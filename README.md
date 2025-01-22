@@ -1,4 +1,4 @@
-# OpenTelemetry-Go-Compile-Instrumnetaion
+# OpenTelemetry-Go-Compile-Instrumentation
 
 
 
