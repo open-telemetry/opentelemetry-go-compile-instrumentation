@@ -129,7 +129,7 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 
 - [Dinesh Gurumurthy](https://github.com/dineshg13), Datadog
 - [Huxing Zhang](https://github.com/ralf0131), Alibaba
-- [Przemyslaw Delewski](https://github.com/pdelewski), QuesmaOrg
+- [Przemyslaw Delewski](https://github.com/pdelewski), Quesma
 
 ### Emeritus
 
