@@ -2,7 +2,7 @@
 
 
 
-OpenTelemetry-Go-Compile-Instrumnetaion provides compile time  [OpenTelemetry](https://opentelemetry.io/) instrumentaion for [Golang](https://golang.org/).
+OpenTelemetry-Go-Compile-Instrumentation provides compile time  [OpenTelemetry](https://opentelemetry.io/) instrumentation for [Golang](https://golang.org/).
 
 ## Project Status
 
