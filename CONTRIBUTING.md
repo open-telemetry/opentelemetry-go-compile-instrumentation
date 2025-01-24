@@ -3,7 +3,7 @@
 The go compile instrumentation SIG meets regularly. See the
 OpenTelemetry
 [community](https://github.com/open-telemetry/community?tab=readme-ov-file#implementation-sigs)
-repo for information on this and other language SIGs.
+repo for information on this and other SIGs.
 
 See the [public meeting
 notes](https://docs.google.com/document/d/1XkVahJfhf482d3WVHsvUUDaGzHc8TO3sqQlSS80mpGY/edit)
