@@ -114,7 +114,7 @@ A PR is considered **ready to merge** when:
 Any [Maintainer] can merge the PR once the above criteria have been met.
 
 [^1]: A qualified approval is a GitHub Pull Request review with "Approve"
-  status from an OpenTelemetry Go [Approver] or [Maintainer].
+  status from an OpenTelemetry Go Compile Instrumentation [Approver] or [Maintainer].
 [^2]: Trivial changes include: typo corrections, cosmetic non-substantive
   changes, documentation corrections or updates, dependency updates, etc.
 
