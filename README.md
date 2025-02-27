@@ -16,7 +16,7 @@ OpenTelemetry-Go-Compile-Instrumentation provides compile time  [OpenTelemetry](
 
 ## Getting Started
 
-TBD
+Run `sh -x build.sh` to show instrumentation example
 
 
 ## Contributing
