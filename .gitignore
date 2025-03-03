@@ -1,0 +1,4 @@
+*.log
+opentelemetry-go-compile-instrumentation
+otel
+demo
