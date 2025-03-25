@@ -42,7 +42,7 @@ jobs:
           check-latest: true
           cache-dependency-path: "**/go.sum"
       - name: Run coverage tests
-        run: make test-coverage
+        run: go test ./... -coverprofile=coverage.txt -covermode=atomic
       - name: Store coverage test output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -95,7 +95,7 @@ jobs:
       - name: Run tests
         env:
           GOARCH: ${{ matrix.platform.arch }}
-        run: go test .
+        run: go test ./...
 
   test-compatibility:
     runs-on: ubuntu-latest
