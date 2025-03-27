@@ -1,5 +1,5 @@
 codecov:
-  require_ci_to_pass: no
+  require_ci_to_pass: true
 
 comment:
   layout: "reach,diff,flags,tree"
