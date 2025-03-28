@@ -7,7 +7,7 @@ repo for information on this and other SIGs.
 
 See the [public meeting
 notes](https://docs.google.com/document/d/1XkVahJfhf482d3WVHsvUUDaGzHc8TO3sqQlSS80mpGY/edit)
-for a summary description of past meetings. You can also get in touch on slack channel 
+for a summary description of past meetings. You can also get in touch on slack channel
 [#otel-go-compt-instr-sig](https://cloud-native.slack.com/archives/C088D8GSSSF)
 
 ## Development
@@ -15,6 +15,64 @@ for a summary description of past meetings. You can also get in touch on slack c
 TBD
 
 ## Pull Requests
+
+### Conventional Commits
+
+Pull requests made to this repository are expected to use the [Conventional Commits][conv-commit]
+specification. Specifically, pull request titles are required to follow the specification's title
+format:
+
+```
+<type>(<scope>)!: <description>
+╰─┬──╯╰───┬───╯│  ╰─────┬─────╯
+  │       │    │        ╰─ Short description of the change (see below)
+  │       │    ╰─ If, and only if the PR contains breaking changes
+  │       ╰─ Optional: change scope (e.g, 'cmd/gotel', `pkg/weaver`, ...)
+  ╰─ Required: commit type (see below for accepted values)
+```
+
+This repository requires using one of the following commit types:
+- `chore` for routine repository maintenance that has no impact on the user interfaces (CI/CD
+  operations, linter configuration, etc...)
+- `doc` or `docs` for documentation changes
+- `feat` for introduction of new features
+- `fix` for bug fixes
+- `release` when cutting a new release
+
+Please try to keep the commit title concise, yet specific: they are used to derive the release notes
+for this repository. A good litmus test for whether a pull request title is suitable or not is to
+determine whether a user would be able to determine whether this change affects them or not by just
+looking at the title.
+
+Here are some examples for the various supported commit types:
+- `chore`:
+  * :information_source: What's changing in this PR? This should provide enough information from a
+    maintainer to make sense of what's going on.
+  * :white_check_mark: `chore(ci): add OSSF Scorecard automation`
+  * :x: `chore: new CI step`
+- `doc`, `docs`:
+  * :information_source: What documentation has change? A user might decide whether they go read it
+    or not based on this.
+  * :white_check_mark: `docs: explain proper use of the -log-level flag`
+  * :x: `docs: improve documentation`
+- `feat`:
+  * :information_source:  What feature is being introduced specifically? A user might decide if this
+    is useful to them or not based on this.
+  * :white_check_mark: `feat(cmd/gotel): -log-level flag to configure log verbosity`
+  * :x: `feat: logging`
+- `fix`:
+  * :information_source: What bug is being fixed? Refer to the symptoms of the fixed issue, not to
+    the solution. A user might decide whether their problem is solved by a release or not based on
+    this.
+  * :white_check_mark: `fix: SEGFAULT on when cross-compiling on linux/arm64 platforms`
+  * :x: `fix: check pointer for nil before dereferencing it`
+- `release:
+  * :information_source: What version is this commit preparing for?
+  * :white_check_mark: `release: v1.2.3`
+  * :x: `release: new release`
+
+
+[conv-commit]: https://www.conventionalcommits.org/en/v1.0.0/
 
 ### How to Send Pull Requests
 

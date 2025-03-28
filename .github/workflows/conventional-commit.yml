@@ -1,0 +1,26 @@
+name: Conventional Commit
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions: read-all
+
+jobs:
+  update-labels:
+    name: Update Labels
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # Needed to update labels
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Setup go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version: oldstable
+          cache-dependency-path: '**/go.mod'
+      - name: Assign Labels
+        run: go -C .github/tools/conventionalcommit run .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
