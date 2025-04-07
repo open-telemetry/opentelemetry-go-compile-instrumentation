@@ -10,6 +10,7 @@ jobs:
     name: Update Labels
     runs-on: ubuntu-latest
     permissions:
+      issues: write # Needed to post comments
       pull-requests: write # Needed to update labels
     steps:
       - name: Check out
