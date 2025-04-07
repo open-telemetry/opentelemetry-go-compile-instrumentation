@@ -1,6 +1,6 @@
 name: Conventional Commit
 on:
-  pull_request:
+  pull_request_target: # Can't get permissions to comment on PR with `pull_request`
     types: [opened, edited, reopened]
 
 permissions:
