@@ -3,15 +3,14 @@ on:
   pull_request:
     types: [opened, edited, reopened]
 
-permissions: read-all
+permissions:
+  contents: read
+  pull-requests: write # Needed to post comments & update labels
 
 jobs:
   update-labels:
     name: Update Labels
     runs-on: ubuntu-latest
-    permissions:
-      issues: write # Needed to post comments
-      pull-requests: write # Needed to update labels
     steps:
       - name: Check out
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
