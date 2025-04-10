@@ -47,8 +47,7 @@ func storeAst(filePath string, ast *dst.File) {
 		panic(err)
 	}
 	defer func() {
-		err := f.Close()
-		if err != nil {
+		if err := f.Close(); err != nil {
 			fmt.Printf("Failed to close file, path is: %s\n", filePath)
 		}
 	}()
