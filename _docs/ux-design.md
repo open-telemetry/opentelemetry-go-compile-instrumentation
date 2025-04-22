@@ -138,21 +138,64 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
 
 #### Configuration Styles
 
-The `gotel` tool allows managing configuration in several ways:
+The compile-time instrumentation tool is designed to allow users introduce the
+tool at various steps in the software development lifecycle:
+
+* Coding time &mdash; the configuration is checked into source control with the
+  codebase, and allows developers (Dev and DevOps personas) direct control over
+  what gets instrumented for a given application;
+* Continuous Integration pipeline (CI/CD) &mdash; the configuration is tracked
+  as part of the CI/CD pipeline definition, possibly externally to the built
+  application's codebase; it is typically maintained by a different group of
+  people than the application's maintainers, usually Ops and/or SecOps personas.
+
+To allow for this, the `gotel` tool allows managing configuration in several
+ways:
 
 1. Using `tool` dependencies (requires `go1.24` or newer) allows the tool to be
    used by the simpler invocation `go tool gotel`, and has all instrumentation
    configuration made available by `tool` dependencies, without requiring the
    addition of any new `.go` or `.yml` file;
+
 2. Using a `gotel.instrumentation.go` file is an alternate strategy that is
    fully supported by `go1.23`, and allows more direct control over what
    instrumentation is included in the projects' configuration;
+
 3. The `.gotel.yml` file allows injecting configuration directly within the
    CI/CD pipeline without persisting any change to the project's source code
    &ndash; but has the disadvantage of making hermetic or reproductible builds
    more difficult (the `go.mod` and `go.sum` files ought to be considered as
    build artifacts, as they will be modified at the start of the build and are
    needed to correctly reproduce a build in the future).
+
+### Building Applications
+
+Once the configuration has been created, either by the command-line assistant,
+or directly by the user (possibly through automated processes), the tool can be
+used directly to build, run, and test go applications directly:
+
+1. If the tool is installed as a Go `tool` dependency (`go1.24` and newer):
+
+   ```console
+   $ go tool gotel build -o bin/app .
+   $ go tool gotel test -shuffle=on ./...
+   ```
+
+2. Installing `gotel` in `$GOBIN`
+
+   ```console
+   $ go install github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel
+   $ gotel build -o bin/app
+   $ gotel test -shuffle=on ./...
+   ```
+
+3. Running `gotel` with `go run`:
+
+   ```console
+   $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel build -o bin/app
+   $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel test -shuffle=on ./...
+   ```
+
 
 ### Ongoing Maintenance
 
