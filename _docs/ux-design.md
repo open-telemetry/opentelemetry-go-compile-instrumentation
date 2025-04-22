@@ -136,3 +136,166 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
    $ git commit -m "chore: enable gotel for compile-time instrumentation"
 ```
 
+#### Configuration Styles
+
+The `gotel` tool allows managing configuration in several ways:
+
+1. Using `tool` dependencies (requires `go1.24` or newer) allows the tool to be
+   used by the simpler invocation `go tool gotel`, and has all instrumentation
+   configuration made available by `tool` dependencies, without requiring the
+   addition of any new `.go` or `.yml` file;
+2. Using a `gotel.instrumentation.go` file is an alternate strategy that is
+   fully supported by `go1.23`, and allows more direct control over what
+   instrumentation is included in the projects' configuration;
+3. The `.gotel.yml` file allows injecting configuration directly within the
+   CI/CD pipeline without persisting any change to the project's source code
+   &ndash; but has the disadvantage of making hermetic or reproductible builds
+   more difficult (the `go.mod` and `go.sum` files ought to be considered as
+   build artifacts, as they will be modified at the start of the build and are
+   needed to correctly reproduce a build in the future).
+
+### Ongoing Maintenance
+
+Since the tool and configuration are registered in the `go.mod` file, users are
+able to keep these dependencies up-to-date using the standard tools and
+processes they use for any other dependency.
+
+They are also able to modify what confguration gets applied by changing the
+configuration according to their set up style, either:
+
+- directly in the `go.mod` file by adding or removing `tool` dependencies,
+- in the `gotel.instrumentation.go` file by adding or removing `import`
+  declarations.
+
+### Custom Configuration
+
+Users may wish to add their own, application-specific automatic instrumentation
+configuration. This is achieved by adding a `.gotel.yml` file in the same
+directory as the application's `go.mod` file. Such instructions will be used
+only when building packages in this module's context (and not when themodule's
+packages are dependencies of an automatically-instrumented application).
+
+The contents of such configuration files uses the same schema as the
+[instrumentation packages](#instrumentation-packages) definitions file.
+
+### Uninstalling
+
+Removing auto-instrumentation configuration is as simple as removing the related
+tool dependencies from `go.mod` and removing the `gotel.instrumentation.go`
+file.
+
+## Instrumentation Packages
+
+A majority of users of the OpenTelemetry compile-time instrumentation tool will
+rely on instrumentation packages to instrument their application. These are
+standard Go packages that are part of a Go module and contain either (or both):
+
+- a `gotel.instrumentation.yml` file that declares all instrumentation
+  configuration that is vended by this package;
+- a `gotel.instrumentation.go` file that imports at least one valid
+  instrumentation package.
+
+### Schema
+
+The schema of the `gotel.instrumentation.yml` file (as well as `.gotel.yml`
+files, which are used by project-specific instrumentation settings) is described
+by the following document:
+
+```yml
+%YAML 1.2
+---
+# yaml-language-server: $schema=https://gotel.opentelemetry.io/schemas/instrumentation
+
+meta: # An optional block of metadata about the configuration file
+   description: # Optional
+      |-
+         A description of what this configuration does, intended to inform
+         end-users about this instrumentation package.
+   caveats: # Optional
+      - |-
+            An array of strings detailing caveats from using this
+            instrumentation package. These may be presented to the users when
+            they install this package for the first time.
+
+instrumentation: # Required with at least 1 item
+   foo: # A unique identifier for this instrumentation item within this file
+      description: #Optional
+         |-
+            A decription of this instrumentation configuration, intended for
+            end-users.
+      pointcut: # Required
+         # The definition of a pointcut, which selects which AST nodes are
+         # targeted by this instrumentation configuration item.
+         ...
+      advice: # Required with at least 1 item
+         # Transformations to be applied on all of the AST nodes that were
+         # selected by the associated pointcut.
+         - ...
+   # etc...
+```
+
+> [!NOTE]
+> The terms _Pointcut_ and _Advice_ are borrowed from [Aspect-oriented
+> Programming (AoP)][aop], which is a programming paradigm that aims to increase
+> modularity by allowing the separation of [cross-cutting
+> concerns][x-cutting-concerns] &mdash; aspects of a program that addect several
+> modules without the possibility of being encapsulated by any of them.
+>
+> This appears to be a relatively good description of what compile-time
+> instrumentation is set to achieve.
+>
+> [aop]: https://en.wikipedia.org/wiki/Aspect-oriented_programming
+> [x-cutting-concerns]: https://en.wikipedia.org/wiki/Cross-cutting_concern
+
+#### Pointcuts & Advice
+
+##### Required Tool Version
+
+Supported _pointcuts_ and _advice_ types are dependent on the version of the
+tool used to apply the configuration. Instrumentation packages can declare the
+minimum required version of the `gotel` tool by including it in their `go.mod`
+files; for example by including a blank import of
+`github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/sdk`
+to their `gotel.instrumentation.go` file. The Go toolchain's Minimum Version
+Selection algorithm will then ensure the version requirement is satisfied for
+any user.
+
+##### Examples
+
+For example, an instrumentation configuration can be the following:
+
+```yml
+pointcut:
+   all-of:
+      - not: # Prevent injecting into the package itself
+            import-path: fully.qualified.package.name
+      - function-call: fully.qualified.package.name.FunctionName
+advice:
+   - before: qualified.instrumentation.package.BeforeFunctionName
+   - after: qualified.instrumentation.package.AfterFunctionName
+```
+
+### Configuration Re-use
+
+Instrumentation packages can re-use configuration defined in other pacakges by
+containing a `gotel.instrumentation.go` file, which contains `import` directives
+for each of the instrumentation packages it re-uses:
+
+```go
+// Within github.com/open-telemetry/open-telemetry-go/gotel/all
+
+package all
+
+import (
+   _ "github.com/open-telemetry/opentelemetry-go/gotel/instrumentation/net-http"
+   _ "github.com/open-telemetry/opentelemetry-go/gotel/instrumentation/database-sql"
+   // ...
+)
+```
+
+Using a `.go` file with `import` declarations allows to make sure the surrouding
+module's `go.mod` file accurately accounts for all included instrumentation
+packages without involving any additional bookkeeping.
+
+The `gotel.instrumentation.go` file may contain additional code, as well as
+imports to packages that are not instrumentation packages.
