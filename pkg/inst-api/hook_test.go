@@ -65,7 +65,7 @@ func TestOnBeforeStart(t *testing.T) {
 	if w.startTime.UnixMilli() != 123412341234 {
 		log.Fatal("start time is not equal to new start time")
 	}
-	if newCtx.Value("test1") != "a" {
+	if newCtx.Value(testKey("test1")) != "a" {
 		log.Fatal("key test1 is not equal to new key value")
 	}
 }
