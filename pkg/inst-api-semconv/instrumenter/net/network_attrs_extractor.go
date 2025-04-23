@@ -70,7 +70,7 @@ func CreateServerAttributesExtractor[REQUEST any, RESPONSE any](getter ServerAtt
 		internalExtractor: InternalServerAttributesExtractor[REQUEST]{
 			addressAndPortExtractor: &ServerAddressAndPortExtractor[REQUEST]{
 				getter:            getter,
-				fallbackExtractor: NoopAddressAndPortExtractor[REQUEST]{},
+				fallbackExtractor: &NoopAddressAndPortExtractor[REQUEST]{},
 			},
 		},
 	}
@@ -93,7 +93,7 @@ func CreateClientAttributesExtractor[REQUEST any, RESPONSE any](getter ClientAtt
 		internalExtractor: InternalClientAttributesExtractor[REQUEST]{
 			addressAndPortExtractor: &ClientAddressAndPortExtractor[REQUEST]{
 				getter:            getter,
-				fallbackExtractor: NoopAddressAndPortExtractor[REQUEST]{},
+				fallbackExtractor: &NoopAddressAndPortExtractor[REQUEST]{},
 			},
 			capturePort: true,
 		},

@@ -23,7 +23,7 @@ type AddressAndPortExtractor[REQUEST any] interface {
 
 type NoopAddressAndPortExtractor[REQUEST any] struct{}
 
-func (n NoopAddressAndPortExtractor[REQUEST]) Extract(request REQUEST) AddressAndPort {
+func (n *NoopAddressAndPortExtractor[REQUEST]) Extract(request REQUEST) AddressAndPort {
 	return noopAddressAndPort
 }
 
