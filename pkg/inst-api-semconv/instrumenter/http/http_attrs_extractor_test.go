@@ -66,7 +66,7 @@ func TestHttpClientExtractorStart(t *testing.T) {
 	httpClientExtractor := HttpClientAttrsExtractor[testRequest, testResponse, httpClientAttrsGetter]{
 		Base: HttpCommonAttrsExtractor[testRequest, testResponse, httpClientAttrsGetter]{},
 	}
-	attrs := make([]attribute.KeyValue, 0)
+	var attrs []attribute.KeyValue
 	parentContext := context.Background()
 	attrs, _ = httpClientExtractor.OnStart(attrs, parentContext, testRequest{})
 	if attrs[0].Key != semconv.HTTPRequestMethodKey || attrs[0].Value.AsString() != "GET" {
@@ -81,7 +81,7 @@ func TestHttpClientExtractorEnd(t *testing.T) {
 	httpClientExtractor := HttpClientAttrsExtractor[testRequest, testResponse, httpClientAttrsGetter]{
 		Base: HttpCommonAttrsExtractor[testRequest, testResponse, httpClientAttrsGetter]{},
 	}
-	attrs := make([]attribute.KeyValue, 0)
+	var attrs []attribute.KeyValue
 	parentContext := context.Background()
 	attrs, _ = httpClientExtractor.OnEnd(attrs, parentContext, testRequest{}, testResponse{}, nil)
 	if attrs[0].Key != semconv.HTTPResponseStatusCodeKey || attrs[0].Value.AsInt64() != 200 {
@@ -93,7 +93,7 @@ func TestHttpServerExtractorStart(t *testing.T) {
 	httpServerExtractor := HttpServerAttrsExtractor[testRequest, testResponse, httpServerAttrsGetter]{
 		Base: HttpCommonAttrsExtractor[testRequest, testResponse, httpServerAttrsGetter]{},
 	}
-	attrs := make([]attribute.KeyValue, 0)
+	var attrs []attribute.KeyValue
 	parentContext := context.Background()
 	attrs, _ = httpServerExtractor.OnStart(attrs, parentContext, testRequest{})
 	if attrs[0].Key != semconv.HTTPRequestMethodKey || attrs[0].Value.AsString() != "GET" {
@@ -111,7 +111,7 @@ func TestHttpServerExtractorEnd(t *testing.T) {
 	httpServerExtractor := HttpServerAttrsExtractor[testRequest, testResponse, httpServerAttrsGetter]{
 		Base: HttpCommonAttrsExtractor[testRequest, testResponse, httpServerAttrsGetter]{},
 	}
-	attrs := make([]attribute.KeyValue, 0)
+	var attrs []attribute.KeyValue
 	ctx := context.Background()
 	ctx = trace.ContextWithSpan(ctx, &testReadOnlySpan{isRecording: true})
 	attrs, _ = httpServerExtractor.OnEnd(attrs, ctx, testRequest{}, testResponse{}, nil)
@@ -130,7 +130,7 @@ func TestHttpServerExtractorWithFilter(t *testing.T) {
 	httpServerExtractor := HttpServerAttrsExtractor[testRequest, testResponse, httpServerAttrsGetter]{
 		Base: HttpCommonAttrsExtractor[testRequest, testResponse, httpServerAttrsGetter]{},
 	}
-	attrs := make([]attribute.KeyValue, 0)
+	var attrs []attribute.KeyValue
 	parentContext := context.Background()
 	httpServerExtractor.Base.AttributesFilter = func(attrs []attribute.KeyValue) []attribute.KeyValue {
 		return []attribute.KeyValue{{
@@ -153,7 +153,7 @@ func TestHttpClientExtractorWithFilter(t *testing.T) {
 	httpClientExtractor := HttpClientAttrsExtractor[testRequest, testResponse, httpClientAttrsGetter]{
 		Base: HttpCommonAttrsExtractor[testRequest, testResponse, httpClientAttrsGetter]{},
 	}
-	attrs := make([]attribute.KeyValue, 0)
+	var attrs []attribute.KeyValue
 	parentContext := context.Background()
 	httpClientExtractor.Base.AttributesFilter = func(attrs []attribute.KeyValue) []attribute.KeyValue {
 		return []attribute.KeyValue{{
@@ -176,7 +176,7 @@ func TestNonRecordingSpan(t *testing.T) {
 	httpServerExtractor := HttpServerAttrsExtractor[testRequest, testResponse, httpServerAttrsGetter]{
 		Base: HttpCommonAttrsExtractor[testRequest, testResponse, httpServerAttrsGetter]{},
 	}
-	attrs := make([]attribute.KeyValue, 0)
+	var attrs []attribute.KeyValue
 	ctx := context.Background()
 	ctx = trace.ContextWithSpan(ctx, &testReadOnlySpan{isRecording: false})
 	attrs, _ = httpServerExtractor.OnEnd(attrs, ctx, testRequest{}, testResponse{}, nil)

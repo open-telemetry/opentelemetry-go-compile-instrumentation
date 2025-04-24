@@ -35,7 +35,7 @@ func TestHttpServerMetrics(t *testing.T) {
 	server.OnAfterStart(ctx, start)
 	server.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
 	rm := &metricdata.ResourceMetrics{}
-	reader.Collect(ctx, rm)
+	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.server.request.duration" {
 		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
@@ -61,7 +61,7 @@ func TestHttpClientMetrics(t *testing.T) {
 	client.OnAfterStart(ctx, start)
 	client.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
 	rm := &metricdata.ResourceMetrics{}
-	reader.Collect(ctx, rm)
+	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.client.request.duration" {
 		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
@@ -109,7 +109,7 @@ func TestLazyHttpServerMetrics(t *testing.T) {
 	server.OnAfterStart(ctx, start)
 	server.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
 	rm := &metricdata.ResourceMetrics{}
-	reader.Collect(ctx, rm)
+	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.server.request.duration" {
 		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
@@ -133,7 +133,7 @@ func TestLazyHttpClientMetrics(t *testing.T) {
 	client.OnAfterStart(ctx, start)
 	client.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
 	rm := &metricdata.ResourceMetrics{}
-	reader.Collect(ctx, rm)
+	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.client.request.duration" {
 		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
@@ -157,7 +157,7 @@ func TestGlobalHttpServerMetrics(t *testing.T) {
 	server.OnAfterStart(ctx, start)
 	server.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
 	rm := &metricdata.ResourceMetrics{}
-	reader.Collect(ctx, rm)
+	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.server.request.duration" {
 		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
@@ -181,7 +181,7 @@ func TestGlobalHttpClientMetrics(t *testing.T) {
 	client.OnAfterStart(ctx, start)
 	client.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
 	rm := &metricdata.ResourceMetrics{}
-	reader.Collect(ctx, rm)
+	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.client.request.duration" {
 		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}

@@ -12,6 +12,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+type testKey string
+
 type testListener struct {
 	startTime       time.Time
 	endTime         time.Time
@@ -21,12 +23,12 @@ type testListener struct {
 
 func (t *testListener) OnBeforeStart(parentContext context.Context, startTimestamp time.Time) context.Context {
 	t.startTime = startTimestamp
-	return context.WithValue(parentContext, "test1", "a")
+	return context.WithValue(parentContext, testKey("test1"), "a")
 }
 
 func (t *testListener) OnBeforeEnd(ctx context.Context, startAttributes []attribute.KeyValue, startTimestamp time.Time) context.Context {
 	t.startAttributes = startAttributes
-	return context.WithValue(ctx, "test2", "a")
+	return context.WithValue(ctx, testKey("test2"), "a")
 }
 
 func (t *testListener) OnAfterStart(context context.Context, endTimestamp time.Time) {
@@ -63,7 +65,7 @@ func TestOnBeforeStart(t *testing.T) {
 	if w.startTime.UnixMilli() != 123412341234 {
 		log.Fatal("start time is not equal to new start time")
 	}
-	if newCtx.Value("test1") != "a" {
+	if newCtx.Value(testKey("test1")) != "a" {
 		log.Fatal("key test1 is not equal to new key value")
 	}
 }
