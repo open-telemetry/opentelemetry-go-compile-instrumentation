@@ -46,7 +46,11 @@ func storeAst(filePath string, ast *dst.File) {
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Printf("Failed to close file, path is: %s\n", filePath)
+		}
+	}()
 	r := decorator.NewRestorer()
 	err = r.Fprint(f, ast)
 	if err != nil {
