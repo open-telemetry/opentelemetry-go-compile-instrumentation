@@ -138,9 +138,7 @@ func (h *HttpServerMetric) OnBeforeEnd(ctx context.Context, startAttributes []at
 	})
 }
 
-func (h *HttpServerMetric) OnAfterStart(context context.Context, endTime time.Time) {
-	return
-}
+func (h *HttpServerMetric) OnAfterStart(context context.Context, endTime time.Time) {}
 
 func (h *HttpServerMetric) OnAfterEnd(context context.Context, endAttributes []attribute.KeyValue, endTime time.Time) {
 	mc := context.Value(h.key).(httpMetricContext)
@@ -171,9 +169,7 @@ func (h HttpClientMetric) OnBeforeEnd(ctx context.Context, startAttributes []att
 	})
 }
 
-func (h HttpClientMetric) OnAfterStart(context context.Context, endTime time.Time) {
-	return
-}
+func (h HttpClientMetric) OnAfterStart(context context.Context, endTime time.Time) {}
 
 func (h HttpClientMetric) OnAfterEnd(context context.Context, endAttributes []attribute.KeyValue, endTime time.Time) {
 	mc := context.Value(h.key).(httpMetricContext)
