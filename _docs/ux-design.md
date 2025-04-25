@@ -22,7 +22,7 @@ The main value proposition is:
 ## Target Audience
 
 Compile-time instrumentation, like other techniques of automatic
-instrumentation, does not affort users the same amount of control over their
+instrumentation, does not afford users the same amount of control over their
 instrumentation as manual instrumentation; it trades very granual control for
 significantly reduced implementation effort. As a result, compile-time
 instrumentation may not appeal to developers who have very specific requirements
