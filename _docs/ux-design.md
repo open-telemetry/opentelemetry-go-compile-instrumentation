@@ -31,7 +31,7 @@ on what their instrumentation produces.
 The primary audience for the OpenTelementry Go compile-time instrumentation tool
 is composed of the following personas:
 
-- Application developers looking for a no-frills, turney instrumentation
+- Application developers looking for a no-frills, turnkey instrumentation
   solution
 - System operators look to instrument applications without involving developers
 
