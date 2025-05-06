@@ -11,7 +11,11 @@ import (
 	"sync/atomic"
 )
 
-type HttpCommonAttrsExtractor[REQUEST any, RESPONSE any, GETTER1 HttpCommonAttrsGetter[REQUEST, RESPONSE]] struct {
+type HttpRequest interface{}
+
+type HttpResponse interface{}
+
+type HttpCommonAttrsExtractor[REQUEST HttpRequest, RESPONSE HttpResponse, GETTER1 HttpCommonAttrsGetter[REQUEST, RESPONSE]] struct {
 	HttpGetter       GETTER1
 	AttributesFilter func(attrs []attribute.KeyValue) []attribute.KeyValue
 }
@@ -37,7 +41,7 @@ func (h *HttpCommonAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnEnd(attributes [
 	return attributes, context
 }
 
-type HttpClientAttrsExtractor[REQUEST any, RESPONSE any, GETTER1 HttpClientAttrsGetter[REQUEST, RESPONSE]] struct {
+type HttpClientAttrsExtractor[REQUEST HttpRequest, RESPONSE HttpResponse, GETTER1 HttpClientAttrsGetter[REQUEST, RESPONSE]] struct {
 	Base HttpCommonAttrsExtractor[REQUEST, RESPONSE, GETTER1]
 }
 
@@ -73,7 +77,7 @@ func (h *HttpClientAttrsExtractor[REQUEST, RESPONSE, GETTER1]) GetSpanKey() attr
 	return utils.HTTP_CLIENT_KEY
 }
 
-type HttpServerAttrsExtractor[REQUEST any, RESPONSE any, GETTER1 HttpServerAttrsGetter[REQUEST, RESPONSE]] struct {
+type HttpServerAttrsExtractor[REQUEST HttpRequest, RESPONSE HttpResponse, GETTER1 HttpServerAttrsGetter[REQUEST, RESPONSE]] struct {
 	Base HttpCommonAttrsExtractor[REQUEST, RESPONSE, GETTER1]
 }
 

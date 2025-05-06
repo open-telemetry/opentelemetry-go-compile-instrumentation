@@ -27,6 +27,6 @@ func (n NoopAttrsShadower) Shadow(attrs []attribute.KeyValue) (int, []attribute.
 	return len(attrs), attrs
 }
 
-type ContextCustomizer[REQUEST interface{}] interface {
+type ContextCustomizer[REQUEST any] interface {
 	OnStart(context context.Context, request REQUEST, startAttributes []attribute.KeyValue) context.Context
 }
