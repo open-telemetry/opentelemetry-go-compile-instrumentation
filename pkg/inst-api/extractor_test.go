@@ -24,7 +24,7 @@ func (ts testSpan) SetStatus(status codes.Code, desc string) {
 func TestDefaultSpanStatusExtractor(t *testing.T) {
 	unset := codes.Unset
 	ts := testSpan{Span: noop.Span{}, status: &unset}
-	d := defaultSpanStatusExtractor[interface{}, interface{}]{}
+	d := defaultSpanStatusExtractor[any, any]{}
 	d.Extract(ts, nil, nil, errors.New(""))
 	if *ts.status != codes.Error {
 		t.Fatal("expected error code")
