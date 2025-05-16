@@ -17,9 +17,8 @@ pkg ---> Public API
             network
 sdk ---> Instrumentation code for each plugin (e.g. http, grpc, ...)
 ```
+For Public API, we have some key abstractions as follows:
 ![Public API](./assets/public_api_design.png)
-
-For Public API, we have some key abstractions as below:
 1. Instrumenter: Unified entrance of instrumentation (generating span, metrics, ...)
 2. Extractor: Extracting attributes using multiple Getters according to OpenTelemetry spec.
 3. Getter: Getting attributes from the REQUEST object(For example, HttpRequest object that HTTP Server received).
