@@ -100,11 +100,11 @@ type MockGetter struct {
 	Port    int
 }
 
-func (m *MockGetter) GetServerAddress(request interface{}) string {
+func (m *MockGetter) GetServerAddress(request any) string {
 	return m.Address
 }
 
-func (m *MockGetter) GetServerPort(request interface{}) int {
+func (m *MockGetter) GetServerPort(request any) int {
 	return m.Port
 }
 
@@ -112,7 +112,7 @@ type MockFallbackExtractor struct {
 	Extracted AddressAndPort
 }
 
-func (m *MockFallbackExtractor) Extract(request interface{}) AddressAndPort {
+func (m *MockFallbackExtractor) Extract(request any) AddressAndPort {
 	return m.Extracted
 }
 
@@ -174,7 +174,7 @@ func TestClientAddressAndPortExtractorExtract(t *testing.T) {
 func TestExtractWhenGetterReturnsDefaultsShouldUseFallbackExtractor(t *testing.T) {
 	mockGetter := &MockGetter{Address: "", Port: 0}
 	mockFallbackExtractor := &MockFallbackExtractor{Extracted: AddressAndPort{Address: "fallbackAddress", Port: 8080}}
-	extractor := ServerAddressAndPortExtractor[interface{}]{
+	extractor := ServerAddressAndPortExtractor[any]{
 		getter:            mockGetter,
 		fallbackExtractor: mockFallbackExtractor,
 	}
@@ -186,7 +186,7 @@ func TestExtractWhenGetterReturnsDefaultsShouldUseFallbackExtractor(t *testing.T
 func TestExtractWhenGetterReturnsNonDefaultsShouldReturnDirectly(t *testing.T) {
 	mockGetter := &MockGetter{Address: "directAddress", Port: 9090}
 	mockFallbackExtractor := &MockFallbackExtractor{Extracted: AddressAndPort{Address: "fallbackAddress", Port: 8080}}
-	extractor := ServerAddressAndPortExtractor[interface{}]{
+	extractor := ServerAddressAndPortExtractor[any]{
 		getter:            mockGetter,
 		fallbackExtractor: mockFallbackExtractor,
 	}
