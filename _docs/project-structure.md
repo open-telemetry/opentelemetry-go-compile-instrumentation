@@ -17,7 +17,7 @@ pkg ---> Public API
             network
 sdk ---> Instrumentation code for each plugin (e.g. http, grpc, ...)
 ```
-![Public API](/assets/public_api_design.png)
+![Public API](./assets/public_api_design.png)
 
 For Public API, we have some key abstractions as below:
 1. Instrumenter: Unified entrance of instrumentation (generating span, metrics, ...)
