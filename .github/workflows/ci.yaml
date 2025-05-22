@@ -1,0 +1,71 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+# Declare default permissions as read only.
+permissions: read-all
+jobs:
+  test-coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version: oldstable
+          check-latest: true
+          cache-dependency-path: "**/go.mod"
+      - name: Run coverage tests
+        run: go test ./... -coverprofile=coverage.txt -covermode=atomic
+      - name: Upload coverage report
+        uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
+
+  compatibility-test:
+    name: Test (go ${{ matrix.go-version }}, ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
+    strategy:
+      matrix:
+        go-version: [stable, oldstable]
+        platform:
+          - os: ubuntu-latest
+            arch: "386"
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: macos-13
+            arch: amd64
+          - os: macos-latest
+            arch: arm64
+          - os: windows-latest
+            arch: "386"
+          - os: windows-latest
+            arch: amd64
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
+          cache-dependency-path: "**/go.mod"
+      - name: Run tests
+        env:
+          GOARCH: ${{ matrix.platform.arch }}
+        run: go test -shufle=on ./...
+
+  done:
+    name: Done
+    runs-on: ubuntu-latest
+    needs: [compatibility-test]
+    if: '!cancelled()'
+    steps:
+      - name: Success
+        run: |
+          echo ${{ needs.compatibility-test.result }}
+          test ${{ needs.compatibility-test.result }} == "success"
