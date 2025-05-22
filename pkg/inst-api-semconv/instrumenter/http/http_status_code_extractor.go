@@ -12,8 +12,8 @@ import (
 )
 
 /**
-For HttpServer, status code >= 500 or < 100 is treated as error
-For HttpClient, status code >= 400 or < 100 is treated as error
+For HttpServer, status code >= 500 or < 100 is treated as error.
+For HttpClient, status code >= 400 or < 100 is treated as error.
 */
 
 const invalidHttpStatusCode = "INVALID_HTTP_STATUS_CODE"
