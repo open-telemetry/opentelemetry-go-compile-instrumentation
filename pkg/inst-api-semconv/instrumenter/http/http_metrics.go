@@ -5,8 +5,6 @@ package http
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/utils"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -15,6 +13,11 @@ import (
 	"sync"
 	"time"
 )
+
+/**
+Http Metrics is defined by https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
+Here are some implementations for stable metrics.
+*/
 
 const http_server_request_duration = "http.server.request.duration"
 
@@ -69,7 +72,7 @@ func newHttpServerMetric(key string, meter metric.Meter) (*HttpServerMetric, err
 	m := &HttpServerMetric{
 		key: attribute.Key(key),
 	}
-	d, err := newHttpServerRequestDurationMeasures(meter)
+	d, err := utils.NewFloat64Histogram(http_server_request_duration, "ms", "Duration of HTTP server requests.", meter)
 	if err != nil {
 		return nil, err
 	}
@@ -77,49 +80,17 @@ func newHttpServerMetric(key string, meter metric.Meter) (*HttpServerMetric, err
 	return m, nil
 }
 
-func newHttpServerRequestDurationMeasures(meter metric.Meter) (metric.Float64Histogram, error) {
-	mu.Lock()
-	defer mu.Unlock()
-	if meter == nil {
-		return nil, errors.New("nil meter")
-	}
-	d, err := meter.Float64Histogram(http_server_request_duration,
-		metric.WithUnit("ms"),
-		metric.WithDescription("Duration of HTTP server requests."))
-	if err == nil {
-		return d, nil
-	} else {
-		return d, fmt.Errorf("failed to create http.server.request.duratio histogram, %v", err)
-	}
-}
-
 // for test only
 func newHttpClientMetric(key string, meter metric.Meter) (*HttpClientMetric, error) {
 	m := &HttpClientMetric{
 		key: attribute.Key(key),
 	}
-	d, err := newHttpClientRequestDurationMeasures(meter)
+	d, err := utils.NewFloat64Histogram(http_client_request_duration, "ms", "Duration of HTTP client requests.", meter)
 	if err != nil {
 		return nil, err
 	}
 	m.clientRequestDuration = d
 	return m, nil
-}
-
-func newHttpClientRequestDurationMeasures(meter metric.Meter) (metric.Float64Histogram, error) {
-	mu.Lock()
-	defer mu.Unlock()
-	if meter == nil {
-		return nil, errors.New("nil meter")
-	}
-	d, err := meter.Float64Histogram(http_client_request_duration,
-		metric.WithUnit("ms"),
-		metric.WithDescription("Duration of HTTP client requests."))
-	if err == nil {
-		return d, nil
-	} else {
-		return d, fmt.Errorf("failed to create http.client.request.duratio histogram, %v", err)
-	}
 }
 
 type httpMetricContext struct {
@@ -146,7 +117,8 @@ func (h *HttpServerMetric) OnAfterEnd(context context.Context, endAttributes []a
 	// end attributes should be shadowed by AttrsShadower
 	if h.serverRequestDuration == nil {
 		var err error
-		h.serverRequestDuration, err = newHttpServerRequestDurationMeasures(globalMeter)
+		h.serverRequestDuration, err = utils.NewFloat64Histogram(http_server_request_duration, "ms",
+			"Duration of HTTP server requests.", globalMeter)
 		if err != nil {
 			log.Printf("failed to create serverRequestDuration, err is %v\n", err)
 		}
@@ -178,7 +150,8 @@ func (h HttpClientMetric) OnAfterEnd(context context.Context, endAttributes []at
 	if h.clientRequestDuration == nil {
 		var err error
 		// second change to init the metric
-		h.clientRequestDuration, err = newHttpClientRequestDurationMeasures(globalMeter)
+		h.clientRequestDuration, err = utils.NewFloat64Histogram(http_client_request_duration, "ms",
+			"Duration of HTTP client requests.", globalMeter)
 		if err != nil {
 			log.Printf("failed to create clientRequestDuration, err is %v\n", err)
 		}

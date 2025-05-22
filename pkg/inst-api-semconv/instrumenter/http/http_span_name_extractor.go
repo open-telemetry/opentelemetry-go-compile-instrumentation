@@ -3,6 +3,11 @@
 
 package http
 
+/**
+HTTP span names SHOULD be {method} {target} if there is a (low-cardinality) target available.
+If there is no (low-cardinality) {target} available, HTTP span names SHOULD be {method}.
+*/
+
 type HttpClientSpanNameExtractor[REQUEST any, RESPONSE any] struct {
 	Getter HttpClientAttrsGetter[REQUEST, RESPONSE]
 }

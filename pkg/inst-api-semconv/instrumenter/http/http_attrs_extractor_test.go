@@ -68,7 +68,7 @@ func TestHttpClientExtractorStart(t *testing.T) {
 	}
 	var attrs []attribute.KeyValue
 	parentContext := context.Background()
-	attrs, _ = httpClientExtractor.OnStart(attrs, parentContext, testRequest{})
+	attrs, _ = httpClientExtractor.OnStart(parentContext, attrs, testRequest{})
 	if attrs[0].Key != semconv.HTTPRequestMethodKey || attrs[0].Value.AsString() != "GET" {
 		t.Fatalf("http method should be GET")
 	}
@@ -162,7 +162,7 @@ func TestHttpClientExtractorWithFilter(t *testing.T) {
 		}}
 	}
 	attrs = make([]attribute.KeyValue, 0)
-	attrs, _ = httpClientExtractor.OnStart(attrs, parentContext, testRequest{Method: "test"})
+	attrs, _ = httpClientExtractor.OnStart(parentContext, attrs, testRequest{Method: "test"})
 	if attrs[0].Key != "test" || attrs[0].Value.AsString() != "test" {
 		panic("attribute should be test")
 	}
@@ -196,13 +196,13 @@ func TestResendCountHandling(t *testing.T) {
 	resendCount := int32(0)
 	parentContext = context.WithValue(parentContext, utils.CLIENT_RESEND_KEY, &resendCount)
 	var attributes []attribute.KeyValue
-	attributes, _ = httpClientExtractor.OnStart(attributes, parentContext, testRequest{})
+	attributes, _ = httpClientExtractor.OnStart(parentContext, attributes, testRequest{})
 	if attributes[1].Key != semconv.HTTPRequestResendCountKey || attributes[1].Value.AsInt64() != 1 {
 		t.Fatalf("wrong http.request.resend_count")
 	}
 
 	parentContext = context.Background()
-	attributes, _ = httpClientExtractor.OnStart([]attribute.KeyValue{}, parentContext, testRequest{})
+	attributes, _ = httpClientExtractor.OnStart(parentContext, []attribute.KeyValue{}, testRequest{})
 	if len(attributes) > 1 {
 		t.Fatalf("wrong attributes length")
 	}
