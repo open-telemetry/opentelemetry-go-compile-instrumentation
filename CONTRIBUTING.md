@@ -181,6 +181,8 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 
 ### Triagers
 
+For the current list of Triagers, please see the [`MAINTAINERS.md`](MAINTAINERS.md) file.
+
 ### Approvers
 
 For the current list of Approvers, please see the [`MAINTAINERS.md`](MAINTAINERS.md) file.
