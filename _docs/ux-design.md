@@ -15,7 +15,7 @@ significant code change beyond adding simple, well-defined configuration that
 may be as simple as adding the relevant tool dependencies.
 
 The main value proposition is:
-- Very low effort required for holistic instrumentation
+- Very little effort is required for holistic instrumentation
 - Ability to instrument within third-party dependencies
 - Keeping the codebase completely de-coupled from instrumentation
 
@@ -23,7 +23,7 @@ The main value proposition is:
 
 Compile-time instrumentation, like other techniques of automatic
 instrumentation, does not afford users the same amount of control over their
-instrumentation as manual instrumentation; it trades very granual control for
+instrumentation as manual instrumentation; it trades very granular control for
 significantly reduced implementation effort. As a result, compile-time
 instrumentation may not appeal to developers who have very specific requirements
 on what their instrumentation produces.
