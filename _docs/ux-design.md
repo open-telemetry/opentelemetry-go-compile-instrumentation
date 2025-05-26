@@ -219,7 +219,7 @@ configuration according to their set up style, either:
 Users may wish to add their own, application-specific automatic instrumentation
 configuration. This is achieved by adding a `.otel.yml` file in the same
 directory as the application's `go.mod` file. Such instructions will be used
-only when building packages in this module's context (and not when themodule's
+only when building packages in this module's context (and not when the module's
 packages are dependencies of an automatically-instrumented application).
 
 The contents of such configuration files uses the same schema as the
