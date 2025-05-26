@@ -74,9 +74,9 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
 │                                                                      │
 ╰──────────────────────────────────────────────────────────────────────╯
 ✨ This setup assistant will guide you through the steps needed to properly
-   configure otel for the github.com/example/demo application. After you've
-   answered all the prompts, it will present you with the list of actions it
-   will execute; and you will have an choice to apply those or not.
+   configure otel for your application. After you've answered all the prompts,
+   it will present you with the list of actions it will execute; and you will
+   have an choice to apply those or not.
 🤖 Press enter to continue...
 
 ℹ️ Registering otel as a tool dependency is recommended: it allows you to
