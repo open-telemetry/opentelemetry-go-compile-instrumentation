@@ -244,9 +244,19 @@ rely on instrumentation packages to instrument their application. These are
 standard Go packages that are part of a Go module and contain either (or both):
 
 - a `otel.instrumentation.yml` file that declares all instrumentation
-  configuration that is vended by this package;
+  configuration that is vended by this package (using the schema defined in the
+  next section);
 - a `otel.instrumentation.go` file that imports at least one valid
-  instrumentation package.
+  instrumentation package:
+  ```go
+  //go:build tools
+  package tools
+
+  import (
+  	_ "github.com/open-telemetry/opentelemetry-go/db"
+  	_ "github.com/open-telemetry/opentelemetry-go/http"
+  )
+  ```
 
 ### Schema
 
