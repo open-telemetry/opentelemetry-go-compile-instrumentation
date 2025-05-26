@@ -98,8 +98,11 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
    Most users need to choose only one. This can be changed at any time.
 🤖 What instrumentation do you want to enable for this project? (Select one or
    more using space, then press enter to confirm your selection)
-   [X] OpenTelemetry (github.com/open-telemetry/opentelemetry-go)
-   [ ] Datadog (github.com/DataDog/dd-trace-go/v2)
+   [X] Everything      (github.com/open-telemetry/opentelemetry-go)
+   [ ] Databases       (github.com/open-telemetry/opentelemetry-go/db)
+   [ ] GRPC Service    (github.com/open-telemetry/opentelemetry-go/grpc)
+   [ ] HTTP Service    (github.com/open-telemetry/opentelemetry-go/http)
+   [ ] Message Streams (github.com/open-telemetry/opentelemetry-go/msgstream)
    [ ] Other
 🆗 I will configure the following instrumentation: OpenTelemetry
 
