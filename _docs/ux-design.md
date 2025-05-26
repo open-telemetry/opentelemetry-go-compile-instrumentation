@@ -140,6 +140,12 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
    $ git commit -m "chore: enable otel for compile-time instrumentation"
 ```
 
+Downstream projects are able to customize these prompts as necessary, either by
+documenting one or more flags users need to pass to the `otel setup` command, or
+by directly wrapping it with their own command that manages these flags on
+behalf of the user. The exact API for this flow will be defined separately, as
+it is not part of the core experience.
+
 #### Configuration Styles
 
 The compile-time instrumentation tool is designed to allow users introduce the
