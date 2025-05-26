@@ -53,7 +53,7 @@ coupling them too tightly.
 The OpenTelemetry Go compile-time instrumentation tool is composed of the
 following software artifacts (in the form of Go packages):
 
-- `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel`,
+- `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel`,
   a command-line tool that can be installed using `go install` or using
   `go get -tool`;
 - `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/runtime`,
@@ -66,7 +66,7 @@ The tool offers a wizard for getting started with the tool automatically by
 following a series of prompts:
 
 ```console
-$ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel@latest setup
+$ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel@latest setup
 ╭──────────────────────────────────────────────────────────────────────╮
 │                                                                      │
 │           OpenTelemetry compile-time instrumentation tool            │
@@ -74,14 +74,14 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
 │                                                                      │
 ╰──────────────────────────────────────────────────────────────────────╯
 ✨ This setup assistant will guide you through the steps needed to properly
-   configure gotel for the github.com/example/demo application. After you've
+   configure otel for the github.com/example/demo application. After you've
    answered all the prompts, it will present you with the list of actions it
    will execute; and you will have an choice to apply those or not.
 🤖 Press enter to continue...
 
-ℹ️ Registering gotel as a tool dependency is recommended: it allows you to
-   manage the dependency on gotel like any other dependency of your application,
-   via the go.mod file. When using go 1.24 or newer, you can use `go tool gotel`
+ℹ️ Registering otel as a tool dependency is recommended: it allows you to
+   manage the dependency on otel like any other dependency of your application,
+   via the go.mod file. When using go 1.24 or newer, you can use `go tool otel`
    to use the correct version of the tool.
    Not registering a go tool dependency allows instrumenting applications
    without modifying their codebase at all (not even the `go.mod` file); which
@@ -90,7 +90,7 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
    go toolchain, and the application may be built with newer versions of
    dependencies than those in the `go.mod` file if the enabled instrumentation
    package(s) requires it.
-🤖 Should I add gotel as a tool dependency?
+🤖 Should I add otel as a tool dependency?
    [Yes]  No
 🆗 I will add a tool dependency
 
@@ -103,10 +103,10 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
    [ ] Other
 🆗 I will configure the following instrumentation: OpenTelemetry
 
-ℹ️ Using go tool dependencies or a `gotel.instrumentation.go` file to configure
+ℹ️ Using go tool dependencies or a `otel.instrumentation.go` file to configure
    integrations is recommended as it ensures the instrumentation packages are
    represented in your `go.mod` file, making builds reproductible.
-   Using a `.gotel.yml` file is useful when instrumenting applications without
+   Using a `.otel.yml` file is useful when instrumenting applications without
    modifying their codebase at all; which may be preferrable when building
    third-party applications or integrating in the CI/CD pipeline. The
    reproductibility of builds is no longer guaranteed by the go toolchain, and
@@ -114,26 +114,26 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
    in the `go.mod` file if the enabled instrumentation package(s) require it.
 🤖 How do you want to configure instrumentation for this project?
    (*) Using go tool dependencies (Recommended)
-   ( ) Using the `gotel.instrumentation.go` file
-   ( ) Using a `.gotel.yml` file
+   ( ) Using the `otel.instrumentation.go` file
+   ( ) Using a `.otel.yml` file
 🆗 I will use go tool dependencies to enable integration packages.
 
 🤖 We're all set! Based on your answers, I will execute the following commands:
-   $ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel@v1.2.3
+   $ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel@v1.2.3
    $ go get -tool github.com/open-telemetry/opentelemetry-go
 🤖 Should I proceed?
    [Yes]  No
 
 🆗 Let's go!
-✅ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel@v1.2.3
+✅ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel@v1.2.3
 ✅ go get -tool github.com/open-telemetry/opentelemetry-go
 
-🤖 Your project is now configured to use gotel with the following integrations:
+🤖 Your project is now configured to use otel with the following integrations:
    OpenTelemetry.
 
 ℹ️ You should commit these changes. This can be done using the following commands:
    $ git add go.mod go.sum
-   $ git commit -m "chore: enable gotel for compile-time instrumentation"
+   $ git commit -m "chore: enable otel for compile-time instrumentation"
 ```
 
 #### Configuration Styles
@@ -149,19 +149,19 @@ tool at various steps in the software development lifecycle:
   application's codebase; it is typically maintained by a different group of
   people than the application's maintainers, usually Ops and/or SecOps personas.
 
-To allow for this, the `gotel` tool allows managing configuration in several
+To allow for this, the `otel` tool allows managing configuration in several
 ways:
 
 1. Using `tool` dependencies (requires `go1.24` or newer) allows the tool to be
-   used by the simpler invocation `go tool gotel`, and has all instrumentation
+   used by the simpler invocation `go tool otel`, and has all instrumentation
    configuration made available by `tool` dependencies, without requiring the
    addition of any new `.go` or `.yml` file;
 
-2. Using a `gotel.instrumentation.go` file is an alternate strategy that is
+2. Using a `otel.instrumentation.go` file is an alternate strategy that is
    fully supported by `go1.23`, and allows more direct control over what
    instrumentation is included in the projects' configuration;
 
-3. The `.gotel.yml` file allows injecting configuration directly within the
+3. The `.otel.yml` file allows injecting configuration directly within the
    CI/CD pipeline without persisting any change to the project's source code
    &ndash; but has the disadvantage of making hermetic or reproductible builds
    more difficult (the `go.mod` and `go.sum` files ought to be considered as
@@ -177,23 +177,23 @@ used directly to build, run, and test go applications directly:
 1. If the tool is installed as a Go `tool` dependency (`go1.24` and newer):
 
    ```console
-   $ go tool gotel build -o bin/app .
-   $ go tool gotel test -shuffle=on ./...
+   $ go tool otel go build -o bin/app .
+   $ go tool otel go test -shuffle=on ./...
    ```
 
-2. Installing `gotel` in `$GOBIN`
+2. Installing `otel` in `$GOBIN`
 
    ```console
-   $ go install github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel
-   $ gotel build -o bin/app
-   $ gotel test -shuffle=on ./...
+   $ go install github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel
+   $ otel go build -o bin/app
+   $ otel go test -shuffle=on ./...
    ```
 
-3. Running `gotel` with `go run`:
+3. Running `otel` with `go run`:
 
    ```console
-   $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel build -o bin/app
-   $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/gotel test -shuffle=on ./...
+   $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go build -o bin/app
+   $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go test -shuffle=on ./...
    ```
 
 
@@ -207,13 +207,13 @@ They are also able to modify what confguration gets applied by changing the
 configuration according to their set up style, either:
 
 - directly in the `go.mod` file by adding or removing `tool` dependencies,
-- in the `gotel.instrumentation.go` file by adding or removing `import`
+- in the `otel.instrumentation.go` file by adding or removing `import`
   declarations.
 
 ### Custom Configuration
 
 Users may wish to add their own, application-specific automatic instrumentation
-configuration. This is achieved by adding a `.gotel.yml` file in the same
+configuration. This is achieved by adding a `.otel.yml` file in the same
 directory as the application's `go.mod` file. Such instructions will be used
 only when building packages in this module's context (and not when themodule's
 packages are dependencies of an automatically-instrumented application).
@@ -224,7 +224,7 @@ The contents of such configuration files uses the same schema as the
 ### Uninstalling
 
 Removing auto-instrumentation configuration is as simple as removing the related
-tool dependencies from `go.mod` and removing the `gotel.instrumentation.go`
+tool dependencies from `go.mod` and removing the `otel.instrumentation.go`
 file.
 
 ## Instrumentation Packages
@@ -233,21 +233,21 @@ A majority of users of the OpenTelemetry compile-time instrumentation tool will
 rely on instrumentation packages to instrument their application. These are
 standard Go packages that are part of a Go module and contain either (or both):
 
-- a `gotel.instrumentation.yml` file that declares all instrumentation
+- a `otel.instrumentation.yml` file that declares all instrumentation
   configuration that is vended by this package;
-- a `gotel.instrumentation.go` file that imports at least one valid
+- a `otel.instrumentation.go` file that imports at least one valid
   instrumentation package.
 
 ### Schema
 
-The schema of the `gotel.instrumentation.yml` file (as well as `.gotel.yml`
+The schema of the `otel.instrumentation.yml` file (as well as `.otel.yml`
 files, which are used by project-specific instrumentation settings) is described
 by the following document:
 
 ```yml
 %YAML 1.2
 ---
-# yaml-language-server: $schema=https://gotel.opentelemetry.io/schemas/instrumentation
+# yaml-language-server: $schema=https://go-otel.opentelemetry.io/schemas/instrumentation
 
 meta: # An optional block of metadata about the configuration file
    description: # Optional
@@ -296,10 +296,10 @@ instrumentation: # Required with at least 1 item
 
 Supported _pointcuts_ and _advice_ types are dependent on the version of the
 tool used to apply the configuration. Instrumentation packages can declare the
-minimum required version of the `gotel` tool by including it in their `go.mod`
+minimum required version of the `otel` tool by including it in their `go.mod`
 files; for example by including a blank import of
 `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/sdk`
-to their `gotel.instrumentation.go` file. The Go toolchain's Minimum Version
+to their `otel.instrumentation.go` file. The Go toolchain's Minimum Version
 Selection algorithm will then ensure the version requirement is satisfied for
 any user.
 
@@ -321,17 +321,17 @@ advice:
 ### Configuration Re-use
 
 Instrumentation packages can re-use configuration defined in other pacakges by
-containing a `gotel.instrumentation.go` file, which contains `import` directives
+containing a `otel.instrumentation.go` file, which contains `import` directives
 for each of the instrumentation packages it re-uses:
 
 ```go
-// Within github.com/open-telemetry/open-telemetry-go/gotel/all
+// Within github.com/open-telemetry/open-telemetry-go/otel/all
 
 package all
 
 import (
-   _ "github.com/open-telemetry/opentelemetry-go/gotel/instrumentation/net-http"
-   _ "github.com/open-telemetry/opentelemetry-go/gotel/instrumentation/database-sql"
+   _ "github.com/open-telemetry/opentelemetry-go/otel/instrumentation/net-http"
+   _ "github.com/open-telemetry/opentelemetry-go/otel/instrumentation/database-sql"
    // ...
 )
 ```
@@ -340,5 +340,5 @@ Using a `.go` file with `import` declarations allows to make sure the surrouding
 module's `go.mod` file accurately accounts for all included instrumentation
 packages without involving any additional bookkeeping.
 
-The `gotel.instrumentation.go` file may contain additional code, as well as
+The `otel.instrumentation.go` file may contain additional code, as well as
 imports to packages that are not instrumentation packages.
