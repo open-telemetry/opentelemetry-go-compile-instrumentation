@@ -82,7 +82,8 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
 ℹ️ Registering otel as a tool dependency is recommended: it allows you to
    manage the dependency on otel like any other dependency of your application,
    via the go.mod file. When using go 1.24 or newer, you can use `go tool otel`
-   to use the correct version of the tool.
+   to use the correct version of the tool (for more information, see:
+   https://go.dev/doc/modules/managing-dependencies#tools).
    Not registering a go tool dependency allows instrumenting applications
    without modifying their codebase at all (not even the `go.mod` file); which
    may be preferred for building third-party applications or integrating in the
