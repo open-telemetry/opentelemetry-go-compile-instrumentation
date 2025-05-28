@@ -3,19 +3,19 @@
 
 package http
 
-type HttpCommonAttrsGetter[REQUEST any, RESPONSE any] interface {
+type HTTPCommonAttrsGetter[REQUEST any, RESPONSE any] interface {
 	GetRequestMethod(request REQUEST) string
-	GetHttpRequestHeader(request REQUEST, name string) []string
-	GetHttpResponseStatusCode(request REQUEST, response RESPONSE, err error) int
-	GetHttpResponseHeader(request REQUEST, response RESPONSE, name string) []string
+	GetHTTPRequestHeader(request REQUEST, name string) []string
+	GetHTTPResponseStatusCode(request REQUEST, response RESPONSE, err error) int
+	GetHTTPResponseHeader(request REQUEST, response RESPONSE, name string) []string
 	GetErrorType(request REQUEST, response RESPONSE, err error) string
 }
 
-type HttpServerAttrsGetter[REQUEST any, RESPONSE any] interface {
-	HttpCommonAttrsGetter[REQUEST, RESPONSE]
-	GetHttpRoute(request REQUEST) string
+type HTTPServerAttrsGetter[REQUEST any, RESPONSE any] interface {
+	HTTPCommonAttrsGetter[REQUEST, RESPONSE]
+	GetHTTPRoute(request REQUEST) string
 }
 
-type HttpClientAttrsGetter[REQUEST any, RESPONSE any] interface {
-	HttpCommonAttrsGetter[REQUEST, RESPONSE]
+type HTTPClientAttrsGetter[REQUEST any, RESPONSE any] interface {
+	HTTPCommonAttrsGetter[REQUEST, RESPONSE]
 }

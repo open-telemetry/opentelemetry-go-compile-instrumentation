@@ -23,7 +23,7 @@ type AttrsShadower interface {
 
 type NoopAttrsShadower struct{}
 
-func (n NoopAttrsShadower) Shadow(attrs []attribute.KeyValue) (int, []attribute.KeyValue) {
+func (NoopAttrsShadower) Shadow(attrs []attribute.KeyValue) (int, []attribute.KeyValue) {
 	return len(attrs), attrs
 }
 

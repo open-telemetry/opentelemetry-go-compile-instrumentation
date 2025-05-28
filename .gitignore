@@ -3,3 +3,4 @@ opentelemetry-go-compile-instrumentation
 otel
 demo
 .idea
+tmp

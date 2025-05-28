@@ -24,8 +24,8 @@ type ServerAttributesGetter[REQUEST any] interface {
 	GetServerPort(request REQUEST) int
 }
 
-type UrlAttrsGetter[REQUEST any] interface {
-	GetUrlScheme(request REQUEST) string
-	GetUrlPath(request REQUEST) string
-	GetUrlQuery(request REQUEST) string
+type URLAttrsGetter[REQUEST any] interface {
+	GetURLScheme(request REQUEST) string
+	GetURLPath(request REQUEST) string
+	GetURLQuery(request REQUEST) string
 }

@@ -5,36 +5,33 @@ package http
 
 import (
 	"context"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/utils"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
-	"log"
-	"sync"
-	"time"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/utils"
 )
 
 /**
-Http Metrics is defined by https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
+HTTP Metrics is defined by https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
 Here are some implementations for stable metrics.
 */
 
-const http_server_request_duration = "http.server.request.duration"
+const (
+	httpDerverTequestDuration = "http.server.request.duration"
+	httpClientRequestDuration = "http.client.request.duration"
+)
 
-const http_client_request_duration = "http.client.request.duration"
-
-type HttpServerMetric struct {
-	key                   attribute.Key
-	serverRequestDuration metric.Float64Histogram
-}
-
-type HttpClientMetric struct {
-	key                   attribute.Key
-	clientRequestDuration metric.Float64Histogram
-}
-
-var mu sync.Mutex
-
+// httpMetricsConv defines the attributes that should be included in HTTP metrics
+// This is a read-only map, so it's safe to be a package-level variable
+//
+//nolint:gochecknoglobals // Read-only map, safe as package-level constant
 var httpMetricsConv = map[attribute.Key]bool{
 	semconv.HTTPRequestMethodKey:      true,
 	semconv.URLSchemeKey:              true,
@@ -47,50 +44,118 @@ var httpMetricsConv = map[attribute.Key]bool{
 	semconv.ServerPortKey:             true,
 }
 
-var globalMeter metric.Meter
-
-func InitHttpMetrics(m metric.Meter) {
-	mu.Lock()
-	defer mu.Unlock()
-	globalMeter = m
+// Registry is the interface for creating HTTP metrics
+type Registry interface {
+	// NewHTTPServerMetric creates a new HTTP server metric
+	NewHTTPServerMetric(key string) (*HTTPServerMetric, error)
+	// NewHTTPClientMetric creates a new HTTP client metric
+	NewHTTPClientMetric(key string) (*HTTPClientMetric, error)
 }
 
-func HttpServerMetrics(key string) *HttpServerMetric {
-	mu.Lock()
-	defer mu.Unlock()
-	return &HttpServerMetric{key: attribute.Key(key)}
+// MetricsRegistry manages HTTP metrics creation and configuration
+type MetricsRegistry struct {
+	logger *slog.Logger
+	meter  metric.Meter
+	mu     sync.RWMutex
 }
 
-func HttpClientMetrics(key string) *HttpClientMetric {
-	mu.Lock()
-	defer mu.Unlock()
-	return &HttpClientMetric{key: attribute.Key(key)}
-}
-
-// for test only
-func newHttpServerMetric(key string, meter metric.Meter) (*HttpServerMetric, error) {
-	m := &HttpServerMetric{
-		key: attribute.Key(key),
+// NewMetricsRegistry creates a new MetricsRegistry with the given logger and meter
+func NewMetricsRegistry(logger *slog.Logger, meter metric.Meter) *MetricsRegistry {
+	if logger == nil {
+		logger = slog.Default()
 	}
-	d, err := utils.NewFloat64Histogram(http_server_request_duration, "ms", "Duration of HTTP server requests.", meter)
+	return &MetricsRegistry{
+		meter:  meter,
+		logger: logger,
+	}
+}
+
+// HTTPServerMetric represents HTTP server metrics
+type HTTPServerMetric struct {
+	key                   attribute.Key
+	serverRequestDuration metric.Float64Histogram
+	logger                *slog.Logger
+	mu                    sync.Mutex
+}
+
+// HTTPClientMetric represents HTTP client metrics
+type HTTPClientMetric struct {
+	key                   attribute.Key
+	clientRequestDuration metric.Float64Histogram
+	logger                *slog.Logger
+	mu                    sync.Mutex
+}
+
+// NewHTTPServerMetric creates a new HTTP server metric
+func (r *MetricsRegistry) NewHTTPServerMetric(key string) (*HTTPServerMetric, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.meter == nil {
+		return nil, errors.New("meter is not initialized")
+	}
+
+	m := &HTTPServerMetric{
+		key:    attribute.Key(key),
+		logger: r.logger,
+	}
+
+	// Eagerly create the histogram if meter is available
+	d, err := utils.NewFloat64Histogram(httpDerverTequestDuration, "ms", "Duration of HTTP server requests.", r.meter)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create serverRequestDuration: %w", err)
 	}
 	m.serverRequestDuration = d
+
 	return m, nil
 }
 
-// for test only
-func newHttpClientMetric(key string, meter metric.Meter) (*HttpClientMetric, error) {
-	m := &HttpClientMetric{
-		key: attribute.Key(key),
+// NewHTTPClientMetric creates a new HTTP client metric
+func (r *MetricsRegistry) NewHTTPClientMetric(key string) (*HTTPClientMetric, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.meter == nil {
+		return nil, errors.New("meter is not initialized")
 	}
-	d, err := utils.NewFloat64Histogram(http_client_request_duration, "ms", "Duration of HTTP client requests.", meter)
+
+	m := &HTTPClientMetric{
+		key:    attribute.Key(key),
+		logger: r.logger,
+	}
+
+	// Eagerly create the histogram if meter is available
+	d, err := utils.NewFloat64Histogram(httpClientRequestDuration, "ms", "Duration of HTTP client requests.", r.meter)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create clientRequestDuration: %w", err)
 	}
 	m.clientRequestDuration = d
+
 	return m, nil
+}
+
+// NoopRegistry is a no-op implementation of Registry for testing
+type NoopRegistry struct{}
+
+// NewNoOpRegistry creates a new no-op registry
+func NewNoOpRegistry() *NoopRegistry {
+	return &NoopRegistry{}
+}
+
+// NewHTTPServerMetric creates a no-op HTTP server metric
+func (*NoopRegistry) NewHTTPServerMetric(key string) (*HTTPServerMetric, error) {
+	return &HTTPServerMetric{
+		key:    attribute.Key(key),
+		logger: slog.Default(),
+	}, nil
+}
+
+// NewHTTPClientMetric creates a no-op HTTP client metric
+func (*NoopRegistry) NewHTTPClientMetric(key string) (*HTTPClientMetric, error) {
+	return &HTTPClientMetric{
+		key:    attribute.Key(key),
+		logger: slog.Default(),
+	}, nil
 }
 
 type httpMetricContext struct {
@@ -98,67 +163,102 @@ type httpMetricContext struct {
 	startAttributes []attribute.KeyValue
 }
 
-func (h *HttpServerMetric) OnBeforeStart(parentContext context.Context, startTime time.Time) context.Context {
+func (*HTTPServerMetric) OnBeforeStart(parentContext context.Context, _ time.Time) context.Context {
 	return parentContext
 }
 
-func (h *HttpServerMetric) OnBeforeEnd(ctx context.Context, startAttributes []attribute.KeyValue, startTime time.Time) context.Context {
+func (h *HTTPServerMetric) OnBeforeEnd(
+	ctx context.Context,
+	startAttributes []attribute.KeyValue,
+	startTime time.Time,
+) context.Context {
 	return context.WithValue(ctx, h.key, httpMetricContext{
 		startTime:       startTime,
 		startAttributes: startAttributes,
 	})
 }
 
-func (h *HttpServerMetric) OnAfterStart(context context.Context, endTime time.Time) {}
+func (*HTTPServerMetric) OnAfterStart(_ context.Context, _ time.Time) {}
 
-func (h *HttpServerMetric) OnAfterEnd(context context.Context, endAttributes []attribute.KeyValue, endTime time.Time) {
-	mc := context.Value(h.key).(httpMetricContext)
+func (h *HTTPServerMetric) OnAfterEnd(context context.Context, endAttributes []attribute.KeyValue, endTime time.Time) {
+	value := context.Value(h.key)
+	if value == nil {
+		// Context doesn't contain expected metric context, skip recording
+		return
+	}
+	mc, ok := value.(httpMetricContext)
+	if !ok {
+		// Type assertion failed, skip recording
+		return
+	}
 	startTime, startAttributes := mc.startTime, mc.startAttributes
-	// end attributes should be shadowed by AttrsShadower
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Check if histogram is initialized
 	if h.serverRequestDuration == nil {
-		var err error
-		h.serverRequestDuration, err = utils.NewFloat64Histogram(http_server_request_duration, "ms",
-			"Duration of HTTP server requests.", globalMeter)
-		if err != nil {
-			log.Printf("failed to create serverRequestDuration, err is %v\n", err)
+		if h.logger != nil {
+			h.logger.WarnContext(context, "serverRequestDuration is not initialized")
 		}
+		return
 	}
+
 	endAttributes = append(endAttributes, startAttributes...)
 	n, metricsAttrs := utils.Shadow(endAttributes, httpMetricsConv)
-	if h.serverRequestDuration != nil {
-		h.serverRequestDuration.Record(context, float64(endTime.Sub(startTime)), metric.WithAttributeSet(attribute.NewSet(metricsAttrs[0:n]...)))
-	}
+	h.serverRequestDuration.Record(
+		context,
+		float64(endTime.Sub(startTime)),
+		metric.WithAttributeSet(attribute.NewSet(metricsAttrs[0:n]...)),
+	)
 }
 
-func (h HttpClientMetric) OnBeforeStart(parentContext context.Context, startTime time.Time) context.Context {
+func (*HTTPClientMetric) OnBeforeStart(parentContext context.Context, _ time.Time) context.Context {
 	return parentContext
 }
 
-func (h HttpClientMetric) OnBeforeEnd(ctx context.Context, startAttributes []attribute.KeyValue, startTime time.Time) context.Context {
+func (h *HTTPClientMetric) OnBeforeEnd(
+	ctx context.Context,
+	startAttributes []attribute.KeyValue,
+	startTime time.Time,
+) context.Context {
 	return context.WithValue(ctx, h.key, httpMetricContext{
 		startTime:       startTime,
 		startAttributes: startAttributes,
 	})
 }
 
-func (h HttpClientMetric) OnAfterStart(context context.Context, endTime time.Time) {}
+func (*HTTPClientMetric) OnAfterStart(_ context.Context, _ time.Time) {}
 
-func (h HttpClientMetric) OnAfterEnd(context context.Context, endAttributes []attribute.KeyValue, endTime time.Time) {
-	mc := context.Value(h.key).(httpMetricContext)
-	startTime, startAttributes := mc.startTime, mc.startAttributes
-	// end attributes should be shadowed by AttrsShadower
-	if h.clientRequestDuration == nil {
-		var err error
-		// second change to init the metric
-		h.clientRequestDuration, err = utils.NewFloat64Histogram(http_client_request_duration, "ms",
-			"Duration of HTTP client requests.", globalMeter)
-		if err != nil {
-			log.Printf("failed to create clientRequestDuration, err is %v\n", err)
-		}
+func (h *HTTPClientMetric) OnAfterEnd(context context.Context, endAttributes []attribute.KeyValue, endTime time.Time) {
+	value := context.Value(h.key)
+	if value == nil {
+		// Context doesn't contain expected metric context, skip recording
+		return
 	}
+	mc, ok := value.(httpMetricContext)
+	if !ok {
+		// Type assertion failed, skip recording
+		return
+	}
+	startTime, startAttributes := mc.startTime, mc.startAttributes
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Check if histogram is initialized
+	if h.clientRequestDuration == nil {
+		if h.logger != nil {
+			h.logger.WarnContext(context, "clientRequestDuration is not initialized")
+		}
+		return
+	}
+
 	endAttributes = append(endAttributes, startAttributes...)
 	n, metricsAttrs := utils.Shadow(endAttributes, httpMetricsConv)
-	if h.clientRequestDuration != nil {
-		h.clientRequestDuration.Record(context, float64(endTime.Sub(startTime)), metric.WithAttributeSet(attribute.NewSet(metricsAttrs[0:n]...)))
-	}
+	h.clientRequestDuration.Record(
+		context,
+		float64(endTime.Sub(startTime)),
+		metric.WithAttributeSet(attribute.NewSet(metricsAttrs[0:n]...)),
+	)
 }
