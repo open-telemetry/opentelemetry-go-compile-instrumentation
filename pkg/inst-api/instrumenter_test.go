@@ -83,7 +83,7 @@ func (t *testOperationListener) OnBeforeEnd(ctx context.Context, startAttributes
 }
 
 func (t *testOperationListener) OnAfterStart(context context.Context, endTimestamp time.Time) {
-	if time.Now().Sub(endTimestamp).Seconds() > 5 {
+	if time.Since(endTimestamp).Seconds() > 5 {
 		panic("duration too long")
 	}
 }
@@ -117,7 +117,7 @@ type testContextCustomizer struct {
 }
 
 func (t testContextCustomizer) OnStart(ctx context.Context, request testRequest, startAttributes []attribute.KeyValue) context.Context {
-	return context.WithValue(ctx, "test-customizer", "test-customizer")
+	return context.WithValue(ctx, testKey("test-customizer"), "test-customizer")
 }
 
 func TestInstrumenter(t *testing.T) {
@@ -130,7 +130,7 @@ func TestInstrumenter(t *testing.T) {
 	instrumenter := builder.BuildInstrumenter()
 	ctx := context.Background()
 	newCtx := instrumenter.Start(ctx, testRequest{})
-	if newCtx.Value("test-customizer") != "test-customizer" {
+	if newCtx.Value(testKey("test-customizer")) != "test-customizer" {
 		t.Fatal("key test-customizer is not expected")
 	}
 	if newCtx.Value(testKey("startTs")) == nil {
