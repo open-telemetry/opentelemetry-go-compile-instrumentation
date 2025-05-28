@@ -7,6 +7,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+/**
+We only need to record some of the attributes in the metrics, since some of the attributes are high-cardinality.
+So we use this function to shadow the attributes that are not needed in the metrics.
+*/
+
 func Shadow(attrs []attribute.KeyValue, metricsSemConv map[attribute.Key]bool) (int, []attribute.KeyValue) {
 	swap := func(attrs []attribute.KeyValue, i, j int) {
 		tmp := attrs[i]

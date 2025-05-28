@@ -32,6 +32,7 @@ format:
 ```
 
 This repository requires using one of the following commit types:
+
 - `chore` for routine repository maintenance that has no impact on the user interfaces (CI/CD
   operations, linter configuration, etc...)
 - `doc` or `docs` for documentation changes
@@ -45,32 +46,32 @@ determine whether a user would be able to determine whether this change affects 
 looking at the title.
 
 Here are some examples for the various supported commit types:
+
 - `chore`:
-  * :information_source: What's changing in this PR? This should provide enough information from a
+  - :information_source: What's changing in this PR? This should provide enough information from a
     maintainer to make sense of what's going on.
-  * :white_check_mark: `chore(ci): add OSSF Scorecard automation`
-  * :x: `chore: new CI step`
+  - :white_check_mark: `chore(ci): add OSSF Scorecard automation`
+  - :x: `chore: new CI step`
 - `doc`, `docs`:
-  * :information_source: What documentation has change? A user might decide whether they go read it
+  - :information_source: What documentation has change? A user might decide whether they go read it
     or not based on this.
-  * :white_check_mark: `docs: explain proper use of the -log-level flag`
-  * :x: `docs: improve documentation`
+  - :white_check_mark: `docs: explain proper use of the -log-level flag`
+  - :x: `docs: improve documentation`
 - `feat`:
-  * :information_source:  What feature is being introduced specifically? A user might decide if this
+  - :information_source:  What feature is being introduced specifically? A user might decide if this
     is useful to them or not based on this.
-  * :white_check_mark: `feat(cmd/gotel): -log-level flag to configure log verbosity`
-  * :x: `feat: logging`
+  - :white_check_mark: `feat(cmd/gotel): -log-level flag to configure log verbosity`
+  - :x: `feat: logging`
 - `fix`:
-  * :information_source: What bug is being fixed? Refer to the symptoms of the fixed issue, not to
+  - :information_source: What bug is being fixed? Refer to the symptoms of the fixed issue, not to
     the solution. A user might decide whether their problem is solved by a release or not based on
     this.
-  * :white_check_mark: `fix: SEGFAULT on when cross-compiling on linux/arm64 platforms`
-  * :x: `fix: check pointer for nil before dereferencing it`
+  - :white_check_mark: `fix: SEGFAULT on when cross-compiling on linux/arm64 platforms`
+  - :x: `fix: check pointer for nil before dereferencing it`
 - `release:
-  * :information_source: What version is this commit preparing for?
-  * :white_check_mark: `release: v1.2.3`
-  * :x: `release: new release`
-
+  - :information_source: What version is this commit preparing for?
+  - :white_check_mark: `release: v1.2.3`
+  - :x: `release: new release`
 
 [conv-commit]: https://www.conventionalcommits.org/en/v1.0.0/
 
@@ -116,57 +117,57 @@ All pull requests are squashed to a single commit upon merge to `main`.
 
 ### How to Receive Comments
 
-* If the PR is not ready for review, please put `[WIP]` in the title,
+- If the PR is not ready for review, please put `[WIP]` in the title,
   tag it as `work-in-progress`, or mark it as
   [`draft`](https://github.blog/2019-02-14-introducing-draft-pull-requests/).
-* Make sure CLA is signed and CI is clear.
+- Make sure CLA is signed and CI is clear.
 
 ### How to Get PRs Merged
 
 A PR is considered **ready to merge** when:
 
-* It has received two qualified approvals[^1].
+- It has received two qualified approvals[^1].
 
   This is not enforced through automation, but needs to be validated by the
   maintainer merging.
-  * The qualified approvals need to be from [Approver]s/[Maintainer]s
+  - The qualified approvals need to be from [Approver]s/[Maintainer]s
     affiliated with different companies. Two qualified approvals from
     [Approver]s or [Maintainer]s affiliated with the same company counts as a
     single qualified approval.
-  * PRs introducing changes that have already been discussed and consensus
+  - PRs introducing changes that have already been discussed and consensus
     reached only need one qualified approval. The discussion and resolution
     needs to be linked to the PR.
-  * Trivial changes[^2] only need one qualified approval.
+  - Trivial changes[^2] only need one qualified approval.
 
-* All feedback has been addressed.
-  * All PR comments and suggestions are resolved.
-  * All GitHub Pull Request reviews with a status of "Request changes" have
+- All feedback has been addressed.
+  - All PR comments and suggestions are resolved.
+  - All GitHub Pull Request reviews with a status of "Request changes" have
     been addressed. Another review by the objecting reviewer with a different
     status can be submitted to clear the original review, or the review can be
     dismissed by a [Maintainer] when the issues from the original review have
     been addressed.
-  * Any comments or reviews that cannot be resolved between the PR author and
+  - Any comments or reviews that cannot be resolved between the PR author and
     reviewers can be submitted to the community [Approver]s and [Maintainer]s
     during the weekly SIG meeting. If consensus is reached among the
     [Approver]s and [Maintainer]s during the SIG meeting the objections to the
     PR may be dismissed or resolved or the PR closed by a [Maintainer].
-  * Any substantive changes to the PR require existing Approval reviews be
+  - Any substantive changes to the PR require existing Approval reviews be
     cleared unless the approver explicitly states that their approval persists
     across changes. This includes changes resulting from other feedback.
     [Approver]s and [Maintainer]s can help in clearing reviews and they should
     be consulted if there are any questions.
 
-* The PR branch is up to date with the base branch it is merging into.
-  * To ensure this does not block the PR, it should be configured to allow
+- The PR branch is up to date with the base branch it is merging into.
+  - To ensure this does not block the PR, it should be configured to allow
     maintainers to update it.
 
-* It has been open for review for at least one working day. This gives people
+- It has been open for review for at least one working day. This gives people
   reasonable time to review.
-  * Trivial changes[^2] do not have to wait for one day and may be merged with
+  - Trivial changes[^2] do not have to wait for one day and may be merged with
     a single [Maintainer]'s approval.
 
-* All required GitHub workflows have succeeded.
-* Urgent fix can take exception as long as it has been actively communicated
+- All required GitHub workflows have succeeded.
+- Urgent fix can take exception as long as it has been actively communicated
   among [Maintainer]s.
 
 Any [Maintainer] can merge the PR once the above criteria have been met.
@@ -176,21 +177,23 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 [^2]: Trivial changes include: typo corrections, cosmetic non-substantive
   changes, documentation corrections or updates, dependency updates, etc.
 
-
 ## Approvers and Maintainers
 
 ### Triagers
 
+For the current list of Triagers, please see the [`MAINTAINERS.md`](MAINTAINERS.md) file.
+
 ### Approvers
+
+For the current list of Approvers, please see the [`MAINTAINERS.md`](MAINTAINERS.md) file.
 
 ### Maintainers
 
-- [Dinesh Gurumurthy](https://github.com/dineshg13), Datadog
-- [Huxing Zhang](https://github.com/ralf0131), Alibaba
-- [Przemyslaw Delewski](https://github.com/pdelewski), Quesma
+For the current list of Maintainers, please see the [`MAINTAINERS.md`](MAINTAINERS.md) file.
 
 ### Emeritus
 
+For the current list of Emeritus Maintainers, please see the [`MAINTAINERS.md`](MAINTAINERS.md) file.
 
 ### Become an Approver or a Maintainer
 
