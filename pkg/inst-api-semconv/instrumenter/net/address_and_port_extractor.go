@@ -35,7 +35,7 @@ type ClientAddressAndPortExtractor[REQUEST any] struct {
 func (c *ClientAddressAndPortExtractor[REQUEST]) Extract(request REQUEST) AddressAndPort {
 	address := c.getter.GetClientAddress(request)
 	port := c.getter.GetClientPort(request)
-	if address == "" && port == 0 {
+	if address == "" && port == 0 && c.fallbackExtractor != nil {
 		return c.fallbackExtractor.Extract(request)
 	} else {
 		return AddressAndPort{
