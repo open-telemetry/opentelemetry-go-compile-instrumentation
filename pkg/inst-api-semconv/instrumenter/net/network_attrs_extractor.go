@@ -33,11 +33,11 @@ func CreateNetworkAttributesExtractor[REQUEST any, RESPONSE any](getter NetworkA
 	}
 }
 
-type UrlAttrsExtractor[REQUEST any, RESPONSE any, GETTER UrlAttrsGetter[REQUEST]] struct {
-	Getter GETTER
+type UrlAttrsExtractor[REQUEST any, RESPONSE any, URLATTRGETTER UrlAttrsGetter[REQUEST]] struct {
+	Getter URLATTRGETTER
 }
 
-func (u *UrlAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnStart(parentContext context.Context,
+func (u *UrlAttrsExtractor[REQUEST, RESPONSE, URLATTRGETTER]) OnStart(parentContext context.Context,
 	attributes []attribute.KeyValue, request REQUEST) ([]attribute.KeyValue, context.Context) {
 	attributes = append(attributes, attribute.KeyValue{
 		Key:   semconv.URLSchemeKey,
@@ -52,7 +52,7 @@ func (u *UrlAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnStart(parentContext con
 	return attributes, parentContext
 }
 
-func (u *UrlAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnEnd(context context.Context,
+func (u *UrlAttrsExtractor[REQUEST, RESPONSE, URLATTRGETTER]) OnEnd(context context.Context,
 	attributes []attribute.KeyValue, request REQUEST,
 	response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
 	return attributes, context

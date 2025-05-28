@@ -13,7 +13,7 @@ import (
 type AttributesExtractor[REQUEST any, RESPONSE any] interface {
 	OnStart(parentContext context.Context, attributes []attribute.KeyValue, request REQUEST) ([]attribute.KeyValue,
 		context.Context)
-	OnEnd(parentContext context.Context, attributes []attribute.KeyValue, ctx context.Context, request REQUEST,
+	OnEnd(parentContext context.Context, attributes []attribute.KeyValue, request REQUEST,
 		response RESPONSE, err error) ([]attribute.KeyValue, context.Context)
 }
 
