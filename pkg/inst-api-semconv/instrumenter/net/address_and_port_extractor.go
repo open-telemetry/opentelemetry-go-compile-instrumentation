@@ -68,7 +68,8 @@ type InternalClientAttributesExtractor[REQUEST any] struct {
 	capturePort             bool
 }
 
-func (i *InternalClientAttributesExtractor[REQUEST]) OnStart(attributes []attribute.KeyValue, ctx context.Context, request REQUEST) ([]attribute.KeyValue, context.Context) {
+func (i *InternalClientAttributesExtractor[REQUEST]) OnStart(ctx context.Context, attributes []attribute.KeyValue,
+	request REQUEST) ([]attribute.KeyValue, context.Context) {
 	clientAddressAndPort := i.addressAndPortExtractor.Extract(request)
 	if clientAddressAndPort.Address != "" {
 		attributes = append(attributes, attribute.KeyValue{
@@ -89,7 +90,8 @@ type InternalServerAttributesExtractor[REQUEST any] struct {
 	addressAndPortExtractor AddressAndPortExtractor[REQUEST]
 }
 
-func (i *InternalServerAttributesExtractor[REQUEST]) OnStart(attributes []attribute.KeyValue, context context.Context, request REQUEST) ([]attribute.KeyValue, context.Context) {
+func (i *InternalServerAttributesExtractor[REQUEST]) OnStart(context context.Context,
+	attributes []attribute.KeyValue, request REQUEST) ([]attribute.KeyValue, context.Context) {
 	serverAddressAndPort := i.addressAndPortExtractor.Extract(request)
 	if serverAddressAndPort.Address != "" {
 		attributes = append(attributes, attribute.KeyValue{
@@ -112,7 +114,8 @@ type InternalNetworkAttributesExtractor[REQUEST any, RESPONSE any] struct {
 	captureLocalSocketAttributes bool
 }
 
-func (i *InternalNetworkAttributesExtractor[REQUEST, RESPONSE]) OnEnd(attributes []attribute.KeyValue, context context.Context, request REQUEST, response RESPONSE) ([]attribute.KeyValue, context.Context) {
+func (i *InternalNetworkAttributesExtractor[REQUEST, RESPONSE]) OnEnd(context context.Context, attributes []attribute.
+	KeyValue, request REQUEST, response RESPONSE) ([]attribute.KeyValue, context.Context) {
 	if i.captureProtocolAttributes {
 		attributes = append(attributes, attribute.KeyValue{
 			Key:   semconv.NetworkTransportKey,

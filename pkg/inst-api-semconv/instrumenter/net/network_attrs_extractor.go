@@ -13,12 +13,14 @@ type NetworkAttrsExtractor[REQUEST any, RESPONSE any] struct {
 	internalExtractor InternalNetworkAttributesExtractor[REQUEST, RESPONSE]
 }
 
-func (i *NetworkAttrsExtractor[REQUEST, RESPONSE]) OnStart(attributes []attribute.KeyValue, parentContext context.Context, request REQUEST) ([]attribute.KeyValue, context.Context) {
+func (i *NetworkAttrsExtractor[REQUEST, RESPONSE]) OnStart(parentContext context.Context,
+	attributes []attribute.KeyValue, request REQUEST) ([]attribute.KeyValue, context.Context) {
 	return attributes, parentContext
 }
 
-func (i *NetworkAttrsExtractor[REQUEST, RESPONSE]) OnEnd(attributes []attribute.KeyValue, context context.Context, request REQUEST, response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
-	return i.internalExtractor.OnEnd(attributes, context, request, response)
+func (i *NetworkAttrsExtractor[REQUEST, RESPONSE]) OnEnd(context context.Context, attributes []attribute.KeyValue,
+	request REQUEST, response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
+	return i.internalExtractor.OnEnd(context, attributes, request, response)
 }
 
 func CreateNetworkAttributesExtractor[REQUEST any, RESPONSE any](getter NetworkAttrsGetter[REQUEST, RESPONSE]) NetworkAttrsExtractor[REQUEST, RESPONSE] {
@@ -35,7 +37,8 @@ type UrlAttrsExtractor[REQUEST any, RESPONSE any, GETTER UrlAttrsGetter[REQUEST]
 	Getter GETTER
 }
 
-func (u *UrlAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnStart(attributes []attribute.KeyValue, parentContext context.Context, request REQUEST) ([]attribute.KeyValue, context.Context) {
+func (u *UrlAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnStart(parentContext context.Context,
+	attributes []attribute.KeyValue, request REQUEST) ([]attribute.KeyValue, context.Context) {
 	attributes = append(attributes, attribute.KeyValue{
 		Key:   semconv.URLSchemeKey,
 		Value: attribute.StringValue(u.Getter.GetUrlScheme(request)),
@@ -49,7 +52,9 @@ func (u *UrlAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnStart(attributes []attr
 	return attributes, parentContext
 }
 
-func (u *UrlAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnEnd(attributes []attribute.KeyValue, context context.Context, request REQUEST, response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
+func (u *UrlAttrsExtractor[REQUEST, RESPONSE, GETTER]) OnEnd(context context.Context,
+	attributes []attribute.KeyValue, request REQUEST,
+	response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
 	return attributes, context
 }
 
@@ -57,11 +62,13 @@ type ServerAttributesExtractor[REQUEST any, RESPONSE any] struct {
 	internalExtractor InternalServerAttributesExtractor[REQUEST]
 }
 
-func (s *ServerAttributesExtractor[REQUEST, RESPONSE]) OnStart(attributes []attribute.KeyValue, parentContext context.Context, request REQUEST) ([]attribute.KeyValue, context.Context) {
-	return s.internalExtractor.OnStart(attributes, parentContext, request)
+func (s *ServerAttributesExtractor[REQUEST, RESPONSE]) OnStart(parentContext context.Context, attributes []attribute.
+	KeyValue, request REQUEST) ([]attribute.KeyValue, context.Context) {
+	return s.internalExtractor.OnStart(parentContext, attributes, request)
 }
 
-func (s *ServerAttributesExtractor[REQUEST, RESPONSE]) OnEnd(attributes []attribute.KeyValue, ctx context.Context, request REQUEST, response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
+func (s *ServerAttributesExtractor[REQUEST, RESPONSE]) OnEnd(ctx context.Context, attributes []attribute.KeyValue,
+	request REQUEST, response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
 	return attributes, ctx
 }
 
@@ -80,11 +87,14 @@ type ClientAttributesExtractor[REQUEST any, RESPONSE any] struct {
 	internalExtractor InternalClientAttributesExtractor[REQUEST]
 }
 
-func (s *ClientAttributesExtractor[REQUEST, RESPONSE]) OnStart(attributes []attribute.KeyValue, parentContext context.Context, request REQUEST) ([]attribute.KeyValue, context.Context) {
-	return s.internalExtractor.OnStart(attributes, parentContext, request)
+func (s *ClientAttributesExtractor[REQUEST, RESPONSE]) OnStart(parentContext context.Context,
+	attributes []attribute.KeyValue, request REQUEST) ([]attribute.KeyValue, context.Context) {
+	return s.internalExtractor.OnStart(parentContext, attributes, request)
 }
 
-func (s *ClientAttributesExtractor[REQUEST, RESPONSE]) OnEnd(attributes []attribute.KeyValue, ctx context.Context, request REQUEST, response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
+func (s *ClientAttributesExtractor[REQUEST, RESPONSE]) OnEnd(ctx context.Context, attributes []attribute.KeyValue,
+	request REQUEST,
+	response RESPONSE, err error) ([]attribute.KeyValue, context.Context) {
 	return attributes, ctx
 }
 

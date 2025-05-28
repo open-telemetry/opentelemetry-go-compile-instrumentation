@@ -34,8 +34,8 @@ func TestOnStart(t *testing.T) {
 	attributes := []attribute.KeyValue{
 		attribute.String("existingKey", "existingValue"),
 	}
-	urlExtractor.OnEnd([]attribute.KeyValue{}, context.Background(), nil, nil, nil)
-	resultAttributes, resultContext := urlExtractor.OnStart(attributes, parentContext, nil)
+	urlExtractor.OnEnd(context.Background(), []attribute.KeyValue{}, nil, nil, nil)
+	resultAttributes, resultContext := urlExtractor.OnStart(parentContext, attributes, nil)
 	expectedAttributes := []attribute.KeyValue{
 		attribute.String("existingKey", "existingValue"),
 		attribute.String(string(semconv.URLSchemeKey), "http"),

@@ -268,19 +268,20 @@ func TestInternalClientAttributesExtractorOnStart(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if test.capturePort {
 				ie := CreateClientAttributesExtractor[AddressAndPort, AddressAndPort](MockClientAttributesGetter{})
-				attributes, _ := ie.OnStart([]attribute.KeyValue{}, context.TODO(), AddressAndPort{
+				attributes, _ := ie.OnStart(context.TODO(), []attribute.KeyValue{}, AddressAndPort{
 					Address: test.address,
 					Port:    test.port,
 				})
 				assert.Equal(t, test.expectedResult, attributes)
-				attributes, _ = ie.OnEnd([]attribute.KeyValue{}, context.TODO(), AddressAndPort{}, AddressAndPort{}, nil)
+				attributes, _ = ie.OnEnd(context.TODO(), []attribute.KeyValue{}, AddressAndPort{}, AddressAndPort{},
+					nil)
 				assert.Equal(t, []attribute.KeyValue{}, attributes)
 			} else {
 				ie := &InternalClientAttributesExtractor[AddressAndPort]{
 					addressAndPortExtractor: &MockAddressAndPortExtractor[AddressAndPort]{},
 					capturePort:             test.capturePort,
 				}
-				attributes, _ := ie.OnStart([]attribute.KeyValue{}, context.TODO(), AddressAndPort{
+				attributes, _ := ie.OnStart(context.TODO(), []attribute.KeyValue{}, AddressAndPort{
 					Address: test.address,
 					Port:    test.port,
 				})
@@ -350,12 +351,12 @@ func TestInternalServerAttributesExtractorOnStart(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ie := CreateServerAttributesExtractor[AddressAndPort, AddressAndPort](MockServerAttributesGetter{})
-			attributes, _ := ie.OnStart([]attribute.KeyValue{}, context.TODO(), AddressAndPort{
+			attributes, _ := ie.OnStart(context.TODO(), []attribute.KeyValue{}, AddressAndPort{
 				Address: test.address,
 				Port:    test.port,
 			})
 			assert.Equal(t, test.expectedResult, attributes)
-			attributes, _ = ie.OnEnd([]attribute.KeyValue{}, context.TODO(), AddressAndPort{}, AddressAndPort{}, nil)
+			attributes, _ = ie.OnEnd(context.TODO(), []attribute.KeyValue{}, AddressAndPort{}, AddressAndPort{}, nil)
 			assert.Equal(t, []attribute.KeyValue{}, attributes)
 		})
 	}
@@ -456,9 +457,9 @@ func TestInternalNetworkAttributesExtractorOnStart(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if test.captureProtocolAttributes && test.captureLocalSocketAttributes {
 				ie := CreateNetworkAttributesExtractor[testRequest, testResponse](netAttrsGetter{})
-				attributes, _ := ie.OnEnd([]attribute.KeyValue{}, context.TODO(), testRequest{}, testResponse{}, nil)
+				attributes, _ := ie.OnEnd(context.TODO(), []attribute.KeyValue{}, testRequest{}, testResponse{}, nil)
 				assert.Equal(t, test.expectedResult, attributes)
-				attributes, _ = ie.OnStart([]attribute.KeyValue{}, context.TODO(), testRequest{})
+				attributes, _ = ie.OnStart(context.TODO(), []attribute.KeyValue{}, testRequest{})
 				assert.Equal(t, []attribute.KeyValue{}, attributes)
 			} else {
 				ie := &InternalNetworkAttributesExtractor[testRequest, testResponse]{
@@ -466,7 +467,7 @@ func TestInternalNetworkAttributesExtractorOnStart(t *testing.T) {
 					captureProtocolAttributes:    test.captureProtocolAttributes,
 					captureLocalSocketAttributes: test.captureLocalSocketAttributes,
 				}
-				attributes, _ := ie.OnEnd([]attribute.KeyValue{}, context.TODO(), testRequest{}, testResponse{})
+				attributes, _ := ie.OnEnd(context.TODO(), []attribute.KeyValue{}, testRequest{}, testResponse{})
 				assert.Equal(t, test.expectedResult, attributes)
 			}
 		})
