@@ -23,9 +23,7 @@ import (
 type testRequest struct {
 }
 
-type testResponse struct {
-	status string
-}
+type testResponse struct{}
 
 type testNameExtractor struct {
 }
@@ -69,7 +67,7 @@ func (m *myTextMapProp) Inject(ctx context.Context, carrier propagation.TextMapC
 
 func (m *myTextMapProp) Extract(ctx context.Context, carrier propagation.TextMapCarrier) context.Context {
 	t := carrier.Get("test")
-	return context.WithValue(ctx, "test", t)
+	return context.WithValue(ctx, testKey("test"), t)
 }
 
 func (m *myTextMapProp) Fields() []string {
@@ -77,11 +75,11 @@ func (m *myTextMapProp) Fields() []string {
 }
 
 func (t *testOperationListener) OnBeforeStart(parentContext context.Context, startTimestamp time.Time) context.Context {
-	return context.WithValue(parentContext, "startTs", startTimestamp)
+	return context.WithValue(parentContext, testKey("startTs"), startTimestamp)
 }
 
 func (t *testOperationListener) OnBeforeEnd(ctx context.Context, startAttributes []attribute.KeyValue, startTimestamp time.Time) context.Context {
-	return context.WithValue(ctx, "startAttrs", startAttributes)
+	return context.WithValue(ctx, testKey("startAttrs"), startAttributes)
 }
 
 func (t *testOperationListener) OnAfterStart(context context.Context, endTimestamp time.Time) {
@@ -135,10 +133,10 @@ func TestInstrumenter(t *testing.T) {
 	if newCtx.Value("test-customizer") != "test-customizer" {
 		t.Fatal("key test-customizer is not expected")
 	}
-	if newCtx.Value("startTs") == nil {
+	if newCtx.Value(testKey("startTs")) == nil {
 		t.Fatal("startTs is not expected")
 	}
-	if newCtx.Value("startAttrs") == nil {
+	if newCtx.Value(testKey("startAttrs")) == nil {
 		t.Fatal("startAttrs is not expected")
 	}
 	instrumenter.End(ctx, testRequest{}, testResponse{}, errors.New("abc"))
@@ -200,7 +198,7 @@ func TestPropFromUpStream(t *testing.T) {
 	ctx := context.Background()
 	newCtx := instrumenter.Start(ctx, testRequest{})
 	instrumenter.End(ctx, testRequest{}, testResponse{}, nil)
-	if newCtx.Value("test") != "test" {
+	if newCtx.Value(testKey("test")) != "test" {
 		panic("test attributes in context should be test")
 	}
 }
@@ -314,10 +312,4 @@ func TestSpanTimestamps(t *testing.T) {
 	recordedSpan := spans[0]
 	assert.Equal(t, startTime, recordedSpan.StartTime())
 	assert.Equal(t, endTime, recordedSpan.EndTime())
-}
-
-// SpanRecorder records started and ended spans.
-type SpanRecorder struct {
-	started []sdktrace.ReadWriteSpan
-	ended   []sdktrace.ReadOnlySpan
 }

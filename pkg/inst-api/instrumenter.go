@@ -72,7 +72,8 @@ const defaultAttributesSliceSize = 25
 
 var attributesPool = &sync.Pool{
 	New: func() interface{} {
-		return make([]attribute.KeyValue, 0, defaultAttributesSliceSize)
+		s := make([]attribute.KeyValue, 0, defaultAttributesSliceSize)
+		return &s
 	},
 }
 
@@ -137,10 +138,16 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doEnd(ctx context.Context, req
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 	}
-	attrs := attributesPool.Get().([]attribute.KeyValue)
+	attrsPtr := attributesPool.Get().(*[]attribute.KeyValue)
+	var attrs []attribute.KeyValue
+	if attrsPtr != nil {
+		attrs = *attrsPtr
+	} else {
+		attrs = make([]attribute.KeyValue, 0, defaultAttributesSliceSize)
+	}
 	defer func() {
 		attrs = attrs[:0]
-		attributesPool.Put(attrs)
+		attributesPool.Put(&attrs)
 	}()
 	for _, extractor := range i.attributesExtractors {
 		attrs, ctx = extractor.OnEnd(ctx, attrs, request, response, err)
