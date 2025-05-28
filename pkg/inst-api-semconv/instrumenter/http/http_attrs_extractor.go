@@ -53,8 +53,8 @@ func (h *HttpCommonAttrsExtractor[REQUEST, RESPONSE, COMMONATTRGETTER]) OnEnd(co
 	return attributes, context
 }
 
-type HttpClientAttrsExtractor[REQUEST HttpRequest, RESPONSE HttpResponse, GETTER1 HttpClientAttrsGetter[REQUEST, RESPONSE]] struct {
-	Base HttpCommonAttrsExtractor[REQUEST, RESPONSE, GETTER1]
+type HttpClientAttrsExtractor[REQUEST HttpRequest, RESPONSE HttpResponse, CLIENTATTRGETTER HttpClientAttrsGetter[REQUEST, RESPONSE]] struct {
+	Base HttpCommonAttrsExtractor[REQUEST, RESPONSE, CLIENTATTRGETTER]
 }
 
 func (h *HttpClientAttrsExtractor[REQUEST, RESPONSE, CLIENTATTRGETTER]) OnStart(parentContext context.Context,
