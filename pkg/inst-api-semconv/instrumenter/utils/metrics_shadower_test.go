@@ -4,14 +4,15 @@
 package utils
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/attribute"
-	"testing"
 )
 
 func TestShadowEmptyInputReturnsZeroAndEmptySlice(t *testing.T) {
-	attrs := []attribute.KeyValue{}
-	metricsSemConv := map[attribute.Key]bool{}
+	attrs := make([]attribute.KeyValue, 0)
+	metricsSemConv := make(map[attribute.Key]bool)
 	index, result := Shadow(attrs, metricsSemConv)
 	assert.Equal(t, 0, index)
 	assert.Empty(t, result)
@@ -22,7 +23,7 @@ func TestShadowNoMatchingKeysReturnsZeroAndUnchangedSlice(t *testing.T) {
 		attribute.String("key1", "value1"),
 		attribute.String("key2", "value2"),
 	}
-	metricsSemConv := map[attribute.Key]bool{}
+	metricsSemConv := make(map[attribute.Key]bool)
 	index, result := Shadow(attrs, metricsSemConv)
 	assert.Equal(t, 0, index)
 	assert.Equal(t, attrs, result)

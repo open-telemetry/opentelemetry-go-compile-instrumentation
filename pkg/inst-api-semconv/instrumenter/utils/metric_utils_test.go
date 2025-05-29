@@ -5,11 +5,12 @@ package utils
 
 import (
 	"context"
+	"testing"
+
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
-	"testing"
 )
 
 func TestNewFloat64Histogram(t *testing.T) {
@@ -23,13 +24,13 @@ func TestNewFloat64Histogram(t *testing.T) {
 	meter := mp.Meter("test-meter")
 	server, err := NewFloat64Histogram("test", "ms", "test metric", meter)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	ctx := context.Background()
 	server.Record(ctx, 1.0)
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "test" {
-		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
+		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
 }

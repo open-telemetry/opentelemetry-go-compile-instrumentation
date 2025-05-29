@@ -8,27 +8,29 @@ HTTP span names SHOULD be {method} {target} if there is a (low-cardinality) targ
 If there is no (low-cardinality) {target} available, HTTP span names SHOULD be {method}.
 */
 
-type HttpClientSpanNameExtractor[REQUEST any, RESPONSE any] struct {
-	Getter HttpClientAttrsGetter[REQUEST, RESPONSE]
+const defaultHTTPSpanName = "HTTP"
+
+type HTTPClientSpanNameExtractor[REQUEST any, RESPONSE any] struct {
+	Getter HTTPClientAttrsGetter[REQUEST, RESPONSE]
 }
 
-func (h *HttpClientSpanNameExtractor[REQUEST, RESPONSE]) Extract(request REQUEST) string {
+func (h *HTTPClientSpanNameExtractor[REQUEST, RESPONSE]) Extract(request REQUEST) string {
 	method := h.Getter.GetRequestMethod(request)
 	if method == "" {
-		return "HTTP"
+		return defaultHTTPSpanName
 	}
 	return method
 }
 
-type HttpServerSpanNameExtractor[REQUEST any, RESPONSE any] struct {
-	Getter HttpServerAttrsGetter[REQUEST, RESPONSE]
+type HTTPServerSpanNameExtractor[REQUEST any, RESPONSE any] struct {
+	Getter HTTPServerAttrsGetter[REQUEST, RESPONSE]
 }
 
-func (h *HttpServerSpanNameExtractor[REQUEST, RESPONSE]) Extract(request REQUEST) string {
+func (h *HTTPServerSpanNameExtractor[REQUEST, RESPONSE]) Extract(request REQUEST) string {
 	method := h.Getter.GetRequestMethod(request)
-	route := h.Getter.GetHttpRoute(request)
+	route := h.Getter.GetHTTPRoute(request)
 	if method == "" {
-		return "HTTP"
+		return defaultHTTPSpanName
 	}
 	if route == "" {
 		return method
