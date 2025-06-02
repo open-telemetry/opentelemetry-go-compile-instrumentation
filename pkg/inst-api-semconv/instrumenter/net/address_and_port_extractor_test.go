@@ -5,62 +5,60 @@ package net
 
 import (
 	"context"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
-	"testing"
 )
 
-type testRequest struct {
-}
+type testRequest struct{}
 
-type testResponse struct {
-}
+type testResponse struct{}
 
-type netAttrsGetter struct {
-}
+type netAttrsGetter struct{}
 
-func (n netAttrsGetter) GetUrlScheme(request testRequest) string {
+func (netAttrsGetter) GetURLScheme(_ testRequest) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetUrlPath(request testRequest) string {
+func (netAttrsGetter) GetURLPath(_ testRequest) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetUrlQuery(request testRequest) string {
+func (netAttrsGetter) GetURLQuery(_ testRequest) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetNetworkType(request testRequest, response testResponse) string {
+func (netAttrsGetter) GetNetworkType(_ testRequest, _ testResponse) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetNetworkTransport(request testRequest, response testResponse) string {
+func (netAttrsGetter) GetNetworkTransport(_ testRequest, _ testResponse) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetNetworkProtocolName(request testRequest, response testResponse) string {
+func (netAttrsGetter) GetNetworkProtocolName(_ testRequest, _ testResponse) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetNetworkProtocolVersion(request testRequest, response testResponse) string {
+func (netAttrsGetter) GetNetworkProtocolVersion(_ testRequest, _ testResponse) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetNetworkLocalInetAddress(request testRequest, response testResponse) string {
+func (netAttrsGetter) GetNetworkLocalInetAddress(_ testRequest, _ testResponse) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetNetworkLocalPort(request testRequest, response testResponse) int {
+func (netAttrsGetter) GetNetworkLocalPort(_ testRequest, _ testResponse) int {
 	return 8080
 }
 
-func (n netAttrsGetter) GetNetworkPeerInetAddress(request testRequest, response testResponse) string {
+func (netAttrsGetter) GetNetworkPeerInetAddress(_ testRequest, _ testResponse) string {
 	return "test"
 }
 
-func (n netAttrsGetter) GetNetworkPeerPort(request testRequest, response testResponse) int {
+func (netAttrsGetter) GetNetworkPeerPort(_ testRequest, _ testResponse) int {
 	return 8080
 }
 
@@ -69,11 +67,11 @@ type mockClientAttributesGetter struct {
 	port    int
 }
 
-func (m *mockClientAttributesGetter) GetClientAddress(request string) string {
+func (m *mockClientAttributesGetter) GetClientAddress(_ string) string {
 	return m.address
 }
 
-func (m *mockClientAttributesGetter) GetClientPort(request string) int {
+func (m *mockClientAttributesGetter) GetClientPort(_ string) int {
 	return m.port
 }
 
@@ -82,7 +80,7 @@ type mockAddressAndPortExtractor struct {
 	port    int
 }
 
-func (m *mockAddressAndPortExtractor) Extract(request string) AddressAndPort {
+func (m *mockAddressAndPortExtractor) Extract(_ string) AddressAndPort {
 	return AddressAndPort{
 		Address: m.address,
 		Port:    m.port,
@@ -92,7 +90,7 @@ func (m *mockAddressAndPortExtractor) Extract(request string) AddressAndPort {
 func TestNoopAddressAndPortExtractorExtractShouldReturnConstantValue(t *testing.T) {
 	extractor := &NoopAddressAndPortExtractor[string]{}
 	actual := extractor.Extract("any request")
-	assert.Equal(t, noopAddressAndPort, actual)
+	assert.Equal(t, AddressAndPort{}, actual)
 }
 
 type MockGetter struct {
@@ -100,11 +98,11 @@ type MockGetter struct {
 	Port    int
 }
 
-func (m *MockGetter) GetServerAddress(request any) string {
+func (m *MockGetter) GetServerAddress(_ any) string {
 	return m.Address
 }
 
-func (m *MockGetter) GetServerPort(request any) int {
+func (m *MockGetter) GetServerPort(_ any) int {
 	return m.Port
 }
 
@@ -112,33 +110,33 @@ type MockFallbackExtractor struct {
 	Extracted AddressAndPort
 }
 
-func (m *MockFallbackExtractor) Extract(request any) AddressAndPort {
+func (m *MockFallbackExtractor) Extract(_ any) AddressAndPort {
 	return m.Extracted
 }
 
 type MockAddressAndPortExtractor[REQUEST AddressAndPort] struct{}
 
-func (m *MockAddressAndPortExtractor[REQUEST]) Extract(request AddressAndPort) AddressAndPort {
+func (*MockAddressAndPortExtractor[REQUEST]) Extract(request AddressAndPort) AddressAndPort {
 	return request
 }
 
 type MockClientAttributesGetter struct{}
 
-func (m MockClientAttributesGetter) GetClientAddress(request AddressAndPort) string {
+func (MockClientAttributesGetter) GetClientAddress(request AddressAndPort) string {
 	return request.Address
 }
 
-func (m MockClientAttributesGetter) GetClientPort(request AddressAndPort) int {
+func (MockClientAttributesGetter) GetClientPort(request AddressAndPort) int {
 	return request.Port
 }
 
 type MockServerAttributesGetter struct{}
 
-func (m MockServerAttributesGetter) GetServerAddress(request AddressAndPort) string {
+func (MockServerAttributesGetter) GetServerAddress(request AddressAndPort) string {
 	return request.Address
 }
 
-func (m MockServerAttributesGetter) GetServerPort(request AddressAndPort) int {
+func (MockServerAttributesGetter) GetServerPort(request AddressAndPort) int {
 	return request.Port
 }
 
@@ -208,7 +206,7 @@ func TestInternalClientAttributesExtractorOnStart(t *testing.T) {
 			address:        "",
 			port:           0,
 			capturePort:    false,
-			expectedResult: []attribute.KeyValue{},
+			expectedResult: make([]attribute.KeyValue, 0),
 		},
 		{
 			name:        "AddressNotEmpty_AttributeAdded",
@@ -268,20 +266,25 @@ func TestInternalClientAttributesExtractorOnStart(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if test.capturePort {
 				ie := CreateClientAttributesExtractor[AddressAndPort, AddressAndPort](MockClientAttributesGetter{})
-				attributes, _ := ie.OnStart(context.TODO(), []attribute.KeyValue{}, AddressAndPort{
+				attributes, _ := ie.OnStart(context.TODO(), make([]attribute.KeyValue, 0), AddressAndPort{
 					Address: test.address,
 					Port:    test.port,
 				})
 				assert.Equal(t, test.expectedResult, attributes)
-				attributes, _ = ie.OnEnd(context.TODO(), []attribute.KeyValue{}, AddressAndPort{}, AddressAndPort{},
-					nil)
-				assert.Equal(t, []attribute.KeyValue{}, attributes)
+				attributes, _ = ie.OnEnd(
+					context.TODO(),
+					make([]attribute.KeyValue, 0),
+					AddressAndPort{},
+					AddressAndPort{},
+					nil,
+				)
+				assert.Equal(t, make([]attribute.KeyValue, 0), attributes)
 			} else {
 				ie := &InternalClientAttributesExtractor[AddressAndPort]{
 					addressAndPortExtractor: &MockAddressAndPortExtractor[AddressAndPort]{},
 					capturePort:             test.capturePort,
 				}
-				attributes, _ := ie.OnStart(context.TODO(), []attribute.KeyValue{}, AddressAndPort{
+				attributes, _ := ie.OnStart(context.TODO(), make([]attribute.KeyValue, 0), AddressAndPort{
 					Address: test.address,
 					Port:    test.port,
 				})
@@ -304,7 +307,7 @@ func TestInternalServerAttributesExtractorOnStart(t *testing.T) {
 			address:        "",
 			port:           0,
 			capturePort:    false,
-			expectedResult: []attribute.KeyValue{},
+			expectedResult: make([]attribute.KeyValue, 0),
 		},
 		{
 			name:        "AddressNotEmpty_AttributeAdded",
@@ -351,13 +354,19 @@ func TestInternalServerAttributesExtractorOnStart(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ie := CreateServerAttributesExtractor[AddressAndPort, AddressAndPort](MockServerAttributesGetter{})
-			attributes, _ := ie.OnStart(context.TODO(), []attribute.KeyValue{}, AddressAndPort{
+			attributes, _ := ie.OnStart(context.TODO(), make([]attribute.KeyValue, 0), AddressAndPort{
 				Address: test.address,
 				Port:    test.port,
 			})
 			assert.Equal(t, test.expectedResult, attributes)
-			attributes, _ = ie.OnEnd(context.TODO(), []attribute.KeyValue{}, AddressAndPort{}, AddressAndPort{}, nil)
-			assert.Equal(t, []attribute.KeyValue{}, attributes)
+			attributes, _ = ie.OnEnd(
+				context.TODO(),
+				make([]attribute.KeyValue, 0),
+				AddressAndPort{},
+				AddressAndPort{},
+				nil,
+			)
+			assert.Equal(t, make([]attribute.KeyValue, 0), attributes)
 		})
 	}
 }
@@ -457,17 +466,23 @@ func TestInternalNetworkAttributesExtractorOnStart(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if test.captureProtocolAttributes && test.captureLocalSocketAttributes {
 				ie := CreateNetworkAttributesExtractor[testRequest, testResponse](netAttrsGetter{})
-				attributes, _ := ie.OnEnd(context.TODO(), []attribute.KeyValue{}, testRequest{}, testResponse{}, nil)
+				attributes, _ := ie.OnEnd(
+					context.TODO(),
+					make([]attribute.KeyValue, 0),
+					testRequest{},
+					testResponse{},
+					nil,
+				)
 				assert.Equal(t, test.expectedResult, attributes)
-				attributes, _ = ie.OnStart(context.TODO(), []attribute.KeyValue{}, testRequest{})
-				assert.Equal(t, []attribute.KeyValue{}, attributes)
+				attributes, _ = ie.OnStart(context.TODO(), make([]attribute.KeyValue, 0), testRequest{})
+				assert.Equal(t, make([]attribute.KeyValue, 0), attributes)
 			} else {
 				ie := &InternalNetworkAttributesExtractor[testRequest, testResponse]{
 					getter:                       netAttrsGetter{},
 					captureProtocolAttributes:    test.captureProtocolAttributes,
 					captureLocalSocketAttributes: test.captureLocalSocketAttributes,
 				}
-				attributes, _ := ie.OnEnd(context.TODO(), []attribute.KeyValue{}, testRequest{}, testResponse{})
+				attributes, _ := ie.OnEnd(context.TODO(), make([]attribute.KeyValue, 0), testRequest{}, testResponse{})
 				assert.Equal(t, test.expectedResult, attributes)
 			}
 		})

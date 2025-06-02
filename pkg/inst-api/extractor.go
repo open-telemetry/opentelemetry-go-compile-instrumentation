@@ -5,6 +5,7 @@ package instrumenter
 
 import (
 	"context"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -33,45 +34,44 @@ type SpanKeyProvider interface {
 	GetSpanKey() attribute.Key
 }
 
-type AlwaysInternalExtractor[REQUEST any] struct {
-}
+type AlwaysInternalExtractor[REQUEST any] struct{}
 
-func (a *AlwaysInternalExtractor[any]) Extract(request any) trace.SpanKind {
+func (_ *AlwaysInternalExtractor[any]) Extract(_ any) trace.SpanKind {
 	return trace.SpanKindInternal
 }
 
-type AlwaysClientExtractor[REQUEST any] struct {
-}
+type AlwaysClientExtractor[REQUEST any] struct{}
 
-func (a *AlwaysClientExtractor[any]) Extract(request any) trace.SpanKind {
+func (_ *AlwaysClientExtractor[any]) Extract(_ any) trace.SpanKind {
 	return trace.SpanKindClient
 }
 
-type AlwaysServerExtractor[REQUEST any] struct {
-}
+type AlwaysServerExtractor[REQUEST any] struct{}
 
-func (a *AlwaysServerExtractor[any]) Extract(request any) trace.SpanKind {
+func (_ *AlwaysServerExtractor[any]) Extract(_ any) trace.SpanKind {
 	return trace.SpanKindServer
 }
 
-type AlwaysProducerExtractor[REQUEST any] struct {
-}
+type AlwaysProducerExtractor[request any] struct{}
 
-func (a *AlwaysProducerExtractor[any]) Extract(request any) trace.SpanKind {
+func (_ *AlwaysProducerExtractor[any]) Extract(_ any) trace.SpanKind {
 	return trace.SpanKindProducer
 }
 
-type AlwaysConsumerExtractor[REQUEST any] struct {
-}
+type AlwaysConsumerExtractor[request any] struct{}
 
-func (a *AlwaysConsumerExtractor[any]) Extract(request any) trace.SpanKind {
+func (_ *AlwaysConsumerExtractor[any]) Extract(_ any) trace.SpanKind {
 	return trace.SpanKindConsumer
 }
 
-type defaultSpanStatusExtractor[REQUEST any, RESPONSE any] struct {
-}
+type defaultSpanStatusExtractor[request any, response any] struct{}
 
-func (d *defaultSpanStatusExtractor[REQUEST, RESPONSE]) Extract(span trace.Span, request REQUEST, response RESPONSE, err error) {
+func (*defaultSpanStatusExtractor[REQUEST, RESPONSE]) Extract(
+	span trace.Span,
+	_ REQUEST,
+	_ RESPONSE,
+	err error,
+) {
 	if err != nil {
 		span.SetStatus(codes.Error, "")
 	}

@@ -3,12 +3,16 @@
 package main
 
 import (
+	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/internal"
 )
+
+const minCompileArgs = 2 // compile command + at least one argument
 
 func runCmd(args ...string) error {
 	path := args[0]
@@ -19,13 +23,13 @@ func runCmd(args ...string) error {
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to run command %s: %w", path, err)
 	}
 	return nil
 }
 
 func isCompilePackage(args []string, pkg string) bool {
-	if len(args) < 2 {
+	if len(args) < minCompileArgs {
 		return false
 	}
 	if !strings.HasSuffix(args[0], "compile") &&
@@ -44,9 +48,10 @@ func isCompilePackage(args []string, pkg string) bool {
 
 func main() {
 	args := os.Args[1:]
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	if isCompilePackage(args, internal.TargetPkg) {
 		// It's the compile command, intercept it and inject hook code
-		args = internal.Instrument(args)
+		args = internal.Instrument(logger, args)
 	}
 	err := runCmd(args...)
 	if err != nil {

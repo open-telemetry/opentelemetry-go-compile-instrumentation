@@ -17,10 +17,12 @@ pkg ---> Public API
             network
 sdk ---> Instrumentation code for each plugin (e.g. http, grpc, ...)
 ```
+
 For Public API, we have some key abstractions as follows:
+
 1. `Instrumenter`: Unified entrance of instrumentation (generating span, metrics, ...)
 2. `Extractor`: Extracting attributes using multiple Getters according to [OpenTelemetry Semconv](https://opentelemetry.io/docs/specs/semconv/).
-3. `Getter`: Getting attributes from the REQUEST object(For example, HttpRequest object that HTTP Server received).
+3. `Getter`: Getting attributes from the REQUEST object(For example, HTTPRequest object that HTTP Server received).
 4. `AttrsShadower`: An extension for Extractor to customize the attributes extracted by the extractor.
 5. `OperationListener`: An hook for better extension(For example, aggregate the metrics).
 
@@ -55,7 +57,7 @@ classDiagram
             + GetXxx(REQUEST) string
             + ...(...)
         }
-        class HttpCommonAttributesGetter {
+        class HTTPCommonAttributesGetter {
             + GetRequestMethod(REQUEST) string
             + ...(...)
         }
@@ -69,7 +71,7 @@ classDiagram
         }
     }
 
-    HttpCommonAttributesGetter ..|> AttributesGetter
+    HTTPCommonAttributesGetter ..|> AttributesGetter
     RcpAttributesGetter ..|> AttributesGetter
     MessagingAttributesGetter ..|> AttributesGetter
 
@@ -122,7 +124,7 @@ classDiagram
             + OnAfterStart(Context, Time)
             + OnAfterEnd(Context, []KeyValue, Time)
         }
-        class HttpServerMetric {
+        class HTTPServerMetric {
             + OnBeforeStart(Context, Time) Context
             + OnBeforeEnd(Context, []KeyValue, Time) Context
             + OnAfterStart(Context, Time)
@@ -138,7 +140,7 @@ classDiagram
 
     Instrumenter *-- "1..*" OperationListener
 
-    OperationListener <|.. HttpServerMetric
+    OperationListener <|.. HTTPServerMetric
     OperationListener <|.. XxxOperationListener
 
     PropagatingFromUpstreamInstrumenter ..|> Instrumenter

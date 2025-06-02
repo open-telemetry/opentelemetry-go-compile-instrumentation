@@ -17,7 +17,7 @@ type testSpan struct {
 	status *codes.Code
 }
 
-func (ts testSpan) SetStatus(status codes.Code, desc string) {
+func (ts testSpan) SetStatus(status codes.Code, _ string) {
 	*ts.status = status
 }
 

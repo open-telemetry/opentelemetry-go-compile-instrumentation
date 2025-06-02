@@ -44,8 +44,10 @@ func main() {
 	)
 
 	// Get default values from environment if running under GHA.
-	if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" {
-		if path := os.Getenv("GITHUB_EVENT_PATH"); path != "" {
+	eventName := os.Getenv("GITHUB_EVENT_NAME")
+	if eventName == "pull_request" || eventName == "pull_request_target" {
+		path := os.Getenv("GITHUB_EVENT_PATH")
+		if path != "" {
 			data, err := os.ReadFile(path)
 			if err != nil {
 				log.Fatalln(err)
