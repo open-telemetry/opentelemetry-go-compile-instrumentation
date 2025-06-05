@@ -231,6 +231,25 @@ packages are dependencies of an automatically-instrumented application).
 The contents of such configuration files uses the same schema as the
 [instrumentation packages](#instrumentation-packages) definitions file.
 
+### Clean-Room Usage
+
+Some users want to be able to apply compile-time instrumentation to a codebase
+without many _any_ modification to it.
+
+To support these users, the `otel` tool can be used without making any
+persistent modifications to the codebase: when using `otel go build` without
+having created any configuration, the tool will automatically analyze the
+project's dependency tree to self-configure and build the project, before
+cleaning up any file system changes that may have needed to be made in the
+process.
+
+The self-configuration can be influenced by passing any and all relevant build
+flags to the `otel` command as part of the build.
+
+It is important to note that this mode of operation does not produce
+reproductible builds. Users who want or need fully reproductible builds must use
+the explicit set-up procedure.
+
 ### Uninstalling
 
 Removing auto-instrumentation configuration is as simple as removing the related
