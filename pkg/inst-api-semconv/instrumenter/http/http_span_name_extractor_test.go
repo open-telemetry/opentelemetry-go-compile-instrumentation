@@ -10,40 +10,39 @@ type testRequest struct {
 	Route  string
 }
 
-type testResponse struct {
-}
+type testResponse struct{}
 
 type testClientGetter struct {
-	HttpClientAttrsGetter[testRequest, testResponse]
+	HTTPClientAttrsGetter[testRequest, testResponse]
 }
 
 type testServerGetter struct {
-	HttpServerAttrsGetter[testRequest, testResponse]
+	HTTPServerAttrsGetter[testRequest, testResponse]
 }
 
-func (t testClientGetter) GetRequestMethod(request testRequest) string {
+func (testClientGetter) GetRequestMethod(request testRequest) string {
 	if request.Method != "" {
 		return request.Method
 	}
 	return ""
 }
 
-func (t testServerGetter) GetRequestMethod(request testRequest) string {
+func (testServerGetter) GetRequestMethod(request testRequest) string {
 	if request.Method != "" {
 		return request.Method
 	}
 	return ""
 }
 
-func (t testServerGetter) GetHttpRoute(request testRequest) string {
+func (testServerGetter) GetHTTPRoute(request testRequest) string {
 	if request.Route != "" {
 		return request.Route
 	}
 	return ""
 }
 
-func TestHttpClientExtractSpanName(t *testing.T) {
-	r := HttpClientSpanNameExtractor[testRequest, testResponse]{Getter: testClientGetter{}}
+func TestHTTPClientExtractSpanName(t *testing.T) {
+	r := HTTPClientSpanNameExtractor[testRequest, testResponse]{Getter: testClientGetter{}}
 	spanName := r.Extract(testRequest{Method: "GET"})
 	if spanName != "GET" {
 		t.Errorf("want GET, got %s", spanName)
@@ -54,8 +53,8 @@ func TestHttpClientExtractSpanName(t *testing.T) {
 	}
 }
 
-func TestHttpServerExtractSpanName(t *testing.T) {
-	r := HttpServerSpanNameExtractor[testRequest, testResponse]{Getter: testServerGetter{}}
+func TestHTTPServerExtractSpanName(t *testing.T) {
+	r := HTTPServerSpanNameExtractor[testRequest, testResponse]{Getter: testServerGetter{}}
 	spanName := r.Extract(testRequest{Method: "GET"})
 	if spanName != "GET" {
 		t.Errorf("want GET, got %s", spanName)

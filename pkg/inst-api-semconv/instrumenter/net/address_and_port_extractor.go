@@ -5,12 +5,11 @@ package net
 
 import (
 	"context"
+	"strings"
+
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
-	"strings"
 )
-
-var noopAddressAndPort = AddressAndPort{}
 
 type AddressAndPort struct {
 	Address string
@@ -23,8 +22,8 @@ type AddressAndPortExtractor[REQUEST any] interface {
 
 type NoopAddressAndPortExtractor[REQUEST any] struct{}
 
-func (n *NoopAddressAndPortExtractor[REQUEST]) Extract(request REQUEST) AddressAndPort {
-	return noopAddressAndPort
+func (_ *NoopAddressAndPortExtractor[REQUEST]) Extract(_ REQUEST) AddressAndPort {
+	return AddressAndPort{}
 }
 
 type ClientAddressAndPortExtractor[REQUEST any] struct {
@@ -37,11 +36,10 @@ func (c *ClientAddressAndPortExtractor[REQUEST]) Extract(request REQUEST) Addres
 	port := c.getter.GetClientPort(request)
 	if address == "" && port == 0 && c.fallbackExtractor != nil {
 		return c.fallbackExtractor.Extract(request)
-	} else {
-		return AddressAndPort{
-			Address: address,
-			Port:    port,
-		}
+	}
+	return AddressAndPort{
+		Address: address,
+		Port:    port,
 	}
 }
 
@@ -55,11 +53,10 @@ func (s *ServerAddressAndPortExtractor[REQUEST]) Extract(request REQUEST) Addres
 	port := s.getter.GetServerPort(request)
 	if address == "" && port == 0 {
 		return s.fallbackExtractor.Extract(request)
-	} else {
-		return AddressAndPort{
-			Address: address,
-			Port:    port,
-		}
+	}
+	return AddressAndPort{
+		Address: address,
+		Port:    port,
 	}
 }
 
@@ -69,7 +66,8 @@ type InternalClientAttributesExtractor[REQUEST any] struct {
 }
 
 func (i *InternalClientAttributesExtractor[REQUEST]) OnStart(ctx context.Context, attributes []attribute.KeyValue,
-	request REQUEST) ([]attribute.KeyValue, context.Context) {
+	request REQUEST,
+) ([]attribute.KeyValue, context.Context) {
 	clientAddressAndPort := i.addressAndPortExtractor.Extract(request)
 	if clientAddressAndPort.Address != "" {
 		attributes = append(attributes, attribute.KeyValue{
@@ -91,7 +89,8 @@ type InternalServerAttributesExtractor[REQUEST any] struct {
 }
 
 func (i *InternalServerAttributesExtractor[REQUEST]) OnStart(context context.Context,
-	attributes []attribute.KeyValue, request REQUEST) ([]attribute.KeyValue, context.Context) {
+	attributes []attribute.KeyValue, request REQUEST,
+) ([]attribute.KeyValue, context.Context) {
 	serverAddressAndPort := i.addressAndPortExtractor.Extract(request)
 	if serverAddressAndPort.Address != "" {
 		attributes = append(attributes, attribute.KeyValue{
@@ -115,7 +114,8 @@ type InternalNetworkAttributesExtractor[REQUEST any, RESPONSE any] struct {
 }
 
 func (i *InternalNetworkAttributesExtractor[REQUEST, RESPONSE]) OnEnd(context context.Context, attributes []attribute.
-	KeyValue, request REQUEST, response RESPONSE) ([]attribute.KeyValue, context.Context) {
+	KeyValue, request REQUEST, response RESPONSE,
+) ([]attribute.KeyValue, context.Context) {
 	if i.captureProtocolAttributes {
 		attributes = append(attributes, attribute.KeyValue{
 			Key:   semconv.NetworkTransportKey,

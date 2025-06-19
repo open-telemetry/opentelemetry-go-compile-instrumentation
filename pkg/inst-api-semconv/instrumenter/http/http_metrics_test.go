@@ -5,28 +5,42 @@ package http
 
 import (
 	"context"
+	"log/slog"
+	"testing"
+	"time"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/utils"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
-	"testing"
-	"time"
 )
 
-func TestHttpServerMetrics(t *testing.T) {
-	reader := metric.NewManualReader()
+// Test helper functions
+func newHTTPServerMetric(key string, meter metric.Meter) (*HTTPServerMetric, error) {
+	registry := NewMetricsRegistry(slog.Default(), meter)
+	return registry.NewHTTPServerMetric(key)
+}
+
+func newHTTPClientMetric(key string, meter metric.Meter) (*HTTPClientMetric, error) {
+	registry := NewMetricsRegistry(slog.Default(), meter)
+	return registry.NewHTTPClientMetric(key)
+}
+
+func TestHTTPServerMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("my-service"),
 		semconv.ServiceVersion("v0.1.0"),
 	)
-	mp := metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(reader))
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
 	meter := mp.Meter("test-meter")
-	server, err := newHttpServerMetric("test", meter)
+	server, err := newHTTPServerMetric("test", meter)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	ctx := context.Background()
 	start := time.Now()
@@ -37,22 +51,22 @@ func TestHttpServerMetrics(t *testing.T) {
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.server.request.duration" {
-		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
+		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
 }
 
-func TestHttpClientMetrics(t *testing.T) {
-	reader := metric.NewManualReader()
+func TestHTTPClientMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("my-service"),
 		semconv.ServiceVersion("v0.1.0"),
 	)
-	mp := metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(reader))
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
 	meter := mp.Meter("test-meter")
-	client, err := newHttpClientMetric("test", meter)
+	client, err := newHTTPClientMetric("test", meter)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	ctx := context.Background()
 	start := time.Now()
@@ -63,11 +77,11 @@ func TestHttpClientMetrics(t *testing.T) {
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.client.request.duration" {
-		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
+		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
 }
 
-func TestHttpMetricAttributesShadower(t *testing.T) {
+func TestHTTPMetricAttributesShadower(t *testing.T) {
 	attrs := make([]attribute.KeyValue, 0)
 	attrs = append(attrs, attribute.KeyValue{
 		Key:   semconv.HTTPRequestMethodKey,
@@ -84,133 +98,181 @@ func TestHttpMetricAttributesShadower(t *testing.T) {
 	})
 	n, attrs := utils.Shadow(attrs, httpMetricsConv)
 	if n != 3 {
-		panic("wrong shadow array")
+		t.Fatal("wrong shadow array")
 	}
 	if attrs[3].Key != "unknown" {
-		panic("unknown should be the last attribute")
+		t.Fatal("unknown should be the last attribute")
 	}
 }
 
-func TestLazyHttpServerMetrics(t *testing.T) {
-	reader := metric.NewManualReader()
+// Tests for MetricsRegistry API
+func TestMetricsRegistryHTTPServerMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("my-service"),
 		semconv.ServiceVersion("v0.1.0"),
 	)
-	mp := metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(reader))
-	m := mp.Meter("test-meter")
-	InitHttpMetrics(m)
-	server := HttpServerMetrics("net.http.server")
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
+	meter := mp.Meter("test-meter")
+
+	registry := NewMetricsRegistry(slog.Default(), meter)
+	server, err := registry.NewHTTPServerMetric("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	ctx := context.Background()
 	start := time.Now()
 	ctx = server.OnBeforeStart(ctx, start)
 	ctx = server.OnBeforeEnd(ctx, []attribute.KeyValue{}, start)
 	server.OnAfterStart(ctx, start)
 	server.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
+
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.server.request.duration" {
-		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
+		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
 }
 
-func TestLazyHttpClientMetrics(t *testing.T) {
-	reader := metric.NewManualReader()
+func TestMetricsRegistryHTTPClientMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("my-service"),
 		semconv.ServiceVersion("v0.1.0"),
 	)
-	mp := metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(reader))
-	m := mp.Meter("test-meter")
-	InitHttpMetrics(m)
-	client := HttpClientMetrics("net.http.client")
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
+	meter := mp.Meter("test-meter")
+
+	registry := NewMetricsRegistry(slog.Default(), meter)
+	client, err := registry.NewHTTPClientMetric("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	ctx := context.Background()
 	start := time.Now()
 	ctx = client.OnBeforeStart(ctx, start)
 	ctx = client.OnBeforeEnd(ctx, []attribute.KeyValue{}, start)
 	client.OnAfterStart(ctx, start)
 	client.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
+
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
 	if rm.ScopeMetrics[0].Metrics[0].Name != "http.client.request.duration" {
-		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
-	}
-}
-
-func TestGlobalHttpServerMetrics(t *testing.T) {
-	reader := metric.NewManualReader()
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName("my-service"),
-		semconv.ServiceVersion("v0.1.0"),
-	)
-	mp := metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(reader))
-	m := mp.Meter("test-meter")
-	InitHttpMetrics(m)
-	server := HttpServerMetrics("net.http.server")
-	ctx := context.Background()
-	start := time.Now()
-	ctx = server.OnBeforeStart(ctx, start)
-	ctx = server.OnBeforeEnd(ctx, []attribute.KeyValue{}, start)
-	server.OnAfterStart(ctx, start)
-	server.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
-	rm := &metricdata.ResourceMetrics{}
-	_ = reader.Collect(ctx, rm)
-	if rm.ScopeMetrics[0].Metrics[0].Name != "http.server.request.duration" {
-		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
-	}
-}
-
-func TestGlobalHttpClientMetrics(t *testing.T) {
-	reader := metric.NewManualReader()
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName("my-service"),
-		semconv.ServiceVersion("v0.1.0"),
-	)
-	mp := metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(reader))
-	m := mp.Meter("test-meter")
-	InitHttpMetrics(m)
-	client := HttpClientMetrics("net.http.client")
-	ctx := context.Background()
-	start := time.Now()
-	ctx = client.OnBeforeStart(ctx, start)
-	ctx = client.OnBeforeEnd(ctx, []attribute.KeyValue{}, start)
-	client.OnAfterStart(ctx, start)
-	client.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
-	rm := &metricdata.ResourceMetrics{}
-	_ = reader.Collect(ctx, rm)
-	if rm.ScopeMetrics[0].Metrics[0].Name != "http.client.request.duration" {
-		panic("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
+		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
 	}
 }
 
 func TestClientNilMeter(t *testing.T) {
-	reader := metric.NewManualReader()
+	reader := sdkmetric.NewManualReader()
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("my-service"),
 		semconv.ServiceVersion("v0.1.0"),
 	)
-	_ = metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(reader))
-	_, err := newHttpClientMetric("test", nil)
+	_ = sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
+	_, err := newHTTPClientMetric("test", nil)
 	if err == nil {
-		panic(err)
+		t.Fatal("expected error for nil meter, but got nil")
 	}
 }
 
 func TestServerNilMeter(t *testing.T) {
-	reader := metric.NewManualReader()
+	reader := sdkmetric.NewManualReader()
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("my-service"),
 		semconv.ServiceVersion("v0.1.0"),
 	)
-	_ = metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(reader))
-	_, err := newHttpServerMetric("test", nil)
+	_ = sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
+	_, err := newHTTPServerMetric("test", nil)
 	if err == nil {
-		panic(err)
+		t.Fatal("expected error for nil meter, but got nil")
 	}
+}
+
+// Tests for NoopRegistry
+func TestNoopRegistry(t *testing.T) {
+	registry := NewNoOpRegistry()
+
+	// Test creating server metric
+	server, err := registry.NewHTTPServerMetric("test.server")
+	if err != nil {
+		t.Fatalf("unexpected error creating no-op server metric: %v", err)
+	}
+	if server == nil {
+		t.Fatal("expected non-nil server metric")
+	}
+	if server.key != "test.server" {
+		t.Fatalf("expected key 'test.server', got %s", server.key)
+	}
+
+	// Test creating client metric
+	client, err := registry.NewHTTPClientMetric("test.client")
+	if err != nil {
+		t.Fatalf("unexpected error creating no-op client metric: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client metric")
+	}
+	if client.key != "test.client" {
+		t.Fatalf("expected key 'test.client', got %s", client.key)
+	}
+}
+
+func TestNoopMetricsDoNotPanic(_ *testing.T) {
+	registry := NewNoOpRegistry()
+
+	// Create no-op metrics
+	server, _ := registry.NewHTTPServerMetric("test.server")
+	client, _ := registry.NewHTTPClientMetric("test.client")
+
+	// Test that all methods can be called without panicking
+	ctx := context.Background()
+	start := time.Now()
+
+	// Test server metric methods
+	ctx = server.OnBeforeStart(ctx, start)
+	ctx = server.OnBeforeEnd(ctx, []attribute.KeyValue{}, start)
+	server.OnAfterStart(ctx, start)
+	server.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
+
+	// Test client metric methods
+	ctx = client.OnBeforeStart(ctx, start)
+	ctx = client.OnBeforeEnd(ctx, []attribute.KeyValue{}, start)
+	client.OnAfterStart(ctx, start)
+	client.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
+
+	// If we get here without panicking, the test passes
+}
+
+func TestRegistryInterface(t *testing.T) {
+	// Test that both implementations satisfy the Registry interface
+	var _ Registry = (*MetricsRegistry)(nil)
+	var _ Registry = (*NoopRegistry)(nil)
+
+	// Test using the interface
+	testRegistry := func(r Registry) {
+		server, err := r.NewHTTPServerMetric("test")
+		if err != nil && r.(*MetricsRegistry) != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if server == nil {
+			t.Fatal("expected non-nil server metric")
+		}
+
+		client, err := r.NewHTTPClientMetric("test")
+		if err != nil && r.(*MetricsRegistry) != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if client == nil {
+			t.Fatal("expected non-nil client metric")
+		}
+	}
+
+	// Test with NoOpRegistry
+	testRegistry(NewNoOpRegistry())
 }

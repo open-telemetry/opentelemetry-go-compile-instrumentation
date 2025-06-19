@@ -4,11 +4,12 @@
 package http
 
 import (
+	"testing"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
-	"testing"
 )
 
 type testSpan struct {
@@ -17,7 +18,7 @@ type testSpan struct {
 	Kvs    []attribute.KeyValue
 }
 
-func (ts *testSpan) SetStatus(status codes.Code, desc string) {
+func (ts *testSpan) SetStatus(status codes.Code, _ string) {
 	*ts.status = status
 }
 
@@ -30,7 +31,7 @@ type testReadOnlySpan struct {
 	isRecording bool
 }
 
-func (t *testReadOnlySpan) Name() string {
+func (*testReadOnlySpan) Name() string {
 	return "http-route"
 }
 
@@ -38,37 +39,37 @@ func (t *testReadOnlySpan) IsRecording() bool {
 	return t.isRecording
 }
 
-type customizedNetHttpAttrsGetter struct {
+type customizedNetHTTPAttrsGetter struct {
 	code int
 }
 
-func (c customizedNetHttpAttrsGetter) GetRequestMethod(request any) string {
-	//TODO implement me
+func (customizedNetHTTPAttrsGetter) GetRequestMethod(_ any) string {
+	// TODO implement me
 	panic("implement me")
 }
 
-func (c customizedNetHttpAttrsGetter) GetHttpRequestHeader(request any, name string) []string {
-	//TODO implement me
+func (customizedNetHTTPAttrsGetter) GetHTTPRequestHeader(_ any, _ string) []string {
+	// TODO implement me
 	panic("implement me")
 }
 
-func (c customizedNetHttpAttrsGetter) GetHttpResponseStatusCode(request any, response any, err error) int {
+func (c customizedNetHTTPAttrsGetter) GetHTTPResponseStatusCode(_ any, _ any, _ error) int {
 	return c.code
 }
 
-func (c customizedNetHttpAttrsGetter) GetHttpResponseHeader(request any, response any, name string) []string {
-	//TODO implement me
+func (customizedNetHTTPAttrsGetter) GetHTTPResponseHeader(_ any, _ any, _ string) []string {
+	// TODO implement me
 	panic("implement me")
 }
 
-func (c customizedNetHttpAttrsGetter) GetErrorType(request any, response any, err error) string {
-	//TODO implement me
+func (customizedNetHTTPAttrsGetter) GetErrorType(_ any, _ any, _ error) string {
+	// TODO implement me
 	panic("implement me")
 }
 
-func TestHttpClientSpanStatusExtractor500(t *testing.T) {
-	c := HttpClientSpanStatusExtractor[any, any]{
-		Getter: customizedNetHttpAttrsGetter{
+func TestHTTPClientSpanStatusExtractor500(t *testing.T) {
+	c := HTTPClientSpanStatusExtractor[any, any]{
+		Getter: customizedNetHTTPAttrsGetter{
 			code: 500,
 		},
 	}
@@ -76,13 +77,13 @@ func TestHttpClientSpanStatusExtractor500(t *testing.T) {
 	span := &testSpan{status: &u}
 	c.Extract(span, nil, nil, nil)
 	if *span.status != codes.Error {
-		panic("span status should be error!")
+		t.Fatal("span status should be error!")
 	}
 }
 
-func TestHttpClientSpanStatusExtractor400(t *testing.T) {
-	c := HttpClientSpanStatusExtractor[any, any]{
-		Getter: customizedNetHttpAttrsGetter{
+func TestHTTPClientSpanStatusExtractor400(t *testing.T) {
+	c := HTTPClientSpanStatusExtractor[any, any]{
+		Getter: customizedNetHTTPAttrsGetter{
 			code: 400,
 		},
 	}
@@ -90,16 +91,16 @@ func TestHttpClientSpanStatusExtractor400(t *testing.T) {
 	span := &testSpan{status: &u}
 	c.Extract(span, nil, nil, nil)
 	if *span.status != codes.Error {
-		panic("span status should be error!")
+		t.Fatal("span status should be error!")
 	}
 	if span.Kvs == nil {
-		panic("kv should not be nil")
+		t.Fatal("kv should not be nil")
 	}
 }
 
-func TestHttpClientSpanStatusExtractor200(t *testing.T) {
-	c := HttpClientSpanStatusExtractor[any, any]{
-		Getter: customizedNetHttpAttrsGetter{
+func TestHTTPClientSpanStatusExtractor200(t *testing.T) {
+	c := HTTPClientSpanStatusExtractor[any, any]{
+		Getter: customizedNetHTTPAttrsGetter{
 			code: 200,
 		},
 	}
@@ -107,12 +108,13 @@ func TestHttpClientSpanStatusExtractor200(t *testing.T) {
 	span := &testSpan{status: &u}
 	c.Extract(span, nil, nil, nil)
 	if *span.status != codes.Ok {
-		panic("span status should be ok!")
+		t.Fatal("span status should be ok!")
 	}
 }
-func TestHttpClientSpanStatusExtractor201(t *testing.T) {
-	c := HttpClientSpanStatusExtractor[any, any]{
-		Getter: customizedNetHttpAttrsGetter{
+
+func TestHTTPClientSpanStatusExtractor201(t *testing.T) {
+	c := HTTPClientSpanStatusExtractor[any, any]{
+		Getter: customizedNetHTTPAttrsGetter{
 			code: 201,
 		},
 	}
@@ -120,12 +122,13 @@ func TestHttpClientSpanStatusExtractor201(t *testing.T) {
 	span := &testSpan{status: &u}
 	c.Extract(span, nil, nil, nil)
 	if *span.status != codes.Ok {
-		panic("span status should be ok!")
+		t.Fatal("span status should be ok!")
 	}
 }
-func TestHttpServerSpanStatusExtractor500(t *testing.T) {
-	c := HttpServerSpanStatusExtractor[any, any]{
-		Getter: customizedNetHttpAttrsGetter{
+
+func TestHTTPServerSpanStatusExtractor500(t *testing.T) {
+	c := HTTPServerSpanStatusExtractor[any, any]{
+		Getter: customizedNetHTTPAttrsGetter{
 			code: 500,
 		},
 	}
@@ -133,16 +136,16 @@ func TestHttpServerSpanStatusExtractor500(t *testing.T) {
 	span := &testSpan{status: &u}
 	c.Extract(span, nil, nil, nil)
 	if *span.status != codes.Error {
-		panic("span status should be error!")
+		t.Fatal("span status should be error!")
 	}
 	if span.Kvs == nil {
-		panic("kv should not be nil")
+		t.Fatal("kv should not be nil")
 	}
 }
 
-func TestHttpServerSpanStatusExtractor400(t *testing.T) {
-	c := HttpServerSpanStatusExtractor[any, any]{
-		Getter: customizedNetHttpAttrsGetter{
+func TestHTTPServerSpanStatusExtractor400(t *testing.T) {
+	c := HTTPServerSpanStatusExtractor[any, any]{
+		Getter: customizedNetHTTPAttrsGetter{
 			code: 400,
 		},
 	}
@@ -150,13 +153,13 @@ func TestHttpServerSpanStatusExtractor400(t *testing.T) {
 	span := &testSpan{status: &u}
 	c.Extract(span, nil, nil, nil)
 	if *span.status != codes.Unset {
-		panic("span status should be error!")
+		t.Fatal("span status should be unset!")
 	}
 }
 
-func TestHttpServerSpanStatusExtractor200(t *testing.T) {
-	c := HttpClientSpanStatusExtractor[any, any]{
-		Getter: customizedNetHttpAttrsGetter{
+func TestHTTPServerSpanStatusExtractor200(t *testing.T) {
+	c := HTTPServerSpanStatusExtractor[any, any]{
+		Getter: customizedNetHTTPAttrsGetter{
 			code: 200,
 		},
 	}
@@ -164,12 +167,13 @@ func TestHttpServerSpanStatusExtractor200(t *testing.T) {
 	span := &testSpan{status: &u}
 	c.Extract(span, nil, nil, nil)
 	if *span.status != codes.Ok {
-		panic("span status should be ok!")
+		t.Fatal("span status should be ok!")
 	}
 }
-func TestHttpServerSpanStatusExtractor201(t *testing.T) {
-	c := HttpClientSpanStatusExtractor[any, any]{
-		Getter: customizedNetHttpAttrsGetter{
+
+func TestHTTPServerSpanStatusExtractor201(t *testing.T) {
+	c := HTTPServerSpanStatusExtractor[any, any]{
+		Getter: customizedNetHTTPAttrsGetter{
 			code: 201,
 		},
 	}
@@ -177,6 +181,6 @@ func TestHttpServerSpanStatusExtractor201(t *testing.T) {
 	span := &testSpan{status: &u}
 	c.Extract(span, nil, nil, nil)
 	if *span.status != codes.Ok {
-		panic("span status should be ok!")
+		t.Fatal("span status should be ok!")
 	}
 }

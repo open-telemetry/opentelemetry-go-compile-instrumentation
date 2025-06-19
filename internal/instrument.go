@@ -4,9 +4,9 @@
 package internal
 
 import (
-	"fmt"
 	"go/parser"
 	"go/token"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +22,7 @@ const (
 	HookName       = "Hook"
 )
 
-func loadAst(filePath string) *dst.File {
+func loadAst(_ *slog.Logger, filePath string) *dst.File {
 	name := filepath.Base(filePath)
 	fset := token.NewFileSet()
 	file, err := os.Open(filePath)
@@ -41,14 +41,14 @@ func loadAst(filePath string) *dst.File {
 	return dstFile
 }
 
-func storeAst(filePath string, ast *dst.File) {
+func storeAst(logger *slog.Logger, filePath string, ast *dst.File) {
 	f, err := os.Create(filePath)
 	if err != nil {
 		panic(err)
 	}
 	defer func() {
-		if err := f.Close(); err != nil {
-			fmt.Printf("Failed to close file, path is: %s\n", filePath)
+		if closeErr := f.Close(); closeErr != nil {
+			logger.Error("Failed to close file", "path", filePath)
 		}
 	}()
 	r := decorator.NewRestorer()
@@ -101,8 +101,8 @@ func findOutputDir(args []string) string {
 	return ""
 }
 
-func rewriteAst(ast *dst.File, fn *dst.FuncDecl) {
-	fmt.Printf("Instrumenting function: %s\n", fn.Name.Name)
+func rewriteAst(logger *slog.Logger, ast *dst.File, fn *dst.FuncDecl) {
+	logger.Info("Instrumenting function", "function", fn.Name.Name)
 	// Insert a call to the trampoline function at the beginning of the function
 	callToTrampoline := newFuncCall(TrampolineName)
 	fn.Body.List = append([]dst.Stmt{callToTrampoline}, fn.Body.List...)
@@ -113,10 +113,10 @@ func rewriteAst(ast *dst.File, fn *dst.FuncDecl) {
 	ast.Decls = append(ast.Decls, hook)
 }
 
-func Instrument(args []string) []string {
+func Instrument(logger *slog.Logger, args []string) []string {
 	for i, arg := range args {
 		if strings.HasSuffix(arg, ".go") {
-			ast := loadAst(arg)
+			ast := loadAst(logger, arg)
 			for _, decl := range ast.Decls {
 				// Find target function
 				fn, ok := decl.(*dst.FuncDecl)
@@ -127,10 +127,10 @@ func Instrument(args []string) []string {
 					continue
 				}
 				// Instrument the function
-				rewriteAst(ast, fn)
+				rewriteAst(logger, ast, fn)
 				// Update the compilation command
 				modified := filepath.Join(findOutputDir(args), "modified.go")
-				storeAst(modified, ast)
+				storeAst(logger, modified, ast)
 				args[i] = modified
 				break
 			}

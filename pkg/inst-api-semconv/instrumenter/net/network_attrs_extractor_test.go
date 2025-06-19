@@ -5,36 +5,37 @@ package net
 
 import (
 	"context"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
-	"testing"
 )
 
-type MockUrlGetter struct{}
+type MockURLGetter struct{}
 
-func (m *MockUrlGetter) GetUrlScheme(request any) string {
+func (*MockURLGetter) GetURLScheme(_ any) string {
 	return "http"
 }
 
-func (m *MockUrlGetter) GetUrlPath(request any) string {
+func (*MockURLGetter) GetURLPath(_ any) string {
 	return "/test"
 }
 
-func (m *MockUrlGetter) GetUrlQuery(request any) string {
+func (*MockURLGetter) GetURLQuery(_ any) string {
 	return "key=value"
 }
 
 func TestOnStart(t *testing.T) {
-	mockGetter := &MockUrlGetter{}
-	urlExtractor := &UrlAttrsExtractor[any, any, *MockUrlGetter]{
+	mockGetter := &MockURLGetter{}
+	urlExtractor := &URLAttrsExtractor[any, any, *MockURLGetter]{
 		Getter: mockGetter,
 	}
 	parentContext := context.Background()
 	attributes := []attribute.KeyValue{
 		attribute.String("existingKey", "existingValue"),
 	}
-	urlExtractor.OnEnd(context.Background(), []attribute.KeyValue{}, nil, nil, nil)
+	urlExtractor.OnEnd(context.Background(), make([]attribute.KeyValue, 0), nil, nil, nil)
 	resultAttributes, resultContext := urlExtractor.OnStart(parentContext, attributes, nil)
 	expectedAttributes := []attribute.KeyValue{
 		attribute.String("existingKey", "existingValue"),

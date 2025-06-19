@@ -1,7 +1,12 @@
 name: Conventional Commit
 on:
-  pull_request_target: # Can't get permissions to comment on PR with `pull_request`
-    types: [opened, edited, reopened]
+  # We need both events to handle different scenarios:
+  # - pull_request: Triggers reliably on all PR events, but lacks write permissions for forks
+  # - pull_request_target: Has write permissions for forks, but doesn't always trigger on 'synchronize'
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read
@@ -11,7 +16,45 @@ jobs:
   update-labels:
     name: Update Labels
     runs-on: ubuntu-latest
+    # Prevent double triggers: skip pull_request runs for forks (pull_request_target will handle them)
+    if: |
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     steps:
+      # Check if we have the necessary permissions to update labels
+      # This is needed because:
+      # - pull_request from forks doesn't have write permissions
+      # - pull_request_target has write permissions but doesn't always trigger on synchronize
+      - name: Check Permissions
+        id: check-permissions
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
+            echo "has_permissions=true" >> $GITHUB_OUTPUT
+            echo "✅ Running with pull_request_target - has write permissions"
+          elif [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
+            echo "has_permissions=true" >> $GITHUB_OUTPUT
+            echo "✅ Running with pull_request from same repository - has write permissions"
+          else
+            echo "has_permissions=false" >> $GITHUB_OUTPUT
+            echo "❌ Running with pull_request from fork - no write permissions"
+            echo "⚠️  Labels cannot be updated on this run. They will be updated when:"
+            echo "   - The PR is opened, edited, or reopened (uses pull_request_target)"
+            echo "   - Or when the PR is merged"
+          fi
+      # Debug information - only shown when we don't have permissions (unexpected scenario)
+      - name: Debug Event
+        if: steps.check-permissions.outputs.has_permissions != 'true'
+        run: |
+          echo "Event Name: ${{ github.event_name }}"
+          echo "Event Action: ${{ github.event.action }}"
+          echo "Event Type: ${{ github.event.pull_request.type }}"
+          echo "Repo Owner: ${{ github.repository_owner }}"
+          echo "Repo Name: ${{ github.event.repository.name }}"
+          echo "PR Number: ${{ github.event.pull_request.number }}"
+          echo "PR State: ${{ github.event.pull_request.state }}"
+          echo "Head Repo: ${{ github.event.pull_request.head.repo.full_name }}"
+          echo "Base Repo: ${{ github.repository }}"
+          echo "Is Fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}"
       - name: Check out
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Setup go
@@ -19,8 +62,10 @@ jobs:
         with:
           go-version: oldstable
           cache-dependency-path: '**/go.mod'
+      # Run the conventionalcommit tool to validate PR title and assign labels
+      # This step is skipped if we don't have write permissions (e.g., pull_request from fork on synchronize)
       - name: Assign Labels
-        run: go -C .github/tools/conventionalcommit run .
+        if: steps.check-permissions.outputs.has_permissions == 'true'
+        run: go -C .github/tools/conventionalcommit run . -owner="${{ github.repository_owner }}" -repo="${{ github.event.repository.name }}" -pr="${{ github.event.pull_request.number }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
