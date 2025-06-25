@@ -92,8 +92,10 @@ var attributesPool = &sync.Pool{
 	},
 }
 
-func (i *InternalInstrumenter[REQUEST, RESPONSE]) ShouldStart(parentContext context.Context, request REQUEST) bool {
+func (*InternalInstrumenter[REQUEST, RESPONSE]) ShouldStart(parentContext context.Context, request REQUEST) bool {
 	// TODO: Here you can add some custom logic to determine whether the instrumentation logic is executed or not.
+	_ = parentContext
+	_ = request
 	return true
 }
 
@@ -189,7 +191,7 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doEnd(
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 	}
-	attrsPtr := attributesPool.Get().(*[]attribute.KeyValue)
+	attrsPtr, _ := attributesPool.Get().(*[]attribute.KeyValue)
 	var attrs []attribute.KeyValue
 	if attrsPtr != nil {
 		attrs = *attrsPtr
@@ -349,9 +351,8 @@ func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) Start(
 			extracted = otel.GetTextMapPropagator().Extract(parentContext, p.carrierGetter(request))
 		}
 		return p.base.Start(extracted, request, options...)
-	} else {
-		return parentContext
 	}
+	return parentContext
 }
 
 func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) End(

@@ -20,7 +20,7 @@ func NewDefaultInstrumentEnabler() InstrumentEnabler {
 	return &defaultInstrumentEnabler{}
 }
 
-func (a *defaultInstrumentEnabler) Enable() bool {
+func (*defaultInstrumentEnabler) Enable() bool {
 	return true
 }
 

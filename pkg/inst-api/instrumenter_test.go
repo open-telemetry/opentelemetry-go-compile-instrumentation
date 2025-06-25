@@ -303,18 +303,19 @@ func TestInstrumentationScope(t *testing.T) {
 	instrumenter := builder.BuildInstrumenter()
 	newCtx := instrumenter.Start(ctx, testRequest{})
 	span := trace.SpanFromContext(newCtx)
-	if readOnly, ok := span.(sdktrace.ReadOnlySpan); !ok {
+	var readOnly sdktrace.ReadOnlySpan
+	var ok bool
+	if readOnly, ok = span.(sdktrace.ReadOnlySpan); !ok {
 		panic("it should be a readonly span")
-	} else {
-		if readOnly.InstrumentationScope().Name != "test" {
-			panic("scope name should be test")
-		}
-		if readOnly.InstrumentationScope().Version != "test" {
-			panic("scope version should be test")
-		}
-		if readOnly.InstrumentationScope().SchemaURL != "test" {
-			panic("scope schema url should be test")
-		}
+	}
+	if readOnly.InstrumentationScope().Name != "test" {
+		panic("scope name should be test")
+	}
+	if readOnly.InstrumentationScope().Version != "test" {
+		panic("scope version should be test")
+	}
+	if readOnly.InstrumentationScope().SchemaURL != "test" {
+		panic("scope schema url should be test")
 	}
 }
 
