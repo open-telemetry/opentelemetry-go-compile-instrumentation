@@ -86,7 +86,7 @@ type PropagatingFromUpstreamInstrumenter[REQUEST any, RESPONSE any] struct {
 const defaultAttributesSliceSize = 25
 
 var attributesPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		s := make([]attribute.KeyValue, 0, defaultAttributesSliceSize)
 		return &s
 	},
