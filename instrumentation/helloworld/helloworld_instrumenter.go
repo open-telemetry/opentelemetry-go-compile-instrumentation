@@ -4,12 +4,13 @@
 package helloworld
 
 import (
+	"log/slog"
+
 	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/http"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/net"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
-	"log/slog"
 )
 
 type HelloWorldRequest struct{}
@@ -39,7 +40,9 @@ func (h HelloWorldAttributesGetter) GetURLQuery(request HelloWorldRequest) strin
 func BuildNetHttpClientOtelInstrumenter() instrumenter.Instrumenter[HelloWorldRequest, HelloWorldResponse] {
 	builder := &instrumenter.Builder[HelloWorldRequest, HelloWorldResponse]{}
 	helloWorldGetter := HelloWorldAttributesGetter{}
-	urlAttributesExtractor := &net.URLAttrsExtractor[HelloWorldRequest, HelloWorldResponse, HelloWorldAttributesGetter]{Getter: helloWorldGetter}
+	urlAttributesExtractor := &net.URLAttrsExtractor[HelloWorldRequest, HelloWorldResponse, HelloWorldAttributesGetter]{
+		Getter: helloWorldGetter,
+	}
 	clientMetricRegistry := http.NewMetricsRegistry(slog.Default(), otel.GetMeterProvider().Meter("hello-world"))
 	// TODO: return noop instrumenter when there is an error
 	clientMetrics, _ := clientMetricRegistry.NewHTTPClientMetric("hello.world.client")

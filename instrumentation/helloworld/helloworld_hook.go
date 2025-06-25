@@ -6,13 +6,14 @@ package helloworld
 import (
 	"context"
 	"fmt"
+	"time"
+	_ "unsafe"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/trace"
-	"time"
-	_ "unsafe"
 )
 
 func init() {

@@ -5,13 +5,14 @@ package instrumenter
 
 import (
 	"context"
+	"sync"
+	"time"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-	"sync"
-	"time"
 )
 
 /**
@@ -27,9 +28,23 @@ type Instrumenter[REQUEST any, RESPONSE any] interface {
 	// Returns true by default.
 	ShouldStart(parentContext context.Context, request REQUEST) bool
 	// StartAndEnd Internal method for creating spans with given start/end timestamps.
-	StartAndEnd(parentContext context.Context, request REQUEST, response RESPONSE, err error, startTime, endTime time.Time)
+	StartAndEnd(
+		parentContext context.Context,
+		request REQUEST,
+		response RESPONSE,
+		err error,
+		startTime, endTime time.Time,
+	)
 	// StartAndEndWithOptions Internal method for creating spans with given start/end timestamps and other options.
-	StartAndEndWithOptions(parentContext context.Context, request REQUEST, response RESPONSE, err error, startTime, endTime time.Time, startOptions []trace.SpanStartOption, endOptions []trace.SpanEndOption)
+	StartAndEndWithOptions(
+		parentContext context.Context,
+		request REQUEST,
+		response RESPONSE,
+		err error,
+		startTime, endTime time.Time,
+		startOptions []trace.SpanStartOption,
+		endOptions []trace.SpanEndOption,
+	)
 	// Start Starts a new instrumented operation. The returned context should be propagated along
 	// with the operation and passed to the End method when it is finished.
 	Start(parentContext context.Context, request REQUEST, options ...trace.SpanStartOption) context.Context
@@ -82,21 +97,44 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) ShouldStart(parentContext cont
 	return true
 }
 
-func (i *InternalInstrumenter[REQUEST, RESPONSE]) StartAndEnd(parentContext context.Context, request REQUEST, response RESPONSE, err error, startTime, endTime time.Time) {
+func (i *InternalInstrumenter[REQUEST, RESPONSE]) StartAndEnd(
+	parentContext context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	startTime, endTime time.Time,
+) {
 	ctx := i.doStart(parentContext, request, startTime)
 	i.doEnd(ctx, request, response, err, endTime)
 }
 
-func (i *InternalInstrumenter[REQUEST, RESPONSE]) StartAndEndWithOptions(parentContext context.Context, request REQUEST, response RESPONSE, err error, startTime, endTime time.Time, startOptions []trace.SpanStartOption, endOptions []trace.SpanEndOption) {
+func (i *InternalInstrumenter[REQUEST, RESPONSE]) StartAndEndWithOptions(
+	parentContext context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	startTime, endTime time.Time,
+	startOptions []trace.SpanStartOption,
+	endOptions []trace.SpanEndOption,
+) {
 	ctx := i.doStart(parentContext, request, startTime, startOptions...)
 	i.doEnd(ctx, request, response, err, endTime, endOptions...)
 }
 
-func (i *InternalInstrumenter[REQUEST, RESPONSE]) Start(parentContext context.Context, request REQUEST, options ...trace.SpanStartOption) context.Context {
+func (i *InternalInstrumenter[REQUEST, RESPONSE]) Start(
+	parentContext context.Context,
+	request REQUEST,
+	options ...trace.SpanStartOption,
+) context.Context {
 	return i.doStart(parentContext, request, time.Now(), options...)
 }
 
-func (i *InternalInstrumenter[REQUEST, RESPONSE]) doStart(parentContext context.Context, request REQUEST, timestamp time.Time, options ...trace.SpanStartOption) context.Context {
+func (i *InternalInstrumenter[REQUEST, RESPONSE]) doStart(
+	parentContext context.Context,
+	request REQUEST,
+	timestamp time.Time,
+	options ...trace.SpanStartOption,
+) context.Context {
 	if i.enabler != nil && !i.enabler.Enable() {
 		return parentContext
 	}
@@ -122,11 +160,24 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doStart(parentContext context.
 	return newCtx
 }
 
-func (i *InternalInstrumenter[REQUEST, RESPONSE]) End(ctx context.Context, request REQUEST, response RESPONSE, err error, options ...trace.SpanEndOption) {
+func (i *InternalInstrumenter[REQUEST, RESPONSE]) End(
+	ctx context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	options ...trace.SpanEndOption,
+) {
 	i.doEnd(ctx, request, response, err, time.Now(), options...)
 }
 
-func (i *InternalInstrumenter[REQUEST, RESPONSE]) doEnd(ctx context.Context, request REQUEST, response RESPONSE, err error, timestamp time.Time, options ...trace.SpanEndOption) {
+func (i *InternalInstrumenter[REQUEST, RESPONSE]) doEnd(
+	ctx context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	timestamp time.Time,
+	options ...trace.SpanEndOption,
+) {
 	if i.enabler != nil && !i.enabler.Enable() {
 		return
 	}
@@ -161,10 +212,20 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doEnd(ctx context.Context, req
 	}
 }
 
-func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) ShouldStart(parentContext context.Context, request REQUEST) bool {
+func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) ShouldStart(
+	parentContext context.Context,
+	request REQUEST,
+) bool {
 	return p.base.ShouldStart(parentContext, request)
 }
-func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) StartAndEnd(parentContext context.Context, request REQUEST, response RESPONSE, err error, startTime, endTime time.Time) {
+
+func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) StartAndEnd(
+	parentContext context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	startTime, endTime time.Time,
+) {
 	newCtx := p.base.doStart(parentContext, request, startTime)
 	if p.carrierGetter != nil {
 		if p.prop != nil {
@@ -176,7 +237,15 @@ func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) StartAndEnd(par
 	p.base.doEnd(newCtx, request, response, err, endTime)
 }
 
-func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) StartAndEndWithOptions(parentContext context.Context, request REQUEST, response RESPONSE, err error, startTime, endTime time.Time, startOptions []trace.SpanStartOption, endOptions []trace.SpanEndOption) {
+func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) StartAndEndWithOptions(
+	parentContext context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	startTime, endTime time.Time,
+	startOptions []trace.SpanStartOption,
+	endOptions []trace.SpanEndOption,
+) {
 	newCtx := p.base.doStart(parentContext, request, startTime, startOptions...)
 	if p.carrierGetter != nil {
 		if p.prop != nil {
@@ -188,7 +257,11 @@ func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) StartAndEndWith
 	p.base.doEnd(newCtx, request, response, err, endTime, endOptions...)
 }
 
-func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) Start(parentContext context.Context, request REQUEST, options ...trace.SpanStartOption) context.Context {
+func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) Start(
+	parentContext context.Context,
+	request REQUEST,
+	options ...trace.SpanStartOption,
+) context.Context {
 	newCtx := p.base.Start(parentContext, request, options...)
 	if p.carrierGetter != nil {
 		if p.prop != nil {
@@ -196,19 +269,34 @@ func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) Start(parentCon
 		} else {
 			otel.GetTextMapPropagator().Inject(newCtx, p.carrierGetter(request))
 		}
-
 	}
 	return newCtx
 }
 
-func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) End(ctx context.Context, request REQUEST, response RESPONSE, err error, options ...trace.SpanEndOption) {
+func (p *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE]) End(
+	ctx context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	options ...trace.SpanEndOption,
+) {
 	p.base.End(ctx, request, response, err, options...)
 }
 
-func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) ShouldStart(parentContext context.Context, request REQUEST) bool {
+func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) ShouldStart(
+	parentContext context.Context,
+	request REQUEST,
+) bool {
 	return p.base.ShouldStart(parentContext, request)
 }
-func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) StartAndEnd(parentContext context.Context, request REQUEST, response RESPONSE, err error, startTime, endTime time.Time) {
+
+func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) StartAndEnd(
+	parentContext context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	startTime, endTime time.Time,
+) {
 	var ctx context.Context
 	if p.carrierGetter != nil {
 		var extracted context.Context
@@ -224,7 +312,15 @@ func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) StartAndEnd(par
 	p.base.doEnd(ctx, request, response, err, endTime)
 }
 
-func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) StartAndEndWithOptions(parentContext context.Context, request REQUEST, response RESPONSE, err error, startTime, endTime time.Time, startOptions []trace.SpanStartOption, endOptions []trace.SpanEndOption) {
+func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) StartAndEndWithOptions(
+	parentContext context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	startTime, endTime time.Time,
+	startOptions []trace.SpanStartOption,
+	endOptions []trace.SpanEndOption,
+) {
 	var ctx context.Context
 	if p.carrierGetter != nil {
 		var extracted context.Context
@@ -240,7 +336,11 @@ func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) StartAndEndWith
 	p.base.doEnd(ctx, request, response, err, endTime, endOptions...)
 }
 
-func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) Start(parentContext context.Context, request REQUEST, options ...trace.SpanStartOption) context.Context {
+func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) Start(
+	parentContext context.Context,
+	request REQUEST,
+	options ...trace.SpanStartOption,
+) context.Context {
 	if p.carrierGetter != nil {
 		var extracted context.Context
 		if p.prop != nil {
@@ -254,6 +354,12 @@ func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) Start(parentCon
 	}
 }
 
-func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) End(ctx context.Context, request REQUEST, response RESPONSE, err error, options ...trace.SpanEndOption) {
+func (p *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE]) End(
+	ctx context.Context,
+	request REQUEST,
+	response RESPONSE,
+	err error,
+	options ...trace.SpanEndOption,
+) {
 	p.base.End(ctx, request, response, err, options...)
 }

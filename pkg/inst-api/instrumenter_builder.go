@@ -54,32 +54,44 @@ func (b *Builder[REQUEST, RESPONSE]) SetInstrumentEnabler(enabler InstrumentEnab
 	return b
 }
 
-func (b *Builder[REQUEST, RESPONSE]) SetSpanNameExtractor(spanNameExtractor SpanNameExtractor[REQUEST]) *Builder[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) SetSpanNameExtractor(
+	spanNameExtractor SpanNameExtractor[REQUEST],
+) *Builder[REQUEST, RESPONSE] {
 	b.SpanNameExtractor = spanNameExtractor
 	return b
 }
 
-func (b *Builder[REQUEST, RESPONSE]) SetSpanStatusExtractor(spanStatusExtractor SpanStatusExtractor[REQUEST, RESPONSE]) *Builder[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) SetSpanStatusExtractor(
+	spanStatusExtractor SpanStatusExtractor[REQUEST, RESPONSE],
+) *Builder[REQUEST, RESPONSE] {
 	b.SpanStatusExtractor = spanStatusExtractor
 	return b
 }
 
-func (b *Builder[REQUEST, RESPONSE]) SetSpanKindExtractor(spanKindExtractor SpanKindExtractor[REQUEST]) *Builder[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) SetSpanKindExtractor(
+	spanKindExtractor SpanKindExtractor[REQUEST],
+) *Builder[REQUEST, RESPONSE] {
 	b.SpanKindExtractor = spanKindExtractor
 	return b
 }
 
-func (b *Builder[REQUEST, RESPONSE]) AddAttributesExtractor(attributesExtractor ...AttributesExtractor[REQUEST, RESPONSE]) *Builder[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) AddAttributesExtractor(
+	attributesExtractor ...AttributesExtractor[REQUEST, RESPONSE],
+) *Builder[REQUEST, RESPONSE] {
 	b.AttributesExtractors = append(b.AttributesExtractors, attributesExtractor...)
 	return b
 }
 
-func (b *Builder[REQUEST, RESPONSE]) AddOperationListeners(operationListener ...OperationListener) *Builder[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) AddOperationListeners(
+	operationListener ...OperationListener,
+) *Builder[REQUEST, RESPONSE] {
 	b.OperationListeners = append(b.OperationListeners, operationListener...)
 	return b
 }
 
-func (b *Builder[REQUEST, RESPONSE]) AddContextCustomizers(contextCustomizers ...ContextCustomizer[REQUEST]) *Builder[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) AddContextCustomizers(
+	contextCustomizers ...ContextCustomizer[REQUEST],
+) *Builder[REQUEST, RESPONSE] {
 	b.ContextCustomizers = append(b.ContextCustomizers, contextCustomizers...)
 	return b
 }
@@ -102,7 +114,9 @@ func (b *Builder[REQUEST, RESPONSE]) BuildInstrumenter() *InternalInstrumenter[R
 	}
 }
 
-func (b *Builder[REQUEST, RESPONSE]) BuildInstrumenterWithTracer(tracer trace.Tracer) *InternalInstrumenter[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) BuildInstrumenterWithTracer(
+	tracer trace.Tracer,
+) *InternalInstrumenter[REQUEST, RESPONSE] {
 	return &InternalInstrumenter[REQUEST, RESPONSE]{
 		enabler:              b.Enabler,
 		spanNameExtractor:    b.SpanNameExtractor,
@@ -116,7 +130,10 @@ func (b *Builder[REQUEST, RESPONSE]) BuildInstrumenterWithTracer(tracer trace.Tr
 	}
 }
 
-func (b *Builder[REQUEST, RESPONSE]) BuildPropagatingToDownstreamInstrumenter(carrierGetter func(REQUEST) propagation.TextMapCarrier, prop propagation.TextMapPropagator) *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) BuildPropagatingToDownstreamInstrumenter(
+	carrierGetter func(REQUEST) propagation.TextMapCarrier,
+	prop propagation.TextMapPropagator,
+) *PropagatingToDownstreamInstrumenter[REQUEST, RESPONSE] {
 	tracer := otel.GetTracerProvider().
 		Tracer(b.Scope.Name,
 			trace.WithInstrumentationVersion(b.Scope.Version),
@@ -138,7 +155,10 @@ func (b *Builder[REQUEST, RESPONSE]) BuildPropagatingToDownstreamInstrumenter(ca
 	}
 }
 
-func (b *Builder[REQUEST, RESPONSE]) BuildPropagatingFromUpstreamInstrumenter(carrierGetter func(REQUEST) propagation.TextMapCarrier, prop propagation.TextMapPropagator) *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE] {
+func (b *Builder[REQUEST, RESPONSE]) BuildPropagatingFromUpstreamInstrumenter(
+	carrierGetter func(REQUEST) propagation.TextMapCarrier,
+	prop propagation.TextMapPropagator,
+) *PropagatingFromUpstreamInstrumenter[REQUEST, RESPONSE] {
 	tracer := otel.GetTracerProvider().
 		Tracer(b.Scope.Name,
 			trace.WithInstrumentationVersion(b.Scope.Version),

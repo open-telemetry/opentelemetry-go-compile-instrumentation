@@ -6,9 +6,10 @@ package instrumenter
 import (
 	"context"
 	"errors"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
@@ -20,23 +21,19 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-type testRequest struct {
-}
+type testRequest struct{}
 
 type testResponse struct{}
 
-type testNameExtractor struct {
-}
+type testNameExtractor struct{}
 
 func (t testNameExtractor) Extract(request testRequest) string {
 	return "test"
 }
 
-type testOperationListener struct {
-}
+type testOperationListener struct{}
 
-type disableEnabler struct {
-}
+type disableEnabler struct{}
 
 func (d disableEnabler) Enable() bool {
 	return false
@@ -58,8 +55,7 @@ func (m *mockProp) Keys() []string {
 	return []string{"test"}
 }
 
-type myTextMapProp struct {
-}
+type myTextMapProp struct{}
 
 func (m *myTextMapProp) Inject(ctx context.Context, carrier propagation.TextMapCarrier) {
 	carrier.Set("test", "test")
@@ -78,7 +74,11 @@ func (t *testOperationListener) OnBeforeStart(parentContext context.Context, sta
 	return context.WithValue(parentContext, testKey("startTs"), startTimestamp)
 }
 
-func (t *testOperationListener) OnBeforeEnd(ctx context.Context, startAttributes []attribute.KeyValue, startTimestamp time.Time) context.Context {
+func (t *testOperationListener) OnBeforeEnd(
+	ctx context.Context,
+	startAttributes []attribute.KeyValue,
+	startTimestamp time.Time,
+) context.Context {
 	return context.WithValue(ctx, testKey("startAttrs"), startAttributes)
 }
 
@@ -88,7 +88,11 @@ func (t *testOperationListener) OnAfterStart(context context.Context, endTimesta
 	}
 }
 
-func (t *testOperationListener) OnAfterEnd(context context.Context, endAttributes []attribute.KeyValue, endTimestamp time.Time) {
+func (t *testOperationListener) OnAfterEnd(
+	context context.Context,
+	endAttributes []attribute.KeyValue,
+	endTimestamp time.Time,
+) {
 	if endAttributes[0].Key != "testAttribute" {
 		panic("invalid attribute key")
 	}
@@ -99,24 +103,37 @@ func (t *testOperationListener) OnAfterEnd(context context.Context, endAttribute
 
 type testAttributesExtractor struct{}
 
-func (t testAttributesExtractor) OnStart(parentContext context.Context, attributes []attribute.KeyValue, request testRequest) ([]attribute.KeyValue,
-	context.Context) {
+func (t testAttributesExtractor) OnStart(
+	parentContext context.Context,
+	attributes []attribute.KeyValue,
+	request testRequest,
+) ([]attribute.KeyValue,
+	context.Context,
+) {
 	return []attribute.KeyValue{
 		attribute.String("testAttribute", "testValue"),
 	}, parentContext
 }
 
-func (t testAttributesExtractor) OnEnd(context context.Context, attributes []attribute.KeyValue, request testRequest, response testResponse,
-	err error) ([]attribute.KeyValue, context.Context) {
+func (t testAttributesExtractor) OnEnd(
+	context context.Context,
+	attributes []attribute.KeyValue,
+	request testRequest,
+	response testResponse,
+	err error,
+) ([]attribute.KeyValue, context.Context) {
 	return []attribute.KeyValue{
 		attribute.String("testAttribute", "testValue"),
 	}, context
 }
 
-type testContextCustomizer struct {
-}
+type testContextCustomizer struct{}
 
-func (t testContextCustomizer) OnStart(ctx context.Context, request testRequest, startAttributes []attribute.KeyValue) context.Context {
+func (t testContextCustomizer) OnStart(
+	ctx context.Context,
+	request testRequest,
+	startAttributes []attribute.KeyValue,
+) context.Context {
 	return context.WithValue(ctx, testKey("test-customizer"), "test-customizer")
 }
 
@@ -154,13 +171,19 @@ func TestStartAndEnd(t *testing.T) {
 	ctx := context.Background()
 	instrumenter.StartAndEnd(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now())
 	prop := mockProp{"test"}
-	dsInstrumenter := builder.BuildPropagatingToDownstreamInstrumenter(func(request testRequest) propagation.TextMapCarrier {
-		return &prop
-	}, &myTextMapProp{})
+	dsInstrumenter := builder.BuildPropagatingToDownstreamInstrumenter(
+		func(request testRequest) propagation.TextMapCarrier {
+			return &prop
+		},
+		&myTextMapProp{},
+	)
 	dsInstrumenter.StartAndEnd(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now())
-	upInstrumenter := builder.BuildPropagatingFromUpstreamInstrumenter(func(request testRequest) propagation.TextMapCarrier {
-		return &prop
-	}, &myTextMapProp{})
+	upInstrumenter := builder.BuildPropagatingFromUpstreamInstrumenter(
+		func(request testRequest) propagation.TextMapCarrier {
+			return &prop
+		},
+		&myTextMapProp{},
+	)
 	upInstrumenter.StartAndEnd(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now())
 	// no panic here
 }
@@ -191,10 +214,15 @@ func TestPropFromUpStream(t *testing.T) {
 		AddOperationListeners(&testOperationListener{}).
 		AddContextCustomizers(testContextCustomizer{})
 	prop := mockProp{"test"}
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	instrumenter := builder.BuildPropagatingFromUpstreamInstrumenter(func(request testRequest) propagation.TextMapCarrier {
-		return &prop
-	}, &myTextMapProp{})
+	otel.SetTextMapPropagator(
+		propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}),
+	)
+	instrumenter := builder.BuildPropagatingFromUpstreamInstrumenter(
+		func(request testRequest) propagation.TextMapCarrier {
+			return &prop
+		},
+		&myTextMapProp{},
+	)
 	ctx := context.Background()
 	newCtx := instrumenter.Start(ctx, testRequest{})
 	instrumenter.End(ctx, testRequest{}, testResponse{}, nil)
@@ -212,10 +240,15 @@ func TestPropToDownStream(t *testing.T) {
 		AddOperationListeners(&testOperationListener{}).
 		AddContextCustomizers(testContextCustomizer{})
 	prop := mockProp{}
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	instrumenter := builder.BuildPropagatingToDownstreamInstrumenter(func(request testRequest) propagation.TextMapCarrier {
-		return &prop
-	}, &myTextMapProp{})
+	otel.SetTextMapPropagator(
+		propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}),
+	)
+	instrumenter := builder.BuildPropagatingToDownstreamInstrumenter(
+		func(request testRequest) propagation.TextMapCarrier {
+			return &prop
+		},
+		&myTextMapProp{},
+	)
 	ctx := context.Background()
 	instrumenter.Start(ctx, testRequest{})
 	instrumenter.End(ctx, testRequest{}, testResponse{}, nil)
@@ -236,13 +269,19 @@ func TestStartAndEndWithOptions(t *testing.T) {
 	ctx := context.Background()
 	instrumenter.StartAndEndWithOptions(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now(), nil, nil)
 	prop := mockProp{"test"}
-	dsInstrumenter := builder.BuildPropagatingToDownstreamInstrumenter(func(request testRequest) propagation.TextMapCarrier {
-		return &prop
-	}, &myTextMapProp{})
+	dsInstrumenter := builder.BuildPropagatingToDownstreamInstrumenter(
+		func(request testRequest) propagation.TextMapCarrier {
+			return &prop
+		},
+		&myTextMapProp{},
+	)
 	dsInstrumenter.StartAndEndWithOptions(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now(), nil, nil)
-	upInstrumenter := builder.BuildPropagatingFromUpstreamInstrumenter(func(request testRequest) propagation.TextMapCarrier {
-		return &prop
-	}, &myTextMapProp{})
+	upInstrumenter := builder.BuildPropagatingFromUpstreamInstrumenter(
+		func(request testRequest) propagation.TextMapCarrier {
+			return &prop
+		},
+		&myTextMapProp{},
+	)
 	upInstrumenter.StartAndEndWithOptions(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now(), nil, nil)
 	// no panic here
 }
