@@ -1,0 +1,99 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package setup
+
+import (
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+)
+
+type SetupProcessor struct {
+	logger *slog.Logger
+}
+
+func (sp *SetupProcessor) findDeps() (map[string]string, error) {
+	// TODO: Implement task
+	return map[string]string{
+		"example.com/some/dependency": "v1.0.0",
+	}, nil
+}
+
+func (sp *SetupProcessor) matchedDeps(deps map[string]string) (map[string]string, error) {
+	// TODO: Implement task
+	return nil, nil
+}
+
+func (sp *SetupProcessor) addDeps(deps map[string]string) error {
+	// TODO: Implement task
+	return nil
+}
+
+func (sp *SetupProcessor) refreshDeps() error {
+	// TODO: Implement task
+	return nil
+}
+
+func (sp *SetupProcessor) store(matched map[string]string) error {
+	// TODO: Implement task
+	f := filepath.Join(".otel-build", "matched.txt")
+	file, err := os.Create(f)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	for k, v := range matched {
+		_, err := fmt.Fprintf(file, "%s %s\n", k, v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// This function can be used to check if the setup has been completed.
+func isSetup() bool {
+	// TODO: Implement Task
+	return false
+}
+
+// This function is intended to prepare the environment for instrumentation.
+func Setup(logger *slog.Logger) error {
+	if isSetup() {
+		logger.Info("Setup has already been completed, skipping setup.")
+		return nil
+	}
+
+	sp := &SetupProcessor{
+		logger: logger,
+	}
+	// Find all dependencies of the project being build
+	deps, err := sp.findDeps()
+	if err != nil {
+		return err
+	}
+	// Match the hook code with these dependencies
+	matched, err := sp.matchedDeps(deps)
+	if err != nil {
+		return err
+	}
+	// Introduce additional hook code by generating otel.instrumentation.go
+	err = sp.addDeps(deps)
+	if err != nil {
+		return err
+	}
+	// Run `go mod tidy` to refresh dependencies
+	err = sp.refreshDeps()
+	if err != nil {
+		return err
+	}
+	// Write the matched hook to matched.txt for further instrument phase
+	err = sp.store(matched)
+	if err != nil {
+		return err
+	}
+	return nil
+}
