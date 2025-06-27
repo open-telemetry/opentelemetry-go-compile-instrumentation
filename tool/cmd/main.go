@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
@@ -29,9 +30,18 @@ func buildWithToolexec(args []string) error {
 }
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	// Configure slog to write to the file
+	logFile, err := os.OpenFile(filepath.Join(".otel-build", "debug.log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		panic(fmt.Sprintf("failed to open log file: %v", err))
+	}
+	defer logFile.Close()
+	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{}))
+
+	// Create the build temp directory if it does not exist
 	buildTemp := ".otel-build"
-	err := os.MkdirAll(buildTemp, 0755)
+	err = os.MkdirAll(buildTemp, 0755)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create build temp directory %s: %v",
 			buildTemp, err))

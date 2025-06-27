@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
 )
 
 type SetupProcessor struct {
@@ -23,6 +25,14 @@ func (sp *SetupProcessor) findDeps() (map[string]string, error) {
 
 func (sp *SetupProcessor) matchedDeps(deps map[string]string) (map[string]string, error) {
 	// TODO: Implement task
+	defaults, err := data.UseDefaultRules()
+	if err != nil {
+		return nil, err
+	}
+	for _, rule := range defaults {
+		// Here we would match the rule with the dependencies
+		// ...
+	}
 	return nil, nil
 }
 
@@ -37,7 +47,6 @@ func (sp *SetupProcessor) refreshDeps() error {
 }
 
 func (sp *SetupProcessor) store(matched map[string]string) error {
-	// TODO: Implement task
 	f := filepath.Join(".otel-build", "matched.txt")
 	file, err := os.Create(f)
 	if err != nil {
