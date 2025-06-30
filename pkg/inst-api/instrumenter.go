@@ -15,14 +15,24 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-/**
- * The Instrumenter encapsulates the entire logic for gathering telemetry, from collecting
- * the data, to starting and ending spans, to recording values using metrics instruments.
- * Instrumenter is called at the start and the end of a request/response lifecycle.
- * For more detailed information about using it see https://github.
- * com/open-telemetry/opentelemetry-go-compile-instrumentation/blob/main/_docs/api-design-and-project-structure.md
- */
-
+// Instrumenter encapsulates the entire logic for gathering telemetry, from collecting
+// the data, to starting and ending spans, to recording values using metrics instruments.
+// Instrumenter is called at the start and the end of a request/response lifecycle.
+//
+// The interface supports generic REQUEST and RESPONSE types, allowing for type-safe
+// instrumentation of various operation types. It provides methods for both immediate
+// instrumentation (StartAndEnd) and deferred instrumentation (Start/End pairs).
+//
+// Usage patterns:
+//   - For operations with known duration: use StartAndEnd or StartAndEndWithOptions
+//   - For ongoing operations: use Start to begin instrumentation, then End when complete
+//   - Always call End after Start to prevent context leaks and ensure accurate telemetry
+//
+// The Instrumenter handles span creation, attribute extraction, status setting, and
+// propagation of OpenTelemetry context throughout the operation lifecycle.
+//
+// For more detailed information about using it see:
+// https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/blob/main/_docs/api-design-and-project-structure.md
 type Instrumenter[REQUEST any, RESPONSE any] interface {
 	// ShouldStart Determines whether the operation should be instrumented for telemetry or not.
 	// Returns true by default.
