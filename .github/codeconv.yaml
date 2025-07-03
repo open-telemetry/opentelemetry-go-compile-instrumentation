@@ -1,8 +1,7 @@
-# Temporarily disable tests as we are still in the early stage of development
-# codecov:
-#   require_ci_to_pass: true
+codecov:
+  require_ci_to_pass: true
 
-# comment:
-#   layout: "reach,diff,flags,tree"
-#   behavior: default
-#   require_changes: yes
+comment:
+  layout: "reach,diff,flags,tree"
+  behavior: default
+  require_changes: yes
