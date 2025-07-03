@@ -10,7 +10,7 @@ import (
 //go:embed *.yaml
 var ruleFs embed.FS
 
-func UseDefaultRules() ([]string, error) {
+func ListAvailableRules() ([]string, error) {
 	rules, err := ruleFs.ReadDir(".")
 	if err != nil {
 		return nil, err

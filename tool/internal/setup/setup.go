@@ -25,13 +25,14 @@ func (sp *SetupProcessor) findDeps() (map[string]string, error) {
 
 func (sp *SetupProcessor) matchedDeps(deps map[string]string) (map[string]string, error) {
 	// TODO: Implement task
-	defaults, err := data.UseDefaultRules()
+	defaults, err := data.ListAvailableRules()
 	if err != nil {
 		return nil, err
 	}
 	for _, rule := range defaults {
 		// Here we would match the rule with the dependencies
 		// ...
+		_ = rule
 	}
 	return nil, nil
 }
@@ -104,5 +105,6 @@ func Setup(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	sp.logger.Info("Setup completed successfully")
 	return nil
 }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,65 +14,103 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/util"
 )
 
-func buildWithToolexec(args []string) error {
-	// go build -toolexec=otel ...
-	for i, arg := range args {
-		if arg == "build" {
-			before := args[:i]
-			after := args[i+1:]
-			insert := []string{"-toolexec=otel"}
-			combined := append(before, insert...)
-			combined = append(combined, after...)
-			args = combined
-			break
-		}
+const (
+	ActionSetup      = "setup"
+	ActionGo         = "go"
+	ActionIntoolexec = "toolexec"
+)
+
+func buildWithToolexec(logger *slog.Logger, args []string) error {
+	// Add -toolexec=otel to the original build command and run it
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
 	}
-	return util.RunCmd(args...)
+	insert := "-toolexec=" + execPath
+	newArgs := make([]string, 0, len(args)+1) // Avoid in-place modification
+	newArgs = append(newArgs, args[:2]...)    // Add "go build"
+	newArgs = append(newArgs, insert)         // Add "-toolexec=..."
+	newArgs = append(newArgs, args[2:]...)    // Add the rest
+	logger.Info("Running go build with toolexec", "args", newArgs)
+	return util.RunCmd(newArgs...)
+}
+
+func initLogger(phase string) (*slog.Logger, error) {
+	var writer io.Writer
+	switch phase {
+	case ActionSetup, ActionGo:
+		// Create .otel-build dir
+		buildTemp := ".otel-build"
+		if _, err := os.Stat(buildTemp); os.IsNotExist(err) {
+			err = os.MkdirAll(buildTemp, 0o755)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create .otel-build dir: %w", err)
+			}
+		}
+		// Configure slog to write to the debug.log file
+		pwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		logFile, err := os.OpenFile(filepath.Join(pwd, ".otel-build", "debug.log"),
+			os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o777)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open log file: %w", err)
+		}
+		writer = logFile
+	case ActionIntoolexec:
+		writer = os.Stdout
+	default:
+		return nil, fmt.Errorf("invalid phase: %s", phase)
+	}
+	logger := slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{}))
+	return logger, nil
 }
 
 func main() {
-	// Configure slog to write to the file
-	logFile, err := os.OpenFile(filepath.Join(".otel-build", "debug.log"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		panic(fmt.Sprintf("failed to open log file: %v", err))
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: otel <action> <args...>")
+		os.Exit(1)
 	}
-	defer logFile.Close()
-	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{}))
-
-	// Create the build temp directory if it does not exist
-	buildTemp := ".otel-build"
-	err = os.MkdirAll(buildTemp, 0755)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create build temp directory %s: %v",
-			buildTemp, err))
-	}
-
 	action := os.Args[1]
 	switch action {
-	case "setup":
+	case ActionSetup:
 		// otel setup - This command is used to set up the environment for
 		// 			    instrumentation. It should be run before other commands.
+		logger, err := initLogger(ActionSetup)
+		if err != nil {
+			panic("failed to initialize logger: " + err.Error())
+		}
+
 		err = setup.Setup(logger)
 		if err != nil {
 			panic("failed to setup: " + err.Error())
 		}
-	case "go":
+	case ActionGo:
 		// otel go build - Invoke the go command with toolexec mode. If the setup
 		// 				   is not done, it will run the setup command first.
+		logger, err := initLogger(ActionGo)
+		if err != nil {
+			panic("failed to initialize logger: " + err.Error())
+		}
+
 		err = setup.Setup(logger)
 		if err != nil {
 			panic("failed to setup: " + err.Error())
 		}
-		err = buildWithToolexec(os.Args[2:])
+		err = buildWithToolexec(logger, os.Args[1:])
 		if err != nil {
-			panic("failed to build with toolexec" + err.Error())
+			panic("failed to build with toolexec: " + err.Error())
 		}
 	default:
 		// in -toolexec - This should not be used directly, but rather
 		// 				   invoked by the go command with toolexec mode.
-		args := os.Args[1:]
-		err = instrument.Toolexec(logger, args)
+		logger, err := initLogger(ActionIntoolexec)
+		if err != nil {
+			panic("failed to initialize logger: " + err.Error())
+		}
+
+		err = instrument.Toolexec(logger, os.Args[1:])
 		if err != nil {
 			panic("failed to instrument: " + err.Error())
 		}

@@ -32,13 +32,13 @@ func Toolexec(logger *slog.Logger, args []string) error {
 	ip := &InstrumentPreprocessor{
 		logger: logger,
 	}
-	// Load matched hook code from setup phase
+	// Load matched hook rules from setup phase
 	err := ip.load()
 	if err != nil {
 		return err
 	}
 	// Check if the current package should be instrumented by matching the current
-	// command with list of matched hook
+	// command with list of matched rules
 	if ip.match(args) {
 		// Okay, this package should be instrumented.
 		err := ip.instrument(args)

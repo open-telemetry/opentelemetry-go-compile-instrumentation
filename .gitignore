@@ -4,3 +4,5 @@ otel
 demo
 .idea
 tmp
+
+.otel-build
