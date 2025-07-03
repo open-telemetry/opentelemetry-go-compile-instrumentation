@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/util"
@@ -15,6 +16,7 @@ type InstrumentPreprocessor struct {
 
 func (ip *InstrumentPreprocessor) match(args []string) bool {
 	// TODO: Implement task
+	_ = args
 	return false
 }
 
@@ -25,6 +27,7 @@ func (ip *InstrumentPreprocessor) load() error {
 
 func (ip *InstrumentPreprocessor) instrument(args []string) error {
 	// TODO: Implement task
+	_ = args
 	return nil
 }
 
@@ -41,12 +44,16 @@ func Toolexec(logger *slog.Logger, args []string) error {
 	// command with list of matched rules
 	if ip.match(args) {
 		// Okay, this package should be instrumented.
-		err := ip.instrument(args)
+		err = ip.instrument(args)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 	// Otherwise, just run the command as is
-	return util.RunCmd(args...)
+	err = util.RunCmd(args...)
+	if err != nil {
+		return fmt.Errorf("failed to run command: %w", err)
+	}
+	return nil
 }

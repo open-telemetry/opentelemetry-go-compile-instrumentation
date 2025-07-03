@@ -4,6 +4,7 @@ package data
 
 import (
 	"embed"
+	"fmt"
 	"strings"
 )
 
@@ -13,7 +14,7 @@ var ruleFs embed.FS
 func ListAvailableRules() ([]string, error) {
 	rules, err := ruleFs.ReadDir(".")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
 
 	var ruleFiles []string

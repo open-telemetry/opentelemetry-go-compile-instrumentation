@@ -32,7 +32,11 @@ func buildWithToolexec(logger *slog.Logger, args []string) error {
 	newArgs = append(newArgs, insert)         // Add "-toolexec=..."
 	newArgs = append(newArgs, args[2:]...)    // Add the rest
 	logger.Info("Running go build with toolexec", "args", newArgs)
-	return util.RunCmd(newArgs...)
+	err = util.RunCmd(newArgs...)
+	if err != nil {
+		return fmt.Errorf("failed to run command: %w", err)
+	}
+	return nil
 }
 
 func initLogger(phase string) (*slog.Logger, error) {

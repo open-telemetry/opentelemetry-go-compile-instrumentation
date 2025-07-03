@@ -16,29 +16,32 @@ type SetupProcessor struct {
 	logger *slog.Logger
 }
 
+//nolint:unparam // Unused parameter is used to pass the linter
 func (sp *SetupProcessor) findDeps() (map[string]string, error) {
 	// TODO: Implement task
-	return map[string]string{
-		"example.com/some/dependency": "v1.0.0",
-	}, nil
+	deps := make(map[string]string)
+	deps["example.com/some/dependency"] = "v1.0.0"
+	return deps, nil
 }
 
 func (sp *SetupProcessor) matchedDeps(deps map[string]string) (map[string]string, error) {
 	// TODO: Implement task
 	defaults, err := data.ListAvailableRules()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list available rules: %w", err)
 	}
 	for _, rule := range defaults {
 		// Here we would match the rule with the dependencies
 		// ...
 		_ = rule
 	}
-	return nil, nil
+	_ = deps
+	return map[string]string{}, nil
 }
 
 func (sp *SetupProcessor) addDeps(deps map[string]string) error {
 	// TODO: Implement task
+	_ = deps
 	return nil
 }
 
@@ -51,14 +54,14 @@ func (sp *SetupProcessor) store(matched map[string]string) error {
 	f := filepath.Join(".otel-build", "matched.txt")
 	file, err := os.Create(f)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create file %s: %w", f, err)
 	}
 	defer file.Close()
 
 	for k, v := range matched {
-		_, err := fmt.Fprintf(file, "%s %s\n", k, v)
+		_, err = fmt.Fprintf(file, "%s %s\n", k, v)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to write to file %s: %w", f, err)
 		}
 	}
 	return nil
