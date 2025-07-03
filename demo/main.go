@@ -6,7 +6,7 @@ import (
 	"fmt"
 	_ "unsafe"
 
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/helloworld"
 )
 
 func main() {
