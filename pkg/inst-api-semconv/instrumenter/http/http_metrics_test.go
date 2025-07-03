@@ -1,5 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+//
 
 package http
 
@@ -8,6 +9,9 @@ import (
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/utils"
 	"go.opentelemetry.io/otel/attribute"
@@ -200,27 +204,15 @@ func TestNoopRegistry(t *testing.T) {
 
 	// Test creating server metric
 	server, err := registry.NewHTTPServerMetric("test.server")
-	if err != nil {
-		t.Fatalf("unexpected error creating no-op server metric: %v", err)
-	}
-	if server == nil {
-		t.Fatal("expected non-nil server metric")
-	}
-	if server.key != "test.server" {
-		t.Fatalf("expected key 'test.server', got %s", server.key)
-	}
+	require.NoError(t, err, "expected no error creating no-op server metric")
+	require.NotNil(t, server, "expected noop server metric")
+	assert.Equal(t, attribute.Key("test.server"), server.key, "expected key 'test.server'")
 
 	// Test creating client metric
 	client, err := registry.NewHTTPClientMetric("test.client")
-	if err != nil {
-		t.Fatalf("unexpected error creating no-op client metric: %v", err)
-	}
-	if client == nil {
-		t.Fatal("expected non-nil client metric")
-	}
-	if client.key != "test.client" {
-		t.Fatalf("expected key 'test.client', got %s", client.key)
-	}
+	require.NoError(t, err, "expected no error creating no-op client metric")
+	require.NotNil(t, client, "expected noop client metric")
+	assert.Equal(t, attribute.Key("test.client"), client.key, "expected key 'test.client'")
 }
 
 func TestNoopMetricsDoNotPanic(_ *testing.T) {
