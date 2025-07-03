@@ -17,14 +17,14 @@ type SetupProcessor struct {
 }
 
 //nolint:unparam // Unused parameter is used to pass the linter
-func (sp *SetupProcessor) findDeps() (map[string]string, error) {
+func (*SetupProcessor) findDeps() (map[string]string, error) {
 	// TODO: Implement task
 	deps := make(map[string]string)
 	deps["example.com/some/dependency"] = "v1.0.0"
 	return deps, nil
 }
 
-func (sp *SetupProcessor) matchedDeps(deps map[string]string) (map[string]string, error) {
+func (*SetupProcessor) matchedDeps(deps map[string]string) (map[string]string, error) {
 	// TODO: Implement task
 	defaults, err := data.ListAvailableRules()
 	if err != nil {
@@ -39,18 +39,18 @@ func (sp *SetupProcessor) matchedDeps(deps map[string]string) (map[string]string
 	return map[string]string{}, nil
 }
 
-func (sp *SetupProcessor) addDeps(deps map[string]string) error {
+func (*SetupProcessor) addDeps(deps map[string]string) error {
 	// TODO: Implement task
 	_ = deps
 	return nil
 }
 
-func (sp *SetupProcessor) refreshDeps() error {
+func (*SetupProcessor) refreshDeps() error {
 	// TODO: Implement task
 	return nil
 }
 
-func (sp *SetupProcessor) store(matched map[string]string) error {
+func (*SetupProcessor) store(matched map[string]string) error {
 	f := filepath.Join(".otel-build", "matched.txt")
 	file, err := os.Create(f)
 	if err != nil {

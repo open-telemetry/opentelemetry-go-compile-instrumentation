@@ -399,6 +399,8 @@ linters:
         - name: unreachable-code
         - name: unused-parameter
           exclude: ["TEST"]
+        - name: unused-receiver
+          exclude: ["TEST"]
         - name: use-any
         - name: useless-break
         - name: var-declaration

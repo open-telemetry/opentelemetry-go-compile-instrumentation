@@ -14,18 +14,18 @@ type InstrumentPreprocessor struct {
 	logger *slog.Logger
 }
 
-func (ip *InstrumentPreprocessor) match(args []string) bool {
+func (*InstrumentPreprocessor) match(args []string) bool {
 	// TODO: Implement task
 	_ = args
 	return false
 }
 
-func (ip *InstrumentPreprocessor) load() error {
+func (*InstrumentPreprocessor) load() error {
 	// TODO: Implement task
 	return nil
 }
 
-func (ip *InstrumentPreprocessor) instrument(args []string) error {
+func (*InstrumentPreprocessor) instrument(args []string) error {
 	// TODO: Implement task
 	_ = args
 	return nil
