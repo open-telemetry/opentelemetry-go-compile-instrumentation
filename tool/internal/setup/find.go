@@ -186,9 +186,8 @@ func (sp *SetupProcessor) findDeps(goBuildCmd []string) (map[string][]string, er
 				deps[importPath] = append(deps[importPath], arg)
 			}
 		}
-	}
-	for k, v := range deps {
-		sp.Info("Found dependency", "importPath", k, "goFiles", v)
+		sp.Info("Found dependency", "importPath", importPath,
+			"sources", deps[importPath])
 	}
 	return deps, nil
 }
