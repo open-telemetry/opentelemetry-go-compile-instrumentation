@@ -14,14 +14,16 @@ all: build
 .PHONY: build
 build:
 	@echo "Building instrumentation tool..."
-	go mod tidy
-	go build -a -o $(BINARY_NAME) ./$(TOOL_DIR)
+	@go mod tidy
+	@go build -a -o $(BINARY_NAME) ./$(TOOL_DIR)
 
 # Run the demo with instrumentation
 .PHONY: demo
 demo: build
 	@echo "Running demo with instrumentation..."
-	cd $(DEMO_DIR) && ../$(BINARY_NAME) go build -a
+	@cd $(DEMO_DIR) && ../$(BINARY_NAME) go build -a
+	@echo "Running demo..."
+	@./$(DEMO_DIR)/demo
 
 # Clean build artifacts
 .PHONY: clean

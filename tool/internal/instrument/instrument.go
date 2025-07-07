@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/util"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 type InstrumentPreprocessor struct {

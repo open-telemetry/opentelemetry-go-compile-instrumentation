@@ -16,15 +16,12 @@ type SetupProcessor struct {
 	logger *slog.Logger
 }
 
-//nolint:unparam // Unused parameter is used to pass the linter
-func (*SetupProcessor) findDeps() (map[string]string, error) {
-	// TODO: Implement task
-	deps := make(map[string]string)
-	deps["example.com/some/dependency"] = "v1.0.0"
-	return deps, nil
-}
+func (sp *SetupProcessor) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
+func (sp *SetupProcessor) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
+func (sp *SetupProcessor) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
+func (sp *SetupProcessor) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
-func (*SetupProcessor) matchedDeps(deps map[string]string) (map[string]string, error) {
+func (*SetupProcessor) matchedDeps(deps map[string][]string) (map[string]string, error) {
 	// TODO: Implement task
 	defaults, err := data.ListAvailableRules()
 	if err != nil {
@@ -39,7 +36,7 @@ func (*SetupProcessor) matchedDeps(deps map[string]string) (map[string]string, e
 	return map[string]string{}, nil
 }
 
-func (*SetupProcessor) addDeps(deps map[string]string) error {
+func (*SetupProcessor) addDeps(deps map[string][]string) error {
 	// TODO: Implement task
 	_ = deps
 	return nil
@@ -84,7 +81,7 @@ func Setup(logger *slog.Logger) error {
 		logger: logger,
 	}
 	// Find all dependencies of the project being build
-	deps, err := sp.findDeps()
+	deps, err := sp.findDeps(os.Args[1:])
 	if err != nil {
 		return err
 	}
@@ -108,6 +105,6 @@ func Setup(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	sp.logger.Info("Setup completed successfully")
+	sp.Info("Setup completed successfully")
 	return nil
 }

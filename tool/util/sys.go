@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 )
 
 func RunCmd(args ...string) error {
@@ -21,4 +22,12 @@ func RunCmd(args ...string) error {
 		return fmt.Errorf("failed to run command %s: %w", path, err)
 	}
 	return nil
+}
+
+func IsWindows() bool {
+	return runtime.GOOS == "windows"
+}
+
+func IsUnix() bool {
+	return runtime.GOOS == "linux" || runtime.GOOS == "darwin"
 }

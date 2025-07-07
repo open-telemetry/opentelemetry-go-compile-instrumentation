@@ -8,10 +8,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/util"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 const (
@@ -44,9 +45,8 @@ func initLogger(phase string) (*slog.Logger, error) {
 	switch phase {
 	case ActionSetup, ActionGo:
 		// Create .otel-build dir
-		buildTemp := ".otel-build"
-		if _, err := os.Stat(buildTemp); os.IsNotExist(err) {
-			err = os.MkdirAll(buildTemp, 0o755)
+		if _, err := os.Stat(util.BuildTempDir); os.IsNotExist(err) {
+			err = os.MkdirAll(util.BuildTempDir, 0o755)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create .otel-build dir: %w", err)
 			}
@@ -56,7 +56,7 @@ func initLogger(phase string) (*slog.Logger, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get working directory: %w", err)
 		}
-		logFile, err := os.OpenFile(filepath.Join(pwd, ".otel-build", "debug.log"),
+		logFile, err := os.OpenFile(filepath.Join(pwd, util.GetBuildTemp("debug.log")),
 			os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o777)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open log file: %w", err)
@@ -65,9 +65,21 @@ func initLogger(phase string) (*slog.Logger, error) {
 	case ActionIntoolexec:
 		writer = os.Stdout
 	default:
-		return nil, fmt.Errorf("invalid phase: %s", phase)
+		return nil, fmt.Errorf("invalid action: %s", phase)
 	}
-	logger := slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{}))
+
+	// Create a custom handler with shorter time format
+	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				if t, ok := a.Value.Any().(time.Time); ok {
+					a.Value = slog.StringValue(t.Format("06/1/2 15:04:05"))
+				}
+			}
+			return a
+		},
+	})
+	logger := slog.New(handler)
 	return logger, nil
 }
 

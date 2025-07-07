@@ -8,3 +8,7 @@ func Assert(condition bool, message string) {
 		panic("Assertion failed: " + message)
 	}
 }
+
+func ShouldNotReachHere() {
+	panic("should not reach here")
+}
