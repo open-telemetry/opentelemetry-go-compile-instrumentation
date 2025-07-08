@@ -42,7 +42,7 @@ func (e InvalidCommitType) ReviewComment() string {
 	msg.WriteString(".\n")
 
 	msg.WriteString("Please update the title to use one of the supported types:\n")
-	for ctype, _ := range conventionalLabels {
+	for ctype := range conventionalLabels {
 		msg.WriteString("- `")
 		msg.WriteString(ctype)
 		msg.WriteString("`\n")
