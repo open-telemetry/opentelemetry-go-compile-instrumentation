@@ -48,6 +48,7 @@ func isCompileCommand(line string) bool {
 
 // getCompileCommands gets the compile commands from the build plan log.
 func getCompileCommands() ([]string, error) {
+	const buildPlanBufSize = 10 * 1024 * 1024 // 10MB buffer size
 	buildPlanLog, err := os.Open(util.GetBuildTemp(BuildPlanLog))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open build plan log file: %w", err)
@@ -58,7 +59,7 @@ func getCompileCommands() ([]string, error) {
 	compileCmds := make([]string, 0)
 	scanner := bufio.NewScanner(buildPlanLog)
 	// 10MB should be enough to accommodate most long line
-	buffer := make([]byte, 0, 10*1024*1024)
+	buffer := make([]byte, 0, buildPlanBufSize)
 	scanner.Buffer(buffer, cap(buffer))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -116,7 +117,8 @@ func splitCompileCmds(input string) []string {
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
 // and then filtering the compile commands from the build plan log.
 func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
-	util.Assert(len(goBuildCmd) >= 2, "at least two arguments are required")
+	const goBuildCmdMinLen = 2 // go build/install + at least one argument
+	util.Assert(len(goBuildCmd) >= goBuildCmdMinLen, "at least two arguments are required")
 	util.Assert(strings.Contains(goBuildCmd[0], "go"), "sanity check")
 	util.Assert(goBuildCmd[1] == "build" || goBuildCmd[1] == "install", "sanity check")
 
