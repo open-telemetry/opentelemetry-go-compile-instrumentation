@@ -5,6 +5,8 @@ package sdk
 
 import (
 	_ "unsafe"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 )
 
 //go:linkname MyFmtHookBefore fmt.MyFmtHookBefore
