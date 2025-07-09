@@ -18,6 +18,19 @@ const (
 	BuildPgoProfile = "-pgoprofile"
 )
 
+type Dependency struct {
+	ImportPath string
+	Version    string
+	Sources    []string
+}
+
+func (d *Dependency) String() string {
+	if d.Version == "" {
+		return fmt.Sprintf("{%s: %v}", d.ImportPath, d.Sources)
+	}
+	return fmt.Sprintf("{%s@%s: %v}", d.ImportPath, d.Version, d.Sources)
+}
+
 // isCompileCommand checks if the line is a compile command.
 func isCompileCommand(line string) bool {
 	check := []string{"-o", "-p", "-buildid"}
@@ -98,7 +111,10 @@ func splitCompileCmds(input string) []string {
 			continue
 		}
 
-		arg.WriteByte(c)
+		err := arg.WriteByte(c)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	if arg.Len() > 0 {
@@ -168,28 +184,38 @@ func findFlagValue(cmd []string, flag string) string {
 }
 
 // findDeps finds the dependencies of the project by listing the build plan.
-func (sp *SetupProcessor) findDeps(goBuildCmd []string) (map[string][]string, error) {
+func (sp *SetupProcessor) findDeps(goBuildCmd []string) ([]*Dependency, error) {
 	buildPlan, err := sp.listBuildPlan(goBuildCmd)
 	if err != nil {
 		return nil, err
 	}
 	// import path -> list of go files
-	deps := make(map[string][]string)
+	deps := make([]*Dependency, 0)
 	for _, plan := range buildPlan {
 		util.Assert(strings.Contains(plan, "compile"), "must be compile command")
 		args := splitCompileCmds(plan)
 		importPath := findFlagValue(args, "-p")
 		util.Assert(importPath != "", "import path is empty")
-		_, exist := deps[importPath]
+		exist := false
+		dep := &Dependency{
+			ImportPath: importPath,
+			Sources:    make([]string, 0),
+		}
+		for _, d := range deps {
+			if d.ImportPath == importPath {
+				exist = true
+				break
+			}
+		}
 		util.Assert(!exist, "import path should not be duplicated")
 
 		for _, arg := range args {
 			if strings.HasSuffix(arg, ".go") {
-				deps[importPath] = append(deps[importPath], arg)
+				dep.Sources = append(dep.Sources, arg)
 			}
 		}
-		sp.Info("Found dependency", "importPath", importPath,
-			"sources", deps[importPath])
+		deps = append(deps, dep)
+		sp.Info("Found dependency", "dep", dep)
 	}
 	return deps, nil
 }

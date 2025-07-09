@@ -9,10 +9,10 @@ import (
 )
 
 //go:embed *.yaml
-var ruleFs embed.FS
+var dataFs embed.FS
 
 func ListAvailableRules() ([]string, error) {
-	rules, err := ruleFs.ReadDir(".")
+	rules, err := dataFs.ReadDir(".")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
@@ -24,4 +24,12 @@ func ListAvailableRules() ([]string, error) {
 		}
 	}
 	return ruleFiles, nil
+}
+
+func ReadEmbedFile(path string) ([]byte, error) {
+	bs, err := dataFs.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	return bs, nil
 }

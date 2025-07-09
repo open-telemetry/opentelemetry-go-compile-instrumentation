@@ -20,7 +20,7 @@ build:
 # Run the demo with instrumentation
 .PHONY: demo
 demo: build
-	@echo "Running demo with instrumentation..."
+	@echo "Building demo with instrumentation..."
 	@cd $(DEMO_DIR) && ../$(BINARY_NAME) go build -a
 	@echo "Running demo..."
 	@./$(DEMO_DIR)/demo
@@ -31,4 +31,4 @@ clean:
 	@echo "Cleaning build artifacts..."
 	rm -f $(BINARY_NAME)
 	rm -f $(DEMO_DIR)/demo
-	rm -rf $(DEMO_DIR)/.otel-build 
+	rm -rf $(DEMO_DIR)/.otel-build

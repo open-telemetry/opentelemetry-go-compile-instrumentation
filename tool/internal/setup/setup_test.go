@@ -1,11 +1,32 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package setup
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/dave/dst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
+
+func TestParseAst(t *testing.T) {
+	parser := ast.NewAstParser()
+	root, err := parser.ParseFileFast("setup_test.go")
+	if err != nil {
+		t.Fatalf("failed to parse file: %v", err)
+	}
+	for _, decl := range root.Decls {
+		funcDecl, ok := decl.(*dst.FuncDecl)
+		if !ok {
+			continue
+		}
+		fmt.Println(funcDecl.Name.Name)
+	}
+}
 
 func TestSplitCompileCmds(t *testing.T) {
 	tests := []struct {
