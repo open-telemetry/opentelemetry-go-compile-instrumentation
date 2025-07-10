@@ -152,7 +152,6 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doStart(
 	attrs := make([]attribute.KeyValue, 0, defaultAttributesSliceSize)
 	currentCtx := newCtx
 	for _, extractor := range i.attributesExtractors {
-		//nolint:fatcontext // There will not be so many attributes extractors here
 		attrs, currentCtx = extractor.OnStart(currentCtx, attrs, request)
 	}
 	for _, customizer := range i.contextCustomizers {
