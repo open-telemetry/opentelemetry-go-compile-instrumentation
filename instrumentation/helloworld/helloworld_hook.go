@@ -17,6 +17,10 @@ import (
 )
 
 func init() {
+	setupOpenTelemetry()
+}
+
+func setupOpenTelemetry() {
 	// Print all the signal to stdout
 	spanExporter, _ := stdouttrace.New()
 	stdoutTraceProvider := trace.NewTracerProvider(trace.WithSpanProcessor(trace.NewSimpleSpanProcessor(spanExporter)))
