@@ -16,7 +16,7 @@ import (
 func TestParseAst(t *testing.T) {
 	parser := ast.NewAstParser()
 	root, err := parser.ParseFileFast("setup_test.go")
-	if err != nil {
+	require.NoError(t, err)
 		t.Fatalf("failed to parse file: %v", err)
 	}
 	for _, decl := range root.Decls {
