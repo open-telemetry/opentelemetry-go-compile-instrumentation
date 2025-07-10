@@ -73,6 +73,7 @@ type InternalInstrumenter[REQUEST any, RESPONSE any] struct {
 	contextCustomizers   []ContextCustomizer[REQUEST]
 	tracer               trace.Tracer
 	instVersion          string
+	attributesPool       *sync.Pool
 }
 
 // PropagatingToDownstreamInstrumenter do instrumentation and propagate the context to downstream.
@@ -94,13 +95,6 @@ type PropagatingFromUpstreamInstrumenter[REQUEST any, RESPONSE any] struct {
 }
 
 const defaultAttributesSliceSize = 25
-
-var attributesPool = &sync.Pool{
-	New: func() any {
-		s := make([]attribute.KeyValue, 0, defaultAttributesSliceSize)
-		return &s
-	},
-}
 
 func (*InternalInstrumenter[REQUEST, RESPONSE]) ShouldStart(parentContext context.Context, request REQUEST) bool {
 	// TODO: Here you can add some custom logic to determine whether the instrumentation logic is executed or not.
@@ -201,7 +195,17 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doEnd(
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 	}
-	attrsPtr, _ := attributesPool.Get().(*[]attribute.KeyValue)
+	// Initialize pool if not already initialized
+	if i.attributesPool == nil {
+		i.attributesPool = &sync.Pool{
+			New: func() any {
+				s := make([]attribute.KeyValue, 0, defaultAttributesSliceSize)
+				return &s
+			},
+		}
+	}
+
+	attrsPtr, _ := i.attributesPool.Get().(*[]attribute.KeyValue)
 	var attrs []attribute.KeyValue
 	if attrsPtr != nil {
 		attrs = *attrsPtr
@@ -210,7 +214,7 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doEnd(
 	}
 	defer func() {
 		attrs = attrs[:0]
-		attributesPool.Put(&attrs)
+		i.attributesPool.Put(&attrs)
 	}()
 	for _, extractor := range i.attributesExtractors {
 		attrs, ctx = extractor.OnEnd(ctx, attrs, request, response, err)
