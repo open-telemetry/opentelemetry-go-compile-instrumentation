@@ -14,8 +14,7 @@ import (
 )
 
 const (
-	BuildPlanLog    = "build-plan.log"
-	BuildPgoProfile = "-pgoprofile"
+	BuildPlanLog = "build-plan.log"
 )
 
 type Dependency struct {
@@ -34,13 +33,10 @@ func (d *Dependency) String() string {
 // isCompileCommand checks if the line is a compile command.
 func isCompileCommand(line string) bool {
 	check := []string{"-o", "-p", "-buildid"}
-	switch util.IsWindows() {
-	case true:
+	if util.IsWindows() {
 		check = append(check, "compile.exe")
-	case false:
+	} else {
 		check = append(check, "compile")
-	default:
-		util.ShouldNotReachHere()
 	}
 
 	// Check if the line contains all the required fields
@@ -53,7 +49,7 @@ func isCompileCommand(line string) bool {
 	// @@PGO compile command is different from normal compile command, we
 	// should skip it, otherwise the same package will be find twice
 	// (one for PGO and one for normal)
-	if strings.Contains(line, BuildPgoProfile) {
+	if strings.Contains(line, "-pgoprofile") {
 		return false
 	}
 	return true

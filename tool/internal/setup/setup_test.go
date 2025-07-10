@@ -4,28 +4,18 @@
 package setup
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 
-	"github.com/dave/dst"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseAst(t *testing.T) {
 	parser := ast.NewAstParser()
-	root, err := parser.ParseFileFast("setup_test.go")
+	_, err := parser.ParseFileFast("setup_test.go")
 	require.NoError(t, err)
-		t.Fatalf("failed to parse file: %v", err)
-	}
-	for _, decl := range root.Decls {
-		funcDecl, ok := decl.(*dst.FuncDecl)
-		if !ok {
-			continue
-		}
-		fmt.Println(funcDecl.Name.Name)
-	}
 }
 
 func TestSplitCompileCmds(t *testing.T) {

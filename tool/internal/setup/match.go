@@ -13,7 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func parseRuleFrom(path string) ([]*rule.InstRule, error) {
+func parseEmbeddedRule(path string) ([]*rule.InstRule, error) {
 	yamlFile, err := data.ReadEmbedFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open yaml file: %w", err)
@@ -33,8 +33,8 @@ func parseRuleFrom(path string) ([]*rule.InstRule, error) {
 
 func materalizeRules(availables []string) ([]*rule.InstRule, error) {
 	parsedRules := []*rule.InstRule{}
-	for _, raw := range availables {
-		rs, parseErr := parseRuleFrom(raw)
+	for _, available := range availables {
+		rs, parseErr := parseEmbeddedRule(available)
 		if parseErr != nil {
 			return nil, fmt.Errorf("failed to parse rule: %w", parseErr)
 		}
