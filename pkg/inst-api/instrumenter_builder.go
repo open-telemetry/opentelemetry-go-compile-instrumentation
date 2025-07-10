@@ -16,6 +16,7 @@ type InstrumentEnabler interface {
 
 type defaultInstrumentEnabler struct{}
 
+//nolint:ireturn
 func NewDefaultInstrumentEnabler() InstrumentEnabler {
 	return &defaultInstrumentEnabler{}
 }

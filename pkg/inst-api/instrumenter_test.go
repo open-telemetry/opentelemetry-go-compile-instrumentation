@@ -156,7 +156,13 @@ func TestInstrumenter(t *testing.T) {
 	if newCtx.Value(testKey("startAttrs")) == nil {
 		t.Fatal("startAttrs is not expected")
 	}
-	instrumenter.End(ctx, testRequest{}, testResponse{}, errors.New("abc"))
+	instrumenter.End(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: time.Now(),
+		EndTimeStamp:   time.Now(),
+		Err:            errors.New("abc"),
+	})
 }
 
 func TestStartAndEnd(t *testing.T) {
@@ -169,7 +175,12 @@ func TestStartAndEnd(t *testing.T) {
 		AddContextCustomizers(testContextCustomizer{})
 	instrumenter := builder.BuildInstrumenter()
 	ctx := context.Background()
-	instrumenter.StartAndEnd(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now())
+	instrumenter.StartAndEnd(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: time.Now(),
+		EndTimeStamp:   time.Now(),
+	})
 	prop := mockProp{"test"}
 	dsInstrumenter := builder.BuildPropagatingToDownstreamInstrumenter(
 		func(request testRequest) propagation.TextMapCarrier {
@@ -177,14 +188,23 @@ func TestStartAndEnd(t *testing.T) {
 		},
 		&myTextMapProp{},
 	)
-	dsInstrumenter.StartAndEnd(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now())
+	dsInstrumenter.StartAndEnd(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: time.Now(),
+		EndTimeStamp:   time.Now(),
+	})
 	upInstrumenter := builder.BuildPropagatingFromUpstreamInstrumenter(
 		func(request testRequest) propagation.TextMapCarrier {
 			return &prop
 		},
 		&myTextMapProp{},
 	)
-	upInstrumenter.StartAndEnd(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now())
+	upInstrumenter.StartAndEnd(ctx, Invocation[testRequest, testResponse]{
+		Request:      testRequest{},
+		Response:     testResponse{},
+		EndTimeStamp: time.Now(),
+	})
 	// no panic here
 }
 
@@ -225,7 +245,12 @@ func TestPropFromUpStream(t *testing.T) {
 	)
 	ctx := context.Background()
 	newCtx := instrumenter.Start(ctx, testRequest{})
-	instrumenter.End(ctx, testRequest{}, testResponse{}, nil)
+	instrumenter.End(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: time.Now(),
+		EndTimeStamp:   time.Now(),
+	}, nil)
 	if newCtx.Value(testKey("test")) != "test" {
 		panic("test attributes in context should be test")
 	}
@@ -251,7 +276,12 @@ func TestPropToDownStream(t *testing.T) {
 	)
 	ctx := context.Background()
 	instrumenter.Start(ctx, testRequest{})
-	instrumenter.End(ctx, testRequest{}, testResponse{}, nil)
+	instrumenter.End(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: time.Now(),
+		EndTimeStamp:   time.Now(),
+	}, nil)
 	if prop.val != "test" {
 		panic("prop val should be test!")
 	}
@@ -267,7 +297,12 @@ func TestStartAndEndWithOptions(t *testing.T) {
 		AddContextCustomizers(testContextCustomizer{})
 	instrumenter := builder.BuildInstrumenter()
 	ctx := context.Background()
-	instrumenter.StartAndEndWithOptions(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now(), nil, nil)
+	instrumenter.StartAndEndWithOptions(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: time.Now(),
+		EndTimeStamp:   time.Now(),
+	}, nil, nil)
 	prop := mockProp{"test"}
 	dsInstrumenter := builder.BuildPropagatingToDownstreamInstrumenter(
 		func(request testRequest) propagation.TextMapCarrier {
@@ -275,14 +310,24 @@ func TestStartAndEndWithOptions(t *testing.T) {
 		},
 		&myTextMapProp{},
 	)
-	dsInstrumenter.StartAndEndWithOptions(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now(), nil, nil)
+	dsInstrumenter.StartAndEndWithOptions(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: time.Now(),
+		EndTimeStamp:   time.Now(),
+	}, nil, nil)
 	upInstrumenter := builder.BuildPropagatingFromUpstreamInstrumenter(
 		func(request testRequest) propagation.TextMapCarrier {
 			return &prop
 		},
 		&myTextMapProp{},
 	)
-	upInstrumenter.StartAndEndWithOptions(ctx, testRequest{}, testResponse{}, nil, time.Now(), time.Now(), nil, nil)
+	upInstrumenter.StartAndEndWithOptions(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: time.Now(),
+		EndTimeStamp:   time.Now(),
+	}, nil, nil)
 	// no panic here
 }
 
@@ -344,7 +389,12 @@ func TestSpanTimestamps(t *testing.T) {
 	ctx := context.Background()
 	startTime := time.Now()
 	endTime := startTime.Add(2 * time.Second)
-	instrumenter.StartAndEnd(ctx, testRequest{}, testResponse{}, nil, startTime, endTime)
+	instrumenter.StartAndEnd(ctx, Invocation[testRequest, testResponse]{
+		Request:        testRequest{},
+		Response:       testResponse{},
+		StartTimeStamp: startTime,
+		EndTimeStamp:   endTime,
+	})
 	spans := sr.Ended()
 	if len(spans) == 0 {
 		t.Fatal("no spans captured")
