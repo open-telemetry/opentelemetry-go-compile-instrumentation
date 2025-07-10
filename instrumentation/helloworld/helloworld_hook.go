@@ -6,9 +6,10 @@ package helloworld
 import (
 	"context"
 	"fmt"
-	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 	"time"
 	_ "unsafe"
+
+	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
@@ -49,7 +50,10 @@ func MyHook() {
 	// .........
 	time.Sleep(5 * time.Second)
 	// We should use instrumenter#end to end the span and to aggregate the metrics
-	helloWorldInstrumenter.End(ctx, instrumenter.NewInvocation(HelloWorldRequest{}, HelloWorldResponse{}))
+	helloWorldInstrumenter.End(ctx, instrumenter.Invocation[HelloWorldRequest, HelloWorldResponse]{
+		Request:  HelloWorldRequest{},
+		Response: HelloWorldResponse{},
+	})
 	fmt.Println("[MyHook] hello world is instrumented!")
 	time.Sleep(2 * time.Second)
 }
