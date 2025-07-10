@@ -142,7 +142,10 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doStart(
 	}
 	for _, listener := range i.operationListeners {
 		pContext := listener.OnBeforeStart(parentContext, timestamp)
-		parentContext = pContext
+		// try to avoid fat context
+		if pContext != parentContext {
+			parentContext = pContext
+		}
 	}
 	// extract span name
 	spanName := i.spanNameExtractor.Extract(request)
