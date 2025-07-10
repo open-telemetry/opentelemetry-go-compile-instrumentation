@@ -141,7 +141,8 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doStart(
 		return parentContext
 	}
 	for _, listener := range i.operationListeners {
-		parentContext = listener.OnBeforeStart(parentContext, timestamp)
+		pContext := listener.OnBeforeStart(parentContext, timestamp)
+		parentContext = pContext
 	}
 	// extract span name
 	spanName := i.spanNameExtractor.Extract(request)
@@ -154,10 +155,12 @@ func (i *InternalInstrumenter[REQUEST, RESPONSE]) doStart(
 		attrs, currentCtx = extractor.OnStart(currentCtx, attrs, request)
 	}
 	for _, customizer := range i.contextCustomizers {
-		currentCtx = customizer.OnStart(currentCtx, request, attrs)
+		curCtx := customizer.OnStart(currentCtx, request, attrs)
+		currentCtx = curCtx
 	}
 	for _, listener := range i.operationListeners {
-		currentCtx = listener.OnBeforeEnd(currentCtx, attrs, timestamp)
+		curCtx := listener.OnBeforeEnd(currentCtx, attrs, timestamp)
+		currentCtx = curCtx
 	}
 	newCtx = currentCtx
 	span.SetAttributes(attrs...)
