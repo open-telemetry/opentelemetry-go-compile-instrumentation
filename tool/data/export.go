@@ -27,7 +27,7 @@ func ListAvailableRules() ([]string, error) {
 }
 
 func ReadEmbedFile(path string) ([]byte, error) {
-	bs, err := dataFs.ReadFile(path)
+	return dataFs.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
