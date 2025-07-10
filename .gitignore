@@ -1,8 +1,9 @@
 *.log
 opentelemetry-go-compile-instrumentation
 otel
-demo
 .idea
 tmp
 
 .otel-build
+**/.DS_Store
+demo/demo
