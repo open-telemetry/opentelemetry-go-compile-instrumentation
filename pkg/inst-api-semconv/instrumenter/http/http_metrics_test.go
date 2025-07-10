@@ -1,5 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+//
 
 package http
 
@@ -8,6 +9,9 @@ import (
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/utils"
 	"go.opentelemetry.io/otel/attribute"
@@ -39,9 +43,7 @@ func TestHTTPServerMetrics(t *testing.T) {
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
 	meter := mp.Meter("test-meter")
 	server, err := newHTTPServerMetric("test", meter)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	ctx := context.Background()
 	start := time.Now()
 	ctx = server.OnBeforeStart(ctx, start)
@@ -50,9 +52,7 @@ func TestHTTPServerMetrics(t *testing.T) {
 	server.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
-	if rm.ScopeMetrics[0].Metrics[0].Name != "http.server.request.duration" {
-		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
-	}
+	assert.Equal(t, "http.server.request.duration", rm.ScopeMetrics[0].Metrics[0].Name)
 }
 
 func TestHTTPClientMetrics(t *testing.T) {
@@ -65,9 +65,7 @@ func TestHTTPClientMetrics(t *testing.T) {
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
 	meter := mp.Meter("test-meter")
 	client, err := newHTTPClientMetric("test", meter)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	ctx := context.Background()
 	start := time.Now()
 	ctx = client.OnBeforeStart(ctx, start)
@@ -76,9 +74,7 @@ func TestHTTPClientMetrics(t *testing.T) {
 	client.OnAfterEnd(ctx, []attribute.KeyValue{}, time.Now())
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
-	if rm.ScopeMetrics[0].Metrics[0].Name != "http.client.request.duration" {
-		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
-	}
+	assert.Equal(t, "http.client.request.duration", rm.ScopeMetrics[0].Metrics[0].Name)
 }
 
 func TestHTTPMetricAttributesShadower(t *testing.T) {
@@ -97,12 +93,8 @@ func TestHTTPMetricAttributesShadower(t *testing.T) {
 		Value: attribute.IntValue(8080),
 	})
 	n, attrs := utils.Shadow(attrs, httpMetricsConv)
-	if n != 3 {
-		t.Fatal("wrong shadow array")
-	}
-	if attrs[3].Key != "unknown" {
-		t.Fatal("unknown should be the last attribute")
-	}
+	assert.Equal(t, 3, n)
+	assert.Equal(t, attribute.Key("unknown"), attrs[n].Key)
 }
 
 // Tests for MetricsRegistry API
@@ -118,9 +110,7 @@ func TestMetricsRegistryHTTPServerMetrics(t *testing.T) {
 
 	registry := NewMetricsRegistry(slog.Default(), meter)
 	server, err := registry.NewHTTPServerMetric("test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	start := time.Now()
@@ -131,9 +121,7 @@ func TestMetricsRegistryHTTPServerMetrics(t *testing.T) {
 
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
-	if rm.ScopeMetrics[0].Metrics[0].Name != "http.server.request.duration" {
-		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
-	}
+	assert.Equal(t, "http.server.request.duration", rm.ScopeMetrics[0].Metrics[0].Name)
 }
 
 func TestMetricsRegistryHTTPClientMetrics(t *testing.T) {
@@ -148,9 +136,7 @@ func TestMetricsRegistryHTTPClientMetrics(t *testing.T) {
 
 	registry := NewMetricsRegistry(slog.Default(), meter)
 	client, err := registry.NewHTTPClientMetric("test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	start := time.Now()
@@ -161,9 +147,7 @@ func TestMetricsRegistryHTTPClientMetrics(t *testing.T) {
 
 	rm := &metricdata.ResourceMetrics{}
 	_ = reader.Collect(ctx, rm)
-	if rm.ScopeMetrics[0].Metrics[0].Name != "http.client.request.duration" {
-		t.Fatal("wrong metrics name, " + rm.ScopeMetrics[0].Metrics[0].Name)
-	}
+	assert.Equal(t, "http.client.request.duration", rm.ScopeMetrics[0].Metrics[0].Name)
 }
 
 func TestClientNilMeter(t *testing.T) {
@@ -175,9 +159,7 @@ func TestClientNilMeter(t *testing.T) {
 	)
 	_ = sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
 	_, err := newHTTPClientMetric("test", nil)
-	if err == nil {
-		t.Fatal("expected error for nil meter, but got nil")
-	}
+	require.Error(t, err, "expected error for nil meter, but got nil")
 }
 
 func TestServerNilMeter(t *testing.T) {
@@ -189,9 +171,7 @@ func TestServerNilMeter(t *testing.T) {
 	)
 	_ = sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
 	_, err := newHTTPServerMetric("test", nil)
-	if err == nil {
-		t.Fatal("expected error for nil meter, but got nil")
-	}
+	require.Error(t, err, "expected error for nil meter, but got nil")
 }
 
 // Tests for NoopRegistry
@@ -200,27 +180,15 @@ func TestNoopRegistry(t *testing.T) {
 
 	// Test creating server metric
 	server, err := registry.NewHTTPServerMetric("test.server")
-	if err != nil {
-		t.Fatalf("unexpected error creating no-op server metric: %v", err)
-	}
-	if server == nil {
-		t.Fatal("expected non-nil server metric")
-	}
-	if server.key != "test.server" {
-		t.Fatalf("expected key 'test.server', got %s", server.key)
-	}
+	require.NoError(t, err, "expected no error creating no-op server metric")
+	require.NotNil(t, server, "expected noop server metric")
+	assert.Equal(t, attribute.Key("test.server"), server.key, "expected key 'test.server'")
 
 	// Test creating client metric
 	client, err := registry.NewHTTPClientMetric("test.client")
-	if err != nil {
-		t.Fatalf("unexpected error creating no-op client metric: %v", err)
-	}
-	if client == nil {
-		t.Fatal("expected non-nil client metric")
-	}
-	if client.key != "test.client" {
-		t.Fatalf("expected key 'test.client', got %s", client.key)
-	}
+	require.NoError(t, err, "expected no error creating no-op client metric")
+	require.NotNil(t, client, "expected noop client metric")
+	assert.Equal(t, attribute.Key("test.client"), client.key, "expected key 'test.client'")
 }
 
 func TestNoopMetricsDoNotPanic(_ *testing.T) {

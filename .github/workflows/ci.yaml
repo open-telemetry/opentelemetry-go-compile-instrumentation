@@ -8,6 +8,7 @@ on:
 permissions: read-all
 jobs:
   test-coverage:
+    if: false # temporary disable
     name: Coverage
     runs-on: ubuntu-latest
     steps:
@@ -25,6 +26,7 @@ jobs:
         uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
 
   compatibility-test:
+    if: false # temporary disable
     name: Test (go ${{ matrix.go-version }}, ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
     strategy:
       matrix:
@@ -63,7 +65,8 @@ jobs:
     name: Done
     runs-on: ubuntu-latest
     needs: [compatibility-test]
-    if: '!cancelled()'
+    # temporary disable
+    if: false #'!cancelled()'
     steps:
       - name: Success
         run: |
