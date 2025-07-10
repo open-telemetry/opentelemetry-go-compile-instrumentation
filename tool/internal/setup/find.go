@@ -55,14 +55,9 @@ func isCompileCommand(line string) bool {
 	return true
 }
 
-// getCompileCommands gets the compile commands from the build plan log.
-func getCompileCommands() ([]string, error) {
+// findCompileCommands finds the compile commands from the build plan log.
+func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	const buildPlanBufSize = 10 * 1024 * 1024 // 10MB buffer size
-	buildPlanLog, err := os.Open(util.GetBuildTemp(BuildPlanLog))
-	if err != nil {
-		return nil, fmt.Errorf("failed to open build plan log file: %w", err)
-	}
-	defer buildPlanLog.Close()
 
 	// Filter compile commands from build plan log
 	compileCmds := make([]string, 0)
@@ -77,7 +72,7 @@ func getCompileCommands() ([]string, error) {
 			compileCmds = append(compileCmds, line)
 		}
 	}
-	err = scanner.Err()
+	err := scanner.Err()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse build plan log: %w", err)
 	}
@@ -139,13 +134,14 @@ func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create build plan log file: %w", err)
 	}
+	defer buildPlanLog.Close()
 	// The full build command is: "go build/install -a -x -n  {...}"
 	args := []string{}
 	args = append(args, goBuildCmd[:2]...)             // go build/install
 	args = append(args, []string{"-a", "-x", "-n"}...) // -a -x -n
 	args = append(args, goBuildCmd[2:]...)             // {...} remaining
-
 	sp.Info("List build plan", "args", args)
+
 	//nolint:gosec // Command arguments are validated with above assertions
 	cmd := exec.Command(args[0], args[1:]...)
 	// This is a little anti-intuitive as the error message is not printed to
@@ -162,7 +158,7 @@ func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	}
 
 	// Find compile commands from build plan log
-	compileCmds, err := getCompileCommands()
+	compileCmds, err := findCompileCommands(buildPlanLog)
 	if err != nil {
 		return nil, err
 	}

@@ -51,7 +51,7 @@ func (sp *SetupProcessor) matchedDeps(deps []*Dependency) ([]*rule.InstRule, err
 	sp.Info("Available rules", "rules", availables)
 
 	// Construct the set of default rules by parsing embedded data
-	parsedRules, err := materalizeRules(availables)
+	rules, err := materalizeRules(availables)
 	if err != nil {
 		return nil, fmt.Errorf("failed to materialize rules: %w", err)
 	}
@@ -59,7 +59,7 @@ func (sp *SetupProcessor) matchedDeps(deps []*Dependency) ([]*rule.InstRule, err
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRule, 0)
 	for _, dep := range deps {
-		for _, rule := range parsedRules {
+		for _, rule := range rules {
 			targetImportPath := rule.GetFuncImportPath()
 			targetFunction := rule.GetFuncName()
 
