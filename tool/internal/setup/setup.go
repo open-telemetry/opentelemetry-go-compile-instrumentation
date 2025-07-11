@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 type SetupProcessor struct {
@@ -21,42 +21,15 @@ func (sp *SetupProcessor) Error(msg string, args ...any) { sp.logger.Error(msg, 
 func (sp *SetupProcessor) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *SetupProcessor) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
-func (*SetupProcessor) matchedDeps(deps map[string][]string) (map[string]string, error) {
-	// TODO: Implement task
-	defaults, err := data.ListAvailableRules()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list available rules: %w", err)
-	}
-	for _, rule := range defaults {
-		// Here we would match the rule with the dependencies
-		// ...
-		_ = rule
-	}
-	_ = deps
-	return map[string]string{}, nil
-}
-
-func (*SetupProcessor) addDeps(deps map[string][]string) error {
-	// TODO: Implement task
-	_ = deps
-	return nil
-}
-
-func (*SetupProcessor) refreshDeps() error {
-	// TODO: Implement task
-	return nil
-}
-
-func (*SetupProcessor) store(matched map[string]string) error {
-	f := filepath.Join(".otel-build", "matched.txt")
+func (*SetupProcessor) store(matched []*rule.InstRule) error {
+	f := util.GetBuildTemp("matched.txt")
 	file, err := os.Create(f)
 	if err != nil {
 		return fmt.Errorf("failed to create file %s: %w", f, err)
 	}
 	defer file.Close()
-
-	for k, v := range matched {
-		_, err = fmt.Fprintf(file, "%s %s\n", k, v)
+	for _, r := range matched {
+		_, err = fmt.Fprintf(file, "%s\n", r.Name)
 		if err != nil {
 			return fmt.Errorf("failed to write to file %s: %w", f, err)
 		}

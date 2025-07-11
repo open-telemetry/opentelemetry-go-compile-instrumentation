@@ -3,8 +3,7 @@
 
 package instrument
 
-func (*InstrumentPreprocessor) instrument(args []string) error {
+func (*InstrumentPreprocessor) load() error {
 	// TODO: Implement task
-	_ = args
 	return nil
 }

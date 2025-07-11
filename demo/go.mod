@@ -2,6 +2,6 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo
 
 go 1.23.0
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk => ../sdk
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/fmt => ../sdk/fmt
 
-require github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk v0.0.0-00010101000000-000000000000
+require github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk v0.0.0-20250708161354-c88b3d6f169f

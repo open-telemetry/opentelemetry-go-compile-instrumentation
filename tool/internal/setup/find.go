@@ -14,20 +14,29 @@ import (
 )
 
 const (
-	BuildPlanLog    = "build-plan.log"
-	BuildPgoProfile = "-pgoprofile"
+	BuildPlanLog = "build-plan.log"
 )
+
+type Dependency struct {
+	ImportPath string
+	Version    string
+	Sources    []string
+}
+
+func (d *Dependency) String() string {
+	if d.Version == "" {
+		return fmt.Sprintf("{%s: %v}", d.ImportPath, d.Sources)
+	}
+	return fmt.Sprintf("{%s@%s: %v}", d.ImportPath, d.Version, d.Sources)
+}
 
 // isCompileCommand checks if the line is a compile command.
 func isCompileCommand(line string) bool {
 	check := []string{"-o", "-p", "-buildid"}
-	switch util.IsWindows() {
-	case true:
+	if util.IsWindows() {
 		check = append(check, "compile.exe")
-	case false:
+	} else {
 		check = append(check, "compile")
-	default:
-		util.ShouldNotReachHere()
 	}
 
 	// Check if the line contains all the required fields
@@ -40,20 +49,15 @@ func isCompileCommand(line string) bool {
 	// @@PGO compile command is different from normal compile command, we
 	// should skip it, otherwise the same package will be find twice
 	// (one for PGO and one for normal)
-	if strings.Contains(line, BuildPgoProfile) {
+	if strings.Contains(line, "-pgoprofile") {
 		return false
 	}
 	return true
 }
 
-// getCompileCommands gets the compile commands from the build plan log.
-func getCompileCommands() ([]string, error) {
+// findCompileCommands finds the compile commands from the build plan log.
+func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	const buildPlanBufSize = 10 * 1024 * 1024 // 10MB buffer size
-	buildPlanLog, err := os.Open(util.GetBuildTemp(BuildPlanLog))
-	if err != nil {
-		return nil, fmt.Errorf("failed to open build plan log file: %w", err)
-	}
-	defer buildPlanLog.Close()
 
 	// Filter compile commands from build plan log
 	compileCmds := make([]string, 0)
@@ -68,7 +72,7 @@ func getCompileCommands() ([]string, error) {
 			compileCmds = append(compileCmds, line)
 		}
 	}
-	err = scanner.Err()
+	err := scanner.Err()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse build plan log: %w", err)
 	}
@@ -98,7 +102,10 @@ func splitCompileCmds(input string) []string {
 			continue
 		}
 
-		arg.WriteByte(c)
+		err := arg.WriteByte(c)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	if arg.Len() > 0 {
@@ -127,13 +134,14 @@ func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create build plan log file: %w", err)
 	}
+	defer buildPlanLog.Close()
 	// The full build command is: "go build/install -a -x -n  {...}"
 	args := []string{}
 	args = append(args, goBuildCmd[:2]...)             // go build/install
 	args = append(args, []string{"-a", "-x", "-n"}...) // -a -x -n
 	args = append(args, goBuildCmd[2:]...)             // {...} remaining
-
 	sp.Info("List build plan", "args", args)
+
 	//nolint:gosec // Command arguments are validated with above assertions
 	cmd := exec.Command(args[0], args[1:]...)
 	// This is a little anti-intuitive as the error message is not printed to
@@ -150,7 +158,7 @@ func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	}
 
 	// Find compile commands from build plan log
-	compileCmds, err := getCompileCommands()
+	compileCmds, err := findCompileCommands(buildPlanLog)
 	if err != nil {
 		return nil, err
 	}
@@ -168,28 +176,38 @@ func findFlagValue(cmd []string, flag string) string {
 }
 
 // findDeps finds the dependencies of the project by listing the build plan.
-func (sp *SetupProcessor) findDeps(goBuildCmd []string) (map[string][]string, error) {
+func (sp *SetupProcessor) findDeps(goBuildCmd []string) ([]*Dependency, error) {
 	buildPlan, err := sp.listBuildPlan(goBuildCmd)
 	if err != nil {
 		return nil, err
 	}
 	// import path -> list of go files
-	deps := make(map[string][]string)
+	deps := make([]*Dependency, 0)
 	for _, plan := range buildPlan {
 		util.Assert(strings.Contains(plan, "compile"), "must be compile command")
 		args := splitCompileCmds(plan)
 		importPath := findFlagValue(args, "-p")
 		util.Assert(importPath != "", "import path is empty")
-		_, exist := deps[importPath]
+		exist := false
+		dep := &Dependency{
+			ImportPath: importPath,
+			Sources:    make([]string, 0),
+		}
+		for _, d := range deps {
+			if d.ImportPath == importPath {
+				exist = true
+				break
+			}
+		}
 		util.Assert(!exist, "import path should not be duplicated")
 
 		for _, arg := range args {
 			if strings.HasSuffix(arg, ".go") {
-				deps[importPath] = append(deps[importPath], arg)
+				dep.Sources = append(dep.Sources, arg)
 			}
 		}
-		sp.Info("Found dependency", "importPath", importPath,
-			"sources", deps[importPath])
+		deps = append(deps, dep)
+		sp.Info("Found dependency", "dep", dep)
 	}
 	return deps, nil
 }
