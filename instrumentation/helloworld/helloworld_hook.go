@@ -9,8 +9,8 @@ import (
 	"time"
 	_ "unsafe"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
-
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
@@ -36,8 +36,8 @@ func setupOpenTelemetry() {
 
 var helloWorldInstrumenter = BuildNetHttpClientOtelInstrumenter()
 
-//go:linkname MyHook main.Hook
-func MyHook() {
+//go:linkname MyHookBefore main.Hook
+func MyHookBefore(ictx inst.Context) {
 	// Use instrumenter to create span and metrics
 	// When the main is executed, we should instrumenter#start to create span
 	ctx := context.Background()
@@ -56,4 +56,10 @@ func MyHook() {
 	})
 	fmt.Println("[MyHook] hello world is instrumented!")
 	time.Sleep(2 * time.Second)
+}
+
+//go:linkname MyHookAfter main.Hook
+func MyHookAfter(ictx inst.Context) {
+	// This is the after hook, we can do some clean up work here if needed
+	fmt.Println("[MyHook] after hook executed!")
 }

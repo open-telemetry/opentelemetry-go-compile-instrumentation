@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Unique name of the instrumentation
-hook_fmt_println:
+hook_helloworld:
   # Where the hook code is located
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/fmt"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/helloworld"
   # Where we want to inject the hook code
-  pointcut: fmt.Println
+  pointcut: main.Example
   # What hook code we want to inject
   advice:
-    - before: MyFmtHookBefore
-    - after: MyFmtHookAfter
+    - before: MyHookBefore
+    - after: MyHookAfter

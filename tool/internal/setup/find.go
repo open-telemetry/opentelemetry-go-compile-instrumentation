@@ -62,6 +62,11 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	// Filter compile commands from build plan log
 	compileCmds := make([]string, 0)
 	scanner := bufio.NewScanner(buildPlanLog)
+	// Seek to the beginning of the file before reading
+	_, err := buildPlanLog.Seek(0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to seek to beginning of build plan log: %w", err)
+	}
 	// 10MB should be enough to accommodate most long line
 	buffer := make([]byte, 0, buildPlanBufSize)
 	scanner.Buffer(buffer, cap(buffer))
@@ -72,8 +77,7 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 			compileCmds = append(compileCmds, line)
 		}
 	}
-	err := scanner.Err()
-	if err != nil {
+	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("failed to parse build plan log: %w", err)
 	}
 	return compileCmds, nil
@@ -162,6 +166,7 @@ func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	sp.Debug("Found compile commands", "compileCmds", compileCmds)
 	return compileCmds, nil
 }
 

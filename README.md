@@ -1,72 +1,44 @@
-# OpenTelemetry-Go-Compile-Instrumentation
+# OpenTelemetry Go Compile Instrumentation
 
-OpenTelemetry-Go-Compile-Instrumentation provides compile time [OpenTelemetry](https://opentelemetry.io/) instrumentation for [Golang](https://golang.org/).
+> [!IMPORTANT]
+> This is a work in progress and not ready for production use. 🚨
+
+This project provides a tool to automatically instrument Go applications with [OpenTelemetry](https://opentelemetry.io/) at compile time. The tool modifies the Go build process to inject OpenTelemetry code into the application without requiring manual changes to the source code.
 
 ## Getting Started
 
-### Prerequisites
-
-- Go 1.23.0 or later
-- Git
-
-### Quick Start
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation.git
-   cd opentelemetry-go-compile-instrumentation
-   ```
-
-2. **Build the instrumentation tool:**
-   ```bash
-   make build
-   ```
-
-3. **Run the demo with instrumentation:**
-   ```bash
-   make demo
-   ```
-
-   This will:
-   - Build the instrumentation tool (`otel` binary)
-   - Run the demo with compile-time instrumentation
-   - Execute the instrumented binary
-
-## How It Works
-
-The instrumentation tool injects OpenTelemetry code at compile time using Go's `-toolexec` flag. The process works as follows:
-
-1. **Setup Phase**: Creates `.otel-build` directory and initializes logging
-2. **Go Build Phase**: Intercepts the `go build` command and adds `-toolexec=./otel` flag
-3. **Toolexec Phase**: The Go toolchain invokes the tool for each compilation step, allowing code injection. This phase is not visible to the user.
-
-### Logging
-
-The tool provides detailed logging to help debug instrumentation issues:
-- Logs are written to `.otel-build/debug.log` for setup and go actions
-- Toolexec action logs to stdout for immediate feedback
-- All logs include structured information about the build process
-
-### Inspecting the Instrumentation
-
-To see the result of instrumentation, navigate to the WORK directory that appears in the build output:
-
+1. Build the otel tool
 ```bash
-# Example WORK directory
-cd /var/folders/x9/fddsvlt5363c0plvvw8_2mr80000gn/T/go-build2020695287
-
-# Locate the main package under the b001 subdirectory
-ls -l b001
-
-# Inspect the modified files
-cat modified.go
+$ git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation.git
+$ cd opentelemetry-go-compile-instrumentation
+$ make build
 ```
+
+2. Build the application with the tool and run it
+```bash
+$ make demo
+```
+
+## Project Structure
+- `docs/`: Documentation for the project
+- `demo/`: A sample Go application to demonstrate the tool
+- `instrumentation/`: Contains the instrumentation logic for various Go packages
+- `pkg/`: The core library used by `instrumentation/`, including utilities and common functionality
+  - `pkg/inst/`: Definition of the instrumentation context
+  - `pkg/inst-api/`: The API for the instrumentation
+  - `pkg/inst-api-semconv/`: The semantic conventions for the instrumentation
+- `tool/`: The main tool for compile-time instrumentation
+  - `tool/internal/setup/`: Setup phase, it prepares the environment for future instrumentation phase
+  - `tool/internal/instrument`: Instrument phase, where the actual instrumentation happens
+  - `tool/internal/rule/`: The rule describes how to match the target function and which instrumentation to apply
 
 ## Contributing
 
-See the [contributing documentation](CONTRIBUTING.md).
+See the [contributing documentation](./docs/CONTRIBUTING.md).
+
+For the code of conduct, please refer to our [OpenTelemetry Community Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md)
 
 ## License
 
-OpenTelemetry Go Compile Instrumentation project is licensed under the terms of the [Apache Software License version 2.0].
+This project is licensed under the terms of the [Apache Software License version 2.0].
 See the [license file](./LICENSE) for more details.
