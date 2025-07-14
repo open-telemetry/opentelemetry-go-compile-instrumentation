@@ -77,7 +77,8 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 			compileCmds = append(compileCmds, line)
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	err = scanner.Err()
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse build plan log: %w", err)
 	}
 	return compileCmds, nil
