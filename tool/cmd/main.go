@@ -86,7 +86,7 @@ func initLogger(phase string) (*slog.Logger, error) {
 
 func main() {
 	if len(os.Args) < 2 { //nolint:mnd // number of args
-		fmt.Println("Usage: otel <action> <args...>")
+		println("Usage: otel <action> <args...>")
 		os.Exit(1)
 	}
 	action := os.Args[1]

@@ -3,8 +3,8 @@
 
 package instrument
 
-func (*InstrumentPreprocessor) instrument(args []string) error {
+func (*InstrumentPreprocessor) match(args []string) bool {
 	// TODO: Implement task
 	_ = args
-	return nil
+	return false
 }

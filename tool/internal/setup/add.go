@@ -1,10 +1,10 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package instrument
+package setup
 
-func (*InstrumentPreprocessor) instrument(args []string) error {
+func (*SetupProcessor) addDeps(deps []*Dependency) error {
 	// TODO: Implement task
-	_ = args
+	_ = deps
 	return nil
 }
