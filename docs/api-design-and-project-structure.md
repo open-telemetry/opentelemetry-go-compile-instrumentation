@@ -2,21 +2,22 @@
 
 The project structure is as follows:
 
-```
-internal ---> Compile-Time-Instrumentation tools
-demo ---> Demo Application
-pkg ---> Public API
-    inst-api ---> Encapsulation of instrumentation (generating span, metrics, ...)
-        instrumenter
-    inst-api-semconv ---> Encapsulation of OpenTelemetry SemConv
-        instrumenter
-            http
-            rpc
-            db
-            messaging
-            network
-sdk ---> Instrumentation code for each plugin (e.g. http, grpc, ...)
-```
+- `demo`: Demo Application
+- `instrumentation`: Instrumentation code for each plugin (e.g. http, rpc, db, messaging, network, ...)
+- `pkg`: Public API
+    - `inst-api`: Encapsulation of instrumentation (generating span, metrics, ...)
+    - `inst-api-semconv`: Encapsulation of OpenTelemetry SemConv
+        - `instrumenter`
+            - `http`
+            - `rpc`
+            - `db`
+            - `messaging`
+            - `network`
+            - ...
+- `tool`: Compile-time instrumentation tool
+  - `internal/setup`: Setup phase, it prepares the environment for future instrumentation phase
+  - `internal/instrument`: Instrument phase, where the actual instrumentation happens
+  - `internal/rule`: The rule describes how to match the target function and which instrumentation to apply
 
 For Public API, we have some key abstractions as follows:
 

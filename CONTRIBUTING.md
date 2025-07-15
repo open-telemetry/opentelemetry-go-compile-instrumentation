@@ -194,7 +194,7 @@ For more information about the maintainer role, see the [community repository](h
 - [Dario Castañe](https://github.com/darccio), Datadog
 - [Eliott Bouhana](https://github.com/eliottness), Datadog
 - [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
-- [Yin Yang](https://github.com/y1yang0), Alibaba
+- [Yi Yang](https://github.com/y1yang0), Alibaba
 
 For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
