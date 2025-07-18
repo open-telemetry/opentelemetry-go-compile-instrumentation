@@ -8,6 +8,7 @@ import (
 	"go/token"
 
 	"github.com/dave/dst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 func ListFuncDecls(file string) ([]*dst.FuncDecl, error) {
@@ -16,7 +17,7 @@ func ListFuncDecls(file string) ([]*dst.FuncDecl, error) {
 	parser := NewAstParser()
 	root, parseErr := parser.ParseFileFast(file)
 	if parseErr != nil {
-		return nil, fmt.Errorf("failed to parse file %s: %w", file, parseErr)
+		return nil, ex.Errorf(parseErr, "failed to parse file %s", file)
 	}
 	funcDecls := make([]*dst.FuncDecl, 0)
 	for _, decl := range root.Decls {

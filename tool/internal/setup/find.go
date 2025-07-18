@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -65,7 +66,7 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	// Seek to the beginning of the file before reading
 	_, err := buildPlanLog.Seek(0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to seek to beginning of build plan log: %w", err)
+		return nil, ex.Error(err)
 	}
 	// 10MB should be enough to accommodate most long line
 	buffer := make([]byte, 0, buildPlanBufSize)
@@ -79,7 +80,7 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	}
 	err = scanner.Err()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse build plan log: %w", err)
+		return nil, ex.Error(err)
 	}
 	return compileCmds, nil
 }
@@ -128,7 +129,7 @@ func splitCompileCmds(input string) []string {
 
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
 // and then filtering the compile commands from the build plan log.
-func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
+func (sp *SetupPhase) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	const goBuildCmdMinLen = 2 // go build/install + at least one argument
 	util.Assert(len(goBuildCmd) >= goBuildCmdMinLen, "at least two arguments are required")
 	util.Assert(strings.Contains(goBuildCmd[0], "go"), "sanity check")
@@ -137,7 +138,7 @@ func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	// Create a build plan log file in the temporary directory
 	buildPlanLog, err := os.Create(util.GetBuildTemp(BuildPlanLog))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create build plan log file: %w", err)
+		return nil, ex.Error(err)
 	}
 	defer buildPlanLog.Close()
 	// The full build command is: "go build/install -a -x -n  {...}"
@@ -159,7 +160,7 @@ func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	cmd.Dir = ""
 	err = cmd.Run()
 	if err != nil {
-		return nil, fmt.Errorf("failed to run build plan: %w", err)
+		return nil, ex.Error(err)
 	}
 
 	// Find compile commands from build plan log
@@ -182,7 +183,7 @@ func findFlagValue(cmd []string, flag string) string {
 }
 
 // findDeps finds the dependencies of the project by listing the build plan.
-func (sp *SetupProcessor) findDeps(goBuildCmd []string) ([]*Dependency, error) {
+func (sp *SetupPhase) findDeps(goBuildCmd []string) ([]*Dependency, error) {
 	buildPlan, err := sp.listBuildPlan(goBuildCmd)
 	if err != nil {
 		return nil, err

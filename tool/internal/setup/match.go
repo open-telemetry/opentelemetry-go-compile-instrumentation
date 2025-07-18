@@ -5,9 +5,9 @@ package setup
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"gopkg.in/yaml.v3"
@@ -16,12 +16,12 @@ import (
 func parseEmbeddedRule(path string) ([]*rule.InstRule, error) {
 	yamlFile, err := data.ReadEmbedFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open yaml file: %w", err)
+		return nil, ex.Error(err)
 	}
 	rules := make(map[string]*rule.InstRule)
 	err = yaml.NewDecoder(bytes.NewReader(yamlFile)).Decode(&rules)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode yaml file: %w", err)
+		return nil, ex.Error(err)
 	}
 	arr := make([]*rule.InstRule, 0)
 	for name, r := range rules {
@@ -36,24 +36,24 @@ func materalizeRules(availables []string) ([]*rule.InstRule, error) {
 	for _, available := range availables {
 		rs, parseErr := parseEmbeddedRule(available)
 		if parseErr != nil {
-			return nil, fmt.Errorf("failed to parse rule: %w", parseErr)
+			return nil, ex.Error(parseErr)
 		}
 		parsedRules = append(parsedRules, rs...)
 	}
 	return parsedRules, nil
 }
 
-func (sp *SetupProcessor) matchedDeps(deps []*Dependency) ([]*rule.InstRule, error) {
+func (sp *SetupPhase) matchedDeps(deps []*Dependency) ([]*rule.InstRule, error) {
 	availables, err := data.ListAvailableRules()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list available rules: %w", err)
+		return nil, ex.Error(err)
 	}
 	sp.Info("Available rules", "rules", availables)
 
 	// Construct the set of default rules by parsing embedded data
 	rules, err := materalizeRules(availables)
 	if err != nil {
-		return nil, fmt.Errorf("failed to materialize rules: %w", err)
+		return nil, ex.Error(err)
 	}
 
 	// Match the default rules with the found dependencies
@@ -72,7 +72,7 @@ func (sp *SetupProcessor) matchedDeps(deps []*Dependency) ([]*rule.InstRule, err
 			for _, file := range dep.Sources {
 				funcDecls, parseErr := ast.ListFuncDecls(file)
 				if parseErr != nil {
-					return nil, fmt.Errorf("failed to list func decls: %w", parseErr)
+					return nil, ex.Error(parseErr)
 				}
 				for _, funcDecl := range funcDecls {
 					// Same function name?

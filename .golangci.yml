@@ -493,6 +493,8 @@ linters:
         - .WithMessage(
         - .WithMessagef(
         - .WithStack(
+        - ex.Error(
+        - ex.Errorf(
       # An array of strings that specify globs of packages to ignore.
       # Default: []
       ignore-package-globs:

@@ -4,7 +4,6 @@
 package ast
 
 import (
-	"fmt"
 	"go/parser"
 	"go/printer"
 	"go/token"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -33,17 +33,17 @@ func (ap *AstParser) ParseFile(filePath string, mode parser.Mode) (*dst.File, er
 	name := filepath.Base(filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
+		return nil, ex.Error(err)
 	}
 	defer file.Close()
 	astFile, err := parser.ParseFile(ap.fset, name, file, mode)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse file %s: %w", filePath, err)
+		return nil, ex.Errorf(err, "failed to parse file %s", filePath)
 	}
 	ap.dec = decorator.NewDecorator(ap.fset)
 	dstFile, err := ap.dec.DecorateFile(astFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decorate file %s: %w", filePath, err)
+		return nil, ex.Errorf(err, "failed to decorate file %s", filePath)
 	}
 	return dstFile, nil
 }
@@ -55,19 +55,19 @@ func (ap *AstParser) ParseFileFast(filePath string) (*dst.File, error) {
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to create file %s: %w", filePath, err)
+		return ex.Errorf(err, "failed to create file %s", filePath)
 	}
 	defer file.Close()
 	fset := token.NewFileSet()
 	restorer := decorator.NewRestorer()
 	astFile, err := restorer.RestoreFile(root)
 	if err != nil {
-		return fmt.Errorf("failed to restore file %s: %w", filePath, err)
+		return ex.Errorf(err, "failed to restore file %s", filePath)
 	}
 	cfg := printer.Config{}
 	err = cfg.Fprint(file, fset, astFile)
 	if err != nil {
-		return fmt.Errorf("failed to write to file %s: %w", filePath, err)
+		return ex.Errorf(err, "failed to write to file %s", filePath)
 	}
 	return nil
 }

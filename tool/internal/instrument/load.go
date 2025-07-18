@@ -3,7 +3,7 @@
 
 package instrument
 
-func (*InstrumentPreprocessor) load() error {
+func (*InstrumentPhase) load() error {
 	// TODO: Implement task
 	return nil
 }

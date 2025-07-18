@@ -4,8 +4,9 @@ package data
 
 import (
 	"embed"
-	"fmt"
 	"strings"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 //go:embed *.yaml
@@ -14,7 +15,7 @@ var dataFs embed.FS
 func ListAvailableRules() ([]string, error) {
 	rules, err := dataFs.ReadDir(".")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read directory: %w", err)
+		return nil, ex.Error(err)
 	}
 
 	var ruleFiles []string
@@ -29,7 +30,7 @@ func ListAvailableRules() ([]string, error) {
 func ReadEmbedFile(path string) ([]byte, error) {
 	bs, err := dataFs.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, ex.Error(err)
 	}
 	return bs, nil
 }
