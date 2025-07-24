@@ -10,12 +10,12 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-type InstrumentPreprocessor struct {
+type InstrumentPhase struct {
 	logger *slog.Logger
 }
 
 func Toolexec(logger *slog.Logger, args []string) error {
-	ip := &InstrumentPreprocessor{
+	ip := &InstrumentPhase{
 		logger: logger,
 	}
 	// Load matched hook rules from setup phase

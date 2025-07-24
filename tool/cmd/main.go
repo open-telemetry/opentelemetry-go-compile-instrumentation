@@ -93,6 +93,9 @@ func initLogger(phase string) (*slog.Logger, error) {
 func main() {
 	if len(os.Args) < 2 { //nolint:mnd // number of args
 		println("Usage: otel <action> <args...>")
+		println("Actions:")
+		println("  setup - Set up the environment for instrumentation.")
+		println("  go - Invoke the go command with toolexec mode.")
 		os.Exit(1)
 	}
 	action := os.Args[1]
@@ -114,11 +117,15 @@ func main() {
 	case ActionGo:
 		// otel go build - Invoke the go command with toolexec mode. If the setup
 		// 				   is not done, it will run the setup command first.
+		defer cleanBuildTemp()
+		backup := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+		util.BackupFile(backup)
+		defer util.RestoreFile(backup)
+
 		logger, err := initLogger(ActionGo)
 		if err != nil {
 			ex.Fatal(err)
 		}
-
 		err = setup.Setup(logger)
 		if err != nil {
 			ex.Fatal(err)
@@ -127,7 +134,8 @@ func main() {
 		if err != nil {
 			ex.Fatal(err)
 		}
-		cleanBuildTemp()
+	case ActionIntoolexec:
+		ex.Fatalf("It should not be used directly")
 	default:
 		// in -toolexec - This should not be used directly, but rather
 		// 				   invoked by the go command with toolexec mode.

@@ -1,5 +1,7 @@
 # OpenTelemetry Go Compile Instrumentation
 
+<img src="./docs/assets/otel-logo.png" alt="OpenTelemetry Logo" width="500">
+
 > [!IMPORTANT]
 > This is a work in progress and not ready for production use. 🚨
 

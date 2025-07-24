@@ -43,7 +43,7 @@ func materalizeRules(availables []string) ([]*rule.InstRule, error) {
 	return parsedRules, nil
 }
 
-func (sp *SetupProcessor) matchedDeps(deps []*Dependency) ([]*rule.InstRule, error) {
+func (sp *SetupPhase) matchedDeps(deps []*Dependency) ([]*rule.InstRule, error) {
 	availables, err := data.ListAvailableRules()
 	if err != nil {
 		return nil, ex.Errorf(err, "failed to list available rules")

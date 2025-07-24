@@ -3,8 +3,6 @@
 
 package main
 
-import _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/helloworld"
-
 // Example demonstrates how to use the instrumenter.
 func Example() {
 	// Output:

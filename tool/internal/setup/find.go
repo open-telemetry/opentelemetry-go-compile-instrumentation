@@ -129,7 +129,7 @@ func splitCompileCmds(input string) []string {
 
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
 // and then filtering the compile commands from the build plan log.
-func (sp *SetupProcessor) listBuildPlan(goBuildCmd []string) ([]string, error) {
+func (sp *SetupPhase) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	const goBuildCmdMinLen = 2 // go build/install + at least one argument
 	util.Assert(len(goBuildCmd) >= goBuildCmdMinLen, "at least two arguments are required")
 	util.Assert(strings.Contains(goBuildCmd[0], "go"), "sanity check")
@@ -183,7 +183,7 @@ func findFlagValue(cmd []string, flag string) string {
 }
 
 // findDeps finds the dependencies of the project by listing the build plan.
-func (sp *SetupProcessor) findDeps(goBuildCmd []string) ([]*Dependency, error) {
+func (sp *SetupPhase) findDeps(goBuildCmd []string) ([]*Dependency, error) {
 	buildPlan, err := sp.listBuildPlan(goBuildCmd)
 	if err != nil {
 		return nil, err

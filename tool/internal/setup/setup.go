@@ -7,22 +7,33 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-type SetupProcessor struct {
+type SetupPhase struct {
 	logger *slog.Logger
 }
 
-func (sp *SetupProcessor) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
-func (sp *SetupProcessor) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
-func (sp *SetupProcessor) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
-func (sp *SetupProcessor) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
+func (sp *SetupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
+func (sp *SetupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
+func (sp *SetupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
+func (sp *SetupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
-func (*SetupProcessor) store(matched []*rule.InstRule) error {
+// recordModified copies the file to the build temp directory for debugging
+// Error is tolerated as it's not critical.
+func (sp *SetupPhase) recordModified(name string) {
+	dstFile := filepath.Join(util.GetBuildTemp("modified"), name)
+	err := util.CopyFile(name, dstFile)
+	if err != nil {
+		sp.Warn("failed to copy file", "file", name, "error", err)
+	}
+}
+
+func (*SetupPhase) store(matched []*rule.InstRule) error {
 	f := util.GetBuildTemp("matched.txt")
 	file, err := os.Create(f)
 	if err != nil {
@@ -51,7 +62,7 @@ func Setup(logger *slog.Logger) error {
 		return nil
 	}
 
-	sp := &SetupProcessor{
+	sp := &SetupPhase{
 		logger: logger,
 	}
 	// Find all dependencies of the project being build
@@ -69,8 +80,8 @@ func Setup(logger *slog.Logger) error {
 	if err != nil {
 		return ex.Error(err)
 	}
-	// Run `go mod tidy` to refresh dependencies
-	err = sp.refreshDeps()
+	// Sync new dependencies to go.mod or vendor/modules.txt
+	err = sp.syncDeps(matched)
 	if err != nil {
 		return ex.Error(err)
 	}

@@ -27,6 +27,7 @@ build:
 .PHONY: demo
 demo: build
 	@echo "Building demo with instrumentation..."
+	@rm -rf $(DEMO_DIR)/otel.runtime.go
 	@cd $(DEMO_DIR) && ../$(BINARY_NAME) go build -a
 	@echo "Running demo..."
 	@./$(DEMO_DIR)/demo
