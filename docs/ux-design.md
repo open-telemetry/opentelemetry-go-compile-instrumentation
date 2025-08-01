@@ -28,7 +28,7 @@ significantly reduced implementation effort. As a result, compile-time
 instrumentation may not appeal to developers who have very specific requirements
 on what their instrumentation produces.
 
-The primary audience for the OpenTelementry Go compile-time instrumentation tool
+The primary audience for the OpenTelemetry Go compile-time instrumentation tool
 is composed of the following personas:
 
 - Application developers looking for a no-frills, turnkey instrumentation
@@ -111,7 +111,7 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
    integrations is recommended as it ensures the instrumentation packages are
    represented in your `go.mod` file, making builds reproductible.
    Using a `.otel.yml` file is useful when instrumenting applications without
-   modifying their codebase at all; which may be preferrable when building
+   modifying their codebase at all; which may be preferable when building
    third-party applications or integrating in the CI/CD pipeline. The
    reproductibility of builds is no longer guaranteed by the go toolchain, and
    the application may be built with newer versions of dependencies than those
@@ -173,7 +173,7 @@ ways:
 
 3. The `.otel.yml` file allows injecting configuration directly within the
    CI/CD pipeline without persisting any change to the project's source code
-   &ndash; but has the disadvantage of making hermetic or reproductible builds
+   &ndash; but has the disadvantage of making hermetic or reproducible builds
    more difficult (the `go.mod` and `go.sum` files ought to be considered as
    build artifacts, as they will be modified at the start of the build and are
    needed to correctly reproduce a build in the future).
@@ -213,7 +213,7 @@ Since the tool and configuration are registered in the `go.mod` file, users are
 able to keep these dependencies up-to-date using the standard tools and
 processes they use for any other dependency.
 
-They are also able to modify what confguration gets applied by changing the
+They are also able to modify what configuration gets applied by changing the
 configuration according to their set up style, either:
 
 - directly in the `go.mod` file by adding or removing `tool` dependencies,
@@ -247,7 +247,7 @@ The self-configuration can be influenced by passing any and all relevant build
 flags to the `otel` command as part of the build.
 
 It is important to note that this mode of operation does not produce
-reproductible builds. Users who want or need fully reproductible builds must use
+reproducible builds. Users who want or need fully reproducible builds must use
 the explicit set-up procedure.
 
 ### Uninstalling
@@ -303,7 +303,7 @@ instrumentation: # Required with at least 1 item
    foo: # A unique identifier for this instrumentation item within this file
       description: #Optional
          |-
-            A decription of this instrumentation configuration, intended for
+            A description of this instrumentation configuration, intended for
             end-users.
       pointcut: # Required
          # The definition of a pointcut, which selects which AST nodes are
@@ -359,7 +359,7 @@ advice:
 
 ### Configuration Re-use
 
-Instrumentation packages can re-use configuration defined in other pacakges by
+Instrumentation packages can re-use configuration defined in other packages by
 containing a `otel.instrumentation.go` file, which contains `import` directives
 for each of the instrumentation packages it re-uses:
 
@@ -375,7 +375,7 @@ import (
 )
 ```
 
-Using a `.go` file with `import` declarations allows to make sure the surrouding
+Using a `.go` file with `import` declarations allows to make sure the surrounding
 module's `go.mod` file accurately accounts for all included instrumentation
 packages without involving any additional bookkeeping.
 
