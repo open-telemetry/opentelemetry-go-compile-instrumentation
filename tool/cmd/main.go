@@ -25,7 +25,7 @@ const (
 )
 
 func buildWithToolexec(logger *slog.Logger, args []string) error {
-	// Add -toolexec=otel to the original bulid command and run it
+	// Add -toolexec=otel to the original build command and run it
 	execPath, err := os.Executable()
 	if err != nil {
 		return ex.Errorf(err, "failed to get executable path")

@@ -109,7 +109,7 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
 
 ℹ️ Using go tool dependencies or a `otel.instrumentation.go` file to configure
    integrations is recommended as it ensures the instrumentation packages are
-   represented in your `go.mod` file, making builds reproductible.
+   represented in your `go.mod` file, making builds reproducible.
    Using a `.otel.yml` file is useful when instrumenting applications without
    modifying their codebase at all; which may be preferable when building
    third-party applications or integrating in the CI/CD pipeline. The
