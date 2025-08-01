@@ -5,5 +5,4 @@ extend-exclude = [
     # Write here the files and directories you want to exclude from the typos check.
     "go.mod",
     "go.sum",
-    "tool/cmd/*"
   ]
