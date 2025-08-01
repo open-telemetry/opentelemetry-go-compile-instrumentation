@@ -1,0 +1,9 @@
+# For more information about this file,
+# please refer to https://github.com/crate-ci/typos/blob/master/docs/reference.md
+[files]
+extend-exclude = [
+    # Write here the files and directories you want to exclude from the typos check.
+    "go.mod",
+    "go.sum",
+    "tool/cmd/*"
+  ]
