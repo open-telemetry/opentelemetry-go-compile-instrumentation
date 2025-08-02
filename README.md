@@ -5,21 +5,27 @@
 > [!IMPORTANT]
 > This is a work in progress and not ready for production use. 🚨
 
-This project provides a tool to automatically instrument Go applications with [OpenTelemetry](https://opentelemetry.io/) at compile time. It modifies the Go build process to inject OpenTelemetry code into the application without requiring manual changes to the source code.
+This project provides a tool to automatically instrument Go applications with
+[OpenTelemetry](https://opentelemetry.io/) at compile time.
+
+It modifies the Go build process to inject OpenTelemetry code into the application without
+requiring manual changes to the source code.
 
 ## Getting Started
 
 1. Build the otel tool
-```bash
-$ git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation.git
-$ cd opentelemetry-go-compile-instrumentation
-$ make build
-```
+
+    ```bash
+    git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation.git
+    cd opentelemetry-go-compile-instrumentation
+    make build
+    ```
 
 2. Build the application with the tool and run it
-```bash
-$ make demo
-```
+
+    ```bash
+    make demo
+    ```
 
 ## Contributing
 

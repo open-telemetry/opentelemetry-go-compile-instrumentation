@@ -5,25 +5,27 @@ The project structure is as follows:
 - `demo`: Demo Application
 - `instrumentation`: Instrumentation code for each plugin (e.g. http, rpc, db, messaging, network, ...)
 - `pkg`: Public API
-    - `inst-api`: Encapsulation of instrumentation (generating span, metrics, ...)
-    - `inst-api-semconv`: Encapsulation of OpenTelemetry SemConv
-        - `instrumenter`
-            - `http`
-            - `rpc`
-            - `db`
-            - `messaging`
-            - `network`
-            - ...
+  - `inst-api`: Encapsulation of instrumentation (generating span, metrics, ...)
+  - `inst-api-semconv`: Encapsulation of OpenTelemetry SemConv
+    - `instrumenter`
+      - `http`
+      - `rpc`
+      - `db`
+      - `messaging`
+      - `network`
+      - ...
 - `tool`: Compile-time instrumentation tool
   - `internal/setup`: Setup phase, it prepares the environment for future instrumentation phase
   - `internal/instrument`: Instrument phase, where the actual instrumentation happens
-  - `internal/rule`: The rule describes how to match the target function and which instrumentation to apply
+  - `internal/rule`: The rule describes how to match the target function
+  and which instrumentation to apply
 
 For Public API, we have some key abstractions as follows:
 
 1. `Instrumenter`: Unified entrance of instrumentation (generating span, metrics, ...)
 2. `Extractor`: Extracting attributes using multiple Getters according to [OpenTelemetry Semconv](https://opentelemetry.io/docs/specs/semconv/).
-3. `Getter`: Getting attributes from the REQUEST object(For example, HTTPRequest object that HTTP Server received).
+3. `Getter`: Getting attributes from the REQUEST object(For example,
+ HTTPRequest object that HTTP Server received).
 4. `AttrsShadower`: An extension for Extractor to customize the attributes extracted by the extractor.
 5. `OperationListener`: An hook for better extension(For example, aggregate the metrics).
 

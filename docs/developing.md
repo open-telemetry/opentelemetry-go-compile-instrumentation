@@ -1,7 +1,7 @@
 # Developing Details
 
-
 ## Project Structure
+
 See the [project structure](./api-design-and-project-structure.md).
 
 ## Error Handling

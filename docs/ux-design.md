@@ -15,6 +15,7 @@ significant code change beyond adding simple, well-defined configuration that
 may be as simple as adding the relevant tool dependencies.
 
 The main value proposition is:
+
 - Very little effort is required for holistic instrumentation
 - Ability to instrument within third-party dependencies
 - Keeping the codebase completely de-coupled from instrumentation
@@ -36,6 +37,7 @@ is composed of the following personas:
 - System operators look to instrument applications without involving developers
 
 The tool may however also be relevant to the following personas:
+
 - Security personnel looking for maximal instrumentation coverage
 - Library developers looking to improve the instrumentation experience for their
   library
@@ -187,25 +189,24 @@ used directly to build, run, and test go applications directly:
 1. If the tool is installed as a Go `tool` dependency (`go1.24` and newer):
 
    ```console
-   $ go tool otel go build -o bin/app .
-   $ go tool otel go test -shuffle=on ./...
+   go tool otel go build -o bin/app .
+   go tool otel go test -shuffle=on ./...
    ```
 
 2. Installing `otel` in `$GOBIN`
 
    ```console
-   $ go install github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel
-   $ otel go build -o bin/app
-   $ otel go test -shuffle=on ./...
+   go install github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel
+   otel go build -o bin/app
+   otel go test -shuffle=on ./...
    ```
 
 3. Running `otel` with `go run`:
 
    ```console
-   $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go build -o bin/app
-   $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go test -shuffle=on ./...
+   go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go build -o bin/app
+   go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go test -shuffle=on ./...
    ```
-
 
 ### Ongoing Maintenance
 
@@ -267,6 +268,7 @@ standard Go packages that are part of a Go module and contain either (or both):
   next section);
 - a `otel.instrumentation.go` file that imports at least one valid
   instrumentation package:
+
   ```go
   //go:build tools
   package tools

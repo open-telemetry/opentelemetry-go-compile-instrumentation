@@ -47,7 +47,6 @@ func Trampoline() {
 var Hook func()
 ```
 
-
 ## 2. Linkage via golinkname
 
 The `Hook` function is linked to the monitoring code using the `//go:linkname`
@@ -63,22 +62,24 @@ a custom toolchain.
 ## Phase 1: Setup Dependencies
 
 ### 1.1 Dependency Analysis
-The first step is to analyze the project's dependencies by collecting the list 
-of modules involved in the build. This is done using the `go build -n` command, 
+
+The first step is to analyze the project's dependencies by collecting the list
+of modules involved in the build. This is done using the `go build -n` command,
 which prints the build plan without executing it.
 
 ```command
-$ go build -n > build_plan.txt
+go build -n > build_plan.txt
 ```
 
-From the build_plan.txt file, the tool extracts all third-party module paths 
+From the build_plan.txt file, the tool extracts all third-party module paths
 (e.g., `github.com/go-redis/redis`, `github.com/gin-gonic/gin`).
 
 ## 1.2 Add Dependencies
+
 The hook configuration is specified by [ux-design.md](ux-design.md),
-which includes the `ImportPath` field where the target function resides. The tool 
+which includes the `ImportPath` field where the target function resides. The tool
 matches this `ImportPath` against the pre-collected third-party dependencies and
-generates a file (e.g., otel_import.go) to import the SDK and corresponding hook 
+generates a file (e.g., otel_import.go) to import the SDK and corresponding hook
 packages for matched dependency
 
 ```go
@@ -108,12 +109,11 @@ The build process can be integrated with custom toolchains in the following ways
 - Direct flag: `go build -toolexec=otel toolexec` (on-demand use; ideal for scripts/CI)
 
 All of these leverage the `-toolexec` flag, which allows users to specify a
-custom tool (e.g., otel) that intercepts compilation commands. The tool identifies 
+custom tool (e.g., otel) that intercepts compilation commands. The tool identifies
 the target function from the compilation commands and injects trampoline code
 into the AST of these functions. Since the hook dependency was already imported
 in Phase 1, the tool can link the target function to the hook code via `//go:linkname`
 without requiring any additional modifications.
-
 
 # Interface Design
 
