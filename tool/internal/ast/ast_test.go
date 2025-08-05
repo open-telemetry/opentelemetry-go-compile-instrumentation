@@ -1,0 +1,16 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package ast
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestParseAst(t *testing.T) {
+	parser := NewAstParser()
+	_, err := parser.ParseFileFast("ast_test.go")
+	require.NoError(t, err)
+}

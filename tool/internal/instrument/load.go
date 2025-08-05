@@ -29,6 +29,6 @@ func (ip *InstrumentPhase) load() ([]*rule.InstRule, error) {
 	if err != nil {
 		return nil, ex.Errorf(err, "failed to unmarshal rules from file %s", f)
 	}
-	ip.Info("Loaded matched rules", "rules", rules)
+	ip.Debug("Loaded matched rules", "rules", rules)
 	return rules, nil
 }

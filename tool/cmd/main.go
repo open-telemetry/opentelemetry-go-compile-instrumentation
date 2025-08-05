@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"time"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
@@ -59,14 +58,21 @@ func initLogger(phase string) (*slog.Logger, error) {
 	}
 
 	// Create a custom handler with shorter time format
-	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{
+	// Remove time and level keys as they make no sense for debugging
+	var handler slog.Handler
+	handler = slog.NewTextHandler(writer, &slog.HandlerOptions{
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.TimeKey {
-				if t, ok := a.Value.Any().(time.Time); ok {
-					a.Value = slog.StringValue(t.Format("06/1/2 15:04:05"))
-				}
+			if a.Key == slog.TimeKey || a.Key == slog.LevelKey {
+				return slog.Attr{}
 			}
 			return a
+		},
+		Level: slog.LevelInfo,
+	})
+	handler = handler.WithAttrs([]slog.Attr{
+		{
+			Key:   "phase",
+			Value: slog.StringValue(phase),
 		},
 	})
 	logger := slog.New(handler)

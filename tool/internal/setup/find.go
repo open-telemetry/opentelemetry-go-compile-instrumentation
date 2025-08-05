@@ -31,31 +31,6 @@ func (d *Dependency) String() string {
 	return fmt.Sprintf("{%s@%s: %v}", d.ImportPath, d.Version, d.Sources)
 }
 
-// isCompileCommand checks if the line is a compile command.
-func isCompileCommand(line string) bool {
-	check := []string{"-o", "-p", "-buildid"}
-	if util.IsWindows() {
-		check = append(check, "compile.exe")
-	} else {
-		check = append(check, "compile")
-	}
-
-	// Check if the line contains all the required fields
-	for _, id := range check {
-		if !strings.Contains(line, id) {
-			return false
-		}
-	}
-
-	// @@PGO compile command is different from normal compile command, we
-	// should skip it, otherwise the same package will be find twice
-	// (one for PGO and one for normal)
-	if strings.Contains(line, "-pgoprofile") {
-		return false
-	}
-	return true
-}
-
 // findCompileCommands finds the compile commands from the build plan log.
 func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	const buildPlanBufSize = 10 * 1024 * 1024 // 10MB buffer size
@@ -73,7 +48,7 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	scanner.Buffer(buffer, cap(buffer))
 	for scanner.Scan() {
 		line := scanner.Text()
-		if isCompileCommand(line) {
+		if util.IsCompileCommand(line) {
 			line = strings.Trim(line, " ")
 			compileCmds = append(compileCmds, line)
 		}
@@ -83,48 +58,6 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 		return nil, ex.Errorf(err, "failed to parse build plan log")
 	}
 	return compileCmds, nil
-}
-
-// splitCompileCmds splits the command line by space, but keep the quoted part
-// as a whole. For example, "a b" c will be split into ["a b", "c"].
-func splitCompileCmds(input string) []string {
-	var args []string
-	var inQuotes bool
-	var arg strings.Builder
-
-	for i := range len(input) {
-		c := input[i]
-
-		if c == '"' {
-			inQuotes = !inQuotes
-			continue
-		}
-
-		if c == ' ' && !inQuotes {
-			if arg.Len() > 0 {
-				args = append(args, arg.String())
-				arg.Reset()
-			}
-			continue
-		}
-
-		err := arg.WriteByte(c)
-		if err != nil {
-			ex.Fatal(err)
-		}
-	}
-
-	if arg.Len() > 0 {
-		args = append(args, arg.String())
-	}
-
-	// Fix the escaped backslashes on Windows
-	if util.IsWindows() {
-		for i, arg := range args {
-			args[i] = strings.ReplaceAll(arg, `\\`, `\`)
-		}
-	}
-	return args
 }
 
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
@@ -172,16 +105,6 @@ func (sp *SetupPhase) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	return compileCmds, nil
 }
 
-// findFlagValue finds the value of a flag in the command line.
-func findFlagValue(cmd []string, flag string) string {
-	for i, v := range cmd {
-		if v == flag {
-			return cmd[i+1]
-		}
-	}
-	return ""
-}
-
 // findDeps finds the dependencies of the project by listing the build plan.
 func (sp *SetupPhase) findDeps(goBuildCmd []string) ([]*Dependency, error) {
 	buildPlan, err := sp.listBuildPlan(goBuildCmd)
@@ -191,9 +114,10 @@ func (sp *SetupPhase) findDeps(goBuildCmd []string) ([]*Dependency, error) {
 	// import path -> list of go files
 	deps := make([]*Dependency, 0)
 	for _, plan := range buildPlan {
-		util.Assert(strings.Contains(plan, "compile"), "must be compile command")
-		args := splitCompileCmds(plan)
-		importPath := findFlagValue(args, "-p")
+		util.Assert(util.IsCompileCommand(plan), "must be compile command")
+		// Find the compiling package name
+		args := util.SplitCompileCmds(plan)
+		importPath := util.FindFlagValue(args, "-p")
 		util.Assert(importPath != "", "import path is empty")
 		exist := false
 		dep := &Dependency{
@@ -207,7 +131,7 @@ func (sp *SetupPhase) findDeps(goBuildCmd []string) ([]*Dependency, error) {
 			}
 		}
 		util.Assert(!exist, "import path should not be duplicated")
-
+		// Find the go files belong to the package
 		for _, arg := range args {
 			if strings.HasSuffix(arg, ".go") {
 				dep.Sources = append(dep.Sources, arg)

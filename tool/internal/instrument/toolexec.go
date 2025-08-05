@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -22,23 +23,29 @@ func Toolexec(logger *slog.Logger, args []string) error {
 	ip := &InstrumentPhase{
 		logger: logger,
 	}
-	// Load matched hook rules from setup phase
-	rules, err := ip.load()
-	if err != nil {
-		return err
-	}
-	// Check if the current package should be instrumented by matching the current
-	// command with list of matched rules
-	if ip.match(args, rules) {
-		// Okay, this package should be instrumented.
-		err = ip.instrument(args)
+
+	// Check if the command is a compile command.
+	if util.IsCompileCommand(strings.Join(args, " ")) {
+		// Load matched hook rules from setup phase
+		rules, err := ip.load()
 		if err != nil {
 			return err
 		}
-		return nil
+		// Check if the current package should be instrumented by matching the
+		// current command with list of matched rules
+		matchedRules := ip.match(args, rules)
+		if len(matchedRules) > 0 {
+			ip.Info("Instrumenting package", "rules", matchedRules, "args", args)
+			// Okay, this package should be instrumented.
+			err = ip.instrument(args)
+			if err != nil {
+				return err
+			}
+			// return nil
+		}
 	}
 	// Otherwise, just run the command as is
-	err = util.RunCmd(args...)
+	err := util.RunCmd(args...)
 	if err != nil {
 		return err
 	}

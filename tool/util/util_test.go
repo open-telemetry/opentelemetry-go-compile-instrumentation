@@ -1,22 +1,12 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package setup
+package util
 
 import (
 	"reflect"
 	"testing"
-
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
-	"github.com/stretchr/testify/require"
 )
-
-func TestParseAst(t *testing.T) {
-	parser := ast.NewAstParser()
-	_, err := parser.ParseFileFast("setup_test.go")
-	require.NoError(t, err)
-}
 
 func TestSplitCompileCmds(t *testing.T) {
 	tests := []struct {
@@ -60,16 +50,16 @@ func TestSplitCompileCmds(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Skip Windows-only tests if not on Windows
-			if tt.isWin && !util.IsWindows() {
+			if tt.isWin && !IsWindows() {
 				t.Skip("Skipping Windows-specific test on non-Windows system")
 			}
 
 			// Skip non-Windows-only tests if on Windows
-			if !tt.isWin && util.IsWindows() {
+			if !tt.isWin && IsWindows() {
 				t.Skip("Skipping non-Windows-specific test on Windows system")
 			}
 
-			actual := splitCompileCmds(tt.input)
+			actual := SplitCompileCmds(tt.input)
 			if !reflect.DeepEqual(actual, tt.expected) {
 				t.Errorf("Expected: %#v, got: %#v", tt.expected, actual)
 			}
