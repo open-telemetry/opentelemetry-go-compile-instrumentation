@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -39,9 +40,11 @@ func isSetup() bool {
 }
 
 // Setup prepares the environment for further instrumentation.
-func Setup(logger *slog.Logger) error {
+func Setup(ctx context.Context) error {
+	logger := util.LoggerFromContext(ctx)
+
 	if isSetup() {
-		logger.Info("Setup has already been completed, skipping setup.")
+		logger.InfoContext(ctx, "Setup has already been completed, skipping setup.")
 		return nil
 	}
 
@@ -49,7 +52,7 @@ func Setup(logger *slog.Logger) error {
 		logger: logger,
 	}
 	// Find all dependencies of the project being build
-	deps, err := sp.findDeps(os.Args[1:])
+	deps, err := sp.findDeps(ctx, os.Args[1:])
 	if err != nil {
 		return err
 	}
@@ -64,7 +67,7 @@ func Setup(logger *slog.Logger) error {
 		return err
 	}
 	// Sync new dependencies to go.mod or vendor/modules.txt
-	err = sp.syncDeps(matched)
+	err = sp.syncDeps(ctx, matched)
 	if err != nil {
 		return err
 	}
@@ -78,7 +81,9 @@ func Setup(logger *slog.Logger) error {
 }
 
 // BuildWithToolexec builds the project with the toolexec mode
-func BuildWithToolexec(logger *slog.Logger, args []string) error {
+func BuildWithToolexec(ctx context.Context, args []string) error {
+	logger := util.LoggerFromContext(ctx)
+
 	// Add -toolexec=otel to the original build command and run it
 	execPath, err := os.Executable()
 	if err != nil {
@@ -89,7 +94,7 @@ func BuildWithToolexec(logger *slog.Logger, args []string) error {
 	newArgs = append(newArgs, args[:2]...)    // Add "go build"
 	newArgs = append(newArgs, insert)         // Add "-toolexec=..."
 	newArgs = append(newArgs, args[2:]...)    // Add the rest
-	logger.Info("Running go build with toolexec", "args", newArgs)
+	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
 	env := os.Environ()
@@ -97,7 +102,7 @@ func BuildWithToolexec(logger *slog.Logger, args []string) error {
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
 
-	err = util.RunCmdWithEnv(env, newArgs...)
+	err = util.RunCmdWithEnv(ctx, env, newArgs...)
 	if err != nil {
 		return err
 	}

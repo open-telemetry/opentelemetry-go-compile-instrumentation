@@ -21,6 +21,7 @@ type stackfulError struct {
 }
 
 func (e *stackfulError) Error() string { return strings.Join(e.message, "\n") }
+func (e *stackfulError) Unwrap() error { return e.wrapped }
 
 func getFrames() []string {
 	const initFrames = 30

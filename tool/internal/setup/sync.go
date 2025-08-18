@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,8 +39,8 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 	return nil
 }
 
-func runModTidy() error {
-	err := util.RunCmd("go", "mod", "tidy")
+func runModTidy(ctx context.Context) error {
+	err := util.RunCmd(ctx, "go", "mod", "tidy")
 	if err != nil {
 		return err
 	}
@@ -64,7 +65,7 @@ func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (b
 	return false, nil
 }
 
-func (sp *SetupPhase) syncDeps(matched []*rule.InstRule) error {
+func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRule) error {
 	const goModFile = "go.mod"
 	modfile, err := parseGoMod(goModFile)
 	if err != nil {
@@ -106,7 +107,7 @@ func (sp *SetupPhase) syncDeps(matched []*rule.InstRule) error {
 		if err != nil {
 			return err
 		}
-		err = runModTidy()
+		err = runModTidy(ctx)
 		if err != nil {
 			return err
 		}

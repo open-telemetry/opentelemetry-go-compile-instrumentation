@@ -5,6 +5,7 @@ package setup
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -129,10 +130,9 @@ func splitCompileCmds(input string) []string {
 
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
 // and then filtering the compile commands from the build plan log.
-func (sp *SetupPhase) listBuildPlan(goBuildCmd []string) ([]string, error) {
-	const goBuildCmdMinLen = 2 // go build/install + at least one argument
+func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([]string, error) {
+	const goBuildCmdMinLen = 1 // build/install + at least one argument
 	util.Assert(len(goBuildCmd) >= goBuildCmdMinLen, "at least two arguments are required")
-	util.Assert(strings.Contains(goBuildCmd[0], "go"), "sanity check")
 	util.Assert(goBuildCmd[1] == "build" || goBuildCmd[1] == "install", "sanity check")
 
 	// Create a build plan log file in the temporary directory
@@ -149,7 +149,7 @@ func (sp *SetupPhase) listBuildPlan(goBuildCmd []string) ([]string, error) {
 	sp.Info("List build plan", "args", args)
 
 	//nolint:gosec // Command arguments are validated with above assertions
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	// This is a little anti-intuitive as the error message is not printed to
 	// the stderr, instead it is printed to the stdout, only the build tool
 	// knows the reason why.
@@ -183,8 +183,8 @@ func findFlagValue(cmd []string, flag string) string {
 }
 
 // findDeps finds the dependencies of the project by listing the build plan.
-func (sp *SetupPhase) findDeps(goBuildCmd []string) ([]*Dependency, error) {
-	buildPlan, err := sp.listBuildPlan(goBuildCmd)
+func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dependency, error) {
+	buildPlan, err := sp.listBuildPlan(ctx, goBuildCmd)
 	if err != nil {
 		return nil, err
 	}

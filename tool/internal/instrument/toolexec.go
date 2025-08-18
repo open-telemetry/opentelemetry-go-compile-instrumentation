@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
@@ -18,7 +19,9 @@ func (ip *InstrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *InstrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *InstrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
-func Toolexec(logger *slog.Logger, args []string) error {
+func Toolexec(ctx context.Context, args []string) error {
+	logger := util.LoggerFromContext(ctx)
+
 	ip := &InstrumentPhase{
 		logger: logger,
 	}
@@ -38,7 +41,7 @@ func Toolexec(logger *slog.Logger, args []string) error {
 		return nil
 	}
 	// Otherwise, just run the command as is
-	err = util.RunCmd(args...)
+	err = util.RunCmd(ctx, args...)
 	if err != nil {
 		return err
 	}

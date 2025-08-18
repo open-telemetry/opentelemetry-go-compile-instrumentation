@@ -4,6 +4,7 @@
 package util
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -13,10 +14,10 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
-func RunCmdWithEnv(env []string, args ...string) error {
+func RunCmdWithEnv(ctx context.Context, env []string, args ...string) error {
 	path := args[0]
 	args = args[1:]
-	cmd := exec.Command(path, args...)
+	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -28,8 +29,8 @@ func RunCmdWithEnv(env []string, args ...string) error {
 	return nil
 }
 
-func RunCmd(args ...string) error {
-	return RunCmdWithEnv(nil, args...)
+func RunCmd(ctx context.Context, args ...string) error {
+	return RunCmdWithEnv(ctx, nil, args...)
 }
 
 func IsWindows() bool {
