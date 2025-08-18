@@ -8,6 +8,9 @@ on:
     paths:
       - '**/*.md'
 
+permissions:
+  contents: read
+
 jobs:
   markdown-lint:
     runs-on: ubuntu-latest

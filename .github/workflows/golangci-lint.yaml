@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: read
-  # Optional: allow read access to pull request. Use with `only-new-issues` option.
-  # pull-requests: read
 env:
   # TODO: Configure dependabot or renovate to update this version.
   GOLANGCI_LINT_VERSION: v2.1.6
