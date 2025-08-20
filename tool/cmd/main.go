@@ -64,8 +64,7 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 
 	// Create a custom handler with shorter time format
 	// Remove time and level keys as they make no sense for debugging
-	var handler slog.Handler
-	handler = slog.NewTextHandler(writer, &slog.HandlerOptions{
+	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey || a.Key == slog.LevelKey {
 				return slog.Attr{}

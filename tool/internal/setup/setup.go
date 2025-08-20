@@ -89,11 +89,12 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	if err != nil {
 		return ex.Errorf(err, "failed to get executable path")
 	}
-	insert := "-toolexec=" + execPath
-	newArgs := make([]string, 0, len(args)+1) // Avoid in-place modification
-	newArgs = append(newArgs, args[:2]...)    // Add "go build"
-	newArgs = append(newArgs, insert)         // Add "-toolexec=..."
-	newArgs = append(newArgs, args[2:]...)    // Add the rest
+	insert := "-toolexec=" + execPath + " --work-dir=" + util.GetOtelWorkDir() + " toolexec"
+	newArgs := make([]string, 0, len(args)+2) // Avoid in-place modification
+	newArgs = append(newArgs, "go")
+	newArgs = append(newArgs, args[:2]...) // Add "go build"
+	newArgs = append(newArgs, insert)      // Add "-toolexec=..."
+	newArgs = append(newArgs, args[2:]...) // Add the rest
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
