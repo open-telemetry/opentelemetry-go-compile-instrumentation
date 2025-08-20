@@ -90,7 +90,8 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 		return ex.Errorf(err, "failed to get executable path")
 	}
 	insert := "-toolexec=" + execPath + " --work-dir=" + util.GetOtelWorkDir() + " toolexec"
-	newArgs := make([]string, 0, len(args)+2) // Avoid in-place modification
+	const additionalCount = 2
+	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
 	newArgs = append(newArgs, "go")
 	newArgs = append(newArgs, args[:2]...) // Add "go build"
 	newArgs = append(newArgs, insert)      // Add "-toolexec=..."

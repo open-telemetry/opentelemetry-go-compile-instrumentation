@@ -26,7 +26,7 @@ var commandGo = cli.Command{
 			logger.Warn("failed to back up go.mod, go.sum, go.work, go.work.sum, proceeding despite this", "error", err)
 		}
 		defer func() {
-			err := util.RestoreFile(backupFiles)
+			err = util.RestoreFile(backupFiles)
 			if err != nil {
 				logger.Warn("failed to restore go.mod, go.sum, go.work, go.work.sum", "error", err)
 			}

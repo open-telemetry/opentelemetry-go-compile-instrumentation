@@ -15,7 +15,7 @@ var commandSetup = cli.Command{
 	Name:        "setup",
 	Description: "Set up the environment for instrumentation",
 	Before:      addLoggerPhaseAttribute,
-	Action: func(ctx context.Context, cmd *cli.Command) error {
+	Action: func(ctx context.Context, _ *cli.Command) error {
 		err := setup.Setup(ctx)
 		if err != nil {
 			return cli.Exit(err, exitCodeFailure)

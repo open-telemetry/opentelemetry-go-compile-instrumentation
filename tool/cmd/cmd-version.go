@@ -22,21 +22,21 @@ var commandVersion = cli.Command{
 		},
 	},
 	Before: addLoggerPhaseAttribute,
-	Action: func(ctx context.Context, cmd *cli.Command) error {
+	Action: func(_ context.Context, cmd *cli.Command) error {
 		_, err := fmt.Fprintf(cmd.Writer, "otel version %s", Version)
 		if err != nil {
 			return cli.Exit(err, exitCodeFailure)
 		}
 
 		if CommitHash != "unknown" {
-			_, err := fmt.Fprintf(cmd.Writer, "+%s", CommitHash)
+			_, err = fmt.Fprintf(cmd.Writer, "+%s", CommitHash)
 			if err != nil {
 				return cli.Exit(err, exitCodeFailure)
 			}
 		}
 
 		if BuildTime != "unknown" {
-			_, err := fmt.Fprintf(cmd.Writer, " (%s)", BuildTime)
+			_, err = fmt.Fprintf(cmd.Writer, " (%s)", BuildTime)
 			if err != nil {
 				return cli.Exit(err, exitCodeFailure)
 			}
@@ -48,7 +48,7 @@ var commandVersion = cli.Command{
 		}
 
 		if cmd.Bool("verbose") {
-			_, err := fmt.Fprintf(cmd.Writer, "%s\n", runtime.Version())
+			_, err = fmt.Fprintf(cmd.Writer, "%s\n", runtime.Version())
 			if err != nil {
 				return cli.Exit(err, exitCodeFailure)
 			}

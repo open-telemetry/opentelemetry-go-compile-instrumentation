@@ -57,7 +57,8 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 		return ctx, ex.Errorf(err, "failed to create work directory %q", buildTempDir)
 	}
 
-	writer, err := os.OpenFile(filepath.Join(buildTempDir, debugLogFilename), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logFilename := filepath.Join(buildTempDir, debugLogFilename)
+	writer, err := os.OpenFile(logFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return ctx, ex.Errorf(err, "failed to open log file %q", buildTempDir)
 	}
@@ -81,6 +82,6 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 
 func addLoggerPhaseAttribute(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 	logger := util.LoggerFromContext(ctx)
-	logger = logger.With(slog.Attr{Key: "phase", Value: slog.StringValue(cmd.Name)})
+	logger = logger.With("phase", cmd.Name)
 	return util.ContextWithLogger(ctx, logger), nil
 }
