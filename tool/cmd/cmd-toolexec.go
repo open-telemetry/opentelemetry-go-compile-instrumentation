@@ -16,14 +16,17 @@ var commandToolexec = &cli.Command{
 	Description:     "Wrap a command run by the go toolchain",
 	Args:            true,
 	SkipFlagParsing: true,
+	Hidden:          true,
 	Before: func(*cli.Context) error {
-		if _, ok := os.LookupEnv("TOOLEXEC_IMPORT_PATH"); !ok {
+		_, ok := os.LookupEnv("TOOLEXEC_IMPORT_PATH")
+		if !ok {
 			return cli.Exit("toolexec can only be invoked by the go toolchain", exitCodeUsageError)
 		}
 		return nil
 	},
 	Action: func(cCtx *cli.Context) error {
-		if err := instrument.Toolexec(cCtx.Context, cCtx.Args().Slice()); err != nil {
+		err := instrument.Toolexec(cCtx.Context, cCtx.Args().Slice())
+		if err != nil {
 			return cli.Exit(err, exitCodeFailure)
 		}
 		return nil

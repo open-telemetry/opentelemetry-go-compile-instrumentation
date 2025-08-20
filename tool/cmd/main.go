@@ -17,12 +17,14 @@ import (
 const (
 	exitCodeFailure    = -1
 	exitCodeUsageError = 2
+
+	debugLogFilename = "debug.log"
 )
 
 func main() {
 	app := cli.App{
 		Name:        "otel",
-		Usage:       "OpenTelemetry Go Compile-Time instrumentation tool",
+		Usage:       "OpenTelemetry Go Compile-Time Instrumentation tool",
 		HideVersion: true,
 		Flags: []cli.Flag{
 			&cli.PathFlag{
@@ -42,18 +44,20 @@ func main() {
 		Before: initLogger,
 	}
 
-	if err := app.Run(os.Args); err != nil {
-		panic(err)
+	err := app.Run(os.Args)
+	if err != nil {
+		ex.Fatal(err)
 	}
 }
 
 func initLogger(cCtx *cli.Context) error {
 	buildTempDir := cCtx.Path("work-dir")
-	if err := os.MkdirAll(buildTempDir, 0o755); err != nil {
+	err := os.MkdirAll(buildTempDir, 0o755)
+	if err != nil {
 		return ex.Errorf(err, "failed to create work directory %q", buildTempDir)
 	}
 
-	writer, err := os.OpenFile(buildTempDir, os.O_APPEND|os.O_CREATE|os.O_APPEND, 0o644)
+	writer, err := os.OpenFile(filepath.Join(buildTempDir, debugLogFilename), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return ex.Errorf(err, "failed to open log file %q", buildTempDir)
 	}

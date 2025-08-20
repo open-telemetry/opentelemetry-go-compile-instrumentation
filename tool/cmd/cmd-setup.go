@@ -13,7 +13,8 @@ var commandSetup = &cli.Command{
 	Name:        "setup",
 	Description: "Set up the environment for instrumentation",
 	Action: func(cCtx *cli.Context) error {
-		if err := setup.Setup(cCtx.Context); err != nil {
+		err := setup.Setup(cCtx.Context)
+		if err != nil {
 			return cli.Exit(err, exitCodeFailure)
 		}
 		return nil

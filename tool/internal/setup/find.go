@@ -132,7 +132,7 @@ func splitCompileCmds(input string) []string {
 // and then filtering the compile commands from the build plan log.
 func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([]string, error) {
 	const goBuildCmdMinLen = 1 // build/install + at least one argument
-	util.Assert(len(goBuildCmd) >= goBuildCmdMinLen, "at least two arguments are required")
+	util.Assert(len(goBuildCmd) >= goBuildCmdMinLen, "at least one argument is required")
 	util.Assert(goBuildCmd[1] == "build" || goBuildCmd[1] == "install", "sanity check")
 
 	// Create a build plan log file in the temporary directory

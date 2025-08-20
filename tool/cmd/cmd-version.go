@@ -21,7 +21,8 @@ var commandVersion = &cli.Command{
 		},
 	},
 	Action: func(cCtx *cli.Context) error {
-		if _, err := fmt.Fprintf(cCtx.App.Writer, "otel version %s", Version); err != nil {
+		_, err := fmt.Fprintf(cCtx.App.Writer, "otel version %s", Version)
+		if err != nil {
 			return cli.Exit(err, exitCodeFailure)
 		}
 
@@ -39,7 +40,8 @@ var commandVersion = &cli.Command{
 			}
 		}
 
-		if _, err := fmt.Fprint(cCtx.App.Writer, "\n"); err != nil {
+		_, err = fmt.Fprint(cCtx.App.Writer, "\n")
+		if err != nil {
 			return cli.Exit(err, exitCodeFailure)
 		}
 

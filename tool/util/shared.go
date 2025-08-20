@@ -39,7 +39,7 @@ func copyBackupFiles(names []string, src, dst string) error {
 	for _, name := range names {
 		srcFile := filepath.Join(src, name)
 		dstFile := filepath.Join(dst, name)
-		err = errors.Join(CopyFile(srcFile, dstFile))
+		err = errors.Join(err, CopyFile(srcFile, dstFile))
 	}
 	return err
 }
