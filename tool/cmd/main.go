@@ -15,8 +15,7 @@ import (
 )
 
 const (
-	exitCodeFailure    = -1
-	exitCodeUsageError = 2
+	exitCodeFailure = -1
 
 	debugLogFilename = "debug.log"
 )
@@ -33,6 +32,7 @@ func main() {
 				Usage:     "The path to a directory where working files will be written",
 				TakesFile: true,
 				Value:     filepath.Join(".", util.BuildTempDir),
+				Sources:   cli.NewValueSourceChain(cli.EnvVar(util.EnvOtelWorkDir)),
 			},
 		},
 		Commands: []*cli.Command{

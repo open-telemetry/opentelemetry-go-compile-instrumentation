@@ -89,7 +89,7 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	if err != nil {
 		return ex.Errorf(err, "failed to get executable path")
 	}
-	insert := "-toolexec=" + execPath + " --work-dir=" + util.GetOtelWorkDir() + " toolexec"
+	insert := "-toolexec=" + execPath + " toolexec"
 	const additionalCount = 2
 	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
 	newArgs = append(newArgs, "go")
