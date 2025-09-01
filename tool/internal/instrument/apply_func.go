@@ -1,0 +1,325 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package instrument
+
+import (
+	"fmt"
+	"go/parser"
+	"path/filepath"
+
+	"github.com/dave/dst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+)
+
+const (
+	TJumpLabel         = "/* TRAMPOLINE_JUMP_IF */"
+	OtelTrampolineFile = "otel.trampoline.go"
+	OtelAPIFile        = "otel.api.go"
+)
+
+func makeName(r *rule.InstFuncRule,
+	funcDecl *dst.FuncDecl, isBefore bool,
+) string {
+	prefix := TrampolineAfterName
+	if isBefore {
+		prefix = TrampolineBeforeName
+	}
+	return fmt.Sprintf("%s_%s%s",
+		prefix, funcDecl.Name.Name, util.Crc32(r.String()))
+}
+
+func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
+	// Multiple func rules may apply to the same function, we need to find the
+	// appropriate jump point to insert trampoline jump.
+	if len(jumpIf.Decs.If) == 1 && jumpIf.Decs.If[0] == TJumpLabel {
+		// Insert trampoline jump within the else block
+		elseBlock := jumpIf.Else.(*dst.BlockStmt)
+		if len(elseBlock.List) > 1 {
+			// One trampoline jump already exists, recursively find last one
+			ifStmt, ok := elseBlock.List[len(elseBlock.List)-1].(*dst.IfStmt)
+			util.Assert(ok, "unexpected statement in trampoline-jump-if")
+			return findJumpPoint(ifStmt)
+		}
+		// Otherwise, this is the appropriate jump point
+		return elseBlock
+	}
+	return nil
+}
+
+func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
+	util.Assert(len(t.Advice) > 0, "sanity check")
+
+	// Add explicit names for return values, they can be further referenced if
+	// we're willing
+	var retVals []dst.Expr // nil by default
+	if retList := funcDecl.Type.Results; retList != nil {
+		idx := 0
+		for _, field := range retList.List {
+			if field.Names == nil {
+				// Rename
+				name := fmt.Sprintf("retVal%d", idx)
+				field.Names = []*dst.Ident{ast.Ident(name)}
+				idx++
+				// Collect (for further use)
+				retVals = append(retVals, dst.Clone(ast.Ident(name)).(*dst.Ident))
+			} else {
+				// Collect only (for further use)
+				for _, name := range field.Names {
+					retVals = append(retVals, ast.Ident(name.Name))
+				}
+			}
+		}
+	}
+
+	// If return values are named, collect their names, otherwise we try to
+	// name them manually for further use
+	if retList := funcDecl.Type.Results; retList != nil {
+		retVals = make([]dst.Expr, 0)
+		for i, field := range retList.List {
+			if field.Names != nil {
+				for _, name := range field.Names {
+					retVals = append(retVals, ast.Ident(name.Name))
+				}
+			} else {
+				retValIdent := ast.Ident(fmt.Sprintf("retVal%d", i))
+				field.Names = []*dst.Ident{retValIdent}
+				retVals = append(retVals, dst.Clone(retValIdent).(*dst.Ident))
+			}
+		}
+	}
+
+	// Collect all arguments for the trampoline function, including the receiver
+	// and the original target function arguments
+	args := make([]dst.Expr, 0)
+	if ast.HasReceiver(funcDecl) {
+		if recv := funcDecl.Recv.List; recv != nil {
+			receiver := recv[0].Names[0].Name
+			args = append(args, ast.AddressOf(ast.Ident(receiver)))
+		} else {
+			util.Unimplemented()
+		}
+	}
+	for _, field := range funcDecl.Type.Params.List {
+		for _, name := range field.Names {
+			args = append(args, ast.AddressOf(ast.Ident(name.Name)))
+		}
+	}
+
+	// Generate the trampoline-jump-if. The trampoline-jump-if is a conditional
+	// jump that jumps to the trampoline function, it looks something like this
+	//
+	//	if ctx, skip := otel_trampoline_before(&arg); skip {
+	//	    otel_trampoline_after(ctx, &retval)
+	//	    return ...
+	//	} else {
+	//	    defer otel_trampoline_after(ctx, &retval)
+	//	    ...
+	//	}
+	//
+	// The trampoline function is just a relay station that properly assembles
+	// the context, handles exceptions, etc, and ultimately jumps to the real
+	// hook code. By inserting trampoline-jump-if at the target function entry,
+	// we can intercept the original function and execute before/after hooks.
+	uniqueSuffix := util.Crc32(t.String())
+	beforeCall := ast.CallTo(makeName(t, funcDecl, true), args)
+	afterCall := ast.CallTo(makeName(t, funcDecl, false), func() []dst.Expr {
+		// NB. DST framework disallows duplicated node in the
+		// AST tree, we need to replicate the return values
+		// as they are already used in return statement above
+		clone := make([]dst.Expr, len(retVals)+1)
+		clone[0] = ast.Ident(TrampolineHookContextName + uniqueSuffix)
+		for i := 1; i < len(clone); i++ {
+			clone[i] = ast.AddressOf(retVals[i-1])
+		}
+		return clone
+	}())
+	tjumpInit := ast.DefineStmts(
+		ast.Exprs(
+			ast.Ident(TrampolineHookContextName+uniqueSuffix),
+			ast.Ident(TrampolineSkipName+uniqueSuffix),
+		),
+		ast.Exprs(beforeCall),
+	)
+	tjumpCond := ast.Ident(TrampolineSkipName + uniqueSuffix)
+	tjumpBody := ast.BlockStmts(
+		ast.ExprStmt(afterCall),
+		ast.ReturnStmt(retVals),
+	)
+	tjumpElse := ast.Block(ast.DeferStmt(afterCall))
+	tjump := ast.IfStmt(tjumpInit, tjumpCond, tjumpBody, tjumpElse)
+	tjump.Decs.If.Append(TJumpLabel)
+
+	// Find if there is already a trampoline-jump-if, insert new tjump if so,
+	// otherwise prepend to block body.
+	found := false
+	if len(funcDecl.Body.List) > 0 {
+		firstStmt := funcDecl.Body.List[0]
+		if ifStmt, ok := firstStmt.(*dst.IfStmt); ok {
+			point := findJumpPoint(ifStmt)
+			if point != nil {
+				point.List = append(point.List, ast.EmptyStmt())
+				point.List = append(point.List, tjump)
+				found = true
+			}
+		}
+	}
+	if !found {
+		// Tag the trampoline-jump-if with a special line directive so that
+		// debugger can show the correct line number
+		tjump.Decs.Before = dst.NewLine
+		tjump.Decs.Start.Append("//line <generated>:1")
+		pos := ip.parser.FindPosition(funcDecl.Body)
+		if len(funcDecl.Body.List) > 0 {
+			// It does happens because we may insert raw code snippets at the
+			// function entry. These dynamically generated nodes do not have
+			// corresponding node positions. We need to keep looking downward
+			// until we find a node that contains position information, and then
+			// annotate it with a line directive.
+			for i := range len(funcDecl.Body.List) {
+				stmt := funcDecl.Body.List[i]
+				pos = ip.parser.FindPosition(stmt)
+				if !pos.IsValid() {
+					continue
+				}
+				tag := fmt.Sprintf("//line %s", pos.String())
+				stmt.Decorations().Before = dst.NewLine
+				stmt.Decorations().Start.Append(tag)
+			}
+		} else {
+			pos = ip.parser.FindPosition(funcDecl.Body)
+			tag := fmt.Sprintf("//line %s", pos.String())
+			empty := ast.EmptyStmt()
+			empty.Decs.Before = dst.NewLine
+			empty.Decs.Start.Append(tag)
+			funcDecl.Body.List = append(funcDecl.Body.List, empty)
+		}
+		funcDecl.Body.List = append([]dst.Stmt{tjump}, funcDecl.Body.List...)
+	}
+
+	// Generate corresponding trampoline code
+	err := ip.generateTrampoline(t)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ip *InstrumentPhase) addCompileArg(newArg string) {
+	ip.compileArgs = append(ip.compileArgs, newArg)
+}
+
+func (ip *InstrumentPhase) writeTrampoline(pkgName string) error {
+	// Prepare trampoline code header
+	p := ast.NewAstParser()
+	trampoline, err := p.ParseSource("package " + pkgName)
+	if err != nil {
+		return err
+	}
+	// One trampoline file shares common variable declarations
+	trampoline.Decls = append(trampoline.Decls, ip.varDecls...)
+	// Write trampoline code to file
+	path := filepath.Join(ip.workDir, OtelTrampolineFile)
+	err = ast.WriteFile(path, trampoline)
+	if err != nil {
+		return err
+	}
+	ip.addCompileArg(path)
+	ip.keepForDebug(path)
+	return nil
+}
+
+// Any modification should be synced with pkg/api declaration
+const APIDeclaration = `type HookContext interface {
+	SetSkipCall(bool)
+	IsSkipCall() bool
+	SetData(interface{})
+	GetData() interface{}
+	GetKeyData(key string) interface{}
+	SetKeyData(key string, val interface{})
+	HasKeyData(key string) bool
+	GetParam(idx int) interface{}
+	SetParam(idx int, val interface{})
+	GetReturnVal(idx int) interface{}
+	SetReturnVal(idx int, val interface{})
+	GetFuncName() string
+	GetPackageName() string
+}`
+
+func copyAPI(target string, pkgName string) error {
+	snippet := APIDeclaration
+	snippet = "package " + pkgName + "\n" + snippet
+	return util.WriteFile(target, snippet)
+}
+
+func (ip *InstrumentPhase) copyOtelAPI() error {
+	target := filepath.Join(ip.workDir, OtelAPIFile)
+	err := copyAPI(target, ip.packageName)
+	if err != nil {
+		return err
+	}
+	ip.addCompileArg(target)
+	ip.keepForDebug(target)
+	return nil
+}
+
+func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string) error {
+	ip.Info("Applying func rule", "rule", rule, "args", args)
+	files := make([]string, 0)
+	// Copy API file to compilation working directory
+	err := ip.copyOtelAPI()
+	if err != nil {
+		return err
+	}
+
+	// Find all go source files from compile command
+	for _, arg := range args {
+		if util.IsGoFile(arg) {
+			files = append(files, arg)
+		}
+	}
+	// Parse each go source file to see if there are any matched functions
+	// and then insert tjump if so
+	for _, file := range files {
+		ip.parser = ast.NewAstParser()
+		root, err := ip.parser.Parse(file, parser.ParseComments)
+		if err != nil {
+			return err
+		}
+		ip.target = root
+		funcDecls, err := ast.FindFuncDeclWithRecv(root, rule.GetFuncName())
+		if err != nil {
+			return err
+		}
+		for _, funcDecl := range funcDecls {
+			ip.rawFunc = funcDecl
+			err = ip.insertTJump(rule, funcDecl)
+			if err != nil {
+				return err
+			}
+		}
+		// Write back to the original file
+		name := filepath.Join(ip.workDir, filepath.Base(file))
+		err = ast.WriteFile(name, root)
+		if err != nil {
+			return err
+		}
+		ip.keepForDebug(name)
+
+		// Replace the original file with the new file in the compile command
+		for i, arg := range ip.compileArgs {
+			if arg == file {
+				ip.compileArgs[i] = name
+				break
+			}
+		}
+		ip.Info("Restored ast", "file", file, "newFile", filepath.Join(ip.workDir, name))
+	}
+	err = ip.writeTrampoline(ip.packageName)
+	if err != nil {
+		return err
+	}
+	return nil
+}

@@ -65,7 +65,7 @@ func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (b
 	return false, nil
 }
 
-func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRule) error {
+func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstFuncRule) error {
 	const goModFile = "go.mod"
 	modfile, err := parseGoMod(goModFile)
 	if err != nil {

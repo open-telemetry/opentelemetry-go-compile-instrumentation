@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
 	"github.com/urfave/cli/v3"
 )
@@ -18,7 +19,7 @@ var commandSetup = cli.Command{
 	Action: func(ctx context.Context, _ *cli.Command) error {
 		err := setup.Setup(ctx)
 		if err != nil {
-			return cli.Exit(err, exitCodeFailure)
+			return ex.Errorf(err, "failed to setup with exitcode %d", exitCodeFailure)
 		}
 		return nil
 	},

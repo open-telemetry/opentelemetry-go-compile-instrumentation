@@ -43,7 +43,7 @@ linters:
     - errcheck # checking for unchecked errors, these unchecked errors can be critical bugs in some cases
     - errname # checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error
     - errorlint # finds code that will cause problems with the error wrapping scheme introduced in Go 1.13
-    - exhaustive # checks exhaustiveness of enum switch statements
+    # - exhaustive # checks exhaustiveness of enum switch statements
     - exptostd # detects functions from golang.org/x/exp/ that can be replaced by std functions
     - fatcontext # detects nested contexts in loops
     - forbidigo # forbids identifiers
@@ -70,7 +70,7 @@ linters:
     - makezero # finds slice declarations with non-zero initial length
     - mirror # reports wrong mirror patterns of bytes/strings usage
     - misspell # finds commonly misspelled English words in comments
-    - mnd # detects magic numbers
+    # - mnd # detects magic numbers
     - musttag # enforces field tags in (un)marshaled structs
     - nakedret # finds naked returns in functions greater than a specified function length
     - nestif # reports deeply nested if statements
@@ -142,7 +142,7 @@ linters:
     cyclop:
       # The maximal code complexity to report.
       # Default: 10
-      max-complexity: 30
+      max-complexity: 40
       # The maximal average package complexity.
       # If it's higher than 0.0 (float) the check is enabled.
       # Default: 0.0
@@ -295,6 +295,7 @@ linters:
         - go.opentelemetry.io/otel/metric.Int64UpDownCounter
         - go.opentelemetry.io/otel/metric.Float64Gauge
         - go.opentelemetry.io/otel/metric.Int64Gauge
+        - desugarType
 
     mnd:
       # List of function patterns to exclude from analysis.

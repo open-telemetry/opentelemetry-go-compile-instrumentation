@@ -3,7 +3,7 @@
 
 package inst
 
-type Context interface {
+type HookContext interface {
 	// Set the data field, can be used to pass information between Before and After hooks
 	SetData(interface{})
 	// Get the data field, can be used to pass information between Before and After hooks

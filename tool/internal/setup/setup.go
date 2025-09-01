@@ -76,6 +76,11 @@ func Setup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Extract the embedded instrumentation modules into local directory
+	err = sp.extract()
+	if err != nil {
+		return err
+	}
 	sp.Info("Setup completed successfully")
 	return nil
 }

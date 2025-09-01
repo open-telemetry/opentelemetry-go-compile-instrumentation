@@ -5,7 +5,6 @@ package ast
 
 import (
 	"go/parser"
-	"go/printer"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -27,7 +26,8 @@ func NewAstParser() *AstParser {
 	}
 }
 
-func (ap *AstParser) ParseFile(filePath string, mode parser.Mode) (*dst.File, error) {
+// ParseFile parses the AST from a file.
+func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error) {
 	util.Assert(ap.fset != nil, "fset is not initialized")
 
 	name := filepath.Base(filePath)
@@ -48,8 +48,23 @@ func (ap *AstParser) ParseFile(filePath string, mode parser.Mode) (*dst.File, er
 	return dstFile, nil
 }
 
-func (ap *AstParser) ParseFileFast(filePath string) (*dst.File, error) {
-	return ap.ParseFile(filePath, parser.SkipObjectResolution)
+// ParseSource parses the AST from complete source code.
+func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
+	util.Assert(source != "", "empty source")
+	ap.dec = decorator.NewDecorator(ap.fset)
+	dstRoot, err := ap.dec.Parse(source)
+	if err != nil {
+		return nil, ex.Error(err)
+	}
+	return dstRoot, nil
+}
+
+func (ap *AstParser) FindPosition(node dst.Node) token.Position {
+	astNode := ap.dec.Ast.Nodes[node]
+	if astNode == nil {
+		return token.Position{Filename: "", Line: -1, Column: -1} // Invalid
+	}
+	return ap.fset.Position(astNode.Pos())
 }
 
 func WriteFile(filePath string, root *dst.File) error {
@@ -58,16 +73,26 @@ func WriteFile(filePath string, root *dst.File) error {
 		return ex.Errorf(err, "failed to create file %s", filePath)
 	}
 	defer file.Close()
-	fset := token.NewFileSet()
-	restorer := decorator.NewRestorer()
-	astFile, err := restorer.RestoreFile(root)
-	if err != nil {
-		return ex.Errorf(err, "failed to restore file %s", filePath)
-	}
-	cfg := printer.Config{}
-	err = cfg.Fprint(file, fset, astFile)
+	r := decorator.NewRestorer()
+	err = r.Fprint(file, root)
 	if err != nil {
 		return ex.Errorf(err, "failed to write to file %s", filePath)
 	}
 	return nil
+}
+
+// ParseFileOnlyPackage parses the AST from a file with the package clause only mode.
+func ParseFileOnlyPackage(filePath string) (*dst.File, error) {
+	return NewAstParser().Parse(filePath, parser.PackageClauseOnly)
+}
+
+// ParseFileFast parses the AST from a file with the skip object resolution mode.
+func ParseFileFast(filePath string) (*dst.File, error) {
+	return NewAstParser().Parse(filePath, parser.SkipObjectResolution)
+}
+
+// ParseFile parses the AST from a file with the parse comments mode. This is the
+// default mode for most cases.
+func ParseFile(filePath string) (*dst.File, error) {
+	return NewAstParser().Parse(filePath, parser.ParseComments)
 }

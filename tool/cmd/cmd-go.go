@@ -5,11 +5,18 @@ package main
 
 import (
 	"context"
+	"os"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 )
+
+// cleanupGenerated cleans up the generated files during the build process
+func cleanupGenerated() {
+	_ = os.RemoveAll(setup.OtelRuntimeFile)
+}
 
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandGo = cli.Command{
@@ -26,6 +33,7 @@ var commandGo = cli.Command{
 			logger.Warn("failed to back up go.mod, go.sum, go.work, go.work.sum, proceeding despite this", "error", err)
 		}
 		defer func() {
+			cleanupGenerated()
 			err = util.RestoreFile(backupFiles)
 			if err != nil {
 				logger.Warn("failed to restore go.mod, go.sum, go.work, go.work.sum", "error", err)
@@ -34,12 +42,12 @@ var commandGo = cli.Command{
 
 		err = setup.Setup(ctx)
 		if err != nil {
-			return cli.Exit(err, exitCodeFailure)
+			return ex.Errorf(err, "failed to build with toolexec with exitcode %d", exitCodeFailure)
 		}
 
 		err = setup.BuildWithToolexec(ctx, cmd.Args().Slice())
 		if err != nil {
-			return cli.Exit(err, exitCodeFailure)
+			return ex.Errorf(err, "failed to build with toolexec with exitcode %d", exitCodeFailure)
 		}
 
 		return nil

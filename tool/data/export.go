@@ -9,7 +9,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
-//go:embed *.yaml
+//go:embed *
 var dataFs embed.FS
 
 func ListEmbedFiles() ([]string, error) {

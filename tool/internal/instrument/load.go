@@ -14,7 +14,7 @@ import (
 
 // load loads the matched rules from the build temp directory.
 // TODO: Shared memory across all sub-processes is possible
-func (ip *InstrumentPhase) load() ([]*rule.InstRule, error) {
+func (ip *InstrumentPhase) load() ([]*rule.InstFuncRule, error) {
 	f := util.GetMatchedRuleFile()
 	content, err := os.ReadFile(f)
 	if err != nil {
@@ -24,7 +24,7 @@ func (ip *InstrumentPhase) load() ([]*rule.InstRule, error) {
 		return nil, nil
 	}
 
-	rules := make([]*rule.InstRule, 0)
+	rules := make([]*rule.InstFuncRule, 0)
 	err = json.Unmarshal(content, &rules)
 	if err != nil {
 		return nil, ex.Errorf(err, "failed to unmarshal rules from file %s", f)

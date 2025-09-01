@@ -9,3 +9,6 @@ tmp
 demo/demo
 
 otel.runtime.go
+otel-pkg.gz
+pkg_temp
+coverage.txt

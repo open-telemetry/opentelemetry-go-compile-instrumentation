@@ -11,14 +11,14 @@ import (
 )
 
 // match matches the rules with the compile command.
-func (ip *InstrumentPhase) match(args []string, rules []*rule.InstRule) []*rule.InstRule {
+func (ip *InstrumentPhase) match(args []string, rules []*rule.InstFuncRule) []*rule.InstFuncRule {
 	util.Assert(util.IsCompileCommand(strings.Join(args, " ")), "sanity check")
 	ip.Debug("Matching rules", "args", args, "rules", rules)
 
 	// Check if the package is in the rules.
 	importPath := util.FindFlagValue(args, "-p")
 	util.Assert(importPath != "", "sanity check")
-	matchedRules := make([]*rule.InstRule, 0)
+	matchedRules := make([]*rule.InstFuncRule, 0)
 	for _, rule := range rules {
 		if rule.GetFuncImportPath() == importPath {
 			matchedRules = append(matchedRules, rule)
