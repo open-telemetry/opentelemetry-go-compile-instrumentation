@@ -25,6 +25,7 @@ func (c *HookContextImpl) GetKeyData(key string) interface{} {
 	}
 	return c.Data.(map[string]interface{})[key]
 }
+
 func (c *HookContextImpl) SetKeyData(key string, val interface{}) {
 	if c.Data == nil {
 		c.Data = make(map[string]interface{})
@@ -45,6 +46,7 @@ func (c *HookContextImpl) GetParam(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.Params[idx] = nil
@@ -53,11 +55,13 @@ func (c *HookContextImpl) SetParam(idx int, val interface{}) {
 	switch idx {
 	}
 }
+
 func (c *HookContextImpl) GetReturnVal(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
+
 func (c *HookContextImpl) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.ReturnVals[idx] = nil
@@ -71,8 +75,10 @@ func (c *HookContextImpl) GetFuncName() string    { return c.FuncName }
 func (c *HookContextImpl) GetPackageName() string { return c.PackageName }
 
 // Variable Template
-var OtelGetStackImpl func() []byte = nil
-var OtelPrintStackImpl func([]byte) = nil
+var (
+	OtelGetStackImpl   func() []byte = nil
+	OtelPrintStackImpl func([]byte)  = nil
+)
 
 // Trampoline Template
 func OtelBeforeTrampoline() (HookContext, bool) {
