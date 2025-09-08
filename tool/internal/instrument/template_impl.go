@@ -70,7 +70,8 @@ func (c *HookContextImpl) SetReturnVal(idx int, val interface{}) {
 	switch idx {
 	}
 }
-
+func (c *HookContextImpl) GetParamCount() int     { return len(c.Params) }
+func (c *HookContextImpl) GetReturnValCount() int { return len(c.ReturnVals) }
 func (c *HookContextImpl) GetFuncName() string    { return c.FuncName }
 func (c *HookContextImpl) GetPackageName() string { return c.PackageName }
 

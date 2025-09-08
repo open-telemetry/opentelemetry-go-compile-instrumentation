@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	_ "embed"
 	"fmt"
 	"go/parser"
 	"path/filepath"
@@ -234,6 +235,9 @@ func (ip *InstrumentPhase) addCompileArg(newArg string) {
 	ip.compileArgs = append(ip.compileArgs, newArg)
 }
 
+//go:embed template_api.go
+var templateAPI string
+
 func (ip *InstrumentPhase) writeTrampoline(pkgName string) error {
 	// Prepare trampoline code header
 	p := ast.NewAstParser()
@@ -241,8 +245,16 @@ func (ip *InstrumentPhase) writeTrampoline(pkgName string) error {
 	if err != nil {
 		return err
 	}
-	// One trampoline file shares common variable declarations
+	// Declare common variable declarations
 	trampoline.Decls = append(trampoline.Decls, ip.varDecls...)
+
+	// Declare the hook context interface
+	api, err := p.ParseSource(templateAPI)
+	if err != nil {
+		return err
+	}
+	trampoline.Decls = append(trampoline.Decls, api.Decls...)
+
 	// Write trampoline code to file
 	path := filepath.Join(ip.workDir, OtelTrampolineFile)
 	err = ast.WriteFile(path, trampoline)
@@ -254,48 +266,9 @@ func (ip *InstrumentPhase) writeTrampoline(pkgName string) error {
 	return nil
 }
 
-// Any modification should be synced with pkg/api declaration
-const APIDeclaration = `type HookContext interface {
-	SetSkipCall(bool)
-	IsSkipCall() bool
-	SetData(interface{})
-	GetData() interface{}
-	GetKeyData(key string) interface{}
-	SetKeyData(key string, val interface{})
-	HasKeyData(key string) bool
-	GetParam(idx int) interface{}
-	SetParam(idx int, val interface{})
-	GetReturnVal(idx int) interface{}
-	SetReturnVal(idx int, val interface{})
-	GetFuncName() string
-	GetPackageName() string
-}`
-
-func copyAPI(target string, pkgName string) error {
-	snippet := APIDeclaration
-	snippet = "package " + pkgName + "\n" + snippet
-	return util.WriteFile(target, snippet)
-}
-
-func (ip *InstrumentPhase) copyOtelAPI() error {
-	target := filepath.Join(ip.workDir, OtelAPIFile)
-	err := copyAPI(target, ip.packageName)
-	if err != nil {
-		return err
-	}
-	ip.addCompileArg(target)
-	ip.keepForDebug(target)
-	return nil
-}
-
 func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string) error {
 	ip.Info("Applying func rule", "rule", rule, "args", args)
 	files := make([]string, 0)
-	// Copy API file to compilation working directory
-	err0 := ip.copyOtelAPI()
-	if err0 != nil {
-		return err0
-	}
 
 	// Find all go source files from compile command
 	for _, arg := range args {

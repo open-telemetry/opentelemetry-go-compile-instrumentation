@@ -59,8 +59,8 @@ const (
 // - Function and variable names are coupled with the framework, any modification
 //   on them should be synced with the framework
 
-//go:embed template.go
-var trampolineTemplate string
+//go:embed template_impl.go
+var templateImpl string
 
 func (ip *InstrumentPhase) addDecl(decl dst.Decl) {
 	util.Assert(ip.target != nil, "sanity check")
@@ -71,7 +71,7 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 	// Read trampoline template and materialize before and after function
 	// declarations based on that
 	p := ast.NewAstParser()
-	astRoot, err := p.ParseSource(trampolineTemplate)
+	astRoot, err := p.ParseSource(templateImpl)
 	if err != nil {
 		return err
 	}
