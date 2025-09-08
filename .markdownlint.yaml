@@ -10,7 +10,7 @@ MD010: false
 
 # line-length
 MD013:
-  line_length: 100
+  line_length: 160
   strict: false
   code_blocks: false
   tables: false
