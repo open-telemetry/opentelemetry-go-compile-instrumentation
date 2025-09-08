@@ -11,8 +11,14 @@ import (
 )
 
 // match matches the rules with the compile command.
-func (ip *InstrumentPhase) match(args []string, rules []*rule.InstFuncRule) []*rule.InstFuncRule {
+func (ip *InstrumentPhase) match(args []string) ([]*rule.InstFuncRule, error) {
 	util.Assert(util.IsCompileCommand(strings.Join(args, " ")), "sanity check")
+	// Load matched hook rules from setup phase
+	rules, err := ip.load()
+	if err != nil {
+		return nil, err
+	}
+
 	ip.Debug("Matching rules", "args", args, "rules", rules)
 
 	// Check if the package is in the rules.
@@ -25,5 +31,5 @@ func (ip *InstrumentPhase) match(args []string, rules []*rule.InstFuncRule) []*r
 		}
 	}
 	ip.Debug("Matched rules", "matchedRules", matchedRules)
-	return matchedRules
+	return matchedRules, nil
 }

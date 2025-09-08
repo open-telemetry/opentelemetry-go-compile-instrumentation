@@ -49,9 +49,7 @@ func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
 	return nil
 }
 
-func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
-	util.Assert(len(t.Advice) > 0, "sanity check")
-
+func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 	// Add explicit names for return values, they can be further referenced if
 	// we're willing
 	var retVals []dst.Expr // nil by default
@@ -91,8 +89,10 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 		}
 	}
 
-	// Collect all arguments for the trampoline function, including the receiver
-	// and the original target function arguments
+	return retVals
+}
+
+func collectArguments(funcDecl *dst.FuncDecl) []dst.Expr {
 	args := make([]dst.Expr, 0)
 	if ast.HasReceiver(funcDecl) {
 		if recv := funcDecl.Recv.List; recv != nil {
@@ -107,22 +107,12 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 			args = append(args, ast.AddressOf(ast.Ident(name.Name)))
 		}
 	}
+	return args
+}
 
-	// Generate the trampoline-jump-if. The trampoline-jump-if is a conditional
-	// jump that jumps to the trampoline function, it looks something like this
-	//
-	//	if ctx, skip := otel_trampoline_before(&arg); skip {
-	//	    otel_trampoline_after(ctx, &retval)
-	//	    return ...
-	//	} else {
-	//	    defer otel_trampoline_after(ctx, &retval)
-	//	    ...
-	//	}
-	//
-	// The trampoline function is just a relay station that properly assembles
-	// the context, handles exceptions, etc, and ultimately jumps to the real
-	// hook code. By inserting trampoline-jump-if at the target function entry,
-	// we can intercept the original function and execute before/after hooks.
+func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
+	args []dst.Expr, retVals []dst.Expr,
+) *dst.IfStmt {
 	uniqueSuffix := util.Crc32(t.String())
 	beforeCall := ast.CallTo(makeName(t, funcDecl, true), args)
 	afterCall := ast.CallTo(makeName(t, funcDecl, false), func() []dst.Expr {
@@ -151,9 +141,10 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	tjumpElse := ast.Block(ast.DeferStmt(afterCall))
 	tjump := ast.IfStmt(tjumpInit, tjumpCond, tjumpBody, tjumpElse)
 	tjump.Decs.If.Append(TJumpLabel)
+	return tjump
+}
 
-	// Find if there is already a trampoline-jump-if, insert new tjump if so,
-	// otherwise prepend to block body.
+func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStmt) {
 	found := false
 	if len(funcDecl.Body.List) > 0 {
 		firstStmt := funcDecl.Body.List[0]
@@ -198,6 +189,38 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 		}
 		funcDecl.Body.List = append([]dst.Stmt{tjump}, funcDecl.Body.List...)
 	}
+}
+
+func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
+	util.Assert(len(t.Advice) > 0, "sanity check")
+
+	// Collect return values for the trampoline function
+	retVals := collectReturnValues(funcDecl)
+
+	// Collect all arguments for the trampoline function, including the receiver
+	// and the original target function arguments
+	args := collectArguments(funcDecl)
+
+	// Generate the trampoline-jump-if. The trampoline-jump-if is a conditional
+	// jump that jumps to the trampoline function, it looks something like this
+	//
+	//	if ctx, skip := otel_trampoline_before(&arg); skip {
+	//	    otel_trampoline_after(ctx, &retval)
+	//	    return ...
+	//	} else {
+	//	    defer otel_trampoline_after(ctx, &retval)
+	//	    ...
+	//	}
+	//
+	// The trampoline function is just a relay station that properly assembles
+	// the context, handles exceptions, etc, and ultimately jumps to the real
+	// hook code. By inserting trampoline-jump-if at the target function entry,
+	// we can intercept the original function and execute before/after hooks.
+	tjump := createTJumpIf(t, funcDecl, args, retVals)
+
+	// Find if there is already a trampoline-jump-if, insert new tjump if so,
+	// otherwise prepend to block body.
+	ip.insertToFunc(funcDecl, tjump)
 
 	// Generate corresponding trampoline code
 	err := ip.generateTrampoline(t)
@@ -269,9 +292,9 @@ func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string)
 	ip.Info("Applying func rule", "rule", rule, "args", args)
 	files := make([]string, 0)
 	// Copy API file to compilation working directory
-	err := ip.copyOtelAPI()
-	if err != nil {
-		return err
+	err0 := ip.copyOtelAPI()
+	if err0 != nil {
+		return err0
 	}
 
 	// Find all go source files from compile command
@@ -317,7 +340,7 @@ func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string)
 		}
 		ip.Info("Restored ast", "file", file, "newFile", filepath.Join(ip.workDir, name))
 	}
-	err = ip.writeTrampoline(ip.packageName)
+	err := ip.writeTrampoline(ip.packageName)
 	if err != nil {
 		return err
 	}

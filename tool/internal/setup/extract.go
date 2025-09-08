@@ -21,20 +21,63 @@ const (
 	EmbeddedInstPkgGzip = "otel-pkg.gz"
 )
 
+func normalizePath(name string) string {
+	cleanName := filepath.ToSlash(filepath.Clean(name))
+	if strings.HasPrefix(cleanName, "pkg_temp/") {
+		cleanName = strings.Replace(cleanName, "pkg_temp/", "pkg/", 1)
+	} else if cleanName == "pkg_temp" {
+		cleanName = "pkg"
+	}
+	return cleanName
+}
+
+func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error {
+	fileInfo := header.FileInfo()
+	switch header.Typeflag {
+	case tar.TypeDir:
+		err := os.MkdirAll(targetPath, fileInfo.Mode())
+		if err != nil {
+			return ex.Error(err)
+		}
+
+	case tar.TypeReg:
+		{
+			file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR,
+				fileInfo.Mode())
+			if err != nil {
+				return ex.Error(err)
+			}
+
+			_, err = io.CopyN(file, tarReader, header.Size)
+			if err != nil {
+				return ex.Error(err)
+			}
+			err = file.Close()
+			if err != nil {
+				return ex.Error(err)
+			}
+		}
+	default:
+		return ex.Errorf(nil, "unsupported file type: %c in %s",
+			header.Typeflag, header.Name)
+	}
+	return nil
+}
+
 func extractGZip(data []byte, targetDir string) error {
-	err := os.MkdirAll(targetDir, 0o755)
-	if err != nil {
-		return ex.Error(err)
+	err0 := os.MkdirAll(targetDir, 0o755)
+	if err0 != nil {
+		return ex.Error(err0)
 	}
 
-	gzReader, err := gzip.NewReader(strings.NewReader(string(data)))
-	if err != nil {
-		return ex.Error(err)
+	gzReader, err0 := gzip.NewReader(strings.NewReader(string(data)))
+	if err0 != nil {
+		return ex.Error(err0)
 	}
 	defer func() {
-		err = gzReader.Close()
-		if err != nil {
-			ex.Fatal(err)
+		err0 = gzReader.Close()
+		if err0 != nil {
+			ex.Fatal(err0)
 		}
 	}()
 
@@ -55,12 +98,8 @@ func extractGZip(data []byte, targetDir string) error {
 		}
 
 		// Normalize path to Unix style for consistent string operations
-		cleanName := filepath.ToSlash(filepath.Clean(header.Name))
-		if strings.HasPrefix(cleanName, "pkg_temp/") {
-			cleanName = strings.Replace(cleanName, "pkg_temp/", "pkg/", 1)
-		} else if cleanName == "pkg_temp" {
-			cleanName = "pkg"
-		}
+		cleanName := normalizePath(header.Name)
+
 		// Sanitize the file path to prevent Zip Slip vulnerability
 		if cleanName == "." || cleanName == ".." ||
 			strings.HasPrefix(cleanName, "..") {
@@ -81,33 +120,9 @@ func extractGZip(data []byte, targetDir string) error {
 			filepath.IsAbs(relPath) {
 			continue // Skip files that would be extracted outside target dir
 		}
-		switch header.Typeflag {
-		case tar.TypeDir:
-			err = os.MkdirAll(targetPath, os.FileMode(header.Mode&0o777))
-			if err != nil {
-				return ex.Error(err)
-			}
-
-		case tar.TypeReg:
-			{
-				file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR,
-					os.FileMode(header.Mode&0o777))
-				if err != nil {
-					return ex.Error(err)
-				}
-
-				_, err = io.Copy(file, tarReader)
-				if err != nil {
-					return ex.Error(err)
-				}
-				err = file.Close()
-				if err != nil {
-					return ex.Error(err)
-				}
-			}
-		default:
-			return ex.Errorf(nil, "unsupported file type: %c in %s",
-				header.Typeflag, header.Name)
+		err = extract(tarReader, header, filepath.Join(targetDir, relPath))
+		if err != nil {
+			return err
 		}
 	}
 

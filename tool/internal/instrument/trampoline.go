@@ -81,18 +81,21 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 	for _, node := range astRoot.Decls {
 		// Materialize function declarations
 		if decl, ok := node.(*dst.FuncDecl); ok {
-			if decl.Name.Name == TrampolineBeforeName {
+			switch decl.Name.Name {
+			case TrampolineBeforeName:
 				ip.beforeHookFunc = decl
 				ip.addDecl(decl)
-			} else if decl.Name.Name == TrampolineAfterName {
+			case TrampolineAfterName:
 				ip.afterHookFunc = decl
 				ip.addDecl(decl)
-			} else if ast.HasReceiver(decl) {
-				// We know exactly this is HookContextImpl method
-				t := decl.Recv.List[0].Type.(*dst.StarExpr).X.(*dst.Ident).Name
-				util.Assert(t == TrampolineHookContextImplType, "sanity check")
-				ip.hookCtxMethods = append(ip.hookCtxMethods, decl)
-				ip.addDecl(decl)
+			default:
+				if ast.HasReceiver(decl) {
+					// We know exactly this is HookContextImpl method
+					t := decl.Recv.List[0].Type.(*dst.StarExpr).X.(*dst.Ident).Name
+					util.Assert(t == TrampolineHookContextImplType, "sanity check")
+					ip.hookCtxMethods = append(ip.hookCtxMethods, decl)
+					ip.addDecl(decl)
+				}
 			}
 		}
 		// Materialize variable declarations
@@ -163,9 +166,9 @@ func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 }
 
 func findHookFile(rule *rule.InstFuncRule) (string, error) {
-	files, err := findRuleFiles(rule)
-	if err != nil {
-		return "", err
+	files, err0 := findRuleFiles(rule)
+	if err0 != nil {
+		return "", err0
 	}
 	for _, file := range files {
 		if !util.IsGoFile(file) {
@@ -377,8 +380,10 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 
 func insertAt(funcDecl *dst.FuncDecl, stmt dst.Stmt, index int) {
 	stmts := funcDecl.Body.List
-	newStmts := append(stmts[:index],
-		append([]dst.Stmt{stmt}, stmts[index:]...)...)
+	newStmts := make([]dst.Stmt, 0, len(stmts)+1)
+	newStmts = append(newStmts, stmts[:index]...)
+	newStmts = append(newStmts, stmt)
+	newStmts = append(newStmts, stmts[index:]...)
 	funcDecl.Body.List = newStmts
 }
 
@@ -421,19 +426,16 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
 	paramList := &dst.FieldList{List: []*dst.Field{}}
 	if before {
 		if ast.HasReceiver(ip.rawFunc) {
-			recvField, ok := dst.Clone(ip.rawFunc.Recv.List[0]).(*dst.Field)
-			util.Assert(ok, "sanity check")
+			recvField := dst.Clone(ip.rawFunc.Recv.List[0]).(*dst.Field)
 			paramList.List = append(paramList.List, recvField)
 		}
 		for _, field := range ip.rawFunc.Type.Params.List {
-			paramField, ok := dst.Clone(field).(*dst.Field)
-			util.Assert(ok, "sanity check")
+			paramField := dst.Clone(field).(*dst.Field)
 			paramList.List = append(paramList.List, paramField)
 		}
 	} else if ip.rawFunc.Type.Results != nil {
 		for _, field := range ip.rawFunc.Type.Results.List {
-			retField, ok := dst.Clone(field).(*dst.Field)
-			util.Assert(ok, "sanity check")
+			retField := dst.Clone(field).(*dst.Field)
 			paramList.List = append(paramList.List, retField)
 		}
 	}
@@ -460,7 +462,7 @@ func (ip *InstrumentPhase) rectifyTypes() {
 
 // replenishHookContext replenishes the hook context before hook invocation
 //
-//nolint:revive,nestif,govet // intentional else branch for readability
+//nolint:revive,nestif,govet,gocognit // intentional else branch for readability
 func (ip *InstrumentPhase) replenishHookContext(before bool) bool {
 	funcDecl := ip.beforeHookFunc
 	if !before {
@@ -560,11 +562,7 @@ func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 		"sanity check")
 	structType.Name.Name += suffix             // type declaration
 	for _, method := range ip.hookCtxMethods { // method declaration
-		starExpr, ok := method.Recv.List[0].Type.(*dst.StarExpr)
-		util.Assert(ok, "sanity check")
-		ident, ok := starExpr.X.(*dst.Ident)
-		util.Assert(ok, "sanity check")
-		ident.Name += suffix
+		method.Recv.List[0].Type.(*dst.StarExpr).X.(*dst.Ident).Name += suffix
 	}
 	for _, node := range []dst.Node{ip.beforeHookFunc, ip.afterHookFunc} {
 		dst.Inspect(node, func(node dst.Node) bool {
@@ -636,6 +634,8 @@ func setReturnValClause(idx int, typ dst.Expr) *dst.CaseClause {
 
 // desugarType desugars parameter type to its original type, if parameter
 // is type of ...T, it will be converted to []T
+//
+//nolint:ireturn // we dont know the type of the parameter
 func desugarType(param *dst.Field) dst.Expr {
 	if ft, ok := param.Type.(*dst.Ellipsis); ok {
 		return ast.ArrayType(ft.Elt)
@@ -666,18 +666,10 @@ func (ip *InstrumentPhase) rewriteHookContextImpl() {
 	// Rewrite SetParam and GetParam methods
 	// Don't believe what you see in template.go, we will null out it and rewrite
 	// the whole switch statement
-	methodSetParamStmt, ok := methodSetParam.Body.List[1].(*dst.SwitchStmt)
-	util.Assert(ok, "sanity check")
-	methodGetParamStmt, ok := methodGetParam.Body.List[0].(*dst.SwitchStmt)
-	util.Assert(ok, "sanity check")
-	methodSetRetValStmt, ok := methodSetRetVal.Body.List[1].(*dst.SwitchStmt)
-	util.Assert(ok, "sanity check")
-	methodGetRetValStmt, ok := methodGetRetVal.Body.List[0].(*dst.SwitchStmt)
-	util.Assert(ok, "sanity check")
-	methodSetParamBody := methodSetParamStmt.Body
-	methodGetParamBody := methodGetParamStmt.Body
-	methodSetRetValBody := methodSetRetValStmt.Body
-	methodGetRetValBody := methodGetRetValStmt.Body
+	methodSetParamBody := methodSetParam.Body.List[1].(*dst.SwitchStmt).Body
+	methodGetParamBody := methodGetParam.Body.List[0].(*dst.SwitchStmt).Body
+	methodSetRetValBody := methodSetRetVal.Body.List[1].(*dst.SwitchStmt).Body
+	methodGetRetValBody := methodGetRetVal.Body.List[0].(*dst.SwitchStmt).Body
 	methodGetParamBody.List = nil
 	methodSetParamBody.List = nil
 	methodGetRetValBody.List = nil

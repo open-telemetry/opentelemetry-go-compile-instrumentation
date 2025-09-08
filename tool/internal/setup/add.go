@@ -127,8 +127,7 @@ func (*SetupPhase) addDeps(matched []*rule.InstFuncRule) error {
 	// Generate the variable declarations that used by otel runtime
 	varDecls := genVarDecl(matched)
 	// Build the ast
-	decls := append(importDecls, varDecls...)
-	root := buildOtelRuntimeAst(decls)
+	root := buildOtelRuntimeAst(append(importDecls, varDecls...))
 	// Write the ast to file
 	err := ast.WriteFile(OtelRuntimeFile, root)
 	if err != nil {

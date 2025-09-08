@@ -91,14 +91,12 @@ func Toolexec(ctx context.Context, args []string) error {
 			packageName: util.FindFlagValue(args, "-p"),
 		}
 
-		// Load matched hook rules from setup phase
-		rules, err := ip.load()
+		// Check if the current package should be instrumented by matching the
+		// current command with list of matched rules
+		matchedRules, err := ip.match(args)
 		if err != nil {
 			return err
 		}
-		// Check if the current package should be instrumented by matching the
-		// current command with list of matched rules
-		matchedRules := ip.match(args, rules)
 		if len(matchedRules) > 0 {
 			ip.Info("Instrumenting package", "rules", matchedRules, "args", args)
 			// Okay, this package should be instrumented.
@@ -111,15 +109,10 @@ func Toolexec(ctx context.Context, args []string) error {
 			// not ready yet, i.e. they don't have function body
 			ip.compileArgs = stripCompleteFlag(ip.compileArgs)
 
-			// Good, run final compilation after instrumentation
-			err = util.RunCmd(ctx, ip.compileArgs...)
-			if err != nil {
-				return err
-			}
-			return nil
+			args = ip.compileArgs
 		}
 	}
-	// Otherwise, just run the command as is
+	// Just run the command as is
 	err := util.RunCmd(ctx, args...)
 	if err != nil {
 		return err

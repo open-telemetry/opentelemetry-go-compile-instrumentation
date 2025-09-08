@@ -35,6 +35,7 @@ func FindFuncDecl(root *dst.File, funcName string) (*dst.FuncDecl, error) {
 		return nil, err
 	}
 	if len(decls) == 0 {
+		//nolint:nilnil // no function declaration found is not an error
 		return nil, nil
 	}
 	return decls[0], nil

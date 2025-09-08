@@ -70,13 +70,13 @@ func (sp *SetupPhase) matchedDeps(deps []*Dependency) ([]*rule.InstFuncRule, err
 			// Iterate over all the source files of the given import path
 			// and check if the function is the one we want to instrument
 			for _, file := range dep.Sources {
-				root, err := ast.ParseFileFast(file)
-				if err != nil {
-					return nil, err
+				root, perr := ast.ParseFileFast(file)
+				if perr != nil {
+					return nil, perr
 				}
-				funcDecl, err := ast.FindFuncDeclWithRecv(root, targetFunction)
-				if err != nil {
-					return nil, err
+				funcDecl, perr := ast.FindFuncDeclWithRecv(root, targetFunction)
+				if perr != nil {
+					return nil, perr
 				}
 				if len(funcDecl) > 0 {
 					// Okay, this function is the one we want to instrument

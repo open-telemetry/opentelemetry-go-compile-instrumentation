@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"github.com/dave/dst"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 const (
@@ -26,9 +25,7 @@ func Ident(name string) *dst.Ident {
 }
 
 func AddressOf(expr dst.Expr) *dst.UnaryExpr {
-	cloned, ok := dst.Clone(expr).(dst.Expr)
-	util.Assert(ok, "failed to clone expression")
-	return &dst.UnaryExpr{Op: token.AND, X: cloned}
+	return &dst.UnaryExpr{Op: token.AND, X: dst.Clone(expr).(dst.Expr)}
 }
 
 func CallTo(name string, args []dst.Expr) *dst.CallExpr {
@@ -75,22 +72,16 @@ func Stmts(stmts ...dst.Stmt) []dst.Stmt {
 }
 
 func SelectorExpr(x dst.Expr, sel string) *dst.SelectorExpr {
-	cloned, ok := dst.Clone(x).(dst.Expr)
-	util.Assert(ok, "failed to clone expression")
 	return &dst.SelectorExpr{
-		X:   cloned,
+		X:   dst.Clone(x).(dst.Expr),
 		Sel: Ident(sel),
 	}
 }
 
 func IndexExpr(x dst.Expr, index dst.Expr) *dst.IndexExpr {
-	cloned, ok := dst.Clone(x).(dst.Expr)
-	util.Assert(ok, "failed to clone expression")
-	cloned1, ok1 := dst.Clone(index).(dst.Expr)
-	util.Assert(ok1, "failed to clone expression")
 	return &dst.IndexExpr{
-		X:     cloned,
-		Index: cloned1,
+		X:     dst.Clone(x).(dst.Expr),
+		Index: dst.Clone(index).(dst.Expr),
 	}
 }
 
@@ -123,9 +114,7 @@ func ArrayType(elem dst.Expr) *dst.ArrayType {
 	return &dst.ArrayType{Elt: elem}
 }
 
-func IfStmt(init dst.Stmt, cond dst.Expr,
-	body, elseBody *dst.BlockStmt,
-) *dst.IfStmt {
+func IfStmt(init dst.Stmt, cond dst.Expr, body, elseBody *dst.BlockStmt) *dst.IfStmt {
 	return &dst.IfStmt{
 		Init: dst.Clone(init).(dst.Stmt),
 		Cond: dst.Clone(cond).(dst.Expr),
