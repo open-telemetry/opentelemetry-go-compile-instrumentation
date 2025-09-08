@@ -138,7 +138,7 @@ func makeOnXName(t *rule.InstFuncRule, before bool) string {
 
 type ParamTrait struct {
 	Index          int
-	IsVaradic      bool
+	IsVariadic     bool
 	IsInterfaceAny bool
 }
 
@@ -244,7 +244,7 @@ func getHookParamTraits(t *rule.InstFuncRule, before bool) ([]ParamTrait, error)
 			attr.IsInterfaceAny = true
 		}
 		if ast.IsEllipsis(field.Type) {
-			attr.IsVaradic = true
+			attr.IsVariadic = true
 		}
 		attrs = append(attrs, attr)
 	}
@@ -265,7 +265,7 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTr
 		for idx, field := range ip.beforeHookFunc.Type.Params.List {
 			trait := traits[idx+1 /*HookContext*/]
 			for _, name := range field.Names { // syntax of n1,n2 type
-				if trait.IsVaradic {
+				if trait.IsVariadic {
 					args = append(args, ast.DereferenceOf(ast.Ident(name.Name+"...")))
 				} else {
 					args = append(args, ast.DereferenceOf(ast.Ident(name.Name)))
@@ -304,7 +304,7 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 		}
 		trait := traits[idx]
 		for _, name := range field.Names { // syntax of n1,n2 type
-			if trait.IsVaradic {
+			if trait.IsVariadic {
 				arg := ast.DereferenceOf(ast.Ident(name.Name + "..."))
 				args = append(args, arg)
 			} else {
@@ -577,17 +577,17 @@ func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 	}
 }
 
-func setValue(field string, idx int, typ dst.Expr) *dst.CaseClause {
+func setValue(field string, idx int, t dst.Expr) *dst.CaseClause {
 	// *(c.Params[idx].(*int)) = val.(int)
 	// c.Params[idx] = val iff type is interface{}
 	se := ast.SelectorExpr(ast.Ident(TrampolineCtxIdentifier), field)
 	ie := ast.IndexExpr(se, ast.IntLit(idx))
-	te := ast.TypeAssertExpr(ie, ast.DereferenceOf(typ))
+	te := ast.TypeAssertExpr(ie, ast.DereferenceOf(t))
 	pe := ast.ParenExpr(te)
 	de := ast.DereferenceOf(pe)
 	val := ast.Ident(TrampolineValIdentifier)
-	assign := ast.AssignStmt(de, ast.TypeAssertExpr(val, typ))
-	if ast.IsInterfaceType(typ) {
+	assign := ast.AssignStmt(de, ast.TypeAssertExpr(val, t))
+	if ast.IsInterfaceType(t) {
 		assign = ast.AssignStmt(ie, val)
 	}
 	caseClause := ast.SwitchCase(
@@ -597,16 +597,16 @@ func setValue(field string, idx int, typ dst.Expr) *dst.CaseClause {
 	return caseClause
 }
 
-func getValue(field string, idx int, typ dst.Expr) *dst.CaseClause {
+func getValue(field string, idx int, t dst.Expr) *dst.CaseClause {
 	// return *(c.Params[idx].(*int))
 	// return c.Params[idx] iff type is interface{}
 	se := ast.SelectorExpr(ast.Ident(TrampolineCtxIdentifier), field)
 	ie := ast.IndexExpr(se, ast.IntLit(idx))
-	te := ast.TypeAssertExpr(ie, ast.DereferenceOf(typ))
+	te := ast.TypeAssertExpr(ie, ast.DereferenceOf(t))
 	pe := ast.ParenExpr(te)
 	de := ast.DereferenceOf(pe)
 	ret := ast.ReturnStmt(ast.Exprs(de))
-	if ast.IsInterfaceType(typ) {
+	if ast.IsInterfaceType(t) {
 		ret = ast.ReturnStmt(ast.Exprs(ie))
 	}
 	caseClause := ast.SwitchCase(
@@ -616,20 +616,20 @@ func getValue(field string, idx int, typ dst.Expr) *dst.CaseClause {
 	return caseClause
 }
 
-func getParamClause(idx int, typ dst.Expr) *dst.CaseClause {
-	return getValue(TrampolineParamsIdentifier, idx, typ)
+func getParamClause(idx int, t dst.Expr) *dst.CaseClause {
+	return getValue(TrampolineParamsIdentifier, idx, t)
 }
 
-func setParamClause(idx int, typ dst.Expr) *dst.CaseClause {
-	return setValue(TrampolineParamsIdentifier, idx, typ)
+func setParamClause(idx int, t dst.Expr) *dst.CaseClause {
+	return setValue(TrampolineParamsIdentifier, idx, t)
 }
 
-func getReturnValClause(idx int, typ dst.Expr) *dst.CaseClause {
-	return getValue(TrampolineReturnValsIdentifier, idx, typ)
+func getReturnValClause(idx int, t dst.Expr) *dst.CaseClause {
+	return getValue(TrampolineReturnValsIdentifier, idx, t)
 }
 
-func setReturnValClause(idx int, typ dst.Expr) *dst.CaseClause {
-	return setValue(TrampolineReturnValsIdentifier, idx, typ)
+func setReturnValClause(idx int, t dst.Expr) *dst.CaseClause {
+	return setValue(TrampolineReturnValsIdentifier, idx, t)
 }
 
 // desugarType desugars parameter type to its original type, if parameter

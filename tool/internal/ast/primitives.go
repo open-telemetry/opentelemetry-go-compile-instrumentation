@@ -85,10 +85,10 @@ func IndexExpr(x dst.Expr, index dst.Expr) *dst.IndexExpr {
 	}
 }
 
-func TypeAssertExpr(x dst.Expr, typ dst.Expr) *dst.TypeAssertExpr {
+func TypeAssertExpr(x dst.Expr, t dst.Expr) *dst.TypeAssertExpr {
 	return &dst.TypeAssertExpr{
 		X:    x,
-		Type: dst.Clone(typ).(dst.Expr),
+		Type: dst.Clone(t).(dst.Expr),
 	}
 }
 
@@ -184,10 +184,10 @@ func DereferenceOf(expr dst.Expr) *dst.StarExpr {
 	return &dst.StarExpr{X: expr}
 }
 
-func Field(name string, typ dst.Expr) *dst.Field {
+func Field(name string, t dst.Expr) *dst.Field {
 	newField := &dst.Field{
 		Names: []*dst.Ident{Ident(name)},
-		Type:  typ,
+		Type:  t,
 	}
 	return newField
 }

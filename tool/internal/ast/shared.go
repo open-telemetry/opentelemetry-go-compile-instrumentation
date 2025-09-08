@@ -84,12 +84,12 @@ func IsStringLit(expr dst.Expr, val string) bool {
 		lit.Value == fmt.Sprintf("%q", val)
 }
 
-func IsInterfaceType(typ dst.Expr) bool {
-	_, ok := typ.(*dst.InterfaceType)
+func IsInterfaceType(t dst.Expr) bool {
+	_, ok := t.(*dst.InterfaceType)
 	return ok
 }
 
-func IsEllipsis(typ dst.Expr) bool {
-	_, ok := typ.(*dst.Ellipsis)
+func IsEllipsis(t dst.Expr) bool {
+	_, ok := t.(*dst.Ellipsis)
 	return ok
 }
