@@ -42,13 +42,14 @@ func FindFuncDecl(root *dst.File, funcName string) (*dst.FuncDecl, error) {
 }
 
 func FindFuncDeclWithRecv(root *dst.File, funcName string) ([]*dst.FuncDecl, error) {
+	const maxMatchDecls = 2
 	decls, err := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
 		return funcDecl.Name.Name == funcName
 	})
 	if err != nil {
 		return nil, err
 	}
-	util.Assert(len(decls) <= 2, "sanity check")
+	util.Assert(len(decls) <= maxMatchDecls, "sanity check")
 	return decls, nil
 }
 

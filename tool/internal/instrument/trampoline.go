@@ -101,6 +101,7 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 		// Materialize variable declarations
 		if decl, ok := node.(*dst.GenDecl); ok {
 			// No further processing for variable declarations, just append them
+			//nolint:exhaustive // all possible tokens are handled
 			switch decl.Tok {
 			case token.VAR:
 				ip.varDecls = append(ip.varDecls, decl)
@@ -460,9 +461,37 @@ func (ip *InstrumentPhase) rectifyTypes() {
 	addHookContext(afterHookFunc.Type.Params)
 }
 
+func assignString(assignStmt *dst.AssignStmt, val string) bool {
+	rhs := assignStmt.Rhs
+	if len(rhs) == 1 {
+		rhsExpr := rhs[0]
+		if basicLit, ok2 := rhsExpr.(*dst.BasicLit); ok2 {
+			if basicLit.Kind == token.STRING {
+				basicLit.Value = strconv.Quote(val)
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func assignSliceLiteral(assignStmt *dst.AssignStmt, vals []dst.Expr) bool {
+	rhs := assignStmt.Rhs
+	if len(rhs) == 1 {
+		rhsExpr := rhs[0]
+		if compositeLit, ok := rhsExpr.(*dst.CompositeLit); ok {
+			elems := compositeLit.Elts
+			elems = append(elems, vals...)
+			compositeLit.Elts = elems
+			return true
+		}
+	}
+	return false
+}
+
 // replenishHookContext replenishes the hook context before hook invocation
 //
-//nolint:revive,nestif,govet,gocognit // intentional else branch for readability
+
 func (ip *InstrumentPhase) replenishHookContext(before bool) bool {
 	funcDecl := ip.beforeHookFunc
 	if !before {
@@ -476,64 +505,27 @@ func (ip *InstrumentPhase) replenishHookContext(before bool) bool {
 				case TrampolineFuncNameIdentifier:
 					util.Assert(before, "sanity check")
 					// hookContext.FuncName = "..."
-					rhs := assignStmt.Rhs
-					if len(rhs) == 1 {
-						rhsExpr := rhs[0]
-						if basicLit, ok2 := rhsExpr.(*dst.BasicLit); ok2 {
-							if basicLit.Kind == token.STRING {
-								rawFuncName := ip.rawFunc.Name.Name
-								basicLit.Value = strconv.Quote(rawFuncName)
-							} else {
-								return false // ill-formed AST
-							}
-						} else {
-							return false // ill-formed AST
-						}
-					} else {
-						return false // ill-formed AST
-					}
+					assigned := assignString(assignStmt, ip.rawFunc.Name.Name)
+					util.Assert(assigned, "sanity check")
 				case TrampolinePackageNameIdentifier:
 					util.Assert(before, "sanity check")
 					// hookContext.PackageName = "..."
-					rhs := assignStmt.Rhs
-					if len(rhs) == 1 {
-						rhsExpr := rhs[0]
-						if basicLit, ok := rhsExpr.(*dst.BasicLit); ok {
-							if basicLit.Kind == token.STRING {
-								pkgName := ip.target.Name.Name
-								basicLit.Value = strconv.Quote(pkgName)
-							} else {
-								return false // ill-formed AST
-							}
-						} else {
-							return false // ill-formed AST
-						}
-					} else {
-						return false // ill-formed AST
-					}
+					assigned := assignString(assignStmt, ip.target.Name.Name)
+					util.Assert(assigned, "sanity check")
 				default:
 					// hookContext.Params = []interface{}{...} or
 					// hookContext.(*HookContextImpl).Params[0] = &int
-					rhs := assignStmt.Rhs
-					if len(rhs) == 1 {
-						rhsExpr := rhs[0]
-						if compositeLit, ok := rhsExpr.(*dst.CompositeLit); ok {
-							elems := compositeLit.Elts
-							names := getNames(funcDecl.Type.Params)
-							for i, name := range names {
-								if i == 0 && !before {
-									// SKip first hookContext parameter for after
-									continue
-								}
-								elems = append(elems, ast.Ident(name))
-							}
-							compositeLit.Elts = elems
-						} else {
-							return false // ill-formed AST
+					names := getNames(funcDecl.Type.Params)
+					vals := make([]dst.Expr, 0, len(names))
+					for i, name := range names {
+						if i == 0 && !before {
+							// SKip first hookContext parameter for after
+							continue
 						}
-					} else {
-						return false // ill-formed AST
+						vals = append(vals, ast.Ident(name))
 					}
+					assigned := assignSliceLiteral(assignStmt, vals)
+					util.Assert(assigned, "sanity check")
 				}
 			}
 		}
@@ -644,7 +636,8 @@ func desugarType(param *dst.Field) dst.Expr {
 }
 
 func (ip *InstrumentPhase) rewriteHookContextImpl() {
-	util.Assert(len(ip.hookCtxMethods) > 4, "sanity check")
+	const expectMinMethodCount = 4
+	util.Assert(len(ip.hookCtxMethods) > expectMinMethodCount, "sanity check")
 	var (
 		methodSetParam  *dst.FuncDecl
 		methodGetParam  *dst.FuncDecl
