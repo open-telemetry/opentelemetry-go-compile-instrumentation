@@ -113,14 +113,14 @@ func collectArguments(funcDecl *dst.FuncDecl) []dst.Expr {
 func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	args []dst.Expr, retVals []dst.Expr,
 ) *dst.IfStmt {
-	uniqueSuffix := util.Crc32(t.String())
+	funcSuffix := util.Crc32(t.String())
 	beforeCall := ast.CallTo(makeName(t, funcDecl, true), args)
 	afterCall := ast.CallTo(makeName(t, funcDecl, false), func() []dst.Expr {
 		// NB. DST framework disallows duplicated node in the
 		// AST tree, we need to replicate the return values
 		// as they are already used in return statement above
 		clone := make([]dst.Expr, len(retVals)+1)
-		clone[0] = ast.Ident(TrampolineHookContextName + uniqueSuffix)
+		clone[0] = ast.Ident(TrampolineHookContextName + funcSuffix)
 		for i := 1; i < len(clone); i++ {
 			clone[i] = ast.AddressOf(retVals[i-1])
 		}
@@ -128,12 +128,12 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	}())
 	tjumpInit := ast.DefineStmts(
 		ast.Exprs(
-			ast.Ident(TrampolineHookContextName+uniqueSuffix),
-			ast.Ident(TrampolineSkipName+uniqueSuffix),
+			ast.Ident(TrampolineHookContextName+funcSuffix),
+			ast.Ident(TrampolineSkipName+funcSuffix),
 		),
 		ast.Exprs(beforeCall),
 	)
-	tjumpCond := ast.Ident(TrampolineSkipName + uniqueSuffix)
+	tjumpCond := ast.Ident(TrampolineSkipName + funcSuffix)
 	tjumpBody := ast.BlockStmts(
 		ast.ExprStmt(afterCall),
 		ast.ReturnStmt(retVals),
@@ -169,8 +169,7 @@ func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 			// corresponding node positions. We need to keep looking downward
 			// until we find a node that contains position information, and then
 			// annotate it with a line directive.
-			for i := range len(funcDecl.Body.List) {
-				stmt := funcDecl.Body.List[i]
+			for _, stmt := range funcDecl.Body.List {
 				pos = ip.parser.FindPosition(stmt)
 				if !pos.IsValid() {
 					continue

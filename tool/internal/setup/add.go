@@ -23,10 +23,12 @@ var requiredImports = [][]string{
 }
 
 func genImportDecl(matched []*rule.InstFuncRule) []dst.Decl {
-	importDecls := make([]dst.Decl, 0, len(matched))
 	for _, m := range matched {
-		decl := ast.ImportDecl("_", m.Path)
-		importDecls = append(importDecls, decl)
+		requiredImports = append(requiredImports, []string{m.Path, "_"})
+	}
+	importDecls := make([]dst.Decl, 0)
+	for _, d := range requiredImports {
+		importDecls = append(importDecls, ast.ImportDecl(d[1], d[0]))
 	}
 	return importDecls
 }
@@ -118,12 +120,8 @@ func buildOtelRuntimeAst(decls []dst.Decl) *dst.File {
 }
 
 func (*SetupPhase) addDeps(matched []*rule.InstFuncRule) error {
-	// Generate all kinds of declarations
-	importDecls := genImportDecl(matched)
 	// Add required imports
-	for _, d := range requiredImports {
-		importDecls = append(importDecls, ast.ImportDecl(d[1], d[0]))
-	}
+	importDecls := genImportDecl(matched)
 	// Generate the variable declarations that used by otel runtime
 	varDecls := genVarDecl(matched)
 	// Build the ast

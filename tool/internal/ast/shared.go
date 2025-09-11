@@ -49,6 +49,7 @@ func FindFuncDecl(root *dst.File, funcName string) ([]*dst.FuncDecl, error) {
 	if err != nil {
 		return nil, err
 	}
+	// one with receiver and one without receiver, at most two
 	util.Assert(len(decls) <= maxMatchDecls, "sanity check")
 	return decls, nil
 }
