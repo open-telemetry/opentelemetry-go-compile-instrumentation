@@ -27,7 +27,7 @@ func findFuncDecls(root *dst.File, lambda func(*dst.FuncDecl) bool) ([]*dst.Func
 	return found, nil
 }
 
-func FindFuncDecl(root *dst.File, funcName string) (*dst.FuncDecl, error) {
+func FindFuncDeclWithouRecv(root *dst.File, funcName string) (*dst.FuncDecl, error) {
 	decls, err := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
 		return funcDecl.Name.Name == funcName && !HasReceiver(funcDecl)
 	})
@@ -41,7 +41,7 @@ func FindFuncDecl(root *dst.File, funcName string) (*dst.FuncDecl, error) {
 	return decls[0], nil
 }
 
-func FindFuncDeclWithRecv(root *dst.File, funcName string) ([]*dst.FuncDecl, error) {
+func FindFuncDecl(root *dst.File, funcName string) ([]*dst.FuncDecl, error) {
 	const maxMatchDecls = 2
 	decls, err := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
 		return funcDecl.Name.Name == funcName

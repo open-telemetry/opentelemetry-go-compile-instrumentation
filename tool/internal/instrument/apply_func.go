@@ -16,9 +16,8 @@ import (
 )
 
 const (
-	TJumpLabel         = "/* TRAMPOLINE_JUMP_IF */"
-	OtelTrampolineFile = "otel.trampoline.go"
-	OtelAPIFile        = "otel.api.go"
+	TJumpLabel      = "/* TRAMPOLINE_JUMP_IF */"
+	OtelGlobalsFile = "otel.globals.go"
 )
 
 func makeName(r *rule.InstFuncRule,
@@ -181,7 +180,6 @@ func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 				stmt.Decorations().Start.Append(tag)
 			}
 		} else {
-			pos = ip.parser.FindPosition(funcDecl.Body)
 			tag := fmt.Sprintf("//line %s", pos.String())
 			empty := ast.EmptyStmt()
 			empty.Decs.Before = dst.NewLine
@@ -224,11 +222,7 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	ip.insertToFunc(funcDecl, tjump)
 
 	// Generate corresponding trampoline code
-	err := ip.generateTrampoline(t)
-	if err != nil {
-		return err
-	}
-	return nil
+	return ip.generateTrampoline(t)
 }
 
 func (ip *InstrumentPhase) addCompileArg(newArg string) {
@@ -238,7 +232,7 @@ func (ip *InstrumentPhase) addCompileArg(newArg string) {
 //go:embed template_api.go
 var templateAPI string
 
-func (ip *InstrumentPhase) writeTrampoline(pkgName string) error {
+func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
 	// Prepare trampoline code header
 	p := ast.NewAstParser()
 	trampoline, err := p.ParseSource("package " + pkgName)
@@ -256,7 +250,7 @@ func (ip *InstrumentPhase) writeTrampoline(pkgName string) error {
 	trampoline.Decls = append(trampoline.Decls, api.Decls...)
 
 	// Write trampoline code to file
-	path := filepath.Join(ip.workDir, OtelTrampolineFile)
+	path := filepath.Join(ip.workDir, OtelGlobalsFile)
 	err = ast.WriteFile(path, trampoline)
 	if err != nil {
 		return err
@@ -285,7 +279,7 @@ func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string)
 			return err
 		}
 		ip.target = root
-		funcDecls, err := ast.FindFuncDeclWithRecv(root, rule.GetFuncName())
+		funcDecls, err := ast.FindFuncDecl(root, rule.GetFuncName())
 		if err != nil {
 			return err
 		}
@@ -313,9 +307,5 @@ func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string)
 		}
 		ip.Info("Restored ast", "file", file, "newFile", filepath.Join(ip.workDir, name))
 	}
-	err := ip.writeTrampoline(ip.packageName)
-	if err != nil {
-		return err
-	}
-	return nil
+	return ip.writeGlobals(ip.packageName)
 }

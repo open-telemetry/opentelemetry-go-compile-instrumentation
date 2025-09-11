@@ -113,9 +113,5 @@ func Toolexec(ctx context.Context, args []string) error {
 		}
 	}
 	// Just run the command as is
-	err := util.RunCmd(ctx, args...)
-	if err != nil {
-		return err
-	}
-	return nil
+	return util.RunCmd(ctx, args...)
 }

@@ -22,11 +22,12 @@ const (
 )
 
 func normalizePath(name string) string {
+	const pkg, pkgTemp = "pkg", "pkg_temp"
 	cleanName := filepath.ToSlash(filepath.Clean(name))
-	if strings.HasPrefix(cleanName, "pkg_temp/") {
-		cleanName = strings.Replace(cleanName, "pkg_temp/", "pkg/", 1)
-	} else if cleanName == "pkg_temp" {
-		cleanName = "pkg"
+	if strings.HasPrefix(cleanName, pkgTemp+"/") {
+		cleanName = strings.Replace(cleanName, pkgTemp+"/", pkg+"/", 1)
+	} else if cleanName == pkgTemp {
+		cleanName = pkg
 	}
 	return cleanName
 }
@@ -138,9 +139,5 @@ func (*SetupPhase) extract() error {
 
 	// Extract the instrumentation code to the build temp directory
 	// for future instrumentation phase
-	err = extractGZip(bs, util.GetBuildTempDir())
-	if err != nil {
-		return err
-	}
-	return nil
+	return extractGZip(bs, util.GetBuildTempDir())
 }

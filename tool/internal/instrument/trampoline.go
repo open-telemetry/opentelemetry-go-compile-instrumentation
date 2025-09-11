@@ -146,7 +146,7 @@ type ParamTrait struct {
 func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 	util.Assert(rule.GetBeforeAdvice() != "" || rule.GetAfterAdvice() != "", "hook must be set")
 	if rule.GetBeforeAdvice() != "" {
-		decl, err := ast.FindFuncDecl(root, rule.GetBeforeAdvice())
+		decl, err := ast.FindFuncDeclWithouRecv(root, rule.GetBeforeAdvice())
 		if err != nil {
 			return false
 		}
@@ -155,7 +155,7 @@ func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 		}
 	}
 	if rule.GetAfterAdvice() != "" {
-		decl, err := ast.FindFuncDecl(root, rule.GetAfterAdvice())
+		decl, err := ast.FindFuncDeclWithouRecv(root, rule.GetAfterAdvice())
 		if err != nil {
 			return false
 		}
@@ -215,12 +215,12 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 	}
 	var target *dst.FuncDecl
 	if before {
-		target, err = ast.FindFuncDecl(root, t.GetBeforeAdvice())
+		target, err = ast.FindFuncDeclWithouRecv(root, t.GetBeforeAdvice())
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		target, err = ast.FindFuncDecl(root, t.GetAfterAdvice())
+		target, err = ast.FindFuncDeclWithouRecv(root, t.GetAfterAdvice())
 		if err != nil {
 			return nil, err
 		}
@@ -369,7 +369,7 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 			Params: paramTypes,
 		},
 	}
-	exist, err := ast.FindFuncDecl(ip.target, fnName)
+	exist, err := ast.FindFuncDeclWithouRecv(ip.target, fnName)
 	if err != nil {
 		return err
 	}
@@ -719,7 +719,7 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule,
 		ip.callAfterHook(t, traits)
 	}
 	if !ip.replenishHookContext(before) {
-		return err
+		return ex.Errorf(nil, "failed to replenish hook context")
 	}
 	return nil
 }

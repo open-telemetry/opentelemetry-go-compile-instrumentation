@@ -74,7 +74,7 @@ func (sp *SetupPhase) matchedDeps(deps []*Dependency) ([]*rule.InstFuncRule, err
 				if perr != nil {
 					return nil, perr
 				}
-				funcDecl, perr := ast.FindFuncDeclWithRecv(root, targetFunction)
+				funcDecl, perr := ast.FindFuncDecl(root, targetFunction)
 				if perr != nil {
 					return nil, perr
 				}
