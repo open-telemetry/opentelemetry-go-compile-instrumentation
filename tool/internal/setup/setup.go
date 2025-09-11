@@ -109,9 +109,5 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
 
-	err = util.RunCmdWithEnv(ctx, env, newArgs...)
-	if err != nil {
-		return err
-	}
-	return nil
+	return util.RunCmdWithEnv(ctx, env, newArgs...)
 }

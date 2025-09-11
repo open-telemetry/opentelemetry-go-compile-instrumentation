@@ -40,11 +40,7 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 }
 
 func runModTidy(ctx context.Context) error {
-	err := util.RunCmd(ctx, "go", "mod", "tidy")
-	if err != nil {
-		return err
-	}
-	return nil
+	return util.RunCmd(ctx, "go", "mod", "tidy")
 }
 
 func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (bool, error) {

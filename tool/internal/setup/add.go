@@ -129,9 +129,5 @@ func (*SetupPhase) addDeps(matched []*rule.InstFuncRule) error {
 	// Build the ast
 	root := buildOtelRuntimeAst(append(importDecls, varDecls...))
 	// Write the ast to file
-	err := ast.WriteFile(OtelRuntimeFile, root)
-	if err != nil {
-		return err
-	}
-	return nil
+	return ast.WriteFile(OtelRuntimeFile, root)
 }
