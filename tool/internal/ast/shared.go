@@ -27,7 +27,7 @@ func findFuncDecls(root *dst.File, lambda func(*dst.FuncDecl) bool) ([]*dst.Func
 	return found, nil
 }
 
-func FindFuncDeclWithouRecv(root *dst.File, funcName string) (*dst.FuncDecl, error) {
+func FindFuncDeclWithoutRecv(root *dst.File, funcName string) (*dst.FuncDecl, error) {
 	decls, err := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
 		return funcDecl.Name.Name == funcName && !HasReceiver(funcDecl)
 	})
