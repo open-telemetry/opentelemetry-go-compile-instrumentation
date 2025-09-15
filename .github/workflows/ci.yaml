@@ -26,7 +26,6 @@ jobs:
         uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
 
   compatibility-test:
-    if: false # temporary disable
     name: Test (go ${{ matrix.go-version }}, ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
     strategy:
       matrix:
@@ -59,14 +58,12 @@ jobs:
       - name: Run tests
         env:
           GOARCH: ${{ matrix.platform.arch }}
-        run: go test -shufle=on ./...
+        run: go test -shuffle=on ./...
 
   done:
     name: Done
     runs-on: ubuntu-latest
     needs: [compatibility-test]
-    # temporary disable
-    if: false #'!cancelled()'
     steps:
       - name: Success
         run: |
