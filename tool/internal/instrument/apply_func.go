@@ -28,7 +28,7 @@ func makeName(r *rule.InstFuncRule,
 		prefix = TrampolineBeforeName
 	}
 	return fmt.Sprintf("%s_%s%s",
-		prefix, funcDecl.Name.Name, util.Crc32(r.String()))
+		prefix, funcDecl.Name.Name, util.CRC32(r.String()))
 }
 
 func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
@@ -113,7 +113,7 @@ func collectArguments(funcDecl *dst.FuncDecl) []dst.Expr {
 func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	args []dst.Expr, retVals []dst.Expr,
 ) *dst.IfStmt {
-	funcSuffix := util.Crc32(t.String())
+	funcSuffix := util.CRC32(t.String())
 	beforeCall := ast.CallTo(makeName(t, funcDecl, true), args)
 	afterCall := ast.CallTo(makeName(t, funcDecl, false), func() []dst.Expr {
 		// NB. DST framework disallows duplicated node in the

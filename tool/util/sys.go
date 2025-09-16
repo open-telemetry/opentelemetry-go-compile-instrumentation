@@ -81,7 +81,7 @@ func CopyFile(src, dst string) error {
 	return nil
 }
 
-func Crc32(s string) string {
+func CRC32(s string) string {
 	crc32Hash := crc32.ChecksumIEEE([]byte(s))
 	return strconv.FormatUint(uint64(crc32Hash), 10)
 }
