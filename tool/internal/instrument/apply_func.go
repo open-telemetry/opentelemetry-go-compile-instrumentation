@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/dave/dst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
@@ -259,8 +260,33 @@ func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
 	return nil
 }
 
+func (ip *InstrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
+	// Write the instrumented AST to the new file in the working directory
+	newFile := filepath.Join(ip.workDir, filepath.Base(oldFile))
+	err := ast.WriteFile(newFile, root)
+	if err != nil {
+		return err
+	}
+	ip.keepForDebug(newFile)
+
+	// Replace the original file with the new file in the compile command
+	replace := false
+	for i, arg := range ip.compileArgs {
+		if arg == oldFile {
+			ip.compileArgs[i] = newFile
+			replace = true
+			break
+		}
+	}
+	if !replace {
+		return ex.Errorf(nil, "cannot apply the instrumented %s for %v",
+			oldFile, ip.compileArgs)
+	}
+	ip.Info("Write instrumented AST", "old", oldFile, "new", newFile)
+	return nil
+}
+
 func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string) error {
-	ip.Info("Applying func rule", "rule", rule, "args", args)
 	files := make([]string, 0)
 
 	// Find all go source files from compile command
@@ -271,6 +297,7 @@ func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string)
 	}
 	// Parse each go source file to see if there are any matched functions
 	// and then insert tjump if so
+	instrumented := false
 	for _, file := range files {
 		ip.parser = ast.NewAstParser()
 		root, err := ip.parser.Parse(file, parser.ParseComments)
@@ -282,29 +309,31 @@ func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, args []string)
 		if err != nil {
 			return err
 		}
+		// No function found for the rule, skip
+		if len(funcDecls) == 0 {
+			continue
+		}
 		for _, funcDecl := range funcDecls {
 			ip.rawFunc = funcDecl
 			err = ip.insertTJump(rule, funcDecl)
+			instrumented = true
 			if err != nil {
 				return err
 			}
+			ip.Info("Apply func rule", "rule", rule, "args", args)
 		}
-		// Write back to the original file
-		name := filepath.Join(ip.workDir, filepath.Base(file))
-		err = ast.WriteFile(name, root)
+		// Write the instrumented AST to new file and replace the original
+		// file in the compile command
+		err = ip.writeInstrumented(root, file)
 		if err != nil {
 			return err
 		}
-		ip.keepForDebug(name)
-
-		// Replace the original file with the new file in the compile command
-		for i, arg := range ip.compileArgs {
-			if arg == file {
-				ip.compileArgs[i] = name
-				break
-			}
-		}
-		ip.Info("Restored ast", "file", file, "newFile", filepath.Join(ip.workDir, name))
 	}
-	return ip.writeGlobals(ip.packageName)
+
+	// Write globals file if any function is instrumented because injected code
+	// always requires some global variables and auxiliary declarations
+	if instrumented {
+		return ip.writeGlobals(ip.packageName)
+	}
+	return nil
 }

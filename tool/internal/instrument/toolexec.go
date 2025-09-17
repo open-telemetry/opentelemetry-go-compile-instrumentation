@@ -98,7 +98,7 @@ func Toolexec(ctx context.Context, args []string) error {
 			return err
 		}
 		if len(matchedRules) > 0 {
-			ip.Info("Instrumenting package", "rules", matchedRules, "args", args)
+			ip.Info("Instrument package", "rules", matchedRules, "args", args)
 			// Okay, this package should be instrumented.
 			err = ip.instrument(matchedRules, args)
 			if err != nil {
