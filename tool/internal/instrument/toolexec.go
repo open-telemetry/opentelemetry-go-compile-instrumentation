@@ -78,38 +78,47 @@ func stripCompleteFlag(args []string) []string {
 	return args
 }
 
+func compileCommand(ctx context.Context, args []string) ([]string, error) {
+	// Read compilation output directory
+	target := util.FindFlagValue(args, "-o")
+	util.Assert(target != "", "why not otherwise")
+	ip := &InstrumentPhase{
+		logger:      util.LoggerFromContext(ctx),
+		workDir:     filepath.Dir(target),
+		compileArgs: args,
+		packageName: util.FindFlagValue(args, "-p"),
+	}
+
+	// Check if the current package should be instrumented by matching the
+	// current command with list of matched rules
+	matchedRules, err := ip.match(args)
+	if err != nil {
+		return nil, err
+	}
+	if len(matchedRules) > 0 {
+		ip.Info("Instrument package", "rules", matchedRules, "args", args)
+		// Okay, this package should be instrumented.
+		err = ip.instrument(matchedRules, args)
+		if err != nil {
+			return nil, err
+		}
+
+		// Strip -complete flag as we may insert some hook points that are
+		// not ready yet, i.e. they don't have function body
+		ip.compileArgs = stripCompleteFlag(ip.compileArgs)
+
+		args = ip.compileArgs
+	}
+	return args, nil
+}
+
 func Toolexec(ctx context.Context, args []string) error {
 	// Check if the command is a compile command.
 	if util.IsCompileCommand(strings.Join(args, " ")) {
-		// Read compilation output directory
-		target := util.FindFlagValue(args, "-o")
-		util.Assert(target != "", "why not otherwise")
-		ip := &InstrumentPhase{
-			logger:      util.LoggerFromContext(ctx),
-			workDir:     filepath.Dir(target),
-			compileArgs: args,
-			packageName: util.FindFlagValue(args, "-p"),
-		}
-
-		// Check if the current package should be instrumented by matching the
-		// current command with list of matched rules
-		matchedRules, err := ip.match(args)
+		var err error
+		args, err = compileCommand(ctx, args)
 		if err != nil {
 			return err
-		}
-		if len(matchedRules) > 0 {
-			ip.Info("Instrument package", "rules", matchedRules, "args", args)
-			// Okay, this package should be instrumented.
-			err = ip.instrument(matchedRules, args)
-			if err != nil {
-				return err
-			}
-
-			// Strip -complete flag as we may insert some hook points that are
-			// not ready yet, i.e. they don't have function body
-			ip.compileArgs = stripCompleteFlag(ip.compileArgs)
-
-			args = ip.compileArgs
 		}
 	}
 	// Just run the command as is
