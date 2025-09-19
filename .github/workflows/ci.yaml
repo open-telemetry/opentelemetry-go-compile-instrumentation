@@ -55,6 +55,8 @@ jobs:
           go-version: ${{ matrix.go-version }}
           check-latest: true
           cache-dependency-path: "**/go.mod"
+      - name: Build
+        run: make build
       - name: Run tests
         env:
           GOARCH: ${{ matrix.platform.arch }}
