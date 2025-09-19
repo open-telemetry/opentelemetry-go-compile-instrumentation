@@ -30,6 +30,11 @@ func GetOtelWorkDir() string {
 }
 
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
+func GetBuildTempDir() string {
+	return filepath.Join(GetOtelWorkDir(), BuildTempDir)
+}
+
+// GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
 	return filepath.Join(GetOtelWorkDir(), BuildTempDir, name)
 }

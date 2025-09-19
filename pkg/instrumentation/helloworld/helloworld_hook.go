@@ -37,7 +37,8 @@ func setupOpenTelemetry() {
 
 var helloWorldInstrumenter = BuildNetHttpClientOtelInstrumenter()
 
-func MyHookBefore(ictx inst.Context) {
+//go:linkname MyHookBefore main.MyHookBefore
+func MyHookBefore(ictx inst.HookContext) {
 	// Use instrumenter to create span and metrics
 	// When the main is executed, we should instrumenter#start to create span
 	ctx := context.Background()
@@ -58,7 +59,8 @@ func MyHookBefore(ictx inst.Context) {
 	time.Sleep(2 * time.Second)
 }
 
-func MyHookAfter(ictx inst.Context) {
+//go:linkname MyHookAfter main.MyHookAfter
+func MyHookAfter(ictx inst.HookContext) {
 	// This is the after hook, we can do some clean up work here if needed
 	fmt.Println("[MyHook] after hook executed!")
 }

@@ -5,7 +5,6 @@ package ast
 
 import (
 	"go/parser"
-	"go/printer"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -22,12 +21,15 @@ type AstParser struct {
 }
 
 func NewAstParser() *AstParser {
+	fset := token.NewFileSet()
 	return &AstParser{
-		fset: token.NewFileSet(),
+		fset: fset,
+		dec:  decorator.NewDecorator(fset),
 	}
 }
 
-func (ap *AstParser) ParseFile(filePath string, mode parser.Mode) (*dst.File, error) {
+// ParseFile parses the AST from a file.
+func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error) {
 	util.Assert(ap.fset != nil, "fset is not initialized")
 
 	name := filepath.Base(filePath)
@@ -40,7 +42,6 @@ func (ap *AstParser) ParseFile(filePath string, mode parser.Mode) (*dst.File, er
 	if err != nil {
 		return nil, ex.Errorf(err, "failed to parse file %s", filePath)
 	}
-	ap.dec = decorator.NewDecorator(ap.fset)
 	dstFile, err := ap.dec.DecorateFile(astFile)
 	if err != nil {
 		return nil, ex.Errorf(err, "failed to decorate file %s", filePath)
@@ -48,26 +49,56 @@ func (ap *AstParser) ParseFile(filePath string, mode parser.Mode) (*dst.File, er
 	return dstFile, nil
 }
 
-func (ap *AstParser) ParseFileFast(filePath string) (*dst.File, error) {
-	return ap.ParseFile(filePath, parser.SkipObjectResolution)
+// ParseSource parses the AST from complete source code.
+func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
+	if source == "" {
+		return nil, ex.Errorf(nil, "empty source")
+	}
+	dstRoot, err := ap.dec.Parse(source)
+	if err != nil {
+		return nil, ex.Error(err)
+	}
+	return dstRoot, nil
 }
 
+// FindPosition finds the source position of a node in the AST.
+func (ap *AstParser) FindPosition(node dst.Node) token.Position {
+	astNode := ap.dec.Ast.Nodes[node]
+	if astNode == nil {
+		return token.Position{Filename: "", Line: -1, Column: -1} // Invalid
+	}
+	return ap.fset.Position(astNode.Pos())
+}
+
+// WriteFile writes the AST to a file.
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
 	if err != nil {
 		return ex.Errorf(err, "failed to create file %s", filePath)
 	}
 	defer file.Close()
-	fset := token.NewFileSet()
-	restorer := decorator.NewRestorer()
-	astFile, err := restorer.RestoreFile(root)
-	if err != nil {
-		return ex.Errorf(err, "failed to restore file %s", filePath)
-	}
-	cfg := printer.Config{}
-	err = cfg.Fprint(file, fset, astFile)
+	r := decorator.NewRestorer()
+	err = r.Fprint(file, root)
 	if err != nil {
 		return ex.Errorf(err, "failed to write to file %s", filePath)
 	}
 	return nil
+}
+
+// ParseFileOnlyPackage parses the AST from a file. Use it if you only need to
+// read the package name from the AST.
+func ParseFileOnlyPackage(filePath string) (*dst.File, error) {
+	return NewAstParser().Parse(filePath, parser.PackageClauseOnly)
+}
+
+// ParseFileFast parses the AST from a file. Use this version if you only need
+// to read information from the AST without writing it back to a file.
+func ParseFileFast(filePath string) (*dst.File, error) {
+	return NewAstParser().Parse(filePath, parser.SkipObjectResolution)
+}
+
+// ParseFile parses the AST from a file. Use this standard version if you need to
+// write the AST back to a file, otherwise use ParseFileFast for better performance.
+func ParseFile(filePath string) (*dst.File, error) {
+	return NewAstParser().Parse(filePath, parser.ParseComments)
 }

@@ -76,6 +76,11 @@ func Setup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Extract the embedded instrumentation modules into local directory
+	err = sp.extract()
+	if err != nil {
+		return err
+	}
 	sp.Info("Setup completed successfully")
 	return nil
 }
@@ -92,10 +97,15 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	insert := "-toolexec=" + execPath + " toolexec"
 	const additionalCount = 2
 	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
+	// Add "go build"
 	newArgs = append(newArgs, "go")
-	newArgs = append(newArgs, args[:2]...) // Add "go build"
-	newArgs = append(newArgs, insert)      // Add "-toolexec=..."
-	newArgs = append(newArgs, args[2:]...) // Add the rest
+	newArgs = append(newArgs, args[:2]...)
+	// Add "-work" to give us a chance to debug instrumented code if needed
+	newArgs = append(newArgs, "-work")
+	// Add "-toolexec=..."
+	newArgs = append(newArgs, insert)
+	// Add the rest
+	newArgs = append(newArgs, args[2:]...)
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
@@ -104,9 +114,5 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
 
-	err = util.RunCmdWithEnv(ctx, env, newArgs...)
-	if err != nil {
-		return err
-	}
-	return nil
+	return util.RunCmdWithEnv(ctx, env, newArgs...)
 }

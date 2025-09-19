@@ -9,9 +9,10 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
-//go:embed *.yaml
+//go:embed *
 var dataFs embed.FS
 
+// ListEmbedFiles lists all the files in the embedded data
 func ListEmbedFiles() ([]string, error) {
 	rules, err := dataFs.ReadDir(".")
 	if err != nil {
@@ -27,6 +28,7 @@ func ListEmbedFiles() ([]string, error) {
 	return ruleFiles, nil
 }
 
+// ReadEmbedFile reads a file from the embedded data
 func ReadEmbedFile(path string) ([]byte, error) {
 	bs, err := dataFs.ReadFile(path)
 	if err != nil {

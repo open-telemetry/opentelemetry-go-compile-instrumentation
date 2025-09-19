@@ -14,7 +14,7 @@ import (
 
 // store stores the matched rules to the file
 // It's the pair of the InstrumentPhase.load
-func (sp *SetupPhase) store(matched []*rule.InstRule) error {
+func (sp *SetupPhase) store(matched []*rule.InstFuncRule) error {
 	f := util.GetMatchedRuleFile()
 	file, err := os.Create(f)
 	if err != nil {

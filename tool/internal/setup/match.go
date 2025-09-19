@@ -13,17 +13,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func parseEmbeddedRule(path string) ([]*rule.InstRule, error) {
+func parseEmbeddedRule(path string) ([]*rule.InstFuncRule, error) {
 	yamlFile, err := data.ReadEmbedFile(path)
 	if err != nil {
 		return nil, err
 	}
-	rules := make(map[string]*rule.InstRule)
+	rules := make(map[string]*rule.InstFuncRule)
 	err = yaml.NewDecoder(bytes.NewReader(yamlFile)).Decode(&rules)
 	if err != nil {
 		return nil, ex.Errorf(err, "failed to decode yaml file")
 	}
-	arr := make([]*rule.InstRule, 0)
+	arr := make([]*rule.InstFuncRule, 0)
 	for name, r := range rules {
 		r.Name = name
 		arr = append(arr, r)
@@ -31,8 +31,8 @@ func parseEmbeddedRule(path string) ([]*rule.InstRule, error) {
 	return arr, nil
 }
 
-func materalizeRules(availables []string) ([]*rule.InstRule, error) {
-	parsedRules := []*rule.InstRule{}
+func materalizeRules(availables []string) ([]*rule.InstFuncRule, error) {
+	parsedRules := []*rule.InstFuncRule{}
 	for _, available := range availables {
 		rs, err := parseEmbeddedRule(available)
 		if err != nil {
@@ -43,7 +43,7 @@ func materalizeRules(availables []string) ([]*rule.InstRule, error) {
 	return parsedRules, nil
 }
 
-func (sp *SetupPhase) matchedDeps(deps []*Dependency) ([]*rule.InstRule, error) {
+func (sp *SetupPhase) matchedDeps(deps []*Dependency) ([]*rule.InstFuncRule, error) {
 	availables, err := data.ListEmbedFiles()
 	if err != nil {
 		return nil, err
@@ -57,7 +57,7 @@ func (sp *SetupPhase) matchedDeps(deps []*Dependency) ([]*rule.InstRule, error) 
 	}
 
 	// Match the default rules with the found dependencies
-	matched := make([]*rule.InstRule, 0)
+	matched := make([]*rule.InstFuncRule, 0)
 	for _, dep := range deps {
 		for _, rule := range rules {
 			targetImportPath := rule.GetFuncImportPath()
@@ -70,17 +70,18 @@ func (sp *SetupPhase) matchedDeps(deps []*Dependency) ([]*rule.InstRule, error) 
 			// Iterate over all the source files of the given import path
 			// and check if the function is the one we want to instrument
 			for _, file := range dep.Sources {
-				funcDecls, parseErr := ast.ListFuncDecls(file)
-				if parseErr != nil {
-					return nil, parseErr
+				root, perr := ast.ParseFileFast(file)
+				if perr != nil {
+					return nil, perr
 				}
-				for _, funcDecl := range funcDecls {
-					// Same function name?
-					if funcDecl.Name.Name == targetFunction {
-						// Okay, this function is the one we want to instrument
-						// record the name of the rule that matches this function
-						matched = append(matched, rule)
-					}
+				funcDecl, perr := ast.FindFuncDecl(root, targetFunction)
+				if perr != nil {
+					return nil, perr
+				}
+				if len(funcDecl) > 0 {
+					// Okay, this function is the one we want to instrument
+					// record the name of the rule that matches this function
+					matched = append(matched, rule)
 				}
 			}
 		}

@@ -5,11 +5,14 @@ package util
 
 import (
 	"context"
+	"hash/crc32"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
@@ -63,6 +66,52 @@ func CopyFile(src, dst string) error {
 	defer dstFile.Close()
 
 	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return ex.Error(err)
+	}
+	return nil
+}
+
+func CRC32(s string) string {
+	crc32Hash := crc32.ChecksumIEEE([]byte(s))
+	return strconv.FormatUint(uint64(crc32Hash), 10)
+}
+
+func ListFiles(dir string) ([]string, error) {
+	var files []string
+	walkFn := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return ex.Error(err)
+		}
+		// Don't list files under hidden directories
+		if strings.HasPrefix(info.Name(), ".") {
+			return filepath.SkipDir
+		}
+		if !info.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	}
+	err := filepath.Walk(dir, walkFn)
+	if err != nil {
+		return nil, ex.Error(err)
+	}
+	return files, nil
+}
+
+func WriteFile(filePath string, content string) error {
+	file, err := os.Create(filePath)
+	if err != nil {
+		return ex.Error(err)
+	}
+	defer func(file *os.File) {
+		err = file.Close()
+		if err != nil {
+			ex.Fatal(err)
+		}
+	}(file)
+
+	_, err = file.WriteString(content)
 	if err != nil {
 		return ex.Error(err)
 	}

@@ -1,5 +1,7 @@
 # OpenTelemetry Go Compile Instrumentation
 
+[![logo](https://img.shields.io/badge/slack-@cncf/otel--gocomp-blue.svg?logo=opentelemetry)](https://cloud-native.slack.com/archives/C088D8GSSSF)  &nbsp;
+
 <img src="./docs/assets/otel-logo.png" alt="OpenTelemetry Logo" width="500">
 
 > [!IMPORTANT]

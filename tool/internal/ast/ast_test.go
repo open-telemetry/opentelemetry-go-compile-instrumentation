@@ -10,7 +10,6 @@ import (
 )
 
 func TestParseAst(t *testing.T) {
-	parser := NewAstParser()
-	_, err := parser.ParseFileFast("ast_test.go")
+	_, err := ParseFile("ast_test.go")
 	require.NoError(t, err)
 }

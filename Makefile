@@ -5,6 +5,8 @@
 BINARY_NAME := otel
 DEMO_DIR := demo
 TOOL_DIR := tool/cmd
+INST_PKG_GZIP = otel-pkg.gz
+INST_PKG_TMP = pkg_temp
 
 # Version variables
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -15,9 +17,20 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%d')
 .PHONY: all
 all: build
 
+# Package the instrumentation code into binary
+.PHONY: package
+package:
+	@echo "Packaging instrumentation code into binary..."
+	@rm -rf $(INST_PKG_TMP)
+	@cp -a pkg $(INST_PKG_TMP)
+	@cd $(INST_PKG_TMP) && go mod tidy
+	@tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
+	@mv $(INST_PKG_GZIP) tool/data/
+	@rm -rf $(INST_PKG_TMP)
+
 # Build the instrumentation tool
 .PHONY: build
-build:
+build: package
 	@echo "Building instrumentation tool..."
 	@go mod tidy
 	@go build -a -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" -o $(BINARY_NAME) ./$(TOOL_DIR)

@@ -133,7 +133,7 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 		util.Assert(!exist, "import path should not be duplicated")
 		// Find the go files belong to the package
 		for _, arg := range args {
-			if strings.HasSuffix(arg, ".go") {
+			if util.IsGoFile(arg) {
 				dep.Sources = append(dep.Sources, arg)
 			}
 		}

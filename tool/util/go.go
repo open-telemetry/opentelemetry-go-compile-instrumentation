@@ -85,3 +85,7 @@ func SplitCompileCmds(input string) []string {
 	}
 	return args
 }
+
+func IsGoFile(path string) bool {
+	return strings.HasSuffix(strings.ToLower(path), ".go")
+}

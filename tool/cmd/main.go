@@ -31,8 +31,13 @@ func main() {
 				Aliases:   []string{"w"},
 				Usage:     "The path to a directory where working files will be written",
 				TakesFile: true,
-				Value:     filepath.Join(".", util.BuildTempDir),
-				Sources:   cli.NewValueSourceChain(cli.EnvVar(util.EnvOtelWorkDir)),
+				Value:     util.GetBuildTempDir(),
+			},
+			&cli.BoolFlag{
+				Name:    "-debug",
+				Aliases: []string{"d"},
+				Usage:   "Enable debug mode",
+				Value:   false,
 			},
 		},
 		Commands: []*cli.Command{

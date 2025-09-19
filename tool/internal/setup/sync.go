@@ -40,11 +40,7 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 }
 
 func runModTidy(ctx context.Context) error {
-	err := util.RunCmd(ctx, "go", "mod", "tidy")
-	if err != nil {
-		return err
-	}
-	return nil
+	return util.RunCmd(ctx, "go", "mod", "tidy")
 }
 
 func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (bool, error) {
@@ -65,7 +61,7 @@ func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (b
 	return false, nil
 }
 
-func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRule) error {
+func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstFuncRule) error {
 	const goModFile = "go.mod"
 	modfile, err := parseGoMod(goModFile)
 	if err != nil {

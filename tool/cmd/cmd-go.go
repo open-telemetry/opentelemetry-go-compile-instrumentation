@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"os"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
@@ -26,6 +28,10 @@ var commandGo = cli.Command{
 			logger.Warn("failed to back up go.mod, go.sum, go.work, go.work.sum, proceeding despite this", "error", err)
 		}
 		defer func() {
+			err = os.RemoveAll(setup.OtelRuntimeFile)
+			if err != nil {
+				logger.Warn("failed to remove otel runtime file", "error", err)
+			}
 			err = util.RestoreFile(backupFiles)
 			if err != nil {
 				logger.Warn("failed to restore go.mod, go.sum, go.work, go.work.sum", "error", err)
@@ -34,12 +40,12 @@ var commandGo = cli.Command{
 
 		err = setup.Setup(ctx)
 		if err != nil {
-			return cli.Exit(err, exitCodeFailure)
+			return ex.Errorf(err, "failed to build with toolexec with exitcode %d", exitCodeFailure)
 		}
 
 		err = setup.BuildWithToolexec(ctx, cmd.Args().Slice())
 		if err != nil {
-			return cli.Exit(err, exitCodeFailure)
+			return ex.Errorf(err, "failed to build with toolexec with exitcode %d", exitCodeFailure)
 		}
 
 		return nil
