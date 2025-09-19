@@ -45,8 +45,8 @@ const (
 	TrampolinePackageNameIdentifier = "PackageName"
 	TrampolineReturnValsIdentifier  = "ReturnVals"
 	TrampolineHookContextImplType   = "HookContextImpl"
-	TrampolineBeforeNamePlaceholder = "\"OtelBeforeNamePlaceholder\""
-	TrampolineAfterNamePlaceholder  = "\"OtelAfterNamePlaceholder\""
+	TrampolineBeforeNamePlaceholder = `"OtelBeforeNamePlaceholder"`
+	TrampolineAfterNamePlaceholder  = `"OtelAfterNamePlaceholder"`
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -394,7 +394,7 @@ func insertAtEnd(funcDecl *dst.FuncDecl, stmt dst.Stmt) {
 
 func (ip *InstrumentPhase) renameFunc(t *rule.InstFuncRule) {
 	// Randomize trampoline function names
-	ip.beforeHookFunc.Name.Name = makeName(t, ip.rawFunc, true)
+	ip.beforeHookFunc.Name.Name = makeName(t, ip.rawFunc, TrampolineBefore)
 	dst.Inspect(ip.beforeHookFunc, func(node dst.Node) bool {
 		if basicLit, ok := node.(*dst.BasicLit); ok {
 			// Replace OtelBeforeTrampolinePlaceHolder to real hook func name
@@ -404,7 +404,7 @@ func (ip *InstrumentPhase) renameFunc(t *rule.InstFuncRule) {
 		}
 		return true
 	})
-	ip.afterHookFunc.Name.Name = makeName(t, ip.rawFunc, false)
+	ip.afterHookFunc.Name.Name = makeName(t, ip.rawFunc, TrampolineAfter)
 	dst.Inspect(ip.afterHookFunc, func(node dst.Node) bool {
 		if basicLit, ok := node.(*dst.BasicLit); ok {
 			if basicLit.Value == TrampolineAfterNamePlaceholder {

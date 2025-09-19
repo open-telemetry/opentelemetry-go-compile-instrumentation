@@ -42,21 +42,19 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 		}
 
 	case tar.TypeReg:
-		{
-			file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR,
-				fileInfo.Mode())
-			if err != nil {
-				return ex.Error(err)
-			}
+		file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR,
+			fileInfo.Mode())
+		if err != nil {
+			return ex.Error(err)
+		}
 
-			_, err = io.CopyN(file, tarReader, header.Size)
-			if err != nil {
-				return ex.Error(err)
-			}
-			err = file.Close()
-			if err != nil {
-				return ex.Error(err)
-			}
+		_, err = io.CopyN(file, tarReader, header.Size)
+		if err != nil {
+			return ex.Error(err)
+		}
+		err = file.Close()
+		if err != nil {
+			return ex.Error(err)
 		}
 	default:
 		return ex.Errorf(nil, "unsupported file type: %c in %s",

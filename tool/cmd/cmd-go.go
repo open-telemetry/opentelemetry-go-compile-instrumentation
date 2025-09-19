@@ -13,11 +13,6 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// cleanupGenerated cleans up the generated files during the build process
-func cleanupGenerated() {
-	_ = os.RemoveAll(setup.OtelRuntimeFile)
-}
-
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandGo = cli.Command{
 	Name:            "go",
@@ -33,7 +28,10 @@ var commandGo = cli.Command{
 			logger.Warn("failed to back up go.mod, go.sum, go.work, go.work.sum, proceeding despite this", "error", err)
 		}
 		defer func() {
-			cleanupGenerated()
+			err = os.RemoveAll(setup.OtelRuntimeFile)
+			if err != nil {
+				logger.Warn("failed to remove otel runtime file", "error", err)
+			}
 			err = util.RestoreFile(backupFiles)
 			if err != nil {
 				logger.Warn("failed to restore go.mod, go.sum, go.work, go.work.sum", "error", err)

@@ -4,7 +4,6 @@
 package ast
 
 import (
-	"fmt"
 	"go/token"
 	"strconv"
 
@@ -38,7 +37,7 @@ func CallTo(name string, args []dst.Expr) *dst.CallExpr {
 func StringLit(value string) *dst.BasicLit {
 	return &dst.BasicLit{
 		Kind:  token.STRING,
-		Value: fmt.Sprintf("%q", value),
+		Value: strconv.Quote(value),
 	}
 }
 
@@ -198,7 +197,7 @@ func ImportDecl(alias, path string) *dst.GenDecl {
 		Specs: []dst.Spec{
 			&dst.ImportSpec{
 				Name: dst.NewIdent(alias),
-				Path: &dst.BasicLit{Value: fmt.Sprintf("%q", path)},
+				Path: &dst.BasicLit{Value: strconv.Quote(path)},
 			},
 		},
 	}

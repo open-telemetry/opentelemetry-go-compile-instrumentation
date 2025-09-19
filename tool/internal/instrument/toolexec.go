@@ -78,7 +78,7 @@ func stripCompleteFlag(args []string) []string {
 	return args
 }
 
-func compileCommand(ctx context.Context, args []string) ([]string, error) {
+func compile(ctx context.Context, args []string) error {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
 	util.Assert(target != "", "why not otherwise")
@@ -89,37 +89,32 @@ func compileCommand(ctx context.Context, args []string) ([]string, error) {
 		packageName: util.FindFlagValue(args, "-p"),
 	}
 
-	// Check if the current package should be instrumented by matching the
-	// current command with list of matched rules
+	// Instrument the package if it matches the rules.
 	matchedRules, err := ip.match(args)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(matchedRules) > 0 {
 		ip.Info("Instrument package", "rules", matchedRules, "args", args)
 		// Okay, this package should be instrumented.
 		err = ip.instrument(matchedRules, args)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		// Strip -complete flag as we may insert some hook points that are
 		// not ready yet, i.e. they don't have function body
 		ip.compileArgs = stripCompleteFlag(ip.compileArgs)
-
-		args = ip.compileArgs
 	}
-	return args, nil
+
+	// Run the instrumented compile command
+	return util.RunCmd(ctx, ip.compileArgs...)
 }
 
 func Toolexec(ctx context.Context, args []string) error {
-	// Check if the command is a compile command.
+	// Only interested in compile commands
 	if util.IsCompileCommand(strings.Join(args, " ")) {
-		var err error
-		args, err = compileCommand(ctx, args)
-		if err != nil {
-			return err
-		}
+		return compile(ctx, args)
 	}
 	// Just run the command as is
 	return util.RunCmd(ctx, args...)

@@ -17,13 +17,13 @@ import (
 )
 
 const (
-	TJumpLabel      = "/* TRAMPOLINE_JUMP_IF */"
-	OtelGlobalsFile = "otel.globals.go"
+	TJumpLabel       = "/* TRAMPOLINE_JUMP_IF */"
+	OtelGlobalsFile  = "otel.globals.go"
+	TrampolineBefore = true
+	TrampolineAfter  = false
 )
 
-func makeName(r *rule.InstFuncRule,
-	funcDecl *dst.FuncDecl, isBefore bool,
-) string {
+func makeName(r *rule.InstFuncRule, funcDecl *dst.FuncDecl, isBefore bool) string {
 	prefix := TrampolineAfterName
 	if isBefore {
 		prefix = TrampolineBeforeName
@@ -59,7 +59,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 		for _, field := range retList.List {
 			if field.Names == nil {
 				// Rename
-				name := fmt.Sprintf("retVal%d", idx)
+				name := fmt.Sprintf("_retVal%d", idx)
 				field.Names = []*dst.Ident{ast.Ident(name)}
 				idx++
 				// Collect (for further use)
@@ -83,7 +83,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 					retVals = append(retVals, ast.Ident(name.Name))
 				}
 			} else {
-				retValIdent := ast.Ident(fmt.Sprintf("retVal%d", i))
+				retValIdent := ast.Ident(fmt.Sprintf("_retVal%d", i))
 				field.Names = []*dst.Ident{retValIdent}
 				retVals = append(retVals, dst.Clone(retValIdent).(*dst.Ident))
 			}
@@ -96,12 +96,8 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 func collectArguments(funcDecl *dst.FuncDecl) []dst.Expr {
 	args := make([]dst.Expr, 0)
 	if ast.HasReceiver(funcDecl) {
-		if recv := funcDecl.Recv.List; recv != nil {
-			receiver := recv[0].Names[0].Name
-			args = append(args, ast.AddressOf(ast.Ident(receiver)))
-		} else {
-			util.Unimplemented()
-		}
+		receiver := funcDecl.Recv.List[0].Names[0].Name
+		args = append(args, ast.AddressOf(ast.Ident(receiver)))
 	}
 	for _, field := range funcDecl.Type.Params.List {
 		for _, name := range field.Names {

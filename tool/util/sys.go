@@ -44,15 +44,6 @@ func IsUnix() bool {
 	return runtime.GOOS == "linux" || runtime.GOOS == "darwin"
 }
 
-func PathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func PathNotExists(path string) bool {
-	return !PathExists(path)
-}
-
 func CopyFile(src, dst string) error {
 	_, err := os.Stat(filepath.Dir(dst))
 	if os.IsNotExist(err) {

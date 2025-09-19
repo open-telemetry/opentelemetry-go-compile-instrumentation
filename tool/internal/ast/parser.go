@@ -21,8 +21,10 @@ type AstParser struct {
 }
 
 func NewAstParser() *AstParser {
+	fset := token.NewFileSet()
 	return &AstParser{
-		fset: token.NewFileSet(),
+		fset: fset,
+		dec:  decorator.NewDecorator(fset),
 	}
 }
 
@@ -40,7 +42,6 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	if err != nil {
 		return nil, ex.Errorf(err, "failed to parse file %s", filePath)
 	}
-	ap.dec = decorator.NewDecorator(ap.fset)
 	dstFile, err := ap.dec.DecorateFile(astFile)
 	if err != nil {
 		return nil, ex.Errorf(err, "failed to decorate file %s", filePath)
@@ -50,8 +51,9 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 
 // ParseSource parses the AST from complete source code.
 func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
-	util.Assert(source != "", "empty source")
-	ap.dec = decorator.NewDecorator(ap.fset)
+	if source == "" {
+		return nil, ex.Errorf(nil, "empty source")
+	}
 	dstRoot, err := ap.dec.Parse(source)
 	if err != nil {
 		return nil, ex.Error(err)

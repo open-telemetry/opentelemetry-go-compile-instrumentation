@@ -4,8 +4,8 @@
 package ast
 
 import (
-	"fmt"
 	"go/token"
+	"strconv"
 
 	"github.com/dave/dst"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
@@ -81,9 +81,14 @@ func IsUnusedIdent(ident *dst.Ident) bool {
 
 func IsStringLit(expr dst.Expr, val string) bool {
 	lit, ok := expr.(*dst.BasicLit)
-	return ok &&
-		lit.Kind == token.STRING &&
-		lit.Value == fmt.Sprintf("%q", val)
+	if !ok {
+		return false
+	}
+	str, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return false
+	}
+	return lit.Kind == token.STRING && str == val
 }
 
 func IsInterfaceType(t dst.Expr) bool {
