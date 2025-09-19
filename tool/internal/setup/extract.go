@@ -91,8 +91,7 @@ func extractGZip(data []byte, targetDir string) error {
 		}
 
 		// Skip AppleDouble files (._filename) and other hidden files
-		if strings.HasPrefix(filepath.Base(header.Name), "._") ||
-			strings.HasPrefix(filepath.Base(header.Name), ".") {
+		if strings.HasPrefix(filepath.Base(header.Name), ".") {
 			continue
 		}
 

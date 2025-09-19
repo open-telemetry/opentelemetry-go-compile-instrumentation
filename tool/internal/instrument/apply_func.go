@@ -37,11 +37,12 @@ func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
 	// appropriate jump point to insert trampoline jump.
 	if len(jumpIf.Decs.If) == 1 && jumpIf.Decs.If[0] == TJumpLabel {
 		// Insert trampoline jump within the else block
-		elseBlock := jumpIf.Else.(*dst.BlockStmt)
+		elseBlock, ok := jumpIf.Else.(*dst.BlockStmt)
+		util.Assert(ok, "elseBlock is not a BlockStmt")
 		if len(elseBlock.List) > 1 {
 			// One trampoline jump already exists, recursively find last one
-			ifStmt, ok := elseBlock.List[len(elseBlock.List)-1].(*dst.IfStmt)
-			util.Assert(ok, "unexpected statement in trampoline-jump-if")
+			ifStmt, ok1 := elseBlock.List[len(elseBlock.List)-1].(*dst.IfStmt)
+			util.Assert(ok1, "unexpected statement in trampoline-jump-if")
 			return findJumpPoint(ifStmt)
 		}
 		// Otherwise, this is the appropriate jump point
@@ -63,7 +64,9 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 				field.Names = []*dst.Ident{ast.Ident(name)}
 				idx++
 				// Collect (for further use)
-				retVals = append(retVals, dst.Clone(ast.Ident(name)).(*dst.Ident))
+				i, ok := dst.Clone(ast.Ident(name)).(*dst.Ident)
+				util.Assert(ok, "ident is not a Ident")
+				retVals = append(retVals, i)
 			} else {
 				// Collect only (for further use)
 				for _, name := range field.Names {
@@ -85,7 +88,9 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 			} else {
 				retValIdent := ast.Ident(fmt.Sprintf("_retVal%d", i))
 				field.Names = []*dst.Ident{retValIdent}
-				retVals = append(retVals, dst.Clone(retValIdent).(*dst.Ident))
+				i, ok := dst.Clone(retValIdent).(*dst.Ident)
+				util.Assert(ok, "ident is not a Ident")
+				retVals = append(retVals, i)
 			}
 		}
 	}

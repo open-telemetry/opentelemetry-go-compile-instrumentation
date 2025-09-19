@@ -78,7 +78,7 @@ func stripCompleteFlag(args []string) []string {
 	return args
 }
 
-func compile(ctx context.Context, args []string) error {
+func compileCommand(ctx context.Context, args []string) ([]string, error) {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
 	util.Assert(target != "", "why not otherwise")
@@ -92,14 +92,14 @@ func compile(ctx context.Context, args []string) error {
 	// Instrument the package if it matches the rules.
 	matchedRules, err := ip.match(args)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(matchedRules) > 0 {
 		ip.Info("Instrument package", "rules", matchedRules, "args", args)
 		// Okay, this package should be instrumented.
 		err = ip.instrument(matchedRules, args)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		// Strip -complete flag as we may insert some hook points that are
@@ -108,13 +108,17 @@ func compile(ctx context.Context, args []string) error {
 	}
 
 	// Run the instrumented compile command
-	return util.RunCmd(ctx, ip.compileArgs...)
+	return ip.compileArgs, nil
 }
 
 func Toolexec(ctx context.Context, args []string) error {
 	// Only interested in compile commands
 	if util.IsCompileCommand(strings.Join(args, " ")) {
-		return compile(ctx, args)
+		var err error
+		args, err = compileCommand(ctx, args)
+		if err != nil {
+			return err
+		}
 	}
 	// Just run the command as is
 	return util.RunCmd(ctx, args...)

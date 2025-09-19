@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/dave/dst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 const (
@@ -24,7 +25,9 @@ func Ident(name string) *dst.Ident {
 }
 
 func AddressOf(expr dst.Expr) *dst.UnaryExpr {
-	return &dst.UnaryExpr{Op: token.AND, X: dst.Clone(expr).(dst.Expr)}
+	e, ok := dst.Clone(expr).(dst.Expr)
+	util.Assert(ok, "expr is not a UnaryExpr")
+	return &dst.UnaryExpr{Op: token.AND, X: e}
 }
 
 func CallTo(name string, args []dst.Expr) *dst.CallExpr {
@@ -71,29 +74,39 @@ func Stmts(stmts ...dst.Stmt) []dst.Stmt {
 }
 
 func SelectorExpr(x dst.Expr, sel string) *dst.SelectorExpr {
+	e, ok := dst.Clone(x).(dst.Expr)
+	util.Assert(ok, "x is not a Expr")
 	return &dst.SelectorExpr{
-		X:   dst.Clone(x).(dst.Expr),
+		X:   e,
 		Sel: Ident(sel),
 	}
 }
 
 func IndexExpr(x dst.Expr, index dst.Expr) *dst.IndexExpr {
+	e, ok := dst.Clone(x).(dst.Expr)
+	util.Assert(ok, "x is not a Expr")
+	i, ok := dst.Clone(index).(dst.Expr)
+	util.Assert(ok, "index is not a Expr")
 	return &dst.IndexExpr{
-		X:     dst.Clone(x).(dst.Expr),
-		Index: dst.Clone(index).(dst.Expr),
+		X:     e,
+		Index: i,
 	}
 }
 
 func TypeAssertExpr(x dst.Expr, t dst.Expr) *dst.TypeAssertExpr {
+	e, ok := dst.Clone(t).(dst.Expr)
+	util.Assert(ok, "t is not a Expr")
 	return &dst.TypeAssertExpr{
 		X:    x,
-		Type: dst.Clone(t).(dst.Expr),
+		Type: e,
 	}
 }
 
 func ParenExpr(x dst.Expr) *dst.ParenExpr {
+	e, ok := dst.Clone(x).(dst.Expr)
+	util.Assert(ok, "x is not a Expr")
 	return &dst.ParenExpr{
-		X: dst.Clone(x).(dst.Expr),
+		X: e,
 	}
 }
 
@@ -114,12 +127,15 @@ func ArrayType(elem dst.Expr) *dst.ArrayType {
 }
 
 func IfStmt(init dst.Stmt, cond dst.Expr, body, elseBody *dst.BlockStmt) *dst.IfStmt {
-	return &dst.IfStmt{
-		Init: dst.Clone(init).(dst.Stmt),
-		Cond: dst.Clone(cond).(dst.Expr),
-		Body: dst.Clone(body).(*dst.BlockStmt),
-		Else: dst.Clone(elseBody).(*dst.BlockStmt),
-	}
+	i, ok := dst.Clone(init).(dst.Stmt)
+	util.Assert(ok, "init is not a Stmt")
+	e, ok := dst.Clone(cond).(dst.Expr)
+	util.Assert(ok, "cond is not a Expr")
+	b, ok := dst.Clone(body).(*dst.BlockStmt)
+	util.Assert(ok, "body is not a BlockStmt")
+	eb, ok := dst.Clone(elseBody).(*dst.BlockStmt)
+	util.Assert(ok, "elseBody is not a BlockStmt")
+	return &dst.IfStmt{Init: i, Cond: e, Body: b, Else: eb}
 }
 
 func IfNotNilStmt(cond dst.Expr, body, elseBody *dst.BlockStmt) *dst.IfStmt {
@@ -127,15 +143,21 @@ func IfNotNilStmt(cond dst.Expr, body, elseBody *dst.BlockStmt) *dst.IfStmt {
 	if elseBody == nil {
 		elseB = nil
 	} else {
-		elseB = dst.Clone(elseBody).(dst.Stmt)
+		e, ok := dst.Clone(elseBody).(dst.Stmt)
+		util.Assert(ok, "elseBody is not a Stmt")
+		elseB = e
 	}
+	e, ok := dst.Clone(cond).(dst.Expr)
+	util.Assert(ok, "cond is not a Expr")
+	b, ok := dst.Clone(body).(*dst.BlockStmt)
+	util.Assert(ok, "body is not a BlockStmt")
 	return &dst.IfStmt{
 		Cond: &dst.BinaryExpr{
-			X:  dst.Clone(cond).(dst.Expr),
+			X:  e,
 			Op: token.NEQ,
 			Y:  &dst.Ident{Name: IdentNil},
 		},
-		Body: dst.Clone(body).(*dst.BlockStmt),
+		Body: b,
 		Else: elseB,
 	}
 }
@@ -145,11 +167,15 @@ func EmptyStmt() *dst.EmptyStmt {
 }
 
 func ExprStmt(expr dst.Expr) *dst.ExprStmt {
-	return &dst.ExprStmt{X: dst.Clone(expr).(dst.Expr)}
+	e, ok := dst.Clone(expr).(dst.Expr)
+	util.Assert(ok, "expr is not a Expr")
+	return &dst.ExprStmt{X: e}
 }
 
 func DeferStmt(call *dst.CallExpr) *dst.DeferStmt {
-	return &dst.DeferStmt{Call: dst.Clone(call).(*dst.CallExpr)}
+	c, ok := dst.Clone(call).(*dst.CallExpr)
+	util.Assert(ok, "call is not a CallExpr")
+	return &dst.DeferStmt{Call: c}
 }
 
 func ReturnStmt(results []dst.Expr) *dst.ReturnStmt {

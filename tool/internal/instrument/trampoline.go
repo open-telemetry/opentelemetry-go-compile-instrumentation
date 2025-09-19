@@ -28,6 +28,7 @@ import (
 // so-called "Trampoline Jump" snippet is inserted at start of raw func, it is
 // guaranteed to be generated within one line to avoid confusing debugging, as
 // its name suggests, it jumps to the trampoline function from raw function.
+
 const (
 	TrampolineBeforeName            = "OtelBeforeTrampoline"
 	TrampolineAfterName             = "OtelAfterTrampoline"
@@ -91,8 +92,11 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 			default:
 				if ast.HasReceiver(decl) {
 					// We know exactly this is HookContextImpl method
-					t := decl.Recv.List[0].Type.(*dst.StarExpr).X.(*dst.Ident).Name
-					util.Assert(t == TrampolineHookContextImplType, "sanity check")
+					t, ok1 := decl.Recv.List[0].Type.(*dst.StarExpr)
+					util.Assert(ok1, "t is not a StarExpr")
+					t2, ok2 := t.X.(*dst.Ident)
+					util.Assert(ok2, "t2 is not a Ident")
+					util.Assert(t2.Name == TrampolineHookContextImplType, "sanity check")
 					ip.hookCtxMethods = append(ip.hookCtxMethods, decl)
 					ip.addDecl(decl)
 				}
@@ -113,10 +117,10 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 			}
 		}
 	}
-	util.Assert(ip.hookCtxDecl != nil, "sanity check")
+	util.Assert(ip.hookCtxDecl != nil &&
+		ip.beforeHookFunc != nil &&
+		ip.afterHookFunc != nil, "sanity check")
 	util.Assert(len(ip.varDecls) > 0, "sanity check")
-	util.Assert(ip.beforeHookFunc != nil, "sanity check")
-	util.Assert(ip.afterHookFunc != nil, "sanity check")
 	return nil
 }
 
@@ -427,16 +431,19 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
 	paramList := &dst.FieldList{List: []*dst.Field{}}
 	if before {
 		if ast.HasReceiver(ip.rawFunc) {
-			recvField := dst.Clone(ip.rawFunc.Recv.List[0]).(*dst.Field)
+			recvField, ok := dst.Clone(ip.rawFunc.Recv.List[0]).(*dst.Field)
+			util.Assert(ok, "recvField is not a Field")
 			paramList.List = append(paramList.List, recvField)
 		}
 		for _, field := range ip.rawFunc.Type.Params.List {
-			paramField := dst.Clone(field).(*dst.Field)
+			paramField, ok := dst.Clone(field).(*dst.Field)
+			util.Assert(ok, "paramField is not a Field")
 			paramList.List = append(paramList.List, paramField)
 		}
 	} else if ip.rawFunc.Type.Results != nil {
 		for _, field := range ip.rawFunc.Type.Results.List {
-			retField := dst.Clone(field).(*dst.Field)
+			retField, ok := dst.Clone(field).(*dst.Field)
+			util.Assert(ok, "retField is not a Field")
 			paramList.List = append(paramList.List, retField)
 		}
 	}
@@ -549,16 +556,21 @@ func (ip *InstrumentPhase) replenishHookContext(before bool) bool {
 // trampoline template
 func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 	suffix := util.CRC32(t.String())
-	structType := ip.hookCtxDecl.Specs[0].(*dst.TypeSpec)
+	structType, ok := ip.hookCtxDecl.Specs[0].(*dst.TypeSpec)
+	util.Assert(ok, "structType is not a TypeSpec")
 	util.Assert(structType.Name.Name == TrampolineHookContextImplType,
 		"sanity check")
 	structType.Name.Name += suffix             // type declaration
 	for _, method := range ip.hookCtxMethods { // method declaration
-		method.Recv.List[0].Type.(*dst.StarExpr).X.(*dst.Ident).Name += suffix
+		t1, ok1 := method.Recv.List[0].Type.(*dst.StarExpr)
+		util.Assert(ok1, "t1 is not a StarExpr")
+		t2, ok2 := t1.X.(*dst.Ident)
+		util.Assert(ok2, "t2 is not a Ident")
+		t2.Name += suffix
 	}
 	for _, node := range []dst.Node{ip.beforeHookFunc, ip.afterHookFunc} {
 		dst.Inspect(node, func(node dst.Node) bool {
-			if ident, ok := node.(*dst.Ident); ok {
+			if ident, ok1 := node.(*dst.Ident); ok1 {
 				if ident.Name == TrampolineHookContextImplType {
 					ident.Name += suffix
 					return false
@@ -638,12 +650,7 @@ func desugarType(param *dst.Field) dst.Expr {
 func (ip *InstrumentPhase) rewriteHookContextImpl() {
 	const expectMinMethodCount = 4
 	util.Assert(len(ip.hookCtxMethods) > expectMinMethodCount, "sanity check")
-	var (
-		methodSetParam  *dst.FuncDecl
-		methodGetParam  *dst.FuncDecl
-		methodGetRetVal *dst.FuncDecl
-		methodSetRetVal *dst.FuncDecl
-	)
+	var methodSetParam, methodGetParam, methodGetRetVal, methodSetRetVal *dst.FuncDecl
 	for _, decl := range ip.hookCtxMethods {
 		switch decl.Name.Name {
 		case TrampolineSetParamName:
@@ -657,16 +664,19 @@ func (ip *InstrumentPhase) rewriteHookContextImpl() {
 		}
 	}
 	// Rewrite SetParam and GetParam methods
-	// Don't believe what you see in template.go, we will null out it and rewrite
+	// Don't believe what you see in template, we will null out it and rewrite
 	// the whole switch statement
-	methodSetParamBody := methodSetParam.Body.List[1].(*dst.SwitchStmt).Body
-	methodGetParamBody := methodGetParam.Body.List[0].(*dst.SwitchStmt).Body
-	methodSetRetValBody := methodSetRetVal.Body.List[1].(*dst.SwitchStmt).Body
-	methodGetRetValBody := methodGetRetVal.Body.List[0].(*dst.SwitchStmt).Body
-	methodGetParamBody.List = nil
-	methodSetParamBody.List = nil
-	methodGetRetValBody.List = nil
-	methodSetRetValBody.List = nil
+	findSwitchBlock := func(fn *dst.FuncDecl, idx int) *dst.BlockStmt {
+		stmt, ok := fn.Body.List[idx].(*dst.SwitchStmt)
+		util.Assert(ok, "sanity check")
+		body := stmt.Body
+		body.List = nil
+		return body
+	}
+	methodSetParamBody := findSwitchBlock(methodSetParam, 1)
+	methodGetParamBody := findSwitchBlock(methodGetParam, 0)
+	methodSetRetValBody := findSwitchBlock(methodSetRetVal, 1)
+	methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
 	idx := 0
 	if ast.HasReceiver(ip.rawFunc) {
 		recvType := ip.rawFunc.Recv.List[0].Type
