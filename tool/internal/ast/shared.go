@@ -11,6 +11,12 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
+// -----------------------------------------------------------------------------
+// AST Shared Utilities
+//
+// This file contains shared utility functions for AST traversal and manipulation.
+// It provides common operations for finding, filtering, and processing AST nodes
+
 func findFuncDecls(root *dst.File, lambda func(*dst.FuncDecl) bool) ([]*dst.FuncDecl, error) {
 	funcDecls, err := ListFuncDecls(root)
 	if err != nil {

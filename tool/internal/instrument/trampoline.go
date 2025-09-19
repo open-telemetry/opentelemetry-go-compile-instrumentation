@@ -712,9 +712,7 @@ func (ip *InstrumentPhase) rewriteHookContextImpl() {
 	}
 }
 
-func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule,
-	before bool,
-) error {
+func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
 	traits, err := getHookParamTraits(t, before)
 	if err != nil {
 		return err

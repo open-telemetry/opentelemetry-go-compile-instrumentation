@@ -11,6 +11,16 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
+// -----------------------------------------------------------------------------
+// AST Primitives
+//
+// This file provides essential primitives for AST manipulation, including common
+// identifier constants, type checking, expression and so on.
+//
+// The primitives defined here serve as building blocks for higher-level AST
+// operations throughout the instrumentation toolchain, ensuring consistent
+// handling of common AST patterns and reducing code duplication.
+
 const (
 	IdentNil    = "nil"
 	IdentTrue   = "true"

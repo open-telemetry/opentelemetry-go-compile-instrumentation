@@ -48,6 +48,7 @@ func (ip *InstrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *InstrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *InstrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
+// keepForDebug keeps the the file to .otel-build directory for debugging
 func (ip *InstrumentPhase) keepForDebug(path string) {
 	util.Assert(ip.packageName != "", "sanity check")
 	escape := func(s string) string {
@@ -111,6 +112,10 @@ func compileCommand(ctx context.Context, args []string) ([]string, error) {
 	return ip.compileArgs, nil
 }
 
+// Toolexec is the entry point of the toolexec command. It intercepts all the
+// commands(link, compile, asm, etc) during build process. Our responsibility is
+// to find out the compile command we are interested in and run it with the
+// instrumented code.
 func Toolexec(ctx context.Context, args []string) error {
 	// Only interested in compile commands
 	if util.IsCompileCommand(strings.Join(args, " ")) {

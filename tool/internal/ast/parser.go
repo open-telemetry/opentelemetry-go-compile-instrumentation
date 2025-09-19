@@ -61,6 +61,7 @@ func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
 	return dstRoot, nil
 }
 
+// FindPosition finds the source position of a node in the AST.
 func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	astNode := ap.dec.Ast.Nodes[node]
 	if astNode == nil {
@@ -69,6 +70,7 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	return ap.fset.Position(astNode.Pos())
 }
 
+// WriteFile writes the AST to a file.
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
 	if err != nil {
@@ -83,18 +85,20 @@ func WriteFile(filePath string, root *dst.File) error {
 	return nil
 }
 
-// ParseFileOnlyPackage parses the AST from a file with the package clause only mode.
+// ParseFileOnlyPackage parses the AST from a file. Use it if you only need to
+// read the package name from the AST.
 func ParseFileOnlyPackage(filePath string) (*dst.File, error) {
 	return NewAstParser().Parse(filePath, parser.PackageClauseOnly)
 }
 
-// ParseFileFast parses the AST from a file with the skip object resolution mode.
+// ParseFileFast parses the AST from a file. Use this version if you only need
+// to read information from the AST without writing it back to a file.
 func ParseFileFast(filePath string) (*dst.File, error) {
 	return NewAstParser().Parse(filePath, parser.SkipObjectResolution)
 }
 
-// ParseFile parses the AST from a file with the parse comments mode. This is the
-// default mode for most cases.
+// ParseFile parses the AST from a file. Use this standard version if you need to
+// write the AST back to a file, otherwise use ParseFileFast for better performance.
 func ParseFile(filePath string) (*dst.File, error) {
 	return NewAstParser().Parse(filePath, parser.ParseComments)
 }
