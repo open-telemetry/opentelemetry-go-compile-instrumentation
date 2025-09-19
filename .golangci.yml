@@ -390,6 +390,9 @@ linters:
         - name: redundant-import-alias
         - name: struct-tag
         - name: superfluous-else
+        - name: unchecked-type-assertion
+          exclude: ["TEST"]
+          arguments: [acceptIgnoredAssertionResult: true]
         - name: unexported-naming
         - name: unhandled-error
           exclude: ["TEST"]
