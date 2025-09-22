@@ -136,9 +136,9 @@ func getNames(list *dst.FieldList) []string {
 
 func makeOnXName(t *rule.InstFuncRule, before bool) string {
 	if before {
-		return t.GetBeforeAdvice()
+		return t.GetBefore()
 	}
-	return t.GetAfterAdvice()
+	return t.GetAfter()
 }
 
 type ParamTrait struct {
@@ -148,9 +148,9 @@ type ParamTrait struct {
 }
 
 func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
-	util.Assert(rule.GetBeforeAdvice() != "" || rule.GetAfterAdvice() != "", "hook must be set")
-	if rule.GetBeforeAdvice() != "" {
-		decl, err := ast.FindFuncDeclWithoutRecv(root, rule.GetBeforeAdvice())
+	util.Assert(rule.GetBefore() != "" || rule.GetAfter() != "", "hook must be set")
+	if rule.GetBefore() != "" {
+		decl, err := ast.FindFuncDeclWithoutRecv(root, rule.GetBefore())
 		if err != nil {
 			return false
 		}
@@ -158,8 +158,8 @@ func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 			return false
 		}
 	}
-	if rule.GetAfterAdvice() != "" {
-		decl, err := ast.FindFuncDeclWithoutRecv(root, rule.GetAfterAdvice())
+	if rule.GetAfter() != "" {
+		decl, err := ast.FindFuncDeclWithoutRecv(root, rule.GetAfter())
 		if err != nil {
 			return false
 		}
@@ -188,7 +188,7 @@ func findHookFile(rule *rule.InstFuncRule) (string, error) {
 		}
 	}
 	return "", ex.Errorf(nil, "no hook %s/%s found for %s from %v",
-		rule.GetBeforeAdvice(), rule.GetAfterAdvice(), rule.GetFuncName(), files)
+		rule.GetBefore(), rule.GetAfter(), rule.GetFuncName(), files)
 }
 
 func findRuleFiles(r rule.InstRule) ([]string, error) {
@@ -219,19 +219,19 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 	}
 	var target *dst.FuncDecl
 	if before {
-		target, err = ast.FindFuncDeclWithoutRecv(root, t.GetBeforeAdvice())
+		target, err = ast.FindFuncDeclWithoutRecv(root, t.GetBefore())
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		target, err = ast.FindFuncDeclWithoutRecv(root, t.GetAfterAdvice())
+		target, err = ast.FindFuncDeclWithoutRecv(root, t.GetAfter())
 		if err != nil {
 			return nil, err
 		}
 	}
 	if target == nil {
 		return nil, ex.Errorf(nil, "hook %s or %s not found",
-			t.GetBeforeAdvice(), t.GetAfterAdvice())
+			t.GetBefore(), t.GetAfter())
 	}
 	return target, nil
 }
@@ -403,7 +403,7 @@ func (ip *InstrumentPhase) renameFunc(t *rule.InstFuncRule) {
 		if basicLit, ok := node.(*dst.BasicLit); ok {
 			// Replace OtelBeforeTrampolinePlaceHolder to real hook func name
 			if basicLit.Value == TrampolineBeforeNamePlaceholder {
-				basicLit.Value = strconv.Quote(t.GetBeforeAdvice())
+				basicLit.Value = strconv.Quote(t.GetBefore())
 			}
 		}
 		return true
@@ -412,7 +412,7 @@ func (ip *InstrumentPhase) renameFunc(t *rule.InstFuncRule) {
 	dst.Inspect(ip.afterHookFunc, func(node dst.Node) bool {
 		if basicLit, ok := node.(*dst.BasicLit); ok {
 			if basicLit.Value == TrampolineAfterNamePlaceholder {
-				basicLit.Value = strconv.Quote(t.GetAfterAdvice())
+				basicLit.Value = strconv.Quote(t.GetAfter())
 			}
 		}
 		return true
@@ -748,13 +748,13 @@ func (ip *InstrumentPhase) generateTrampoline(t *rule.InstFuncRule) error {
 	// Rectify types of trampoline functions
 	ip.rectifyTypes()
 	// Generate calls to hook functions
-	if t.GetBeforeAdvice() != "" {
+	if t.GetBefore() != "" {
 		err = ip.callHookFunc(t, true)
 		if err != nil {
 			return err
 		}
 	}
-	if t.GetAfterAdvice() != "" {
+	if t.GetAfter() != "" {
 		err = ip.callHookFunc(t, false)
 		if err != nil {
 			return err

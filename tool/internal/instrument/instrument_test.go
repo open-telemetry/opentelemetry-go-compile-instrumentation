@@ -128,10 +128,8 @@ func createTestRuleJSON(path string) ([]byte, error) {
 			Name:     "hook_helloworld",
 			Path:     path,
 			Pointcut: "main.Example",
-			Advice: []rule.Advice{
-				{Before: "MyHookBefore", After: ""},
-				{Before: "", After: "MyHookAfter"},
-			},
+			Before:   "MyHookBefore",
+			After:    "MyHookAfter",
 		},
 	}
 	return json.Marshal(rules)

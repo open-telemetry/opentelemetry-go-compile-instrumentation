@@ -192,7 +192,7 @@ func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 }
 
 func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
-	util.Assert(len(t.Advice) > 0, "sanity check")
+	util.Assert(t.Before != "" || t.After != "", "sanity check")
 
 	// Collect return values for the trampoline function
 	retVals := collectReturnValues(funcDecl)

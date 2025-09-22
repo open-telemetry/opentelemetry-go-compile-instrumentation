@@ -1,13 +1,12 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Unique name of the instrumentation
+# Unique name of the hook rule
 hook_helloworld:
   # Where the hook code is located
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
   # Where we want to inject the hook code
   pointcut: main.Example
-  # What hook code we want to inject
-  advice:
-    - before: MyHookBefore
-    - after: MyHookAfter
+  # What hook code we want to inject at target func entry or exit
+  before: MyHookBefore
+  after: MyHookAfter
