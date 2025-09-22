@@ -17,10 +17,8 @@ import (
 )
 
 const (
-	TJumpLabel       = "/* TRAMPOLINE_JUMP_IF */"
-	OtelGlobalsFile  = "otel.globals.go"
-	TrampolineBefore = true
-	TrampolineAfter  = false
+	TJumpLabel      = "/* TRAMPOLINE_JUMP_IF */"
+	OtelGlobalsFile = "otel.globals.go"
 )
 
 func makeName(r *rule.InstFuncRule, funcDecl *dst.FuncDecl, isBefore bool) string {
@@ -203,8 +201,24 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	// otherwise prepend to block body.
 	ip.insertToFunc(funcDecl, tjump)
 
-	// Generate corresponding trampoline code
-	return ip.generateTrampoline(t)
+	// Trampoline-jump-if ultimately jumps to the trampoline function, which
+	// typically has the following form
+	//
+	//	func otel_trampoline_before(arg) (HookContext, bool) {
+	//	    defer func () { /* handle panic */ }()
+	//	    // prepare hook context for real hook code
+	//	    hookctx := &HookContextImpl_abc{}
+	//	    ...
+	//	    // Call the real hook code
+	//		realHook(ctx, arg)
+	//	    return ctx, skip
+	//	}
+	//
+	// It catches any potential panic from the real hook code, and prepare the
+	// hook context for the real hook code. Once all preparations are done, it
+	// jumps to the real hook code. Note that each trampoline has its own hook
+	// context implementation, which is generated dynamically.
+	return ip.createTrampoline(t)
 }
 
 func (ip *InstrumentPhase) addCompileArg(newArg string) {

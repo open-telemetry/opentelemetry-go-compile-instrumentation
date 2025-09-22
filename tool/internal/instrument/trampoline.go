@@ -48,6 +48,8 @@ const (
 	TrampolineHookContextImplType   = "HookContextImpl"
 	TrampolineBeforeNamePlaceholder = `"OtelBeforeNamePlaceholder"`
 	TrampolineAfterNamePlaceholder  = `"OtelAfterNamePlaceholder"`
+	TrampolineBefore                = true
+	TrampolineAfter                 = false
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -396,7 +398,7 @@ func insertAtEnd(funcDecl *dst.FuncDecl, stmt dst.Stmt) {
 	insertAt(funcDecl, stmt, len(funcDecl.Body.List))
 }
 
-func (ip *InstrumentPhase) renameFunc(t *rule.InstFuncRule) {
+func (ip *InstrumentPhase) renameTrampolineFunc(t *rule.InstFuncRule) {
 	// Randomize trampoline function names
 	ip.beforeHookFunc.Name.Name = makeName(t, ip.rawFunc, TrampolineBefore)
 	dst.Inspect(ip.beforeHookFunc, func(node dst.Node) bool {
@@ -450,7 +452,7 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
 	return paramList
 }
 
-func (ip *InstrumentPhase) rectifyTypes() {
+func (ip *InstrumentPhase) buildTrampolineTypes() {
 	beforeHookFunc, afterHookFunc := ip.beforeHookFunc, ip.afterHookFunc
 	beforeHookFunc.Type.Params = ip.buildTrampolineType(true)
 	afterHookFunc.Type.Params = ip.buildTrampolineType(false)
@@ -497,8 +499,6 @@ func assignSliceLiteral(assignStmt *dst.AssignStmt, vals []dst.Expr) bool {
 }
 
 // replenishHookContext replenishes the hook context before hook invocation
-//
-
 func (ip *InstrumentPhase) replenishHookContext(before bool) bool {
 	funcDecl := ip.beforeHookFunc
 	if !before {
@@ -647,7 +647,7 @@ func desugarType(param *dst.Field) dst.Expr {
 	return param.Type
 }
 
-func (ip *InstrumentPhase) rewriteHookContextImpl() {
+func (ip *InstrumentPhase) rewriteHookContext() {
 	const expectMinMethodCount = 4
 	util.Assert(len(ip.hookCtxMethods) > expectMinMethodCount, "sanity check")
 	var methodSetParam, methodGetParam, methodGetRetVal, methodSetRetVal *dst.FuncDecl
@@ -717,45 +717,53 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	if err != nil {
 		return err
 	}
+	// Add the body-less real hook function declaration. They will be linked to
+	// the real hook function.
 	err = ip.addHookFuncVar(t, traits, before)
 	if err != nil {
 		return err
 	}
+	// Add the function call to the real hook code.
 	if before {
 		ip.callBeforeHook(t, traits)
 	} else {
 		ip.callAfterHook(t, traits)
 	}
+	// Fulfill the hook context before calling the real hook code.
 	if !ip.replenishHookContext(before) {
 		return ex.Errorf(nil, "failed to replenish hook context")
 	}
 	return nil
 }
 
-func (ip *InstrumentPhase) generateTrampoline(t *rule.InstFuncRule) error {
+func (ip *InstrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
 	// Materialize various declarations from template file, no one wants to see
 	// a bunch of manual AST code generation, isn't it?
 	err := ip.materializeTemplate()
 	if err != nil {
 		return err
 	}
-	// Implement HookContext interface
+	// Implement HookContext interface methods dynamically
 	ip.implementHookContext(t)
 	// Rewrite type-aware HookContext APIs
-	ip.rewriteHookContextImpl()
-	// Rename trampoline functions
-	ip.renameFunc(t)
-	// Rectify types of trampoline functions
-	ip.rectifyTypes()
-	// Generate calls to hook functions
+	// Make all HookContext methods type-aware according to the target function
+	// signature.
+	ip.rewriteHookContext()
+	// Rename template function to trampoline function
+	ip.renameTrampolineFunc(t)
+	// Build types of trampoline functions. The parameters of the Before trampoline
+	// function are the same as the target function, the parameters of the After
+	// trampoline function are the same as the target function.
+	ip.buildTrampolineTypes()
+	// Generate calls to real hook functions
 	if t.GetBefore() != "" {
-		err = ip.callHookFunc(t, true)
+		err = ip.callHookFunc(t, TrampolineBefore)
 		if err != nil {
 			return err
 		}
 	}
 	if t.GetAfter() != "" {
-		err = ip.callHookFunc(t, false)
+		err = ip.callHookFunc(t, TrampolineAfter)
 		if err != nil {
 			return err
 		}
