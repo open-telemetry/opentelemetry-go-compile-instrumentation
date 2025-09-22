@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -28,7 +27,7 @@ const (
 )
 
 func findGoToolCompile() string {
-	cmd := exec.Command("go", "env", "GOROOT")
+	cmd := exec.Command("go", "env", "GOTOOLDIR")
 	output, err := cmd.Output()
 	if err != nil {
 		fmt.Printf("Error getting GOROOT: %v\n", err)
@@ -40,11 +39,7 @@ func findGoToolCompile() string {
 		fmt.Println("GOROOT not set")
 		return ""
 	}
-
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-	toolDir := filepath.Join(goroot, "pkg", "tool", goos+"_"+goarch)
-	return filepath.Join(toolDir, "compile")
+	return filepath.Join(goroot, "compile")
 }
 
 func TestInstrument(t *testing.T) {
