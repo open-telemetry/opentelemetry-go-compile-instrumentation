@@ -76,25 +76,6 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 		}
 	}
 
-	// If return values are named, collect their names, otherwise we try to
-	// name them manually for further use
-	if retList := funcDecl.Type.Results; retList != nil {
-		retVals = make([]dst.Expr, 0)
-		for i, field := range retList.List {
-			if field.Names != nil {
-				for _, name := range field.Names {
-					retVals = append(retVals, ast.Ident(name.Name))
-				}
-			} else {
-				retValIdent := ast.Ident(fmt.Sprintf("_retVal%d", i))
-				field.Names = []*dst.Ident{retValIdent}
-				i, ok := dst.Clone(retValIdent).(*dst.Ident)
-				util.Assert(ok, "ident is not a Ident")
-				retVals = append(retVals, i)
-			}
-		}
-	}
-
 	return retVals
 }
 
