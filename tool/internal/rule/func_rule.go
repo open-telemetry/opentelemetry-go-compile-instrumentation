@@ -21,16 +21,11 @@ import "strings"
 // The rule is defined in the yaml file, and the yaml file is embedded into the
 // binary during the build process.
 type InstFuncRule struct {
-	// The unique name of the hook rule
-	Name string `json:"name,omitempty" yaml:"name,omitempty"`
-	// The module path of the hook code
-	Path string `json:"path"           yaml:"path"`
-	// The full qualified name of the target function to be instrumented
-	Pointcut string `json:"pointcut"       yaml:"pointcut"`
-	// The function we inject at the target function entry
-	Before string `json:"before"         yaml:"before"`
-	// The function we inject at the target function exit
-	After string `json:"after"          yaml:"after"`
+	Name     string `json:"name,omitempty" yaml:"name,omitempty"` // The unique name of the hook rule
+	Path     string `json:"path"           yaml:"path"`           // The module path of the hook code
+	Pointcut string `json:"pointcut"       yaml:"pointcut"`       // The full qualified name of the target function to be instrumented
+	Before   string `json:"before"         yaml:"before"`         // The function we inject at the target function entry
+	After    string `json:"after"          yaml:"after"`          // The function we inject at the target function exit
 }
 
 func (r *InstFuncRule) String() string {
