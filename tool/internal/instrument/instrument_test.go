@@ -5,8 +5,11 @@ package instrument
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -24,22 +27,40 @@ const (
 	mainPkgDir         = "b001"
 )
 
-func TestCompileCommand(t *testing.T) {
+func findGoToolCompile() string {
+	cmd := exec.Command("go", "env", "GOROOT")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Printf("Error getting GOROOT: %v\n", err)
+		return ""
+	}
+
+	goroot := strings.TrimSpace(string(output))
+	if goroot == "" {
+		fmt.Println("GOROOT not set")
+		return ""
+	}
+
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+	toolDir := filepath.Join(goroot, "pkg", "tool", goos+"_"+goarch)
+	return filepath.Join(toolDir, "compile")
+}
+
+func TestInstrument(t *testing.T) {
 	tests := []struct {
 		name    string
 		wantErr bool
 	}{
 		{"valid compile with instrumentation", false},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			tempDir := setupTestEnvironment(t)
 
 			args := createCompileArgs(tempDir)
-
-			_, err := compileCommand(ctx, args)
+			err := Toolexec(ctx, args)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -88,22 +109,14 @@ func setupTestEnvironment(t *testing.T) string {
 func createCompileArgs(tempDir string) []string {
 	buildDir := filepath.Join(tempDir, util.BuildTempDir)
 	outputPath := filepath.Join(buildDir, mainPkgDir, "_pkg_.a")
-	trimPath := "/" + mainPkgDir + "=>"
-	importCfgPath := "/" + mainPkgDir + "/importcfg"
+	compilePath := findGoToolCompile()
 
 	return []string{
-		"compile",
+		compilePath,
 		"-o", outputPath,
-		"-trimpath", trimPath,
 		"-p", "main",
-		"-lang=go1.23",
 		"-complete",
-		"-buildid", "LQWltgXJxiWKFGWheOxv/LQWltgXJxiWKFGWheOxv",
-		"-goversion", "go1.24.4",
-		"-c=4",
-		"-shared",
-		"-nolocalimports",
-		"-importcfg", importCfgPath,
+		"-buildid", "foo/bar",
 		"-pack",
 		mainGoFile,
 	}

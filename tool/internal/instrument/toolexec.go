@@ -79,7 +79,7 @@ func stripCompleteFlag(args []string) []string {
 	return args
 }
 
-func compileCommand(ctx context.Context, args []string) ([]string, error) {
+func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
 	util.Assert(target != "", "why not otherwise")
@@ -120,7 +120,7 @@ func Toolexec(ctx context.Context, args []string) error {
 	// Only interested in compile commands
 	if util.IsCompileCommand(strings.Join(args, " ")) {
 		var err error
-		args, err = compileCommand(ctx, args)
+		args, err = interceptCompile(ctx, args)
 		if err != nil {
 			return err
 		}
