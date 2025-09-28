@@ -1,11 +1,9 @@
-//go:build ignore
-
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package instrument
+package inst
 
-// !!!Any modification MUST be synced with pkg/inst/context.go
+// !!! This file will auto-sync to tool/internal/instrument/api.tmpl
 type HookContext interface {
 	// Set the skip call flag, can be used to skip the original function call
 	SetSkipCall(bool)

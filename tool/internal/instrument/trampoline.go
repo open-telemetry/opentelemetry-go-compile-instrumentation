@@ -62,7 +62,7 @@ const (
 // - Function and variable names are coupled with the framework, any modification
 //   on them should be synced with the framework
 
-//go:embed template_impl.go
+//go:embed impl.tmpl
 var templateImpl string
 
 func (ip *InstrumentPhase) addDecl(decl dst.Decl) {

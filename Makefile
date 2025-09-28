@@ -7,6 +7,8 @@ DEMO_DIR := demo
 TOOL_DIR := tool/cmd
 INST_PKG_GZIP = otel-pkg.gz
 INST_PKG_TMP = pkg_temp
+API_SYNC_SOURCE = pkg/inst/context.go
+API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 
 # Version variables
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -32,6 +34,7 @@ package:
 .PHONY: build
 build: package
 	@echo "Building instrumentation tool..."
+	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
 	@go build -a -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" -o $(BINARY_NAME) ./$(TOOL_DIR)
 	@./$(BINARY_NAME) version

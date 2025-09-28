@@ -90,7 +90,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		packageName: util.FindFlagValue(args, "-p"),
 	}
 
-	// Instrument the package if it matches the rules.
+	// Check if the current compile command matches the rules.
 	matchedRules, err := ip.match(args)
 	if err != nil {
 		return nil, err

@@ -3,7 +3,7 @@
 
 package inst
 
-// !!! Any modification MUST be synced with tool/internal/instrument/template_api.go
+// !!! pkg/inst/context.go will auto-sync to tool/internal/instrument/api.tmpl
 type HookContext interface {
 	// Set the skip call flag, can be used to skip the original function call
 	SetSkipCall(bool)

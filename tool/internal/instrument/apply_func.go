@@ -225,7 +225,7 @@ func (ip *InstrumentPhase) addCompileArg(newArg string) {
 	ip.compileArgs = append(ip.compileArgs, newArg)
 }
 
-//go:embed template_api.go
+//go:embed api.tmpl
 var templateAPI string
 
 func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
