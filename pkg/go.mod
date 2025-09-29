@@ -3,7 +3,7 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg
 go 1.23.0
 
 require (
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.37.0
 	go.opentelemetry.io/otel/metric v1.37.0
 	go.opentelemetry.io/otel/sdk v1.37.0
