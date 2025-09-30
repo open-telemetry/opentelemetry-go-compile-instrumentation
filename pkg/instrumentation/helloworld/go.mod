@@ -2,10 +2,10 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/in
 
 go 1.23.0
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../pkg
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../..
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20250919084107-31d19f623291
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20250929164917-9dda36905275
 	go.opentelemetry.io/otel v1.37.0
 	go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.37.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.37.0
