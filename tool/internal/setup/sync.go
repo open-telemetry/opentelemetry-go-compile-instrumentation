@@ -18,11 +18,11 @@ import (
 func parseGoMod(gomod string) (*modfile.File, error) {
 	data, err := os.ReadFile(gomod)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to read go.mod file")
+		return nil, ex.Wrapf(err, "failed to read go.mod file")
 	}
 	modFile, err := modfile.Parse(gomod, data, nil)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to parse go.mod file")
+		return nil, ex.Wrapf(err, "failed to parse go.mod file")
 	}
 	return modFile, nil
 }
@@ -30,11 +30,11 @@ func parseGoMod(gomod string) (*modfile.File, error) {
 func writeGoMod(gomod string, modfile *modfile.File) error {
 	data, err := modfile.Format()
 	if err != nil {
-		return ex.Errorf(err, "failed to format go.mod file")
+		return ex.Wrapf(err, "failed to format go.mod file")
 	}
 	err = os.WriteFile(gomod, data, 0o644) //nolint:gosec // 0644 is ok
 	if err != nil {
-		return ex.Errorf(err, "failed to write go.mod file")
+		return ex.Wrapf(err, "failed to write go.mod file")
 	}
 	return nil
 }
@@ -54,7 +54,7 @@ func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (b
 	if !hasReplace {
 		err := modfile.AddReplace(path, version, rpath, rversion)
 		if err != nil {
-			return false, ex.Errorf(err, "failed to add replace directive")
+			return false, ex.Wrapf(err, "failed to add replace directive")
 		}
 		return true, nil
 	}

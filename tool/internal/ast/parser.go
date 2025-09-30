@@ -35,16 +35,16 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	name := filepath.Base(filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to open file %s", filePath)
+		return nil, ex.Wrapf(err, "failed to open file %s", filePath)
 	}
 	defer file.Close()
 	astFile, err := parser.ParseFile(ap.fset, name, file, mode)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to parse file %s", filePath)
+		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)
 	}
 	dstFile, err := ap.dec.DecorateFile(astFile)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to decorate file %s", filePath)
+		return nil, ex.Wrapf(err, "failed to decorate file %s", filePath)
 	}
 	return dstFile, nil
 }
@@ -52,11 +52,11 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 // ParseSource parses the AST from complete source code.
 func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
 	if source == "" {
-		return nil, ex.Errorf(nil, "empty source")
+		return nil, ex.Newf("empty source")
 	}
 	dstRoot, err := ap.dec.Parse(source)
 	if err != nil {
-		return nil, ex.Error(err)
+		return nil, ex.Wrap(err)
 	}
 	return dstRoot, nil
 }
@@ -74,13 +74,13 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
 	if err != nil {
-		return ex.Errorf(err, "failed to create file %s", filePath)
+		return ex.Wrapf(err, "failed to create file %s", filePath)
 	}
 	defer file.Close()
 	r := decorator.NewRestorer()
 	err = r.Fprint(file, root)
 	if err != nil {
-		return ex.Errorf(err, "failed to write to file %s", filePath)
+		return ex.Wrapf(err, "failed to write to file %s", filePath)
 	}
 	return nil
 }

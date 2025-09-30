@@ -19,7 +19,7 @@ func (ip *InstrumentPhase) load() ([]*rule.InstFuncRule, error) {
 	f := util.GetMatchedRuleFile()
 	content, err := os.ReadFile(f)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to read file %s", f)
+		return nil, ex.Wrapf(err, "failed to read file %s", f)
 	}
 	if len(content) == 0 {
 		return nil, nil
@@ -28,7 +28,7 @@ func (ip *InstrumentPhase) load() ([]*rule.InstFuncRule, error) {
 	rules := make([]*rule.InstFuncRule, 0)
 	err = json.Unmarshal(content, &rules)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to unmarshal rules from file %s", f)
+		return nil, ex.Wrapf(err, "failed to unmarshal rules from file %s", f)
 	}
 	ip.Debug("Loaded matched rules", "rules", rules)
 	return rules, nil

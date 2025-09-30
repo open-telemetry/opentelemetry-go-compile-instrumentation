@@ -82,7 +82,7 @@ func stripCompleteFlag(args []string) []string {
 func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
-	util.Assert(target != "", "why not otherwise")
+	util.Assert(target != "", "missing -o flag value")
 	ip := &InstrumentPhase{
 		logger:      util.LoggerFromContext(ctx),
 		workDir:     filepath.Dir(target),

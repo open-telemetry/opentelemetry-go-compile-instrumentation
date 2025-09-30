@@ -42,7 +42,7 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	// Seek to the beginning of the file before reading
 	_, err := buildPlanLog.Seek(0, 0)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to seek to beginning of build plan log")
+		return nil, ex.Wrapf(err, "failed to seek to beginning of build plan log")
 	}
 	// 10MB should be enough to accommodate most long line
 	buffer := make([]byte, 0, buildPlanBufSize)
@@ -56,7 +56,7 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	}
 	err = scanner.Err()
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to parse build plan log")
+		return nil, ex.Wrapf(err, "failed to parse build plan log")
 	}
 	return compileCmds, nil
 }
@@ -71,7 +71,7 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	// Create a build plan log file in the temporary directory
 	buildPlanLog, err := os.Create(util.GetBuildTemp(BuildPlanLog))
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to create build plan log file")
+		return nil, ex.Wrapf(err, "failed to create build plan log file")
 	}
 	defer buildPlanLog.Close()
 	// The full build command is: "go build/install -a -x -n  {...}"
@@ -93,7 +93,7 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	cmd.Dir = ""
 	err = cmd.Run()
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to run build plan")
+		return nil, ex.Wrapf(err, "failed to run build plan")
 	}
 
 	// Find compile commands from build plan log

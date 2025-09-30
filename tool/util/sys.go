@@ -27,7 +27,7 @@ func RunCmdWithEnv(ctx context.Context, env []string, args ...string) error {
 	cmd.Env = env
 	err := cmd.Run()
 	if err != nil {
-		return ex.Errorf(err, "failed to run command %s", path)
+		return ex.Wrapf(err, "failed to run command %s", path)
 	}
 	return nil
 }
@@ -49,25 +49,25 @@ func CopyFile(src, dst string) error {
 	if os.IsNotExist(err) {
 		err = os.MkdirAll(filepath.Dir(dst), 0o755)
 		if err != nil {
-			return ex.Error(err)
+			return ex.Wrap(err)
 		}
 	}
 
 	srcFile, err := os.Open(src)
 	if err != nil {
-		return ex.Error(err)
+		return ex.Wrap(err)
 	}
 	defer srcFile.Close()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
-		return ex.Error(err)
+		return ex.Wrap(err)
 	}
 	defer dstFile.Close()
 
 	_, err = io.Copy(dstFile, srcFile)
 	if err != nil {
-		return ex.Error(err)
+		return ex.Wrap(err)
 	}
 	return nil
 }
@@ -81,7 +81,7 @@ func ListFiles(dir string) ([]string, error) {
 	var files []string
 	walkFn := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return ex.Error(err)
+			return ex.Wrap(err)
 		}
 		// Don't list files under hidden directories
 		if strings.HasPrefix(info.Name(), ".") {
@@ -94,7 +94,7 @@ func ListFiles(dir string) ([]string, error) {
 	}
 	err := filepath.Walk(dir, walkFn)
 	if err != nil {
-		return nil, ex.Error(err)
+		return nil, ex.Wrap(err)
 	}
 	return files, nil
 }
@@ -102,7 +102,7 @@ func ListFiles(dir string) ([]string, error) {
 func WriteFile(filePath string, content string) error {
 	file, err := os.Create(filePath)
 	if err != nil {
-		return ex.Error(err)
+		return ex.Wrap(err)
 	}
 	defer func(file *os.File) {
 		err = file.Close()
@@ -113,7 +113,7 @@ func WriteFile(filePath string, content string) error {
 
 	_, err = file.WriteString(content)
 	if err != nil {
-		return ex.Error(err)
+		return ex.Wrap(err)
 	}
 	return nil
 }

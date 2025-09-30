@@ -21,7 +21,7 @@ func parseEmbeddedRule(path string) ([]*rule.InstFuncRule, error) {
 	rules := make(map[string]*rule.InstFuncRule)
 	err = yaml.NewDecoder(bytes.NewReader(yamlFile)).Decode(&rules)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to decode yaml file")
+		return nil, ex.Wrapf(err, "failed to decode yaml file")
 	}
 	arr := make([]*rule.InstFuncRule, 0)
 	for name, r := range rules {

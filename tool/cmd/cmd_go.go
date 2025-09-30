@@ -40,12 +40,12 @@ var commandGo = cli.Command{
 
 		err = setup.Setup(ctx)
 		if err != nil {
-			return ex.Errorf(err, "failed to build with toolexec with exit code %d", exitCodeFailure)
+			return ex.Wrapf(err, "failed to build with toolexec with exit code %d", exitCodeFailure)
 		}
 
 		err = setup.BuildWithToolexec(ctx, cmd.Args().Slice())
 		if err != nil {
-			return ex.Errorf(err, "failed to build with toolexec with exit code %d", exitCodeFailure)
+			return ex.Wrapf(err, "failed to build with toolexec with exit code %d", exitCodeFailure)
 		}
 
 		return nil

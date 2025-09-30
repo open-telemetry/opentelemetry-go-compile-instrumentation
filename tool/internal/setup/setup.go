@@ -92,7 +92,7 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	// Add -toolexec=otel to the original build command and run it
 	execPath, err := os.Executable()
 	if err != nil {
-		return ex.Errorf(err, "failed to get executable path")
+		return ex.Wrapf(err, "failed to get executable path")
 	}
 	insert := "-toolexec=" + execPath + " toolexec"
 	const additionalCount = 2

@@ -19,7 +19,7 @@ var commandSetup = cli.Command{
 	Action: func(ctx context.Context, _ *cli.Command) error {
 		err := setup.Setup(ctx)
 		if err != nil {
-			return ex.Errorf(err, "failed to setup with exit code %d", exitCodeFailure)
+			return ex.Wrapf(err, "failed to setup with exit code %d", exitCodeFailure)
 		}
 		return nil
 	},

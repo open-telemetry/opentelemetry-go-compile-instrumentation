@@ -189,7 +189,7 @@ func findHookFile(rule *rule.InstFuncRule) (string, error) {
 			return file, nil
 		}
 	}
-	return "", ex.Errorf(nil, "no hook %s/%s found for %s from %v",
+	return "", ex.Newf("no hook %s/%s found for %s from %v",
 		rule.GetBefore(), rule.GetAfter(), rule.GetFuncName(), files)
 }
 
@@ -232,7 +232,7 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 		}
 	}
 	if target == nil {
-		return nil, ex.Errorf(nil, "hook %s or %s not found",
+		return nil, ex.Newf("hook %s or %s not found",
 			t.GetBefore(), t.GetAfter())
 	}
 	return target, nil
@@ -332,7 +332,7 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 
 func rectifyAnyType(paramList *dst.FieldList, traits []ParamTrait) error {
 	if len(paramList.List) != len(traits) {
-		return ex.Errorf(nil, "hook func signature can not match with target function")
+		return ex.Newf("hook func signature can not match with target function")
 	}
 	for i, field := range paramList.List {
 		trait := traits[i]
@@ -731,7 +731,7 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	}
 	// Fulfill the hook context before calling the real hook code.
 	if !ip.replenishHookContext(before) {
-		return ex.Errorf(nil, "failed to replenish hook context")
+		return ex.Newf("failed to replenish hook context")
 	}
 	return nil
 }

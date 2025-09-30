@@ -275,7 +275,7 @@ func (ip *InstrumentPhase) writeInstrumented(root *dst.File, oldFile string) err
 		}
 	}
 	if !replace {
-		return ex.Errorf(nil, "cannot apply the instrumented %s for %v",
+		return ex.Newf("cannot apply the instrumented %s for %v",
 			oldFile, ip.compileArgs)
 	}
 	ip.Info("Write instrumented AST", "old", oldFile, "new", newFile)

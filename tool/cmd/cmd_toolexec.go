@@ -21,7 +21,7 @@ var commandToolexec = cli.Command{
 	Action: func(ctx context.Context, cmd *cli.Command) error {
 		err := instrument.Toolexec(ctx, cmd.Args().Slice())
 		if err != nil {
-			return ex.Errorf(err, "failed to run toolexec with exit code %d", exitCodeFailure)
+			return ex.Wrapf(err, "failed to run toolexec with exit code %d", exitCodeFailure)
 		}
 		return nil
 	},

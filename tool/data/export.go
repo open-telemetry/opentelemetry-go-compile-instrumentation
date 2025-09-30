@@ -16,7 +16,7 @@ var dataFs embed.FS
 func ListEmbedFiles() ([]string, error) {
 	rules, err := dataFs.ReadDir(".")
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to read directory")
+		return nil, ex.Wrapf(err, "failed to read directory")
 	}
 
 	var ruleFiles []string
@@ -32,7 +32,7 @@ func ListEmbedFiles() ([]string, error) {
 func ReadEmbedFile(path string) ([]byte, error) {
 	bs, err := dataFs.ReadFile(path)
 	if err != nil {
-		return nil, ex.Errorf(err, "failed to read file")
+		return nil, ex.Wrapf(err, "failed to read file")
 	}
 	return bs, nil
 }

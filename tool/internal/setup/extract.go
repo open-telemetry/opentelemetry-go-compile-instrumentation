@@ -38,26 +38,26 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 	case tar.TypeDir:
 		err := os.MkdirAll(targetPath, fileInfo.Mode())
 		if err != nil {
-			return ex.Error(err)
+			return ex.Wrap(err)
 		}
 
 	case tar.TypeReg:
 		file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR,
 			fileInfo.Mode())
 		if err != nil {
-			return ex.Error(err)
+			return ex.Wrap(err)
 		}
 
 		_, err = io.CopyN(file, tarReader, header.Size)
 		if err != nil {
-			return ex.Error(err)
+			return ex.Wrap(err)
 		}
 		err = file.Close()
 		if err != nil {
-			return ex.Error(err)
+			return ex.Wrap(err)
 		}
 	default:
-		return ex.Errorf(nil, "unsupported file type: %c in %s",
+		return ex.Newf("unsupported file type: %c in %s",
 			header.Typeflag, header.Name)
 	}
 	return nil
@@ -66,12 +66,12 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 func extractGZip(data []byte, targetDir string) error {
 	err0 := os.MkdirAll(targetDir, 0o755)
 	if err0 != nil {
-		return ex.Error(err0)
+		return ex.Wrap(err0)
 	}
 
 	gzReader, err0 := gzip.NewReader(strings.NewReader(string(data)))
 	if err0 != nil {
-		return ex.Error(err0)
+		return ex.Wrap(err0)
 	}
 	defer func() {
 		err0 = gzReader.Close()
@@ -87,7 +87,7 @@ func extractGZip(data []byte, targetDir string) error {
 			break
 		}
 		if err != nil {
-			return ex.Error(err)
+			return ex.Wrap(err)
 		}
 
 		// Skip AppleDouble files (._filename) and other hidden files

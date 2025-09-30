@@ -59,13 +59,13 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	buildTempDir := cmd.String("work-dir")
 	err := os.MkdirAll(buildTempDir, 0o755)
 	if err != nil {
-		return ctx, ex.Errorf(err, "failed to create work directory %q", buildTempDir)
+		return ctx, ex.Wrapf(err, "failed to create work directory %q", buildTempDir)
 	}
 
 	logFilename := filepath.Join(buildTempDir, debugLogFilename)
 	writer, err := os.OpenFile(logFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return ctx, ex.Errorf(err, "failed to open log file %q", buildTempDir)
+		return ctx, ex.Wrapf(err, "failed to open log file %q", buildTempDir)
 	}
 
 	// Create a custom handler with shorter time format
