@@ -6,12 +6,12 @@
   ],
   "packageRules": [
     {
-      "groupName": "all patch versions",
-      "matchUpdateTypes": ["patch"],
-      "schedule": ["before 8am every weekday"]
+      "groupName": "all non-major versions",
+      "matchUpdateTypes": ["patch", "minor"],
+      "schedule": ["before 8am on Monday"]
     },
     {
-      "matchUpdateTypes": ["minor", "major"],
+      "matchUpdateTypes": ["major"],
       "schedule": ["before 8am on Monday"]
     }
   ],
