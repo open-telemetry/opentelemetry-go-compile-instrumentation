@@ -300,7 +300,6 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 
 func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, root *dst.File) error {
 	funcDecls := ast.FindFuncDecl(root, rule.Func)
-	// No function found for the rule, skip
 	if len(funcDecls) == 0 {
 		return ex.Newf("can not find function %s", rule.Func)
 	}

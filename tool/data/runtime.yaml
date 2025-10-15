@@ -1,5 +1,21 @@
-runtime_gls:
+runtime_trace_context:
   target: "runtime"
   struct: "g"
   field_name: "otel_trace_context"
   field_type: "interface{}"
+
+runtime_baggage_container:
+  target: "runtime"
+  struct: "g"
+  field_name: "otel_baggage_container"
+  field_type: "interface{}"
+
+runtime_propagate_context:
+  target: "runtime"
+  file: "runtime_linker.go"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/runtime"
+
+runtime_do_propagation:
+  target: "runtime"
+  func: "newproc1"
+  raw: "defer func(){ _retVal0.otel_trace_context = propagateOtelContext(callergp.otel_trace_context); _retVal0.otel_baggage_container = propagateOtelContext(callergp.otel_baggage_container); }()"

@@ -49,6 +49,21 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	return dstFile, nil
 }
 
+// ParseSnippet parses the AST from incomplete source code snippet.
+func (ap *AstParser) ParseSnippet(source string) ([]dst.Stmt, error) {
+	if source == "" {
+		return nil, ex.New("empty source")
+	}
+	snippet := "package main; func _() {" + source + "}"
+	file, err := decorator.ParseFile(ap.fset, "", snippet, 0)
+	if err != nil {
+		return nil, ex.Wrap(err)
+	}
+	funcDecl, ok := file.Decls[0].(*dst.FuncDecl)
+	util.Assert(ok, "must be a func decl")
+	return funcDecl.Body.List, nil
+}
+
 // ParseSource parses the AST from complete source code.
 func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
 	if source == "" {
