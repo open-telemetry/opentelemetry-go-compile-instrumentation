@@ -6,9 +6,7 @@ package instrument
 import (
 	_ "embed"
 	"go/token"
-	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/dave/dst"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -167,7 +165,7 @@ func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 }
 
 func findHookFile(rule *rule.InstFuncRule) (string, error) {
-	files, err0 := findRuleFiles(rule)
+	files, err0 := listRuleFiles(rule.Path)
 	if err0 != nil {
 		return "", err0
 	}
@@ -185,17 +183,6 @@ func findHookFile(rule *rule.InstFuncRule) (string, error) {
 	}
 	return "", ex.Newf("no hook {%s,%s} found for %s from %v",
 		rule.Before, rule.After, rule.Func, files)
-}
-
-func findRuleFiles(r *rule.InstFuncRule) ([]string, error) {
-	path := r.Path
-	path = strings.TrimPrefix(path, util.OtelRoot)
-	path = filepath.Join(util.GetBuildTempDir(), path)
-	files, err := util.ListFiles(path)
-	if err != nil {
-		return nil, err
-	}
-	return files, nil
 }
 
 func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
@@ -617,7 +604,9 @@ func setReturnValClause(idx int, t dst.Expr) *dst.CaseClause {
 
 // desugarType desugars parameter type to its original type, if parameter
 // is type of ...T, it will be converted to []T
-func desugarType(param *dst.Field) dst.Expr { //nolint:ireturn // we dont know the type of the parameter
+//
+//nolint:ireturn // we dont know the type of the parameter
+func desugarType(param *dst.Field) dst.Expr {
 	if ft, ok := param.Type.(*dst.Ellipsis); ok {
 		return ast.ArrayType(ft.Elt)
 	}

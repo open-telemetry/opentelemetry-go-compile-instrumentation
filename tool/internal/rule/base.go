@@ -13,6 +13,8 @@ type InstRule interface {
 	String() string    // The string representation of the rule
 	GetName() string   // The name of the rule
 	GetTarget() string // The target module path where the rule is applied
+	SetName(name string)
+	SetTarget(target string)
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
@@ -21,9 +23,11 @@ type InstBaseRule struct {
 	Target string `json:"target"         yaml:"target"`         // The target module path where the rule is applied
 }
 
-func (ibr *InstBaseRule) String() string    { return ibr.Name }
-func (ibr *InstBaseRule) GetName() string   { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string { return ibr.Target }
+func (ibr *InstBaseRule) String() string          { return ibr.Name }
+func (ibr *InstBaseRule) GetName() string         { return ibr.Name }
+func (ibr *InstBaseRule) GetTarget() string       { return ibr.Target }
+func (ibr *InstBaseRule) SetName(name string)     { ibr.Name = name }
+func (ibr *InstBaseRule) SetTarget(target string) { ibr.Target = target }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
@@ -33,45 +37,61 @@ func (ibr *InstBaseRule) GetTarget() string { return ibr.Target }
 type InstRuleSet struct {
 	PackageName string                       `json:"package_name"`
 	ModulePath  string                       `json:"module_path"`
+	RawRules    map[string][]*InstRawRule    `json:"raw_rules"`
 	FuncRules   map[string][]*InstFuncRule   `json:"func_rules"`
 	StructRules map[string][]*InstStructRule `json:"struct_rules"`
+	FileRules   []*InstFileRule              `json:"file_rules"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
 	return &InstRuleSet{
 		PackageName: "",
 		ModulePath:  importPath,
+		RawRules:    make(map[string][]*InstRawRule),
 		FuncRules:   make(map[string][]*InstFuncRule),
 		StructRules: make(map[string][]*InstStructRule),
+		FileRules:   make([]*InstFileRule, 0),
 	}
 }
 
 func (irs *InstRuleSet) IsEmpty() bool {
 	return irs == nil ||
-		(len(irs.FuncRules) == 0 && len(irs.StructRules) == 0)
+		(len(irs.FuncRules) == 0 &&
+			len(irs.StructRules) == 0 &&
+			len(irs.RawRules) == 0 &&
+			len(irs.FileRules) == 0)
+}
+
+// AddRule is a generic method that adds any type of rule to the appropriate map.
+// It works with any rule type that implements the InstRule interface.
+func addRule[T InstRule](file string, rule T, rulesMap map[string][]T) {
+	util.Assert(filepath.IsAbs(file), "file must be an absolute path")
+	if _, exist := rulesMap[file]; !exist {
+		rulesMap[file] = make([]T, 0)
+		rulesMap[file] = append(rulesMap[file], rule)
+	} else {
+		rulesMap[file] = append(rulesMap[file], rule)
+	}
+}
+
+func (irs *InstRuleSet) AddRawRule(file string, rule *InstRawRule) {
+	addRule(file, rule, irs.RawRules)
 }
 
 func (irs *InstRuleSet) AddFuncRule(file string, rule *InstFuncRule) {
-	util.Assert(filepath.IsAbs(file), "file must be an absolute path")
-	if _, exist := irs.FuncRules[file]; !exist {
-		irs.FuncRules[file] = make([]*InstFuncRule, 0)
-		irs.FuncRules[file] = append(irs.FuncRules[file], rule)
-	} else {
-		irs.FuncRules[file] = append(irs.FuncRules[file], rule)
-	}
+	addRule(file, rule, irs.FuncRules)
 }
 
 func (irs *InstRuleSet) AddStructRule(file string, rule *InstStructRule) {
-	util.Assert(filepath.IsAbs(file), "file must be an absolute path")
-	if _, exist := irs.StructRules[file]; !exist {
-		irs.StructRules[file] = make([]*InstStructRule, 0)
-		irs.StructRules[file] = append(irs.StructRules[file], rule)
-	} else {
-		irs.StructRules[file] = append(irs.StructRules[file], rule)
-	}
+	addRule(file, rule, irs.StructRules)
+}
+
+func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
+	irs.FileRules = append(irs.FileRules, rule)
 }
 
 func (irs *InstRuleSet) SetPackageName(name string) {
+	util.Assert(name != "", "package name is empty")
 	irs.PackageName = name
 }
 

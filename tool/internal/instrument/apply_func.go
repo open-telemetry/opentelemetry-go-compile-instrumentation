@@ -58,7 +58,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 		for _, field := range retList.List {
 			if field.Names == nil {
 				// Rename
-				name := fmt.Sprintf("_retVal%d", idx)
+				name := fmt.Sprintf("%s%d", unnamedRetValName, idx)
 				field.Names = []*dst.Ident{ast.Ident(name)}
 				idx++
 				// Collect (for further use)
@@ -300,7 +300,6 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 
 func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, root *dst.File) error {
 	funcDecls := ast.FindFuncDecl(root, rule.Func)
-	// No function found for the rule, skip
 	if len(funcDecls) == 0 {
 		return ex.Newf("can not find function %s", rule.Func)
 	}

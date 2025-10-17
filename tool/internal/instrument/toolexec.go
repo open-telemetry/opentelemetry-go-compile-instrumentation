@@ -105,6 +105,8 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	}
 
 	// Run the instrumented compile command
+	ip.Info("Run instrumented compile command",
+		"args", strings.Join(ip.compileArgs, " "))
 	return ip.compileArgs, nil
 }
 

@@ -20,11 +20,24 @@ func groupRules(rset *rule.InstRuleSet) map[string][]rule.InstRule {
 			file2rules[file] = append(file2rules[file], rule)
 		}
 	}
+	for file, rules := range rset.RawRules {
+		for _, rule := range rules {
+			file2rules[file] = append(file2rules[file], rule)
+		}
+	}
 	return file2rules
 }
 
 func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	hasFuncRule := false
+	// Apply file rules first because they can introduce new files that used
+	// by other rules such as raw rules
+	for _, rule := range rset.FileRules {
+		err := ip.applyFileRule(rule)
+		if err != nil {
+			return err
+		}
+	}
 	for file, rules := range groupRules(rset) {
 		// Group rules by file, then parse the target file once
 		root, err := ip.parseFile(file)
@@ -46,6 +59,12 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 				if err1 != nil {
 					return err1
 				}
+			case *rule.InstRawRule:
+				err1 := ip.applyRawRule(rt, root)
+				if err1 != nil {
+					return err1
+				}
+				hasFuncRule = true
 			default:
 				util.ShouldNotReachHere()
 			}
