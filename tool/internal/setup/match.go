@@ -110,7 +110,7 @@ func runMatch(dependency *Dependency, allRules []rule.InstRule) (*rule.InstRuleS
 			continue
 		}
 		rules = append(rules, r)
-		// Do further. If the rule is a file rule, it always applicable
+		// Furthermore, if the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
 			set.AddFileRule(fr)
 		}

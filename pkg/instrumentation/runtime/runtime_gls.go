@@ -19,16 +19,16 @@ func SetBaggageContainerToGLS(baggageContainer interface{}) {
 	getg().m.curg.otel_baggage_container = baggageContainer
 }
 
-type ContextSnapshoter interface {
-	TakeSnapshot() interface{}
+type ContextCloner interface {
+	Clone() interface{}
 }
 
 func propagateOtelContext(context interface{}) interface{} {
 	if context == nil {
 		return nil
 	}
-	if snapshoter, ok := context.(ContextSnapshoter); ok {
-		return snapshoter.TakeSnapshot()
+	if snapshoter, ok := context.(ContextCloner); ok {
+		return snapshoter.Clone()
 	}
 	return context
 }

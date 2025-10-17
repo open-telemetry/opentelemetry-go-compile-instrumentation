@@ -13,12 +13,14 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
+const unnamedRetValName = "_unnamedRetVal"
+
 func renameReturnValues(funcDecl *dst.FuncDecl) {
 	if retList := funcDecl.Type.Results; retList != nil {
 		idx := 0
 		for _, field := range retList.List {
 			if field.Names == nil {
-				name := fmt.Sprintf("_retVal%d", idx)
+				name := fmt.Sprintf("%s%d", unnamedRetValName, idx)
 				field.Names = []*dst.Ident{ast.Ident(name)}
 				idx++
 			}

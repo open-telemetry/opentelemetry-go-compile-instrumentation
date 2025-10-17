@@ -58,7 +58,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 		for _, field := range retList.List {
 			if field.Names == nil {
 				// Rename
-				name := fmt.Sprintf("_retVal%d", idx)
+				name := fmt.Sprintf("%s%d", unnamedRetValName, idx)
 				field.Names = []*dst.Ident{ast.Ident(name)}
 				idx++
 				// Collect (for further use)

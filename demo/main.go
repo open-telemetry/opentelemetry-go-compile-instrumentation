@@ -17,7 +17,7 @@ func (tc *traceContext) String() string {
 	return fmt.Sprintf("traceID: %s, spanID: %s", tc.traceID, tc.spanID)
 }
 
-func (tc *traceContext) TakeSnapshot() interface{} {
+func (tc *traceContext) Clone() interface{} {
 	return &traceContext{
 		traceID: tc.traceID,
 		spanID:  tc.spanID,
