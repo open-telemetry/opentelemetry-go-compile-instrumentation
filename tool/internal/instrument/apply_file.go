@@ -16,15 +16,17 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-func listRuleFiles(p string) ([]string, error) {
-	var path string
-	if util.PathExists(p) {
-		path = p
+func listRuleFiles(path string) ([]string, error) {
+	// If the path is a local path, use it directly, otherwise, it's a module
+	// path, we need to convert it to a local path and find the module files
+	var p string
+	if util.PathExists(path) {
+		p = path
 	} else {
-		path = strings.TrimPrefix(p, util.OtelRoot)
-		path = filepath.Join(util.GetBuildTempDir(), path)
+		p = strings.TrimPrefix(path, util.OtelRoot)
+		p = filepath.Join(util.GetBuildTempDir(), p)
 	}
-	files, err := util.ListFiles(path)
+	files, err := util.ListFiles(p)
 	if err != nil {
 		return nil, err
 	}

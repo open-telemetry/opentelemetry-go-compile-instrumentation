@@ -13,8 +13,6 @@ type InstRule interface {
 	String() string    // The string representation of the rule
 	GetName() string   // The name of the rule
 	GetTarget() string // The target module path where the rule is applied
-	SetName(name string)
-	SetTarget(target string)
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
@@ -23,11 +21,9 @@ type InstBaseRule struct {
 	Target string `json:"target"         yaml:"target"`         // The target module path where the rule is applied
 }
 
-func (ibr *InstBaseRule) String() string          { return ibr.Name }
-func (ibr *InstBaseRule) GetName() string         { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string       { return ibr.Target }
-func (ibr *InstBaseRule) SetName(name string)     { ibr.Name = name }
-func (ibr *InstBaseRule) SetTarget(target string) { ibr.Target = target }
+func (ibr *InstBaseRule) String() string    { return ibr.Name }
+func (ibr *InstBaseRule) GetName() string   { return ibr.Name }
+func (ibr *InstBaseRule) GetTarget() string { return ibr.Target }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
