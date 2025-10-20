@@ -28,8 +28,6 @@ type InstrumentPhase struct {
 	compileArgs []string
 	// The target function to be instrumented
 	rawFunc *dst.FuncDecl
-	// Whether the rule is exact match with target function, or it's a regexp match
-	exact bool
 	// The enter hook function, it should be inserted into the target source file
 	beforeHookFunc *dst.FuncDecl
 	// The exit hook function, it should be inserted into the target source file

@@ -9,12 +9,22 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 )
 
-//go:linkname Func1Before main.Func1Before
-func Func1Before(ctx inst.HookContext) {
-	println("Func1Before")
+//go:linkname H1Before main.H1Before
+func H1Before(ctx inst.HookContext, p1 string, p2 int) {
+	println("H1Before")
 }
 
-//go:linkname Func1After main.Func1After
-func Func1After(ctx inst.HookContext) {
-	println("Func1After")
+//go:linkname H1After main.H1After
+func H1After(ctx inst.HookContext, r1 float32, r2 error) {
+	println("H1After")
+}
+
+//go:linkname H2Before main.H2Before
+func H2Before(ctx inst.HookContext, p1 string, p2 int) {
+	println("H2Before")
+}
+
+//go:linkname H2After main.H2After
+func H2After(ctx inst.HookContext, r1 float32, r2 error) {
+	println("H2After")
 }

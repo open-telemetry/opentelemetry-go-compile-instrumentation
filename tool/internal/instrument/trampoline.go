@@ -227,25 +227,23 @@ func getHookParamTraits(t *rule.InstFuncRule, before bool) ([]ParamTrait, error)
 	return attrs, nil
 }
 
-func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTrait) {
+func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTrait) error {
 	// The actual parameter list of hook function should be the same as the
 	// target function
-	if ip.exact {
-		util.Assert(len(traits) == (len(ip.beforeHookFunc.Type.Params.List)+1),
-			"hook func signature can not match with target function")
+	if len(traits) != (len(ip.beforeHookFunc.Type.Params.List) + 1) {
+		return ex.Newf("hook func signature mismatch, expected %d, got %d",
+			len(ip.beforeHookFunc.Type.Params.List)+1, len(traits))
 	}
 	// Hook: 	   func beforeFoo(hookContext* HookContext, p*[]int)
 	// Trampoline: func OtelBeforeTrampoline_foo(p *[]int)
 	args := []dst.Expr{ast.Ident(trampolineHookContextName)}
-	if ip.exact {
-		for idx, field := range ip.beforeHookFunc.Type.Params.List {
-			trait := traits[idx+1 /*HookContext*/]
-			for _, name := range field.Names { // syntax of n1,n2 type
-				if trait.IsVariadic {
-					args = append(args, ast.DereferenceOf(ast.Ident(name.Name+"...")))
-				} else {
-					args = append(args, ast.DereferenceOf(ast.Ident(name.Name)))
-				}
+	for idx, field := range ip.beforeHookFunc.Type.Params.List {
+		trait := traits[idx+1 /*HookContext*/]
+		for _, name := range field.Names { // syntax of n1,n2 type
+			if trait.IsVariadic {
+				args = append(args, ast.DereferenceOf(ast.Ident(name.Name+"...")))
+			} else {
+				args = append(args, ast.DereferenceOf(ast.Ident(name.Name)))
 			}
 		}
 	}
@@ -257,14 +255,15 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTr
 		nil,
 	)
 	insertAt(ip.beforeHookFunc, iff, len(ip.beforeHookFunc.Body.List)-1)
+	return nil
 }
 
-func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTrait) {
+func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTrait) error {
 	// The actual parameter list of hook function should be the same as the
 	// target function
-	if ip.exact {
-		util.Assert(len(traits) == len(ip.afterHookFunc.Type.Params.List),
-			"hook func signature can not match with target function")
+	if len(traits) != len(ip.afterHookFunc.Type.Params.List) {
+		return ex.Newf("hook func signature mismatch, expected %d, got %d",
+			len(ip.afterHookFunc.Type.Params.List), len(traits))
 	}
 	// Hook: 	   func afterFoo(ctx* HookContext, p*[]int)
 	// Trampoline: func OtelAfterTrampoline_foo(ctx* HookContext, p *[]int)
@@ -272,10 +271,6 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 	for idx, field := range ip.afterHookFunc.Type.Params.List {
 		if idx == 0 {
 			args = append(args, ast.Ident(trampolineHookContextName))
-			if !ip.exact {
-				// Generic hook function, no need to process parameters
-				break
-			}
 			continue
 		}
 		trait := traits[idx]
@@ -297,6 +292,7 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 		nil,
 	)
 	insertAtEnd(ip.afterHookFunc, iff)
+	return nil
 }
 
 func rectifyAnyType(paramList *dst.FieldList, traits []ParamTrait) error {
@@ -316,18 +312,13 @@ func rectifyAnyType(paramList *dst.FieldList, traits []ParamTrait) error {
 func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 	traits []ParamTrait, before bool,
 ) error {
-	paramTypes := &dst.FieldList{List: []*dst.Field{}}
-	if ip.exact {
-		paramTypes = ip.buildTrampolineType(before)
-	}
+	paramTypes := ip.buildTrampolineType(before)
 	addHookContext(paramTypes)
-	if ip.exact {
-		// Hook functions may uses interface{} as parameter type, as some types of
-		// raw function is not exposed
-		err := rectifyAnyType(paramTypes, traits)
-		if err != nil {
-			return err
-		}
+	// Hook functions may uses interface{} as parameter type, as some types of
+	// raw function is not exposed
+	err := rectifyAnyType(paramTypes, traits)
+	if err != nil {
+		return err
 	}
 
 	// Generate var decl and append it to the target file, note that many target
@@ -336,9 +327,7 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 	// if the hook function variable is already declared in the target file
 	fnName := makeOnXName(t, before)
 	funcDecl := &dst.FuncDecl{
-		Name: &dst.Ident{
-			Name: fnName,
-		},
+		Name: ast.Ident(fnName),
 		Type: &dst.FuncType{
 			Func:   false,
 			Params: paramTypes,
@@ -691,9 +680,12 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	}
 	// Add the function call to the real hook code.
 	if before {
-		ip.callBeforeHook(t, traits)
+		err = ip.callBeforeHook(t, traits)
 	} else {
-		ip.callAfterHook(t, traits)
+		err = ip.callAfterHook(t, traits)
+	}
+	if err != nil {
+		return err
 	}
 	// Fulfill the hook context before calling the real hook code.
 	if !ip.replenishHookContext(before) {

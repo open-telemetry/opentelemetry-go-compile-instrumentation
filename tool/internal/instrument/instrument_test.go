@@ -114,13 +114,23 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 				mainGoFile: {
 					{
 						InstBaseRule: rule.InstBaseRule{
-							Name:   "instrument_func1",
+							Name:   "func1_inject1",
 							Target: "main",
 						},
 						Path:   filepath.Join(".", "testdata"),
 						Func:   "Func1",
-						Before: "Func1Before",
-						After:  "Func1After",
+						Before: "H1Before",
+						After:  "H1After",
+					},
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "func1_inject2",
+							Target: "main",
+						},
+						Path:   filepath.Join(".", "testdata"),
+						Func:   "Func1",
+						Before: "H2Before",
+						After:  "H2After",
 					},
 				},
 			},
