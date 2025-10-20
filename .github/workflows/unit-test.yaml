@@ -29,8 +29,6 @@ jobs:
       matrix:
         platform:
           - os: ubuntu-latest
-            arch: "386"
-          - os: ubuntu-latest
             arch: amd64
           - os: ubuntu-22.04-arm
             arch: arm64
@@ -38,8 +36,6 @@ jobs:
             arch: amd64
           - os: macos-latest
             arch: arm64
-          - os: windows-latest
-            arch: "386"
           - os: windows-latest
             arch: amd64
     runs-on: ${{ matrix.platform.os }}
