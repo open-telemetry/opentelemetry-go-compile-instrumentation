@@ -17,11 +17,9 @@ add_new_field:
   target: main
   # The struct name to inject the field into
   struct: MyStruct
-  # Which field we want to inject the code into
-  field_name: NewField
-  field_type: string
-  # Where the hook code is located
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+  new_field:
+    - name: NewField
+      type: string
 
 raw_helloworld:
   # Where we want to inject the raw code

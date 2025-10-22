@@ -15,7 +15,9 @@ func (ip *InstrumentPhase) applyStructRule(rule *rule.InstStructRule, root *dst.
 	if structDecl == nil {
 		return ex.Newf("can not find struct %s", rule.Struct)
 	}
-	ast.AddStructField(structDecl, rule.FieldName, rule.FieldType)
+	for _, field := range rule.NewField {
+		ast.AddStructField(structDecl, field.Name, field.Type)
+	}
 	ip.Info("Apply struct rule", "rule", rule)
 	return nil
 }

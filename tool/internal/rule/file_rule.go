@@ -12,9 +12,6 @@ package rule
 //		target: "main"
 //		file: "newfile.go"
 //		path: "github.com/foo/bar/newfile"
-//
-// The rule will be matched against the target package and the new file
-// will be injected at the appropriate location.
 type InstFileRule struct {
 	InstBaseRule
 	File string `json:"file" yaml:"file"` // The name of the file to be added to the target package

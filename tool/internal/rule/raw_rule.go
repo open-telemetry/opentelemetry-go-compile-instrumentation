@@ -12,9 +12,6 @@ package rule
 //		target: "main"
 //		func: "Bar"
 //		raw: "println(\"Hello, World!\")"
-//
-// The rule will be matched against the target function and the raw code
-// will be injected at the appropriate location.
 type InstRawRule struct {
 	InstBaseRule
 	Func string `json:"func" yaml:"func"` // The name of the target func to be instrumented

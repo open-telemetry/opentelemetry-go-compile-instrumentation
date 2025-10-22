@@ -1,14 +1,11 @@
-trace_ctx:
+add_gls_field:
   target: "runtime"
   struct: "g"
-  field_name: "otel_trace_context"
-  field_type: "interface{}"
-
-baggage_ctx:
-  target: "runtime"
-  struct: "g"
-  field_name: "otel_baggage_container"
-  field_type: "interface{}"
+  new_field:
+    - name: "otel_trace_context"
+      type: "interface{}"
+    - name: "otel_baggage_container"
+      type: "interface{}"
 
 gls_linker:
   target: "runtime"

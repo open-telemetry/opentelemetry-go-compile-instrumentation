@@ -13,12 +13,13 @@ package rule
 //		struct: "Bar"
 //		field_name: "Foo"
 //		field_type: "int"
-//
-// The rule will be matched against the target struct and the hook field will be
-// injected at the appropriate location.
+type InstStructField struct {
+	Name string `json:"name" yaml:"name"` // The name of the field to be added
+	Type string `json:"type" yaml:"type"` // The type of the field to be added
+}
+
 type InstStructRule struct {
 	InstBaseRule
-	Struct    string `json:"struct"     yaml:"struct"`     // The type name of the struct to be instrumented
-	FieldName string `json:"field_name" yaml:"field_name"` // The name of the field to be added
-	FieldType string `json:"field_type" yaml:"field_type"` // The type of the field to be added
+	Struct   string             `json:"struct"    yaml:"struct"`    // The type name of the struct to be instrumented
+	NewField []*InstStructField `json:"new_field" yaml:"new_field"` // The new fields to be added
 }

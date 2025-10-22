@@ -153,9 +153,13 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 							Name:   "add_new_field",
 							Target: "main",
 						},
-						Struct:    "T",
-						FieldName: "NewField",
-						FieldType: "string",
+						Struct: "T",
+						NewField: []*rule.InstStructField{
+							{
+								Name: "NewField",
+								Type: "string",
+							},
+						},
 					},
 				},
 			},
