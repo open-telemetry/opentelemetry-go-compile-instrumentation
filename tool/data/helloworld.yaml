@@ -13,18 +13,21 @@ hook_helloworld:
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
 
 add_new_field:
-  # Where we want to inject the hook code
   target: main
-  # The struct name to inject the field into
   struct: MyStruct
   new_field:
     - name: NewField
       type: string
 
 raw_helloworld:
-  # Where we want to inject the raw code
   target: main
-  # What function we want to inject the raw code into
   func: Example
-  # What raw code we want to inject into the target function
   raw: "go func(){ println(\"Hello, World!\") }()"
+
+hook_recv:
+  target: main
+  func: Example
+  recv: "*MyStruct"
+  before: MyHook1Before
+  after: MyHook1After
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"

@@ -299,18 +299,17 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 }
 
 func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, root *dst.File) error {
-	funcDecls := ast.FindFuncDecl(root, rule.Func)
-	if len(funcDecls) == 0 {
+	funcDecl := ast.FindFuncDecl(root, rule.Func, rule.Recv)
+	// No function found for the rule, skip
+	if funcDecl == nil {
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
-	for _, funcDecl := range funcDecls {
-		ip.rawFunc = funcDecl
-		err := ip.insertTJump(rule, funcDecl)
-		if err != nil {
-			return err
-		}
-		ip.Info("Apply func rule", "rule", rule)
+	ip.rawFunc = funcDecl
+	err := ip.insertTJump(rule, funcDecl)
+	if err != nil {
+		return err
 	}
+	ip.Info("Apply func rule", "rule", rule)
 	return nil
 }

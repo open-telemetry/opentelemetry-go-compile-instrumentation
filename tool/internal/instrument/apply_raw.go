@@ -46,17 +46,15 @@ func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl) error {
 // applyRawRule injects the raw code into the target function at the beginning
 // of the function.
 func (ip *InstrumentPhase) applyRawRule(rule *rule.InstRawRule, root *dst.File) error {
-	funcDecls := ast.FindFuncDecl(root, rule.Func)
-	if len(funcDecls) == 0 {
+	funcDecl := ast.FindFuncDecl(root, rule.Func, rule.Recv)
+	if funcDecl == nil {
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
-	for _, funcDecl := range funcDecls {
-		err := insertRaw(rule, funcDecl)
-		if err != nil {
-			return err
-		}
-		ip.Info("Apply raw rule", "rule", rule)
+	err := insertRaw(rule, funcDecl)
+	if err != nil {
+		return err
 	}
+	ip.Info("Apply raw rule", "rule", rule)
 	return nil
 }

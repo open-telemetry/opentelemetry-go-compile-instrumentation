@@ -17,6 +17,6 @@ func ShouldNotReachHere() {
 	ex.Fatalf("should not reach here")
 }
 
-func Unimplemented() {
-	ex.Fatalf("Unimplemented yet")
+func Unimplemented(message string) {
+	ex.Fatalf("Unimplemented: %s", message)
 }

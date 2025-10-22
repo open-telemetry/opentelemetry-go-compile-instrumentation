@@ -26,6 +26,8 @@ func (tc *traceContext) Clone() interface{} {
 
 type MyStruct struct{}
 
+func (m *MyStruct) Example() { println("MyStruct.Example") }
+
 // Example demonstrates how to use the instrumenter.
 func Example() {
 	// Output:
@@ -49,4 +51,5 @@ func main() {
 	m := &MyStruct{}
 	// Add a new field to the struct
 	println(m.NewField)
+	m.Example()
 }

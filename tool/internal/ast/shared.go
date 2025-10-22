@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"fmt"
 	"go/token"
 	"strconv"
 
@@ -42,15 +43,44 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 	return decls[0]
 }
 
-func FindFuncDecl(root *dst.File, funcName string) []*dst.FuncDecl {
-	const maxMatchDecls = 2
+func FindFuncDecl(root *dst.File, funcName string, recv string) *dst.FuncDecl {
 	decls := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
-		return funcDecl.Name.Name == funcName
+		// Receiver type is empty? Match func name only
+		name := funcDecl.Name.Name
+		if recv == "" {
+			return name == funcName && !HasReceiver(funcDecl)
+		}
+		if !HasReceiver(funcDecl) {
+			return false
+		}
+
+		// Receiver type is specified, Match both func name and receiver type
+		switch recvTypeExpr := funcDecl.Recv.List[0].Type.(type) {
+		case *dst.StarExpr: // func (*Recv)T
+			tn, ok := recvTypeExpr.X.(*dst.Ident)
+			if !ok {
+				// This is a generic type, we don't support it yet
+				return false
+			}
+			t := "*" + tn.Name
+			return t == recv
+		case *dst.Ident: // func (Recv)T
+			t := recvTypeExpr.Name
+			return t == recv
+		case *dst.IndexExpr:
+			// This is a generic type, we don't support it yet
+			return false
+		default:
+			msg := fmt.Sprintf("unexpected receiver type: %T", recvTypeExpr)
+			util.Unimplemented(msg)
+		}
+		return false
 	})
 
-	// one with receiver and one without receiver, at most two
-	util.Assert(len(decls) <= maxMatchDecls, "sanity check")
-	return decls
+	if len(decls) == 0 {
+		return nil
+	}
+	return decls[0]
 }
 
 func ListFuncDecls(root *dst.File) []*dst.FuncDecl {

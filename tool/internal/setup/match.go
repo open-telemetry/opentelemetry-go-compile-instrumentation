@@ -142,8 +142,8 @@ func runMatch(dependency *Dependency, allRules []rule.InstRule) (*rule.InstRuleS
 			// Let's match with the rule precisely
 			switch rt := available.(type) {
 			case *rule.InstFuncRule:
-				funcDecl := ast.FindFuncDecl(tree, rt.Func)
-				if len(funcDecl) > 0 {
+				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
+				if funcDecl != nil {
 					set.AddFuncRule(source, rt)
 				}
 			case *rule.InstStructRule:
@@ -152,8 +152,8 @@ func runMatch(dependency *Dependency, allRules []rule.InstRule) (*rule.InstRuleS
 					set.AddStructRule(source, rt)
 				}
 			case *rule.InstRawRule:
-				funcDecl := ast.FindFuncDecl(tree, rt.Func)
-				if len(funcDecl) > 0 {
+				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
+				if funcDecl != nil {
 					set.AddRawRule(source, rt)
 				}
 			case *rule.InstFileRule:

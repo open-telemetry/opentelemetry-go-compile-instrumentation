@@ -16,26 +16,31 @@ const (
 )
 
 //nolint:gochecknoglobals // This is a constant
-var requiredImports = [][]string{
-	{"runtime/debug", "_otel_debug"}, // The getstack function depends on runtime/debug
-	{"log", "_otel_log"},             // The printstack function depends on log
-	{"unsafe", "_"},                  // The golinkname tag depends on unsafe
+var requiredImports = map[string]string{
+	"runtime/debug": "_otel_debug", // The getstack function depends on runtime/debug
+	"log":           "_otel_log",   // The printstack function depends on log
+	"unsafe":        "_",           // The golinkname tag depends on unsafe
 }
 
 func genImportDecl(matched []*rule.InstFuncRule) []dst.Decl {
 	for _, m := range matched {
-		requiredImports = append(requiredImports, []string{m.Path, "_"})
+		requiredImports[m.Path] = "_"
 	}
 	importDecls := make([]dst.Decl, 0)
-	for _, d := range requiredImports {
-		importDecls = append(importDecls, ast.ImportDecl(d[1], d[0]))
+	for k, v := range requiredImports {
+		importDecls = append(importDecls, ast.ImportDecl(v, k))
 	}
 	return importDecls
 }
 
 func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 	decls := make([]dst.Decl, 0, len(matched))
+	uniquePath := map[string]bool{}
 	for i, m := range matched {
+		if _, ok := uniquePath[m.Path]; ok {
+			continue
+		}
+		uniquePath[m.Path] = true
 		// First variable declaration
 		// //go:linkname _getstatck%d %s.OtelGetStackImpl
 		// var _getstatck%d = _otel_debug.Stack

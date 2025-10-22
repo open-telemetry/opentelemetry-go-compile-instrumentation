@@ -64,3 +64,13 @@ func MyHookAfter(ictx inst.HookContext) {
 	// This is the after hook, we can do some clean up work here if needed
 	fmt.Println("[MyHook] after hook executed!")
 }
+
+//go:linkname MyHook1Before main.MyHook1Before
+func MyHook1Before(ictx inst.HookContext, recv interface{}) {
+	println("Before MyStruct.Example()")
+}
+
+//go:linkname MyHook1After main.MyHook1After
+func MyHook1After(ictx inst.HookContext) {
+	println("After MyStruct.Example()")
+}

@@ -11,9 +11,11 @@ package rule
 //		name: "newrule"
 //		target: "main"
 //		func: "Bar"
+//		recv: "*Recv"
 //		raw: "println(\"Hello, World!\")"
 type InstRawRule struct {
 	InstBaseRule
 	Func string `json:"func" yaml:"func"` // The name of the target func to be instrumented
+	Recv string `json:"recv" yaml:"recv"` // The name of the receiver type
 	Raw  string `json:"raw"  yaml:"raw"`  // The raw code to be injected
 }
