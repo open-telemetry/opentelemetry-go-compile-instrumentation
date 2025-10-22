@@ -13,37 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// parseEmbeddedRule parses the embedded yaml rule file to concrete rule instances
-//
-//nolint:nestif // It has many if statements, but it's straightforward
-func parseEmbeddedRule(path string) ([]rule.InstRule, error) {
-	yamlFile, err := data.ReadEmbedFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var h map[string]map[string]any
-	err = yaml.Unmarshal(yamlFile, &h)
-	if err != nil {
-		return nil, ex.Wrap(err)
-	}
-	rules := make([]rule.InstRule, 0)
-	for name, fields := range h {
-		raw, err1 := yaml.Marshal(fields)
-		if err1 != nil {
-			return nil, ex.Wrap(err1)
-		}
-
-		if _, ok := fields["struct"]; ok {
-			var r rule.InstStructRule
-			err2 := yaml.Unmarshal(raw, &r)
-			if err2 != nil {
-				return nil, ex.Wrap(err2)
-			}
-			r.Name = name
-			r.Target, ok = fields["target"].(string)
-			util.Assert(ok, "target is not a string")
-			rules = append(rules, &r)
 // createRuleFromFields creates a rule instance based on the field type present in the YAML
+//
+//nolint:ireturn,nilnil // factory function
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
 	target, ok := fields["target"].(string)
 	util.Assert(ok, "target is not a string")
@@ -88,8 +60,6 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 }
 
 // parseEmbeddedRule parses the embedded yaml rule file to concrete rule instances
-//
-//nolint:nestif // It has many if statements, but it's straightforward
 func parseEmbeddedRule(path string) ([]rule.InstRule, error) {
 	yamlFile, err := data.ReadEmbedFile(path)
 	if err != nil {
@@ -112,41 +82,6 @@ func parseEmbeddedRule(path string) ([]rule.InstRule, error) {
 			return nil, err2
 		}
 		rules = append(rules, r)
-	}
-	return rules, nil
-}
-			var r rule.InstFileRule
-			err2 := yaml.Unmarshal(raw, &r)
-			if err2 != nil {
-				return nil, ex.Wrap(err2)
-			}
-			r.Name = name
-			r.Target, ok = fields["target"].(string)
-			util.Assert(ok, "target is not a string")
-			rules = append(rules, &r)
-		} else if _, ok3 := fields["raw"]; ok3 {
-			var r rule.InstRawRule
-			err2 := yaml.Unmarshal(raw, &r)
-			if err2 != nil {
-				return nil, ex.Wrap(err2)
-			}
-			r.Name = name
-			r.Target, ok = fields["target"].(string)
-			util.Assert(ok, "target is not a string")
-			rules = append(rules, &r)
-		} else if _, ok4 := fields["func"]; ok4 {
-			var r rule.InstFuncRule
-			err2 := yaml.Unmarshal(raw, &r)
-			if err2 != nil {
-				return nil, ex.Wrap(err2)
-			}
-			r.Name = name
-			r.Target, ok = fields["target"].(string)
-			util.Assert(ok, "target is not a string")
-			rules = append(rules, &r)
-		} else {
-			util.ShouldNotReachHere()
-		}
 	}
 	return rules, nil
 }

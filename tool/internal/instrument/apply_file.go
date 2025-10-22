@@ -27,10 +27,6 @@ func listRuleFiles(path string) ([]string, error) {
 		p = filepath.Join(util.GetBuildTempDir(), p)
 	}
 	return util.ListFiles(p)
-	if err != nil {
-		return nil, err
-	}
-	return files, nil
 }
 
 // applyFileRule introduces the new file to the target package at compile time.
