@@ -26,7 +26,7 @@ func listRuleFiles(path string) ([]string, error) {
 		p = strings.TrimPrefix(path, util.OtelRoot)
 		p = filepath.Join(util.GetBuildTempDir(), p)
 	}
-	files, err := util.ListFiles(p)
+	return util.ListFiles(p)
 	if err != nil {
 		return nil, err
 	}
