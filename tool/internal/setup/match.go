@@ -43,7 +43,78 @@ func parseEmbeddedRule(path string) ([]rule.InstRule, error) {
 			r.Target, ok = fields["target"].(string)
 			util.Assert(ok, "target is not a string")
 			rules = append(rules, &r)
-		} else if _, ok2 := fields["file"]; ok2 {
+// createRuleFromFields creates a rule instance based on the field type present in the YAML
+func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
+	target, ok := fields["target"].(string)
+	util.Assert(ok, "target is not a string")
+
+	switch {
+	case fields["struct"] != nil:
+		var r rule.InstStructRule
+		if err := yaml.Unmarshal(raw, &r); err != nil {
+			return nil, ex.Wrap(err)
+		}
+		r.Name = name
+		r.Target = target
+		return &r, nil
+	case fields["file"] != nil:
+		var r rule.InstFileRule
+		if err := yaml.Unmarshal(raw, &r); err != nil {
+			return nil, ex.Wrap(err)
+		}
+		r.Name = name
+		r.Target = target
+		return &r, nil
+	case fields["raw"] != nil:
+		var r rule.InstRawRule
+		if err := yaml.Unmarshal(raw, &r); err != nil {
+			return nil, ex.Wrap(err)
+		}
+		r.Name = name
+		r.Target = target
+		return &r, nil
+	case fields["func"] != nil:
+		var r rule.InstFuncRule
+		if err := yaml.Unmarshal(raw, &r); err != nil {
+			return nil, ex.Wrap(err)
+		}
+		r.Name = name
+		r.Target = target
+		return &r, nil
+	default:
+		util.ShouldNotReachHere()
+		return nil, nil
+	}
+}
+
+// parseEmbeddedRule parses the embedded yaml rule file to concrete rule instances
+//
+//nolint:nestif // It has many if statements, but it's straightforward
+func parseEmbeddedRule(path string) ([]rule.InstRule, error) {
+	yamlFile, err := data.ReadEmbedFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var h map[string]map[string]any
+	err = yaml.Unmarshal(yamlFile, &h)
+	if err != nil {
+		return nil, ex.Wrap(err)
+	}
+	rules := make([]rule.InstRule, 0)
+	for name, fields := range h {
+		raw, err1 := yaml.Marshal(fields)
+		if err1 != nil {
+			return nil, ex.Wrap(err1)
+		}
+
+		r, err2 := createRuleFromFields(raw, name, fields)
+		if err2 != nil {
+			return nil, err2
+		}
+		rules = append(rules, r)
+	}
+	return rules, nil
+}
 			var r rule.InstFileRule
 			err2 := yaml.Unmarshal(raw, &r)
 			if err2 != nil {
