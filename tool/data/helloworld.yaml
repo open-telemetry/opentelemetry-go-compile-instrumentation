@@ -15,7 +15,7 @@ hook_helloworld:
 add_new_field:
   # Where we want to inject the hook code
   target: main
-  # What type of struct we want to inject the field into
+  # The struct name to inject the field into
   struct: MyStruct
   # Which field we want to inject the code into
   field_name: NewField
