@@ -1,6 +1,7 @@
 # Getting Started
 
-OpenTelemetry Go Compile-Time Instrumentation is a tool that automatically instruments your Go applications with [OpenTelemetry](https://opentelemetry.io/) at compile time. No manual code changes required.
+OpenTelemetry Go Compile-Time Instrumentation is a tool that automatically instruments your Go applications with [OpenTelemetry](https://opentelemetry.io/) at compile-time.
+No manual code changes required.
 
 ## Why Use This Tool?
 
