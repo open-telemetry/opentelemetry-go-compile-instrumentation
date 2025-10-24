@@ -47,19 +47,19 @@ The tool uses compile-time instrumentation through:
 
 This approach provides dynamic instrumentation without runtime overhead or invasive code modifications.
 
-## Video Talks
-
-Learn more about the project from these presentations:
-
-- [OpenTelemetry Go Compile-Time Instrumentation Overview](https://www.youtube.com/watch?v=xEsVOhBdlZY)
-- [Deep Dive: Conceptual details](https://www.youtube.com/watch?v=8Rw-fVEjihw&list=PLDWZ5uzn69ewrYyHTNrXlrWVDjLiOX0Yb&index=19)
-
 ## Learn More
 
 - [User Experience Design](./ux-design.md) - Detailed UX documentation and configuration options
 - [Implementation Details](./implementation.md) - Technical architecture and internals
 - [API Design](./api-design-and-project-structure.md) - API structure and project organization
 - [Contributing Guide](../CONTRIBUTING.md) - How to contribute to the project
+
+### Video Talks
+
+Learn more about the project from these presentations:
+
+- [OpenTelemetry Go Compile-Time Instrumentation Overview](https://www.youtube.com/watch?v=xEsVOhBdlZY)
+- [Deep Dive: Conceptual details](https://www.youtube.com/watch?v=8Rw-fVEjihw&list=PLDWZ5uzn69ewrYyHTNrXlrWVDjLiOX0Yb&index=19)
 
 ## Community
 
