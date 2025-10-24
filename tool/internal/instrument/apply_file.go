@@ -5,7 +5,6 @@ package instrument
 
 import (
 	"fmt"
-	"go/parser"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -30,7 +29,7 @@ func listRuleFiles(path string) ([]string, error) {
 }
 
 // applyFileRule introduces the new file to the target package at compile time.
-func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule) error {
+func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string) error {
 	util.Assert(rule.File != "", "sanity check")
 	// List all files in the rule module path
 	files, err := listRuleFiles(rule.Path)
@@ -48,13 +47,12 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule) error {
 	file := files[index]
 
 	// Parse the new file into AST nodes and modify it as needed
-	p := ast.NewAstParser()
-	root, err := p.Parse(file, parser.ParseComments)
+	root, err := ip.parseFile(file)
 	if err != nil {
 		return err
 	}
 	// Always rename the package name to the target package name
-	root.Name.Name = ip.packageName
+	root.Name.Name = pkgName
 
 	// Write back the modified AST to a new file in the working directory
 	base := filepath.Base(rule.File)

@@ -3,13 +3,10 @@
 
 # Unique name of the hook rule
 hook_helloworld:
-  # Where we want to inject the hook code
   target: main
   func: Example
-  # What hook code we want to inject at target func entry or exit
   before: MyHookBefore
   after: MyHookAfter
-  # Where the hook code is located
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
 
 add_new_field:
@@ -22,7 +19,7 @@ add_new_field:
 raw_helloworld:
   target: main
   func: Example
-  raw: "go func(){ println(\"Hello, World!\") }()"
+  raw: "go func(){ println(\"RawCode\") }()"
 
 hook_recv:
   target: main
@@ -31,3 +28,9 @@ hook_recv:
   before: MyHook1Before
   after: MyHook1After
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+
+hook_real_mod:
+  target: golang.org/x/time/rate
+  version: "v0.11.0,v0.12.0"
+  func: Every
+  raw: "println(\"Every is called\")"

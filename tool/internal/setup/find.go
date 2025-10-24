@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -104,6 +105,17 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	return compileCmds, nil
 }
 
+func findModVersion(path string) string {
+	path = filepath.ToSlash(path) // Unify the path to Unix style
+	versionRegexp := regexp.MustCompile(`@v\d+\.\d+\.\d+(-.*?)?/`)
+	version := versionRegexp.FindString(path)
+	if version == "" {
+		return ""
+	}
+	// Extract version number from the string
+	return version[1 : len(version)-1]
+}
+
 // findDeps finds the dependencies of the project by listing the build plan.
 func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dependency, error) {
 	buildPlan, err := sp.listBuildPlan(ctx, goBuildCmd)
@@ -114,23 +126,18 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 	deps := make([]*Dependency, 0)
 	for _, plan := range buildPlan {
 		util.Assert(util.IsCompileCommand(plan), "must be compile command")
-		// Find the compiling package name
+		dep := &Dependency{
+			ImportPath: "",
+			Sources:    make([]string, 0),
+		}
+
+		// Find the compiling package name as dependency import path
 		args := util.SplitCompileCmds(plan)
 		importPath := util.FindFlagValue(args, "-p")
 		util.Assert(importPath != "", "import path is empty")
-		exist := false
-		dep := &Dependency{
-			ImportPath: importPath,
-			Sources:    make([]string, 0),
-		}
-		for _, d := range deps {
-			if d.ImportPath == importPath {
-				exist = true
-				break
-			}
-		}
-		util.Assert(!exist, "import path should not be duplicated")
-		// Find the go files belong to the package
+		dep.ImportPath = importPath
+
+		// Find the go files belong to the package as dependency sources
 		for _, arg := range args {
 			if util.IsGoFile(arg) {
 				abs, err1 := filepath.Abs(arg)
@@ -140,6 +147,11 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 				dep.Sources = append(dep.Sources, abs)
 			}
 		}
+		// Extract the version from the source file path if available
+		if len(dep.Sources) > 0 {
+			dep.Version = findModVersion(dep.Sources[0])
+		}
+
 		deps = append(deps, dep)
 		sp.Info("Found dependency", "dep", dep)
 	}

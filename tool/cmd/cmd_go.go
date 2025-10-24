@@ -42,7 +42,6 @@ var commandGo = cli.Command{
 		if err != nil {
 			return ex.Wrapf(err, "failed to build with toolexec with exit code %d", exitCodeFailure)
 		}
-
 		err = setup.BuildWithToolexec(ctx, cmd.Args().Slice())
 		if err != nil {
 			return ex.Wrapf(err, "failed to build with toolexec with exit code %d", exitCodeFailure)

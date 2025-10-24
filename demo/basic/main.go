@@ -6,6 +6,9 @@ package main
 import (
 	"fmt"
 	"runtime"
+	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type traceContext struct {
@@ -50,6 +53,9 @@ func main() {
 	Example()
 	m := &MyStruct{}
 	// Add a new field to the struct
-	println(m.NewField)
+	m.NewField = "abc"
 	m.Example()
+
+	// Call real module function
+	println(rate.Every(time.Duration(1)))
 }

@@ -1,19 +1,23 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Variables
+# Constant variables
 BINARY_NAME := otel
-DEMO_DIR := demo
 TOOL_DIR := tool/cmd
 INST_PKG_GZIP = otel-pkg.gz
 INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 
-# Version variables
+# Dynamic variables
+GOOS ?= $(shell go env GOOS)
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
+EXT :=
+ifeq ($(GOOS),windows)
+	EXT = .exe
+endif
 
 # Default target
 .PHONY: all
@@ -36,22 +40,19 @@ build: package
 	@echo "Building instrumentation tool..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
-	@go build -a -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" -o $(BINARY_NAME) ./$(TOOL_DIR)
-	@./$(BINARY_NAME) version
+	@go build -a -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" -o $(BINARY_NAME)$(EXT) ./$(TOOL_DIR)
+	@./$(BINARY_NAME)$(EXT) version
 
-# Run the demo with instrumentation
-.PHONY: demo
-demo: build
-	@echo "Building demo with instrumentation..."
-	@rm -rf $(DEMO_DIR)/otel.runtime.go
-	@cd $(DEMO_DIR) && ../$(BINARY_NAME) go build -a
-	@echo "Running demo..."
-	@./$(DEMO_DIR)/demo
+# Run the test with instrumentation
+.PHONY: test
+test: build
+	@echo "Running test..."
+	@go test -count=1 -run TestBasic ./test/...
 
 # Clean build artifacts
 .PHONY: clean
 clean:
 	@echo "Cleaning build artifacts..."
-	rm -f $(BINARY_NAME)
-	rm -f $(DEMO_DIR)/demo
-	rm -rf $(DEMO_DIR)/.otel-build
+	rm -f $(BINARY_NAME)$(EXT)
+	rm -f demo/basic/basic
+	rm -rf demo/basic/.otel-build

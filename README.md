@@ -23,10 +23,10 @@ requiring manual changes to the source code.
     make build
     ```
 
-2. Build the application with the tool and run it
+2. Run the test
 
     ```bash
-    make demo
+    make test
     ```
 
 ## Contributing

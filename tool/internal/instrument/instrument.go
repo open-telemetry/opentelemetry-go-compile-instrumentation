@@ -33,7 +33,7 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	// Apply file rules first because they can introduce new files that used
 	// by other rules such as raw rules
 	for _, rule := range rset.FileRules {
-		err := ip.applyFileRule(rule)
+		err := ip.applyFileRule(rule, rset.PackageName)
 		if err != nil {
 			return err
 		}
@@ -81,7 +81,7 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	// Write globals file if any function is instrumented because injected code
 	// always requires some global variables and auxiliary declarations
 	if hasFuncRule {
-		return ip.writeGlobals(ip.packageName)
+		return ip.writeGlobals(rset.PackageName)
 	}
 	return nil
 }

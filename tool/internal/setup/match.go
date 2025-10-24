@@ -4,12 +4,14 @@
 package setup
 
 import (
-	"github.com/dave/dst"
+	"strings"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,8 +19,17 @@ import (
 //
 //nolint:ireturn,nilnil // factory function
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
-	target, ok := fields["target"].(string)
-	util.Assert(ok, "target is not a string")
+	base := rule.InstBaseRule{
+		Name: name,
+	}
+	if target, ok := fields["target"].(string); ok {
+		base.Target = target
+	}
+	if fields["version"] != nil {
+		v, ok := fields["version"].(string)
+		util.Assert(ok, "version is not a string")
+		base.Version = v
+	}
 
 	switch {
 	case fields["struct"] != nil:
@@ -26,32 +37,28 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		if err := yaml.Unmarshal(raw, &r); err != nil {
 			return nil, ex.Wrap(err)
 		}
-		r.Name = name
-		r.Target = target
+		r.InstBaseRule = base
 		return &r, nil
 	case fields["file"] != nil:
 		var r rule.InstFileRule
 		if err := yaml.Unmarshal(raw, &r); err != nil {
 			return nil, ex.Wrap(err)
 		}
-		r.Name = name
-		r.Target = target
+		r.InstBaseRule = base
 		return &r, nil
 	case fields["raw"] != nil:
 		var r rule.InstRawRule
 		if err := yaml.Unmarshal(raw, &r); err != nil {
 			return nil, ex.Wrap(err)
 		}
-		r.Name = name
-		r.Target = target
+		r.InstBaseRule = base
 		return &r, nil
 	case fields["func"] != nil:
 		var r rule.InstFuncRule
 		if err := yaml.Unmarshal(raw, &r); err != nil {
 			return nil, ex.Wrap(err)
 		}
-		r.Name = name
-		r.Target = target
+		r.InstBaseRule = base
 		return &r, nil
 	default:
 		util.ShouldNotReachHere()
@@ -104,60 +111,84 @@ func materalizeRules() ([]rule.InstRule, error) {
 	return parsedRules, nil
 }
 
-func runMatch(dependency *Dependency, allRules []rule.InstRule) (*rule.InstRuleSet, error) {
-	parsedAst := make(map[string]*dst.File)
+func matchTarget(dependency *Dependency, rule rule.InstRule) bool {
+	return rule.GetTarget() == dependency.ImportPath
+}
+
+func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
+	if rule.GetVersion() == "" {
+		return true // No version specified, so it's applicable
+	}
+	ruleVersion := rule.GetVersion()
+	commaIndex := strings.Index(ruleVersion, ",")
+	util.Assert(commaIndex != -1, "comma not found in version")
+	startInclusive := ruleVersion[:commaIndex]
+	endExclusive := ruleVersion[commaIndex+1:]
+	if semver.Compare(dependency.Version, startInclusive) >= 0 &&
+		semver.Compare(dependency.Version, endExclusive) < 0 {
+		return true // Version is in the "inclusive,exclusive" range
+	}
+	return false // Not applicable
+}
+
+func (sp *SetupPhase) runMatch(dependency *Dependency, allRules []rule.InstRule) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dependency.ImportPath)
 
-	// Not all rules are applicable to the dependency, we can quickly filter out
-	// the rules based on the target module path.
-	rules := make([]rule.InstRule, 0)
+	// Quick filtering
+	availables := make([]rule.InstRule, 0)
 	for _, r := range allRules {
-		if r.GetTarget() != dependency.ImportPath {
+		// Not all availables are applicable to the dependency, we can quickly
+		// filter out the availables based on the target module path and the version.
+		if !matchTarget(dependency, r) || !matchVersion(dependency, r) {
 			continue
 		}
-		rules = append(rules, r)
-		// Furthermore, if the rule is a file rule, it is always applicable
+		// If the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
 			set.AddFileRule(fr)
+			sp.Info("Match file rule", "rule", fr, "dep", dependency)
+			continue
 		}
+		// We can't decide whether the rule is applicable yet, add it to the
+		// available list to be processed later.
+		availables = append(availables, r)
 	}
+	// Precise matching
 	for _, source := range dependency.Sources {
-		// Fair enough, parse the file content. Since this is a heavy operation,
-		// we cache the parsed AST to avoid redundant parsing.
-		tree, found := parsedAst[source]
-		if !found {
-			root, err := ast.ParseFileFast(source) // Match only, no node updates
-			if err != nil {
-				return nil, err
-			}
-			parsedAst[source] = root
-			set.SetPackageName(root.Name.Name)
-			tree = root
+		// Passe the source code. Since the only purpose here is to match,
+		// no node updates, we can use fast variant.
+		tree, err := ast.ParseFileFast(source)
+		if err != nil {
+			return nil, err
 		}
 		if tree == nil {
 			return nil, ex.Newf("failed to parse file %s", source)
 		}
+		set.SetPackageName(tree.Name.Name)
 
-		for _, available := range rules {
+		for _, available := range availables {
 			// Let's match with the rule precisely
 			switch rt := available.(type) {
 			case *rule.InstFuncRule:
 				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
 				if funcDecl != nil {
 					set.AddFuncRule(source, rt)
+					sp.Info("Match func rule", "rule", rt, "dep", dependency)
 				}
 			case *rule.InstStructRule:
 				structDecl := ast.FindStructDecl(tree, rt.Struct)
 				if structDecl != nil {
 					set.AddStructRule(source, rt)
+					sp.Info("Match struct rule", "rule", rt, "dep", dependency)
 				}
 			case *rule.InstRawRule:
 				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
 				if funcDecl != nil {
 					set.AddRawRule(source, rt)
+					sp.Info("Match raw rule", "rule", rt, "dep", dependency)
 				}
 			case *rule.InstFileRule:
 				// Skip as it's already processed
+				continue
 			default:
 				util.ShouldNotReachHere()
 			}
@@ -172,7 +203,7 @@ func (sp *SetupPhase) matchDeps(deps []*Dependency) ([]*rule.InstRuleSet, error)
 	if err != nil {
 		return nil, err
 	}
-	sp.Info("Available rules", "rules", allRules)
+	sp.Info("Found available rules", "rules", allRules)
 	if len(allRules) == 0 {
 		return nil, nil
 	}
@@ -181,7 +212,7 @@ func (sp *SetupPhase) matchDeps(deps []*Dependency) ([]*rule.InstRuleSet, error)
 	matched := make([]*rule.InstRuleSet, 0)
 	for _, dep := range deps {
 		// TODO: Parallelize this
-		m, err1 := runMatch(dep, allRules)
+		m, err1 := sp.runMatch(dep, allRules)
 		if err1 != nil {
 			return nil, err1
 		}
@@ -189,6 +220,5 @@ func (sp *SetupPhase) matchDeps(deps []*Dependency) ([]*rule.InstRuleSet, error)
 			matched = append(matched, m)
 		}
 	}
-	sp.Info("Match rule sets", "sets", matched)
 	return matched, nil
 }

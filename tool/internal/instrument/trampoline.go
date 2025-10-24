@@ -355,7 +355,7 @@ func insertAtEnd(funcDecl *dst.FuncDecl, stmt dst.Stmt) {
 
 func (ip *InstrumentPhase) renameTrampolineFunc(t *rule.InstFuncRule) {
 	// Randomize trampoline function names
-	ip.beforeHookFunc.Name.Name = makeName(t, ip.rawFunc, trampolineBefore)
+	ip.beforeHookFunc.Name.Name = makeName(t, ip.targetFunc, trampolineBefore)
 	dst.Inspect(ip.beforeHookFunc, func(node dst.Node) bool {
 		if basicLit, ok := node.(*dst.BasicLit); ok {
 			// Replace OtelBeforeTrampolinePlaceHolder to real hook func name
@@ -365,7 +365,7 @@ func (ip *InstrumentPhase) renameTrampolineFunc(t *rule.InstFuncRule) {
 		}
 		return true
 	})
-	ip.afterHookFunc.Name.Name = makeName(t, ip.rawFunc, trampolineAfter)
+	ip.afterHookFunc.Name.Name = makeName(t, ip.targetFunc, trampolineAfter)
 	dst.Inspect(ip.afterHookFunc, func(node dst.Node) bool {
 		if basicLit, ok := node.(*dst.BasicLit); ok {
 			if basicLit.Value == trampolineAfterNamePlaceholder {
@@ -387,18 +387,18 @@ func addHookContext(list *dst.FieldList) {
 func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
 	paramList := &dst.FieldList{List: []*dst.Field{}}
 	if before {
-		if ast.HasReceiver(ip.rawFunc) {
-			recvField, ok := dst.Clone(ip.rawFunc.Recv.List[0]).(*dst.Field)
+		if ast.HasReceiver(ip.targetFunc) {
+			recvField, ok := dst.Clone(ip.targetFunc.Recv.List[0]).(*dst.Field)
 			util.Assert(ok, "recvField is not a Field")
 			paramList.List = append(paramList.List, recvField)
 		}
-		for _, field := range ip.rawFunc.Type.Params.List {
+		for _, field := range ip.targetFunc.Type.Params.List {
 			paramField, ok := dst.Clone(field).(*dst.Field)
 			util.Assert(ok, "paramField is not a Field")
 			paramList.List = append(paramList.List, paramField)
 		}
-	} else if ip.rawFunc.Type.Results != nil {
-		for _, field := range ip.rawFunc.Type.Results.List {
+	} else if ip.targetFunc.Type.Results != nil {
+		for _, field := range ip.targetFunc.Type.Results.List {
 			retField, ok := dst.Clone(field).(*dst.Field)
 			util.Assert(ok, "retField is not a Field")
 			paramList.List = append(paramList.List, retField)
@@ -467,7 +467,7 @@ func (ip *InstrumentPhase) replenishHookContext(before bool) bool {
 				case trampolineFuncNameIdentifier:
 					util.Assert(before, "sanity check")
 					// hookContext.FuncName = "..."
-					assigned := assignString(assignStmt, ip.rawFunc.Name.Name)
+					assigned := assignString(assignStmt, ip.targetFunc.Name.Name)
 					util.Assert(assigned, "sanity check")
 				case trampolinePackageNameIdentifier:
 					util.Assert(before, "sanity check")
@@ -633,15 +633,15 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 	methodSetRetValBody := findSwitchBlock(methodSetRetVal, 1)
 	methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
 	idx := 0
-	if ast.HasReceiver(ip.rawFunc) {
-		recvType := ip.rawFunc.Recv.List[0].Type
+	if ast.HasReceiver(ip.targetFunc) {
+		recvType := ip.targetFunc.Recv.List[0].Type
 		clause := setParamClause(idx, recvType)
 		methodSetParamBody.List = append(methodSetParamBody.List, clause)
 		clause = getParamClause(idx, recvType)
 		methodGetParamBody.List = append(methodGetParamBody.List, clause)
 		idx++
 	}
-	for _, param := range ip.rawFunc.Type.Params.List {
+	for _, param := range ip.targetFunc.Type.Params.List {
 		paramType := desugarType(param)
 		for range param.Names {
 			clause := setParamClause(idx, paramType)
@@ -652,9 +652,9 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 		}
 	}
 	// Rewrite GetReturnVal and SetReturnVal methods
-	if ip.rawFunc.Type.Results != nil {
+	if ip.targetFunc.Type.Results != nil {
 		idx = 0
-		for _, retval := range ip.rawFunc.Type.Results.List {
+		for _, retval := range ip.targetFunc.Type.Results.List {
 			retType := desugarType(retval)
 			for range retval.Names {
 				clause := getReturnValClause(idx, retType)
