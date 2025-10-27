@@ -9,7 +9,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
-//go:embed *
+//go:embed *.yaml
 var dataFs embed.FS
 
 // ListEmbedFiles lists all the files in the embedded data
