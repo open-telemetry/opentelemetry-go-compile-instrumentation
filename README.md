@@ -1,41 +1,70 @@
-# OpenTelemetry Go Compile Instrumentation
+<div align="center">
+  <img src="./docs/assets/otel-logo.png" alt="OpenTelemetry Logo" width="500">
 
-[![logo](https://img.shields.io/badge/slack-@cncf/otel--gocomp-blue.svg?logo=opentelemetry)](https://cloud-native.slack.com/archives/C088D8GSSSF)  &nbsp;
+[![Go 1.21+](https://img.shields.io/badge/Go-1.21%2B-4A90E2?style=flat&logo=go)](https://golang.org/)
+[![Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-4A90E2?style=flat&logo=apache)](https://opensource.org/licenses/Apache-2.0)
+[![Development](https://img.shields.io/badge/Status-Development-FF6B35?style=flat&logo=github)](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation)
+[![Slack](https://img.shields.io/badge/Slack-CNCF-FF6B35?style=flat&logo=slack)](https://cloud-native.slack.com/archives/C088D8GSSSF)
 
-<img src="./docs/assets/otel-logo.png" alt="OpenTelemetry Logo" width="500">
+</div>
 
 > [!IMPORTANT]
 > This is a work in progress and not ready for production use. 🚨
 
-This project provides a tool to automatically instrument Go applications with
-[OpenTelemetry](https://opentelemetry.io/) at compile time.
+## Overview
 
-It modifies the Go build process to inject OpenTelemetry code into the application without
-requiring manual changes to the source code.
+This project provides a tool to automatically instrument Go applications with [OpenTelemetry](https://opentelemetry.io/) at compile-time.
+It modifies the Go build process to inject OpenTelemetry code into the application **without requiring manual changes to the source code**.
 
-## Getting Started
+Highlights:
 
-1. Build the otel tool
+- **🚀 Zero Runtime Overhead** - Instrumentation is baked into your binary at compile time
+- **🔧 Zero Code Changes** - Automatically instrument entire applications and dependencies
+- **📚 Third-Party Library Support** - Instrument libraries you don't control
+- **🎯 Complete Decoupling** - Keep your codebase free from instrumentation concerns
+- **⚡ Flexible Deployment** - Integrate at development time or in your CI/CD pipeline
 
-    ```bash
-    git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation.git
-    cd opentelemetry-go-compile-instrumentation
-    make build
-    ```
+## Quick Start
 
-2. Build the application with the tool and run it
+### 1. Build the Tool
 
-    ```bash
-    make demo
-    ```
+```bash
+git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation.git
+cd opentelemetry-go-compile-instrumentation
+make build
+```
 
-## Contributing
+### 2. Try the Demo
 
-See the [contributing documentation](CONTRIBUTING.md) for general contribution guidelines.
+```bash
+make test
+```
 
-See the [developing documentation](./docs/developing.md) for tool development.
+## Community
 
-For the code of conduct, please refer to our [OpenTelemetry Community Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md)
+### 📚 Documentation
+
+- [Getting Started Guide](./docs/getting-started.md) - Setup and usage
+- [UX Design](./docs/ux-design.md) - Configuration options
+- [Implementation Details](./docs/implementation.md) - Technical architecture
+- [API Design](./docs/api-design-and-project-structure.md) - API structure
+
+### 🎥 Video Talks
+
+- [Project Overview](https://www.youtube.com/watch?v=xEsVOhBdlZY)
+- [Deep Dive Details](https://www.youtube.com/watch?v=8Rw-fVEjihw&list=PLDWZ5uzn69ewrYyHTNrXlrWVDjLiOX0Yb&index=19)
+
+### 💬 Get Help
+
+- [GitHub Discussions](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/discussions) - Ask questions
+- [GitHub Issues](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues) - Report bugs
+- [Slack Channel](https://cloud-native.slack.com/archives/C088D8GSSSF) - Real-time chat
+
+### 🤝 Contributing
+
+We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [development docs](./docs/developing.md).
+
+This project follows the [OpenTelemetry Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md).
 
 ## License
 
