@@ -42,7 +42,7 @@ No manual code changes required.
 The tool uses compile-time instrumentation through:
 
 1. **Trampoline Code Injection** - Injects lightweight hook points into target functions
-2. **Function Pointer Redirection** - Links hooks to monitoring code via `//go:linkname`
+2. **Function Pointer Redirection** - Automatically generates and links hooks to monitoring code via `//go:linkname`
 3. **Custom Toolchain Integration** - Intercepts compilation using `-toolexec` flag
 
 This approach provides dynamic instrumentation without runtime overhead or invasive code modifications.

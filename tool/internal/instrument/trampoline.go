@@ -5,6 +5,7 @@ package instrument
 
 import (
 	_ "embed"
+	"fmt"
 	"go/token"
 	"strconv"
 
@@ -66,6 +67,23 @@ var templateImpl string
 func (ip *InstrumentPhase) addDecl(decl dst.Decl) {
 	util.Assert(ip.target != nil, "sanity check")
 	ip.target.Decls = append(ip.target.Decls, decl)
+}
+
+// ensureUnsafeImport ensures that the unsafe package is imported in the target file.
+// This is required when using //go:linkname directives.
+func (ip *InstrumentPhase) ensureUnsafeImport() {
+	for _, decl := range ip.target.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			if importSpec, ok2 := spec.(*dst.ImportSpec); ok2 && importSpec.Path.Value == `"unsafe"` {
+				return
+			}
+		}
+	}
+	ip.target.Decls = append([]dst.Decl{ast.ImportDecl("_", "unsafe")}, ip.target.Decls...)
 }
 
 func (ip *InstrumentPhase) materializeTemplate() error {
@@ -332,11 +350,22 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 			Func:   false,
 			Params: paramTypes,
 		},
+		Decs: dst.FuncDeclDecorations{
+			NodeDecs: dst.NodeDecs{
+				Before: dst.NewLine,
+				Start: dst.Decorations{
+					fmt.Sprintf("//go:linkname %s %s.%s",
+						fnName, t.Path, fnName),
+				},
+			},
+		},
 	}
+
 	exist := ast.FindFuncDeclWithoutRecv(ip.target, fnName)
 	if exist == nil {
 		ip.addDecl(funcDecl)
 	}
+
 	return nil
 }
 
@@ -566,6 +595,7 @@ func getValue(field string, idx int, t dst.Expr) *dst.CaseClause {
 	de := ast.DereferenceOf(pe)
 	ret := ast.ReturnStmt(ast.Exprs(de))
 	if ast.IsInterfaceType(t) {
+		//nolint:ireturn // we don't know the type of the parameter
 		ret = ast.ReturnStmt(ast.Exprs(ie))
 	}
 	caseClause := ast.SwitchCase(
@@ -693,6 +723,8 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 }
 
 func (ip *InstrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
+	// Ensure unsafe package is imported since we use //go:linkname directives
+	ip.ensureUnsafeImport()
 	// Materialize various declarations from template file, no one wants to see
 	// a bunch of manual AST code generation, isn't it?
 	err := ip.materializeTemplate()
