@@ -129,6 +129,22 @@ func TestMatchVersion(t *testing.T) {
 			ruleVersion:    "v1.0.0,v2.0.0",
 			expectedResult: true,
 		},
+		{
+			name: "minimal version only - good",
+			dependency: &Dependency{
+				Version: "v1.2.3",
+			},
+			ruleVersion:    "v1.2.3",
+			expectedResult: true,
+		},
+		{
+			name: "minimal version only - bad",
+			dependency: &Dependency{
+				Version: "v1.2.3",
+			},
+			ruleVersion:    "v1.2.4",
+			expectedResult: false,
+		},
 	}
 
 	for _, tt := range tests {

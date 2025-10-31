@@ -46,8 +46,10 @@ build: package
 # Run the test with instrumentation
 .PHONY: test
 test: build
-	@echo "Running test..."
+	@echo "Running e2e test..."
 	@go test -count=1 -run TestBasic ./test/...
+	@echo "Running unit test..."
+	@go test -count=1 ./tool/...
 
 # Clean build artifacts
 .PHONY: clean

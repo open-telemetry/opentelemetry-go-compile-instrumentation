@@ -16,7 +16,8 @@ func TestBasic(t *testing.T) {
 	BuildApp(t, appDir, "go", "build", "-a")
 	output := RunApp(t, appDir)
 	expect := []string{
-		"Every is called",
+		"Every1",
+		"Every3",
 		"MyStruct.Example",
 		"traceID: 123, spanID: 456",
 		"[MyHook]",
