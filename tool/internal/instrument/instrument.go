@@ -69,7 +69,12 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 				util.ShouldNotReachHere()
 			}
 		}
-
+		// Since trampoline-jump-if is performance-critical, perform AST level
+		// optimization for them before writing to file
+		err = ip.optimizeTJumps()
+		if err != nil {
+			return err
+		}
 		// Once all func rules targeting this file are applied, write instrumented
 		// AST to new file and replace the original file in the compile command
 		err = ip.writeInstrumented(root, file)

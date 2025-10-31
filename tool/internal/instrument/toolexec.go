@@ -32,10 +32,12 @@ type InstrumentPhase struct {
 	afterHookFunc *dst.FuncDecl
 	// Variable declarations waiting to be inserted into target source file
 	varDecls []dst.Decl
-	// The declaration of the hook context, it should be replenished later
+	// The declaration of the hook context, it should be populateed later
 	hookCtxDecl *dst.GenDecl
 	// The methods of the hook context
 	hookCtxMethods []*dst.FuncDecl
+	// The trampoline jumps to be optimized
+	tjumps []*TJump
 }
 
 func (ip *InstrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }

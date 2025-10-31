@@ -199,6 +199,10 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	// we can intercept the original function and execute before/after hooks.
 	tjump := createTJumpIf(t, funcDecl, args, retVals)
 
+	// Record the trampoline-jump-if as they can be optimized later, they are
+	// performance-critical
+	ip.tjumps = append(ip.tjumps, &TJump{target: funcDecl, ifStmt: tjump, rule: t})
+
 	// Find if there is already a trampoline-jump-if, insert new tjump if so,
 	// otherwise prepend to block body.
 	ip.insertToFunc(funcDecl, tjump)
@@ -297,6 +301,9 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 		return nil, err
 	}
 	ip.target = root
+	// Every time we parse a file, we need to reset the trampoline jumps
+	// because they are associated with one certain file
+	ip.tjumps = make([]*TJump, 0)
 	return root, nil
 }
 

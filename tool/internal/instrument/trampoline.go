@@ -453,8 +453,8 @@ func assignSliceLiteral(assignStmt *dst.AssignStmt, vals []dst.Expr) bool {
 	return false
 }
 
-// replenishHookContext replenishes the hook context before hook invocation
-func (ip *InstrumentPhase) replenishHookContext(before bool) bool {
+// populateHookContext populatees the hook context before hook invocation
+func (ip *InstrumentPhase) populateHookContext(before bool) bool {
 	funcDecl := ip.beforeHookFunc
 	if !before {
 		funcDecl = ip.afterHookFunc
@@ -688,8 +688,8 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 		return err
 	}
 	// Fulfill the hook context before calling the real hook code.
-	if !ip.replenishHookContext(before) {
-		return ex.New("failed to replenish hook context")
+	if !ip.populateHookContext(before) {
+		return ex.New("failed to populate hook context")
 	}
 	return nil
 }
