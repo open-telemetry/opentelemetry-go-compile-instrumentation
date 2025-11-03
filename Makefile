@@ -43,6 +43,13 @@ build: package
 	@go build -a -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" -o $(BINARY_NAME)$(EXT) ./$(TOOL_DIR)
 	@./$(BINARY_NAME)$(EXT) version
 
+
+.PHONY: build-demo-grpc
+build-demo-grpc:
+	@echo "Building gRPC demo..."
+	@cd demo/grpc/server && go generate && go build -o server .
+	@cd demo/grpc/client && go build -o client .
+
 # Run the test with instrumentation
 .PHONY: test
 test: build
@@ -58,3 +65,8 @@ clean:
 	rm -f $(BINARY_NAME)$(EXT)
 	rm -f demo/basic/basic
 	rm -rf demo/basic/.otel-build
+	rm -f demo/grpc/server/server
+	rm -rf demo/grpc/server/pb
+	rm -f demo/grpc/client/client
+	rm -rf demo/grpc/server/.otel-build
+	rm -rf demo/grpc/client/.otel-build
