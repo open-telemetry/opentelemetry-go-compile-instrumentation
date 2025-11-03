@@ -51,6 +51,7 @@ cd server
 ```
 
 To use a different port:
+
 ```bash
 ./server -port=50052
 ```
@@ -121,5 +122,6 @@ The gRPC service defines two methods:
 2. **SayHelloStream** - Bidirectional streaming RPC for multiple greetings
 
 Both methods use the following message types:
+
 - `HelloRequest` - Contains a name field
 - `HelloReply` - Contains a message field with the greeting
