@@ -10,20 +10,20 @@ import (
 	"log"
 	"time"
 
+	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server/pb"
 )
 
 var (
-	addr = flag.String("addr", "localhost:50051", "the address to connect to")
-	name = flag.String("name", "world", "Name to greet")
+	addr   = flag.String("addr", "localhost:50051", "the address to connect to")
+	name   = flag.String("name", "world", "Name to greet")
 	stream = flag.Bool("stream", false, "Use streaming RPC")
 )
 
 func main() {
 	flag.Parse()
-	
+
 	// Set up a connection to the server
 	conn, err := grpc.NewClient(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -52,7 +52,7 @@ func main() {
 			log.Printf("Sent: %v", req.GetName())
 			time.Sleep(500 * time.Millisecond)
 		}
-		
+
 		// Close sending side
 		if err := streamClient.CloseSend(); err != nil {
 			log.Fatalf("could not close send: %v", err)
