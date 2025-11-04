@@ -87,10 +87,10 @@ docker-compose ps
 
 # Expected output - all services should be "Up" and "healthy"
 NAME            IMAGE                                         STATUS
-grafana         grafana/grafana:latest                        Up (healthy)
-jaeger          jaegertracing/jaeger:2.0.0                    Up (healthy)
-otel-collector  otel/opentelemetry-collector-contrib:0.138.0  Up (healthy)
-prometheus      prom/prometheus:v3.0.1                        Up (healthy)
+grafana         grafana/grafana:12.2.1                        Up (healthy)
+jaeger          jaegertracing/jaeger:2.11.0                   Up (healthy)
+otel-collector  otel/opentelemetry-collector-contrib:0.139.0  Up (healthy)
+prometheus      prom/prometheus:v3.7.3                        Up (healthy)
 grpc-server     ...                                           Up
 grpc-client     ...                                           Up
 ```

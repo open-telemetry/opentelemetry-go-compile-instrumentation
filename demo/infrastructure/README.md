@@ -43,22 +43,22 @@ This infrastructure provides a production-like observability stack to demonstrat
 
 ### Observability Stack
 
-1. **OpenTelemetry Collector** (v0.138.0)
+1. **OpenTelemetry Collector** (v0.139.0)
    - OTLP receivers (gRPC: 4317, HTTP: 4318)
    - Batch processing for efficiency
    - Exports to Jaeger and Prometheus
 
-2. **Jaeger** (v2.0.0)
+2. **Jaeger** (v2.11.0)
    - Distributed tracing backend
    - Native OTLP support
    - UI available at [http://localhost:16686](http://localhost:16686)
 
-3. **Prometheus** (v3.0.1)
+3. **Prometheus** (v3.7.3)
    - Metrics storage and querying
    - Native OTLP receiver support
    - UI available at [http://localhost:9090](http://localhost:9090)
 
-4. **Grafana** (latest)
+4. **Grafana** (v12.2.1)
    - Pre-configured dashboards
    - Prometheus and Jaeger datasources
    - UI available at [http://localhost:3000](http://localhost:3000)
