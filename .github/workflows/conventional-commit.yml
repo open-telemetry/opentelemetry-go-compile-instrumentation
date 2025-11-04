@@ -30,13 +30,13 @@ jobs:
         id: check-permissions
         run: |
           if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
-            echo "has_permissions=true" >> $GITHUB_OUTPUT
+            echo "has_permissions=true" >> "$GITHUB_OUTPUT"
             echo "✅ Running with pull_request_target - has write permissions"
           elif [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
-            echo "has_permissions=true" >> $GITHUB_OUTPUT
+            echo "has_permissions=true" >> "$GITHUB_OUTPUT"
             echo "✅ Running with pull_request from same repository - has write permissions"
           else
-            echo "has_permissions=false" >> $GITHUB_OUTPUT
+            echo "has_permissions=false" >> "$GITHUB_OUTPUT"
             echo "❌ Running with pull_request from fork - no write permissions"
             echo "⚠️  Labels cannot be updated on this run. They will be updated when:"
             echo "   - The PR is opened, edited, or reopened (uses pull_request_target)"
@@ -61,7 +61,7 @@ jobs:
       - name: Setup go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          cache-dependency-path: '**/go.mod'
+          cache-dependency-path: "**/go.mod"
           go-version-file: go.mod
       # Run the conventionalcommit tool to validate PR title and assign labels
       # This step is skipped if we don't have write permissions (e.g., pull_request from fork on synchronize)

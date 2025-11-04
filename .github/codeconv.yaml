@@ -5,13 +5,13 @@ coverage:
   status:
     project:
       default:
-        target: auto        # compare to base
-        threshold: 1%       # allow small drops
-        informational: true # don't fail PRs on project drop
+        target: auto  # compare to base
+        threshold: 1%  # allow small drops
+        informational: true  # don't fail PRs on project drop
     patch:
       default:
         target: auto
-        threshold: 0.1%     # require the change itself to be covered
+        threshold: 0.1%  # require the change itself to be covered
 
 comment:
   layout: "reach,diff,flags,tree"
