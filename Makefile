@@ -51,6 +51,7 @@ install: ## Install otel to $$GOPATH/bin
 	go install -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" ./$(TOOL_DIR)
 
 .ONESHELL:
+SHELL := /bin/bash
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
 	set -euo pipefail
@@ -142,6 +143,7 @@ test: ## Run all tests (unit + integration)
 test: test-unit test-integration
 
 .ONESHELL:
+SHELL := /bin/bash
 test-unit: ## Run unit tests
 test-unit: gotestfmt
 	@echo "Running unit tests..."
@@ -149,6 +151,7 @@ test-unit: gotestfmt
 	go test -json -v -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
 
 .ONESHELL:
+SHELL := /bin/bash
 test-integration: ## Run integration tests
 test-integration: build gotestfmt
 	@echo "Running integration tests..."
