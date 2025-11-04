@@ -1,0 +1,23 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# yamlfmt configuration file
+# See: https://github.com/google/yamlfmt/blob/main/docs/config-file.md
+
+formatter:
+  type: basic
+  retain_line_breaks: true
+  max_line_length: 120
+  indentless_arrays: false
+  drop_merge_tag: false
+  pad_line_comments: 2
+  include_document_start: false
+
+# Exclude patterns for files/directories to ignore
+exclude:
+  - testdata/
+  - vendor/
+  - .git/
+  - node_modules/
+  - pb/
+  - .otel-build/

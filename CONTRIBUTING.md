@@ -12,7 +12,110 @@ for a summary description of past meetings. You can also get in touch on slack c
 
 ## Development
 
-TBD
+### Prerequisites
+
+This project uses several tools for development. Most tools will be automatically installed when you first run the corresponding `make` target. However, you need to have:
+
+- [Go](https://golang.org/dl/) 1.21 or later
+- [Git](https://git-scm.com/)
+- Make (usually pre-installed on macOS and Linux)
+
+### Getting Started
+
+1. Clone the repository:
+
+```sh
+git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation
+cd opentelemetry-go-compile-instrumentation
+```
+
+2. Build the project:
+
+```sh
+make build
+```
+
+3. Run tests:
+
+```sh
+make test
+```
+
+### Available Make Targets
+
+Run `make help` to see all available targets:
+
+```sh
+make help
+```
+
+#### Build Targets
+
+- `make build` - Build the instrumentation tool (includes packaging)
+- `make install` - Install the `otel` binary to `$GOPATH/bin`
+- `make package` - Package the instrumentation code into a binary archive
+- `make build-demo-grpc` - Build gRPC demo server and client
+
+#### Code Quality
+
+- `make format` - Format all code (Go + YAML)
+  - `make format/go` - Format Go code only using golangci-lint
+  - `make format/yaml` - Format YAML files only using yamlfmt
+- `make lint` - Run all linters (Go, YAML, GitHub Actions)
+  - `make lint/go` - Run golangci-lint on Go code
+  - `make lint/yaml` - Lint YAML formatting
+  - `make lint/action` - Lint GitHub Actions workflows
+
+#### Testing
+
+- `make test` - Run all tests (unit + integration)
+- `make test-unit` - Run unit tests only with formatted output
+- `make test-integration` - Run integration tests only with formatted output
+
+Test results are saved to `gotest-unit.log` and `gotest-integration.log` for review.
+
+#### Documentation
+
+- `make docs` - Update embedded documentation in markdown files
+
+#### GitHub Actions Security
+
+- `make ratchet/pin` - Pin GitHub Actions to specific commit SHAs for security
+- `make ratchet/update` - Update pinned GitHub Actions to latest versions
+- `make ratchet/check` - Verify all GitHub Actions are properly pinned
+
+#### Cleanup
+
+- `make clean` - Remove all build artifacts and temporary files
+
+### Development Workflow
+
+A typical development workflow looks like:
+
+1. Make your changes
+2. Format your code: `make format`
+3. Run linters: `make lint`
+4. Run tests: `make test`
+5. Commit your changes
+
+For a complete check before submitting a PR, run:
+
+```sh
+make all
+```
+
+This will run: `build`, `format`, `lint`, and `test` in sequence.
+
+### Tools
+
+The following development tools are used and will be automatically installed on first use:
+
+- **[golangci-lint](https://golangci-lint.run/)** - Go linter aggregator
+- **[gotestfmt](https://github.com/gotesttools/gotestfmt)** - Prettier test output
+- **[yamlfmt](https://github.com/google/yamlfmt)** - YAML formatter
+- **[actionlint](https://github.com/rhysd/actionlint)** - GitHub Actions linter
+- **[ratchet](https://github.com/sethvargo/ratchet)** - GitHub Actions security pinning
+- **[embedmd](https://github.com/campoy/embedmd)** - Embed code in markdown files
 
 ## Pull Requests
 
