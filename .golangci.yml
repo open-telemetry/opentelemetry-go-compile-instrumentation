@@ -65,7 +65,6 @@ linters:
     - ineffassign # detects when assignments to existing variables are not used
     - interfacebloat # checks the number of methods inside an interface
     - intrange # finds places where for loops could make use of an integer range
-    - ireturn # accept interfaces, return concrete types
     - loggercheck # checks key value pairs for common logger libraries (kitlog,klog,logr,zap)
     - makezero # finds slice declarations with non-zero initial length
     - mirror # reports wrong mirror patterns of bytes/strings usage

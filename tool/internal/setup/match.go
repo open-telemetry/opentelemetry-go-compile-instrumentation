@@ -17,7 +17,7 @@ import (
 
 // createRuleFromFields creates a rule instance based on the field type present in the YAML
 //
-//nolint:ireturn,nilnil // factory function
+//nolint:nilnil // factory function
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
 	base := rule.InstBaseRule{
 		Name: name,

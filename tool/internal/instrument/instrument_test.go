@@ -142,6 +142,16 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 						Recv:   "*T",
 						Before: "H3Before",
 					},
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "hook_func_no_before",
+							Target: "main",
+						},
+						Path:  filepath.Join(".", "testdata"),
+						Func:  "Func1",
+						Recv:  "*T",
+						After: "H3After",
+					},
 				},
 			},
 			RawRules: map[string][]*rule.InstRawRule{

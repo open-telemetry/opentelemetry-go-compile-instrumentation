@@ -453,8 +453,8 @@ func assignSliceLiteral(assignStmt *dst.AssignStmt, vals []dst.Expr) bool {
 	return false
 }
 
-// replenishHookContext replenishes the hook context before hook invocation
-func (ip *InstrumentPhase) replenishHookContext(before bool) bool {
+// populateHookContext populates the hook context before hook invocation
+func (ip *InstrumentPhase) populateHookContext(before bool) bool {
 	funcDecl := ip.beforeHookFunc
 	if !before {
 		funcDecl = ip.afterHookFunc
@@ -593,8 +593,6 @@ func setReturnValClause(idx int, t dst.Expr) *dst.CaseClause {
 
 // desugarType desugars parameter type to its original type, if parameter
 // is type of ...T, it will be converted to []T
-//
-//nolint:ireturn // we dont know the type of the parameter
 func desugarType(param *dst.Field) dst.Expr {
 	if ft, ok := param.Type.(*dst.Ellipsis); ok {
 		return ast.ArrayType(ft.Elt)
@@ -688,8 +686,8 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 		return err
 	}
 	// Fulfill the hook context before calling the real hook code.
-	if !ip.replenishHookContext(before) {
-		return ex.New("failed to replenish hook context")
+	if !ip.populateHookContext(before) {
+		return ex.New("failed to populate hook context")
 	}
 	return nil
 }
