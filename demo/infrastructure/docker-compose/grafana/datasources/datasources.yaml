@@ -1,0 +1,40 @@
+# Grafana datasources provisioning
+# Automatically configures Prometheus and Jaeger datasources on startup
+
+apiVersion: 1
+
+datasources:
+  # Prometheus datasource for metrics
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      # Enable exemplar support for metric-to-trace correlation
+      exemplarTraceIdDestinations:
+        - name: traceID
+          datasourceUid: jaeger
+      # Enable Prometheus query suggestions
+      timeInterval: 15s
+
+  # Jaeger datasource for distributed tracing
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: true
+    jsonData:
+      # Trace to metrics correlation
+      tracesToMetrics:
+        datasourceUid: prometheus
+        tags:
+          - key: service.name
+            value: job
+      # Node graph support for service dependencies
+      nodeGraph:
+        enabled: true

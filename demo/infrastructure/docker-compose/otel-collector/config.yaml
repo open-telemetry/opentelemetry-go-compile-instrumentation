@@ -1,0 +1,67 @@
+# OpenTelemetry Collector configuration for demo environment
+# Receives traces and metrics from instrumented Go applications
+# Exports traces to Jaeger and exposes metrics for Prometheus
+
+receivers:
+  # OTLP receiver for traces and metrics
+  otlp:
+    protocols:
+      grpc:
+        # Must bind to 0.0.0.0 for Docker networking (required in v0.116.0+)
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch processor for improved performance
+  batch:
+    send_batch_size: 1024
+    timeout: 5s
+    send_batch_max_size: 2048
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+exporters:
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # OTLP exporter for Jaeger v2 (native OTLP support)
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: otel
+    const_labels:
+      environment: demo
+
+service:
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug, otlp/jaeger]
+
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug, prometheus]
+
+  # Telemetry configuration for the collector itself
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
