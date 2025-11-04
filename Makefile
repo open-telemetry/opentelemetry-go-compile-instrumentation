@@ -31,7 +31,7 @@ help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[A-Za-z0-9_.\/-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[A-Za-z0-9_./-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 all: build format lint test
 
@@ -50,18 +50,14 @@ install: ## Install otel to $$GOPATH/bin
 	@go mod tidy
 	go install -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" ./$(TOOL_DIR)
 
-.ONESHELL:
-SHELL := /bin/bash
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
-	set -euo pipefail
-	rm -rf $(INST_PKG_TMP)
-	cp -a pkg $(INST_PKG_TMP)
-	(cd $(INST_PKG_TMP) && go mod tidy)
-	tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
-	mkdir -p tool/data/
-	mv $(INST_PKG_GZIP) tool/data/
-	rm -rf $(INST_PKG_TMP)
+	@rm -rf $(INST_PKG_TMP)
+	@cp -a pkg $(INST_PKG_TMP)
+	@cd $(INST_PKG_TMP) && go mod tidy
+	@tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
+	@mv $(INST_PKG_GZIP) tool/data/
+	@rm -rf $(INST_PKG_TMP)
 
 build-demo-grpc: ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
@@ -113,17 +109,17 @@ lint/yaml: yamlfmt
 ratchet/pin: ## Pin GitHub Actions to commit SHAs
 ratchet/pin: ratchet
 	@echo "Pinning GitHub Actions to commit SHAs..."
-	ratchet pin .github/workflows/*.yml .github/workflows/*.yaml
+	ratchet pin .github/workflows/*.yml .github/actions/**/action.yml
 
 ratchet/update: ## Update pinned GitHub Actions to latest versions
 ratchet/update: ratchet
 	@echo "Updating pinned GitHub Actions to latest versions..."
-	ratchet update .github/workflows/*.yml .github/workflows/*.yaml
+	ratchet update .github/workflows/*.yml .github/actions/**/action.yml
 
 ratchet/check: ## Verify all GitHub Actions are pinned
 ratchet/check: ratchet
 	@echo "Checking GitHub Actions are pinned..."
-	ratchet lint .github/workflows/*.yml .github/workflows/*.yaml
+	ratchet lint .github/workflows/*.yml .github/actions/**/action.yml
 
 # Documentation targets
 
@@ -143,7 +139,6 @@ test: ## Run all tests (unit + integration)
 test: test-unit test-integration
 
 .ONESHELL:
-SHELL := /bin/bash
 test-unit: ## Run unit tests
 test-unit: gotestfmt
 	@echo "Running unit tests..."
@@ -151,7 +146,6 @@ test-unit: gotestfmt
 	go test -json -v -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
 
 .ONESHELL:
-SHELL := /bin/bash
 test-integration: ## Run integration tests
 test-integration: build gotestfmt
 	@echo "Running integration tests..."

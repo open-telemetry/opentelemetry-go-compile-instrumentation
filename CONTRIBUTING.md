@@ -24,22 +24,22 @@ This project uses several tools for development. Most tools will be automaticall
 
 1. Clone the repository:
 
-   ```sh
-   git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation
-   cd opentelemetry-go-compile-instrumentation
-   ```
+  ```sh
+  git clone https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation
+  cd opentelemetry-go-compile-instrumentation
+  ```
 
 2. Build the project:
 
-   ```sh
-   make build
-   ```
+  ```sh
+  make build
+  ```
 
 3. Run tests:
 
-   ```sh
-   make test
-   ```
+  ```sh
+  make test
+  ```
 
 ### Available Make Targets
 
