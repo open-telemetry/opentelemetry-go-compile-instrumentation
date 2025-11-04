@@ -80,7 +80,7 @@ var (
 )
 
 // Trampoline Template
-func OtelBeforeTrampoline() (HookContext, bool) {
+func OtelBeforeTrampoline() (hookContext *HookContextImpl, skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "OtelBeforeNamePlaceholder")
@@ -93,7 +93,7 @@ func OtelBeforeTrampoline() (HookContext, bool) {
 			}
 		}
 	}()
-	hookContext := &HookContextImpl{}
+	hookContext = &HookContextImpl{}
 	hookContext.params = []interface{}{}
 	hookContext.funcName = ""
 	hookContext.packageName = ""
