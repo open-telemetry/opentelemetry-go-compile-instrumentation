@@ -50,14 +50,17 @@ install: ## Install otel to $$GOPATH/bin
 	@go mod tidy
 	go install -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" ./$(TOOL_DIR)
 
+.ONESHELL:
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
-	@rm -rf $(INST_PKG_TMP)
-	@cp -a pkg $(INST_PKG_TMP)
-	@cd $(INST_PKG_TMP) && go mod tidy
-	@tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
-	@mv $(INST_PKG_GZIP) tool/data/
-	@rm -rf $(INST_PKG_TMP)
+	set -euo pipefail
+	rm -rf $(INST_PKG_TMP)
+	cp -a pkg $(INST_PKG_TMP)
+	(cd $(INST_PKG_TMP) && go mod tidy)
+	tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
+	mkdir -p tool/data/
+	mv $(INST_PKG_GZIP) tool/data/
+	rm -rf $(INST_PKG_TMP)
 
 build-demo-grpc: ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
