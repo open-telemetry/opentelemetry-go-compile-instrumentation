@@ -3,7 +3,6 @@
 package instrument
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -48,7 +47,7 @@ func TestInstrument(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
-	ctx := util.ContextWithLogger(context.Background(), logger)
+	ctx := util.ContextWithLogger(t.Context(), logger)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tempDir := setupTestEnvironment(t)

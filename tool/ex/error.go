@@ -128,7 +128,7 @@ func Wrapf(previousErr error, format string, args ...any) error {
 }
 
 func New(message string) error {
-	return wrapOrCreate(nil, message)
+	return wrapOrCreate(nil, "%s", message)
 }
 
 func Newf(format string, args ...any) error {
