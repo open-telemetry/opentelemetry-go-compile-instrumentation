@@ -50,6 +50,12 @@ build-demo-grpc:
 	@cd demo/grpc/server && go generate && go build -o server .
 	@cd demo/grpc/client && go build -o client .
 
+.PHONY: build-demo-http
+build-demo-http:
+	@echo "Building HTTP demo..."
+	@cd demo/http/server && go build -o server .
+	@cd demo/http/client && go build -o client .
+
 # Run the test with instrumentation
 .PHONY: test
 test: build
@@ -70,3 +76,7 @@ clean:
 	rm -f demo/grpc/client/client
 	rm -rf demo/grpc/server/.otel-build
 	rm -rf demo/grpc/client/.otel-build
+	rm -f demo/http/server/server
+	rm -f demo/http/client/client
+	rm -rf demo/http/server/.otel-build
+	rm -rf demo/http/client/.otel-build
