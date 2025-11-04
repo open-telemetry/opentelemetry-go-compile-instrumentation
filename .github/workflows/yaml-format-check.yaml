@@ -1,0 +1,32 @@
+name: YAML Format Check
+
+on:
+  pull_request:
+    paths:
+      - "**/*.yml"
+      - "**/*.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.yml"
+      - "**/*.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  yaml-format:
+    name: Check YAML Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+
+      - name: Setup Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Check YAML formatting
+        run: make lint/yaml
