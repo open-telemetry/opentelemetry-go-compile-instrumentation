@@ -109,17 +109,17 @@ lint/yaml: yamlfmt
 ratchet/pin: ## Pin GitHub Actions to commit SHAs
 ratchet/pin: ratchet
 	@echo "Pinning GitHub Actions to commit SHAs..."
-	ratchet pin .github/workflows/*.yml .github/actions/**/action.yml
+	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs ratchet pin
 
 ratchet/update: ## Update pinned GitHub Actions to latest versions
 ratchet/update: ratchet
 	@echo "Updating pinned GitHub Actions to latest versions..."
-	ratchet update .github/workflows/*.yml .github/actions/**/action.yml
+	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs ratchet update
 
 ratchet/check: ## Verify all GitHub Actions are pinned
 ratchet/check: ratchet
 	@echo "Checking GitHub Actions are pinned..."
-	ratchet lint .github/workflows/*.yml .github/actions/**/action.yml
+	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs ratchet lint
 
 # Documentation targets
 
