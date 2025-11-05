@@ -1,12 +1,10 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Unique name of the hook rule
 hook_helloworld:
   target: main
   func: Example
   before: MyHookBefore
-  after: MyHookAfter
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
 
 add_new_field:
@@ -50,3 +48,9 @@ version_min_good:
   func: Every
   raw: |
     println("Every3")
+
+only_after:
+  target: main
+  func: Example
+  after: MyHookAfter
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
