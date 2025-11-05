@@ -4,6 +4,7 @@
 package test
 
 import (
+	"context"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -18,10 +19,10 @@ import (
 // compiled binary program, and verify that the output of the binary program
 // is as expected.
 
-func runCmd(dir string, args ...string) (string, error) {
+func runCmd(ctx context.Context, dir string, args ...string) (string, error) {
 	path := args[0]
 	args = args[1:]
-	cmd := exec.Command(path, args...)
+	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -38,13 +39,13 @@ func BuildApp(t *testing.T, appDir string, args ...string) {
 	}
 	otelPath := filepath.Join("..", "..", binName)
 	args = append([]string{otelPath}, args...)
-	out, err := runCmd(appDir, args...)
+	out, err := runCmd(t.Context(), appDir, args...)
 	require.NoError(t, err, out)
 }
 
 // RunApp runs the application and returns the output.
 func RunApp(t *testing.T, dir string) string {
-	out, err := runCmd(dir, "./"+filepath.Base(dir))
+	out, err := runCmd(t.Context(), dir, "./"+filepath.Base(dir))
 	require.NoError(t, err, out)
 	return out
 }
