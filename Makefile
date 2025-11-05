@@ -1,10 +1,13 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
+# Use bash for all shell commands (required for pipefail and other bash features)
+SHELL := /bin/bash
+
 .PHONY: all test test-unit test-integration format lint build install package clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
-        ratchet/update ratchet/check golangci-lint embedmd checkmake help docs
+        ratchet/update ratchet/check golangci-lint embedmd checkmake help docs check-embed
 
 # Constant variables
 BINARY_NAME := otel
@@ -142,24 +145,38 @@ tmp/make-help.txt: $(MAKEFILE_LIST)
 	@mkdir -p tmp
 	@$(MAKE) --no-print-directory help > tmp/make-help.txt
 
+# Validation targets
+
+check-embed: ## Verify that embedded files exist (required for tests)
+	@echo "Checking embedded files..."
+	@if [ ! -f tool/data/$(INST_PKG_GZIP) ]; then \
+		echo "Error: tool/data/$(INST_PKG_GZIP) does not exist"; \
+		echo "Run 'make package' to generate it"; \
+		exit 1; \
+	fi
+	@echo "All embedded files present"
+
 # Test targets
+# NOTE: Tests require the 'package' target to run first because tool/data/export.go
+# uses //go:embed to embed otel-pkg.gz at compile time. If the file doesn't exist
+# when Go compiles the test packages, the embed will fail.
 
 test: ## Run all tests (unit + integration)
 test: test-unit test-integration
 
 .ONESHELL:
 test-unit: ## Run unit tests
-test-unit: gotestfmt
+test-unit: package gotestfmt
 	@echo "Running unit tests..."
 	set -euo pipefail
-	go test -json -v -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
+	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
 
 .ONESHELL:
 test-integration: ## Run integration tests
 test-integration: build gotestfmt
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go test -json -v -timeout=10m -count=1 -run TestBasic ./test/... 2>&1 | tee ./gotest-integration.log | gotestfmt
+	go test -json -v -shuffle=on -timeout=10m -count=1 -run TestBasic ./test/... 2>&1 | tee ./gotest-integration.log | gotestfmt
 
 # Clean targets
 
