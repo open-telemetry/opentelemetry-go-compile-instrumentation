@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 .PHONY: all test test-unit test-integration format lint build install package clean \
-        build-demo-grpc format/go format/yaml lint/go lint/yaml lint/action \
-        actionlint yamlfmt gotestfmt ratchet ratchet/pin ratchet/update ratchet/check \
-        golangci-lint embedmd help docs tmp/make-help.txt
+        build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
+        lint/action lint/makefile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
+        ratchet/update ratchet/check golangci-lint embedmd checkmake help docs
 
 # Constant variables
 BINARY_NAME := otel
@@ -56,8 +56,12 @@ package: ## Package the instrumentation code into binary
 	@cp -a pkg $(INST_PKG_TMP)
 	@cd $(INST_PKG_TMP) && go mod tidy
 	@tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
+	@mkdir -p tool/data/
 	@mv $(INST_PKG_GZIP) tool/data/
 	@rm -rf $(INST_PKG_TMP)
+
+build-demo: ## Build all demos
+build-demo: build-demo-grpc build-demo-http
 
 build-demo-grpc: ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
@@ -86,8 +90,8 @@ format/yaml: yamlfmt
 
 # Lint targets
 
-lint: ## Run all linters (Go, YAML, GitHub Actions)
-lint: lint/go lint/yaml lint/action
+lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile)
+lint: lint/go lint/yaml lint/action lint/makefile
 
 lint/action: ## Lint GitHub Actions workflows
 lint/action: actionlint ratchet/check
@@ -103,6 +107,11 @@ lint/yaml: ## Lint YAML formatting
 lint/yaml: yamlfmt
 	@echo "Linting YAML files..."
 	yamlfmt -lint -dstar '**/*.yml' '**/*.yaml'
+
+lint/makefile: ## Lint Makefile
+lint/makefile: checkmake
+	@echo "Linting Makefile..."
+	checkmake --config .checkmake Makefile
 
 # Ratchet targets for GitHub Actions pinning
 
@@ -206,4 +215,10 @@ embedmd: ## Install embedmd if not present
 	@if ! command -v embedmd >/dev/null 2>&1; then \
 		echo "Installing embedmd..."; \
 		go install github.com/campoy/embedmd@latest; \
+	fi
+
+checkmake: ## Install checkmake if not present
+	@if ! command -v checkmake >/dev/null 2>&1; then \
+		echo "Installing checkmake..."; \
+		go install github.com/checkmake/checkmake/cmd/checkmake@latest; \
 	fi

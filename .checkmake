@@ -1,0 +1,17 @@
+[default]
+# Configuration for checkmake linter
+
+[uniquetargets]
+# Allow duplicate target definitions (one for comment, one for dependencies)
+# This improves readability by separating comments from dependencies
+disabled = true
+
+[maxbodylength]
+# Allow longer target bodies for complex build tasks
+# Package and clean targets naturally have multiple steps
+disabled = true
+
+[phonydeclared]
+# We declare all phony targets at the top of the Makefile in a single .PHONY declaration
+# This is a valid approach and more maintainable than declaring each target separately
+disabled = true
