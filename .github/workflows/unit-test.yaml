@@ -32,8 +32,6 @@ jobs:
             arch: amd64
           - os: ubuntu-22.04-arm
             arch: arm64
-          - os: macos-13
-            arch: amd64
           - os: macos-latest
             arch: arm64
           - os: windows-latest
