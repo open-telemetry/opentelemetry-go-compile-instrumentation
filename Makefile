@@ -31,7 +31,7 @@ help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[A-Za-z0-9_./-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[A-Za-z0-9_.\/-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 all: build format lint test
 
@@ -114,17 +114,17 @@ lint/yaml: yamlfmt
 ratchet/pin: ## Pin GitHub Actions to commit SHAs
 ratchet/pin: ratchet
 	@echo "Pinning GitHub Actions to commit SHAs..."
-	ratchet pin .github/workflows/*.yml .github/actions/**/action.yml
+	ratchet pin .github/workflows/*.yml .github/workflows/*.yaml
 
 ratchet/update: ## Update pinned GitHub Actions to latest versions
 ratchet/update: ratchet
 	@echo "Updating pinned GitHub Actions to latest versions..."
-	ratchet update .github/workflows/*.yml .github/actions/**/action.yml
+	ratchet update .github/workflows/*.yml .github/workflows/*.yaml
 
 ratchet/check: ## Verify all GitHub Actions are pinned
 ratchet/check: ratchet
 	@echo "Checking GitHub Actions are pinned..."
-	ratchet lint .github/workflows/*.yml .github/actions/**/action.yml
+	ratchet lint .github/workflows/*.yml .github/workflows/*.yaml
 
 # Documentation targets
 
