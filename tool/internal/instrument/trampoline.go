@@ -49,6 +49,7 @@ const (
 	trampolineAfterNamePlaceholder  = `"OtelAfterNamePlaceholder"`
 	trampolineBefore                = true
 	trampolineAfter                 = false
+	unsafePackageName               = "unsafe"
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -78,12 +79,13 @@ func (ip *InstrumentPhase) ensureUnsafeImport() {
 			continue
 		}
 		for _, spec := range genDecl.Specs {
-			if importSpec, ok2 := spec.(*dst.ImportSpec); ok2 && importSpec.Path.Value == `"unsafe"` {
+			if importSpec, ok2 := spec.(*dst.ImportSpec); ok2 &&
+				importSpec.Path.Value == strconv.Quote(unsafePackageName) {
 				return
 			}
 		}
 	}
-	ip.target.Decls = append([]dst.Decl{ast.ImportDecl("_", "unsafe")}, ip.target.Decls...)
+	ip.target.Decls = append([]dst.Decl{ast.ImportDecl("_", unsafePackageName)}, ip.target.Decls...)
 }
 
 func (ip *InstrumentPhase) materializeTemplate() error {
@@ -595,7 +597,6 @@ func getValue(field string, idx int, t dst.Expr) *dst.CaseClause {
 	de := ast.DereferenceOf(pe)
 	ret := ast.ReturnStmt(ast.Exprs(de))
 	if ast.IsInterfaceType(t) {
-		//nolint:ireturn // we don't know the type of the parameter
 		ret = ast.ReturnStmt(ast.Exprs(ie))
 	}
 	caseClause := ast.SwitchCase(
