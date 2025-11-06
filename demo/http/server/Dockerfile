@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for gRPC server with OpenTelemetry compile-time instrumentation
+# Multi-stage Dockerfile for HTTP server with OpenTelemetry compile-time instrumentation
 # Stage 1: Build the otel tool
 FROM golang:1.24-alpine AS otel-builder
 
@@ -14,29 +14,19 @@ COPY . .
 # Build the otel tool
 RUN go build -o /otel ./tool/cmd
 
-# Stage 2: Build the gRPC server with instrumentation
+# Stage 2: Build the HTTP server with instrumentation
 FROM golang:1.24-alpine AS app-builder
 
 WORKDIR /app
 
-# Install protobuf compiler and dependencies
-RUN apk add --no-cache git protobuf-dev protoc
-
-# Install protoc-gen-go and protoc-gen-go-grpc
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.4 && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+# Install git for go mod download
+RUN apk add --no-cache git
 
 # Copy the otel tool from previous stage
 COPY --from=otel-builder /otel /usr/local/bin/otel
 
-# Copy demo app source
-COPY demo/grpc/server /app
-
-# Generate protobuf code
-RUN mkdir -p pb && \
-    protoc --go_out=pb --go_opt=paths=source_relative \
-           --go-grpc_out=pb --go-grpc_opt=paths=source_relative \
-           greeter.proto
+# Copy HTTP server source
+COPY demo/http/server /app
 
 # Download dependencies
 RUN go mod download
@@ -62,19 +52,15 @@ RUN addgroup -g 1000 appuser && \
 
 USER appuser
 
-# Expose gRPC port
-EXPOSE 50051
+# Expose HTTP port
+EXPOSE 8080
 
 # Environment variables for OpenTelemetry
 ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
     OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
-    OTEL_SERVICE_NAME=grpc-server \
+    OTEL_SERVICE_NAME=http-server \
     OTEL_RESOURCE_ATTRIBUTES="service.namespace=demo,service.version=1.0.0" \
     OTEL_LOG_LEVEL=info
 
-# Health check (if health endpoint is implemented)
-# HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-#   CMD grpc_health_probe -addr=:50051 || exit 1
-
 ENTRYPOINT ["./server"]
-CMD ["-port", "50051"]
+CMD ["-port", "8080"]

@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for gRPC client with OpenTelemetry compile-time instrumentation
 # Stage 1: Build the otel tool
-FROM golang:1.23-alpine AS otel-builder
+FROM golang:1.24-alpine AS otel-builder
 
 WORKDIR /build
 
@@ -12,31 +12,22 @@ COPY go.mod go.sum ./
 COPY . .
 
 # Build the otel tool
-RUN go build -o /otel ./cmd/otel
+RUN go build -o /otel ./tool/cmd
 
 # Stage 2: Build the gRPC client with instrumentation
-FROM golang:1.23-alpine AS app-builder
+FROM golang:1.24-alpine AS app-builder
 
 WORKDIR /app
 
-# Install protobuf compiler and dependencies
-RUN apk add --no-cache git protobuf-dev protoc
-
-# Install protoc-gen-go and protoc-gen-go-grpc
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+# Install git for go mod download
+RUN apk add --no-cache git
 
 # Copy the otel tool from previous stage
 COPY --from=otel-builder /otel /usr/local/bin/otel
 
-# Copy demo app source
+# Copy both client and server to maintain the go.mod replace directive structure
+COPY demo/grpc/server /server
 COPY demo/grpc/client /app
-
-# Generate protobuf code
-RUN mkdir -p pb && \
-    protoc --go_out=pb --go_opt=paths=source_relative \
-           --go-grpc_out=pb --go-grpc_opt=paths=source_relative \
-           greeter.proto
 
 # Download dependencies
 RUN go mod download
@@ -45,7 +36,7 @@ RUN go mod download
 RUN otel go build -o client .
 
 # Stage 3: Runtime image
-FROM alpine:latest
+FROM alpine:3.21
 
 # Install ca-certificates for TLS and timezone data
 RUN apk --no-cache add ca-certificates tzdata

@@ -128,7 +128,7 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	$$HADOLINT_CMD demo/grpc/client/Dockerfile demo/grpc/server/Dockerfile
+	$$HADOLINT_CMD demo/grpc/client/Dockerfile demo/grpc/server/Dockerfile demo/http/client/Dockerfile demo/http/server/Dockerfile
 
 lint/makefile: ## Lint Makefile
 lint/makefile: checkmake
