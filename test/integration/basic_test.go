@@ -1,3 +1,5 @@
+//go:build integration
+
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
@@ -12,7 +14,7 @@ import (
 )
 
 func TestBasic(t *testing.T) {
-	appDir := filepath.Join("..", "demo", "basic")
+	appDir := filepath.Join("..", "..", "demo", "basic")
 
 	app.Build(t, appDir, "go", "build", "-a")
 	output := app.Run(t, appDir)

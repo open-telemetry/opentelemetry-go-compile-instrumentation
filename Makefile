@@ -4,10 +4,11 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
-.PHONY: all test test-unit test-integration format lint build install package clean \
+.PHONY: all test test-unit test-integration test-e2e format lint build install package clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
-        ratchet/update ratchet/check golangci-lint embedmd checkmake help docs check-embed
+        ratchet/update ratchet/check golangci-lint embedmd checkmake help docs check-embed \
+        test-unit/coverage test-integration/coverage test-e2e/coverage
 
 # Constant variables
 BINARY_NAME := otel
@@ -168,8 +169,8 @@ check-embed: ## Verify that embedded files exist (required for tests)
 # uses //go:embed to embed otel-pkg.gz at compile time. If the file doesn't exist
 # when Go compiles the test packages, the embed will fail.
 
-test: ## Run all tests (unit + integration)
-test: test-unit test-integration
+test: ## Run all tests (unit + integration + e2e)
+test: test-unit test-integration test-e2e
 
 .ONESHELL:
 test-unit: ## Run unit tests
@@ -190,14 +191,28 @@ test-integration: ## Run integration tests
 test-integration: build gotestfmt
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 -run TestBasic ./test/... 2>&1 | tee ./gotest-integration.log | gotestfmt
+	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... 2>&1 | tee ./gotest-integration.log | gotestfmt
 
 .ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build gotestfmt
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 -run TestBasic ./test/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log | gotestfmt
+	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log | gotestfmt
+
+.ONESHELL:
+test-e2e: ## Run e2e tests
+test-e2e: build gotestfmt
+	@echo "Running e2e tests..."
+	set -euo pipefail
+	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... 2>&1 | tee ./gotest-e2e.log | gotestfmt
+
+.ONESHELL:
+test-e2e/coverage: ## Run e2e tests with coverage report
+test-e2e/coverage: build gotestfmt
+	@echo "Running e2e tests with coverage report..."
+	set -euo pipefail
+	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log | gotestfmt
 
 # Clean targets
 
@@ -215,7 +230,7 @@ clean: ## Clean build artifacts
 	rm -f demo/http/client/client
 	rm -rf demo/http/server/.otel-build
 	rm -rf demo/http/client/.otel-build
-	rm -f ./gotest-unit.log ./gotest-integration.log
+	rm -f ./gotest-unit.log ./gotest-integration.log ./gotest-e2e.log
 
 # Tool installation targets
 

@@ -1,0 +1,61 @@
+name: E2E Tests
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+# Declare default permissions as read only.
+permissions: read-all
+jobs:
+  test-coverage:
+    if: false  # temporary disable
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+      - name: Install Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # v5.5.0
+        with:
+          go-version-file: go.mod
+      - name: Run e2e test coverage
+        run: make test-e2e/coverage
+      - name: Upload coverage report
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
+
+  test-e2e:
+    name: Test (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
+    strategy:
+      matrix:
+        platform:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: macos-latest
+            arch: arm64
+          - os: windows-latest
+            arch: amd64
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+      - name: Install Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Build and test
+        env:
+          GOARCH: ${{ matrix.platform.arch }}
+        run: make test-e2e
+
+  done:
+    name: Done
+    runs-on: ubuntu-latest
+    needs: [test-e2e]
+    steps:
+      - name: Success
+        run: |
+          echo ${{ needs.test-e2e.result }}
+          test ${{ needs.test-e2e.result }} == "success"

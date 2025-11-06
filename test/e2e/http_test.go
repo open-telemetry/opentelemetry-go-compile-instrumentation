@@ -1,3 +1,5 @@
+//go:build e2e
+
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
@@ -54,8 +56,8 @@ func waitUntilReady(t *testing.T, serverApp *exec.Cmd, outputPipe io.ReadCloser)
 }
 
 func TestHttp(t *testing.T) {
-	serverDir := filepath.Join("..", "demo", "http", "server")
-	clientDir := filepath.Join("..", "demo", "http", "client")
+	serverDir := filepath.Join("..", "..", "demo", "http", "server")
+	clientDir := filepath.Join("..", "..", "demo", "http", "client")
 
 	// Build the server and client applications with the instrumentation tool.
 	app.Build(t, serverDir, "go", "build", "-a")

@@ -36,7 +36,7 @@ func Build(t *testing.T, appDir string, args ...string) {
 	}
 	pwd, err := os.Getwd()
 	require.NoError(t, err)
-	otelPath := filepath.Join(pwd, "..", binName)
+	otelPath := filepath.Join(pwd, "..", "..", binName)
 	args = append([]string{otelPath}, args...)
 
 	cmd := newCmd(t.Context(), appDir, args...)
