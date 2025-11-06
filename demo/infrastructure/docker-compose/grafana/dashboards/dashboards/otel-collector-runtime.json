@@ -120,18 +120,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "otel_otelcol_process_runtime_heap_alloc_bytes_bytes{service=~\"$service\"}",
-          "legendFormat": "{{service}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "expr": "otelcol_process_runtime_heap_alloc_bytes{service=~\"$service\"}",
           "legendFormat": "{{service}}",
-          "refId": "B"
+          "refId": "A"
         }
       ],
       "title": "Heap Memory Allocated",
@@ -223,18 +214,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "otel_otelcol_process_memory_rss_bytes{service=~\"$service\"}",
-          "legendFormat": "{{service}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "expr": "otelcol_process_memory_rss{service=~\"$service\"}",
           "legendFormat": "{{service}}",
-          "refId": "B"
+          "refId": "A"
         }
       ],
       "title": "Process Memory (RSS)",
@@ -326,18 +308,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "otel_otelcol_process_runtime_total_sys_memory_bytes_bytes{service=~\"$service\"}",
-          "legendFormat": "{{service}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "expr": "otelcol_process_runtime_total_sys_memory_bytes{service=~\"$service\"}",
           "legendFormat": "{{service}}",
-          "refId": "B"
+          "refId": "A"
         }
       ],
       "title": "Total System Memory",
@@ -429,18 +402,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(otel_otelcol_process_runtime_alloc_bytes_bytes_total{service=~\"$service\"}[5m])",
-          "legendFormat": "{{service}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "expr": "rate(otelcol_process_runtime_total_alloc_bytes{service=~\"$service\"}[5m])",
           "legendFormat": "{{service}}",
-          "refId": "B"
+          "refId": "A"
         }
       ],
       "title": "Memory Allocation Rate",
@@ -545,18 +509,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(otel_otelcol_process_cpu_seconds_seconds_total{service=~\"$service\"}[5m])",
-          "legendFormat": "{{service}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "expr": "rate(otelcol_process_cpu_seconds{service=~\"$service\"}[5m])",
           "legendFormat": "{{service}}",
-          "refId": "B"
+          "refId": "A"
         }
       ],
       "title": "CPU Usage",
@@ -646,18 +601,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "otel_otelcol_process_uptime_seconds_total{service=~\"$service\"}",
-          "legendFormat": "{{service}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "expr": "otelcol_process_uptime{service=~\"$service\"}",
           "legendFormat": "{{service}}",
-          "refId": "B"
+          "refId": "A"
         }
       ],
       "title": "Process Uptime",

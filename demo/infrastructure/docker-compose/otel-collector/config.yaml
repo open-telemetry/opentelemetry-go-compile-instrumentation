@@ -9,6 +9,7 @@ extensions:
 
 connectors:
   # Spanmetrics connector - generates metrics from spans
+  # Generates standard OpenTelemetry metrics with traces_span_ namespace (v0.109.0+)
   spanmetrics:
     histogram:
       explicit:
@@ -17,6 +18,8 @@ connectors:
       - name: http.method
         default: GET
       - name: http.status_code
+      - name: http.route
+        default: ""  # Optional - empty for services without route instrumentation
       - name: service.version
     exemplars:
       enabled: true
@@ -41,7 +44,7 @@ receivers:
         - job_name: jaeger
           scrape_interval: 15s
           static_configs:
-            - targets: ['jaeger:8888']  # Jaeger internal telemetry port
+            - targets: ["jaeger:8888"]  # Jaeger internal telemetry port
               labels:
                 service: jaeger
                 component: tracing
@@ -74,7 +77,8 @@ exporters:
   # Prometheus exporter for metrics
   prometheus:
     endpoint: 0.0.0.0:8889
-    namespace: otel
+    # namespace removed to avoid breaking dashboard queries
+    # metrics will use their original names without prefix
     const_labels:
       environment: demo
 
