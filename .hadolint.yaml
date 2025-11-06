@@ -1,0 +1,26 @@
+# Hadolint configuration for OpenTelemetry Go compile-time instrumentation
+# See https://github.com/hadolint/hadolint for more information
+
+# Rules to ignore
+ignored:
+  # DL3018: Pin versions in apk add.
+  # Pinning apk package versions is impractical as they change between Alpine releases.
+  # We pin the Alpine base image version instead for reproducibility.
+  - DL3018
+  # DL3059: Multiple consecutive RUN instructions.
+  # We intentionally separate RUN commands for different build phases to optimize
+  # Docker layer caching and improve readability.
+  - DL3059
+
+# Trusted registries for base images
+trustedRegistries:
+  - docker.io
+  - gcr.io
+# Override specific rules
+# override:
+#   error:
+#     - DL3008
+#   warning:
+#     - DL3015
+#   info:
+#     - DL3059
