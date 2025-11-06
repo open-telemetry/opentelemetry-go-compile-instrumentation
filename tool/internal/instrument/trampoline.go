@@ -353,13 +353,8 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 			Params: paramTypes,
 		},
 		Decs: dst.FuncDeclDecorations{
-			NodeDecs: dst.NodeDecs{
-				Before: dst.NewLine,
-				Start: dst.Decorations{
-					fmt.Sprintf("//go:linkname %s %s.%s",
-						fnName, t.Path, fnName),
-				},
-			},
+			NodeDecs: ast.LineComments(
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName)),
 		},
 	}
 
