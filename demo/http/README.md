@@ -115,6 +115,9 @@ cd client
 
 # Combine options
 ./client -addr=http://localhost:8081 -name="Testing" -method=POST -count=3 -log-level=debug
+
+# Send a shutdown request to the server, this will exit the server process gracefully.
+./client -shutdown
 ```
 
 ## API Endpoints

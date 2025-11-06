@@ -142,13 +142,20 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 
 		// Find the go files belong to the package as dependency sources
 		for _, arg := range args {
-			if util.IsGoFile(arg) {
-				abs, err1 := filepath.Abs(arg)
-				if err1 != nil {
-					return nil, ex.Wrap(err1)
-				}
-				dep.Sources = append(dep.Sources, abs)
+			// Skip non-go files
+			if !util.IsGoFile(arg) {
+				continue
 			}
+			// This is a generated file during compilation, e.g. _cgo_gotypes.go
+			// We need to skip it as it is not part of the instrumentation target
+			if !util.PathExists(arg) {
+				continue
+			}
+			abs, err1 := filepath.Abs(arg)
+			if err1 != nil {
+				return nil, ex.Wrap(err1)
+			}
+			dep.Sources = append(dep.Sources, abs)
 		}
 		// Extract the version from the source file path if available
 		if len(dep.Sources) > 0 {

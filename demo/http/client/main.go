@@ -27,6 +27,7 @@ var (
 	method   = flag.String("method", "GET", "HTTP method to use (GET or POST)")
 	count    = flag.Int("count", 1, "Number of requests to send")
 	logLevel = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	shutdown = flag.Bool("shutdown", false, "Shutdown the server")
 	logger   *slog.Logger
 )
 
@@ -144,7 +145,9 @@ func main() {
 
 	ctx := context.Background()
 	url := *addr + "/greet"
-
+	if *shutdown {
+		url = *addr + "/shutdown"
+	}
 	logger.Info("client starting",
 		"server_address", *addr,
 		"method", *method,

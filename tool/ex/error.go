@@ -149,7 +149,7 @@ func Fatal(err error) {
 		for i, m := range e.message {
 			em += fmt.Sprintf("[%d] %s\n", i, m)
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "Error:\n%s\nStack:\n%s",
+		_, _ = fmt.Fprintf(os.Stderr, "Error:\n%s\nStack:\n%s\n",
 			em, strings.Join(e.frame, "\n"))
 		os.Exit(1)
 	}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -160,6 +161,10 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+func shutdownHandler(w http.ResponseWriter, _ *http.Request) {
+	os.Exit(0)
+}
+
 func main() {
 	flag.Parse()
 
@@ -186,6 +191,7 @@ func main() {
 
 	http.HandleFunc("/greet", greetHandler)
 	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc("/shutdown", shutdownHandler)
 
 	addr := fmt.Sprintf(":%d", *port)
 	logger.Info("server starting",
@@ -196,7 +202,14 @@ func main() {
 		"latency_disabled", *disableLatency,
 		"log_level", *logLevel)
 
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		logger.Error("server failed to listen", "error", err)
+		os.Exit(1)
+	}
+	defer listener.Close()
+	logger.Info("server started", "address", listener.Addr())
+	if err := http.Serve(listener, nil); err != nil {
 		logger.Error("server failed", "error", err)
 		os.Exit(1)
 	}
