@@ -4,23 +4,26 @@ version: '3.8'
 # Complete observability stack with Jaeger, Prometheus, OTel Collector, Grafana, and k6
 
 services:
-  # Jaeger - Distributed tracing backend (v2 with native OTLP support)
+  # Jaeger - Distributed tracing backend (v2 with native OTLP support + SPM)
   jaeger:
     image: jaegertracing/jaeger:2.11.0
     container_name: jaeger
     command:
-      - --set=receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
-      - --set=receivers.otlp.protocols.http.endpoint=0.0.0.0:4318
-      - --feature-gates=-telemetry.UseLocalHostAsDefaultMetricsAddress  # Expose telemetry on 0.0.0.0:8888
+      - --config=/etc/jaeger/config.yaml
+    volumes:
+      - ./jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+      - ./jaeger/ui-config.json:/etc/jaeger/ui-config.json:ro
     ports:
       - "16686:16686"  # Jaeger UI
       - "4317"  # OTLP gRPC (internal)
       - "4318"  # OTLP HTTP (internal)
       - "14269:8888"  # Internal telemetry metrics (Jaeger's port 8888 mapped to host 14269)
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
+      - "13133"  # Health check endpoint (internal)
     networks:
       - observability
+    depends_on:
+      prometheus:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686"]
       interval: 10s
