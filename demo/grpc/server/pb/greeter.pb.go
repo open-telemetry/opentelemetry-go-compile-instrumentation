@@ -112,6 +112,86 @@ func (x *HelloReply) GetMessage() string {
 	return ""
 }
 
+type ShutdownRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownRequest) Reset() {
+	*x = ShutdownRequest{}
+	mi := &file_greeter_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownRequest) ProtoMessage() {}
+
+func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_greeter_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
+func (*ShutdownRequest) Descriptor() ([]byte, []int) {
+	return file_greeter_proto_rawDescGZIP(), []int{2}
+}
+
+type ShutdownReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownReply) Reset() {
+	*x = ShutdownReply{}
+	mi := &file_greeter_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownReply) ProtoMessage() {}
+
+func (x *ShutdownReply) ProtoReflect() protoreflect.Message {
+	mi := &file_greeter_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownReply.ProtoReflect.Descriptor instead.
+func (*ShutdownReply) Descriptor() ([]byte, []int) {
+	return file_greeter_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ShutdownReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_greeter_proto protoreflect.FileDescriptor
 
 const file_greeter_proto_rawDesc = "" +
@@ -121,10 +201,14 @@ const file_greeter_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"&\n" +
 	"\n" +
 	"HelloReply\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage2\x87\x01\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\x11\n" +
+	"\x0fShutdownRequest\")\n" +
+	"\rShutdownReply\x12\x18\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage2\xc7\x01\n" +
 	"\aGreeter\x128\n" +
 	"\bSayHello\x12\x15.greeter.HelloRequest\x1a\x13.greeter.HelloReply\"\x00\x12B\n" +
-	"\x0eSayHelloStream\x12\x15.greeter.HelloRequest\x1a\x13.greeter.HelloReply\"\x00(\x010\x01BXZVgithub.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server/pbb\x06proto3"
+	"\x0eSayHelloStream\x12\x15.greeter.HelloRequest\x1a\x13.greeter.HelloReply\"\x00(\x010\x01\x12>\n" +
+	"\bShutdown\x12\x18.greeter.ShutdownRequest\x1a\x16.greeter.ShutdownReply\"\x00BXZVgithub.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server/pbb\x06proto3"
 
 var (
 	file_greeter_proto_rawDescOnce sync.Once
@@ -138,18 +222,22 @@ func file_greeter_proto_rawDescGZIP() []byte {
 	return file_greeter_proto_rawDescData
 }
 
-var file_greeter_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_greeter_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_greeter_proto_goTypes = []any{
-	(*HelloRequest)(nil), // 0: greeter.HelloRequest
-	(*HelloReply)(nil),   // 1: greeter.HelloReply
+	(*HelloRequest)(nil),    // 0: greeter.HelloRequest
+	(*HelloReply)(nil),      // 1: greeter.HelloReply
+	(*ShutdownRequest)(nil), // 2: greeter.ShutdownRequest
+	(*ShutdownReply)(nil),   // 3: greeter.ShutdownReply
 }
 var file_greeter_proto_depIdxs = []int32{
 	0, // 0: greeter.Greeter.SayHello:input_type -> greeter.HelloRequest
 	0, // 1: greeter.Greeter.SayHelloStream:input_type -> greeter.HelloRequest
-	1, // 2: greeter.Greeter.SayHello:output_type -> greeter.HelloReply
-	1, // 3: greeter.Greeter.SayHelloStream:output_type -> greeter.HelloReply
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
+	2, // 2: greeter.Greeter.Shutdown:input_type -> greeter.ShutdownRequest
+	1, // 3: greeter.Greeter.SayHello:output_type -> greeter.HelloReply
+	1, // 4: greeter.Greeter.SayHelloStream:output_type -> greeter.HelloReply
+	3, // 5: greeter.Greeter.Shutdown:output_type -> greeter.ShutdownReply
+	3, // [3:6] is the sub-list for method output_type
+	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -166,7 +254,7 @@ func file_greeter_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_greeter_proto_rawDesc), len(file_greeter_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
