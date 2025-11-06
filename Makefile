@@ -53,15 +53,22 @@ install: ## Install otel to $$GOPATH/bin
 	@go mod tidy
 	go install -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" ./$(TOOL_DIR)
 
+.ONESHELL:
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
-	@rm -rf $(INST_PKG_TMP)
-	@cp -a pkg $(INST_PKG_TMP)
-	@cd $(INST_PKG_TMP) && go mod tidy
-	@tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
-	@mkdir -p tool/data/
-	@mv $(INST_PKG_GZIP) tool/data/
-	@rm -rf $(INST_PKG_TMP)
+	@set -euo pipefail
+	rm -rf $(INST_PKG_TMP)
+	if [ ! -d pkg ]; then \
+		echo "Error: pkg directory does not exist"; \
+		exit 1; \
+	fi
+	cp -r pkg $(INST_PKG_TMP)
+	(cd $(INST_PKG_TMP) && go mod tidy)
+	tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
+	mkdir -p tool/data/
+	mv $(INST_PKG_GZIP) tool/data/
+	rm -rf $(INST_PKG_TMP)
+	@echo "Package created successfully at tool/data/$(INST_PKG_GZIP)"
 
 build-demo: ## Build all demos
 build-demo: build-demo-grpc build-demo-http
@@ -172,11 +179,25 @@ test-unit: package gotestfmt
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
 
 .ONESHELL:
+test-unit/coverage: ## Run unit tests with coverage report
+test-unit/coverage: package gotestfmt
+	@echo "Running unit tests with coverage report..."
+	set -euo pipefail
+	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-unit.log | gotestfmt
+
+.ONESHELL:
 test-integration: ## Run integration tests
 test-integration: build gotestfmt
 	@echo "Running integration tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -run TestBasic ./test/... 2>&1 | tee ./gotest-integration.log | gotestfmt
+
+.ONESHELL:
+test-integration/coverage: ## Run integration tests with coverage report
+test-integration/coverage: build gotestfmt
+	@echo "Running integration tests with coverage report..."
+	set -euo pipefail
+	go test -json -v -shuffle=on -timeout=10m -count=1 -run TestBasic ./test/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log | gotestfmt
 
 # Clean targets
 

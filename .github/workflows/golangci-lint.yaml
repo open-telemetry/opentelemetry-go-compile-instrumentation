@@ -30,5 +30,3 @@ jobs:
         uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9  # v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-      - name: Check Typos
-        uses: crate-ci/typos@0c17dabcee8b8f1957fa917d17393a23e02e1583  # v1.36.3
