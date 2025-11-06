@@ -465,6 +465,81 @@ grafana:
    - Go to Dashboards → Import
    - Upload JSON file from `grafana/dashboards/dashboards/`
 
+## Configuration Validation
+
+### Built-in Validation Tools
+
+The observability stack includes several validation tools to check configurations before deployment:
+
+#### Validate All Configurations
+
+```bash
+make validate-all
+```
+
+This runs validation for:
+
+- Docker Compose configuration
+- OpenTelemetry Collector configuration
+- Prometheus configuration
+
+#### Individual Validation
+
+**Docker Compose:**
+
+```bash
+make validate
+# Or manually:
+docker-compose config
+```
+
+**OpenTelemetry Collector:**
+
+```bash
+make validate-otel
+# Or manually:
+docker-compose exec otel-collector /otelcol-contrib validate --config=/etc/otelcol-contrib/config.yaml
+```
+
+**Prometheus:**
+
+```bash
+make validate-prometheus
+# Or manually:
+docker-compose exec prometheus promtool check config /etc/prometheus/prometheus.yml
+```
+
+### External Validation Tools
+
+For more comprehensive validation and best practices checking:
+
+1. **otel-config-validator** (by Lightstep/AWS):
+   - GUI: <https://github.com/lightstep/otel-config-validator>
+   - Validates OTel configurations
+   - Identifies common misconfigurations
+
+2. **OTelBin** (online tool):
+   - URL: <https://www.otelbin.io/>
+   - Visualizes OTel Collector pipelines
+   - YAML linting and syntax highlighting
+
+3. **CoGuard CLI**:
+   - Security-focused configuration scanner
+   - Detects misconfigurations and vulnerabilities
+   - Install: <https://www.coguard.io/>
+
+### Best Practice: Validate Before Deploy
+
+Always validate configurations before deploying:
+
+```bash
+# Before starting services
+make validate-all
+
+# If validation passes, then start
+make start
+```
+
 ## Maintenance
 
 ### Update Images

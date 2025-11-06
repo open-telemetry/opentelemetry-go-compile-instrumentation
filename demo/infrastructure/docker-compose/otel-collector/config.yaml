@@ -2,6 +2,26 @@
 # Receives traces and metrics from instrumented Go applications
 # Exports traces to Jaeger and exposes metrics for Prometheus
 
+extensions:
+  # Health check extension for container healthcheck
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+connectors:
+  # Spanmetrics connector - generates metrics from spans
+  spanmetrics:
+    histogram:
+      explicit:
+        buckets: [100us, 1ms, 2ms, 6ms, 10ms, 100ms, 250ms]
+    dimensions:
+      - name: http.method
+        default: GET
+      - name: http.status_code
+      - name: service.version
+    exemplars:
+      enabled: true
+    metrics_flush_interval: 15s
+
 receivers:
   # OTLP receiver for traces and metrics
   otlp:
@@ -11,6 +31,20 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+
+  # Prometheus receiver to scrape Jaeger metrics
+  # Jaeger v2 exposes internal telemetry on port 8888 (same as OTel Collector)
+  # Mapped to host port 8889 to avoid conflict
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: jaeger
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['jaeger:8888']  # Jaeger internal telemetry port
+              labels:
+                service: jaeger
+                component: tracing
 
 processors:
   # Batch processor for improved performance
@@ -45,23 +79,28 @@ exporters:
       environment: demo
 
 service:
+  extensions: [health_check]
+
   pipelines:
-    # Traces pipeline
+    # Traces pipeline - exports to Jaeger and spanmetrics connector
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [debug, otlp/jaeger]
+      exporters: [debug, otlp/jaeger, spanmetrics]
 
-    # Metrics pipeline
+    # Metrics pipeline - receives from applications via OTLP and scrapes Jaeger
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, prometheus]
       processors: [memory_limiter, batch]
       exporters: [debug, prometheus]
+
+    # Spanmetrics pipeline - receives span-derived metrics from connector
+    metrics/spanmetrics:
+      receivers: [spanmetrics]
+      processors: [batch]
+      exporters: [prometheus]
 
   # Telemetry configuration for the collector itself
   telemetry:
     logs:
       level: info
-    metrics:
-      level: detailed
-      address: 0.0.0.0:8888

@@ -7,21 +7,24 @@ const errorRate = new Rate('errors');
 const successRate = new Rate('success');
 const requestDuration = new Trend('request_duration');
 
-// Test configuration
+// Test configuration - Continuous waves pattern
 export const options = {
-  // Load testing stages
+  // Continuous load with periodic waves
   stages: [
-    { duration: '30s', target: 10 },  // Ramp-up to 10 users
-    { duration: '2m', target: 20 },   // Ramp-up to 20 users
-    { duration: '3m', target: 20 },   // Stay at 20 users
-    { duration: '1m', target: 50 },   // Spike to 50 users
-    { duration: '2m', target: 20 },   // Scale back to 20 users
-    { duration: '30s', target: 0 },   // Ramp-down to 0 users
+    { duration: '2m', target: 10 },   // Baseline - 10 VUs
+    { duration: '1m', target: 25 },   // Wave up to 25 VUs
+    { duration: '2m', target: 25 },   // Sustain at 25 VUs
+    { duration: '1m', target: 10 },   // Wave down to 10 VUs
+    { duration: '2m', target: 10 },   // Baseline - 10 VUs
+    { duration: '1m', target: 30 },   // Spike to 30 VUs
+    { duration: '1m', target: 10 },   // Back to baseline
+    { duration: '3m', target: 10 },   // Long baseline period
+    // Pattern repeats - use Ctrl+C to stop or set --duration flag
   ],
 
   // Thresholds - define SLOs
   thresholds: {
-    'http_req_duration': ['p(95)<500', 'p(99)<1000'], // 95% of requests under 500ms, 99% under 1s
+    'http_req_duration': ['p(95)<500', 'p(99)<1000'], // 95% of requests under 500ms
     'http_req_failed': ['rate<0.05'],                  // Error rate below 5%
     'errors': ['rate<0.05'],                           // Custom error rate below 5%
     'success': ['rate>0.95'],                          // Success rate above 95%
@@ -35,33 +38,21 @@ export const options = {
 // Base URL - using Docker service name
 const BASE_URL = 'http://http-server:8080';
 
-// Endpoints to test
-const endpoints = [
-  { method: 'GET', url: '/api/hello', weight: 40 },
-  { method: 'GET', url: '/api/users', weight: 30 },
-  { method: 'POST', url: '/api/data', weight: 20, payload: JSON.stringify({ test: 'data' }) },
-  { method: 'GET', url: '/api/slow', weight: 10 },  // Intentionally slow endpoint
-];
+// Endpoint weights for realistic traffic distribution
+const ENDPOINT_GET_WEIGHT = 60;    // 60% GET requests
+const ENDPOINT_POST_WEIGHT = 40;   // 40% POST requests
 
-// Helper function to select endpoint based on weight
-function selectEndpoint() {
+// Helper function to select request method based on weight
+function selectMethod() {
   const random = Math.random() * 100;
-  let cumulative = 0;
-
-  for (const endpoint of endpoints) {
-    cumulative += endpoint.weight;
-    if (random <= cumulative) {
-      return endpoint;
-    }
-  }
-
-  return endpoints[0]; // Fallback
+  return random < ENDPOINT_GET_WEIGHT ? 'GET' : 'POST';
 }
 
-// Main test function
+// Main test function - runs for each virtual user iteration
 export default function () {
-  const endpoint = selectEndpoint();
-  const url = `${BASE_URL}${endpoint.url}`;
+  const method = selectMethod();
+  const name = `k6-user-${__VU}-${Date.now()}`; // Unique name per request
+  const url = `${BASE_URL}/greet`;
 
   let response;
   const params = {
@@ -70,16 +61,18 @@ export default function () {
       'User-Agent': 'k6-load-test',
     },
     tags: {
-      endpoint: endpoint.url,
-      method: endpoint.method,
+      endpoint: '/greet',
+      method: method,
     },
   };
 
-  // Make request
-  if (endpoint.method === 'POST') {
-    response = http.post(url, endpoint.payload, params);
+  // Make request based on method
+  if (method === 'POST') {
+    const payload = JSON.stringify({ name: name });
+    response = http.post(url, payload, params);
   } else {
-    response = http.get(url, params);
+    const getURL = `${url}?name=${name}`;
+    response = http.get(getURL, params);
   }
 
   // Record custom metrics
@@ -87,9 +80,25 @@ export default function () {
 
   // Checks - validate response
   const success = check(response, {
-    'status is 200-299': (r) => r.status >= 200 && r.status < 300,
+    'status is 200': (r) => r.status === 200,
     'response time < 2s': (r) => r.timings.duration < 2000,
     'response has body': (r) => r.body && r.body.length > 0,
+    'response is valid JSON': (r) => {
+      try {
+        JSON.parse(r.body);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    },
+    'message contains Hello': (r) => {
+      try {
+        const json = JSON.parse(r.body);
+        return json.message && json.message.includes('Hello');
+      } catch (e) {
+        return false;
+      }
+    },
   });
 
   // Update custom metrics
@@ -98,24 +107,43 @@ export default function () {
 
   // Log errors for debugging
   if (!success) {
-    console.error(`Request failed: ${endpoint.method} ${endpoint.url} - Status: ${response.status}`);
+    console.error(`Request failed: ${method} /greet - Status: ${response.status}, Body: ${response.body.substring(0, 100)}`);
+  } else if (__ITER % 100 === 0) {
+    // Log every 100th successful request to avoid log spam
+    try {
+      const json = JSON.parse(response.body);
+      console.log(`[VU ${__VU}] ${method} /greet - ${json.message} (${response.timings.duration.toFixed(0)}ms)`);
+    } catch (e) {
+      // Ignore JSON parse errors in logging
+    }
   }
 
   // Think time - simulate real user behavior
-  sleep(Math.random() * 2 + 1); // Random sleep between 1-3 seconds
+  // Random sleep between 1-3 seconds
+  sleep(Math.random() * 2 + 1);
 }
 
 // Setup function - runs once at the beginning
 export function setup() {
+  console.log('='.repeat(60));
   console.log('Starting HTTP load test');
   console.log(`Target: ${BASE_URL}`);
-  console.log('Testing endpoints:', endpoints.map(e => `${e.method} ${e.url}`).join(', '));
+  console.log('Endpoints:');
+  console.log(`  - GET  /greet?name=<name> (${ENDPOINT_GET_WEIGHT}%)`);
+  console.log(`  - POST /greet (${ENDPOINT_POST_WEIGHT}%)`);
+  console.log('Pattern: Continuous waves with periodic scaling');
+  console.log('Press Ctrl+C to stop the test');
+  console.log('='.repeat(60));
 
-  // Health check
+  // Health check before starting
   const healthCheck = http.get(`${BASE_URL}/health`);
-  if (healthCheck.status !== 200) {
-    console.error('Health check failed - server may not be ready');
+  if (healthCheck.status === 200) {
+    console.log('✓ Health check passed - server is ready');
+  } else {
+    console.warn(`⚠ Health check failed - status: ${healthCheck.status}`);
+    console.warn('  Continuing with test anyway...');
   }
+  console.log('='.repeat(60));
 
   return { startTime: new Date() };
 }
@@ -124,13 +152,15 @@ export function setup() {
 export function teardown(data) {
   const endTime = new Date();
   const duration = (endTime - data.startTime) / 1000;
+  console.log('='.repeat(60));
   console.log(`Test completed. Duration: ${duration.toFixed(2)}s`);
+  console.log('='.repeat(60));
 }
 
 // Handle summary - custom summary output
 export function handleSummary(data) {
   return {
     'stdout': JSON.stringify(data, null, 2),
-    '/tmp/k6-summary.json': JSON.stringify(data),
+    '/tmp/k6-http-summary.json': JSON.stringify(data),
   };
 }

@@ -144,9 +144,32 @@ pull: ## Pull latest images
 
 update: pull restart ## Update images and restart services
 
-validate: ## Validate docker-compose configuration
+validate-docker-compose: ## Validate docker-compose configuration
 	@echo "$(BLUE)Validating configuration...$(NC)"
 	@docker-compose config > /dev/null && echo "$(GREEN)✓ Configuration valid$(NC)" || echo "$(RED)✗ Configuration invalid$(NC)"
+
+validate-otel: ## Validate OpenTelemetry Collector configuration
+	@echo "$(BLUE)Validating OTel Collector configuration...$(NC)"
+	@docker-compose exec -T otel-collector /otelcol-contrib validate --config=/etc/otelcol-contrib/config.yaml && \
+		echo "$(GREEN)✓ OTel Collector configuration valid$(NC)" || \
+		echo "$(RED)✗ OTel Collector configuration invalid$(NC)"
+
+validate-otel-local: ## Validate OTel Collector config locally (requires otelcol-contrib binary)
+	@echo "$(BLUE)Validating OTel Collector configuration locally...$(NC)"
+	@if command -v otelcol-contrib > /dev/null 2>&1; then \
+		otelcol-contrib validate --config=otel-collector/config.yaml && \
+		echo "$(GREEN)✓ Configuration valid$(NC)"; \
+	else \
+		echo "$(YELLOW)! otelcol-contrib not found. Install from: https://github.com/open-telemetry/opentelemetry-collector-releases$(NC)"; \
+	fi
+
+validate-prometheus: ## Validate Prometheus configuration
+	@echo "$(BLUE)Validating Prometheus configuration...$(NC)"
+	@docker-compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml && \
+		echo "$(GREEN)✓ Prometheus configuration valid$(NC)" || \
+		echo "$(RED)✗ Prometheus configuration invalid$(NC)"
+
+validate: validate-docker-compose validate-otel validate-prometheus ## Validate all configurations (docker-compose, OTel, Prometheus)
 
 metrics-otel: ## Show OpenTelemetry Collector metrics
 	@echo "$(BLUE)OpenTelemetry Collector Metrics:$(NC)"

@@ -7,21 +7,24 @@ const errorRate = new Rate('errors');
 const successRate = new Rate('success');
 const requestDuration = new Trend('request_duration');
 
-// Test configuration
+// Test configuration - Continuous waves pattern
 export const options = {
-  // Load testing stages
+  // Continuous load with periodic waves
   stages: [
-    { duration: '30s', target: 10 },  // Ramp-up to 10 users
-    { duration: '2m', target: 20 },   // Ramp-up to 20 users
-    { duration: '3m', target: 20 },   // Stay at 20 users
-    { duration: '1m', target: 50 },   // Spike to 50 users
-    { duration: '2m', target: 20 },   // Scale back to 20 users
-    { duration: '30s', target: 0 },   // Ramp-down to 0 users
+    { duration: '2m', target: 10 },   // Baseline - 10 VUs
+    { duration: '1m', target: 25 },   // Wave up to 25 VUs
+    { duration: '2m', target: 25 },   // Sustain at 25 VUs
+    { duration: '1m', target: 10 },   // Wave down to 10 VUs
+    { duration: '2m', target: 10 },   // Baseline - 10 VUs
+    { duration: '1m', target: 30 },   // Spike to 30 VUs
+    { duration: '1m', target: 10 },   // Back to baseline
+    { duration: '3m', target: 10 },   // Long baseline period
+    // Pattern repeats - use Ctrl+C to stop or set --duration flag
   ],
 
   // Thresholds - define SLOs
   thresholds: {
-    'grpc_req_duration': ['p(95)<300', 'p(99)<500'], // gRPC should be faster than HTTP
+    'grpc_req_duration': ['p(95)<300', 'p(99)<500'], // gRPC should be fast
     'errors': ['rate<0.05'],                          // Error rate below 5%
     'success': ['rate>0.95'],                         // Success rate above 95%
   },
@@ -33,10 +36,14 @@ export const options = {
 // gRPC client
 const client = new grpc.Client();
 
+// Load proto file - mounted from demo/grpc/server/greeter.proto
+// This ensures k6 always uses the same proto definition as the server
+client.load(['/proto'], 'greeter.proto');
+
 // Base URL - using Docker service name
 const GRPC_SERVER = 'grpc-server:50051';
 
-// Main test function
+// Main test function - runs for each virtual user iteration
 export default function () {
   // Connect to gRPC server
   client.connect(GRPC_SERVER, {
@@ -44,22 +51,16 @@ export default function () {
     timeout: '10s',
   });
 
-  // Example: Call a unary RPC method
-  // Replace with your actual service and method names
+  // Prepare request with unique name for each virtual user
   const request = {
-    name: `user-${__VU}`,  // VU = Virtual User
-    message: 'Hello from k6',
+    name: `k6-user-${__VU}-${Date.now()}`,  // VU = Virtual User
   };
 
   const startTime = new Date();
 
   try {
-    // Replace 'YourService/YourMethod' with actual gRPC service/method
-    // Example: const response = client.invoke('demo.GreetingService/SayHello', request);
-
-    // For now, this is a template - uncomment and modify when gRPC demo is ready
-    /*
-    const response = client.invoke('demo.GreetingService/SayHello', request);
+    // Call the gRPC method: greeter.Greeter/SayHello
+    const response = client.invoke('greeter.Greeter/SayHello', request);
 
     const duration = new Date() - startTime;
     requestDuration.add(duration);
@@ -67,8 +68,9 @@ export default function () {
     // Check response
     const success = check(response, {
       'status is OK': (r) => r && r.status === grpc.StatusOK,
-      'response has data': (r) => r && r.message !== undefined,
+      'response has message': (r) => r && r.message && r.message.message !== undefined,
       'response time < 500ms': () => duration < 500,
+      'message contains Hello': (r) => r && r.message && r.message.message.includes('Hello'),
     });
 
     errorRate.add(!success);
@@ -76,12 +78,10 @@ export default function () {
 
     if (!success) {
       console.error(`gRPC request failed: ${response.error ? response.error.message : 'unknown error'}`);
+    } else if (__ITER % 100 === 0) {
+      // Log every 100th successful request to avoid log spam
+      console.log(`[VU ${__VU}] Received: ${response.message.message} (${duration}ms)`);
     }
-    */
-
-    // Placeholder for template
-    console.log('gRPC load test template - update with actual service methods');
-    sleep(1);
 
   } catch (error) {
     console.error(`gRPC error: ${error}`);
@@ -92,14 +92,20 @@ export default function () {
   }
 
   // Think time - simulate real user behavior
-  sleep(Math.random() * 2 + 1); // Random sleep between 1-3 seconds
+  // Random sleep between 1-3 seconds
+  sleep(Math.random() * 2 + 1);
 }
 
 // Setup function - runs once at the beginning
 export function setup() {
+  console.log('='.repeat(60));
   console.log('Starting gRPC load test');
   console.log(`Target: ${GRPC_SERVER}`);
-  console.log('NOTE: This is a template - update with actual gRPC service definitions');
+  console.log(`Service: greeter.Greeter`);
+  console.log(`Method: SayHello`);
+  console.log('Pattern: Continuous waves with periodic scaling');
+  console.log('Press Ctrl+C to stop the test');
+  console.log('='.repeat(60));
 
   return { startTime: new Date() };
 }
@@ -108,7 +114,9 @@ export function setup() {
 export function teardown(data) {
   const endTime = new Date();
   const duration = (endTime - data.startTime) / 1000;
+  console.log('='.repeat(60));
   console.log(`Test completed. Duration: ${duration.toFixed(2)}s`);
+  console.log('='.repeat(60));
 }
 
 // Handle summary - custom summary output
@@ -118,17 +126,3 @@ export function handleSummary(data) {
     '/tmp/k6-grpc-summary.json': JSON.stringify(data),
   };
 }
-
-/*
- * INSTRUCTIONS FOR USING THIS TEMPLATE:
- *
- * 1. Update GRPC_SERVER with the actual gRPC server address
- * 2. Replace 'demo.GreetingService/SayHello' with your actual service/method
- * 3. Update the request payload to match your proto definitions
- * 4. Modify checks to validate your specific response structure
- * 5. Consider adding streaming RPC examples if needed
- * 6. Update thresholds based on your performance requirements
- *
- * For more information on k6 gRPC support:
- * https://k6.io/docs/using-k6/protocols/grpc/
- */
