@@ -1,18 +1,18 @@
-name: Checkmake
+name: Check Makefiles
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'Makefile'
-      - '.checkmake'
-      - '.github/workflows/checkmake.yaml'
+      - "Makefile"
+      - ".checkmake"
+      - ".github/workflows/checkmake.yaml"
   pull_request:
     paths:
-      - 'Makefile'
-      - '.checkmake'
-      - '.github/workflows/checkmake.yaml'
+      - "Makefile"
+      - ".checkmake"
+      - ".github/workflows/checkmake.yaml"
 
 jobs:
   checkmake:
@@ -24,7 +24,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # ratchet:actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
 
       - name: Install checkmake
         run: go install github.com/checkmake/checkmake/cmd/checkmake@latest

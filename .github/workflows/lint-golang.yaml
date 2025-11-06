@@ -1,4 +1,4 @@
-name: Linters
+name: Check Go Code
 on:
   push:
     branches:
@@ -12,8 +12,8 @@ env:
   GOLANGCI_LINT_VERSION: v2.1.6
 
 jobs:
-  golangci:
-    name: Format and Lint
+  golangci-lint:
+    name: Check Go Code
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0

@@ -1,22 +1,26 @@
-name: YAML Format Check
+name: Check GitHub Actions
 
 on:
   pull_request:
     paths:
-      - "**/*.yml"
-      - "**/*.yaml"
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".github/actions/**/action.yml"
+      - ".github/actions/**/action.yaml"
   push:
     branches: [main]
     paths:
-      - "**/*.yml"
-      - "**/*.yaml"
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".github/actions/**/action.yml"
+      - ".github/actions/**/action.yaml"
 
 permissions:
   contents: read
 
 jobs:
-  yaml-format:
-    name: Check YAML Formatting
+  actionlint:
+    name: Lint GitHub Actions
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
@@ -28,5 +32,5 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Check YAML formatting
-        run: make lint/yaml
+      - name: Lint GitHub Actions
+        run: make lint/action

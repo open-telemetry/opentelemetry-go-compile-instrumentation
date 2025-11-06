@@ -1,4 +1,4 @@
-name: Markdown Lint
+name: Check Markdown Files
 on:
   pull_request:
     paths:
