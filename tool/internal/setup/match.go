@@ -164,6 +164,11 @@ func (sp *SetupPhase) runMatch(dependency *Dependency, allRules []rule.InstRule)
 		// available list to be processed later.
 		availables = append(availables, r)
 	}
+
+	if len(availables) == 0 {
+		return set, nil
+	}
+
 	// Precise matching
 	for _, source := range dependency.Sources {
 		// Parse the source code. Since the only purpose here is to match,
