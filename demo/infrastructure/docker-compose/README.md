@@ -205,8 +205,109 @@ curl http://localhost:3000/api/datasources
 **Export dashboard:**
 
 ```bash
-curl http://localhost:3000/api/dashboards/uid/go-metrics | jq > exported-dashboard.json
+curl http://localhost:3000/api/dashboards/uid/go-runtime-prometheus | jq > exported-dashboard.json
 ```
+
+#### Go Runtime Dashboards
+
+Three dashboards are available for monitoring Go runtime metrics:
+
+##### 1. Go Runtime Metrics (Prometheus)
+
+- **Purpose**: Monitor infrastructure components (Jaeger, Prometheus, OTel Collector)
+- **Metrics Format**: Traditional Prometheus `go_collector` metrics
+- **Dashboard UID**: `go-runtime-prometheus`
+- **Current Status**: ✅ Active - showing real-time metrics from all infrastructure services
+- **Features**:
+  - Service selector dropdown to filter by specific services
+  - Memory usage metrics (heap, stack, allocations)
+  - Goroutine count and growth patterns
+  - Garbage collection metrics (duration, frequency)
+  - System threads and resource usage
+
+**Example Prometheus queries:**
+
+```promql
+# Jaeger memory usage
+go_memstats_heap_alloc_bytes{service="jaeger"}
+
+# All services goroutines
+go_goroutines{service=~"jaeger|prometheus|otel-collector"}
+
+# GC duration for all infrastructure
+rate(go_gc_duration_seconds_sum{service=~".*"}[5m]) / rate(go_gc_duration_seconds_count{service=~".*"}[5m])
+```
+
+**Access the dashboard:**
+
+```bash
+# Direct URL
+open http://localhost:3000/d/go-runtime-prometheus
+```
+
+##### 2. Go Runtime Metrics (OpenTelemetry)
+
+- **Purpose**: Monitor demo applications with OTel runtime instrumentation
+- **Metrics Format**: OpenTelemetry semantic convention metrics
+- **Dashboard UID**: `go-runtime-otel`
+- **Current Status**: 🔜 Pending - will populate when demo apps include runtime instrumentation
+- **Metrics Expected**:
+  - `go.memory.used` - Memory in use by Go runtime
+  - `go.memory.limit` - Go memory limit
+  - `go.goroutine.count` - Number of goroutines
+  - `go.gc.duration` - GC pause duration
+  - `go.processor.limit` - Number of OS threads
+
+**Note**: This dashboard uses metrics from `go.opentelemetry.io/contrib/instrumentation/runtime` which will be automatically added to demo applications when the compile-time instrumentation tool adds runtime metrics support.
+
+**Access the dashboard:**
+
+```bash
+# Direct URL
+open http://localhost:3000/d/go-runtime-otel
+```
+
+##### 3. OTel Collector Runtime Metrics
+
+- **Purpose**: Monitor OTel Collector-based services (Jaeger v2, OTel Collector)
+- **Metrics Format**: OpenTelemetry Collector internal telemetry metrics
+- **Dashboard UID**: `otel-collector-runtime`
+- **Current Status**: ✅ Active - showing real-time metrics from Jaeger and OTel Collector
+- **Features**:
+  - Service selector dropdown to filter by specific services
+  - Heap memory allocation tracking
+  - Process memory (RSS) monitoring
+  - CPU usage rate
+  - Memory allocation rate
+  - Process uptime
+
+**Metrics displayed:**
+
+```promql
+# Jaeger heap memory
+otel_otelcol_process_runtime_heap_alloc_bytes_bytes{service="jaeger"}
+
+# OTel Collector heap memory
+otelcol_process_runtime_heap_alloc_bytes{service="otel-collector"}
+
+# CPU usage rate for all services
+rate(otelcol_process_cpu_seconds{service=~".*"}[5m])
+```
+
+**Access the dashboard:**
+
+```bash
+# Direct URL
+open http://localhost:3000/d/otel-collector-runtime
+```
+
+**Note**: This dashboard shows metrics from the OpenTelemetry Collector's internal telemetry system. Jaeger v2 is built on the OTel Collector and exposes these metrics. The metric names differ slightly depending on the scrape source (direct vs. via prometheus receiver).
+
+**References:**
+
+- [OTel Collector Internal Telemetry](https://opentelemetry.io/docs/collector/internal-telemetry/#basic-level-metrics)
+- [OTel Go Runtime Metrics Specification](https://opentelemetry.io/docs/specs/semconv/runtime/go-metrics/)
+- [Jaeger Monitoring Documentation](https://www.jaegertracing.io/docs/2.11/operations/monitoring/#go-runtime-metrics)
 
 ## Advanced Usage
 
