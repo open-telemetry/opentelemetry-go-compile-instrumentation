@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -225,15 +226,27 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, nil
 	}
 
+	// Pre-index rules by target
+	rulesByTarget := make(map[string][]rule.InstRule)
+	for _, r := range allRules {
+		target := r.GetTarget()
+		rulesByTarget[target] = append(rulesByTarget[target], r)
+	}
+
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRuleSet, 0)
 	var mu sync.Mutex
 	g, _ := errgroup.WithContext(ctx)
+	g.SetLimit(runtime.NumCPU() * 2)
 
 	for _, dep := range deps {
-		dep := dep // capture loop variable
 		g.Go(func() error {
-			m, err1 := sp.runMatch(dep, allRules)
+			relevantRules := rulesByTarget[dep.ImportPath]
+			if len(relevantRules) == 0 {
+				return nil
+			}
+
+			m, err1 := sp.runMatch(dep, relevantRules)
 			if err1 != nil {
 				return err1
 			}
