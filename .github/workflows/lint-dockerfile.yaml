@@ -2,9 +2,17 @@ name: Check Dockerfiles
 
 on:
   pull_request:
+    paths:
+      - '**/*Dockerfile*'
+      - '.hadolint.yaml'
+      - '.github/workflows/lint-dockerfile.yaml'
   push:
     branches:
       - main
+    paths:
+      - '**/*Dockerfile*'
+      - '.hadolint.yaml'
+      - '.github/workflows/lint-dockerfile.yaml'
 
 permissions:
   contents: read

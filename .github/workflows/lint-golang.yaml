@@ -3,7 +3,15 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '**/*.go'
+      - '.golangci.yml'
+      - '.github/workflows/lint-golang.yaml'
   pull_request:
+    paths:
+      - '**/*.go'
+      - '.golangci.yml'
+      - '.github/workflows/lint-golang.yaml'
 
 permissions:
   contents: read
