@@ -20,6 +20,13 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
+const (
+	// matchDepsConcurrencyMultiplier controls the maximum number of concurrent goroutines
+	// used in the matchDeps function. It multiplies the number of CPUs to determine
+	// the concurrency limit for errgroup execution within matchDeps.
+	matchDepsConcurrencyMultiplier = 2
+)
+
 // createRuleFromFields creates a rule instance based on the field type present in the YAML
 //
 //nolint:nilnil // factory function
@@ -237,7 +244,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 	matched := make([]*rule.InstRuleSet, 0)
 	var mu sync.Mutex
 	g, _ := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.NumCPU() * 2)
+	g.SetLimit(runtime.NumCPU() * matchDepsConcurrencyMultiplier)
 
 	for _, dep := range deps {
 		g.Go(func() error {
@@ -259,7 +266,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		})
 	}
 
-	if err := g.Wait(); err != nil {
+	if err = g.Wait(); err != nil {
 		return nil, err
 	}
 	return matched, nil
