@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/dave/dst"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 

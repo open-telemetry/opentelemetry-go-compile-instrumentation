@@ -6,11 +6,12 @@ package helloworld
 import (
 	"log/slog"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/instrumentation"
+
 	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/http"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/net"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/sdk/instrumentation"
 )
 
 type HelloWorldRequest struct{}

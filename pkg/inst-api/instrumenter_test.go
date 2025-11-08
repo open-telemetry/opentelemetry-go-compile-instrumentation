@@ -9,16 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
-
-	"go.opentelemetry.io/otel/attribute"
 )
 
 type testRequest struct{}

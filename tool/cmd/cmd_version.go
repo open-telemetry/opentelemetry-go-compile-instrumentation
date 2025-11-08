@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/urfave/cli/v3"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 //nolint:gochecknoglobals // Implementation of a CLI command
