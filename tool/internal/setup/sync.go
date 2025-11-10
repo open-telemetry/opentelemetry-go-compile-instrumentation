@@ -9,10 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/mod/modfile"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
-	"golang.org/x/mod/modfile"
 )
 
 func parseGoMod(gomod string) (*modfile.File, error) {

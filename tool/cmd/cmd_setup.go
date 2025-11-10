@@ -6,9 +6,10 @@ package main
 import (
 	"context"
 
+	"github.com/urfave/cli/v3"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
-	"github.com/urfave/cli/v3"
 )
 
 //nolint:gochecknoglobals // Implementation of a CLI command

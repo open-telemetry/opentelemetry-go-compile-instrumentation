@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/dave/dst"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -353,13 +354,8 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 			Params: paramTypes,
 		},
 		Decs: dst.FuncDeclDecorations{
-			NodeDecs: dst.NodeDecs{
-				Before: dst.NewLine,
-				Start: dst.Decorations{
-					fmt.Sprintf("//go:linkname %s %s.%s",
-						fnName, t.Path, fnName),
-				},
-			},
+			NodeDecs: ast.LineComments(
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName)),
 		},
 	}
 

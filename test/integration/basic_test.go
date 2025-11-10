@@ -9,8 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 )
 
 func TestBasic(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/dave/dst"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -252,5 +253,12 @@ func VarDecl(name string, value dst.Expr) *dst.GenDecl {
 				},
 			},
 		},
+	}
+}
+
+func LineComments(comments ...string) dst.NodeDecs {
+	return dst.NodeDecs{
+		Before: dst.NewLine,
+		Start:  dst.Decorations(comments),
 	}
 }

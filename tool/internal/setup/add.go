@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/dave/dst"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
@@ -47,13 +48,8 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		value := ast.SelectorExpr(ast.Ident("_otel_debug"), "Stack")
 		getStackVar := ast.VarDecl(fmt.Sprintf("_getstatck%d", i), value)
 		getStackVar.Decs = dst.GenDeclDecorations{
-			NodeDecs: dst.NodeDecs{
-				Before: dst.NewLine,
-				Start: dst.Decorations{
-					fmt.Sprintf("//go:linkname _getstatck%d %s.OtelGetStackImpl",
-						i, m.Path),
-				},
-			},
+			NodeDecs: ast.LineComments(
+				fmt.Sprintf("//go:linkname _getstatck%d %s.OtelGetStackImpl", i, m.Path)),
 		}
 		// Second variable declaration
 		// //go:linkname _printstack%d %s.OtelPrintStackImpl
@@ -96,13 +92,8 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		}
 		printStackVar := ast.VarDecl(fmt.Sprintf("_printstack%d", i), val)
 		printStackVar.Decs = dst.GenDeclDecorations{
-			NodeDecs: dst.NodeDecs{
-				Before: dst.NewLine,
-				Start: dst.Decorations{
-					fmt.Sprintf("//go:linkname _printstack%d %s.OtelPrintStackImpl",
-						i, m.Path),
-				},
-			},
+			NodeDecs: ast.LineComments(
+				fmt.Sprintf("//go:linkname _printstack%d %s.OtelPrintStackImpl", i, m.Path)),
 		}
 		decls = append(decls, getStackVar, printStackVar)
 	}
@@ -114,11 +105,7 @@ func buildOtelRuntimeAst(decls []dst.Decl) *dst.File {
 	return &dst.File{
 		Name: ast.Ident("main"),
 		Decs: dst.FileDecorations{
-			NodeDecs: dst.NodeDecs{
-				Start: dst.Decorations{
-					comment,
-				},
-			},
+			NodeDecs: ast.LineComments(comment),
 		},
 		Decls: decls,
 	}

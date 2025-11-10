@@ -8,13 +8,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/trace"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 )
 
 func init() {

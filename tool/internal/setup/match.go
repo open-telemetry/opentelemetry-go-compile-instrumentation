@@ -6,13 +6,14 @@ package setup
 import (
 	"strings"
 
+	"golang.org/x/mod/semver"
+	"gopkg.in/yaml.v3"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
-	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
 )
 
 // createRuleFromFields creates a rule instance based on the field type present in the YAML
