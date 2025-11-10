@@ -149,16 +149,31 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 
 // runMatch performs precise matching of rules against the dependency's source code.
 // It parses source files and matches rules by examining AST nodes
-func (sp *SetupPhase) runMatch(dependency *Dependency, rules []rule.InstRule) (*rule.InstRuleSet, error) {
-	set := rule.NewInstRuleSet(dependency.ImportPath)
+func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.InstRule) (*rule.InstRuleSet, error) {
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	// Filter rules by target
+	relevantRules := rulesByTarget[dep.ImportPath]
+	if len(relevantRules) == 0 {
+		return set, nil
+	}
+
+	// Filter rules by version
+	filteredRules := make([]rule.InstRule, 0)
+	for _, r := range relevantRules {
+		if !matchVersion(dep, r) {
+			continue
+		}
+		filteredRules = append(filteredRules, r)
+	}
 
 	// Separate file rules from rules that need precise matching
 	preciseRules := make([]rule.InstRule, 0)
-	for _, r := range rules {
+	for _, r := range filteredRules {
 		// If the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
 			set.AddFileRule(fr)
-			sp.Info("Match file rule", "rule", fr, "dep", dependency)
+			sp.Info("Match file rule", "rule", fr, "dep", dep)
 			continue
 		}
 		// We can't decide whether the rule is applicable yet, add it to the
@@ -171,7 +186,7 @@ func (sp *SetupPhase) runMatch(dependency *Dependency, rules []rule.InstRule) (*
 	}
 
 	// Precise matching
-	for _, source := range dependency.Sources {
+	for _, source := range dep.Sources {
 		// Parse the source code. Since the only purpose here is to match,
 		// no node updates, we can use fast variant.
 		tree, err := ast.ParseFileFast(source)
@@ -190,19 +205,19 @@ func (sp *SetupPhase) runMatch(dependency *Dependency, rules []rule.InstRule) (*
 				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
 				if funcDecl != nil {
 					set.AddFuncRule(source, rt)
-					sp.Info("Match func rule", "rule", rt, "dep", dependency)
+					sp.Info("Match func rule", "rule", rt, "dep", dep)
 				}
 			case *rule.InstStructRule:
 				structDecl := ast.FindStructDecl(tree, rt.Struct)
 				if structDecl != nil {
 					set.AddStructRule(source, rt)
-					sp.Info("Match struct rule", "rule", rt, "dep", dependency)
+					sp.Info("Match struct rule", "rule", rt, "dep", dep)
 				}
 			case *rule.InstRawRule:
 				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
 				if funcDecl != nil {
 					set.AddRawRule(source, rt)
-					sp.Info("Match raw rule", "rule", rt, "dep", dependency)
+					sp.Info("Match raw rule", "rule", rt, "dep", dep)
 				}
 			case *rule.InstFileRule:
 				// Skip as it's already processed
@@ -213,23 +228,6 @@ func (sp *SetupPhase) runMatch(dependency *Dependency, rules []rule.InstRule) (*
 		}
 	}
 	return set, nil
-}
-
-// quickFilter filters rules by target and version for a given dependency.
-func quickFilter(dep *Dependency, rulesByTarget map[string][]rule.InstRule) []rule.InstRule {
-	relevantRules := rulesByTarget[dep.ImportPath]
-	if len(relevantRules) == 0 {
-		return nil
-	}
-
-	filteredRules := make([]rule.InstRule, 0)
-	for _, r := range relevantRules {
-		if !matchVersion(dep, r) {
-			continue
-		}
-		filteredRules = append(filteredRules, r)
-	}
-	return filteredRules
 }
 
 func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
@@ -258,12 +256,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			filteredRules := quickFilter(dep, rulesByTarget)
-			if filteredRules == nil {
-				return nil
-			}
-
-			m, err1 := sp.runMatch(dep, filteredRules)
+			m, err1 := sp.runMatch(dep, rulesByTarget)
 			if err1 != nil {
 				return err1
 			}
