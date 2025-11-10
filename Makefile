@@ -5,9 +5,9 @@
 SHELL := /bin/bash
 
 .PHONY: all test test-unit test-integration test-e2e format lint build install package clean \
-        build-demo build-demo-grpc build-demo-http format/go format/yaml format/license lint/go lint/yaml \
-        lint/action lint/makefile lint/license actionlint yamlfmt gotestfmt ratchet ratchet/pin \
-        ratchet/update ratchet/check golangci-lint embedmd checkmake go-license help docs check-embed \
+        build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
+        lint/action lint/makefile lint/license-header lint/license-header/fix actionlint yamlfmt gotestfmt ratchet ratchet/pin \
+        ratchet/update ratchet/check golangci-lint embedmd checkmake help docs check-embed \
         test-unit/coverage test-integration/coverage test-e2e/coverage
 
 # Constant variables
@@ -87,7 +87,7 @@ build-demo-http: ## Build HTTP demo server and client
 # Format targets
 
 format: ## Format Go code and YAML files
-format: format/go format/yaml format/license
+format: format/go format/yaml lint/license-header/fix
 
 format/go: ## Format Go code only
 format/go: golangci-lint
@@ -99,15 +99,10 @@ format/yaml: yamlfmt
 	@echo "Formatting YAML files..."
 	yamlfmt -dstar '**/*.yml' '**/*.yaml'
 
-format/license: ## Apply license headers to Go files
-format/license: go-license
-	@echo "Applying license headers..."
-	go-license --config=license.yml .
-
 # Lint targets
 
 lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile)
-lint: lint/go lint/yaml lint/action lint/makefile
+lint: lint/go lint/yaml lint/action lint/makefile lint/license-header
 
 lint/action: ## Lint GitHub Actions workflows
 lint/action: actionlint ratchet/check
@@ -129,10 +124,14 @@ lint/makefile: checkmake
 	@echo "Linting Makefile..."
 	checkmake --config .checkmake Makefile
 
-lint/license: ## Check license headers
-lint/license: go-license
-	@echo "Checking license headers..."
-	go-license --config=license.yml --verify .
+# License header targets
+
+lint/license-header: ## Check license headers in source files
+	@./scripts/license-check.sh
+
+.PHONY: lint/license-header/fix
+lint/license-header/fix: ## Add missing license headers to source files
+	@./scripts/license-check.sh --fix
 
 # Ratchet targets for GitHub Actions pinning
 
@@ -284,10 +283,4 @@ checkmake: ## Install checkmake if not present
 	@if ! command -v checkmake >/dev/null 2>&1; then \
 		echo "Installing checkmake..."; \
 		go install github.com/checkmake/checkmake/cmd/checkmake@latest; \
-	fi
-
-go-license: ## Install go-license if not present
-	@if ! command -v go-license >/dev/null 2>&1; then \
-		echo "Installing go-license..."; \
-		go install github.com/palantir/go-license@latest; \
 	fi
