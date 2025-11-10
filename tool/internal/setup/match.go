@@ -123,10 +123,6 @@ func materalizeRules() ([]rule.InstRule, error) {
 	return parsedRules, nil
 }
 
-func matchTarget(dependency *Dependency, rule rule.InstRule) bool {
-	return rule.GetTarget() == dependency.ImportPath
-}
-
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	// No version specified, so it's always applicable
 	if rule.GetVersion() == "" {
