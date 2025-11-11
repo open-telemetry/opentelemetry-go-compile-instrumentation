@@ -8,7 +8,8 @@ SHELL := /bin/bash
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
-        test-unit/coverage test-integration/coverage test-e2e/coverage
+        test-unit/coverage test-integration/coverage test-e2e/coverage \
+        registry-diff registry-check registry-resolve weaver-install
 
 # Constant variables
 BINARY_NAME := otel
@@ -327,3 +328,74 @@ hadolint: ## Install hadolint if not present
 			exit 1; \
 		fi; \
 	fi
+
+# Semantic Convention Registry targets
+
+weaver-install: ## Install OTel Weaver if not present
+	@if ! command -v weaver >/dev/null 2>&1; then \
+		echo "Installing OTel Weaver..."; \
+		WEAVER_VERSION="v0.13.0"; \
+		if [ "$$(uname -s)" = "Darwin" ]; then \
+			if [ "$$(uname -m)" = "arm64" ]; then \
+				WEAVER_ARCH="aarch64-apple-darwin"; \
+			else \
+				WEAVER_ARCH="x86_64-apple-darwin"; \
+			fi; \
+		elif [ "$$(uname -s)" = "Linux" ]; then \
+			WEAVER_ARCH="x86_64-unknown-linux-gnu"; \
+		else \
+			echo "Error: Unsupported platform $$(uname -s)"; \
+			exit 1; \
+		fi; \
+		WEAVER_URL="https://github.com/open-telemetry/weaver/releases/download/$${WEAVER_VERSION}/weaver-$${WEAVER_ARCH}"; \
+		echo "Downloading weaver from $${WEAVER_URL}..."; \
+		curl -fsSL "$${WEAVER_URL}" -o /tmp/weaver; \
+		chmod +x /tmp/weaver; \
+		mkdir -p "$$(go env GOPATH)/bin"; \
+		mv /tmp/weaver "$$(go env GOPATH)/bin/weaver"; \
+		echo "Installed weaver to $$(go env GOPATH)/bin/weaver"; \
+		weaver --version; \
+	else \
+		echo "OTel Weaver is already installed at $$(command -v weaver)"; \
+		weaver --version; \
+	fi
+
+registry-check: ## Validate semantic convention registry
+registry-check: weaver-install
+	@echo "Validating semantic convention registry..."
+	@weaver registry check \
+		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
+		--future
+
+registry-diff: ## Generate diff between two versions of semantic convention registry
+registry-diff: weaver-install
+	@echo "Generating semantic convention registry diff..."
+	@mkdir -p tmp
+	@BASELINE_VERSION=$${BASELINE_VERSION:-v1.29.0}; \
+	echo "Comparing current registry against baseline version: $${BASELINE_VERSION}"; \
+	weaver registry diff \
+		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
+		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$${BASELINE_VERSION} \
+		--diff-format markdown \
+		--output tmp/registry-diff.md \
+		--future || true; \
+	if [ -f tmp/registry-diff.md ]; then \
+		echo ""; \
+		echo "Registry diff report saved to tmp/registry-diff.md"; \
+		echo ""; \
+		cat tmp/registry-diff.md; \
+	else \
+		echo "No diff report generated"; \
+	fi
+
+registry-resolve: ## Resolve semantic convention registry schema
+registry-resolve: weaver-install
+	@echo "Resolving semantic convention registry..."
+	@mkdir -p tmp
+	@weaver registry resolve \
+		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
+		--format yaml \
+		--output tmp/resolved-schema.yaml \
+		--future
+	@echo "Resolved schema saved to tmp/resolved-schema.yaml"
+
