@@ -483,7 +483,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "OpenTelemetry Collector",
+  "title": "Collector: Metrics",
   "uid": "otel-collector",
   "version": 1,
   "weekStart": ""

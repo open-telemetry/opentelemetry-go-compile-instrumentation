@@ -648,7 +648,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "OTel Collector Runtime Metrics",
+  "title": "Runtime: Collector",
   "uid": "otel-collector-runtime",
   "description": "OpenTelemetry Collector internal runtime metrics for infrastructure components (Jaeger, OTel Collector). Based on https://opentelemetry.io/docs/collector/internal-telemetry/#basic-level-metrics",
   "version": 0

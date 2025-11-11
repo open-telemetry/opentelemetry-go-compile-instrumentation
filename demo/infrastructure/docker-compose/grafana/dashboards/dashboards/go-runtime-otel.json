@@ -903,7 +903,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Go Runtime Metrics (OpenTelemetry)",
+  "title": "Runtime: Go (OTel)",
   "uid": "go-runtime-otel",
   "version": 27,
   "weekStart": "",

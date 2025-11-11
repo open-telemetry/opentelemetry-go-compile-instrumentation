@@ -1144,7 +1144,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "OpenTelemetry APM",
+  "title": "Services: APM",
   "uid": "opentelemetry-apm",
   "version": 2,
   "weekStart": "",

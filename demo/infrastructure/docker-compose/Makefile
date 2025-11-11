@@ -97,9 +97,12 @@ urls: ## Show URLs for all UIs
 	@echo "  $(GREEN)Prometheus:$(NC) http://localhost:9090"
 	@echo ""
 	@echo "$(BLUE)Dashboards:$(NC)"
-	@echo "  $(GREEN)Go Metrics:$(NC)         http://localhost:3000/d/go-metrics"
-	@echo "  $(GREEN)OTel Collector:$(NC)     http://localhost:3000/d/otel-collector"
-	@echo "  $(GREEN)Services Overview:$(NC)  http://localhost:3000/d/services-overview"
+	@echo "  $(GREEN)Runtime: Go (Prometheus)$(NC)  http://localhost:3000/d/go-runtime-prometheus"
+	@echo "  $(GREEN)Runtime: Go (OTel)$(NC)        http://localhost:3000/d/go-runtime-otel"
+	@echo "  $(GREEN)Runtime: Collector$(NC)        http://localhost:3000/d/otel-collector-runtime"
+	@echo "  $(GREEN)Collector: Metrics$(NC)        http://localhost:3000/d/otel-collector"
+	@echo "  $(GREEN)Services: Overview$(NC)        http://localhost:3000/d/services-overview"
+	@echo "  $(GREEN)Services: APM$(NC)             http://localhost:3000/d/opentelemetry-apm"
 	@echo ""
 
 build: ## Rebuild demo applications

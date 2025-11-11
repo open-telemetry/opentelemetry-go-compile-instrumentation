@@ -873,7 +873,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Go Runtime Metrics (Prometheus)",
+  "title": "Runtime: Go (Prometheus)",
   "uid": "go-runtime-prometheus",
   "description": "Go runtime metrics from Prometheus go_collector for infrastructure components. Uses modern Go 1.19+ metrics format.",
   "version": 0

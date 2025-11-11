@@ -90,9 +90,12 @@ infrastructure/
 │   │   └── dashboards/
 │   │       ├── dashboard.yaml      # Dashboard provider config
 │   │       └── dashboards/
-│   │           ├── go-metrics.json          # Go runtime metrics
-│   │           ├── otel-collector.json      # Collector health
-│   │           └── services-overview.json   # Service metrics & traces
+│   │           ├── go-runtime-prometheus.json    # Go runtime metrics (Prometheus)
+│   │           ├── go-runtime-otel.json          # Go runtime metrics (OTel)
+│   │           ├── opentelemetry-apm.json        # APM dashboard
+│   │           ├── otel-collector.json           # Collector health
+│   │           ├── otel-collector-runtime.json   # Collector runtime metrics
+│   │           └── services-overview.json        # Service metrics & traces
 │   ├── k6/
 │   │   ├── http-load-test.js      # HTTP load test
 │   │   └── grpc-load-test.js      # gRPC load test
@@ -197,26 +200,46 @@ docker-compose run --rm k6 run /scripts/grpc-load-test.js
 
 ## Dashboards
 
-Three pre-configured Grafana dashboards are automatically provisioned:
+Six pre-configured Grafana dashboards are automatically provisioned:
 
-1. **Go Runtime Metrics**
+1. **Runtime: Go (Prometheus)**
    - Goroutines count
    - Memory usage (heap, stack, alloc)
    - GC duration and rate
-   - Direct link: [http://localhost:3000/d/go-metrics](http://localhost:3000/d/go-metrics)
+   - For infrastructure components (Jaeger, Prometheus, OTel Collector)
+   - Direct link: [http://localhost:3000/d/go-runtime-prometheus](http://localhost:3000/d/go-runtime-prometheus)
 
-2. **OpenTelemetry Collector**
+2. **Runtime: Go (OTel)**
+   - Goroutines count
+   - Memory usage (heap, stack, alloc)
+   - GC duration and rate
+   - For demo applications using OpenTelemetry metrics
+   - Direct link: [http://localhost:3000/d/go-runtime-otel](http://localhost:3000/d/go-runtime-otel)
+
+3. **Runtime: Collector**
+   - OTel Collector internal runtime metrics
+   - Memory and CPU usage
+   - Internal telemetry
+   - Direct link: [http://localhost:3000/d/otel-collector-runtime](http://localhost:3000/d/otel-collector-runtime)
+
+4. **Collector: Metrics**
    - Spans/metrics received and exported
    - Batch processor statistics
    - Memory usage and health
    - Direct link: [http://localhost:3000/d/otel-collector](http://localhost:3000/d/otel-collector)
 
-3. **Services Overview**
+5. **Services: Overview**
    - HTTP request rate and latency
    - Error rates by status code
    - Recent traces with metric correlation
    - Request breakdown by endpoint
    - Direct link: [http://localhost:3000/d/services-overview](http://localhost:3000/d/services-overview)
+
+6. **Services: APM**
+   - Comprehensive application performance monitoring
+   - Request rate, latency, and error rates
+   - Service dependency visualization
+   - Direct link: [http://localhost:3000/d/opentelemetry-apm](http://localhost:3000/d/opentelemetry-apm)
 
 ## Features
 
