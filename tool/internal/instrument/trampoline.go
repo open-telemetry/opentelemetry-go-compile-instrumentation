@@ -222,8 +222,8 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 		target = ast.FindFuncDeclWithoutRecv(root, t.After)
 	}
 	if target == nil {
-		return nil, ex.Newf("hook %s or %s not found",
-			t.Before, t.After)
+		return nil, ex.Newf("hook %s or %s not found from %s",
+			t.Before, t.After, file)
 	}
 	return target, nil
 }

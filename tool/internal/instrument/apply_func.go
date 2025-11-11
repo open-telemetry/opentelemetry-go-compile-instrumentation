@@ -173,6 +173,8 @@ func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 
 func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
 	util.Assert(t.Before != "" || t.After != "", "sanity check")
+	util.Assert(funcDecl.Name.Name == t.Func, "sanity check")
+
 	// Record the target function for the whole trampoline creation process
 	ip.targetFunc = funcDecl
 
