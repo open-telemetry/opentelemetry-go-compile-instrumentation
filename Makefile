@@ -389,7 +389,7 @@ registry-diff: weaver-install
 	fi
 
 registry-resolve: ## Resolve semantic convention registry schema
-registry-resolve: weaver-install
+semantic-conventions/resolve: weaver-install
 	@echo "Resolving semantic convention registry..."
 	@mkdir -p tmp
 	@weaver registry resolve \
