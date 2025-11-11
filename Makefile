@@ -6,7 +6,7 @@ SHELL := /bin/bash
 
 .PHONY: all test test-unit test-integration test-e2e format lint build install package clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
-        lint/action lint/makefile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
+        lint/action lint/makefile lint/license-header lint/license-header/fix actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake help docs check-embed \
         test-unit/coverage test-integration/coverage test-e2e/coverage
 
@@ -35,7 +35,7 @@ help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[A-Za-z0-9_./-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[A-Za-z0-9_.\/-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 all: build format lint test
 
@@ -87,7 +87,7 @@ build-demo-http: ## Build HTTP demo server and client
 # Format targets
 
 format: ## Format Go code and YAML files
-format: format/go format/yaml
+format: format/go format/yaml lint/license-header/fix
 
 format/go: ## Format Go code only
 format/go: golangci-lint
@@ -102,7 +102,7 @@ format/yaml: yamlfmt
 # Lint targets
 
 lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile)
-lint: lint/go lint/yaml lint/action lint/makefile
+lint: lint/go lint/yaml lint/action lint/makefile lint/license-header
 
 lint/action: ## Lint GitHub Actions workflows
 lint/action: actionlint ratchet/check
@@ -123,6 +123,15 @@ lint/makefile: ## Lint Makefile
 lint/makefile: checkmake
 	@echo "Linting Makefile..."
 	checkmake --config .checkmake Makefile
+
+# License header targets
+
+lint/license-header: ## Check license headers in source files
+	@./scripts/license-check.sh
+
+.PHONY: lint/license-header/fix
+lint/license-header/fix: ## Add missing license headers to source files
+	@./scripts/license-check.sh --fix
 
 # Ratchet targets for GitHub Actions pinning
 

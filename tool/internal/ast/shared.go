@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/dave/dst"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -45,16 +46,19 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 
 func FindFuncDecl(root *dst.File, funcName string, recv string) *dst.FuncDecl {
 	decls := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
-		// Receiver type is empty? Match func name only
+		// Receiver type is ignored, match func name only
 		name := funcDecl.Name.Name
 		if recv == "" {
 			return name == funcName && !HasReceiver(funcDecl)
 		}
+		// Receiver type is specified, but target function does not have receiver
+		// That's not what we want
 		if !HasReceiver(funcDecl) {
 			return false
 		}
 
-		// Receiver type is specified, Match both func name and receiver type
+		// Receiver type is specified, and target function has receiver
+		// Match both func name and receiver type
 		switch recvTypeExpr := funcDecl.Recv.List[0].Type.(type) {
 		case *dst.StarExpr: // func (*Recv)T
 			tn, ok := recvTypeExpr.X.(*dst.Ident)
@@ -63,10 +67,10 @@ func FindFuncDecl(root *dst.File, funcName string, recv string) *dst.FuncDecl {
 				return false
 			}
 			t := "*" + tn.Name
-			return t == recv
+			return t == recv && name == funcName
 		case *dst.Ident: // func (Recv)T
 			t := recvTypeExpr.Name
-			return t == recv
+			return t == recv && name == funcName
 		case *dst.IndexExpr:
 			// This is a generic type, we don't support it yet
 			return false

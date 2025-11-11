@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+
 # Generate Go code from proto file
 # Note: This requires protoc to be installed on the system
 # On macOS: brew install protobuf

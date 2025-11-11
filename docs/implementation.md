@@ -49,9 +49,11 @@ var Hook func()
 
 ## 2. Linkage via golinkname
 
-The `Hook` function is linked to the monitoring code using the `//go:linkname`
-directive. This allows us to dynamically associate the hook with the target
-function at compile time.
+The `Hook` function is linked to the monitoring code using automatically generated
+`//go:linkname` directives. During the setup phase, the tool analyzes the hook
+configuration and generates the necessary linkname directives in the target package.
+The generated linkname directives allow us to dynamically associate hooks with target
+functions at compile time without requiring hook authors to define them manually.
 
 # Implementation Details
 
@@ -80,7 +82,7 @@ The hook configuration is specified by [ux-design.md](ux-design.md),
 which includes the `ImportPath` field where the target function resides. The tool
 matches this `ImportPath` against the pre-collected third-party dependencies and
 generates a file (e.g., otel_import.go) to import the SDK and corresponding hook
-packages for matched dependency
+packages for matched dependency.
 
 ```go
 // otel_importer.go

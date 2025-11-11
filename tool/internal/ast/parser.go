@@ -11,6 +11,7 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )

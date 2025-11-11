@@ -57,7 +57,7 @@ func Setup(ctx context.Context) error {
 		return err
 	}
 	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(deps)
+	matched, err := sp.matchDeps(ctx, deps)
 	if err != nil {
 		return err
 	}

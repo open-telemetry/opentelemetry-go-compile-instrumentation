@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/dave/dst"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -30,6 +31,8 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 
 func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl) error {
 	util.Assert(r.Raw != "", "sanity check")
+	util.Assert(decl.Name.Name == r.Func, "sanity check")
+
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
 	// Parse the raw code into AST statements

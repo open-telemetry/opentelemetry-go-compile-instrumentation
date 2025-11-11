@@ -4,15 +4,27 @@
 package setup
 
 import (
+	"context"
+	"runtime"
 	"strings"
+	"sync"
+
+	"golang.org/x/mod/semver"
+	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
-	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
+)
+
+const (
+	// matchDepsConcurrencyMultiplier controls the maximum number of concurrent goroutines
+	// used in the matchDeps function. It multiplies the number of CPUs to determine
+	// the concurrency limit for errgroup execution within matchDeps.
+	matchDepsConcurrencyMultiplier = 2
 )
 
 // createRuleFromFields creates a rule instance based on the field type present in the YAML
@@ -111,10 +123,6 @@ func materalizeRules() ([]rule.InstRule, error) {
 	return parsedRules, nil
 }
 
-func matchTarget(dependency *Dependency, rule rule.InstRule) bool {
-	return rule.GetTarget() == dependency.ImportPath
-}
-
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	// No version specified, so it's always applicable
 	if rule.GetVersion() == "" {
@@ -139,29 +147,46 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return semver.Compare(dependency.Version, ruleVersion) >= 0
 }
 
-func (sp *SetupPhase) runMatch(dependency *Dependency, allRules []rule.InstRule) (*rule.InstRuleSet, error) {
-	set := rule.NewInstRuleSet(dependency.ImportPath)
+// runMatch performs precise matching of rules against the dependency's source code.
+// It parses source files and matches rules by examining AST nodes
+func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.InstRule) (*rule.InstRuleSet, error) {
+	set := rule.NewInstRuleSet(dep.ImportPath)
 
-	// Quick filtering
-	availables := make([]rule.InstRule, 0)
-	for _, r := range allRules {
-		// Not all availables are applicable to the dependency, we can quickly
-		// filter out the availables based on the target module path and the version.
-		if !matchTarget(dependency, r) || !matchVersion(dependency, r) {
+	// Filter rules by target
+	relevantRules := rulesByTarget[dep.ImportPath]
+	if len(relevantRules) == 0 {
+		return set, nil
+	}
+
+	// Filter rules by version
+	filteredRules := make([]rule.InstRule, 0)
+	for _, r := range relevantRules {
+		if !matchVersion(dep, r) {
 			continue
 		}
+		filteredRules = append(filteredRules, r)
+	}
+
+	// Separate file rules from rules that need precise matching
+	preciseRules := make([]rule.InstRule, 0)
+	for _, r := range filteredRules {
 		// If the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
 			set.AddFileRule(fr)
-			sp.Info("Match file rule", "rule", fr, "dep", dependency)
+			sp.Info("Match file rule", "rule", fr, "dep", dep)
 			continue
 		}
 		// We can't decide whether the rule is applicable yet, add it to the
-		// available list to be processed later.
-		availables = append(availables, r)
+		// precise rules list to be processed later.
+		preciseRules = append(preciseRules, r)
 	}
+
+	if len(preciseRules) == 0 {
+		return set, nil
+	}
+
 	// Precise matching
-	for _, source := range dependency.Sources {
+	for _, source := range dep.Sources {
 		// Parse the source code. Since the only purpose here is to match,
 		// no node updates, we can use fast variant.
 		tree, err := ast.ParseFileFast(source)
@@ -173,26 +198,26 @@ func (sp *SetupPhase) runMatch(dependency *Dependency, allRules []rule.InstRule)
 		}
 		set.SetPackageName(tree.Name.Name)
 
-		for _, available := range availables {
+		for _, r := range preciseRules {
 			// Let's match with the rule precisely
-			switch rt := available.(type) {
+			switch rt := r.(type) {
 			case *rule.InstFuncRule:
 				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
 				if funcDecl != nil {
 					set.AddFuncRule(source, rt)
-					sp.Info("Match func rule", "rule", rt, "dep", dependency)
+					sp.Info("Match func rule", "rule", rt, "dep", dep)
 				}
 			case *rule.InstStructRule:
 				structDecl := ast.FindStructDecl(tree, rt.Struct)
 				if structDecl != nil {
 					set.AddStructRule(source, rt)
-					sp.Info("Match struct rule", "rule", rt, "dep", dependency)
+					sp.Info("Match struct rule", "rule", rt, "dep", dep)
 				}
 			case *rule.InstRawRule:
 				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
 				if funcDecl != nil {
 					set.AddRawRule(source, rt)
-					sp.Info("Match raw rule", "rule", rt, "dep", dependency)
+					sp.Info("Match raw rule", "rule", rt, "dep", dep)
 				}
 			case *rule.InstFileRule:
 				// Skip as it's already processed
@@ -205,7 +230,7 @@ func (sp *SetupPhase) runMatch(dependency *Dependency, allRules []rule.InstRule)
 	return set, nil
 }
 
-func (sp *SetupPhase) matchDeps(deps []*Dependency) ([]*rule.InstRuleSet, error) {
+func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
 	allRules, err := materalizeRules()
 	if err != nil {
@@ -216,17 +241,36 @@ func (sp *SetupPhase) matchDeps(deps []*Dependency) ([]*rule.InstRuleSet, error)
 		return nil, nil
 	}
 
+	// Pre-index rules by target
+	rulesByTarget := make(map[string][]rule.InstRule)
+	for _, r := range allRules {
+		target := r.GetTarget()
+		rulesByTarget[target] = append(rulesByTarget[target], r)
+	}
+
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRuleSet, 0)
+	var mu sync.Mutex
+	g, _ := errgroup.WithContext(ctx)
+	g.SetLimit(runtime.NumCPU() * matchDepsConcurrencyMultiplier)
+
 	for _, dep := range deps {
-		// TODO: Parallelize this
-		m, err1 := sp.runMatch(dep, allRules)
-		if err1 != nil {
-			return nil, err1
-		}
-		if !m.IsEmpty() {
-			matched = append(matched, m)
-		}
+		g.Go(func() error {
+			m, err1 := sp.runMatch(dep, rulesByTarget)
+			if err1 != nil {
+				return err1
+			}
+			if !m.IsEmpty() {
+				mu.Lock()
+				matched = append(matched, m)
+				mu.Unlock()
+			}
+			return nil
+		})
+	}
+
+	if err = g.Wait(); err != nil {
+		return nil, err
 	}
 	return matched, nil
 }

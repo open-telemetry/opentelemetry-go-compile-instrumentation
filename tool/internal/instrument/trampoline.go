@@ -5,10 +5,12 @@ package instrument
 
 import (
 	_ "embed"
+	"fmt"
 	"go/token"
 	"strconv"
 
 	"github.com/dave/dst"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -48,6 +50,7 @@ const (
 	trampolineAfterNamePlaceholder  = `"OtelAfterNamePlaceholder"`
 	trampolineBefore                = true
 	trampolineAfter                 = false
+	unsafePackageName               = "unsafe"
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -66,6 +69,24 @@ var templateImpl string
 func (ip *InstrumentPhase) addDecl(decl dst.Decl) {
 	util.Assert(ip.target != nil, "sanity check")
 	ip.target.Decls = append(ip.target.Decls, decl)
+}
+
+// ensureUnsafeImport ensures that the unsafe package is imported in the target file.
+// This is required when using //go:linkname directives.
+func (ip *InstrumentPhase) ensureUnsafeImport() {
+	for _, decl := range ip.target.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			if importSpec, ok2 := spec.(*dst.ImportSpec); ok2 &&
+				importSpec.Path.Value == strconv.Quote(unsafePackageName) {
+				return
+			}
+		}
+	}
+	ip.target.Decls = append([]dst.Decl{ast.ImportDecl("_", unsafePackageName)}, ip.target.Decls...)
 }
 
 func (ip *InstrumentPhase) materializeTemplate() error {
@@ -201,8 +222,8 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 		target = ast.FindFuncDeclWithoutRecv(root, t.After)
 	}
 	if target == nil {
-		return nil, ex.Newf("hook %s or %s not found",
-			t.Before, t.After)
+		return nil, ex.Newf("hook %s or %s not found from %s",
+			t.Before, t.After, file)
 	}
 	return target, nil
 }
@@ -332,11 +353,17 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 			Func:   false,
 			Params: paramTypes,
 		},
+		Decs: dst.FuncDeclDecorations{
+			NodeDecs: ast.LineComments(
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName)),
+		},
 	}
+
 	exist := ast.FindFuncDeclWithoutRecv(ip.target, fnName)
 	if exist == nil {
 		ip.addDecl(funcDecl)
 	}
+
 	return nil
 }
 
@@ -693,6 +720,8 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 }
 
 func (ip *InstrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
+	// Ensure unsafe package is imported since we use //go:linkname directives
+	ip.ensureUnsafeImport()
 	// Materialize various declarations from template file, no one wants to see
 	// a bunch of manual AST code generation, isn't it?
 	err := ip.materializeTemplate()

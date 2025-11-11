@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/dave/dst"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -172,6 +173,8 @@ func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 
 func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
 	util.Assert(t.Before != "" || t.After != "", "sanity check")
+	util.Assert(funcDecl.Name.Name == t.Func, "sanity check")
+
 	// Record the target function for the whole trampoline creation process
 	ip.targetFunc = funcDecl
 

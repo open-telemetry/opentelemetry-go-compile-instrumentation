@@ -163,58 +163,6 @@ func TestMatchVersion(t *testing.T) {
 	}
 }
 
-func TestMatchTarget(t *testing.T) {
-	tests := []struct {
-		name           string
-		dependency     *Dependency
-		ruleTarget     string
-		expectedResult bool
-	}{
-		{
-			name:           "exact target match",
-			dependency:     &Dependency{ImportPath: "github.com/example/lib"},
-			ruleTarget:     "github.com/example/lib",
-			expectedResult: true,
-		},
-		{
-			name:           "target mismatch",
-			dependency:     &Dependency{ImportPath: "github.com/example/lib"},
-			ruleTarget:     "github.com/other/lib",
-			expectedResult: false,
-		},
-		{
-			name:           "empty target",
-			dependency:     &Dependency{ImportPath: "github.com/example/lib"},
-			ruleTarget:     "",
-			expectedResult: false,
-		},
-		{
-			name:           "empty dependency import path",
-			dependency:     &Dependency{ImportPath: ""},
-			ruleTarget:     "github.com/example/lib",
-			expectedResult: false,
-		},
-		{
-			name:           "both empty",
-			dependency:     &Dependency{ImportPath: ""},
-			ruleTarget:     "",
-			expectedResult: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rule := &mockInstRule{
-				InstBaseRule: rule.InstBaseRule{Target: tt.ruleTarget},
-			}
-			result := matchTarget(tt.dependency, rule)
-			if result != tt.expectedResult {
-				t.Errorf("matchTarget() = %v, want %v", result, tt.expectedResult)
-			}
-		})
-	}
-}
-
 func TestCreateRuleFromFields(t *testing.T) {
 	tests := []struct {
 		name         string
