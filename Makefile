@@ -360,7 +360,7 @@ weaver-install: ## Install OTel Weaver if not present
 		weaver --version; \
 	fi
 
-registry-check: ## Validate semantic convention registry
+lint/semantic-conventions: ## Validate semantic convention registry
 registry-check: weaver-install
 	@echo "Validating semantic convention registry..."
 	@weaver registry check \
