@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for gRPC client with OpenTelemetry compile-time instrumentation
 # Stage 1: Build the otel tool
-FROM golang:1.24-alpine AS otel-builder
+FROM golang:1.24-alpine@sha256:12c199a889439928e36df7b4c5031c18bfdad0d33cdeae5dd35b2de369b5fbf5 AS otel-builder
 
 WORKDIR /build
 
@@ -15,7 +15,7 @@ COPY . .
 RUN go build -o /otel ./tool/cmd
 
 # Stage 2: Build the gRPC client with instrumentation
-FROM golang:1.24-alpine AS app-builder
+FROM golang:1.24-alpine@sha256:12c199a889439928e36df7b4c5031c18bfdad0d33cdeae5dd35b2de369b5fbf5 AS app-builder
 
 WORKDIR /app
 
@@ -36,7 +36,7 @@ RUN go mod download
 RUN otel go build -o client .
 
 # Stage 3: Runtime image
-FROM alpine:3.21
+FROM alpine:3.21@sha256:5405e8f36ce1878720f71217d664aa3dea32e5e5df11acbf07fc78ef5661465b
 
 # Install ca-certificates for TLS and timezone data
 RUN apk --no-cache add ca-certificates tzdata
