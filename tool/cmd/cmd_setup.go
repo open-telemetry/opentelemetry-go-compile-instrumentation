@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+
 	"github.com/urfave/cli/v3"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
