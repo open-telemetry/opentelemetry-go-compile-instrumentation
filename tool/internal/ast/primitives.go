@@ -95,7 +95,7 @@ func SelectorExpr(x dst.Expr, sel string) *dst.SelectorExpr {
 	}
 }
 
-func IndexExpr(x dst.Expr, index dst.Expr) *dst.IndexExpr {
+func IndexExpr(x, index dst.Expr) *dst.IndexExpr {
 	e, ok := dst.Clone(x).(dst.Expr)
 	util.Assert(ok, "x is not a Expr")
 	i, ok := dst.Clone(index).(dst.Expr)
@@ -106,7 +106,7 @@ func IndexExpr(x dst.Expr, index dst.Expr) *dst.IndexExpr {
 	}
 }
 
-func TypeAssertExpr(x dst.Expr, t dst.Expr) *dst.TypeAssertExpr {
+func TypeAssertExpr(x, t dst.Expr) *dst.TypeAssertExpr {
 	e, ok := dst.Clone(t).(dst.Expr)
 	util.Assert(ok, "t is not a Expr")
 	return &dst.TypeAssertExpr{

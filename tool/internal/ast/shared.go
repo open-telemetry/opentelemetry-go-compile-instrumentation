@@ -44,7 +44,7 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 	return decls[0]
 }
 
-func FindFuncDecl(root *dst.File, funcName string, recv string) *dst.FuncDecl {
+func FindFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 	decls := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
 		// Receiver type is ignored, match func name only
 		name := funcDecl.Name.Name
@@ -147,7 +147,7 @@ func IsEllipsis(t dst.Expr) bool {
 	return ok
 }
 
-func AddStructField(decl dst.Decl, name string, t string) {
+func AddStructField(decl dst.Decl, name, t string) {
 	gen, ok := decl.(*dst.GenDecl)
 	util.Assert(ok, "decl is not a GenDecl")
 	fd := Field(name, Ident(t))
