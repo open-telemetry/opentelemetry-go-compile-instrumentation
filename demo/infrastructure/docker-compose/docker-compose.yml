@@ -1,5 +1,3 @@
-version: '3.8'
-
 # OpenTelemetry Demo Infrastructure
 # Complete observability stack with Jaeger, Prometheus, OTel Collector, Grafana, and k6
 
