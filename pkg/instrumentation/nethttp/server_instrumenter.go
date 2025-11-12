@@ -11,6 +11,7 @@ import (
 	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 	httpconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/http"
 	netconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/net"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otelsetup"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 )
 
@@ -51,7 +52,14 @@ func BuildNetHttpServerOtelInstrumenter() *instrumenter.PropagatingFromUpstreamI
 		Base: commonExtractor,
 	}
 
-	return builder.Init().
+	// Create metrics registry and HTTP server metrics
+	metricsRegistry := httpconv.NewMetricsRegistry(otelsetup.GetLogger(), otelsetup.GetMeterProvider().Meter(instrumentationName))
+	serverMetrics, err := metricsRegistry.NewHTTPServerMetric(instrumentationName)
+	if err != nil {
+		otelsetup.GetLogger().Error("failed to create HTTP server metrics", "error", err)
+	}
+
+	base := builder.Init().
 		SetInstrumentEnabler(serverEnabler).
 		SetSpanStatusExtractor(httpconv.HTTPServerSpanStatusExtractor[*netHttpRequest, *netHttpResponse]{Getter: serverGetter}).
 		SetSpanNameExtractor(&httpconv.HTTPServerSpanNameExtractor[*netHttpRequest, *netHttpResponse]{Getter: serverGetter}).
@@ -62,14 +70,20 @@ func BuildNetHttpServerOtelInstrumenter() *instrumenter.PropagatingFromUpstreamI
 		}).
 		AddAttributesExtractor(httpServerExtractor).
 		AddAttributesExtractor(&networkExtractor).
-		AddAttributesExtractor(urlExtractor).
-		BuildPropagatingFromUpstreamInstrumenter(
-			func(req *netHttpRequest) propagation.TextMapCarrier {
-				if req.header == nil {
-					return nil
-				}
-				return propagation.HeaderCarrier(req.header)
-			},
-			otel.GetTextMapPropagator(),
-		)
+		AddAttributesExtractor(urlExtractor)
+
+	// Add metrics if successfully created
+	if serverMetrics != nil {
+		base.AddOperationListeners(serverMetrics)
+	}
+
+	return base.BuildPropagatingFromUpstreamInstrumenter(
+		func(req *netHttpRequest) propagation.TextMapCarrier {
+			if req.header == nil {
+				return nil
+			}
+			return propagation.HeaderCarrier(req.header)
+		},
+		otel.GetTextMapPropagator(),
+	)
 }
