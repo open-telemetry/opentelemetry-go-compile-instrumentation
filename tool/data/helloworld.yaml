@@ -51,3 +51,9 @@ only_after:
   func: Example
   after: MyHookAfter
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+
+underscore_param:
+  target: main
+  func: Underscore
+  before: BeforeUnderscore
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"

@@ -84,6 +84,9 @@ cd client
 
 # Combine options
 ./client -addr=localhost:50052 -name="Testing" -stream=true
+
+# Send a shutdown request to the server, this will exit the server process gracefully.
+./client -shutdown
 ```
 
 ## Regenerating Protocol Buffer Code
@@ -116,12 +119,15 @@ All methods will create the `pb/` directory (if it doesn't exist) and generate `
 
 ## Service Definition
 
-The gRPC service defines two methods:
+The gRPC service defines three methods:
 
 1. **SayHello** - Unary RPC that accepts a name and returns a greeting
 2. **SayHelloStream** - Bidirectional streaming RPC for multiple greetings
+3. **Shutdown** - Unary RPC that gracefully shuts down the server
 
-Both methods use the following message types:
+The service uses the following message types:
 
 - `HelloRequest` - Contains a name field
 - `HelloReply` - Contains a message field with the greeting
+- `ShutdownRequest` - Empty message for shutdown requests
+- `ShutdownReply` - Contains a message confirming shutdown

@@ -28,3 +28,6 @@ func H3Before(ctx inst.HookContext, recv interface{}, p1 string, p2 int) {}
 
 //go:linkname H3After main.H3After
 func H3After(ctx inst.HookContext, r1 float32, r2 error) {}
+
+//go:linkname H4Before main.H4Before
+func H4Before(ctx inst.HookContext, p1 string, _ int) {}

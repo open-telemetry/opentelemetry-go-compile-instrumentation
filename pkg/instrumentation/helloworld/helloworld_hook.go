@@ -70,3 +70,5 @@ func MyHook1Before(ictx inst.HookContext, recv interface{}) {
 func MyHook1After(ictx inst.HookContext) {
 	println("After MyStruct.Example()")
 }
+
+func BeforeUnderscore(ictx inst.HookContext, _ int, _ float32) {}
