@@ -17,6 +17,7 @@ EXCLUDE_PATHS=(
     -o -path './LICENSES/*'
     -o -path './.github/workflows/*'
     -o -path './scripts/*'
+    -o -path '**/.otel-build/*'
 )
 
 # File patterns that require license headers (source code files only)
