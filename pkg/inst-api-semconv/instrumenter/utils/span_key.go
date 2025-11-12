@@ -9,5 +9,8 @@ const (
 	HTTPClientKey = attribute.Key("opentelemetry-traces-span-key-http-client")
 	HTTPServerKey = attribute.Key("opentelemetry-traces-span-key-http-server")
 
+	RPCClientKey = attribute.Key("opentelemetry-traces-span-key-rpc-client")
+	RPCServerKey = attribute.Key("opentelemetry-traces-span-key-rpc-server")
+
 	ClientResendKey = attribute.Key("opentelemetry-http-client-resend-key")
 )
