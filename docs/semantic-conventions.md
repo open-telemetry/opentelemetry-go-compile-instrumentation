@@ -57,10 +57,12 @@ BASELINE_VERSION=v1.28.0 make registry-diff
 ```
 
 **Output files**:
+
 - `tmp/registry-diff-baseline.md` - Changes since baseline
 - `tmp/registry-diff-latest.md` - Available updates
 
 **Example output**:
+
 ```
 Detected project semconv version: v1.30.0
 Baseline version: v1.29.0
@@ -77,11 +79,13 @@ Available updates (latest vs v1.30.0):
 ```
 
 **When to use**:
+
 - Understanding what's in your current semconv version
 - Deciding whether to upgrade to a newer version
 - Reviewing changes before modifying `pkg/inst-api-semconv/`
 
 **Requirements**:
+
 - Network access to GitHub
 - OTel Weaver installed (run `make weaver-install` first)
 
@@ -112,6 +116,7 @@ weaver registry resolve \
 ```
 
 **When to use**:
+
 - Inspecting the complete schema structure
 - Searching for specific attribute definitions
 - Debugging attribute inheritance or references
@@ -232,12 +237,14 @@ When you modify files in `pkg/inst-api-semconv/`:
    - Action items for ensuring code compliance
 
 **What This Checks**:
+
 - Validates the semantic conventions version you're using is valid
 - Shows what changed in that version compared to baseline
 - Shows what's available if you upgrade to newer versions
 - Helps ensure your Go code aligns with the correct semconv version
 
 **What This Doesn't Check**:
+
 - Does not validate Go code syntax or logic (use `make lint` and `make test`)
 - Does not enforce upgrading to latest version (informational only)
 
@@ -251,6 +258,7 @@ When changes are merged to `main`:
 ### How It Works
 
 The CI workflow:
+
 1. Scans your Go files for `semconv/vX.Y.Z` imports
 2. Validates that specific version's registry using OTel Weaver
 3. Compares against baseline and latest to show evolution
@@ -259,11 +267,13 @@ The CI workflow:
 ### When to Update Semantic Conventions
 
 Consider updating your `semconv` version when:
+
 - The "Available Updates" section shows relevant new conventions
 - You need new attributes or metrics added in newer versions
 - You want to adopt breaking changes or improvements
 
 **Steps to update**:
+
 1. Review the "Available Updates" diff
 2. Update Go imports: `semconv/v1.30.0` → `semconv/v1.31.0`
 3. Update `CURRENT_SEMCONV_VERSION` in `.github/workflows/check-registry-diff.yaml`

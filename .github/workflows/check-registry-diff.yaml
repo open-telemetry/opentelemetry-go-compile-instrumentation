@@ -59,15 +59,15 @@ jobs:
             sort -u | \
             head -1 | \
             sed 's/semconv\///')
-          
+
           if [ -z "$DETECTED_VERSION" ]; then
             echo "::error::No semconv version detected in pkg/inst-api-semconv/"
             exit 1
           fi
-          
-          echo "detected_version=$DETECTED_VERSION" >> $GITHUB_OUTPUT
+
+          echo "detected_version=$DETECTED_VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected semconv version: $DETECTED_VERSION"
-          
+
           # Check if detected version matches expected version
           if [ "$DETECTED_VERSION" != "$CURRENT_SEMCONV_VERSION" ]; then
             echo "::warning::Detected version ($DETECTED_VERSION) differs from expected ($CURRENT_SEMCONV_VERSION)"
@@ -93,7 +93,7 @@ jobs:
 
           CURRENT_VER="${{ steps.detect-version.outputs.detected_version }}"
           BASELINE_VER="${BASELINE_SEMCONV_VERSION}"
-          
+
           echo "::group::Generating registry diff: ${CURRENT_VER} vs ${BASELINE_VER}"
           weaver registry diff \
             --registry "${SEMCONV_REGISTRY}[model]@${CURRENT_VER}" \
@@ -111,7 +111,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           CURRENT_VER="${{ steps.detect-version.outputs.detected_version }}"
-          
+
           echo "::group::Generating registry diff: ${CURRENT_VER} vs latest (main)"
           weaver registry diff \
             --registry "${SEMCONV_REGISTRY}[model]" \
@@ -124,7 +124,7 @@ jobs:
               exit 0
             }
           echo "::endgroup::"
-          
+
           echo "Registry diff reports generated:"
           echo "1. Current ($CURRENT_VER) vs Baseline ($BASELINE_SEMCONV_VERSION): registry-diff-output/diff-baseline.md"
           echo "2. Latest (main) vs Current ($CURRENT_VER): registry-diff-output/diff-latest.md"
@@ -138,14 +138,14 @@ jobs:
             sort -u | \
             head -1 | \
             sed 's/semconv\///')
-          
+
           if [ -z "$DETECTED_VERSION" ]; then
             echo "::error::No semconv version detected in pkg/inst-api-semconv/"
             exit 1
           fi
-          
+
           echo "Detected semconv version: $DETECTED_VERSION"
-          
+
           # Validate the registry version that the project currently uses
           weaver registry check \
             --registry "${SEMCONV_REGISTRY}[model]@${DETECTED_VERSION}" \
@@ -172,21 +172,21 @@ jobs:
             const diffLatestFile = 'registry-diff-output/diff-latest.md';
 
             let comment = '## 📊 Semantic Convention Registry Diff Report\n\n';
-            
+
             // Read detected version from step output
             const detectedVersion = '${{ steps.detect-version.outputs.detected_version }}';
             const baselineVersion = process.env.BASELINE_SEMCONV_VERSION;
-            
+
             comment += `**Current Project Version**: \`${detectedVersion}\`\n`;
             comment += `**Baseline Version**: \`${baselineVersion}\`\n\n`;
-            
+
             comment += '> This report shows semantic convention changes relevant to this project. ';
             comment += 'It helps ensure `pkg/inst-api-semconv/` code aligns with the semantic conventions version used.\n\n';
-            
+
             // Section 1: Changes since baseline
             comment += '### 📈 Changes Since Baseline\n\n';
             comment += `Comparing **${detectedVersion}** (current) vs **${baselineVersion}** (baseline)\n\n`;
-            
+
             if (fs.existsSync(diffBaselineFile)) {
               const diffContent = fs.readFileSync(diffBaselineFile, 'utf8');
               if (diffContent.includes('Registry diff generation failed')) {
@@ -201,11 +201,11 @@ jobs:
             } else {
               comment += '⚠️ Diff report not generated.\n\n';
             }
-            
+
             // Section 2: Available updates
             comment += '### 🆕 Available Updates\n\n';
             comment += `Comparing **latest** (main branch) vs **${detectedVersion}** (current)\n\n`;
-            
+
             if (fs.existsSync(diffLatestFile)) {
               const diffContent = fs.readFileSync(diffLatestFile, 'utf8');
               if (diffContent.includes('Registry diff generation failed')) {
@@ -221,7 +221,7 @@ jobs:
             } else {
               comment += '⚠️ Diff report not generated.\n\n';
             }
-            
+
             comment += '---\n\n';
             comment += '### 📝 What This Means\n\n';
             comment += '- **Changes Since Baseline**: Shows what changed in the version you\'re currently using\n';

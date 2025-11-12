@@ -57,10 +57,12 @@ BASELINE_VERSION=v1.28.0 make registry-diff
 ```
 
 **输出文件**：
+
 - `tmp/registry-diff-baseline.md` - 自基线版本以来的变更
 - `tmp/registry-diff-latest.md` - 可用的更新
 
 **输出示例**：
+
 ```
 检测到项目 semconv 版本：v1.30.0
 基线版本：v1.29.0
@@ -77,11 +79,13 @@ BASELINE_VERSION=v1.28.0 make registry-diff
 ```
 
 **何时使用**：
+
 - 了解当前 semconv 版本包含的内容
 - 决定是否升级到更新版本
 - 修改 `pkg/inst-api-semconv/` 之前查看变更
 
 **要求**：
+
 - GitHub 网络访问
 - 已安装 OTel Weaver（先运行 `make weaver-install`）
 
@@ -112,6 +116,7 @@ weaver registry resolve \
 ```
 
 **何时使用**：
+
 - 检查完整的模式结构
 - 搜索特定属性定义
 - 调试属性继承或引用
@@ -232,12 +237,14 @@ pkg/inst-api-semconv/
    - 确保代码合规的操作项
 
 **此检查的内容**：
+
 - 验证你使用的语义约定版本是否有效
 - 显示该版本相对于基线版本的变更
 - 显示升级到更新版本可获得的内容
 - 帮助确保 Go 代码与正确的 semconv 版本对齐
 
 **此检查不包含的内容**：
+
 - ❌ 不验证 Go 代码语法或逻辑（使用 `make lint` 和 `make test`）
 - ❌ 不强制升级到最新版本（仅提供信息）
 
@@ -251,6 +258,7 @@ pkg/inst-api-semconv/
 ### 工作原理
 
 CI 工作流程：
+
 1. 扫描 Go 文件中的 `semconv/vX.Y.Z` 导入
 2. 使用 OTel Weaver 验证该特定版本的注册表
 3. 与基线版本和最新版本进行比较以显示演进
@@ -259,11 +267,13 @@ CI 工作流程：
 ### 何时更新语义约定
 
 在以下情况下考虑更新你的 `semconv` 版本：
+
 - "可用更新"部分显示相关的新约定
 - 你需要更新版本中添加的新属性或指标
 - 你想采用破坏性更改或改进
 
 **更新步骤**：
+
 1. 查看"可用更新"差异
 2. 更新 Go 导入：`semconv/v1.30.0` → `semconv/v1.31.0`
 3. 更新 `.github/workflows/check-registry-diff.yaml` 中的 `CURRENT_SEMCONV_VERSION`
