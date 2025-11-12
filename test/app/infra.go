@@ -42,7 +42,7 @@ func Build(t *testing.T, appDir string, args ...string) {
 
 	cmd := newCmd(t.Context(), appDir, args...)
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, out)
+	require.NoError(t, err, string(out))
 }
 
 // Run runs the application and returns the output.
@@ -51,7 +51,7 @@ func Run(t *testing.T, dir string, args ...string) string {
 	appName := "./" + filepath.Base(dir)
 	cmd := newCmd(t.Context(), dir, append([]string{appName}, args...)...)
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, out)
+	require.NoError(t, err, string(out))
 	return string(out)
 }
 
