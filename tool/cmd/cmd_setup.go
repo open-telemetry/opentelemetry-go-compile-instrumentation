@@ -5,8 +5,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-
 	"github.com/urfave/cli/v3"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -22,10 +20,6 @@ var commandSetup = cli.Command{
 	Before:          addLoggerPhaseAttribute,
 	Action: func(ctx context.Context, cmd *cli.Command) error {
 		args := cmd.Args().Slice()
-		// Default to "go build" if no args provided
-		if len(args) == 0 {
-			args = []string{"go", "build"}
-		}
 		err := setup.SetupWithArgs(ctx, args)
 		if err != nil {
 			return ex.Wrapf(err, "failed to setup with exit code %d", exitCodeFailure)
