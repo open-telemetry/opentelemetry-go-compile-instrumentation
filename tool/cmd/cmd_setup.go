@@ -20,7 +20,7 @@ var commandSetup = cli.Command{
 	Before:          addLoggerPhaseAttribute,
 	Action: func(ctx context.Context, cmd *cli.Command) error {
 		args := cmd.Args().Slice()
-		err := setup.SetupWithArgs(ctx, args)
+		err := setup.Setup(ctx, args)
 		if err != nil {
 			return ex.Wrapf(err, "failed to setup with exit code %d", exitCodeFailure)
 		}

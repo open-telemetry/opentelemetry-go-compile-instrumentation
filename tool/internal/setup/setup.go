@@ -40,11 +40,7 @@ func isSetup() bool {
 }
 
 // Setup prepares the environment for further instrumentation.
-func Setup(ctx context.Context) error {
-	return SetupWithArgs(ctx, os.Args[1:])
-}
-
-func SetupWithArgs(ctx context.Context, args []string) error {
+func Setup(ctx context.Context, args []string) error {
 	logger := util.LoggerFromContext(ctx)
 
 	if isSetup() {
