@@ -1,0 +1,40 @@
+name: Check Dockerfiles
+
+on:
+  pull_request:
+    paths:
+      - '**/*Dockerfile*'
+      - '.hadolint.yaml'
+      - '.github/workflows/lint-dockerfile.yaml'
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*Dockerfile*'
+      - '.hadolint.yaml'
+      - '.github/workflows/lint-dockerfile.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  hadolint:
+    name: Lint Dockerfiles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+
+      - name: Lint gRPC Client Dockerfile
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf  # v3.3.0
+        with:
+          dockerfile: demo/grpc/client/Dockerfile
+          config: .hadolint.yaml
+          failure-threshold: warning
+
+      - name: Lint gRPC Server Dockerfile
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf  # v3.3.0
+        with:
+          dockerfile: demo/grpc/server/Dockerfile
+          config: .hadolint.yaml
+          failure-threshold: warning

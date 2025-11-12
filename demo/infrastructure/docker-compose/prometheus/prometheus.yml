@@ -1,0 +1,63 @@
+# Prometheus configuration for demo environment
+# Scrapes metrics from OpenTelemetry Collector
+# Supports native OTLP ingestion (Prometheus v3.0+)
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: demo
+    cluster: local
+
+# Tracing configuration - send Prometheus spans to OTel Collector
+tracing:
+  endpoint: otel-collector:4317
+  insecure: true
+  tls_config:
+    insecure_skip_verify: true
+  # Enable sampling of queries to generate traces
+  sampling_fraction: 1.0  # Sample 100% of queries for demo purposes
+
+# OTLP configuration for native OTLP receiver (Prometheus v3.0+)
+otlp:
+  # Promote resource attributes to labels
+  promote_resource_attributes:
+    - service.name
+    - service.namespace
+    - service.instance.id
+  # Use NoTranslation to preserve original metric names (requires UTF-8)
+  translation_strategy: NoTranslation
+
+# Scrape configurations
+scrape_configs:
+  # Scrape Prometheus itself
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: prometheus
+
+  # Scrape OpenTelemetry Collector internal metrics
+  - job_name: otel-collector
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['otel-collector:8888']
+        labels:
+          service: otel-collector
+          component: collector
+
+  # Scrape OpenTelemetry Collector Prometheus exporter
+  # This includes: application metrics, spanmetrics, AND Jaeger metrics
+  # (OTel Collector scrapes Jaeger and re-exports via this endpoint)
+  - job_name: otel-metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['otel-collector:8889']
+        labels:
+          component: applications
+
+# Storage configuration
+storage:
+  tsdb:
+    # Out-of-order ingestion window for distributed collectors
+    out_of_order_time_window: 30m

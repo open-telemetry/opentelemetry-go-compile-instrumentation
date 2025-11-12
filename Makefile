@@ -6,8 +6,8 @@ SHELL := /bin/bash
 
 .PHONY: all test test-unit test-integration test-e2e format lint build install package clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
-        lint/action lint/makefile lint/license-header lint/license-header/fix actionlint yamlfmt gotestfmt ratchet ratchet/pin \
-        ratchet/update ratchet/check golangci-lint embedmd checkmake help docs check-embed \
+        lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
+        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
         test-unit/coverage test-integration/coverage test-e2e/coverage
 
 # Constant variables
@@ -101,8 +101,8 @@ format/yaml: yamlfmt
 
 # Lint targets
 
-lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile)
-lint: lint/go lint/yaml lint/action lint/makefile lint/license-header
+lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile)
+lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile
 
 lint/action: ## Lint GitHub Actions workflows
 lint/action: actionlint ratchet/check
@@ -118,6 +118,17 @@ lint/yaml: ## Lint YAML formatting
 lint/yaml: yamlfmt
 	@echo "Linting YAML files..."
 	yamlfmt -lint -dstar '**/*.yml' '**/*.yaml'
+
+lint/dockerfile: ## Lint Dockerfiles
+lint/dockerfile: hadolint
+	@echo "Linting Dockerfiles..."
+	@HADOLINT_CMD="hadolint"; \
+	if command -v hadolint >/dev/null 2>&1 && hadolint --version >/dev/null 2>&1; then \
+		HADOLINT_CMD="hadolint"; \
+	elif [ -f /opt/homebrew/bin/hadolint ]; then \
+		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
+	fi; \
+	$$HADOLINT_CMD demo/grpc/client/Dockerfile demo/grpc/server/Dockerfile demo/http/client/Dockerfile demo/http/server/Dockerfile
 
 lint/makefile: ## Lint Makefile
 lint/makefile: checkmake
@@ -283,4 +294,36 @@ checkmake: ## Install checkmake if not present
 	@if ! command -v checkmake >/dev/null 2>&1; then \
 		echo "Installing checkmake..."; \
 		go install github.com/checkmake/checkmake/cmd/checkmake@latest; \
+	fi
+
+hadolint: ## Install hadolint if not present
+	@HADOLINT_PATH=""; \
+	if command -v hadolint >/dev/null 2>&1 && hadolint --version >/dev/null 2>&1; then \
+		HADOLINT_PATH=$$(command -v hadolint); \
+	elif [ -f /opt/homebrew/bin/hadolint ] && /opt/homebrew/bin/hadolint --version >/dev/null 2>&1; then \
+		HADOLINT_PATH="/opt/homebrew/bin/hadolint"; \
+	fi; \
+	if [ -z "$$HADOLINT_PATH" ]; then \
+		echo "Installing hadolint..."; \
+		if [ "$$(uname -s)" = "Darwin" ]; then \
+			if command -v brew >/dev/null 2>&1; then \
+				brew install hadolint; \
+			else \
+				echo "Error: Homebrew not found. Install Homebrew from https://brew.sh/ and try again."; \
+				exit 1; \
+			fi; \
+		elif [ "$$(uname -s)" = "Linux" ]; then \
+			VERSION="v2.14.0"; \
+			ARCH=$$(uname -m); \
+			if [ "$$ARCH" = "aarch64" ] || [ "$$ARCH" = "arm64" ]; then ARCH="arm64"; else ARCH="x86_64"; fi; \
+			curl -sL "https://github.com/hadolint/hadolint/releases/download/$$VERSION/hadolint-Linux-$$ARCH" -o /tmp/hadolint; \
+			chmod +x /tmp/hadolint; \
+			mkdir -p "$$(go env GOPATH)/bin"; \
+			mv /tmp/hadolint "$$(go env GOPATH)/bin/hadolint"; \
+			echo "Installed hadolint to $$(go env GOPATH)/bin/hadolint"; \
+		else \
+			echo "Error: Unsupported platform $$(uname -s)"; \
+			echo "Please install hadolint manually from https://github.com/hadolint/hadolint#install"; \
+			exit 1; \
+		fi; \
 	fi

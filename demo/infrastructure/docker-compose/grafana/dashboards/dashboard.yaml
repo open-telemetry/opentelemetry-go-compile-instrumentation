@@ -1,0 +1,16 @@
+# Grafana dashboard provisioning
+# Automatically loads dashboards from the dashboards directory
+
+apiVersion: 1
+
+providers:
+  - name: Default
+    orgId: 1
+    folder: OpenTelemetry Demo
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/dashboards
+      foldersFromFilesStructure: true

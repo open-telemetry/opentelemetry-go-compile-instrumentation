@@ -35,10 +35,12 @@ func Ident(name string) *dst.Ident {
 	}
 }
 
-func AddressOf(expr dst.Expr) *dst.UnaryExpr {
-	e, ok := dst.Clone(expr).(dst.Expr)
-	util.Assert(ok, "expr is not a UnaryExpr")
-	return &dst.UnaryExpr{Op: token.AND, X: e}
+func Nil() *dst.Ident {
+	return &dst.Ident{Name: IdentNil}
+}
+
+func AddressOf(name string) *dst.UnaryExpr {
+	return &dst.UnaryExpr{Op: token.AND, X: Ident(name)}
 }
 
 func CallTo(name string, args []dst.Expr) *dst.CallExpr {

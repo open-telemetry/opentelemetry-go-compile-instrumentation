@@ -1,0 +1,61 @@
+# Jaeger v2 configuration with Service Performance Monitoring (SPM) enabled
+# Based on: https://www.jaegertracing.io/docs/2.11/architecture/spm/
+
+extensions:
+  jaeger_storage:
+    backends:
+      memory:
+        memory:
+          max_traces: 100000
+    # Configure metric backends for SPM
+    metric_backends:
+      prometheus_metrics:
+        prometheus:
+          endpoint: http://prometheus:9090
+          # Normalize metric names to match OTel Collector spanmetrics output
+          normalize_calls: true
+          normalize_duration: true
+
+  jaeger_query:
+    storage:
+      traces: memory
+      metrics: prometheus_metrics
+    ui:
+      config_file: /etc/jaeger/ui-config.json
+
+  healthcheckv2:
+    http:
+      endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: memory
+
+  # Export traces to OTel Collector for spanmetrics generation
+  otlp:
+    endpoint: otel-collector:4317
+    tls:
+      insecure: true
+
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      # Export to both local storage AND OTel Collector for spanmetrics
+      exporters: [jaeger_storage_exporter, otlp]

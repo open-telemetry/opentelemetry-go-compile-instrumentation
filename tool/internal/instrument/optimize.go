@@ -117,7 +117,7 @@ func populateHookContextLiteral(tjump *TJump, expr dst.Expr) {
 	// Populate call context literal with addresses of all arguments
 	names := make([]dst.Expr, 0)
 	for _, name := range getNames(targetFunc.Type.Params) {
-		names = append(names, ast.AddressOf(ast.Ident(name)))
+		names = append(names, ast.AddressOf(name))
 	}
 	paramLiteral, _ := paramElem.(*dst.KeyValueExpr).Value.(*dst.CompositeLit)
 	paramLiteral.Elts = names
@@ -125,7 +125,7 @@ func populateHookContextLiteral(tjump *TJump, expr dst.Expr) {
 	if targetFunc.Type.Results != nil {
 		rets := make([]dst.Expr, 0)
 		for _, name := range getNames(targetFunc.Type.Results) {
-			rets = append(rets, ast.AddressOf(ast.Ident(name)))
+			rets = append(rets, ast.AddressOf(name))
 		}
 		returnLiteral, _ := returnElem.(*dst.KeyValueExpr).Value.(*dst.CompositeLit)
 		returnLiteral.Elts = rets

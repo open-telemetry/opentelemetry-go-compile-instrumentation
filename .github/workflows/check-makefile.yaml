@@ -5,12 +5,12 @@ on:
     branches:
       - main
     paths:
-      - "Makefile"
+      - "**/*Makefile*"
       - ".checkmake"
       - ".github/workflows/checkmake.yaml"
   pull_request:
     paths:
-      - "Makefile"
+      - "**/*Makefile*"
       - ".checkmake"
       - ".github/workflows/checkmake.yaml"
 

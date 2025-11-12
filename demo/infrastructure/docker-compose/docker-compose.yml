@@ -1,0 +1,232 @@
+version: '3.8'
+
+# OpenTelemetry Demo Infrastructure
+# Complete observability stack with Jaeger, Prometheus, OTel Collector, Grafana, and k6
+
+services:
+  # Jaeger - Distributed tracing backend (v2 with native OTLP support + SPM)
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0@sha256:b585df1b6299bbbd16bf7c679da30389349736e4b6bc8f4f500142a75bf26ca8
+    container_name: jaeger
+    command:
+      - --config=/etc/jaeger/config.yaml
+    volumes:
+      - ./jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+      - ./jaeger/ui-config.json:/etc/jaeger/ui-config.json:ro
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317"  # OTLP gRPC (internal)
+      - "4318"  # OTLP HTTP (internal)
+      - "14269:8888"  # Internal telemetry metrics (Jaeger's port 8888 mapped to host 14269)
+      - "13133"  # Health check endpoint (internal)
+    networks:
+      - observability
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus - Metrics backend with native OTLP support (v3)
+  prometheus:
+    image: prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --web.console.templates=/etc/prometheus/consoles
+      - --web.enable-lifecycle
+      - --web.enable-otlp-receiver
+      - --enable-feature=exemplar-storage
+      - --enable-feature=native-histograms
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # OpenTelemetry Collector - Receives, processes, and exports telemetry
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.139.0@sha256:faf125d656fa47cea568b2f3b4494efd2525083bc75c1e96038bc23f05cd68fd
+    container_name: otel-collector
+    command:
+      - "--config=/etc/otelcol-contrib/config.yaml"
+      - "--feature-gates=-telemetry.UseLocalHostAsDefaultMetricsAddress"  # Expose metrics on 0.0.0.0
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"  # OTLP gRPC receiver
+      - "4318:4318"  # OTLP HTTP receiver
+      - "8888:8888"  # Collector internal telemetry metrics
+      - "8889:8889"  # Application metrics + spanmetrics
+      - "13133:13133"  # Health check endpoint
+    networks:
+      - observability
+    depends_on:
+      jaeger:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana:12.2.1@sha256:35c41e0fd0295f5d0ee5db7e780cf33506abfaf47686196f825364889dee878b
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+    volumes:
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    networks:
+      - observability
+    depends_on:
+      - prometheus
+      - jaeger
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # gRPC Server - Demo application with compile-time instrumentation
+  grpc-server:
+    build:
+      context: ../../..
+      dockerfile: demo/grpc/server/Dockerfile
+    container_name: grpc-server
+    ports:
+      - "50051:50051"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=grpc-server
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      - otel-collector
+    restart: unless-stopped
+
+  # gRPC Client - Demo client making requests to server
+  grpc-client:
+    build:
+      context: ../../..
+      dockerfile: demo/grpc/client/Dockerfile
+    container_name: grpc-client
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=grpc-client
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      - grpc-server
+      - otel-collector
+    restart: unless-stopped
+
+  # HTTP Server - Demo HTTP application with compile-time instrumentation
+  http-server:
+    build:
+      context: ../../..
+      dockerfile: demo/http/server/Dockerfile
+    container_name: http-server
+    ports:
+      - "8080:8080"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=http-server
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      - otel-collector
+    restart: unless-stopped
+
+  # HTTP Client - Demo client making requests to HTTP server
+  http-client:
+    build:
+      context: ../../..
+      dockerfile: demo/http/client/Dockerfile
+    container_name: http-client
+    command: ["-addr", "http://http-server:8080", "-count", "10000", "-method", "GET"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=http-client
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      - http-server
+      - otel-collector
+    restart: unless-stopped
+
+  # k6 gRPC Load Testing - Generates continuous load against gRPC server
+  k6-grpc:
+    image: grafana/k6:1.3.0@sha256:3ddc8b1a33a2c3d8edc6e99b6a762ae36cba08788463458f5e6a7703e14eb77d
+    container_name: k6-grpc
+    command: run --quiet /scripts/grpc-load-test.js
+    volumes:
+      - ./k6:/scripts:ro
+      - ../../grpc/server/greeter.proto:/proto/greeter.proto:ro
+    networks:
+      - observability
+    depends_on:
+      - grpc-server
+    profiles:
+      - load-testing
+    environment:
+      - K6_OUT=json=/tmp/k6-grpc-results.json
+    restart: unless-stopped
+
+  # k6 HTTP Load Testing - Generates continuous load against HTTP server
+  k6-http:
+    image: grafana/k6:1.3.0@sha256:3ddc8b1a33a2c3d8edc6e99b6a762ae36cba08788463458f5e6a7703e14eb77d
+    container_name: k6-http
+    command: run --quiet /scripts/http-load-test.js
+    volumes:
+      - ./k6:/scripts:ro
+    networks:
+      - observability
+    depends_on:
+      - http-server
+    profiles:
+      - load-testing
+    environment:
+      - K6_OUT=json=/tmp/k6-http-results.json
+    restart: unless-stopped
+
+networks:
+  observability:
+    driver: bridge
+    name: otel-demo-network
+
+# Note: No volumes defined for ephemeral demo environment
+# Data will be lost when containers are stopped
+# For persistent data, uncomment and add volumes:
+# volumes:
+#   prometheus-data:
+#   grafana-data:
+#   jaeger-data:
