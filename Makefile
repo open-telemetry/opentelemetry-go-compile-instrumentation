@@ -195,7 +195,7 @@ test: test-unit test-integration test-e2e
 
 .ONESHELL:
 test-unit: ## Run unit tests
-test-unit: package gotestfmt
+test-unit: build package gotestfmt
 	@echo "Running unit tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
@@ -209,21 +209,21 @@ test-unit/coverage: package gotestfmt
 
 .ONESHELL:
 test-integration: ## Run integration tests
-test-integration: build gotestfmt
+test-integration: build build-demo gotestfmt
 	@echo "Running integration tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... 2>&1 | tee ./gotest-integration.log | gotestfmt
 
 .ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
-test-integration/coverage: build gotestfmt
+test-integration/coverage: build build-demo gotestfmt
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log | gotestfmt
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
-test-e2e: build gotestfmt
+test-e2e: build build-demo gotestfmt
 	@echo "Running e2e tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... 2>&1 | tee ./gotest-e2e.log | gotestfmt
