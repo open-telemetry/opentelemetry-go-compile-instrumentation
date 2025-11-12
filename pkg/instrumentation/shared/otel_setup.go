@@ -11,9 +11,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otelsetup"
 )
 
-var (
-	setupOnce sync.Once
-)
+var setupOnce sync.Once
 
 // GetLogger returns a shared logger instance for instrumentation
 // It uses OTEL_LOG_LEVEL environment variable (debug, info, warn, error)
