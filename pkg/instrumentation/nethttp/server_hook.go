@@ -6,6 +6,7 @@ package nethttp
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
@@ -14,17 +15,21 @@ import (
 )
 
 var (
-	logger             = shared.GetLogger()
-	serverInstrumenter = BuildNetHttpServerOtelInstrumenter()
+	logger                 = shared.GetLogger()
+	serverInstrumenter     *instrumenter.PropagatingFromUpstreamInstrumenter[*netHttpRequest, *netHttpResponse]
+	serverInstrumenterOnce sync.Once
 )
 
-func init() {
-	// Setup OpenTelemetry SDK (idempotent, shared across all instrumentations)
-	if err := shared.SetupOTelSDK(); err != nil {
-		logger.Error("failed to setup OTel SDK", "error", err)
-		return
-	}
-	logger.Info("HTTP server instrumentation initialized")
+func getServerInstrumenter() *instrumenter.PropagatingFromUpstreamInstrumenter[*netHttpRequest, *netHttpResponse] {
+	serverInstrumenterOnce.Do(func() {
+		// Ensure SDK is initialized before building instrumenter
+		if err := shared.SetupOTelSDK(); err != nil {
+			logger.Error("failed to setup OTel SDK", "error", err)
+		}
+		serverInstrumenter = BuildNetHttpServerOtelInstrumenter()
+		logger.Info("HTTP server instrumentation initialized")
+	})
+	return serverInstrumenter
 }
 
 func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
@@ -49,7 +54,7 @@ func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWri
 	}
 
 	// Start instrumentation
-	ctx := serverInstrumenter.Start(r.Context(), request)
+	ctx := getServerInstrumenter().Start(r.Context(), request)
 
 	// Wrap ResponseWriter to capture status code
 	wrapper := &writerWrapper{
@@ -141,7 +146,7 @@ func AfterServeHTTP(ictx inst.HookContext) {
 	}
 
 	// End instrumentation
-	serverInstrumenter.End(ctx, instrumenter.Invocation[*netHttpRequest, *netHttpResponse]{
+	getServerInstrumenter().End(ctx, instrumenter.Invocation[*netHttpRequest, *netHttpResponse]{
 		Request:        request,
 		Response:       response,
 		Err:            nil,
