@@ -334,7 +334,7 @@ hadolint: ## Install hadolint if not present
 weaver-install: ## Install OTel Weaver if not present
 	@if ! command -v weaver >/dev/null 2>&1; then \
 		echo "Installing OTel Weaver..."; \
-		WEAVER_VERSION="v0.13.0"; \
+		WEAVER_VERSION="v0.19.0"; \
 		if [ "$$(uname -s)" = "Darwin" ]; then \
 			if [ "$$(uname -m)" = "arm64" ]; then \
 				WEAVER_ARCH="aarch64-apple-darwin"; \
@@ -347,12 +347,21 @@ weaver-install: ## Install OTel Weaver if not present
 			echo "Error: Unsupported platform $$(uname -s)"; \
 			exit 1; \
 		fi; \
-		WEAVER_URL="https://github.com/open-telemetry/weaver/releases/download/$${WEAVER_VERSION}/weaver-$${WEAVER_ARCH}"; \
+		WEAVER_URL="https://github.com/open-telemetry/weaver/releases/download/$${WEAVER_VERSION}/weaver-$${WEAVER_ARCH}.tar.xz"; \
 		echo "Downloading weaver from $${WEAVER_URL}..."; \
-		curl -fsSL "$${WEAVER_URL}" -o /tmp/weaver; \
-		chmod +x /tmp/weaver; \
+		mkdir -p /tmp/weaver-install; \
+		curl -fsSL "$${WEAVER_URL}" -o /tmp/weaver-install/weaver.tar.xz; \
+		tar -xJf /tmp/weaver-install/weaver.tar.xz -C /tmp/weaver-install; \
+		WEAVER_BIN=$$(find /tmp/weaver-install -name weaver -type f); \
+		if [ -z "$$WEAVER_BIN" ]; then \
+			echo "Error: weaver binary not found in archive"; \
+			rm -rf /tmp/weaver-install; \
+			exit 1; \
+		fi; \
+		chmod +x "$$WEAVER_BIN"; \
 		mkdir -p "$$(go env GOPATH)/bin"; \
-		mv /tmp/weaver "$$(go env GOPATH)/bin/weaver"; \
+		mv "$$WEAVER_BIN" "$$(go env GOPATH)/bin/weaver"; \
+		rm -rf /tmp/weaver-install; \
 		echo "Installed weaver to $$(go env GOPATH)/bin/weaver"; \
 		weaver --version; \
 	else \
@@ -361,7 +370,7 @@ weaver-install: ## Install OTel Weaver if not present
 	fi
 
 lint/semantic-conventions: ## Validate semantic convention registry
-registry-check: weaver-install
+lint/semantic-conventions: weaver-install
 	@echo "Validating semantic convention registry..."
 	@weaver registry check \
 		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
@@ -378,17 +387,18 @@ registry-diff: weaver-install
 		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$${BASELINE_VERSION} \
 		--diff-format markdown \
 		--output tmp/registry-diff.md \
-		--future || true; \
+		--future; \
 	if [ -f tmp/registry-diff.md ]; then \
 		echo ""; \
 		echo "Registry diff report saved to tmp/registry-diff.md"; \
 		echo ""; \
 		cat tmp/registry-diff.md; \
 	else \
-		echo "No diff report generated"; \
+		echo "Error: No diff report generated"; \
+		exit 1; \
 	fi
 
-registry-resolve: ## Resolve semantic convention registry schema
+semantic-conventions/resolve: ## Resolve semantic convention registry schema
 semantic-conventions/resolve: weaver-install
 	@echo "Resolving semantic convention registry..."
 	@mkdir -p tmp
@@ -398,4 +408,3 @@ semantic-conventions/resolve: weaver-install
 		--output tmp/resolved-schema.yaml \
 		--future
 	@echo "Resolved schema saved to tmp/resolved-schema.yaml"
-

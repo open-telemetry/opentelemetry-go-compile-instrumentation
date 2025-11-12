@@ -16,7 +16,7 @@ permissions:
 
 env:
   # OTel Weaver version to use for registry diff check
-  WEAVER_VERSION: v0.13.0
+  WEAVER_VERSION: v0.19.0
   # Semantic conventions registry URL
   SEMCONV_REGISTRY: https://github.com/open-telemetry/semantic-conventions.git
 
@@ -34,16 +34,29 @@ jobs:
         run: |
           # Download and install weaver binary
           WEAVER_ARCH="x86_64-unknown-linux-gnu"
-          WEAVER_URL="https://github.com/open-telemetry/weaver/releases/download/${WEAVER_VERSION}/weaver-${WEAVER_ARCH}"
+          WEAVER_URL="https://github.com/open-telemetry/weaver/releases/download/${WEAVER_VERSION}/weaver-${WEAVER_ARCH}.tar.xz"
 
-          curl -fsSL "${WEAVER_URL}" -o weaver
+          curl -fsSL "${WEAVER_URL}" -o weaver.tar.xz
+          tar -xJf weaver.tar.xz
           chmod +x weaver
           sudo mv weaver /usr/local/bin/weaver
+          rm -f weaver.tar.xz
 
           # Verify installation
           weaver --version
 
-      - name: Check registry diff against main branch
+      - name: Validate semantic conventions registry
+        if: github.event_name == 'pull_request'
+        run: |
+          # First, validate the registry to catch any schema errors
+          echo "::group::Validating semantic convention registry"
+          weaver registry check \
+            --registry "${SEMCONV_REGISTRY}[model]" \
+            --diagnostic-format gh_workflow_command \
+            --future
+          echo "::endgroup::"
+
+      - name: Generate registry diff against main branch
         if: github.event_name == 'pull_request'
         run: |
           # Create output directory
@@ -51,13 +64,15 @@ jobs:
 
           # Run registry diff comparing current PR branch against main branch
           # Using the semantic conventions registry as baseline
+          echo "::group::Generating registry diff"
           weaver registry diff \
             --registry "${SEMCONV_REGISTRY}[model]" \
             --baseline-registry "${SEMCONV_REGISTRY}[model]" \
             --diff-format markdown \
             --output registry-diff-output/diff.md \
             --diagnostic-format gh_workflow_command \
-            --future || true
+            --future
+          echo "::endgroup::"
 
           echo "Registry diff completed. Check output below:"
           if [ -f registry-diff-output/diff.md ]; then

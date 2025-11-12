@@ -92,6 +92,15 @@ Test results are saved to `gotest-unit.log` and `gotest-integration.log` for rev
 
 - `make docs` - Update embedded documentation in markdown files
 
+#### Semantic Conventions
+
+- `make weaver-install` - Install OTel Weaver if not present
+- `make lint/semantic-conventions` - Validate semantic convention registry
+- `make registry-diff` - Generate diff between two versions of semantic convention registry
+- `make semantic-conventions/resolve` - Resolve semantic convention registry schema
+
+For detailed information on managing semantic conventions, see [docs/semantic-conventions.md](docs/semantic-conventions.md).
+
 #### GitHub Actions Security
 
 - `make ratchet/pin` - Pin GitHub Actions to specific commit SHAs for security
