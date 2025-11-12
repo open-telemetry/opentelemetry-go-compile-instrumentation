@@ -21,12 +21,20 @@ func (n netHttpClientAttrsGetter) GetHTTPRequestHeader(request *netHttpRequest, 
 }
 
 // GetHTTPResponseStatusCode returns the HTTP response status code
-func (n netHttpClientAttrsGetter) GetHTTPResponseStatusCode(request *netHttpRequest, response *netHttpResponse, err error) int {
+func (n netHttpClientAttrsGetter) GetHTTPResponseStatusCode(
+	request *netHttpRequest,
+	response *netHttpResponse,
+	err error,
+) int {
 	return response.statusCode
 }
 
 // GetHTTPResponseHeader returns the HTTP response header values for the given name
-func (n netHttpClientAttrsGetter) GetHTTPResponseHeader(request *netHttpRequest, response *netHttpResponse, name string) []string {
+func (n netHttpClientAttrsGetter) GetHTTPResponseHeader(
+	request *netHttpRequest,
+	response *netHttpResponse,
+	name string,
+) []string {
 	return response.header.Values(name)
 }
 
@@ -60,7 +68,10 @@ func (n netHttpClientAttrsGetter) GetNetworkProtocolVersion(request *netHttpRequ
 }
 
 // GetNetworkLocalInetAddress returns the local inet address
-func (n netHttpClientAttrsGetter) GetNetworkLocalInetAddress(request *netHttpRequest, response *netHttpResponse) string {
+func (n netHttpClientAttrsGetter) GetNetworkLocalInetAddress(
+	request *netHttpRequest,
+	response *netHttpResponse,
+) string {
 	return ""
 }
 

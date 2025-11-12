@@ -53,7 +53,10 @@ func BuildNetHttpServerOtelInstrumenter() *instrumenter.PropagatingFromUpstreamI
 	}
 
 	// Create metrics registry and HTTP server metrics
-	metricsRegistry := httpconv.NewMetricsRegistry(otelsetup.GetLogger(), otelsetup.GetMeterProvider().Meter(instrumentationName))
+	metricsRegistry := httpconv.NewMetricsRegistry(
+		otelsetup.GetLogger(),
+		otelsetup.GetMeterProvider().Meter(instrumentationName),
+	)
 	serverMetrics, err := metricsRegistry.NewHTTPServerMetric(instrumentationName)
 	if err != nil {
 		otelsetup.GetLogger().Error("failed to create HTTP server metrics", "error", err)

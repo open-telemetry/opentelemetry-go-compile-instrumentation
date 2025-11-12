@@ -43,7 +43,10 @@ func BuildNetHttpClientOtelInstrumenter() *instrumenter.PropagatingToDownstreamI
 	}
 
 	// Create metrics registry and HTTP client metrics
-	metricsRegistry := httpconv.NewMetricsRegistry(otelsetup.GetLogger(), otelsetup.GetMeterProvider().Meter(instrumentationName))
+	metricsRegistry := httpconv.NewMetricsRegistry(
+		otelsetup.GetLogger(),
+		otelsetup.GetMeterProvider().Meter(instrumentationName),
+	)
 	clientMetrics, err := metricsRegistry.NewHTTPClientMetric(instrumentationName)
 	if err != nil {
 		otelsetup.GetLogger().Error("failed to create HTTP client metrics", "error", err)
