@@ -41,6 +41,10 @@ func isSetup() bool {
 
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context) error {
+	return SetupWithArgs(ctx, os.Args[1:])
+}
+
+func SetupWithArgs(ctx context.Context, args []string) error {
 	logger := util.LoggerFromContext(ctx)
 
 	if isSetup() {
@@ -52,7 +56,7 @@ func Setup(ctx context.Context) error {
 		logger: logger,
 	}
 	// Find all dependencies of the project being build
-	deps, err := sp.findDeps(ctx, os.Args[1:])
+	deps, err := sp.findDeps(ctx, args)
 	if err != nil {
 		return err
 	}

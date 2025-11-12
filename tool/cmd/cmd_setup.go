@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/urfave/cli/v3"
 
@@ -14,11 +15,18 @@ import (
 
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandSetup = cli.Command{
-	Name:        "setup",
-	Description: "Set up the environment for instrumentation",
-	Before:      addLoggerPhaseAttribute,
-	Action: func(ctx context.Context, _ *cli.Command) error {
-		err := setup.Setup(ctx)
+	Name:            "setup",
+	Description:     "Set up the environment for instrumentation",
+	ArgsUsage:       "[go build flags]",
+	SkipFlagParsing: true,
+	Before:          addLoggerPhaseAttribute,
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		args := cmd.Args().Slice()
+		// Default to "go build" if no args provided
+		if len(args) == 0 {
+			args = []string{"go", "build"}
+		}
+		err := setup.SetupWithArgs(ctx, args)
 		if err != nil {
 			return ex.Wrapf(err, "failed to setup with exit code %d", exitCodeFailure)
 		}
