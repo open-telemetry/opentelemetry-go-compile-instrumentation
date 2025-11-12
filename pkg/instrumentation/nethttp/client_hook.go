@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
@@ -16,15 +17,21 @@ import (
 
 const otelExporterPrefix = "OTel OTLP Exporter Go"
 
-var clientInstrumenter = BuildNetHttpClientOtelInstrumenter()
+var (
+	clientInstrumenter     *instrumenter.PropagatingToDownstreamInstrumenter[*netHttpRequest, *netHttpResponse]
+	clientInstrumenterOnce sync.Once
+)
 
-func init() {
-	// Setup OpenTelemetry SDK (idempotent, shared across all instrumentations)
-	if err := shared.SetupOTelSDK(); err != nil {
-		logger.Error("failed to setup OTel SDK", "error", err)
-		return
-	}
-	logger.Info("HTTP client instrumentation initialized")
+func getClientInstrumenter() *instrumenter.PropagatingToDownstreamInstrumenter[*netHttpRequest, *netHttpResponse] {
+	clientInstrumenterOnce.Do(func() {
+		// Ensure SDK is initialized before building instrumenter
+		if err := shared.SetupOTelSDK(); err != nil {
+			logger.Error("failed to setup OTel SDK", "error", err)
+		}
+		clientInstrumenter = BuildNetHttpClientOtelInstrumenter()
+		logger.Info("HTTP client instrumentation initialized")
+	})
+	return clientInstrumenter
 }
 
 func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http.Request) {
@@ -56,7 +63,7 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
 	}
 
 	// Start instrumentation (this will inject trace context into headers)
-	ctx := clientInstrumenter.Start(req.Context(), request)
+	ctx := getClientInstrumenter().Start(req.Context(), request)
 
 	// Update request with new context (contains trace information)
 	newReq := req.WithContext(ctx)
@@ -140,7 +147,7 @@ func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 	}
 
 	// End instrumentation
-	clientInstrumenter.End(ctx, instrumenter.Invocation[*netHttpRequest, *netHttpResponse]{
+	getClientInstrumenter().End(ctx, instrumenter.Invocation[*netHttpRequest, *netHttpResponse]{
 		Request:        request,
 		Response:       response,
 		Err:            err,

@@ -13,6 +13,12 @@ import (
 
 var setupOnce sync.Once
 
+func init() {
+	// Initialize OTel SDK when this package is first imported
+	// This ensures SDK is ready before other packages build their instrumenters
+	_ = SetupOTelSDK()
+}
+
 // GetLogger returns a shared logger instance for instrumentation
 // It uses OTEL_LOG_LEVEL environment variable (debug, info, warn, error)
 func GetLogger() *slog.Logger {
