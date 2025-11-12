@@ -37,11 +37,18 @@ This command:
 
 ### Generate Registry Diff
 
-Compare the current semantic convention registry against a baseline version to see what has changed:
+Compare semantic convention versions to understand changes and available updates:
 
 ```bash
 make registry-diff
 ```
+
+This command automatically:
+
+1. **Detects** the `semconv` version used in your code (e.g., `v1.30.0`)
+2. **Generates two comparison reports**:
+   - **Current vs Baseline**: What changed in your version vs `v1.29.0`
+   - **Latest vs Current**: What new features are available if you upgrade
 
 By default, this compares against `v1.29.0`. To use a different baseline:
 
@@ -49,18 +56,38 @@ By default, this compares against `v1.29.0`. To use a different baseline:
 BASELINE_VERSION=v1.28.0 make registry-diff
 ```
 
-This command:
+**Output files**:
+- `tmp/registry-diff-baseline.md` - Changes since baseline
+- `tmp/registry-diff-latest.md` - Available updates
 
-- Generates a markdown report showing differences between versions
-- Highlights added, modified, and removed attributes
-- Saves the report to `tmp/registry-diff.md`
-- Displays the report in your terminal
+**Example output**:
+```
+Detected project semconv version: v1.30.0
+Baseline version: v1.29.0
 
-**When to use**: Use this to understand changes when updating semantic convention dependencies or when adding new attributes.
+Changes in your current version (v1.30.0 vs v1.29.0):
+- Added: http.request.body.size
+- Modified: http.response.status_code description
+...
+
+Available updates (latest vs v1.30.0):
+- Added: db.client.connection.state
+- Deprecated: net.peer.name (use server.address)
+...
+```
+
+**When to use**:
+- Understanding what's in your current semconv version
+- Deciding whether to upgrade to a newer version
+- Reviewing changes before modifying `pkg/inst-api-semconv/`
+
+**Requirements**:
+- Network access to GitHub
+- OTel Weaver installed (run `make weaver-install` first)
 
 ### Resolve Registry Schema
 
-Generate a resolved, flattened view of the entire semantic convention registry:
+Generate a resolved, flattened view of the semantic convention registry for your current version:
 
 ```bash
 make semantic-conventions/resolve
@@ -68,12 +95,27 @@ make semantic-conventions/resolve
 
 This command:
 
-- Fetches the complete semantic convention registry
+- Fetches the semantic convention registry at the **latest** version (main branch)
 - Resolves all references and inheritance
 - Outputs a single YAML file with all definitions
 - Saves the output to `tmp/resolved-schema.yaml`
 
-**When to use**: Use this when you need to inspect the complete schema or debug attribute definitions.
+**To resolve a specific version** (e.g., the version you're using):
+
+```bash
+# Manually resolve for v1.30.0
+weaver registry resolve \
+  --registry https://github.com/open-telemetry/semantic-conventions.git[model]@v1.30.0 \
+  --format yaml \
+  --output tmp/resolved-v1.30.0.yaml \
+  --future
+```
+
+**When to use**:
+- Inspecting the complete schema structure
+- Searching for specific attribute definitions
+- Debugging attribute inheritance or references
+- Understanding available attributes before implementing new features
 
 ## Workflow: Adding a New Attribute
 
@@ -179,17 +221,54 @@ The project includes automated checks for semantic conventions:
 
 When you modify files in `pkg/inst-api-semconv/`:
 
-1. **Registry Validation**: Validates that definitions follow the correct schema
-2. **Diff Report**: Generates a comparison against the upstream registry
-3. **PR Comment**: Posts a summary of changes as a PR comment
-4. **Blocking Check**: CI will **fail** if validation errors are found, preventing merge until issues are resolved
+1. **Version Detection**: Automatically detects the `semconv` version used in the Go code (e.g., `v1.30.0`)
+2. **Registry Validation**: Validates the semantic conventions registry at the detected version to ensure it's valid
+3. **Diff Reports**: Generates two comparison reports:
+   - **Current vs Baseline**: Shows changes between your version and the baseline (v1.29.0)
+   - **Latest vs Current**: Shows available updates if you upgrade to the latest semantic conventions
+4. **PR Comment**: Posts a comprehensive diff report as a PR comment with:
+   - What changed in your current version
+   - What new features/changes are available in newer versions
+   - Action items for ensuring code compliance
+
+**What This Checks**:
+- Validates the semantic conventions version you're using is valid
+- Shows what changed in that version compared to baseline
+- Shows what's available if you upgrade to newer versions
+- Helps ensure your Go code aligns with the correct semconv version
+
+**What This Doesn't Check**:
+- Does not validate Go code syntax or logic (use `make lint` and `make test`)
+- Does not enforce upgrading to latest version (informational only)
 
 ### On Main Branch
 
 When changes are merged to `main`:
 
-1. **Registry Validation**: Re-validates the current state
-2. **Baseline Update**: Establishes a new baseline for future comparisons
+1. **Version Detection**: Detects the current `semconv` version in use
+2. **Registry Validation**: Validates that version's registry to ensure continued compliance
+
+### How It Works
+
+The CI workflow:
+1. Scans your Go files for `semconv/vX.Y.Z` imports
+2. Validates that specific version's registry using OTel Weaver
+3. Compares against baseline and latest to show evolution
+4. Posts actionable information to help you maintain compliance
+
+### When to Update Semantic Conventions
+
+Consider updating your `semconv` version when:
+- The "Available Updates" section shows relevant new conventions
+- You need new attributes or metrics added in newer versions
+- You want to adopt breaking changes or improvements
+
+**Steps to update**:
+1. Review the "Available Updates" diff
+2. Update Go imports: `semconv/v1.30.0` → `semconv/v1.31.0`
+3. Update `CURRENT_SEMCONV_VERSION` in `.github/workflows/check-registry-diff.yaml`
+4. Update code to handle any breaking changes
+5. Run tests: `make test`
 
 ## Best Practices
 

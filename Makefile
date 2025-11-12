@@ -380,22 +380,46 @@ registry-diff: ## Generate diff between two versions of semantic convention regi
 registry-diff: weaver-install
 	@echo "Generating semantic convention registry diff..."
 	@mkdir -p tmp
-	@BASELINE_VERSION=$${BASELINE_VERSION:-v1.29.0}; \
-	echo "Comparing current registry against baseline version: $${BASELINE_VERSION}"; \
+	@# Detect current semconv version from code
+	@CURRENT_VERSION=$$(grep -r "semconv/v" pkg/inst-api-semconv/ --include="*.go" | \
+		grep -o "semconv/v[0-9]*\.[0-9]*\.[0-9]*" | \
+		sort -u | head -1 | sed 's/semconv\///'); \
+	if [ -z "$$CURRENT_VERSION" ]; then \
+		echo "Error: No semconv version detected in pkg/inst-api-semconv/"; \
+		exit 1; \
+	fi; \
+	BASELINE_VERSION=$${BASELINE_VERSION:-v1.29.0}; \
+	echo "Detected project semconv version: $$CURRENT_VERSION"; \
+	echo "Baseline version: $$BASELINE_VERSION"; \
+	echo ""; \
+	echo "=== Diff 1: Current ($$CURRENT_VERSION) vs Baseline ($$BASELINE_VERSION) ==="; \
+	weaver registry diff \
+		--registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION \
+		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$BASELINE_VERSION \
+		--diff-format markdown \
+		--output tmp/registry-diff-baseline.md \
+		--future || echo "Warning: Baseline diff failed"; \
+	echo ""; \
+	echo "=== Diff 2: Latest (main) vs Current ($$CURRENT_VERSION) ==="; \
 	weaver registry diff \
 		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
-		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$${BASELINE_VERSION} \
+		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION \
 		--diff-format markdown \
-		--output tmp/registry-diff.md \
-		--future; \
-	if [ -f tmp/registry-diff.md ]; then \
+		--output tmp/registry-diff-latest.md \
+		--future || echo "Warning: Latest diff failed"; \
+	echo ""; \
+	if [ -f tmp/registry-diff-baseline.md ]; then \
+		echo "📊 Changes in your current version ($$CURRENT_VERSION vs $$BASELINE_VERSION):"; \
+		echo "Saved to: tmp/registry-diff-baseline.md"; \
 		echo ""; \
-		echo "Registry diff report saved to tmp/registry-diff.md"; \
+		cat tmp/registry-diff-baseline.md; \
 		echo ""; \
-		cat tmp/registry-diff.md; \
-	else \
-		echo "Error: No diff report generated"; \
-		exit 1; \
+	fi; \
+	if [ -f tmp/registry-diff-latest.md ]; then \
+		echo "🆕 Available updates (latest vs $$CURRENT_VERSION):"; \
+		echo "Saved to: tmp/registry-diff-latest.md"; \
+		echo ""; \
+		cat tmp/registry-diff-latest.md; \
 	fi
 
 semantic-conventions/resolve: ## Resolve semantic convention registry schema
