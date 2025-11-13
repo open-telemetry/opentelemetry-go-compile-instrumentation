@@ -556,6 +556,13 @@ formatters:
 
   # All settings can be found here https://github.com/golangci/golangci-lint/blob/HEAD/.golangci.reference.yml
   settings:
+    gofmt:
+      simplify: true
+
+    gofumpt:
+      module-path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation
+      extra-rules: true
+
     goimports:
       # A list of prefixes, which, if set, checks import paths
       # with the given prefixes are grouped after 3rd-party packages.

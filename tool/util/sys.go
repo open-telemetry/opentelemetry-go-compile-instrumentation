@@ -99,7 +99,7 @@ func ListFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-func WriteFile(filePath string, content string) error {
+func WriteFile(filePath, content string) error {
 	file, err := os.Create(filePath)
 	if err != nil {
 		return ex.Wrap(err)

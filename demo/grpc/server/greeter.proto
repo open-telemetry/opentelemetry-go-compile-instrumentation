@@ -10,6 +10,7 @@ option go_package = "github.com/open-telemetry/opentelemetry-go-compile-instrume
 service Greeter {
   rpc SayHello (HelloRequest) returns (HelloReply) {}
   rpc SayHelloStream (stream HelloRequest) returns (stream HelloReply) {}
+  rpc Shutdown (ShutdownRequest) returns (ShutdownReply) {}
 }
 
 message HelloRequest {
@@ -17,5 +18,11 @@ message HelloRequest {
 }
 
 message HelloReply {
+  string message = 1;
+}
+
+message ShutdownRequest {}
+
+message ShutdownReply {
   string message = 1;
 }

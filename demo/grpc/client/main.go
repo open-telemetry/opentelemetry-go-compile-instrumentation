@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	addr   = flag.String("addr", "localhost:50051", "the address to connect to")
-	name   = flag.String("name", "world", "Name to greet")
-	stream = flag.Bool("stream", false, "Use streaming RPC")
+	addr     = flag.String("addr", "localhost:50051", "the address to connect to")
+	name     = flag.String("name", "world", "Name to greet")
+	stream   = flag.Bool("stream", false, "Use streaming RPC")
+	shutdown = flag.Bool("shutdown", false, "Shutdown the server")
 )
 
 func main() {
@@ -36,7 +37,14 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if *stream {
+	if *shutdown {
+		// Send shutdown request
+		r, err := c.Shutdown(ctx, &pb.ShutdownRequest{})
+		if err != nil {
+			log.Fatalf("could not send shutdown: %v", err)
+		}
+		log.Printf("Shutdown response: %s", r.GetMessage())
+	} else if *stream {
 		// Streaming RPC
 		streamClient, err := c.SayHelloStream(ctx)
 		if err != nil {

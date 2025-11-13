@@ -1,0 +1,9 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+server_hook:
+  target: google.golang.org/grpc
+  func: Serve
+  recv: "*Server"
+  before: BeforeServe
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc"

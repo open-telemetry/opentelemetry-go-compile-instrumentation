@@ -412,22 +412,40 @@ func addHookContext(list *dst.FieldList) {
 }
 
 func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
+	// Since target function parameter names might be "_", we may use the target
+	// function parameters in the trampoline function, which would cause a syntax
+	// error, so we assign them a specific name and use them.
+	idx := 0
+	renameField := func(field *dst.Field, prefix string) {
+		for _, names := range field.Names {
+			names.Name = fmt.Sprintf("%s%d", prefix, idx)
+			idx++
+		}
+	}
+	// Build parameter list of trampoline function.
+	// For before trampoline, it's signature is:
+	// func S(h* HookContext, recv type, arg1 type, arg2 type, ...)
+	// For after trampoline, it's signature is:
+	// func S(h* HookContext, arg1 type, arg2 type, ...)
 	paramList := &dst.FieldList{List: []*dst.Field{}}
 	if before {
 		if ast.HasReceiver(ip.targetFunc) {
 			recvField, ok := dst.Clone(ip.targetFunc.Recv.List[0]).(*dst.Field)
 			util.Assert(ok, "recvField is not a Field")
+			renameField(recvField, "recv")
 			paramList.List = append(paramList.List, recvField)
 		}
 		for _, field := range ip.targetFunc.Type.Params.List {
 			paramField, ok := dst.Clone(field).(*dst.Field)
 			util.Assert(ok, "paramField is not a Field")
+			renameField(paramField, "param")
 			paramList.List = append(paramList.List, paramField)
 		}
 	} else if ip.targetFunc.Type.Results != nil {
 		for _, field := range ip.targetFunc.Type.Results.List {
 			retField, ok := dst.Clone(field).(*dst.Field)
 			util.Assert(ok, "retField is not a Field")
+			renameField(retField, "arg")
 			paramList.List = append(paramList.List, retField)
 		}
 	}

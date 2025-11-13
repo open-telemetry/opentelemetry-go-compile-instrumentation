@@ -93,6 +93,7 @@ format/go: ## Format Go code only
 format/go: golangci-lint
 	@echo "Formatting Go code..."
 	golangci-lint fmt
+	golangci-lint run --fix
 
 format/yaml: ## Format YAML files only (excludes testdata)
 format/yaml: yamlfmt

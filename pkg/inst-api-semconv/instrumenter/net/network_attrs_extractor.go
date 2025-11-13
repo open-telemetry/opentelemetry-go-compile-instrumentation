@@ -26,7 +26,7 @@ func (i *NetworkAttrsExtractor[REQUEST, RESPONSE]) OnEnd(context context.Context
 	return i.internalExtractor.OnEnd(context, attributes, request, response)
 }
 
-func CreateNetworkAttributesExtractor[REQUEST any, RESPONSE any](
+func CreateNetworkAttributesExtractor[REQUEST, RESPONSE any](
 	getter NetworkAttrsGetter[REQUEST, RESPONSE],
 ) NetworkAttrsExtractor[REQUEST, RESPONSE] {
 	return NetworkAttrsExtractor[REQUEST, RESPONSE]{
@@ -81,7 +81,7 @@ func (_ *ServerAttributesExtractor[REQUEST, RESPONSE]) OnEnd(ctx context.Context
 	return attributes, ctx
 }
 
-func CreateServerAttributesExtractor[REQUEST any, RESPONSE any](
+func CreateServerAttributesExtractor[REQUEST, RESPONSE any](
 	getter ServerAttributesGetter[REQUEST],
 ) ServerAttributesExtractor[REQUEST, RESPONSE] {
 	return ServerAttributesExtractor[REQUEST, RESPONSE]{
@@ -112,7 +112,7 @@ func (_ *ClientAttributesExtractor[REQUEST, RESPONSE]) OnEnd(ctx context.Context
 	return attributes, ctx
 }
 
-func CreateClientAttributesExtractor[REQUEST any, RESPONSE any](
+func CreateClientAttributesExtractor[REQUEST, RESPONSE any](
 	getter ClientAttributesGetter[REQUEST],
 ) ClientAttributesExtractor[REQUEST, RESPONSE] {
 	return ClientAttributesExtractor[REQUEST, RESPONSE]{

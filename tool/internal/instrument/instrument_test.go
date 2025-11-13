@@ -154,6 +154,15 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 						Recv:  "*T",
 						After: "H3After",
 					},
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "underscore_param",
+							Target: "main",
+						},
+						Path:   filepath.Join(".", "testdata"),
+						Func:   "Func2",
+						Before: "H4Before",
+					},
 				},
 			},
 			RawRules: map[string][]*rule.InstRawRule{
