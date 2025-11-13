@@ -46,33 +46,33 @@ func CreateRuleFromFields(raw []byte, name string, fields map[string]any) (InstR
 
 	switch {
 	case fields["struct"] != nil:
-		var r InstStructRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
+		r, err := NewInstStructRule(raw, name)
+		if err != nil {
+			return nil, err
 		}
 		r.InstBaseRule = base
-		return &r, nil
+		return r, nil
 	case fields["file"] != nil:
-		var r InstFileRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
+		r, err := NewInstFileRule(raw, name)
+		if err != nil {
+			return nil, err
 		}
 		r.InstBaseRule = base
-		return &r, nil
+		return r, nil
 	case fields["raw"] != nil:
-		var r InstRawRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
+		r, err := NewInstRawRule(raw, name)
+		if err != nil {
+			return nil, err
 		}
 		r.InstBaseRule = base
-		return &r, nil
+		return r, nil
 	case fields["func"] != nil:
-		var r InstFuncRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
+		r, err := NewInstFuncRule(raw, name)
+		if err != nil {
+			return nil, err
 		}
 		r.InstBaseRule = base
-		return &r, nil
+		return r, nil
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
