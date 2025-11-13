@@ -10,8 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// materalizeRules materializes all available rules from the embedded data
-func MateralizeRules() ([]InstRule, error) {
+// MaterializeRules materializes all available rules from the embedded data
+func MaterializeRules() ([]InstRule, error) {
 	availables, err := data.ListEmbedFiles()
 	if err != nil {
 		return nil, err
@@ -28,58 +28,26 @@ func MateralizeRules() ([]InstRule, error) {
 	return parsedRules, nil
 }
 
-// createRuleFromFields creates a rule instance based on the field type present in the YAML
+// CreateRuleFromFields creates a rule instance based on the field type present in the YAML
 //
 //nolint:nilnil // factory function
 func CreateRuleFromFields(raw []byte, name string, fields map[string]any) (InstRule, error) {
-	base := InstBaseRule{
-		Name: name,
-	}
-	if target, ok := fields["target"].(string); ok {
-		base.Target = target
-	}
-	if fields["version"] != nil {
-		v, ok := fields["version"].(string)
-		util.Assert(ok, "version is not a string")
-		base.Version = v
-	}
-
 	switch {
 	case fields["struct"] != nil:
-		r, err := NewInstStructRule(raw, name)
-		if err != nil {
-			return nil, err
-		}
-		r.InstBaseRule = base
-		return r, nil
+		return NewInstStructRule(raw, name)
 	case fields["file"] != nil:
-		r, err := NewInstFileRule(raw, name)
-		if err != nil {
-			return nil, err
-		}
-		r.InstBaseRule = base
-		return r, nil
+		return NewInstFileRule(raw, name)
 	case fields["raw"] != nil:
-		r, err := NewInstRawRule(raw, name)
-		if err != nil {
-			return nil, err
-		}
-		r.InstBaseRule = base
-		return r, nil
+		return NewInstRawRule(raw, name)
 	case fields["func"] != nil:
-		r, err := NewInstFuncRule(raw, name)
-		if err != nil {
-			return nil, err
-		}
-		r.InstBaseRule = base
-		return r, nil
+		return NewInstFuncRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
 	}
 }
 
-// parseEmbeddedRule parses the embedded yaml rule file to concrete rule instances
+// ParseEmbeddedRule parses the embedded yaml rule file to concrete rule instances
 func ParseEmbeddedRule(path string) ([]InstRule, error) {
 	yamlFile, err := data.ReadEmbedFile(path)
 	if err != nil {

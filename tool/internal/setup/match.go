@@ -134,7 +134,7 @@ func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.
 
 func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
-	allRules, err := rule.MateralizeRules()
+	allRules, err := rule.MaterializeRules()
 	if err != nil {
 		return nil, err
 	}

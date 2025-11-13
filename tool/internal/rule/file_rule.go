@@ -20,7 +20,8 @@ import (
 //		file: "newfile.go"
 //		path: "github.com/foo/bar/newfile"
 type InstFileRule struct {
-	InstBaseRule
+	InstBaseRule `yaml:",inline"`
+
 	File string `json:"file" yaml:"file"` // The name of the file to be added to the target package
 	Path string `json:"path" yaml:"path"` // The module path where the file is located
 }

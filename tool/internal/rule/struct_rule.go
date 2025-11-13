@@ -26,7 +26,8 @@ type InstStructField struct {
 }
 
 type InstStructRule struct {
-	InstBaseRule
+	InstBaseRule `yaml:",inline"`
+
 	Struct   string             `json:"struct"    yaml:"struct"`    // The type name of the struct to be instrumented
 	NewField []*InstStructField `json:"new_field" yaml:"new_field"` // The new fields to be added
 }
