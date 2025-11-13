@@ -263,16 +263,10 @@ func testFunc(param1 string, param2 int) (result1 string) { return "" }`,
 				},
 			}
 
-			expr, err := newHookContextImpl(tjump)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Nil(t, expr)
-			} else {
-				require.NoError(t, err)
-				assert.NotNil(t, expr)
-				if tt.validate != nil {
-					tt.validate(t, expr)
-				}
+			expr := newHookContextImpl(tjump)
+			assert.NotNil(t, expr)
+			if tt.validate != nil {
+				tt.validate(t, expr)
 			}
 		})
 	}
