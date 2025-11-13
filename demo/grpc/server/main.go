@@ -13,6 +13,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"time"
 
 	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server/pb"
 	"google.golang.org/grpc"
@@ -45,6 +47,15 @@ func (s *server) SayHelloStream(stream pb.Greeter_SayHelloStreamServer) error {
 	}
 }
 
+func (s *server) Shutdown(ctx context.Context, in *pb.ShutdownRequest) (*pb.ShutdownReply, error) {
+	log.Printf("Shutdown request received")
+	go func() {
+		time.Sleep(100 * time.Millisecond) // Give time to send response
+		os.Exit(0)
+	}()
+	return &pb.ShutdownReply{Message: "Server is shutting down"}, nil
+}
+
 func main() {
 	flag.Parse()
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
@@ -54,6 +65,7 @@ func main() {
 	s := grpc.NewServer()
 	pb.RegisterGreeterServer(s, &server{})
 	log.Printf("server listening at %v", lis.Addr())
+	log.Printf("server started")
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}

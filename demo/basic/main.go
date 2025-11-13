@@ -38,6 +38,8 @@ func Example() {
 	// [MyHook] hello world is instrumented!
 }
 
+func Underscore(_ int, _ float32) {}
+
 func main() {
 	context := &traceContext{
 		traceID: "123",

@@ -35,10 +35,12 @@ func Ident(name string) *dst.Ident {
 	}
 }
 
-func AddressOf(expr dst.Expr) *dst.UnaryExpr {
-	e, ok := dst.Clone(expr).(dst.Expr)
-	util.Assert(ok, "expr is not a UnaryExpr")
-	return &dst.UnaryExpr{Op: token.AND, X: e}
+func Nil() *dst.Ident {
+	return &dst.Ident{Name: IdentNil}
+}
+
+func AddressOf(name string) *dst.UnaryExpr {
+	return &dst.UnaryExpr{Op: token.AND, X: Ident(name)}
 }
 
 func CallTo(name string, args []dst.Expr) *dst.CallExpr {
@@ -93,7 +95,7 @@ func SelectorExpr(x dst.Expr, sel string) *dst.SelectorExpr {
 	}
 }
 
-func IndexExpr(x dst.Expr, index dst.Expr) *dst.IndexExpr {
+func IndexExpr(x, index dst.Expr) *dst.IndexExpr {
 	e, ok := dst.Clone(x).(dst.Expr)
 	util.Assert(ok, "x is not a Expr")
 	i, ok := dst.Clone(index).(dst.Expr)
@@ -104,7 +106,7 @@ func IndexExpr(x dst.Expr, index dst.Expr) *dst.IndexExpr {
 	}
 }
 
-func TypeAssertExpr(x dst.Expr, t dst.Expr) *dst.TypeAssertExpr {
+func TypeAssertExpr(x, t dst.Expr) *dst.TypeAssertExpr {
 	e, ok := dst.Clone(t).(dst.Expr)
 	util.Assert(ok, "t is not a Expr")
 	return &dst.TypeAssertExpr{

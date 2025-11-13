@@ -14,4 +14,6 @@ func Func1(p1 string, p2 int) (float32, error) {
 	return 0.0, nil
 }
 
+func Func2(p1 string, _ int) {}
+
 func main() { Func1("hello", 123) }

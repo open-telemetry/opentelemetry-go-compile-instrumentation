@@ -53,16 +53,16 @@ func (customizedNetHTTPAttrsGetter) GetHTTPRequestHeader(_ any, _ string) []stri
 	panic("implement me")
 }
 
-func (c customizedNetHTTPAttrsGetter) GetHTTPResponseStatusCode(_ any, _ any, _ error) int {
+func (c customizedNetHTTPAttrsGetter) GetHTTPResponseStatusCode(_, _ any, _ error) int {
 	return c.code
 }
 
-func (customizedNetHTTPAttrsGetter) GetHTTPResponseHeader(_ any, _ any, _ string) []string {
+func (customizedNetHTTPAttrsGetter) GetHTTPResponseHeader(_, _ any, _ string) []string {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (customizedNetHTTPAttrsGetter) GetErrorType(_ any, _ any, _ error) string {
+func (customizedNetHTTPAttrsGetter) GetErrorType(_, _ any, _ error) string {
 	// TODO implement me
 	panic("implement me")
 }

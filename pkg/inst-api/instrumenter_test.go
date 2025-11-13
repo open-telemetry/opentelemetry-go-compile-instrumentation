@@ -45,7 +45,7 @@ func (m *mockProp) Get(key string) string {
 	return m.val
 }
 
-func (m *mockProp) Set(key string, value string) {
+func (m *mockProp) Set(key, value string) {
 	m.val = value
 }
 

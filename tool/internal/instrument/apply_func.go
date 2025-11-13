@@ -50,26 +50,24 @@ func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
 	return nil
 }
 
-func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
+func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 	// Add explicit names for return values, they can be further referenced if
 	// we're willing
-	var retVals []dst.Expr // nil by default
+	var retVals []string // nil by default
 	if retList := funcDecl.Type.Results; retList != nil {
 		idx := 0
 		for _, field := range retList.List {
 			if field.Names == nil {
-				// Rename
+				// Rename (for referenceability)
 				name := fmt.Sprintf("%s%d", unnamedRetValName, idx)
 				field.Names = []*dst.Ident{ast.Ident(name)}
 				idx++
 				// Collect (for further use)
-				i, ok := dst.Clone(ast.Ident(name)).(*dst.Ident)
-				util.Assert(ok, "ident is not a Ident")
-				retVals = append(retVals, i)
+				retVals = append(retVals, name)
 			} else {
 				// Collect only (for further use)
 				for _, name := range field.Names {
-					retVals = append(retVals, ast.Ident(name.Name))
+					retVals = append(retVals, name.Name)
 				}
 			}
 		}
@@ -78,36 +76,47 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []dst.Expr {
 	return retVals
 }
 
-func collectArguments(funcDecl *dst.FuncDecl) []dst.Expr {
-	args := make([]dst.Expr, 0)
+func collectArguments(funcDecl *dst.FuncDecl) []string {
+	args := make([]string, 0)
 	if ast.HasReceiver(funcDecl) {
 		receiver := funcDecl.Recv.List[0].Names[0].Name
-		args = append(args, ast.AddressOf(ast.Ident(receiver)))
+		args = append(args, receiver)
 	}
 	for _, field := range funcDecl.Type.Params.List {
 		for _, name := range field.Names {
-			args = append(args, ast.AddressOf(ast.Ident(name.Name)))
+			args = append(args, name.Name)
 		}
 	}
 	return args
 }
 
+func createHookArgs(names []string) []dst.Expr {
+	exprs := make([]dst.Expr, 0)
+	// If we find "a type" in target func, we pass "&a" to trampoline func,
+	// if we find "_ type" in target func, we pass "nil" to trampoline func,
+	for _, name := range names {
+		if name == "_" {
+			exprs = append(exprs, ast.Nil())
+		} else {
+			exprs = append(exprs, ast.AddressOf(name))
+		}
+	}
+	return exprs
+}
+
 func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
-	args []dst.Expr, retVals []dst.Expr,
+	args, retVals []string,
 ) *dst.IfStmt {
 	funcSuffix := util.CRC32(t.String())
-	beforeCall := ast.CallTo(makeName(t, funcDecl, true), args)
-	afterCall := ast.CallTo(makeName(t, funcDecl, false), func() []dst.Expr {
-		// NB. DST framework disallows duplicated node in the
-		// AST tree, we need to replicate the return values
-		// as they are already used in return statement above
-		clone := make([]dst.Expr, len(retVals)+1)
-		clone[0] = ast.Ident(trampolineHookContextName + funcSuffix)
-		for i := 1; i < len(clone); i++ {
-			clone[i] = ast.AddressOf(retVals[i-1])
-		}
-		return clone
-	}())
+	// Transparently pass the target function's parameters to trampoline func,
+	// with the only exception being that if the target func parameter is "_",
+	// then we directly pass "nil"
+	argsToBefore := createHookArgs(args)
+	argsToAfter := createHookArgs(retVals)
+	argHookContext := ast.Ident(trampolineHookContextName + funcSuffix)
+	argsToAfter = append([]dst.Expr{argHookContext}, argsToAfter...)
+	beforeCall := ast.CallTo(makeName(t, funcDecl, true), argsToBefore)
+	afterCall := ast.CallTo(makeName(t, funcDecl, false), argsToAfter)
 	tjumpInit := ast.DefineStmts(
 		ast.Exprs(
 			ast.Ident(trampolineHookContextName+funcSuffix),
@@ -116,9 +125,13 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 		ast.Exprs(beforeCall),
 	)
 	tjumpCond := ast.Ident(trampolineSkipName + funcSuffix)
+	tjumpReturn := make([]dst.Expr, 0)
+	for _, retVal := range retVals {
+		tjumpReturn = append(tjumpReturn, ast.Ident(retVal))
+	}
 	tjumpBody := ast.BlockStmts(
 		ast.ExprStmt(afterCall),
-		ast.ReturnStmt(retVals),
+		ast.ReturnStmt(tjumpReturn),
 	)
 	tjumpElse := ast.Block(ast.DeferStmt(afterCall))
 	tjump := ast.IfStmt(tjumpInit, tjumpCond, tjumpBody, tjumpElse)
@@ -178,11 +191,10 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	// Record the target function for the whole trampoline creation process
 	ip.targetFunc = funcDecl
 
-	// Collect return values for the trampoline function
+	// Collect return values from target function
 	retVals := collectReturnValues(funcDecl)
 
-	// Collect all arguments for the trampoline function, including the receiver
-	// and the original target function arguments
+	// Collect all arguments from target function, including the receiver
 	args := collectArguments(funcDecl)
 
 	// Generate the trampoline-jump-if. The trampoline-jump-if is a conditional
