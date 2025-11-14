@@ -120,3 +120,32 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 
 	return util.RunCmdWithEnv(ctx, env, newArgs...)
 }
+
+func GoBuild(ctx context.Context, args []string) error {
+	logger := util.LoggerFromContext(ctx)
+	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+	err := util.BackupFile(backupFiles)
+	if err != nil {
+		logger.Debug("failed to back up go.mod, go.sum, go.work, go.work.sum, proceeding despite this", "error", err)
+	}
+	defer func() {
+		err = os.RemoveAll(OtelRuntimeFile)
+		if err != nil {
+			logger.Debug("failed to remove otel runtime file", "error", err)
+		}
+		err = util.RestoreFile(backupFiles)
+		if err != nil {
+			logger.Debug("failed to restore go.mod, go.sum, go.work, go.work.sum", "error", err)
+		}
+	}()
+
+	err = Setup(ctx, os.Args[1:])
+	if err != nil {
+		return err
+	}
+	err = BuildWithToolexec(ctx, args)
+	if err != nil {
+		return err
+	}
+	return nil
+}

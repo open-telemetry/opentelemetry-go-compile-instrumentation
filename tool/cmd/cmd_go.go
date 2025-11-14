@@ -5,11 +5,8 @@ package main
 
 import (
 	"context"
-	"os"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 )
 
@@ -21,6 +18,9 @@ var commandGo = cli.Command{
 	SkipFlagParsing: true,
 	Before:          addLoggerPhaseAttribute,
 	Action: func(ctx context.Context, cmd *cli.Command) error {
+<<<<<<< HEAD
+		return setup.GoBuild(ctx, cmd.Args().Slice())
+=======
 		logger := util.LoggerFromContext(ctx)
 		backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
 		err := util.BackupFile(backupFiles)
@@ -48,5 +48,6 @@ var commandGo = cli.Command{
 		}
 
 		return nil
+>>>>>>> main
 	},
 }

@@ -8,12 +8,18 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
 )
 
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandSetup = cli.Command{
+<<<<<<< HEAD
+	Name:        "setup",
+	Description: "Set up the environment for instrumentation",
+	Before:      addLoggerPhaseAttribute,
+	Action: func(ctx context.Context, _ *cli.Command) error {
+		return setup.Setup(ctx)
+=======
 	Name:            "setup",
 	Description:     "Set up the environment for instrumentation",
 	ArgsUsage:       "[go build flags]",
@@ -26,5 +32,6 @@ var commandSetup = cli.Command{
 			return ex.Wrapf(err, "failed to setup with exit code %d", exitCodeFailure)
 		}
 		return nil
+>>>>>>> main
 	},
 }
