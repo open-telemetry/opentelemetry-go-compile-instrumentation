@@ -50,5 +50,8 @@ func (r *InstFuncRule) validate() error {
 	if strings.TrimSpace(r.Func) == "" {
 		return ex.Newf("func cannot be empty")
 	}
+	if r.Before == "" && r.After == "" {
+		return ex.Newf("before or after must be set")
+	}
 	return nil
 }
