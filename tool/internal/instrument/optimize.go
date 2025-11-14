@@ -117,30 +117,30 @@ func newHookContextImpl(tjump *TJump) dst.Expr {
 	targetFunc := tjump.target
 	structName := "HookContextImpl" + util.CRC32(tjump.rule.String())
 
-	// Build params slice: []interface{}{}
-	paramNames := make([]dst.Expr, 0)
+	// Build params slice: []interface{}{&param1, &param2, ...}
+	paramExprs := make([]dst.Expr, 0)
 	for _, name := range getNames(targetFunc.Type.Params) {
-		paramNames = append(paramNames, ast.AddressOf(name))
+		paramExprs = append(paramExprs, ast.AddressOf(name))
 	}
 	paramsSlice := &dst.CompositeLit{
 		Type: ast.ArrayType(ast.InterfaceType()),
-		Elts: paramNames,
+		Elts: paramExprs,
 	}
 
-	// Build returnVals slice: []interface{}{}
-	returnElts := make([]dst.Expr, 0)
+	// Build returnVals slice: []interface{}{&retval1, &retval2, ...}
+	returnExprs := make([]dst.Expr, 0)
 	if targetFunc.Type.Results != nil {
 		for _, name := range getNames(targetFunc.Type.Results) {
-			returnElts = append(returnElts, ast.AddressOf(name))
+			returnExprs = append(returnExprs, ast.AddressOf(name))
 		}
 	}
 	returnValsSlice := &dst.CompositeLit{
 		Type: ast.ArrayType(ast.InterfaceType()),
-		Elts: returnElts,
+		Elts: returnExprs,
 	}
 
 	// Build the struct literal: &HookContextImpl{params:..., returnVals:...}
-	ctxExpr := &dst.UnaryExpr{
+	return &dst.UnaryExpr{
 		Op: token.AND,
 		X: &dst.CompositeLit{
 			Type: ast.Ident(structName),
@@ -156,13 +156,11 @@ func newHookContextImpl(tjump *TJump) dst.Expr {
 			},
 		},
 	}
-
-	return ctxExpr
 }
 
 func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
 	// Construct HookContext on the fly and pass to After trampoline defer call
-	callContextExpr := newHookContextImpl(tjump)
+	hookContextExpr := newHookContextImpl(tjump)
 	// Find defer call to After and replace its call context with new one
 	found := false
 	block, ok := tjump.ifStmt.Else.(*dst.BlockStmt)
@@ -172,7 +170,7 @@ func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
 		if deferStmt, ok1 := stmt.(*dst.DeferStmt); ok1 {
 			args := deferStmt.Call.Args
 			util.Assert(len(args) >= 1, "must have at least one argument")
-			args[0] = callContextExpr
+			args[0] = hookContextExpr
 			found = true
 			break
 		}
