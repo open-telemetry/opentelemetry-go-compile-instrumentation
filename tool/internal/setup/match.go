@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -25,6 +26,70 @@ const (
 	// the concurrency limit for errgroup execution within matchDeps.
 	matchDepsConcurrencyMultiplier = 2
 )
+
+// createRuleFromFields creates a rule instance based on the field type present in the YAML
+//
+//nolint:nilnil // factory function
+func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
+	switch {
+	case fields["struct"] != nil:
+		return rule.NewInstStructRule(raw, name)
+	case fields["file"] != nil:
+		return rule.NewInstFileRule(raw, name)
+	case fields["raw"] != nil:
+		return rule.NewInstRawRule(raw, name)
+	case fields["func"] != nil:
+		return rule.NewInstFuncRule(raw, name)
+	default:
+		util.ShouldNotReachHere()
+		return nil, nil
+	}
+}
+
+// parseEmbeddedRule parses the embedded yaml rule file to concrete rule instances
+func parseEmbeddedRule(path string) ([]rule.InstRule, error) {
+	yamlFile, err := data.ReadEmbedFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var h map[string]map[string]any
+	err = yaml.Unmarshal(yamlFile, &h)
+	if err != nil {
+		return nil, ex.Wrap(err)
+	}
+	rules := make([]rule.InstRule, 0)
+	for name, fields := range h {
+		raw, err1 := yaml.Marshal(fields)
+		if err1 != nil {
+			return nil, ex.Wrap(err1)
+		}
+
+		r, err2 := createRuleFromFields(raw, name, fields)
+		if err2 != nil {
+			return nil, err2
+		}
+		rules = append(rules, r)
+	}
+	return rules, nil
+}
+
+// materializeRules materializes all available rules from the embedded data
+func materializeRules() ([]rule.InstRule, error) {
+	availables, err := data.ListEmbedFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	parsedRules := []rule.InstRule{}
+	for _, available := range availables {
+		rs, perr := parseEmbeddedRule(available)
+		if perr != nil {
+			return nil, perr
+		}
+		parsedRules = append(parsedRules, rs...)
+	}
+	return parsedRules, nil
+}
 
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	// No version specified, so it's always applicable
@@ -176,22 +241,4 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, err
 	}
 	return matched, nil
-}
-
-// materializeRules materializes all available rules from the embedded data
-func materializeRules() ([]rule.InstRule, error) {
-	availables, err := data.ListEmbedFiles()
-	if err != nil {
-		return nil, err
-	}
-
-	parsedRules := []rule.InstRule{}
-	for _, available := range availables {
-		rs, perr := rule.ParseEmbeddedRule(available)
-		if perr != nil {
-			return nil, perr
-		}
-		parsedRules = append(parsedRules, rs...)
-	}
-	return parsedRules, nil
 }
