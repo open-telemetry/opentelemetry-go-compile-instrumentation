@@ -15,13 +15,17 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	//line <generated>:1
 	if false {
 	} else {
-		defer OtelAfterTrampoline_Func13335793671(&HookContextImpl3335793671{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal0, &_unnamedRetVal1}}, &_unnamedRetVal0, &_unnamedRetVal1)
+		defer OtelAfterTrampoline_Func13335793671(&HookContextImpl3335793671{params: []interface {
+		}{&p1, &p2}, returnVals: []interface {
+		}{&_unnamedRetVal0, &_unnamedRetVal1}}, &_unnamedRetVal0, &_unnamedRetVal1)
 	}
 	//line main.go:13:2
 	println("Hello, World!")
 	//line main.go:14:2
 	return 0.0, nil
 }
+
+func Func2(p1 string, _ int) {}
 
 func main() { Func1("hello", 123) }
 
@@ -111,7 +115,7 @@ func (c *HookContextImpl3335793671) GetReturnValCount() int { return len(c.retur
 func (c *HookContextImpl3335793671) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl3335793671) GetPackageName() string { return c.packageName }
 
-func OtelAfterTrampoline_Func13335793671(hookContext HookContext, _unnamedRetVal0 *float32, _unnamedRetVal1 *error) {
+func OtelAfterTrampoline_Func13335793671(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H1After")
@@ -124,11 +128,11 @@ func OtelAfterTrampoline_Func13335793671(hookContext HookContext, _unnamedRetVal
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl3335793671).returnVals = []interface{}{_unnamedRetVal0, _unnamedRetVal1}
+	hookContext.(*HookContextImpl3335793671).returnVals = []interface{}{arg0, arg1}
 	if H1After != nil {
-		H1After(hookContext, *_unnamedRetVal0, *_unnamedRetVal1)
+		H1After(hookContext, *arg0, *arg1)
 	}
 }
 
 //go:linkname H1After testdata.H1After
-func H1After(hookContext HookContext, _unnamedRetVal0 float32, _unnamedRetVal1 error)
+func H1After(hookContext HookContext, arg0 float32, arg1 error)

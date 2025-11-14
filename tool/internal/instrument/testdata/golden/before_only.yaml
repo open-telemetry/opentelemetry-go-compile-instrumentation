@@ -1,0 +1,10 @@
+package_name: main
+module_path: main
+func_rules:
+  - name: hook_before_only
+    target: main
+    func: Func1
+    before: H1Before
+    after: ""
+    path: testdata
+

@@ -24,6 +24,8 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	return 0.0, nil
 }
 
+func Func2(p1 string, _ int) {}
+
 func main() { Func1("hello", 123) }
 
 //line <generated>:1
@@ -113,7 +115,7 @@ func (c *HookContextImpl2350319093) GetFuncName() string    { return c.funcName 
 func (c *HookContextImpl2350319093) GetPackageName() string { return c.packageName }
 
 // Trampoline Template
-func OtelBeforeTrampoline_Func12350319093(p1 *string, p2 *int) (hookContext *HookContextImpl2350319093, skipCall bool) {
+func OtelBeforeTrampoline_Func12350319093(param0 *string, param1 *int) (hookContext *HookContextImpl2350319093, skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H1Before")
@@ -127,16 +129,16 @@ func OtelBeforeTrampoline_Func12350319093(p1 *string, p2 *int) (hookContext *Hoo
 		}
 	}()
 	hookContext = &HookContextImpl2350319093{}
-	hookContext.params = []interface{}{p1, p2}
+	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
 	if H1Before != nil {
-		H1Before(hookContext, *p1, *p2)
+		H1Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_Func12350319093(hookContext HookContext, _unnamedRetVal0 *float32, _unnamedRetVal1 *error) {
+func OtelAfterTrampoline_Func12350319093(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "")
@@ -153,4 +155,4 @@ func OtelAfterTrampoline_Func12350319093(hookContext HookContext, _unnamedRetVal
 }
 
 //go:linkname H1Before testdata.H1Before
-func H1Before(hookContext HookContext, p1 string, p2 int)
+func H1Before(hookContext HookContext, param0 string, param1 int)

@@ -31,6 +31,8 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	return 0.0, nil
 }
 
+func Func2(p1 string, _ int) {}
+
 func main() { Func1("hello", 123) }
 
 //line <generated>:1
@@ -120,7 +122,7 @@ func (c *HookContextImpl1756415418) GetFuncName() string    { return c.funcName 
 func (c *HookContextImpl1756415418) GetPackageName() string { return c.packageName }
 
 // Trampoline Template
-func OtelBeforeTrampoline_Func11756415418(p1 *string, p2 *int) (hookContext *HookContextImpl1756415418, skipCall bool) {
+func OtelBeforeTrampoline_Func11756415418(param0 *string, param1 *int) (hookContext *HookContextImpl1756415418, skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H1Before")
@@ -134,16 +136,16 @@ func OtelBeforeTrampoline_Func11756415418(p1 *string, p2 *int) (hookContext *Hoo
 		}
 	}()
 	hookContext = &HookContextImpl1756415418{}
-	hookContext.params = []interface{}{p1, p2}
+	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
 	if H1Before != nil {
-		H1Before(hookContext, *p1, *p2)
+		H1Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_Func11756415418(hookContext HookContext, _unnamedRetVal0 *float32, _unnamedRetVal1 *error) {
+func OtelAfterTrampoline_Func11756415418(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H1After")
@@ -156,17 +158,17 @@ func OtelAfterTrampoline_Func11756415418(hookContext HookContext, _unnamedRetVal
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl1756415418).returnVals = []interface{}{_unnamedRetVal0, _unnamedRetVal1}
+	hookContext.(*HookContextImpl1756415418).returnVals = []interface{}{arg0, arg1}
 	if H1After != nil {
-		H1After(hookContext, *_unnamedRetVal0, *_unnamedRetVal1)
+		H1After(hookContext, *arg0, *arg1)
 	}
 }
 
 //go:linkname H1Before testdata.H1Before
-func H1Before(hookContext HookContext, p1 string, p2 int)
+func H1Before(hookContext HookContext, param0 string, param1 int)
 
 //go:linkname H1After testdata.H1After
-func H1After(hookContext HookContext, _unnamedRetVal0 float32, _unnamedRetVal1 error)
+func H1After(hookContext HookContext, arg0 float32, arg1 error)
 
 //line <generated>:1
 type HookContextImpl4055471104 struct {
@@ -255,7 +257,7 @@ func (c *HookContextImpl4055471104) GetFuncName() string    { return c.funcName 
 func (c *HookContextImpl4055471104) GetPackageName() string { return c.packageName }
 
 // Trampoline Template
-func OtelBeforeTrampoline_Func14055471104(p1 *string, p2 *int) (hookContext *HookContextImpl4055471104, skipCall bool) {
+func OtelBeforeTrampoline_Func14055471104(param0 *string, param1 *int) (hookContext *HookContextImpl4055471104, skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H2Before")
@@ -269,16 +271,16 @@ func OtelBeforeTrampoline_Func14055471104(p1 *string, p2 *int) (hookContext *Hoo
 		}
 	}()
 	hookContext = &HookContextImpl4055471104{}
-	hookContext.params = []interface{}{p1, p2}
+	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
 	if H2Before != nil {
-		H2Before(hookContext, *p1, *p2)
+		H2Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_Func14055471104(hookContext HookContext, _unnamedRetVal0 *float32, _unnamedRetVal1 *error) {
+func OtelAfterTrampoline_Func14055471104(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H2After")
@@ -291,14 +293,14 @@ func OtelAfterTrampoline_Func14055471104(hookContext HookContext, _unnamedRetVal
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl4055471104).returnVals = []interface{}{_unnamedRetVal0, _unnamedRetVal1}
+	hookContext.(*HookContextImpl4055471104).returnVals = []interface{}{arg0, arg1}
 	if H2After != nil {
-		H2After(hookContext, *_unnamedRetVal0, *_unnamedRetVal1)
+		H2After(hookContext, *arg0, *arg1)
 	}
 }
 
 //go:linkname H2Before testdata.H2Before
-func H2Before(hookContext HookContext, p1 string, p2 int)
+func H2Before(hookContext HookContext, param0 string, param1 int)
 
 //go:linkname H2After testdata.H2After
-func H2After(hookContext HookContext, _unnamedRetVal0 float32, _unnamedRetVal1 error)
+func H2After(hookContext HookContext, arg0 float32, arg1 error)

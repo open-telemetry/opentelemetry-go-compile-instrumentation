@@ -18,6 +18,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/golden"
 )
 
@@ -34,21 +35,13 @@ const (
 
 func TestInstrumentWithDifferentRuleTypes_Integration(t *testing.T) {
 	tests := []struct {
-		name       string
-		setupRules func(string) *rule.InstRuleSet
-		verify     func(*testing.T, *testContext)
+		name     string
+		yamlFile string
+		verify   func(*testing.T, *testContext)
 	}{
 		{
-			name: "func rule only",
-			setupRules: func(sourceFile string) *rule.InstRuleSet {
-				return &rule.InstRuleSet{
-					PackageName: mainPackageName,
-					ModulePath:  mainModulePath,
-					FuncRules: map[string][]*rule.InstFuncRule{
-						sourceFile: {newFuncRule("hook_func", "Func1", "H1Before", "H1After")},
-					},
-				}
-			},
+			name:     "func rule only",
+			yamlFile: "func_rule_only.yaml",
 			verify: func(t *testing.T, tc *testContext) {
 				mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
 				globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
@@ -57,16 +50,8 @@ func TestInstrumentWithDifferentRuleTypes_Integration(t *testing.T) {
 			},
 		},
 		{
-			name: "struct rule only",
-			setupRules: func(sourceFile string) *rule.InstRuleSet {
-				return &rule.InstRuleSet{
-					PackageName: mainPackageName,
-					ModulePath:  mainModulePath,
-					StructRules: map[string][]*rule.InstStructRule{
-						sourceFile: {newStructRule("add_new_field", "T", "NewField", "string")},
-					},
-				}
-			},
+			name:     "struct rule only",
+			yamlFile: "struct_rule_only.yaml",
 			verify: func(t *testing.T, tc *testContext) {
 				mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
 				assertGoldenFile(t, mainGoPath, "struct_rule_only.main.go")
@@ -74,16 +59,8 @@ func TestInstrumentWithDifferentRuleTypes_Integration(t *testing.T) {
 			},
 		},
 		{
-			name: "raw rule only",
-			setupRules: func(sourceFile string) *rule.InstRuleSet {
-				return &rule.InstRuleSet{
-					PackageName: mainPackageName,
-					ModulePath:  mainModulePath,
-					RawRules: map[string][]*rule.InstRawRule{
-						sourceFile: {newRawRule("add_raw_code", "Func1", "_ = 123")},
-					},
-				}
-			},
+			name:     "raw rule only",
+			yamlFile: "raw_rule_only.yaml",
 			verify: func(t *testing.T, tc *testContext) {
 				mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
 				globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
@@ -92,14 +69,8 @@ func TestInstrumentWithDifferentRuleTypes_Integration(t *testing.T) {
 			},
 		},
 		{
-			name: "file rule only",
-			setupRules: func(sourceFile string) *rule.InstRuleSet {
-				return &rule.InstRuleSet{
-					PackageName: mainPackageName,
-					ModulePath:  mainModulePath,
-					FileRules:   []*rule.InstFileRule{newFileRule("add_new_file", "newfile.go")},
-				}
-			},
+			name:     "file rule only",
+			yamlFile: "file_rule_only.yaml",
 			verify: func(t *testing.T, tc *testContext) {
 				newFile := filepath.Join(tc.tempDir, "otel.newfile.go")
 				assertGoldenFile(t, newFile, "file_rule_only.otel.newfile.go")
@@ -112,7 +83,8 @@ func TestInstrumentWithDifferentRuleTypes_Integration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := setupTest(t)
 			sourceFile := setupTestFiles(t, tc.tempDir)
-			ruleSet := tt.setupRules(sourceFile)
+			yamlPath := filepath.Join(testdataPath, "golden", tt.yamlFile)
+			ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 			err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 			require.NoError(t, err, "instrumentation should succeed")
 			tt.verify(t, tc)
@@ -124,22 +96,8 @@ func TestInstrumentWithMethodReceiver_Integration(t *testing.T) {
 	tc := setupTest(t)
 	sourceFile := setupTestFiles(t, tc.tempDir)
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackageName,
-		ModulePath:  mainModulePath,
-		FuncRules: map[string][]*rule.InstFuncRule{
-			sourceFile: {
-				{
-					InstBaseRule: newBaseRule("hook_method"),
-					Path:         filepath.Join(".", testdataPath),
-					Func:         "Func1",
-					Recv:         "*T",
-					Before:       "H3Before",
-					After:        "H3After",
-				},
-			},
-		},
-	}
+	yamlPath := filepath.Join(testdataPath, "golden", "method_receiver.yaml")
+	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 
 	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 	require.NoError(t, err, "instrumentation should succeed")
@@ -154,22 +112,8 @@ func TestInstrumentWithInvalidReceiver_Integration(t *testing.T) {
 	tc := setupTest(t)
 	sourceFile := setupTestFiles(t, tc.tempDir)
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackageName,
-		ModulePath:  mainModulePath,
-		FuncRules: map[string][]*rule.InstFuncRule{
-			sourceFile: {
-				{
-					InstBaseRule: newBaseRule("hook_invalid_receiver"),
-					Path:         filepath.Join(".", testdataPath),
-					Func:         "Func1",
-					Recv:         "*NonExistent", // Invalid receiver - doesn't match any method
-					Before:       "H1Before",
-					After:        "H1After",
-				},
-			},
-		},
-	}
+	yamlPath := filepath.Join(testdataPath, "golden", "invalid_receiver.yaml")
+	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 
 	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 	require.Error(t, err, "instrumentation should fail with invalid receiver")
@@ -180,21 +124,8 @@ func TestInstrumentWithBeforeOnly_Integration(t *testing.T) {
 	tc := setupTest(t)
 	sourceFile := setupTestFiles(t, tc.tempDir)
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackageName,
-		ModulePath:  mainModulePath,
-		FuncRules: map[string][]*rule.InstFuncRule{
-			sourceFile: {
-				{
-					InstBaseRule: newBaseRule("hook_before_only"),
-					Path:         filepath.Join(".", testdataPath),
-					Func:         "Func1",
-					Before:       "H1Before",
-					After:        "",
-				},
-			},
-		},
-	}
+	yamlPath := filepath.Join(testdataPath, "golden", "before_only.yaml")
+	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 
 	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 	require.NoError(t, err, "instrumentation should succeed")
@@ -209,21 +140,8 @@ func TestInstrumentWithAfterOnly_Integration(t *testing.T) {
 	tc := setupTest(t)
 	sourceFile := setupTestFiles(t, tc.tempDir)
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackageName,
-		ModulePath:  mainModulePath,
-		FuncRules: map[string][]*rule.InstFuncRule{
-			sourceFile: {
-				{
-					InstBaseRule: newBaseRule("hook_after_only"),
-					Path:         filepath.Join(".", testdataPath),
-					Func:         "Func1",
-					Before:       "",
-					After:        "H1After",
-				},
-			},
-		},
-	}
+	yamlPath := filepath.Join(testdataPath, "golden", "after_only.yaml")
+	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 
 	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 	require.NoError(t, err, "instrumentation should succeed")
@@ -238,16 +156,8 @@ func TestInstrumentWithMultipleFuncRules_Integration(t *testing.T) {
 	tc := setupTest(t)
 	sourceFile := setupTestFiles(t, tc.tempDir)
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackageName,
-		ModulePath:  mainModulePath,
-		FuncRules: map[string][]*rule.InstFuncRule{
-			sourceFile: {
-				newFuncRule("hook_func_1", "Func1", "H1Before", "H1After"),
-				newFuncRule("hook_func_2", "Func1", "H2Before", "H2After"),
-			},
-		},
-	}
+	yamlPath := filepath.Join(testdataPath, "golden", "multiple_func_rules.yaml")
+	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 
 	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 	require.NoError(t, err, "instrumentation should succeed")
@@ -262,16 +172,8 @@ func TestInstrumentWithFuncAndRawRules_Integration(t *testing.T) {
 	tc := setupTest(t)
 	sourceFile := setupTestFiles(t, tc.tempDir)
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackageName,
-		ModulePath:  mainModulePath,
-		FuncRules: map[string][]*rule.InstFuncRule{
-			sourceFile: {newFuncRule("hook_func", "Func1", "H1Before", "H1After")},
-		},
-		RawRules: map[string][]*rule.InstRawRule{
-			sourceFile: {newRawRule("add_raw_code", "Func1", "_ = 456")},
-		},
-	}
+	yamlPath := filepath.Join(testdataPath, "golden", "func_and_raw_rules.yaml")
+	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 
 	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 	require.NoError(t, err, "instrumentation should succeed")
@@ -286,23 +188,8 @@ func TestInstrumentWithMultipleStructFields_Integration(t *testing.T) {
 	tc := setupTest(t)
 	sourceFile := setupTestFiles(t, tc.tempDir)
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackageName,
-		ModulePath:  mainModulePath,
-		StructRules: map[string][]*rule.InstStructRule{
-			sourceFile: {
-				{
-					InstBaseRule: newBaseRule("add_multiple_fields"),
-					Struct:       "T",
-					NewField: []*rule.InstStructField{
-						{Name: "Field1", Type: "string"},
-						{Name: "Field2", Type: "int"},
-						{Name: "Field3", Type: "bool"},
-					},
-				},
-			},
-		},
-	}
+	yamlPath := filepath.Join(testdataPath, "golden", "multiple_struct_fields.yaml")
+	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 
 	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 	require.NoError(t, err, "instrumentation should succeed")
@@ -316,20 +203,8 @@ func TestInstrumentWithCombinedRules_Integration(t *testing.T) {
 	tc := setupTest(t)
 	sourceFile := setupTestFiles(t, tc.tempDir)
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackageName,
-		ModulePath:  mainModulePath,
-		FuncRules: map[string][]*rule.InstFuncRule{
-			sourceFile: {newFuncRule("hook_func", "Func1", "H1Before", "H1After")},
-		},
-		StructRules: map[string][]*rule.InstStructRule{
-			sourceFile: {newStructRule("add_field", "T", "NewField", "string")},
-		},
-		RawRules: map[string][]*rule.InstRawRule{
-			sourceFile: {newRawRule("add_raw", "Func1", "_ = 789")},
-		},
-		FileRules: []*rule.InstFileRule{newFileRule("add_file", "newfile.go")},
-	}
+	yamlPath := filepath.Join(testdataPath, "golden", "combined_rules.yaml")
+	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
 
 	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
 	require.NoError(t, err, "instrumentation should succeed")
@@ -440,55 +315,48 @@ func setupMatchedJSON(t *testing.T, tempDir string, ruleSet *rule.InstRuleSet) {
 // Rule Builder Helpers
 // ============================================================================
 
-// newFuncRule creates a function instrumentation rule.
-//
-//nolint:unparam // funcName parameter kept for flexibility in future tests
-func newFuncRule(name, funcName, before, after string) *rule.InstFuncRule {
-	return &rule.InstFuncRule{
-		InstBaseRule: newBaseRule(name),
-		Path:         filepath.Join(".", testdataPath),
-		Func:         funcName,
-		Before:       before,
-		After:        after,
-	}
+// ruleSetYAML represents the YAML structure for loading rule sets.
+type ruleSetYAML struct {
+	PackageName string                 `yaml:"package_name"`
+	ModulePath  string                 `yaml:"module_path"`
+	FuncRules   []*rule.InstFuncRule   `yaml:"func_rules"`
+	StructRules []*rule.InstStructRule `yaml:"struct_rules"`
+	RawRules    []*rule.InstRawRule    `yaml:"raw_rules"`
+	FileRules   []*rule.InstFileRule   `yaml:"file_rules"`
 }
 
-// newStructRule creates a struct instrumentation rule.
-func newStructRule(name, structName, fieldName, fieldType string) *rule.InstStructRule {
-	return &rule.InstStructRule{
-		InstBaseRule: newBaseRule(name),
-		Struct:       structName,
-		NewField: []*rule.InstStructField{
-			{
-				Name: fieldName,
-				Type: fieldType,
-			},
-		},
-	}
-}
+// loadRuleSetFromYAML loads a rule set from a YAML file and maps rules to the source file path.
+func loadRuleSetFromYAML(t *testing.T, yamlPath, sourceFile string) *rule.InstRuleSet {
+	t.Helper()
 
-// newRawRule creates a raw code instrumentation rule.
-func newRawRule(name, funcName, raw string) *rule.InstRawRule {
-	return &rule.InstRawRule{
-		InstBaseRule: newBaseRule(name),
-		Func:         funcName,
-		Raw:          raw,
-	}
-}
+	yamlContent, err := os.ReadFile(yamlPath)
+	require.NoError(t, err, "failed to read YAML file: %s", yamlPath)
 
-// newFileRule creates a file instrumentation rule.
-func newFileRule(name, fileName string) *rule.InstFileRule {
-	return &rule.InstFileRule{
-		InstBaseRule: newBaseRule(name),
-		File:         fileName,
-		Path:         filepath.Join(".", testdataPath),
-	}
-}
+	var yamlRuleSet ruleSetYAML
+	err = yaml.Unmarshal(yamlContent, &yamlRuleSet)
+	require.NoError(t, err, "failed to unmarshal YAML: %s", yamlPath)
 
-// newBaseRule creates a base rule with common fields.
-func newBaseRule(name string) rule.InstBaseRule {
-	return rule.InstBaseRule{
-		Name:   name,
-		Target: mainPackageName,
+	ruleSet := &rule.InstRuleSet{
+		PackageName: yamlRuleSet.PackageName,
+		ModulePath:  yamlRuleSet.ModulePath,
+		FuncRules:   make(map[string][]*rule.InstFuncRule),
+		StructRules: make(map[string][]*rule.InstStructRule),
+		RawRules:    make(map[string][]*rule.InstRawRule),
+		FileRules:   make([]*rule.InstFileRule, 0),
 	}
+
+	if len(yamlRuleSet.FuncRules) > 0 {
+		ruleSet.FuncRules[sourceFile] = yamlRuleSet.FuncRules
+	}
+	if len(yamlRuleSet.StructRules) > 0 {
+		ruleSet.StructRules[sourceFile] = yamlRuleSet.StructRules
+	}
+	if len(yamlRuleSet.RawRules) > 0 {
+		ruleSet.RawRules[sourceFile] = yamlRuleSet.RawRules
+	}
+	if len(yamlRuleSet.FileRules) > 0 {
+		ruleSet.FileRules = yamlRuleSet.FileRules
+	}
+
+	return ruleSet
 }

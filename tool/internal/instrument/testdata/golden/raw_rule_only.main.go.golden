@@ -15,4 +15,6 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	return 0.0, nil
 }
 
+func Func2(p1 string, _ int) {}
+
 func main() { Func1("hello", 123) }

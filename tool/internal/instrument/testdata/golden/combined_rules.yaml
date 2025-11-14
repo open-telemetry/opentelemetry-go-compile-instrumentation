@@ -1,0 +1,27 @@
+package_name: main
+module_path: main
+func_rules:
+  - name: hook_func
+    target: main
+    func: Func1
+    before: H1Before
+    after: H1After
+    path: testdata
+struct_rules:
+  - name: add_field
+    target: main
+    struct: T
+    new_field:
+      - name: NewField
+        type: string
+raw_rules:
+  - name: add_raw
+    target: main
+    func: Func1
+    raw: "_ = 789"
+file_rules:
+  - name: add_file
+    target: main
+    file: newfile.go
+    path: testdata
+

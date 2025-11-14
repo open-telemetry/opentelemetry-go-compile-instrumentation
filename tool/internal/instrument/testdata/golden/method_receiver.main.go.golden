@@ -24,6 +24,8 @@ func Func1(p1 string, p2 int) (float32, error) {
 	return 0.0, nil
 }
 
+func Func2(p1 string, _ int) {}
+
 func main() { Func1("hello", 123) }
 
 //line <generated>:1
@@ -117,7 +119,7 @@ func (c *HookContextImpl2501994857) GetFuncName() string    { return c.funcName 
 func (c *HookContextImpl2501994857) GetPackageName() string { return c.packageName }
 
 // Trampoline Template
-func OtelBeforeTrampoline_Func12501994857(t **T, p1 *string, p2 *int) (hookContext *HookContextImpl2501994857, skipCall bool) {
+func OtelBeforeTrampoline_Func12501994857(recv0 **T, param1 *string, param2 *int) (hookContext *HookContextImpl2501994857, skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H3Before")
@@ -131,16 +133,16 @@ func OtelBeforeTrampoline_Func12501994857(t **T, p1 *string, p2 *int) (hookConte
 		}
 	}()
 	hookContext = &HookContextImpl2501994857{}
-	hookContext.params = []interface{}{t, p1, p2}
+	hookContext.params = []interface{}{recv0, param1, param2}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
 	if H3Before != nil {
-		H3Before(hookContext, *t, *p1, *p2)
+		H3Before(hookContext, *recv0, *param1, *param2)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_Func12501994857(hookContext HookContext, _unnamedRetVal0 *float32, _unnamedRetVal1 *error) {
+func OtelAfterTrampoline_Func12501994857(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H3After")
@@ -153,15 +155,15 @@ func OtelAfterTrampoline_Func12501994857(hookContext HookContext, _unnamedRetVal
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl2501994857).returnVals = []interface{}{_unnamedRetVal0, _unnamedRetVal1}
+	hookContext.(*HookContextImpl2501994857).returnVals = []interface{}{arg0, arg1}
 	if H3After != nil {
-		H3After(hookContext, *_unnamedRetVal0, *_unnamedRetVal1)
+		H3After(hookContext, *arg0, *arg1)
 	}
 }
 
 //go:linkname H3Before testdata.H3Before
-func H3Before(hookContext HookContext, t interface {
-}, p1 string, p2 int)
+func H3Before(hookContext HookContext, recv0 interface {
+}, param1 string, param2 int)
 
 //go:linkname H3After testdata.H3After
-func H3After(hookContext HookContext, _unnamedRetVal0 float32, _unnamedRetVal1 error)
+func H3After(hookContext HookContext, arg0 float32, arg1 error)
