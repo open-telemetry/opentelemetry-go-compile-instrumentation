@@ -74,5 +74,5 @@ func TestGrpc(t *testing.T) {
 	output := waitUntilDone()
 
 	// Verify that the server hook was called.
-	require.Contains(t, output, "BeforeServe")
+	require.Contains(t, output, "[otel-grpc]")
 }
