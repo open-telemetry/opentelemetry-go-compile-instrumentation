@@ -6,4 +6,4 @@ server_hook:
   func: Serve
   recv: "*Server"
   before: BeforeServe
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/contrib/grpc"
