@@ -10,24 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// MaterializeRules materializes all available rules from the embedded data
-func MaterializeRules() ([]InstRule, error) {
-	availables, err := data.ListEmbedFiles()
-	if err != nil {
-		return nil, err
-	}
-
-	parsedRules := []InstRule{}
-	for _, available := range availables {
-		rs, perr := ParseEmbeddedRule(available)
-		if perr != nil {
-			return nil, perr
-		}
-		parsedRules = append(parsedRules, rs...)
-	}
-	return parsedRules, nil
-}
-
 // CreateRuleFromFields creates a rule instance based on the field type present in the YAML
 //
 //nolint:nilnil // factory function

@@ -12,6 +12,7 @@ import (
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -134,7 +135,7 @@ func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.
 
 func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
-	allRules, err := rule.MaterializeRules()
+	allRules, err := materializeRules()
 	if err != nil {
 		return nil, err
 	}
@@ -175,4 +176,22 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, err
 	}
 	return matched, nil
+}
+
+// materializeRules materializes all available rules from the embedded data
+func materializeRules() ([]rule.InstRule, error) {
+	availables, err := data.ListEmbedFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	parsedRules := []rule.InstRule{}
+	for _, available := range availables {
+		rs, perr := rule.ParseEmbeddedRule(available)
+		if perr != nil {
+			return nil, perr
+		}
+		parsedRules = append(parsedRules, rs...)
+	}
+	return parsedRules, nil
 }
