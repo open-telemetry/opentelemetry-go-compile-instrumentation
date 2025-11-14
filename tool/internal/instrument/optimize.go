@@ -4,7 +4,7 @@
 package instrument
 
 import (
-	"fmt"
+	"go/token"
 
 	"github.com/dave/dst"
 
@@ -110,55 +110,57 @@ func removeAfterTrampolineCall(tjump *TJump) error {
 	return nil
 }
 
-func populateHookContextLiteral(tjump *TJump, expr dst.Expr) {
-	targetFunc := tjump.target
-	elems, _ := expr.(*dst.UnaryExpr).X.(*dst.CompositeLit)
-	paramElem, returnElem := elems.Elts[0], elems.Elts[1]
-	// Populate call context literal with addresses of all arguments
-	names := make([]dst.Expr, 0)
-	for _, name := range getNames(targetFunc.Type.Params) {
-		names = append(names, ast.AddressOf(name))
-	}
-	paramLiteral, _ := paramElem.(*dst.KeyValueExpr).Value.(*dst.CompositeLit)
-	paramLiteral.Elts = names
-	// Populate return values
-	if targetFunc.Type.Results != nil {
-		rets := make([]dst.Expr, 0)
-		for _, name := range getNames(targetFunc.Type.Results) {
-			rets = append(rets, ast.AddressOf(name))
-		}
-		returnLiteral, _ := returnElem.(*dst.KeyValueExpr).Value.(*dst.CompositeLit)
-		returnLiteral.Elts = rets
-	}
-}
-
 // newHookContextImpl constructs a new HookContextImpl structure literal and
 // populates its Params && ReturnValues field with addresses of all arguments.
 // The HookContextImpl structure is used to pass arguments to the exit trampoline
-func newHookContextImpl(tjump *TJump) (dst.Expr, error) {
-	// TODO: This generated structure construction can also be marked via line
-	// directive
-	// One line please, otherwise debugging line number will be a nightmare
-	tmpl := fmt.Sprintf("&HookContextImpl%s{params:[]interface{}{},returnVals:[]interface{}{}}",
-		util.CRC32(tjump.rule.String()))
-	p := ast.NewAstParser()
-	astRoot, err := p.ParseSnippet(tmpl)
-	if err != nil {
-		return nil, err
+func newHookContextImpl(tjump *TJump) dst.Expr {
+	targetFunc := tjump.target
+	structName := "HookContextImpl" + util.CRC32(tjump.rule.String())
+
+	// Build params slice: []interface{}{&param1, &param2, ...}
+	paramExprs := make([]dst.Expr, 0)
+	for _, name := range getNames(targetFunc.Type.Params) {
+		paramExprs = append(paramExprs, ast.AddressOf(name))
 	}
-	ctxExpr, ok := astRoot[0].(*dst.ExprStmt)
-	util.Assert(ok, "ctxExpr is not a ExprStmt")
-	// Populate call context by passing addresses of all arguments
-	populateHookContextLiteral(tjump, ctxExpr.X)
-	return ctxExpr.X, nil
+	paramsSlice := &dst.CompositeLit{
+		Type: ast.ArrayType(ast.InterfaceType()),
+		Elts: paramExprs,
+	}
+
+	// Build returnVals slice: []interface{}{&retval1, &retval2, ...}
+	returnExprs := make([]dst.Expr, 0)
+	if targetFunc.Type.Results != nil {
+		for _, name := range getNames(targetFunc.Type.Results) {
+			returnExprs = append(returnExprs, ast.AddressOf(name))
+		}
+	}
+	returnValsSlice := &dst.CompositeLit{
+		Type: ast.ArrayType(ast.InterfaceType()),
+		Elts: returnExprs,
+	}
+
+	// Build the struct literal: &HookContextImpl{params:..., returnVals:...}
+	return &dst.UnaryExpr{
+		Op: token.AND,
+		X: &dst.CompositeLit{
+			Type: ast.Ident(structName),
+			Elts: []dst.Expr{
+				&dst.KeyValueExpr{
+					Key:   ast.Ident("params"),
+					Value: paramsSlice,
+				},
+				&dst.KeyValueExpr{
+					Key:   ast.Ident("returnVals"),
+					Value: returnValsSlice,
+				},
+			},
+		},
+	}
 }
 
 func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
 	// Construct HookContext on the fly and pass to After trampoline defer call
-	callContextExpr, err := newHookContextImpl(tjump)
-	if err != nil {
-		return err
-	}
+	hookContextExpr := newHookContextImpl(tjump)
 	// Find defer call to After and replace its call context with new one
 	found := false
 	block, ok := tjump.ifStmt.Else.(*dst.BlockStmt)
@@ -168,7 +170,7 @@ func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
 		if deferStmt, ok1 := stmt.(*dst.DeferStmt); ok1 {
 			args := deferStmt.Call.Args
 			util.Assert(len(args) >= 1, "must have at least one argument")
-			args[0] = callContextExpr
+			args[0] = hookContextExpr
 			found = true
 			break
 		}
