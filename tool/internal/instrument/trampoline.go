@@ -169,7 +169,6 @@ type ParamTrait struct {
 }
 
 func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
-	util.Assert(rule.Before != "" || rule.After != "", "hook must be set")
 	if rule.Before != "" {
 		decl := ast.FindFuncDeclWithoutRecv(root, rule.Before)
 		if decl == nil {

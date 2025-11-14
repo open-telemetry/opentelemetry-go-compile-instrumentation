@@ -31,47 +31,15 @@ const (
 //
 //nolint:nilnil // factory function
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
-	base := rule.InstBaseRule{
-		Name: name,
-	}
-	if target, ok := fields["target"].(string); ok {
-		base.Target = target
-	}
-	if fields["version"] != nil {
-		v, ok := fields["version"].(string)
-		util.Assert(ok, "version is not a string")
-		base.Version = v
-	}
-
 	switch {
 	case fields["struct"] != nil:
-		var r rule.InstStructRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
-		}
-		r.InstBaseRule = base
-		return &r, nil
+		return rule.NewInstStructRule(raw, name)
 	case fields["file"] != nil:
-		var r rule.InstFileRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
-		}
-		r.InstBaseRule = base
-		return &r, nil
+		return rule.NewInstFileRule(raw, name)
 	case fields["raw"] != nil:
-		var r rule.InstRawRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
-		}
-		r.InstBaseRule = base
-		return &r, nil
+		return rule.NewInstRawRule(raw, name)
 	case fields["func"] != nil:
-		var r rule.InstFuncRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
-		}
-		r.InstBaseRule = base
-		return &r, nil
+		return rule.NewInstFuncRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
@@ -105,8 +73,8 @@ func parseEmbeddedRule(path string) ([]rule.InstRule, error) {
 	return rules, nil
 }
 
-// materalizeRules materializes all available rules from the embedded data
-func materalizeRules() ([]rule.InstRule, error) {
+// materializeRules materializes all available rules from the embedded data
+func materializeRules() ([]rule.InstRule, error) {
 	availables, err := data.ListEmbedFiles()
 	if err != nil {
 		return nil, err
@@ -232,7 +200,7 @@ func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.
 
 func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
-	allRules, err := materalizeRules()
+	allRules, err := materializeRules()
 	if err != nil {
 		return nil, err
 	}

@@ -186,6 +186,7 @@ target: github.com/example/lib
 			yamlContent: `
 func: TestFunc
 target: github.com/example/lib
+before: MyHook1Before
 `,
 			ruleName:     "test-func-rule",
 			expectError:  false,

@@ -83,12 +83,7 @@ func (irs *InstRuleSet) IsEmpty() bool {
 // It works with any rule type that implements the InstRule interface.
 func addRule[T InstRule](file string, rule T, rulesMap map[string][]T) {
 	util.Assert(filepath.IsAbs(file), "file must be an absolute path")
-	if _, exist := rulesMap[file]; !exist {
-		rulesMap[file] = make([]T, 0)
-		rulesMap[file] = append(rulesMap[file], rule)
-	} else {
-		rulesMap[file] = append(rulesMap[file], rule)
-	}
+	rulesMap[file] = append(rulesMap[file], rule)
 }
 
 func (irs *InstRuleSet) AddRawRule(file string, rule *InstRawRule) {
