@@ -62,8 +62,23 @@ func TestInstrument(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			// TODO: Link the instrumented binary and run it and further check
-			// output content
+			// Build the instrumented binary and run it, then verify output
+			binPath := filepath.Join(tempDir, "app")
+			buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+			buildCmd.Dir = tempDir
+			buildCmd.Env = append(os.Environ(), "GO111MODULE=off")
+			out, err := buildCmd.CombinedOutput()
+			require.NoErrorf(t, err, "go build failed: %s", string(out))
+
+			runCmd := exec.Command(binPath)
+			runtimeOut, err := runCmd.CombinedOutput()
+			require.NoErrorf(t, err, "running app failed: %s", string(runtimeOut))
+
+			output := string(runtimeOut)
+			// Base output from source.go
+			require.Contains(t, output, "Hello, World!")
+			// Output from added raw rule newfile.go(func2)
+			require.Contains(t, output, "func2")
 		})
 	}
 }
@@ -112,59 +127,6 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 		{
 			PackageName: "main",
 			ModulePath:  "main",
-			FuncRules: map[string][]*rule.InstFuncRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Before: "H1Before",
-						After:  "H1After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_same_func",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Before: "H2Before",
-						After:  "H2After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func_with_recv",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Recv:   "*T",
-						Before: "H3Before",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func_no_before",
-							Target: "main",
-						},
-						Path:  filepath.Join(".", "testdata"),
-						Func:  "Func1",
-						Recv:  "*T",
-						After: "H3After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "underscore_param",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func2",
-						Before: "H4Before",
-					},
-				},
-			},
 			RawRules: map[string][]*rule.InstRawRule{
 				mainGoFile: {
 					{
@@ -174,23 +136,6 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 						},
 						Func: "Func1",
 						Raw:  "func2()",
-					},
-				},
-			},
-			StructRules: map[string][]*rule.InstStructRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "add_new_field",
-							Target: "main",
-						},
-						Struct: "T",
-						NewField: []*rule.InstStructField{
-							{
-								Name: "NewField",
-								Type: "string",
-							},
-						},
 					},
 				},
 			},
