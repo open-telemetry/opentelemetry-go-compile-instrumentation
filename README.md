@@ -60,6 +60,7 @@ make test
 - [UX Design](./docs/ux-design.md) - Configuration options
 - [Implementation Details](./docs/implementation.md) - Technical architecture
 - [API Design](./docs/api-design-and-project-structure.md) - API structure
+- [Semantic Conventions](./docs/semantic-conventions.md) - Managing semantic conventions
 
 ### Video Talks
 
