@@ -30,7 +30,6 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 }
 
 func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl) error {
-	util.Assert(r.Raw != "", "sanity check")
 	util.Assert(decl.Name.Name == r.Func, "sanity check")
 
 	// Rename the unnamed return values so that the raw code can reference them

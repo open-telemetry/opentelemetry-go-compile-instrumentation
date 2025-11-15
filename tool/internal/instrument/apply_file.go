@@ -30,7 +30,6 @@ func listRuleFiles(path string) ([]string, error) {
 
 // applyFileRule introduces the new file to the target package at compile time.
 func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string) error {
-	util.Assert(rule.File != "", "sanity check")
 	// List all files in the rule module path
 	files, err := listRuleFiles(rule.Path)
 	if err != nil {

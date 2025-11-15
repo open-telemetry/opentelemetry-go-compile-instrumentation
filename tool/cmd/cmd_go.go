@@ -38,7 +38,7 @@ var commandGo = cli.Command{
 			}
 		}()
 
-		err = setup.Setup(ctx)
+		err = setup.Setup(ctx, os.Args[1:])
 		if err != nil {
 			return ex.Wrapf(err, "failed to build with toolexec with exit code %d", exitCodeFailure)
 		}
