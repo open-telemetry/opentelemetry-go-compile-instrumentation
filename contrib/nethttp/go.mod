@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/contrib/nethttp
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp
 
 go 1.23.0
 

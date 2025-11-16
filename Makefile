@@ -14,6 +14,8 @@ SHELL := /bin/bash
 BINARY_NAME := otel
 TOOL_DIR := tool/cmd
 INST_PKG_GZIP = otel-pkg.gz
+INST_CONTRIB_GZIP = otel-contrib.gz
+INST_CONTRIB_TMP = contrib_temp
 INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
@@ -58,6 +60,7 @@ install: ## Install otel to $$GOPATH/bin
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
 	@set -euo pipefail
+	# pkg
 	rm -rf $(INST_PKG_TMP)
 	if [ ! -d pkg ]; then \
 		echo "Error: pkg directory does not exist"; \
@@ -70,6 +73,20 @@ package: ## Package the instrumentation code into binary
 	mv $(INST_PKG_GZIP) tool/data/
 	rm -rf $(INST_PKG_TMP)
 	@echo "Package created successfully at tool/data/$(INST_PKG_GZIP)"
+
+	# contrib
+	rm -rf $(INST_CONTRIB_TMP)
+	if [ ! -d contrib ]; then \
+		echo "Error: contrib directory does not exist"; \
+		exit 1; \
+	fi
+	cp -r contrib $(INST_CONTRIB_TMP)
+	(cd $(INST_CONTRIB_TMP) && go mod tidy)
+	tar -czf $(INST_CONTRIB_GZIP) --exclude='*.log' $(INST_CONTRIB_TMP)
+	mkdir -p tool/data/
+	mv $(INST_CONTRIB_GZIP) tool/data/
+	rm -rf $(INST_CONTRIB_TMP)
+	@echo "Package created successfully at tool/data/$(INST_CONTRIB_GZIP)"
 
 build-demo: ## Build all demos
 build-demo: build-demo-grpc build-demo-http
@@ -92,7 +109,6 @@ format: format/go format/yaml lint/license-header/fix
 format/go: ## Format Go code only
 format/go: golangci-lint
 	@echo "Formatting Go code..."
-	golangci-lint fmt
 	golangci-lint run --fix
 
 format/yaml: ## Format YAML files only (excludes testdata)
@@ -183,6 +199,11 @@ check-embed: ## Verify that embedded files exist (required for tests)
 		echo "Run 'make package' to generate it"; \
 		exit 1; \
 	fi
+	@if [ ! -f tool/data/$(INST_CONTRIB_GZIP) ]; then \
+		echo "Error: tool/data/$(INST_CONTRIB_GZIP) does not exist"; \
+		echo "Run 'make package' to generate it"; \
+		exit 1; \
+	fi
 	@echo "All embedded files present"
 
 # Test targets
@@ -264,7 +285,7 @@ gotestfmt: ## Install gotestfmt if not present
 golangci-lint: ## Install golangci-lint if not present
 	@if ! command -v golangci-lint >/dev/null 2>&1; then \
 		echo "Installing golangci-lint..."; \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
 	fi
 
 actionlint: ## Install actionlint if not present
