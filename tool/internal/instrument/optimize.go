@@ -4,8 +4,6 @@
 package instrument
 
 import (
-	"go/token"
-
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -115,47 +113,34 @@ func removeAfterTrampolineCall(tjump *TJump) error {
 // The HookContextImpl structure is used to pass arguments to the exit trampoline
 func newHookContextImpl(tjump *TJump) dst.Expr {
 	targetFunc := tjump.target
-	structName := "HookContextImpl" + util.CRC32(tjump.rule.String())
+	structName := trampolineHookContextImplType + util.CRC32(tjump.rule.String())
 
 	// Build params slice: []interface{}{&param1, &param2, ...}
-	paramExprs := make([]dst.Expr, 0)
-	for _, name := range getNames(targetFunc.Type.Params) {
-		paramExprs = append(paramExprs, ast.AddressOf(name))
-	}
-	paramsSlice := &dst.CompositeLit{
-		Type: ast.ArrayType(ast.InterfaceType()),
-		Elts: paramExprs,
-	}
+	// Use createHookArgs to handle underscore parameters correctly
+	paramNames := getNames(targetFunc.Type.Params)
+	paramExprs := createHookArgs(paramNames)
+	paramsSlice := ast.CompositeLit(
+		ast.ArrayType(ast.InterfaceType()),
+		paramExprs,
+	)
 
 	// Build returnVals slice: []interface{}{&retval1, &retval2, ...}
 	returnExprs := make([]dst.Expr, 0)
 	if targetFunc.Type.Results != nil {
-		for _, name := range getNames(targetFunc.Type.Results) {
-			returnExprs = append(returnExprs, ast.AddressOf(name))
-		}
+		returnNames := getNames(targetFunc.Type.Results)
+		returnExprs = createHookArgs(returnNames)
 	}
-	returnValsSlice := &dst.CompositeLit{
-		Type: ast.ArrayType(ast.InterfaceType()),
-		Elts: returnExprs,
-	}
+	returnValsSlice := ast.CompositeLit(
+		ast.ArrayType(ast.InterfaceType()),
+		returnExprs,
+	)
 
 	// Build the struct literal: &HookContextImpl{params:..., returnVals:...}
-	return &dst.UnaryExpr{
-		Op: token.AND,
-		X: &dst.CompositeLit{
-			Type: ast.Ident(structName),
-			Elts: []dst.Expr{
-				&dst.KeyValueExpr{
-					Key:   ast.Ident("params"),
-					Value: paramsSlice,
-				},
-				&dst.KeyValueExpr{
-					Key:   ast.Ident("returnVals"),
-					Value: returnValsSlice,
-				},
-			},
-		},
-	}
+	return ast.StructLit(
+		structName,
+		ast.KeyValueExpr("params", paramsSlice),
+		ast.KeyValueExpr("returnVals", returnValsSlice),
+	)
 }
 
 func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
