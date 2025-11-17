@@ -153,3 +153,114 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 	}
 	return json.Marshal(ruleSet)
 }
+
+// TestInstrumentWithHooks tests FuncRules and StructRules instrumentation
+func TestInstrumentWithHooks(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	ctx := util.ContextWithLogger(t.Context(), logger)
+
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelWorkDir, tempDir)
+
+	// Create source code file
+	mainGoFile := filepath.Join(tempDir, "main.go")
+	err := os.MkdirAll(filepath.Dir(mainGoFile), 0o755)
+	require.NoError(t, err)
+	err = util.CopyFile(filepath.Join("testdata", "source.go"), mainGoFile)
+	require.NoError(t, err)
+
+	// Create matched.json with FuncRules and StructRules
+	matchedJSON, err := createTestRuleJSONWithHooks(mainGoFile)
+	require.NoError(t, err)
+	matchedFile := filepath.Join(tempDir, util.BuildTempDir, matchedJSONFile)
+	err = os.MkdirAll(filepath.Dir(matchedFile), 0o755)
+	require.NoError(t, err)
+	err = util.WriteFile(matchedFile, string(matchedJSON))
+	require.NoError(t, err)
+
+	args := createCompileArgs(tempDir)
+	err = Toolexec(ctx, args)
+	require.NoError(t, err, "Instrumentation with FuncRules and StructRules should succeed")
+}
+
+func createTestRuleJSONWithHooks(mainGoFile string) ([]byte, error) {
+	ruleSet := []*rule.InstRuleSet{
+		{
+			PackageName: "main",
+			ModulePath:  "main",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				mainGoFile: {
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "hook_func",
+							Target: "main",
+						},
+						Path:   filepath.Join(".", "testdata"),
+						Func:   "Func1",
+						Before: "H1Before",
+						After:  "H1After",
+					},
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "hook_same_func",
+							Target: "main",
+						},
+						Path:   filepath.Join(".", "testdata"),
+						Func:   "Func1",
+						Before: "H2Before",
+						After:  "H2After",
+					},
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "hook_func_with_recv",
+							Target: "main",
+						},
+						Path:   filepath.Join(".", "testdata"),
+						Func:   "Func1",
+						Recv:   "*T",
+						Before: "H3Before",
+					},
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "hook_func_no_before",
+							Target: "main",
+						},
+						Path:  filepath.Join(".", "testdata"),
+						Func:  "Func1",
+						Recv:  "*T",
+						After: "H3After",
+					},
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "underscore_param",
+							Target: "main",
+						},
+						Path:   filepath.Join(".", "testdata"),
+						Func:   "Func2",
+						Before: "H4Before",
+					},
+				},
+			},
+			StructRules: map[string][]*rule.InstStructRule{
+				mainGoFile: {
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "add_new_field",
+							Target: "main",
+						},
+						Struct: "T",
+						NewField: []*rule.InstStructField{
+							{
+								Name: "NewField",
+								Type: "string",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return json.Marshal(ruleSet)
+}
