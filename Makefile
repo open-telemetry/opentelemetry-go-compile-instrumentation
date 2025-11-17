@@ -145,6 +145,16 @@ lint/license-header: ## Check license headers in source files
 lint/license-header/fix: ## Add missing license headers to source files
 	@./scripts/license-check.sh --fix
 
+##@ Markdown
+
+.PHONY: lint/markdown
+lint/markdown: ## Lint Check the markdown files.
+	npx markdownlint-cli -c .markdownlint.yaml **/*.md
+
+.PHONY: lint/markdown/fix
+lint/markdown/fix: ## Lint Check the markdown files and fix them.
+	npx markdownlint-cli -c .markdownlint.yaml --fix **/*.md
+
 # Ratchet targets for GitHub Actions pinning
 
 ratchet/pin: ## Pin GitHub Actions to commit SHAs
