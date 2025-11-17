@@ -272,9 +272,9 @@ func KeyValueExpr(key string, value dst.Expr) *dst.KeyValueExpr {
 	}
 }
 
-func CompositeLit(typ dst.Expr, elts []dst.Expr) *dst.CompositeLit {
+func CompositeLit(t dst.Expr, elts []dst.Expr) *dst.CompositeLit {
 	return &dst.CompositeLit{
-		Type: typ,
+		Type: t,
 		Elts: elts,
 	}
 }
