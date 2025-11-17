@@ -32,14 +32,15 @@ endif
 
 .PHONY: help
 help: ## Show this help message
+	@echo -e "\033[1;3;34mOpenTelemetry Go Compile Instrumentation.\033[0m\n"
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[A-Za-z0-9_.\/-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf ""} /^[a-zA-Z_0-9\/-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 all: build format lint test
 
-# Build targets
+##@ Core Build
 
 build: package ## Build the instrumentation tool
 	@echo "Building instrumentation tool..."
@@ -84,7 +85,7 @@ build-demo-http: ## Build HTTP demo server and client
 	@(cd demo/http/server && go build -o server .)
 	@(cd demo/http/client && go build -o client .)
 
-# Format targets
+##@ Code Quality
 
 format: ## Format Go code and YAML files
 format: format/go format/yaml lint/license-header/fix
@@ -99,8 +100,6 @@ format/yaml: ## Format YAML files only (excludes testdata)
 format/yaml: yamlfmt
 	@echo "Formatting YAML files..."
 	yamlfmt -dstar '**/*.yml' '**/*.yaml'
-
-# Lint targets
 
 lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile)
 lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile
@@ -136,16 +135,12 @@ lint/makefile: checkmake
 	@echo "Linting Makefile..."
 	checkmake --config .checkmake Makefile
 
-# License header targets
-
 lint/license-header: ## Check license headers in source files
 	@./scripts/license-check.sh
 
 .PHONY: lint/license-header/fix
 lint/license-header/fix: ## Add missing license headers to source files
 	@./scripts/license-check.sh --fix
-
-# Ratchet targets for GitHub Actions pinning
 
 ratchet/pin: ## Pin GitHub Actions to commit SHAs
 ratchet/pin: ratchet
@@ -162,7 +157,7 @@ ratchet/check: ratchet
 	@echo "Checking GitHub Actions are pinned..."
 	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs ratchet lint
 
-# Documentation targets
+##@ Documentation
 
 docs: ## Update embedded documentation in markdown files
 docs: embedmd tmp/make-help.txt
@@ -174,7 +169,7 @@ tmp/make-help.txt: $(MAKEFILE_LIST)
 	@mkdir -p tmp
 	@$(MAKE) --no-print-directory help > tmp/make-help.txt
 
-# Validation targets
+##@ Validation
 
 check-embed: ## Verify that embedded files exist (required for tests)
 	@echo "Checking embedded files..."
@@ -185,7 +180,7 @@ check-embed: ## Verify that embedded files exist (required for tests)
 	fi
 	@echo "All embedded files present"
 
-# Test targets
+##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
 # uses //go:embed to embed otel-pkg.gz at compile time. If the file doesn't exist
 # when Go compiles the test packages, the embed will fail.
@@ -235,7 +230,7 @@ test-e2e/coverage: build gotestfmt
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log | gotestfmt
 
-# Clean targets
+##@ Utilities
 
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
@@ -252,8 +247,6 @@ clean: ## Clean build artifacts
 	rm -rf demo/http/server/.otel-build
 	rm -rf demo/http/client/.otel-build
 	rm -f ./gotest-unit.log ./gotest-integration.log ./gotest-e2e.log
-
-# Tool installation targets
 
 gotestfmt: ## Install gotestfmt if not present
 	@if ! command -v gotestfmt >/dev/null 2>&1; then \
