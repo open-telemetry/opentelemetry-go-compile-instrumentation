@@ -27,32 +27,32 @@ var commandVersion = cli.Command{
 	Action: func(_ context.Context, cmd *cli.Command) error {
 		_, err := fmt.Fprintf(cmd.Writer, "otel version %s", Version)
 		if err != nil {
-			return ex.Wrapf(err, "failed to print version with exit code %d", exitCodeFailure)
+			return ex.Wrapf(err, "failed to print version")
 		}
 
 		if CommitHash != "unknown" {
 			_, err = fmt.Fprintf(cmd.Writer, "+%s", CommitHash)
 			if err != nil {
-				return ex.Wrapf(err, "failed to print version with exit code %d", exitCodeFailure)
+				return ex.Wrapf(err, "failed to print commit hash")
 			}
 		}
 
 		if BuildTime != "unknown" {
 			_, err = fmt.Fprintf(cmd.Writer, " (%s)", BuildTime)
 			if err != nil {
-				return ex.Wrapf(err, "failed to print version with exit code %d", exitCodeFailure)
+				return ex.Wrapf(err, "failed to print build time")
 			}
 		}
 
 		_, err = fmt.Fprint(cmd.Writer, "\n")
 		if err != nil {
-			return ex.Wrapf(err, "failed to print version with exit code %d", exitCodeFailure)
+			return ex.Wrapf(err, "failed to print newline")
 		}
 
 		if cmd.Bool("verbose") {
 			_, err = fmt.Fprintf(cmd.Writer, "%s\n", runtime.Version())
 			if err != nil {
-				return ex.Wrapf(err, "failed to print version with exit code %d", exitCodeFailure)
+				return ex.Wrapf(err, "failed to print runtime version")
 			}
 		}
 
