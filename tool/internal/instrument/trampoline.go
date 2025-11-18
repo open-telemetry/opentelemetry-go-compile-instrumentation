@@ -233,8 +233,9 @@ func getHookParamTraits(t *rule.InstFuncRule, before bool) ([]ParamTrait, error)
 		return nil, err
 	}
 	attrs := make([]ParamTrait, 0)
+	splitParams := ast.SplitMultiNameFields(target.Type.Params)
 	// Find which parameter is type of interface{}
-	for i, field := range target.Type.Params.List {
+	for i, field := range splitParams.List {
 		attr := ParamTrait{Index: i}
 		if ast.IsInterfaceType(field.Type) {
 			attr.IsInterfaceAny = true
@@ -340,6 +341,11 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 	if err != nil {
 		return err
 	}
+	// For generic target functions, replace type parameters with interface{}
+	// in the linkname declaration (since linkname doesn't support generics)
+	for _, field := range paramTypes.List {
+		field.Type = replaceTypeParamsWithAny(field.Type, ip.targetFunc.Type.TypeParams)
+	}
 
 	// Generate var decl and append it to the target file, note that many target
 	// functions may match the same hook function, it's a fatal error to append
@@ -429,17 +435,20 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
 	paramList := &dst.FieldList{List: []*dst.Field{}}
 	if before {
 		if ast.HasReceiver(ip.targetFunc) {
-			recvField := util.AssertType[*dst.Field](dst.Clone(ip.targetFunc.Recv.List[0]))
+			splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
+			recvField := util.AssertType[*dst.Field](dst.Clone(splitRecv.List[0]))
 			renameField(recvField, "recv")
 			paramList.List = append(paramList.List, recvField)
 		}
-		for _, field := range ip.targetFunc.Type.Params.List {
+		splitParams := ast.SplitMultiNameFields(ip.targetFunc.Type.Params)
+		for _, field := range splitParams.List {
 			paramField := util.AssertType[*dst.Field](dst.Clone(field))
 			renameField(paramField, "param")
 			paramList.List = append(paramList.List, paramField)
 		}
 	} else if ip.targetFunc.Type.Results != nil {
-		for _, field := range ip.targetFunc.Type.Results.List {
+		splitResults := ast.SplitMultiNameFields(ip.targetFunc.Type.Results)
+		for _, field := range splitResults.List {
 			retField := util.AssertType[*dst.Field](dst.Clone(field))
 			renameField(retField, "arg")
 			paramList.List = append(paramList.List, retField)
@@ -464,6 +473,8 @@ func (ip *InstrumentPhase) buildTrampolineTypes() {
 		}
 	}
 	addHookContext(afterHookFunc.Type.Params)
+	beforeHookFunc.Type.TypeParams = ast.CloneTypeParams(ip.targetFunc.Type.TypeParams)
+	afterHookFunc.Type.TypeParams = ast.CloneTypeParams(ip.targetFunc.Type.TypeParams)
 }
 
 func assignString(assignStmt *dst.AssignStmt, val string) bool {
@@ -668,37 +679,81 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 	methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
 	idx := 0
 	if ast.HasReceiver(ip.targetFunc) {
-		recvType := ip.targetFunc.Recv.List[0].Type
+		splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
+		recvType := replaceTypeParamsWithAny(splitRecv.List[0].Type, ip.targetFunc.Type.TypeParams)
 		clause := setParamClause(idx, recvType)
 		methodSetParamBody.List = append(methodSetParamBody.List, clause)
 		clause = getParamClause(idx, recvType)
 		methodGetParamBody.List = append(methodGetParamBody.List, clause)
 		idx++
 	}
-	for _, param := range ip.targetFunc.Type.Params.List {
-		paramType := desugarType(param)
-		for range param.Names {
-			clause := setParamClause(idx, paramType)
-			methodSetParamBody.List = append(methodSetParamBody.List, clause)
-			clause = getParamClause(idx, paramType)
-			methodGetParamBody.List = append(methodGetParamBody.List, clause)
-			idx++
-		}
+	splitParams := ast.SplitMultiNameFields(ip.targetFunc.Type.Params)
+	for _, param := range splitParams.List {
+		paramType := replaceTypeParamsWithAny(desugarType(param), ip.targetFunc.Type.TypeParams)
+		clause := setParamClause(idx, paramType)
+		methodSetParamBody.List = append(methodSetParamBody.List, clause)
+		clause = getParamClause(idx, paramType)
+		methodGetParamBody.List = append(methodGetParamBody.List, clause)
+		idx++
 	}
 	// Rewrite GetReturnVal and SetReturnVal methods
 	if ip.targetFunc.Type.Results != nil {
 		idx = 0
-		for _, retval := range ip.targetFunc.Type.Results.List {
-			retType := desugarType(retval)
-			for range retval.Names {
-				clause := getReturnValClause(idx, retType)
-				methodGetRetValBody.List = append(methodGetRetValBody.List, clause)
-				clause = setReturnValClause(idx, retType)
-				methodSetRetValBody.List = append(methodSetRetValBody.List, clause)
-				idx++
+		splitResults := ast.SplitMultiNameFields(ip.targetFunc.Type.Results)
+		for _, retval := range splitResults.List {
+			retType := replaceTypeParamsWithAny(desugarType(retval), ip.targetFunc.Type.TypeParams)
+			clause := getReturnValClause(idx, retType)
+			methodGetRetValBody.List = append(methodGetRetValBody.List, clause)
+			clause = setReturnValClause(idx, retType)
+			methodSetRetValBody.List = append(methodSetRetValBody.List, clause)
+			idx++
+		}
+	}
+}
+
+// isTypeParameter checks if a type expression is a bare type parameter identifier
+func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
+	if typeParams == nil {
+		return false
+	}
+	ident, ok := t.(*dst.Ident)
+	if !ok {
+		return false
+	}
+	// Check if this identifier matches any type parameter name
+	for _, field := range typeParams.List {
+		for _, name := range field.Names {
+			if name.Name == ident.Name {
+				return true
 			}
 		}
 	}
+	return false
+}
+
+// replaceTypeParamsWithAny replaces type parameters with interface{} for use in
+// non-generic contexts like HookContextImpl methods
+func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
+	if isTypeParameter(t, typeParams) {
+		return ast.InterfaceType()
+	}
+
+	// For complex types like *T, []T, map[K]V, etc., handle them recursively
+	switch tType := t.(type) {
+	case *dst.StarExpr:
+		// *T -> *interface{}
+		return ast.DereferenceOf(replaceTypeParamsWithAny(tType.X, typeParams))
+	case *dst.ArrayType:
+		// []T -> []interface{}
+		return ast.ArrayType(replaceTypeParamsWithAny(tType.Elt, typeParams))
+	case *dst.MapType:
+		// map[K]V -> map[interface{}]interface{}
+		return &dst.MapType{
+			Key:   replaceTypeParamsWithAny(tType.Key, typeParams),
+			Value: replaceTypeParamsWithAny(tType.Value, typeParams),
+		}
+	}
+	return t
 }
 
 func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {

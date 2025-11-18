@@ -50,6 +50,36 @@ func CallTo(name string, args []dst.Expr) *dst.CallExpr {
 	}
 }
 
+// CallToGeneric creates a call expression to a generic function with explicit type arguments.
+// For example: CallToGeneric("Foo", typeArgs, args) creates Foo[T1, T2](args...)
+func CallToGeneric(name string, typeArgs *dst.FieldList, args []dst.Expr) *dst.CallExpr {
+	if typeArgs == nil || len(typeArgs.List) == 0 {
+		return CallTo(name, args)
+	}
+	var indices []dst.Expr
+	for _, field := range typeArgs.List {
+		for _, ident := range field.Names {
+			indices = append(indices, Ident(ident.Name))
+		}
+	}
+	var fun dst.Expr
+	if len(indices) == 1 {
+		fun = &dst.IndexExpr{
+			X:     Ident(name),
+			Index: indices[0],
+		}
+	} else {
+		fun = &dst.IndexListExpr{
+			X:       Ident(name),
+			Indices: indices,
+		}
+	}
+	return &dst.CallExpr{
+		Fun:  fun,
+		Args: args,
+	}
+}
+
 func StringLit(value string) *dst.BasicLit {
 	return &dst.BasicLit{
 		Kind:  token.STRING,
@@ -274,4 +304,44 @@ func StructLit(typeName string, fields ...*dst.KeyValueExpr) dst.Expr {
 		Op: token.AND,
 		X:  CompositeLit(Ident(typeName), exprs),
 	}
+}
+
+// CloneTypeParams safely clones a type parameter field list for generic functions.
+// Returns nil if the input is nil.
+func CloneTypeParams(typeParams *dst.FieldList) *dst.FieldList {
+	if typeParams == nil {
+		return nil
+	}
+	cloned, ok := dst.Clone(typeParams).(*dst.FieldList)
+	util.Assert(ok, "typeParams is not a FieldList")
+	return cloned
+}
+
+// SplitMultiNameFields splits fields that have multiple names into separate fields.
+// For example, a field like "a, b int" becomes two fields: "a int" and "b int".
+func SplitMultiNameFields(fieldList *dst.FieldList) *dst.FieldList {
+	if fieldList == nil {
+		return nil
+	}
+	result := &dst.FieldList{List: []*dst.Field{}}
+	for _, field := range fieldList.List {
+		if len(field.Names) <= 1 {
+			clonedField, ok := dst.Clone(field).(*dst.Field)
+			util.Assert(ok, "field is not a Field")
+			result.List = append(result.List, clonedField)
+		} else {
+			for _, name := range field.Names {
+				clonedType, ok := dst.Clone(field.Type).(dst.Expr)
+				util.Assert(ok, "field.Type is not an Expr")
+				clonedName, ok := dst.Clone(name).(*dst.Ident)
+				util.Assert(ok, "name is not an Ident")
+				newField := &dst.Field{
+					Names: []*dst.Ident{clonedName},
+					Type:  clonedType,
+				}
+				result.List = append(result.List, newField)
+			}
+		}
+	}
+	return result
 }

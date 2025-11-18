@@ -71,4 +71,12 @@ func MyHook1After(ictx inst.HookContext) {
 	println("After MyStruct.Example()")
 }
 
+func MyHookGenericBefore(ictx inst.HookContext, _, _ interface{}) {
+	println("GenericExample before hook")
+}
+
+func MyHookGenericAfter(ictx inst.HookContext, _ interface{}) {
+	println("GenericExample after hook")
+}
+
 func BeforeUnderscore(ictx inst.HookContext, _ int, _ float32) {}

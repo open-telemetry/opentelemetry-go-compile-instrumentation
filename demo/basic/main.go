@@ -31,6 +31,11 @@ type MyStruct struct{}
 
 func (m *MyStruct) Example() { println("MyStruct.Example") }
 
+func GenericExample[K comparable, V any](key K, value V) V {
+	println("Hello, Generic World!", key, value)
+	return value
+}
+
 // Example demonstrates how to use the instrumenter.
 func Example() {
 	// Output:
@@ -54,6 +59,7 @@ func main() {
 	// Call the Example function to trigger the instrumentation
 	Example()
 	m := &MyStruct{}
+	GenericExample(1, 2)
 	// Add a new field to the struct
 	m.NewField = "abc"
 	m.Example()
