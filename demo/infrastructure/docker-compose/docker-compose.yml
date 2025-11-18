@@ -111,7 +111,7 @@ services:
     ports:
       - "50051:50051"
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=grpc-server
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
@@ -128,8 +128,20 @@ services:
       context: ../../..
       dockerfile: demo/grpc/client/Dockerfile
     container_name: grpc-client
+    # Make requests in a loop: unary calls, then streaming calls, with delays
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          echo "[$(date)] Making unary call..."
+          /app/client -addr=grpc-server:50051 -name="demo-user-$$"
+          sleep 3
+          echo "[$(date)] Making streaming call..."
+          /app/client -addr=grpc-server:50051 -name="stream-user-$$" -stream
+          sleep 5
+        done
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=grpc-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
@@ -220,7 +232,6 @@ networks:
   observability:
     driver: bridge
     name: otel-demo-network
-
 # Note: No volumes defined for ephemeral demo environment
 # Data will be lost when containers are stopped
 # For persistent data, uncomment and add volumes:
