@@ -186,6 +186,14 @@ func testFunc(param1 string, param2 int) {}`,
 				compositeLit, ok := unaryExpr.X.(*dst.CompositeLit)
 				require.True(t, ok, "expression should contain composite literal")
 				assert.Len(t, compositeLit.Elts, 2, "should have params and return values fields")
+
+				// Verify params field has correct number of parameter addresses
+				paramsKV, ok := compositeLit.Elts[0].(*dst.KeyValueExpr)
+				require.True(t, ok, "first element should be KeyValueExpr")
+				assert.Equal(t, "params", paramsKV.Key.(*dst.Ident).Name)
+				paramsLit, ok := paramsKV.Value.(*dst.CompositeLit)
+				require.True(t, ok, "params value should be CompositeLit")
+				assert.Len(t, paramsLit.Elts, 2, "should have 2 parameter addresses")
 			},
 		},
 		{
@@ -195,6 +203,52 @@ func testFunc(param1 string) (result1 string) { return "" }`,
 			wantErr: false,
 			validate: func(t *testing.T, expr dst.Expr) {
 				assert.NotNil(t, expr, "expression should not be nil")
+
+				// Verify returnVals field has correct number of return value addresses
+				unaryExpr, ok := expr.(*dst.UnaryExpr)
+				require.True(t, ok, "expression should be unary expression")
+				compositeLit, ok := unaryExpr.X.(*dst.CompositeLit)
+				require.True(t, ok, "expression should contain composite literal")
+
+				returnsKV, ok := compositeLit.Elts[1].(*dst.KeyValueExpr)
+				require.True(t, ok, "second element should be KeyValueExpr")
+				assert.Equal(t, "returnVals", returnsKV.Key.(*dst.Ident).Name)
+				returnsLit, ok := returnsKV.Value.(*dst.CompositeLit)
+				require.True(t, ok, "returnVals value should be CompositeLit")
+				assert.Len(t, returnsLit.Elts, 1, "should have 1 return value address")
+			},
+		},
+		{
+			name: "creates context with both params and return values",
+			funcSrc: `package main
+func testFunc(param1 string, param2 int) (result1 string) { return "" }`,
+			wantErr: false,
+			validate: func(t *testing.T, expr dst.Expr) {
+				unaryExpr, ok := expr.(*dst.UnaryExpr)
+				require.True(t, ok, "expression should be unary expression")
+				compositeLit, ok := unaryExpr.X.(*dst.CompositeLit)
+				require.True(t, ok, "expression should contain composite literal")
+
+				// Verify struct type name
+				typeIdent, ok := compositeLit.Type.(*dst.Ident)
+				require.True(t, ok, "type should be an Ident")
+				assert.Contains(t, typeIdent.Name, "HookContextImpl", "struct name should contain HookContextImpl")
+
+				// Verify params field
+				paramsKV, ok := compositeLit.Elts[0].(*dst.KeyValueExpr)
+				require.True(t, ok, "first element should be KeyValueExpr")
+				assert.Equal(t, "params", paramsKV.Key.(*dst.Ident).Name)
+				paramsLit, ok := paramsKV.Value.(*dst.CompositeLit)
+				require.True(t, ok, "params value should be CompositeLit")
+				assert.Len(t, paramsLit.Elts, 2, "should have 2 parameter addresses")
+
+				// Verify returnVals field
+				returnsKV, ok := compositeLit.Elts[1].(*dst.KeyValueExpr)
+				require.True(t, ok, "second element should be KeyValueExpr")
+				assert.Equal(t, "returnVals", returnsKV.Key.(*dst.Ident).Name)
+				returnsLit, ok := returnsKV.Value.(*dst.CompositeLit)
+				require.True(t, ok, "returnVals value should be CompositeLit")
+				assert.Len(t, returnsLit.Elts, 1, "should have 1 return value address")
 			},
 		},
 	}
@@ -209,16 +263,10 @@ func testFunc(param1 string) (result1 string) { return "" }`,
 				},
 			}
 
-			expr, err := newHookContextImpl(tjump)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Nil(t, expr)
-			} else {
-				require.NoError(t, err)
-				assert.NotNil(t, expr)
-				if tt.validate != nil {
-					tt.validate(t, expr)
-				}
+			expr := newHookContextImpl(tjump)
+			assert.NotNil(t, expr)
+			if tt.validate != nil {
+				tt.validate(t, expr)
 			}
 		})
 	}
@@ -340,37 +388,4 @@ func %s() {}`, beforeFuncName)
 
 	// Verify body contains empty statement
 	assert.Len(t, tjump.ifStmt.Body.List, 1)
-}
-
-func TestPopulateHookContextLiteral(t *testing.T) {
-	funcSrc := `package main
-func testFunc(param1 string, param2 int) (result1 string) { return "" }`
-
-	targetFunc := parseFunc(t, funcSrc)
-	tjump := &TJump{
-		target: targetFunc,
-	}
-
-	// Create mock expression structure representing &HookContextImpl{Params:[]interface{}{},ReturnVals:[]interface{}{}}
-	// This mimics the structure created by newHookContextImpl
-	exprSrc := `&HookContextImpl{Params: []interface{}{}, ReturnVals: []interface{}{}}`
-	stmts := parseSnippet(t, exprSrc)
-	require.Len(t, stmts, 1)
-	exprStmt, ok := stmts[0].(*dst.ExprStmt)
-	require.True(t, ok)
-	expr := exprStmt.X
-
-	populateHookContextLiteral(tjump, expr)
-
-	unaryExpr, ok := expr.(*dst.UnaryExpr)
-	require.True(t, ok)
-	compositeLit := unaryExpr.X.(*dst.CompositeLit)
-	paramsLit := compositeLit.Elts[0].(*dst.KeyValueExpr).Value.(*dst.CompositeLit)
-	returnsLit := compositeLit.Elts[1].(*dst.KeyValueExpr).Value.(*dst.CompositeLit)
-
-	// Verify parameters were populated with addresses of all arguments
-	assert.Len(t, paramsLit.Elts, 2, "should have 2 parameter addresses")
-
-	// Verify return values were populated with addresses
-	assert.Len(t, returnsLit.Elts, 1, "should have 1 return value address")
 }
