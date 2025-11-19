@@ -275,13 +275,14 @@ pkg/inst-api-semconv/
 
 ### 工作原理
 
-CI 工作流程使用 Makefile 中定义的 Make 目标：
+CI 使用 Makefile 中定义的 Make 目标：
 
 - `make weaver-install`：安装 OTel Weaver
 - `make registry-check`：验证注册表（阻塞性检查）
 - `make registry-diff`：生成差异报告（非阻塞性检查）
 
 这种方法：
+
 - 减少 CI 和本地开发之间的代码重复
 - 确保 CI 使用与开发人员相同的验证逻辑
 - 便于在推送前本地运行相同的检查

@@ -282,6 +282,7 @@ The CI workflow uses the Make targets defined in the Makefile:
 - `make registry-diff`: Generates diff report (non-blocking check)
 
 This approach:
+
 - Reduces code duplication between CI and local development
 - Ensures CI uses the same validation logic as developers
 - Makes it easy to run the same checks locally before pushing
