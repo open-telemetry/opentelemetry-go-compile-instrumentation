@@ -378,14 +378,14 @@ weaver-install: ## Install OTel Weaver if not present
 lint/semantic-conventions: ## Validate semantic convention registry against the project's version
 lint/semantic-conventions: weaver-install
 	@echo "Validating semantic convention registry..."
-	@# Read the semconv version from .semconv-version file
+	@# Read the semconv version from .semconv-version file (ignore comments and empty lines)
 	@if [ ! -f .semconv-version ]; then \
 		echo "Error: .semconv-version file not found"; \
 		exit 1; \
 	fi; \
-	CURRENT_VERSION=$$(cat .semconv-version | tr -d '[:space:]'); \
+	CURRENT_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]'); \
 	if [ -z "$$CURRENT_VERSION" ]; then \
-		echo "Error: .semconv-version file is empty"; \
+		echo "Error: No version found in .semconv-version file"; \
 		exit 1; \
 	fi; \
 	echo "Checking semantic conventions registry at version: $$CURRENT_VERSION"; \
@@ -398,14 +398,14 @@ semantic-conventions/diff: ## Generate diff between current version and latest (
 semantic-conventions/diff: weaver-install
 	@echo "Generating semantic convention registry diff (current vs latest)..."
 	@mkdir -p tmp
-	@# Read the semconv version from .semconv-version file
+	@# Read the semconv version from .semconv-version file (ignore comments and empty lines)
 	@if [ ! -f .semconv-version ]; then \
 		echo "Error: .semconv-version file not found"; \
 		exit 1; \
 	fi; \
-	CURRENT_VERSION=$$(cat .semconv-version | tr -d '[:space:]'); \
+	CURRENT_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]'); \
 	if [ -z "$$CURRENT_VERSION" ]; then \
-		echo "Error: .semconv-version file is empty"; \
+		echo "Error: No version found in .semconv-version file"; \
 		exit 1; \
 	fi; \
 	echo "Current project version: $$CURRENT_VERSION"; \

@@ -45,9 +45,9 @@ jobs:
             echo "::error::.semconv-version file not found"
             exit 1
           fi
-          CURRENT_VERSION=$(cat .semconv-version | tr -d '[:space:]')
+          CURRENT_VERSION=$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]')
           if [ -z "$CURRENT_VERSION" ]; then
-            echo "::error::.semconv-version file is empty"
+            echo "::error::No version found in .semconv-version file"
             exit 1
           fi
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
@@ -104,7 +104,7 @@ jobs:
       - name: Read semconv version
         id: read-version
         run: |
-          CURRENT_VERSION=$(cat .semconv-version | tr -d '[:space:]')
+          CURRENT_VERSION=$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]')
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "Current version: $CURRENT_VERSION"
 
@@ -112,7 +112,7 @@ jobs:
         continue-on-error: true
         run: |
           echo "Generating diff between current version and latest (main branch)"
-          make registry-diff || echo "::warning::Registry diff generation failed (non-blocking)"
+          make lint/semantic-conventions || echo "::warning::Registry diff generation failed (non-blocking)"
 
       - name: Upload diff report
         if: always()
@@ -201,4 +201,3 @@ jobs:
                 body: comment
               });
             }
-
