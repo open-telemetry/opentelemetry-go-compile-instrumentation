@@ -375,52 +375,53 @@ weaver-install: ## Install OTel Weaver if not present
 		weaver --version; \
 	fi
 
-lint/semantic-conventions: ## Validate semantic convention registry
+lint/semantic-conventions: ## Validate semantic convention registry against the project's version
 lint/semantic-conventions: weaver-install
 	@echo "Validating semantic convention registry..."
-	@weaver registry check \
-		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
-		--future
-
-registry-diff: ## Generate diff between two versions of semantic convention registry
-registry-diff: weaver-install
-	@echo "Generating semantic convention registry diff..."
-	@mkdir -p tmp
-	@# Detect current semconv version from code
-	@CURRENT_VERSION=$$(grep -r "semconv/v" pkg/inst-api-semconv/ --include="*.go" | \
-		grep -o "semconv/v[0-9]*\.[0-9]*\.[0-9]*" | \
-		sort -u | head -1 | sed 's/semconv\///'); \
-	if [ -z "$$CURRENT_VERSION" ]; then \
-		echo "Error: No semconv version detected in pkg/inst-api-semconv/"; \
+	@# Read the semconv version from .semconv-version file
+	@if [ ! -f .semconv-version ]; then \
+		echo "Error: .semconv-version file not found"; \
 		exit 1; \
 	fi; \
-	BASELINE_VERSION=$${BASELINE_VERSION:-v1.29.0}; \
-	echo "Detected project semconv version: $$CURRENT_VERSION"; \
-	echo "Baseline version: $$BASELINE_VERSION"; \
-	echo ""; \
-	echo "=== Diff 1: Current ($$CURRENT_VERSION) vs Baseline ($$BASELINE_VERSION) ==="; \
-	weaver registry diff \
+	CURRENT_VERSION=$$(cat .semconv-version | tr -d '[:space:]'); \
+	if [ -z "$$CURRENT_VERSION" ]; then \
+		echo "Error: .semconv-version file is empty"; \
+		exit 1; \
+	fi; \
+	echo "Checking semantic conventions registry at version: $$CURRENT_VERSION"; \
+	weaver registry check \
 		--registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION \
-		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$BASELINE_VERSION \
-		--diff-format markdown \
-		--output tmp/registry-diff-baseline.md \
-		--future || echo "Warning: Baseline diff failed"; \
+		--diagnostic-format gh_workflow_command \
+		--future
+
+semantic-conventions/diff: ## Generate diff between current version and latest (non-blocking informational check)
+semantic-conventions/diff: weaver-install
+	@echo "Generating semantic convention registry diff (current vs latest)..."
+	@mkdir -p tmp
+	@# Read the semconv version from .semconv-version file
+	@if [ ! -f .semconv-version ]; then \
+		echo "Error: .semconv-version file not found"; \
+		exit 1; \
+	fi; \
+	CURRENT_VERSION=$$(cat .semconv-version | tr -d '[:space:]'); \
+	if [ -z "$$CURRENT_VERSION" ]; then \
+		echo "Error: .semconv-version file is empty"; \
+		exit 1; \
+	fi; \
+	echo "Current project version: $$CURRENT_VERSION"; \
+	echo "Comparing against latest (main branch)..."; \
 	echo ""; \
-	echo "=== Diff 2: Latest (main) vs Current ($$CURRENT_VERSION) ==="; \
 	weaver registry diff \
 		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
 		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION \
 		--diff-format markdown \
 		--output tmp/registry-diff-latest.md \
-		--future || echo "Warning: Latest diff failed"; \
+		--future || { \
+			echo "⚠️  Warning: Registry diff generation failed (this is non-blocking)"; \
+			echo "⚠️  Registry diff generation failed." > tmp/registry-diff-latest.md; \
+			exit 0; \
+		}; \
 	echo ""; \
-	if [ -f tmp/registry-diff-baseline.md ]; then \
-		echo "📊 Changes in your current version ($$CURRENT_VERSION vs $$BASELINE_VERSION):"; \
-		echo "Saved to: tmp/registry-diff-baseline.md"; \
-		echo ""; \
-		cat tmp/registry-diff-baseline.md; \
-		echo ""; \
-	fi; \
 	if [ -f tmp/registry-diff-latest.md ]; then \
 		echo "🆕 Available updates (latest vs $$CURRENT_VERSION):"; \
 		echo "Saved to: tmp/registry-diff-latest.md"; \

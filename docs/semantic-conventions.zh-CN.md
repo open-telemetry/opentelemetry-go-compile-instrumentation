@@ -6,6 +6,27 @@
 
 语义约定定义了 OpenTelemetry 项目中使用的一组通用属性名称和值，以确保一致性和互操作性。本项目使用 [OTel Weaver](https://github.com/open-telemetry/weaver) 来验证和跟踪语义约定的变更。
 
+## 版本管理
+
+项目的语义约定版本在仓库根目录的 `.semconv-version` 文件中跟踪。此文件：
+
+- 指定项目打算遵守的语义约定版本
+- 必须与 `pkg/inst-api-semconv/` Go 代码中使用的 `semconv` 导入匹配
+- 由 CI 验证以确保一致性
+
+**`.semconv-version` 文件示例**：
+
+```
+v1.30.0
+```
+
+更新到新的语义约定版本时：
+
+1. 更新 `.semconv-version` 中的版本
+2. 更新 `pkg/inst-api-semconv/` 中的 Go 导入以匹配
+3. 运行 `make registry-check` 验证
+4. 更新代码以处理任何破坏性更改
+
 ## 前置条件
 
 语义约定工具需要 OTel Weaver。当你运行相关的 make 目标时，它会自动安装：
@@ -20,24 +41,25 @@ make weaver-install
 
 ### 验证语义约定
 
-验证你的语义约定定义是否遵循正确的模式和约定：
+验证项目的语义约定是否符合指定版本的注册表：
 
 ```bash
-make lint/semantic-conventions
+make registry-check
 ```
 
 此命令会：
 
-- 对照官方模式检查语义约定注册表
-- 验证属性名称、类型和定义
-- 报告任何模式违规或已弃用的模式
+- 从 `.semconv-version` 读取版本
+- 在该版本验证语义约定注册表
+- 报告任何违规或已弃用的模式
 - 使用 `--future` 标志启用更严格的验证规则
+- **此检查会阻塞** - 违规将导致 CI 失败
 
 **何时使用**：在提交对 `pkg/inst-api-semconv/` 中语义约定定义的更改之前运行此命令。
 
 ### 生成注册表差异
 
-比较语义约定版本以了解变更和可用更新：
+将当前版本与最新版本进行比较，查看可用的更新：
 
 ```bash
 make registry-diff
@@ -45,36 +67,22 @@ make registry-diff
 
 此命令会自动：
 
-1. **检测**代码中使用的 `semconv` 版本（例如 `v1.30.0`）
-2. **生成两个比较报告**：
-   - **当前版本 vs 基线版本**：你的版本相对于 `v1.29.0` 的变更
-   - **最新版本 vs 当前版本**：如果升级可获得的新功能
+1. **读取** `.semconv-version` 中的版本（例如 `v1.30.0`）
+2. **生成比较报告**：最新版本（main 分支）vs 当前版本
+3. 显示可用的新功能和变更
 
-默认情况下，这会与 `v1.29.0` 进行比较。要使用不同的基线版本：
-
-```bash
-BASELINE_VERSION=v1.28.0 make registry-diff
-```
-
-**输出文件**：
-
-- `tmp/registry-diff-baseline.md` - 自基线版本以来的变更
-- `tmp/registry-diff-latest.md` - 可用的更新
+**输出文件**：`tmp/registry-diff-latest.md`
 
 **输出示例**：
 
 ```
-检测到项目 semconv 版本：v1.30.0
-基线版本：v1.29.0
-
-当前版本的变更（v1.30.0 vs v1.29.0）：
-- 添加：http.request.body.size
-- 修改：http.response.status_code 描述
-...
+当前项目版本：v1.30.0
+与最新版本（main 分支）进行比较...
 
 可用更新（latest vs v1.30.0）：
 - 添加：db.client.connection.state
 - 已弃用：net.peer.name（使用 server.address）
+- 修改：http.response.status_code 描述
 ...
 ```
 
@@ -224,45 +232,59 @@ pkg/inst-api-semconv/
 
 ### Pull Request 阶段
 
-当你修改 `pkg/inst-api-semconv/` 中的文件时：
+当你修改 `pkg/inst-api-semconv/` 或 `.semconv-version` 中的文件时：
 
-1. **版本检测**：自动检测 Go 代码中使用的 `semconv` 版本（例如 `v1.30.0`）
-2. **注册表验证**：验证检测到的版本的语义约定注册表是否有效
-3. **差异报告**：生成两个比较报告：
-   - **当前版本 vs 基线版本**：显示你的版本与基线版本（v1.29.0）之间的变更
-   - **最新版本 vs 当前版本**：显示如果升级到最新语义约定可获得的更新
-4. **PR 评论**：发布包含以下内容的综合差异报告作为 PR 评论：
-   - 当前版本中的变更内容
-   - 更新版本中的新功能/变更
-   - 确保代码合规的操作项
+#### 任务 1：验证语义约定（阻塞性检查）
+
+此任务确保你的代码遵循正确的语义约定版本：
+
+1. **读取版本**：从 `.semconv-version` 文件读取版本
+2. **验证一致性**：检查 `pkg/inst-api-semconv/` 中的 Go 导入是否与 `.semconv-version` 中的版本匹配
+3. **注册表验证**：运行 `make registry-check` 验证注册表
+   - **这是阻塞性检查** - 违规将导致 PR 失败
 
 **此检查的内容**：
 
-- 验证你使用的语义约定版本是否有效
-- 显示该版本相对于基线版本的变更
-- 显示升级到更新版本可获得的内容
-- 帮助确保 Go 代码与正确的 semconv 版本对齐
+- `.semconv-version` 中的版本与 Go 代码中的 `semconv` 导入匹配
+- 该版本的语义约定注册表有效（无违规）
+- 你的代码遵守指定版本的约定
 
-**此检查不包含的内容**：
+#### 任务 2：检查可用更新（非阻塞性检查）
 
-- ❌ 不验证 Go 代码语法或逻辑（使用 `make lint` 和 `make test`）
-- ❌ 不强制升级到最新版本（仅提供信息）
+此任务显示最新语义约定中的新内容：
+
+1. **生成差异**：运行 `make registry-diff` 比较当前版本与最新版本
+2. **上传报告**：上传差异报告作为构件
+3. **PR 评论**：发布信息性评论，显示：
+   - 可用的新语义约定
+   - 是否使用了最新版本
+   - 更新建议（如果需要）
+
+**此检查的内容**：
+
+- 显示可用的更新（仅提供信息）
+- **这是非阻塞性检查** - 永远不会导致 PR 失败
+- 帮助你了解新约定，而无需立即采取行动
 
 ### 主分支
 
 当更改合并到 `main` 时：
 
-1. **版本检测**：检测当前使用的 `semconv` 版本
+1. **读取版本**：从 `.semconv-version` 读取版本
 2. **注册表验证**：验证该版本的注册表以确保持续合规
 
 ### 工作原理
 
-CI 工作流程：
+CI 工作流程使用 Makefile 中定义的 Make 目标：
 
-1. 扫描 Go 文件中的 `semconv/vX.Y.Z` 导入
-2. 使用 OTel Weaver 验证该特定版本的注册表
-3. 与基线版本和最新版本进行比较以显示演进
-4. 发布可操作的信息以帮助你保持合规
+- `make weaver-install`：安装 OTel Weaver
+- `make registry-check`：验证注册表（阻塞性检查）
+- `make registry-diff`：生成差异报告（非阻塞性检查）
+
+这种方法：
+- 减少 CI 和本地开发之间的代码重复
+- 确保 CI 使用与开发人员相同的验证逻辑
+- 便于在推送前本地运行相同的检查
 
 ### 何时更新语义约定
 
@@ -276,9 +298,10 @@ CI 工作流程：
 
 1. 查看"可用更新"差异
 2. 更新 Go 导入：`semconv/v1.30.0` → `semconv/v1.31.0`
-3. 更新 `.github/workflows/check-registry-diff.yaml` 中的 `CURRENT_SEMCONV_VERSION`
+3. 更新 `.semconv-version` 文件中的版本号
 4. 更新代码以处理任何破坏性更改
-5. 运行测试：`make test`
+5. 运行 `make registry-check` 验证新版本
+6. 运行测试：`make test`
 
 ## 最佳实践
 
@@ -356,5 +379,5 @@ CI 工作流程：
 如果你遇到语义约定工具的问题：
 
 1. 查看 [GitHub Issues](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues)
-2. 在 [#otel-go-compt-instr-sig](https://cloud-native.slack.com/archives/C088D8GSSSF) Slack 频道询问
+2. 在 [#otel-go-compile-instrumentation](https://cloud-native.slack.com/archives/C088D8GSSSF) Slack Channel 询问
 3. 提交包含问题详情的新 issue

@@ -1,237 +1,177 @@
-name: Check Semantic Convention Registry Diff
+name: Check Semantic Convention Registry
 
 on:
   pull_request:
     paths:
       - 'pkg/inst-api-semconv/**'
+      - '.semconv-version'
   push:
     branches:
       - main
     paths:
       - 'pkg/inst-api-semconv/**'
+      - '.semconv-version'
 
 permissions:
   contents: read
   pull-requests: write
 
 env:
-  # OTel Weaver version to use for registry diff check
+  # OTel Weaver version to use for registry checks
   WEAVER_VERSION: v0.19.0
   # Semantic conventions registry URL
   SEMCONV_REGISTRY: https://github.com/open-telemetry/semantic-conventions.git
-  # Current semconv version used in this project (should match imports in Go code)
-  CURRENT_SEMCONV_VERSION: v1.30.0
-  # Baseline semconv version for comparison
-  BASELINE_SEMCONV_VERSION: v1.29.0
 
 jobs:
-  registry-diff:
-    name: Check Registry Diff
+  registry-check:
+    name: Validate Semantic Conventions
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+
+      - name: Set up Go
+        uses: actions/setup-go@6aaf6e5ee1c6c4763fe8f3b431f2bee5d927b6bc  # v5.2.0
         with:
-          fetch-depth: 0  # Fetch full history for baseline comparison
+          go-version-file: 'go.mod'
 
       - name: Install OTel Weaver
+        run: make weaver-install
+
+      - name: Read semconv version
+        id: read-version
         run: |
-          # Download and install weaver binary
-          WEAVER_ARCH="x86_64-unknown-linux-gnu"
-          WEAVER_URL="https://github.com/open-telemetry/weaver/releases/download/${WEAVER_VERSION}/weaver-${WEAVER_ARCH}.tar.xz"
+          if [ ! -f .semconv-version ]; then
+            echo "::error::.semconv-version file not found"
+            exit 1
+          fi
+          CURRENT_VERSION=$(cat .semconv-version | tr -d '[:space:]')
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "::error::.semconv-version file is empty"
+            exit 1
+          fi
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current semantic conventions version: $CURRENT_VERSION"
 
-          curl -fsSL "${WEAVER_URL}" -o weaver.tar.xz
-          tar -xJf weaver.tar.xz
-          chmod +x weaver
-          sudo mv weaver /usr/local/bin/weaver
-          rm -f weaver.tar.xz
-
-          # Verify installation
-          weaver --version
-
-      - name: Detect semconv version from code
-        id: detect-version
-        if: github.event_name == 'pull_request'
+      - name: Validate code uses correct semconv version
         run: |
-          # Detect the semconv version used in the Go code
+          # Detect the semconv version used in the Go code imports
           DETECTED_VERSION=$(grep -r "semconv/v" pkg/inst-api-semconv/ --include="*.go" | \
             grep -o "semconv/v[0-9]*\.[0-9]*\.[0-9]*" | \
             sort -u | \
             head -1 | \
             sed 's/semconv\///')
 
+          EXPECTED_VERSION="${{ steps.read-version.outputs.current_version }}"
+
           if [ -z "$DETECTED_VERSION" ]; then
-            echo "::error::No semconv version detected in pkg/inst-api-semconv/"
+            echo "::error::No semconv version detected in Go imports in pkg/inst-api-semconv/"
             exit 1
           fi
 
-          echo "detected_version=$DETECTED_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Detected semconv version: $DETECTED_VERSION"
+          echo "Detected version in Go code: $DETECTED_VERSION"
+          echo "Expected version from .semconv-version: $EXPECTED_VERSION"
 
-          # Check if detected version matches expected version
-          if [ "$DETECTED_VERSION" != "$CURRENT_SEMCONV_VERSION" ]; then
-            echo "::warning::Detected version ($DETECTED_VERSION) differs from expected ($CURRENT_SEMCONV_VERSION)"
-            echo "::warning::Please update CURRENT_SEMCONV_VERSION in workflow file"
-          fi
-
-      - name: Validate semantic conventions registry at current version
-        if: github.event_name == 'pull_request'
-        run: |
-          # Validate the registry version that the project currently uses
-          echo "::group::Validating semantic convention registry at ${{ steps.detect-version.outputs.detected_version }}"
-          weaver registry check \
-            --registry "${SEMCONV_REGISTRY}[model]@${{ steps.detect-version.outputs.detected_version }}" \
-            --diagnostic-format gh_workflow_command \
-            --future
-          echo "::endgroup::"
-
-      - name: Generate registry diff - Current vs Baseline
-        if: github.event_name == 'pull_request'
-        run: |
-          # Create output directory
-          mkdir -p registry-diff-output
-
-          CURRENT_VER="${{ steps.detect-version.outputs.detected_version }}"
-          BASELINE_VER="${BASELINE_SEMCONV_VERSION}"
-
-          echo "::group::Generating registry diff: ${CURRENT_VER} vs ${BASELINE_VER}"
-          weaver registry diff \
-            --registry "${SEMCONV_REGISTRY}[model]@${CURRENT_VER}" \
-            --baseline-registry "${SEMCONV_REGISTRY}[model]@${BASELINE_VER}" \
-            --diff-format markdown \
-            --output registry-diff-output/diff-baseline.md \
-            --future || {
-              echo "::warning::Registry diff (current vs baseline) failed."
-              echo "⚠️ Registry diff generation failed." > registry-diff-output/diff-baseline.md
-              exit 0
-            }
-          echo "::endgroup::"
-
-      - name: Generate registry diff - Current vs Latest
-        if: github.event_name == 'pull_request'
-        run: |
-          CURRENT_VER="${{ steps.detect-version.outputs.detected_version }}"
-
-          echo "::group::Generating registry diff: ${CURRENT_VER} vs latest (main)"
-          weaver registry diff \
-            --registry "${SEMCONV_REGISTRY}[model]" \
-            --baseline-registry "${SEMCONV_REGISTRY}[model]@${CURRENT_VER}" \
-            --diff-format markdown \
-            --output registry-diff-output/diff-latest.md \
-            --future || {
-              echo "::warning::Registry diff (current vs latest) failed."
-              echo "⚠️ Registry diff generation failed." > registry-diff-output/diff-latest.md
-              exit 0
-            }
-          echo "::endgroup::"
-
-          echo "Registry diff reports generated:"
-          echo "1. Current ($CURRENT_VER) vs Baseline ($BASELINE_SEMCONV_VERSION): registry-diff-output/diff-baseline.md"
-          echo "2. Latest (main) vs Current ($CURRENT_VER): registry-diff-output/diff-latest.md"
-
-      - name: Check registry for main branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          # Detect the semconv version used in the Go code
-          DETECTED_VERSION=$(grep -r "semconv/v" pkg/inst-api-semconv/ --include="*.go" | \
-            grep -o "semconv/v[0-9]*\.[0-9]*\.[0-9]*" | \
-            sort -u | \
-            head -1 | \
-            sed 's/semconv\///')
-
-          if [ -z "$DETECTED_VERSION" ]; then
-            echo "::error::No semconv version detected in pkg/inst-api-semconv/"
+          if [ "$DETECTED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Version mismatch! Go code imports $DETECTED_VERSION but .semconv-version specifies $EXPECTED_VERSION"
+            echo "::error::Please update either the Go imports or the .semconv-version file to match"
             exit 1
           fi
 
-          echo "Detected semconv version: $DETECTED_VERSION"
+          echo "✅ Version consistency check passed"
 
-          # Validate the registry version that the project currently uses
-          weaver registry check \
-            --registry "${SEMCONV_REGISTRY}[model]@${DETECTED_VERSION}" \
-            --diagnostic-format gh_workflow_command \
-            --future
+      - name: Check registry for violations
+        run: |
+          echo "Validating semantic convention registry for version ${{ steps.read-version.outputs.current_version }}"
+          make registry-check
 
-          echo "Registry validation completed for main branch using version: $DETECTED_VERSION"
+  registry-diff:
+    name: Check Available Updates (Non-blocking)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+
+      - name: Set up Go
+        uses: actions/setup-go@6aaf6e5ee1c6c4763fe8f3b431f2bee5d927b6bc  # v5.2.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install OTel Weaver
+        run: make weaver-install
+
+      - name: Read semconv version
+        id: read-version
+        run: |
+          CURRENT_VERSION=$(cat .semconv-version | tr -d '[:space:]')
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Generate registry diff (current vs latest)
+        continue-on-error: true
+        run: |
+          echo "Generating diff between current version and latest (main branch)"
+          make registry-diff || echo "::warning::Registry diff generation failed (non-blocking)"
 
       - name: Upload diff report
-        if: github.event_name == 'pull_request' && always()
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6bb5d4667c85d1fc677ab6a7f3c13  # v4.6.2
         with:
           name: registry-diff-report
-          path: registry-diff-output/
+          path: tmp/registry-diff-latest.md
           retention-days: 30
+          if-no-files-found: warn
 
       - name: Comment PR with diff summary
-        if: github.event_name == 'pull_request' && always()
+        if: always()
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
           script: |
             const fs = require('fs');
-            const diffBaselineFile = 'registry-diff-output/diff-baseline.md';
-            const diffLatestFile = 'registry-diff-output/diff-latest.md';
+            const diffFile = 'tmp/registry-diff-latest.md';
 
-            let comment = '## 📊 Semantic Convention Registry Diff Report\n\n';
+            let comment = '## 📊 Semantic Convention Registry Update Check\n\n';
 
-            // Read detected version from step output
-            const detectedVersion = '${{ steps.detect-version.outputs.detected_version }}';
-            const baselineVersion = process.env.BASELINE_SEMCONV_VERSION;
+            const currentVersion = '${{ steps.read-version.outputs.current_version }}';
+            comment += `**Current Project Version**: \`${currentVersion}\` (from \`.semconv-version\`)\n\n`;
 
-            comment += `**Current Project Version**: \`${detectedVersion}\`\n`;
-            comment += `**Baseline Version**: \`${baselineVersion}\`\n\n`;
+            comment += '> ℹ️ This is a **non-blocking informational check** that shows what semantic convention updates are available. ';
+            comment += 'It helps you stay informed about new conventions without requiring immediate action.\n\n';
 
-            comment += '> This report shows semantic convention changes relevant to this project. ';
-            comment += 'It helps ensure `pkg/inst-api-semconv/` code aligns with the semantic conventions version used.\n\n';
-
-            // Section 1: Changes since baseline
-            comment += '### 📈 Changes Since Baseline\n\n';
-            comment += `Comparing **${detectedVersion}** (current) vs **${baselineVersion}** (baseline)\n\n`;
-
-            if (fs.existsSync(diffBaselineFile)) {
-              const diffContent = fs.readFileSync(diffBaselineFile, 'utf8');
-              if (diffContent.includes('Registry diff generation failed')) {
-                comment += '⚠️ Diff generation failed (possibly network issues)\n\n';
-              } else if (diffContent.trim().length < 50) {
-                comment += '✅ No significant changes between these versions.\n\n';
-              } else {
-                comment += '<details>\n<summary>View detailed changes</summary>\n\n';
-                comment += diffContent;
-                comment += '\n</details>\n\n';
-              }
-            } else {
-              comment += '⚠️ Diff report not generated.\n\n';
-            }
-
-            // Section 2: Available updates
             comment += '### 🆕 Available Updates\n\n';
-            comment += `Comparing **latest** (main branch) vs **${detectedVersion}** (current)\n\n`;
+            comment += `Comparing **latest** (main branch) vs **${currentVersion}** (current)\n\n`;
 
-            if (fs.existsSync(diffLatestFile)) {
-              const diffContent = fs.readFileSync(diffLatestFile, 'utf8');
+            if (fs.existsSync(diffFile)) {
+              const diffContent = fs.readFileSync(diffFile, 'utf8');
               if (diffContent.includes('Registry diff generation failed')) {
-                comment += '⚠️ Diff generation failed (possibly network issues)\n\n';
-              } else if (diffContent.trim().length < 50) {
-                comment += '✅ Project is using the latest semantic conventions!\n\n';
+                comment += '⚠️ Could not generate diff (possibly due to network issues). This check is non-blocking.\n\n';
+              } else if (diffContent.trim().length < 50 || diffContent.includes('No changes')) {
+                comment += '✅ **Your project is using the latest semantic conventions!**\n\n';
+                comment += 'No updates are available at this time.\n\n';
               } else {
-                comment += '💡 New semantic conventions are available. Consider updating `semconv` version if these changes are relevant:\n\n';
-                comment += '<details>\n<summary>View available updates</summary>\n\n';
+                comment += '💡 **New semantic conventions are available.** Consider updating if these changes are relevant to your instrumentation:\n\n';
+                comment += '<details>\n<summary>📋 View available updates</summary>\n\n';
                 comment += diffContent;
                 comment += '\n</details>\n\n';
               }
             } else {
-              comment += '⚠️ Diff report not generated.\n\n';
+              comment += '⚠️ Diff report was not generated. This check is non-blocking.\n\n';
             }
 
             comment += '---\n\n';
             comment += '### 📝 What This Means\n\n';
-            comment += '- **Changes Since Baseline**: Shows what changed in the version you\'re currently using\n';
-            comment += '- **Available Updates**: Shows new features/changes you could adopt by updating\n';
-            comment += '- When modifying `pkg/inst-api-semconv/`, ensure your code aligns with these conventions\n\n';
-            comment += '**Action Items**:\n';
-            comment += '- ✅ Verify your changes follow the semantic conventions for the current version\n';
-            comment += '- 📚 Review "Available Updates" to see if newer conventions should be adopted\n';
-            comment += '- 🔄 Update Go imports if you decide to use a newer semconv version\n\n';
-            comment += '*Generated by [OTel Weaver](https://github.com/open-telemetry/weaver) • Run `make registry-diff` locally for more details*';
+            comment += '- **Non-blocking**: This check will never fail your PR\n';
+            comment += '- **Informational**: Shows what\'s new in the semantic conventions\n';
+            comment += '- **Optional**: You can choose when to adopt new conventions\n\n';
+
+            comment += '**How to Update** (if desired):\n';
+            comment += '1. Review the changes above to see if they\'re relevant to your use case\n';
+            comment += '2. Update Go imports in `pkg/inst-api-semconv/` to the new semconv version\n';
+            comment += '3. Update the version in `.semconv-version` file\n';
+            comment += '4. Run `make registry-check` locally to validate\n\n';
+
+            comment += '*Generated by [OTel Weaver](https://github.com/open-telemetry/weaver) • Run `make registry-diff` locally for details*';
 
             // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
@@ -242,7 +182,7 @@ jobs:
 
             const botComment = comments.find(comment =>
               comment.user.type === 'Bot' &&
-              comment.body.includes('Semantic Convention Registry Diff Report')
+              comment.body.includes('Semantic Convention Registry Update Check')
             );
 
             // Update or create comment
@@ -261,3 +201,4 @@ jobs:
                 body: comment
               });
             }
+

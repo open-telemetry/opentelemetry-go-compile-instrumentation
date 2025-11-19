@@ -6,6 +6,27 @@ This document describes the tooling and workflow for managing [OpenTelemetry Sem
 
 Semantic conventions define a common set of attribute names and values used across OpenTelemetry projects to ensure consistency and interoperability. This project uses [OTel Weaver](https://github.com/open-telemetry/weaver) to validate and track changes to semantic conventions.
 
+## Version Management
+
+The project's semantic conventions version is tracked in the `.semconv-version` file at the root of the repository. This file:
+
+- Specifies which semantic conventions version the project intends to abide by
+- Must match the `semconv` imports used in `pkg/inst-api-semconv/` Go code
+- Is validated by CI to ensure consistency
+
+**Example `.semconv-version` file**:
+
+```
+v1.30.0
+```
+
+When updating to a new semantic conventions version:
+
+1. Update the version in `.semconv-version`
+2. Update Go imports in `pkg/inst-api-semconv/` to match
+3. Run `make registry-check` to validate
+4. Update code to handle any breaking changes
+
 ## Prerequisites
 
 The semantic conventions tooling requires OTel Weaver. It will be automatically installed when you run the related make targets:
@@ -20,24 +41,25 @@ This installs the weaver CLI tool to `$GOPATH/bin`. Ensure your `$GOPATH/bin` is
 
 ### Validate Semantic Conventions
 
-Validate that your semantic convention definitions follow the correct schema and conventions:
+Validate that the project's semantic conventions adhere to the registry at the specified version:
 
 ```bash
-make lint/semantic-conventions
+make registry-check
 ```
 
 This command:
 
-- Checks the semantic convention registry against the official schema
-- Validates attribute names, types, and definitions
-- Reports any schema violations or deprecated patterns
+- Reads the version from `.semconv-version`
+- Validates the semantic convention registry at that version
+- Reports any violations or deprecated patterns
 - Uses the `--future` flag to enable stricter validation rules
+- **This check is blocking** - violations will fail CI
 
 **When to use**: Run this before committing changes to semantic convention definitions in `pkg/inst-api-semconv/`.
 
 ### Generate Registry Diff
 
-Compare semantic convention versions to understand changes and available updates:
+Compare the current version against the latest to see available updates:
 
 ```bash
 make registry-diff
@@ -45,36 +67,22 @@ make registry-diff
 
 This command automatically:
 
-1. **Detects** the `semconv` version used in your code (e.g., `v1.30.0`)
-2. **Generates two comparison reports**:
-   - **Current vs Baseline**: What changed in your version vs `v1.29.0`
-   - **Latest vs Current**: What new features are available if you upgrade
+1. **Reads** the version from `.semconv-version` (e.g., `v1.30.0`)
+2. **Generates a comparison report**: Latest (main branch) vs Current version
+3. Shows what new features and changes are available
 
-By default, this compares against `v1.29.0`. To use a different baseline:
-
-```bash
-BASELINE_VERSION=v1.28.0 make registry-diff
-```
-
-**Output files**:
-
-- `tmp/registry-diff-baseline.md` - Changes since baseline
-- `tmp/registry-diff-latest.md` - Available updates
+**Output file**: `tmp/registry-diff-latest.md`
 
 **Example output**:
 
 ```
-Detected project semconv version: v1.30.0
-Baseline version: v1.29.0
-
-Changes in your current version (v1.30.0 vs v1.29.0):
-- Added: http.request.body.size
-- Modified: http.response.status_code description
-...
+Current project version: v1.30.0
+Comparing against latest (main branch)...
 
 Available updates (latest vs v1.30.0):
 - Added: db.client.connection.state
 - Deprecated: net.peer.name (use server.address)
+- Modified: http.response.status_code description
 ...
 ```
 
@@ -224,45 +232,59 @@ The project includes automated checks for semantic conventions:
 
 ### On Pull Requests
 
-When you modify files in `pkg/inst-api-semconv/`:
+When you modify files in `pkg/inst-api-semconv/` or `.semconv-version`:
 
-1. **Version Detection**: Automatically detects the `semconv` version used in the Go code (e.g., `v1.30.0`)
-2. **Registry Validation**: Validates the semantic conventions registry at the detected version to ensure it's valid
-3. **Diff Reports**: Generates two comparison reports:
-   - **Current vs Baseline**: Shows changes between your version and the baseline (v1.29.0)
-   - **Latest vs Current**: Shows available updates if you upgrade to the latest semantic conventions
-4. **PR Comment**: Posts a comprehensive diff report as a PR comment with:
-   - What changed in your current version
-   - What new features/changes are available in newer versions
-   - Action items for ensuring code compliance
+#### Job 1: Validate Semantic Conventions (Blocking)
+
+This job ensures your code follows the correct semantic conventions version:
+
+1. **Read Version**: Reads the version from `.semconv-version` file
+2. **Validate Consistency**: Checks that Go imports in `pkg/inst-api-semconv/` match the version in `.semconv-version`
+3. **Registry Validation**: Runs `make registry-check` to validate against the registry
+   - **This check is blocking** - violations will fail the PR
 
 **What This Checks**:
 
-- Validates the semantic conventions version you're using is valid
-- Shows what changed in that version compared to baseline
-- Shows what's available if you upgrade to newer versions
-- Helps ensure your Go code aligns with the correct semconv version
+- The version in `.semconv-version` matches the `semconv` imports in Go code
+- The semantic conventions registry at that version is valid (no violations)
+- Your code adheres to the conventions for your specified version
 
-**What This Doesn't Check**:
+#### Job 2: Check Available Updates (Non-blocking)
 
-- Does not validate Go code syntax or logic (use `make lint` and `make test`)
-- Does not enforce upgrading to latest version (informational only)
+This job shows what's new in the latest semantic conventions:
+
+1. **Generate Diff**: Runs `make registry-diff` to compare current version vs latest
+2. **Upload Report**: Uploads the diff report as an artifact
+3. **PR Comment**: Posts an informational comment showing:
+   - What new semantic conventions are available
+   - Whether you're using the latest version
+   - Suggestions for updating (if desired)
+
+**What This Checks**:
+
+- Shows available updates (informational only)
+- **This check is non-blocking** - it will never fail your PR
+- Helps you stay informed about new conventions without requiring immediate action
 
 ### On Main Branch
 
 When changes are merged to `main`:
 
-1. **Version Detection**: Detects the current `semconv` version in use
+1. **Read Version**: Reads the version from `.semconv-version`
 2. **Registry Validation**: Validates that version's registry to ensure continued compliance
 
 ### How It Works
 
-The CI workflow:
+The CI workflow uses the Make targets defined in the Makefile:
 
-1. Scans your Go files for `semconv/vX.Y.Z` imports
-2. Validates that specific version's registry using OTel Weaver
-3. Compares against baseline and latest to show evolution
-4. Posts actionable information to help you maintain compliance
+- `make weaver-install`: Installs OTel Weaver
+- `make registry-check`: Validates the registry (blocking check)
+- `make registry-diff`: Generates diff report (non-blocking check)
+
+This approach:
+- Reduces code duplication between CI and local development
+- Ensures CI uses the same validation logic as developers
+- Makes it easy to run the same checks locally before pushing
 
 ### When to Update Semantic Conventions
 
@@ -276,9 +298,10 @@ Consider updating your `semconv` version when:
 
 1. Review the "Available Updates" diff
 2. Update Go imports: `semconv/v1.30.0` → `semconv/v1.31.0`
-3. Update `CURRENT_SEMCONV_VERSION` in `.github/workflows/check-registry-diff.yaml`
+3. Update the version in `.semconv-version` file
 4. Update code to handle any breaking changes
-5. Run tests: `make test`
+5. Run `make registry-check` to validate the new version
+6. Run tests: `make test`
 
 ## Best Practices
 
