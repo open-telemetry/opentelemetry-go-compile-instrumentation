@@ -433,6 +433,5 @@ semantic-conventions/resolve: weaver-install
 	@weaver registry resolve \
 		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
 		--format yaml \
-		--output tmp/resolved-schema.yaml \
-		--future
+		--output tmp/resolved-schema.yaml
 	@echo "Resolved schema saved to tmp/resolved-schema.yaml"
