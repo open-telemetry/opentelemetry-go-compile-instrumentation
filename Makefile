@@ -375,6 +375,7 @@ weaver-install: ## Install OTel Weaver if not present
 		weaver --version; \
 	fi
 
+# Semantic Conventions Validation Targets
 lint/semantic-conventions: ## Validate semantic convention registry against the project's version
 lint/semantic-conventions: weaver-install
 	@echo "Validating semantic convention registry..."
@@ -467,20 +468,19 @@ semantic-conventions/resolve:
 	echo "Current version: $$CURRENT_VERSION"; \
 	echo ""; \
 	echo "Checking for latest version..."; \
-	rm -rf /tmp/semconv-latest-$$$$; \
-	if git clone --depth 1 https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-latest-$$$$ 2>/dev/null; then \
-		cd /tmp/semconv-latest-$$$$ && \
-		LATEST_TAG=$$(git describe --tags --abbrev=0 2>/dev/null || echo "unknown"); \
-		cd - >/dev/null; \
-		rm -rf /tmp/semconv-latest-$$$$; \
+	LATEST_TAG=$$(git ls-remote --tags --refs https://github.com/open-telemetry/semantic-conventions.git 2>/dev/null | \
+		grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$$' | \
+		awk -F/ '{print $$NF}' | \
+		sort -t. -k1,1n -k2,2n -k3,3n | \
+		tail -1); \
+	if [ -n "$$LATEST_TAG" ]; then \
 		echo "Latest available: $$LATEST_TAG"; \
-		if [ "$$CURRENT_VERSION" != "$$LATEST_TAG" ] && [ "$$LATEST_TAG" != "unknown" ]; then \
+		if [ "$$CURRENT_VERSION" != "$$LATEST_TAG" ]; then \
 			echo ""; \
 			echo "🆕 Update available: $$CURRENT_VERSION → $$LATEST_TAG"; \
 		else \
 			echo "✅ You are using the latest version"; \
 		fi; \
 	else \
-		rm -rf /tmp/semconv-latest-$$$$; \
 		echo "⚠️  Unable to check latest version"; \
 	fi
