@@ -289,7 +289,7 @@ CI 工作流程：
 ### 2. 遵循命名约定
 
 - 使用点符号：`namespace.concept.attribute`
-- 对多词属性使用 snake_case：`http.request.method`
+- 对多词属性使用 snake_case：`http.response.status_code`
 - 具体明确，避免缩写：使用 `client.address` 而不是 `cli.addr`
 
 ### 3. 充分记录
