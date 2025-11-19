@@ -289,7 +289,7 @@ Always prefer existing semantic conventions from the official registry. Only cre
 ### 2. Follow Naming Conventions
 
 - Use dot notation: `namespace.concept.attribute`
-- Use snake_case for multi-word attributes: `http.request.method`
+- Use snake_case for multi-word attributes: `http.response.status_code`
 - Be specific and avoid abbreviations: `client.address` not `cli.addr`
 
 ### 3. Document Thoroughly
