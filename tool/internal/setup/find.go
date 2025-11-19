@@ -95,7 +95,10 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	cmd.Dir = ""
 	err = cmd.Run()
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to run build plan")
+		// Read the build plan log to see what went wrong
+		_, _ = buildPlanLog.Seek(0, 0)
+		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
+		return nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
 	}
 
 	// Find compile commands from build plan log
