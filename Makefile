@@ -390,9 +390,7 @@ lint/semantic-conventions: weaver-install
 	fi; \
 	echo "Checking semantic conventions registry at version: $$CURRENT_VERSION"; \
 	weaver registry check \
-		--registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION \
-		--diagnostic-format gh_workflow_command \
-		--future
+		--registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION
 
 semantic-conventions/diff: ## Generate diff between current version and latest (non-blocking informational check)
 semantic-conventions/diff: weaver-install
@@ -415,8 +413,7 @@ semantic-conventions/diff: weaver-install
 		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
 		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION \
 		--diff-format markdown \
-		--output tmp/registry-diff-latest.md \
-		--future || { \
+		--output tmp/registry-diff-latest.md || { \
 			echo "⚠️  Warning: Registry diff generation failed (this is non-blocking)"; \
 			echo "⚠️  Registry diff generation failed." > tmp/registry-diff-latest.md; \
 			exit 0; \
