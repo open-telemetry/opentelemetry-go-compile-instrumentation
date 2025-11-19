@@ -389,8 +389,17 @@ lint/semantic-conventions: weaver-install
 		exit 1; \
 	fi; \
 	echo "Checking semantic conventions registry at version: $$CURRENT_VERSION"; \
-	weaver registry check \
-		--registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION
+	echo "Cloning semantic-conventions repository..."; \
+	rm -rf /tmp/semconv-$$$$; \
+	git clone --depth 1 --branch $$CURRENT_VERSION https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-$$$$ 2>/dev/null || { \
+		echo "::error::Failed to clone semantic-conventions repository at version $$CURRENT_VERSION"; \
+		rm -rf /tmp/semconv-$$$$; \
+		exit 1; \
+	}; \
+	weaver registry check --registry /tmp/semconv-$$$$/model; \
+	EXIT_CODE=$$?; \
+	rm -rf /tmp/semconv-$$$$; \
+	exit $$EXIT_CODE
 
 semantic-conventions/diff: ## Generate diff between current version and latest (non-blocking informational check)
 semantic-conventions/diff: weaver-install
@@ -407,31 +416,71 @@ semantic-conventions/diff: weaver-install
 		exit 1; \
 	fi; \
 	echo "Current project version: $$CURRENT_VERSION"; \
-	echo "Comparing against latest (main branch)..."; \
-	echo ""; \
+	echo "Cloning semantic-conventions repositories..."; \
+	rm -rf /tmp/semconv-current-$$$$ /tmp/semconv-latest-$$$$ tmp/registry-diff-latest; \
+	git clone --depth 1 --branch $$CURRENT_VERSION https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-current-$$$$ 2>/dev/null && \
+	git clone --depth 1 https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-latest-$$$$ 2>/dev/null || { \
+		echo "⚠️  Warning: Failed to clone repositories (this is non-blocking)"; \
+		echo "⚠️  Registry diff generation failed." > tmp/registry-diff-latest.md; \
+		rm -rf /tmp/semconv-current-$$$$ /tmp/semconv-latest-$$$$; \
+		exit 0; \
+	}; \
+	mkdir -p tmp/registry-diff-latest; \
 	weaver registry diff \
-		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
-		--baseline-registry https://github.com/open-telemetry/semantic-conventions.git[model]@$$CURRENT_VERSION \
+		--registry /tmp/semconv-latest-$$$$/model \
+		--baseline-registry /tmp/semconv-current-$$$$/model \
 		--diff-format markdown \
-		--output tmp/registry-diff-latest.md || { \
+		--output tmp/registry-diff-latest || { \
 			echo "⚠️  Warning: Registry diff generation failed (this is non-blocking)"; \
+			rm -rf tmp/registry-diff-latest; \
 			echo "⚠️  Registry diff generation failed." > tmp/registry-diff-latest.md; \
-			exit 0; \
 		}; \
-	echo ""; \
-	if [ -f tmp/registry-diff-latest.md ]; then \
+	rm -rf /tmp/semconv-current-$$$$ /tmp/semconv-latest-$$$$; \
+	if [ -f tmp/registry-diff-latest/diff.md ]; then \
+		mv tmp/registry-diff-latest/diff.md tmp/registry-diff-latest.md; \
+		rm -rf tmp/registry-diff-latest; \
+		echo ""; \
 		echo "🆕 Available updates (latest vs $$CURRENT_VERSION):"; \
 		echo "Saved to: tmp/registry-diff-latest.md"; \
 		echo ""; \
 		cat tmp/registry-diff-latest.md; \
-	fi
+	elif [ -f tmp/registry-diff-latest.md ]; then \
+		echo ""; \
+		echo "⚠️  Registry diff generation failed."; \
+		cat tmp/registry-diff-latest.md; \
+	fi; \
+	exit 0
 
-semantic-conventions/resolve: ## Resolve semantic convention registry schema
-semantic-conventions/resolve: weaver-install
-	@echo "Resolving semantic convention registry..."
-	@mkdir -p tmp
-	@weaver registry resolve \
-		--registry https://github.com/open-telemetry/semantic-conventions.git[model] \
-		--format yaml \
-		--output tmp/resolved-schema.yaml
-	@echo "Resolved schema saved to tmp/resolved-schema.yaml"
+semantic-conventions/resolve: ## Display the current semantic conventions version
+semantic-conventions/resolve:
+	@echo "Semantic conventions version management"
+	@echo "========================================"
+	@if [ ! -f .semconv-version ]; then \
+		echo "Error: .semconv-version file not found"; \
+		exit 1; \
+	fi; \
+	CURRENT_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]'); \
+	if [ -z "$$CURRENT_VERSION" ]; then \
+		echo "Error: No version found in .semconv-version file"; \
+		exit 1; \
+	fi; \
+	echo "Current version: $$CURRENT_VERSION"; \
+	echo ""; \
+	echo "Checking for latest version..."; \
+	rm -rf /tmp/semconv-latest-$$$$; \
+	if git clone --depth 1 https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-latest-$$$$ 2>/dev/null; then \
+		cd /tmp/semconv-latest-$$$$ && \
+		LATEST_TAG=$$(git describe --tags --abbrev=0 2>/dev/null || echo "unknown"); \
+		cd - >/dev/null; \
+		rm -rf /tmp/semconv-latest-$$$$; \
+		echo "Latest available: $$LATEST_TAG"; \
+		if [ "$$CURRENT_VERSION" != "$$LATEST_TAG" ] && [ "$$LATEST_TAG" != "unknown" ]; then \
+			echo ""; \
+			echo "🆕 Update available: $$CURRENT_VERSION → $$LATEST_TAG"; \
+		else \
+			echo "✅ You are using the latest version"; \
+		fi; \
+	else \
+		rm -rf /tmp/semconv-latest-$$$$; \
+		echo "⚠️  Unable to check latest version"; \
+	fi
