@@ -4,7 +4,9 @@
 package nethttp
 
 import (
+	"net"
 	"strconv"
+	"strings"
 )
 
 // netHttpClientAttrsGetter implements HTTP client and network attribute getters
@@ -38,14 +40,47 @@ func (n netHttpClientAttrsGetter) GetHTTPResponseHeader(
 	return response.header.Values(name)
 }
 
-// GetErrorType returns the error type
-// TODO: implement status code as error type
+// GetErrorType returns the error type if an error occurred during the request.
+// Note: HTTP status code errors are handled separately by HTTPClientSpanStatusExtractor.
+// This method only returns error types for transport-level errors (connection errors, timeouts, etc.).
 func (n netHttpClientAttrsGetter) GetErrorType(request *netHttpRequest, response *netHttpResponse, err error) string {
+	if err != nil {
+		// Return the error type name (e.g., "net.OpError", "url.Error")
+		// For a more generic approach, we return the error string itself
+		return err.Error()
+	}
 	return ""
 }
 
-// GetNetworkType returns the network type
+// GetNetworkType returns the network type (ipv4 or ipv6) based on the host address.
+// It attempts to detect IPv6 addresses by parsing the host.
 func (n netHttpClientAttrsGetter) GetNetworkType(request *netHttpRequest, response *netHttpResponse) string {
+	host := request.host
+	if host == "" {
+		return "ipv4" // default to ipv4 if host is not available
+	}
+
+	// Remove brackets if present (for IPv6 addresses)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.Trim(host, "[]")
+	}
+
+	// Try to split host:port to extract just the host
+	if hostPart, _, err := net.SplitHostPort(host); err == nil {
+		host = hostPart
+	}
+	// If SplitHostPort fails, host might be an IP address or hostname without port
+
+	// Try to parse as IP address
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip.To4() != nil {
+			return "ipv4"
+		}
+		return "ipv6"
+	}
+
+	// For hostnames, default to ipv4
 	return "ipv4"
 }
 
@@ -67,7 +102,10 @@ func (n netHttpClientAttrsGetter) GetNetworkProtocolVersion(request *netHttpRequ
 	return request.version
 }
 
-// GetNetworkLocalInetAddress returns the local inet address
+// GetNetworkLocalInetAddress returns the local inet address.
+// Returns empty string because HTTP client requests do not typically expose
+// local socket information. The net/http Client API does not provide access
+// to the local address used for outbound connections.
 func (n netHttpClientAttrsGetter) GetNetworkLocalInetAddress(
 	request *netHttpRequest,
 	response *netHttpResponse,
@@ -75,7 +113,10 @@ func (n netHttpClientAttrsGetter) GetNetworkLocalInetAddress(
 	return ""
 }
 
-// GetNetworkLocalPort returns the local port
+// GetNetworkLocalPort returns the local port.
+// Returns 0 because HTTP client requests do not typically expose
+// local socket information. The net/http Client API does not provide access
+// to the local port used for outbound connections.
 func (n netHttpClientAttrsGetter) GetNetworkLocalPort(request *netHttpRequest, response *netHttpResponse) int {
 	return 0
 }

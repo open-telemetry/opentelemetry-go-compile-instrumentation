@@ -4,6 +4,7 @@
 package nethttp
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"testing"
@@ -78,17 +79,99 @@ func TestClientAttrsGetter_GetErrorType(t *testing.T) {
 	req := &netHttpRequest{}
 	resp := &netHttpResponse{statusCode: 500}
 
-	errorType := getter.GetErrorType(req, resp, nil)
-	assert.Equal(t, "", errorType)
+	tests := []struct {
+		name          string
+		err           error
+		wantErrorType string
+	}{
+		{
+			name:          "No error",
+			err:           nil,
+			wantErrorType: "",
+		},
+		{
+			name:          "Connection error",
+			err:           errors.New("connection refused"),
+			wantErrorType: "connection refused",
+		},
+		{
+			name:          "Timeout error",
+			err:           errors.New("timeout"),
+			wantErrorType: "timeout",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errorType := getter.GetErrorType(req, resp, tt.err)
+			assert.Equal(t, tt.wantErrorType, errorType)
+		})
+	}
 }
 
 func TestClientAttrsGetter_GetNetworkType(t *testing.T) {
 	getter := &netHttpClientAttrsGetter{}
-	req := &netHttpRequest{}
 	resp := &netHttpResponse{}
 
-	netType := getter.GetNetworkType(req, resp)
-	assert.Equal(t, "ipv4", netType)
+	tests := []struct {
+		name            string
+		host            string
+		wantNetworkType string
+	}{
+		{
+			name:            "IPv4 address",
+			host:            "192.168.1.1",
+			wantNetworkType: "ipv4",
+		},
+		{
+			name:            "IPv4 with port",
+			host:            "192.168.1.1:8080",
+			wantNetworkType: "ipv4",
+		},
+		{
+			name:            "IPv6 address",
+			host:            "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+			wantNetworkType: "ipv6",
+		},
+		{
+			name:            "IPv6 with brackets",
+			host:            "[2001:db8::1]",
+			wantNetworkType: "ipv6",
+		},
+		{
+			name:            "IPv6 with brackets and port",
+			host:            "[2001:db8::1]:8080",
+			wantNetworkType: "ipv6",
+		},
+		{
+			name:            "IPv6 loopback",
+			host:            "::1",
+			wantNetworkType: "ipv6",
+		},
+		{
+			name:            "Hostname",
+			host:            "api.example.com",
+			wantNetworkType: "ipv4",
+		},
+		{
+			name:            "Hostname with port",
+			host:            "api.example.com:8080",
+			wantNetworkType: "ipv4",
+		},
+		{
+			name:            "Empty host",
+			host:            "",
+			wantNetworkType: "ipv4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &netHttpRequest{host: tt.host}
+			netType := getter.GetNetworkType(req, resp)
+			assert.Equal(t, tt.wantNetworkType, netType)
+		})
+	}
 }
 
 func TestClientAttrsGetter_GetNetworkTransport(t *testing.T) {
