@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -98,7 +99,15 @@ func loadRulesYAML(testName, sourceFile string) *rule.InstRuleSet {
 		FileRules:   make([]*rule.InstFileRule, 0),
 	}
 
-	for name, props := range rawRules {
+	// Sort rule names to ensure deterministic order in tests
+	ruleNames := make([]string, 0, len(rawRules))
+	for name := range rawRules {
+		ruleNames = append(ruleNames, name)
+	}
+	sort.Strings(ruleNames)
+
+	for _, name := range ruleNames {
+		props := rawRules[name]
 		props["name"] = name
 		ruleData, _ := yaml.Marshal(props)
 
@@ -147,16 +156,19 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		if !strings.HasSuffix(entry.Name(), goldenExt) {
 			continue
 		}
-		actualFile := actualFileFromGolden(entry.Name())
+		actualFile := actualFileFromGolden(t, entry.Name())
 		actual, _ := os.ReadFile(filepath.Join(tempDir, actualFile))
 		golden.Assert(t, string(actual), filepath.Join(goldenDir, testName, entry.Name()))
 	}
 }
 
-func actualFileFromGolden(goldenName string) string {
-	parts := strings.SplitN(strings.TrimSuffix(goldenName, goldenExt), ".", 2)
-	if len(parts) == 2 {
-		return parts[1]
+func actualFileFromGolden(t *testing.T, goldenName string) string {
+	// Golden files are named: <prefix>.<actual_file_name>.golden
+	// Example: func_rule_only.main.go.golden -> main.go
+	nameWithoutExt := strings.TrimSuffix(goldenName, goldenExt)
+	parts := strings.SplitN(nameWithoutExt, ".", 2)
+	if len(parts) != 2 {
+		t.Fatalf("invalid golden file name format: %s (expected: <prefix>.<filename>.golden)", goldenName)
 	}
-	return ""
+	return parts[1]
 }
