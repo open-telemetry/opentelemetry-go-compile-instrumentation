@@ -7,9 +7,9 @@ on:
 # Declare default permissions as read only.
 permissions: read-all
 jobs:
-  test-coverage:
+  test-unit-coverage:
     if: false  # temporary disable
-    name: Coverage
+    name: Coverage Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
@@ -24,7 +24,7 @@ jobs:
         uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
 
   test-unit:
-    name: Test (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
+    name: Unit Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
     strategy:
       matrix:
         platform:
@@ -51,7 +51,7 @@ jobs:
         run: make test-unit
 
   done:
-    name: Done
+    name: Done (Unit Tests)
     runs-on: ubuntu-latest
     needs: [test-unit]
     steps:
