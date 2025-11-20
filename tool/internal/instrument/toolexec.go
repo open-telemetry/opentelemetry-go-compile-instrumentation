@@ -71,7 +71,6 @@ func stripCompleteFlag(args []string) []string {
 }
 
 func interceptCompile(ctx context.Context, args []string) ([]string, error) {
-	util.Assert(util.IsCompileCommand(strings.Join(args, " ")), "sanity check")
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
 	util.Assert(target != "", "missing -o flag value")

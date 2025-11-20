@@ -178,7 +178,7 @@ func TestNewHookContextImpl(t *testing.T) {
 		{
 			name: "creates context for function with parameters",
 			funcSrc: `package main
-func testFunc(param1 string, param2 int) {}`,
+			func testFunc(param1 string, param2 int) {}`,
 			wantErr: false,
 			validate: func(t *testing.T, expr dst.Expr) {
 				unaryExpr, ok := expr.(*dst.UnaryExpr)
@@ -199,7 +199,7 @@ func testFunc(param1 string, param2 int) {}`,
 		{
 			name: "creates context for function with return values",
 			funcSrc: `package main
-func testFunc(param1 string) (result1 string) { return "" }`,
+			func testFunc(param1 string) (result1 string) { return "" }`,
 			wantErr: false,
 			validate: func(t *testing.T, expr dst.Expr) {
 				assert.NotNil(t, expr, "expression should not be nil")
@@ -221,7 +221,7 @@ func testFunc(param1 string) (result1 string) { return "" }`,
 		{
 			name: "creates context with both params and return values",
 			funcSrc: `package main
-func testFunc(param1 string, param2 int) (result1 string) { return "" }`,
+			func testFunc(param1 string, param2 int) (result1 string) { return "" }`,
 			wantErr: false,
 			validate: func(t *testing.T, expr dst.Expr) {
 				unaryExpr, ok := expr.(*dst.UnaryExpr)
@@ -346,7 +346,7 @@ func TestOptimizeTJumps_NoAfterHook(t *testing.T) {
 func TestRemoveBeforeTrampolineCall(t *testing.T) {
 	// Test case based on comment: "No Before hook present? Construct HookContext on the fly"
 	funcSrc := `package main
-func testFunc(param1 string) {}`
+	func testFunc(param1 string) {}`
 
 	ifSrc := `if ctx, skip := otel_trampoline_before(&arg); skip {
 		otel_trampoline_after(ctx, &retval)
@@ -370,8 +370,8 @@ func testFunc(param1 string) {}`
 	// Create target file with the original function and a dummy before trampoline function
 	beforeFuncName := makeName(tjump.rule, tjump.target, true)
 	fileSrc := fmt.Sprintf(`package main
-func testFunc(param1 string) {}
-func %s() {}`, beforeFuncName)
+	func testFunc(param1 string) {}
+	func %s() {}`, beforeFuncName)
 	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
 	require.NoError(t, err)
 
@@ -388,4 +388,129 @@ func %s() {}`, beforeFuncName)
 
 	// Verify body contains empty statement
 	assert.Len(t, tjump.ifStmt.Body.List, 1)
+}
+
+func TestFlattenTJump(t *testing.T) {
+	tests := []struct {
+		name          string
+		hookSrc       string
+		canFlatten    bool
+		removedOnExit bool
+		validate      func(*testing.T, *dst.IfStmt)
+	}{
+		{
+			name: "always false condition",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
+			}`,
+			canFlatten:    true,
+			removedOnExit: false,
+			validate: func(t *testing.T, ifStmt *dst.IfStmt) {
+				cond := ifStmt.Cond
+				body := ifStmt.Body
+				assert.Equal(t, "false", cond.(*dst.BasicLit).Value)
+				assert.Len(t, body.List, 1)
+				assert.IsType(t, &dst.EmptyStmt{}, body.List[0])
+				lhs1, ok := ifStmt.Init.(*dst.AssignStmt).Lhs[1].(*dst.Ident)
+				require.True(t, ok)
+				assert.True(t, ast.IsUnusedIdent(lhs1))
+			},
+		},
+		{
+			name: "removed on exit",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
+			}`,
+			canFlatten:    true,
+			removedOnExit: true,
+			validate: func(t *testing.T, ifStmt *dst.IfStmt) {
+				cond := ifStmt.Cond
+				body := ifStmt.Body
+				assert.Equal(t, "false", cond.(*dst.BasicLit).Value)
+				assert.Len(t, body.List, 1)
+				assert.IsType(t, &dst.EmptyStmt{}, body.List[0])
+				init := ifStmt.Init
+				assert.IsType(t, &dst.ExprStmt{}, init)
+			},
+		},
+		{
+			name: "can not flatten",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
+				_ = ctx
+			}`,
+			canFlatten:    false,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "can not flatten1",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
+				ctx.SetSkipCall("false")
+			}`,
+			canFlatten:    false,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "can not flatten2",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
+				passTo(ctx)
+			}`,
+			canFlatten:    false,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "can not flatten3",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
+				var escape interface{} = ctx
+			}`,
+			canFlatten:    false,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "can flatten",
+			hookSrc: `package main
+			func hookFunc(_ HookContext, arg1 string) {
+			}`,
+			canFlatten:    true,
+			removedOnExit: false,
+			validate:      nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ifSrc := `if ctx, skip := otel_trampoline_before(&arg); skip {
+				otel_trampoline_after(ctx, &retval)
+				return
+			} else {
+				defer otel_trampoline_after(ctx, &retval)
+			}`
+
+			hookFunc := parseFunc(t, tt.hookSrc)
+			ifStmt := parseIfStmt(t, ifSrc)
+
+			tjump := &TJump{
+				target: nil, // Not used in this optimization scenario
+				ifStmt: ifStmt,
+				rule: &rule.InstFuncRule{
+					Before: "beforeHook",
+					After:  "", // Optimization only happens if After hook is not present
+				},
+			}
+			canFlatten := canFlattenTJump(hookFunc)
+			require.Equal(t, tt.canFlatten, canFlatten)
+			if canFlatten {
+				require.NoError(t, flattenTJump(tjump, tt.removedOnExit))
+				if tt.validate != nil {
+					tt.validate(t, tjump.ifStmt)
+				}
+			}
+		})
+	}
 }

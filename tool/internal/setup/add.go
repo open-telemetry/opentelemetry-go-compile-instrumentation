@@ -25,7 +25,7 @@ var requiredImports = map[string]string{
 
 func genImportDecl(matched []*rule.InstFuncRule) []dst.Decl {
 	for _, m := range matched {
-		requiredImports[m.Path] = "_"
+		requiredImports[m.Path] = ast.IdentIgnore
 	}
 	importDecls := make([]dst.Decl, 0)
 	for k, v := range requiredImports {

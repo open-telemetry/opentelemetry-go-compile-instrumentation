@@ -13,9 +13,7 @@ func (t *T) Func1(p1 string, p2 int) (float32, error) {
 
 func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	//line <generated>:1
-	if hookContext2350319093, skip2350319093 := OtelBeforeTrampoline_Func12350319093(&p1, &p2); skip2350319093 {
-		OtelAfterTrampoline_Func12350319093(hookContext2350319093, &_unnamedRetVal0, &_unnamedRetVal1)
-		return _unnamedRetVal0, _unnamedRetVal1
+	if OtelBeforeTrampoline_Func12350319093(&p1, &p2); false {
 	} else {
 	}
 	//line main.go:13:2
@@ -25,6 +23,10 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 }
 
 func Func2(p1 string, _ int) {}
+
+func OptGood() {}
+func OptBad()  {}
+func OptBad2() {}
 
 func main() { Func1("hello", 123) }
 

@@ -4,6 +4,8 @@
 package util
 
 import (
+	"reflect"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
@@ -13,8 +15,20 @@ func Assert(condition bool, message string) {
 	}
 }
 
+func AssertType[T any](v any) T {
+	value, ok := v.(T)
+	if !ok {
+		actualType := reflect.TypeOf(v).Name()
+		var zero T
+		expectType := reflect.TypeOf(zero).String()
+		ex.Fatalf("Type assertion failed: %s, expected %s",
+			actualType, expectType)
+	}
+	return value
+}
+
 func ShouldNotReachHere() {
-	ex.Fatalf("should not reach here")
+	ex.Fatalf("Should not reach here!")
 }
 
 func Unimplemented(message string) {
