@@ -4,11 +4,12 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
-.PHONY: all test test-unit test-integration test-e2e format lint build install package clean \
+.PHONY: all test test-unit test-integration test-e2e format lint build build/pkg install package clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
-        test-unit/coverage test-integration/coverage test-e2e/coverage \
+        test-unit/tool test-unit/pkg test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
+        test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install
 
 # Constant variables
@@ -43,7 +44,18 @@ all: build format lint test
 
 ##@ Core Build
 
-build: package ## Build the instrumentation tool
+.ONESHELL:
+build/pkg: ## Build all pkg modules to verify compilation
+	@echo "Building pkg modules..."
+	@set -euo pipefail
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime"); \
+	for moddir in $$PKG_MODULES; do \
+		echo "Building $$moddir..."; \
+		(cd $$moddir && go mod tidy && go build ./...); \
+	done
+	@echo "All pkg modules built successfully"
+
+build: build/pkg package ## Build the instrumentation tool
 	@echo "Building instrumentation tool..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
@@ -95,7 +107,6 @@ format/go: ## Format Go code only
 format/go: golangci-lint
 	@echo "Formatting Go code..."
 	golangci-lint fmt --config .config/golangci.yml
-	golangci-lint run --config .config/golangci.yml --fix
 
 format/yaml: ## Format YAML files only (excludes testdata)
 format/yaml: yamlfmt
@@ -114,6 +125,11 @@ lint/go: ## Run golangci-lint on Go code
 lint/go: golangci-lint
 	@echo "Linting Go code..."
 	golangci-lint run --config .config/golangci.yml
+
+lint/go/fix: ## Run golangci-lint on Go code and fix the issues
+lint/go/fix: golangci-lint
+	@echo "Linting Go code..."
+	golangci-lint run --config .config/golangci.yml --fix
 
 lint/yaml: ## Lint YAML formatting
 lint/yaml: yamlfmt
@@ -201,37 +217,59 @@ check-embed: ## Verify that embedded files exist (required for tests)
 test: ## Run all tests (unit + integration + e2e)
 test: test-unit test-integration test-e2e
 
-.ONESHELL:
-test-unit: ## Run unit tests
-test-unit: package gotestfmt
-	@echo "Running unit tests..."
-	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
+test-unit: test-unit/tool test-unit/pkg ## Run all unit tests (tool + pkg)
 
 .ONESHELL:
-test-unit/coverage: ## Run unit tests with coverage report
-test-unit/coverage: package gotestfmt
-	@echo "Running unit tests with coverage report..."
+test-unit/tool: build package gotestfmt ## Run unit tests for tool modules only
+	@echo "Running tool unit tests..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-unit.log | gotestfmt
+	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log | gotestfmt
+
+.ONESHELL:
+test-unit/pkg: package gotestfmt ## Run unit tests for pkg modules only
+	@echo "Running pkg unit tests..."
+	set -euo pipefail
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime"); \
+	for moddir in $$PKG_MODULES; do \
+		echo "Testing $$moddir..."; \
+		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
+	done
+
+test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage ## Run all unit tests with coverage
+
+.ONESHELL:
+test-unit/tool/coverage: package gotestfmt ## Run unit tests with coverage for tool modules only
+	@echo "Running tool unit tests with coverage..."
+	set -euo pipefail
+	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log | gotestfmt
+
+.ONESHELL:
+test-unit/pkg/coverage: package gotestfmt ## Run unit tests with coverage for pkg modules only
+	@echo "Running pkg unit tests with coverage..."
+	set -euo pipefail
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime"); \
+	for moddir in $$PKG_MODULES; do \
+		echo "Testing $$moddir..."; \
+		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
+	done
 
 .ONESHELL:
 test-integration: ## Run integration tests
-test-integration: build gotestfmt
+test-integration: build build-demo gotestfmt
 	@echo "Running integration tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... 2>&1 | tee ./gotest-integration.log | gotestfmt
 
 .ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
-test-integration/coverage: build gotestfmt
+test-integration/coverage: build build-demo gotestfmt
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log | gotestfmt
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
-test-e2e: build gotestfmt
+test-e2e: build build-demo gotestfmt
 	@echo "Running e2e tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... 2>&1 | tee ./gotest-e2e.log | gotestfmt
@@ -259,7 +297,7 @@ clean: ## Clean build artifacts
 	rm -f demo/http/client/client
 	rm -rf demo/http/server/.otel-build
 	rm -rf demo/http/client/.otel-build
-	rm -f ./gotest-unit.log ./gotest-integration.log ./gotest-e2e.log
+	rm -f ./gotest-unit-tool.log ./gotest-unit-pkg.log ./gotest-integration.log ./gotest-e2e.log
 
 gotestfmt: ## Install gotestfmt if not present
 	@if ! command -v gotestfmt >/dev/null 2>&1; then \
