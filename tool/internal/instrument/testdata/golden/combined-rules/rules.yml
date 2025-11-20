@@ -1,0 +1,24 @@
+hook_func:
+  target: main
+  func: Func1
+  before: H1Before
+  after: H1After
+  path: testdata
+
+add_field:
+  target: main
+  struct: T
+  new_field:
+    - name: NewField
+      type: string
+
+add_raw:
+  target: main
+  func: Func1
+  raw: "_ = 789"
+
+add_file:
+  target: main
+  file: newfile.go
+  path: testdata
+

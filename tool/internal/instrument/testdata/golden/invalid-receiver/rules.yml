@@ -1,0 +1,8 @@
+hook_invalid_receiver:
+  target: main
+  func: Func1
+  recv: "*NonExistent"
+  before: H1Before
+  after: H1After
+  path: testdata
+

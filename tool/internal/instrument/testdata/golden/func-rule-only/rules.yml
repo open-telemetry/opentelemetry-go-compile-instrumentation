@@ -1,0 +1,7 @@
+hook_func:
+  target: main
+  func: Func1
+  before: H1Before
+  after: H1After
+  path: testdata
+
