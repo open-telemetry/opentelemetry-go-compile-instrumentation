@@ -64,7 +64,7 @@ func TestGetProtocolVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getProtocolVersion(tt.majorVersion, tt.minorVersion)
+			result := GetProtocolVersion(tt.majorVersion, tt.minorVersion)
 			assert.Equal(t, tt.expectedProto, result)
 		})
 	}
@@ -78,22 +78,15 @@ func TestNetHttpRequestStruct(t *testing.T) {
 	header.Set("Content-Type", "application/json")
 	header.Set("User-Agent", "test-agent")
 
-	req := &netHttpRequest{
-		method:  "POST",
-		url:     testURL,
-		host:    "example.com",
-		isTls:   true,
-		header:  header,
-		version: "1.1",
-	}
+	req := NewNetHttpRequest("POST", testURL, "example.com", header, "1.1", true)
 
-	assert.Equal(t, "POST", req.method)
-	assert.Equal(t, testURL, req.url)
-	assert.Equal(t, "example.com", req.host)
-	assert.True(t, req.isTls)
-	assert.Equal(t, "application/json", req.header.Get("Content-Type"))
-	assert.Equal(t, "test-agent", req.header.Get("User-Agent"))
-	assert.Equal(t, "1.1", req.version)
+	assert.Equal(t, "POST", req.Method())
+	assert.Equal(t, testURL, req.URL())
+	assert.Equal(t, "example.com", req.Host())
+	assert.True(t, req.IsTls())
+	assert.Equal(t, "application/json", req.Header().Get("Content-Type"))
+	assert.Equal(t, "test-agent", req.Header().Get("User-Agent"))
+	assert.Equal(t, "1.1", req.Version())
 }
 
 func TestNetHttpResponseStruct(t *testing.T) {
@@ -101,14 +94,11 @@ func TestNetHttpResponseStruct(t *testing.T) {
 	header.Set("Content-Type", "application/json")
 	header.Set("X-Custom-Header", "custom-value")
 
-	resp := &netHttpResponse{
-		statusCode: 200,
-		header:     header,
-	}
+	resp := NewNetHttpResponse(200, header)
 
-	assert.Equal(t, 200, resp.statusCode)
-	assert.Equal(t, "application/json", resp.header.Get("Content-Type"))
-	assert.Equal(t, "custom-value", resp.header.Get("X-Custom-Header"))
+	assert.Equal(t, 200, resp.StatusCode())
+	assert.Equal(t, "application/json", resp.Header().Get("Content-Type"))
+	assert.Equal(t, "custom-value", resp.Header().Get("X-Custom-Header"))
 }
 
 func TestNetHttpResponseStructWithDifferentStatusCodes(t *testing.T) {
@@ -126,11 +116,8 @@ func TestNetHttpResponseStructWithDifferentStatusCodes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := &netHttpResponse{
-				statusCode: tc.statusCode,
-				header:     http.Header{},
-			}
-			assert.Equal(t, tc.statusCode, resp.statusCode)
+			resp := NewNetHttpResponse(tc.statusCode, http.Header{})
+			assert.Equal(t, tc.statusCode, resp.StatusCode())
 		})
 	}
 }

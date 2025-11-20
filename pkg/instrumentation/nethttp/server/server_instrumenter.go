@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package nethttp
+package server
 
 import (
 	"go.opentelemetry.io/otel"
@@ -11,6 +11,7 @@ import (
 	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 	httpconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/http"
 	netconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/net"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otelsetup"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 )
@@ -30,12 +31,12 @@ func (n netHttpServerEnabler) Enable() bool {
 var serverEnabler = netHttpServerEnabler{}
 
 // BuildNetHttpServerOtelInstrumenter builds an instrumenter for HTTP server operations
-func BuildNetHttpServerOtelInstrumenter() *instrumenter.PropagatingFromUpstreamInstrumenter[*netHttpRequest, *netHttpResponse] {
-	builder := &instrumenter.Builder[*netHttpRequest, *netHttpResponse]{}
+func BuildNetHttpServerOtelInstrumenter() *instrumenter.PropagatingFromUpstreamInstrumenter[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse] {
+	builder := &instrumenter.Builder[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]{}
 	serverGetter := &netHttpServerAttrsGetter{}
 
 	// Create HTTP common attributes extractor
-	commonExtractor := httpconv.HTTPCommonAttrsExtractor[*netHttpRequest, *netHttpResponse, httpconv.HTTPServerAttrsGetter[*netHttpRequest, *netHttpResponse]]{
+	commonExtractor := httpconv.HTTPCommonAttrsExtractor[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse, httpconv.HTTPServerAttrsGetter[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]]{
 		HTTPGetter: serverGetter,
 	}
 
@@ -43,12 +44,12 @@ func BuildNetHttpServerOtelInstrumenter() *instrumenter.PropagatingFromUpstreamI
 	networkExtractor := netconv.CreateNetworkAttributesExtractor(serverGetter)
 
 	// Create URL attributes extractor
-	urlExtractor := &netconv.URLAttrsExtractor[*netHttpRequest, *netHttpResponse, netconv.URLAttrsGetter[*netHttpRequest]]{
+	urlExtractor := &netconv.URLAttrsExtractor[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse, netconv.URLAttrsGetter[*nethttp.NetHttpRequest]]{
 		Getter: serverGetter,
 	}
 
 	// Create HTTP server attributes extractor
-	httpServerExtractor := &httpconv.HTTPServerAttrsExtractor[*netHttpRequest, *netHttpResponse, httpconv.HTTPServerAttrsGetter[*netHttpRequest, *netHttpResponse]]{
+	httpServerExtractor := &httpconv.HTTPServerAttrsExtractor[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse, httpconv.HTTPServerAttrsGetter[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]]{
 		Base: commonExtractor,
 	}
 
@@ -64,9 +65,9 @@ func BuildNetHttpServerOtelInstrumenter() *instrumenter.PropagatingFromUpstreamI
 
 	base := builder.Init().
 		SetInstrumentEnabler(serverEnabler).
-		SetSpanStatusExtractor(httpconv.HTTPServerSpanStatusExtractor[*netHttpRequest, *netHttpResponse]{Getter: serverGetter}).
-		SetSpanNameExtractor(&httpconv.HTTPServerSpanNameExtractor[*netHttpRequest, *netHttpResponse]{Getter: serverGetter}).
-		SetSpanKindExtractor(&instrumenter.AlwaysServerExtractor[*netHttpRequest]{}).
+		SetSpanStatusExtractor(httpconv.HTTPServerSpanStatusExtractor[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]{Getter: serverGetter}).
+		SetSpanNameExtractor(&httpconv.HTTPServerSpanNameExtractor[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]{Getter: serverGetter}).
+		SetSpanKindExtractor(&instrumenter.AlwaysServerExtractor[*nethttp.NetHttpRequest]{}).
 		SetInstrumentationScope(instrumentation.Scope{
 			Name:    instrumentationName,
 			Version: instrumentationVersion,
@@ -81,11 +82,11 @@ func BuildNetHttpServerOtelInstrumenter() *instrumenter.PropagatingFromUpstreamI
 	}
 
 	return base.BuildPropagatingFromUpstreamInstrumenter(
-		func(req *netHttpRequest) propagation.TextMapCarrier {
-			if req.header == nil {
+		func(req *nethttp.NetHttpRequest) propagation.TextMapCarrier {
+			if req.Header() == nil {
 				return nil
 			}
-			return propagation.HeaderCarrier(req.header)
+			return propagation.HeaderCarrier(req.Header())
 		},
 		otel.GetTextMapPropagator(),
 	)

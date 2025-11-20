@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package nethttp
+package server
 
 import (
 	"context"
@@ -11,16 +11,17 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 )
 
 var (
 	logger                 = shared.GetLogger()
-	serverInstrumenter     *instrumenter.PropagatingFromUpstreamInstrumenter[*netHttpRequest, *netHttpResponse]
+	serverInstrumenter     *instrumenter.PropagatingFromUpstreamInstrumenter[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]
 	serverInstrumenterOnce sync.Once
 )
 
-func getServerInstrumenter() *instrumenter.PropagatingFromUpstreamInstrumenter[*netHttpRequest, *netHttpResponse] {
+func getServerInstrumenter() *instrumenter.PropagatingFromUpstreamInstrumenter[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse] {
 	serverInstrumenterOnce.Do(func() {
 		// Ensure SDK is initialized before building instrumenter
 		if err := shared.SetupOTelSDK(); err != nil {
@@ -44,14 +45,14 @@ func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWri
 		"remote_addr", r.RemoteAddr)
 
 	// Build request representation
-	request := &netHttpRequest{
-		method:  r.Method,
-		url:     r.URL,
-		host:    r.Host,
-		header:  r.Header,
-		version: getProtocolVersion(r.ProtoMajor, r.ProtoMinor),
-		isTls:   r.TLS != nil,
-	}
+	request := nethttp.NewNetHttpRequest(
+		r.Method,
+		r.URL,
+		r.Host,
+		r.Header,
+		nethttp.GetProtocolVersion(r.ProtoMajor, r.ProtoMinor),
+		r.TLS != nil,
+	)
 
 	// Start instrumentation
 	ctx := getServerInstrumenter().Start(r.Context(), request)
@@ -98,7 +99,7 @@ func AfterServeHTTP(ictx inst.HookContext) {
 		return
 	}
 
-	request, ok := data["request"].(*netHttpRequest)
+	request, ok := data["request"].(*nethttp.NetHttpRequest)
 	if !ok {
 		logger.Warn("AfterServeHTTP: no request from before hook")
 		return
@@ -127,10 +128,7 @@ func AfterServeHTTP(ictx inst.HookContext) {
 	}
 
 	// Build response representation
-	response := &netHttpResponse{
-		statusCode: statusCode,
-		header:     responseHeader,
-	}
+	response := nethttp.NewNetHttpResponse(statusCode, responseHeader)
 
 	duration := time.Since(startTime)
 	if r != nil {
@@ -146,7 +144,7 @@ func AfterServeHTTP(ictx inst.HookContext) {
 	}
 
 	// End instrumentation
-	getServerInstrumenter().End(ctx, instrumenter.Invocation[*netHttpRequest, *netHttpResponse]{
+	getServerInstrumenter().End(ctx, instrumenter.Invocation[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]{
 		Request:        request,
 		Response:       response,
 		Err:            nil,

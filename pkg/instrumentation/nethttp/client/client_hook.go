@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package nethttp
+package client
 
 import (
 	"context"
@@ -12,17 +12,19 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 )
 
 const otelExporterPrefix = "OTel OTLP Exporter Go"
 
 var (
-	clientInstrumenter     *instrumenter.PropagatingToDownstreamInstrumenter[*netHttpRequest, *netHttpResponse]
+	logger                 = shared.GetLogger()
+	clientInstrumenter     *instrumenter.PropagatingToDownstreamInstrumenter[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]
 	clientInstrumenterOnce sync.Once
 )
 
-func getClientInstrumenter() *instrumenter.PropagatingToDownstreamInstrumenter[*netHttpRequest, *netHttpResponse] {
+func getClientInstrumenter() *instrumenter.PropagatingToDownstreamInstrumenter[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse] {
 	clientInstrumenterOnce.Do(func() {
 		// Ensure SDK is initialized before building instrumenter
 		if err := shared.SetupOTelSDK(); err != nil {
@@ -53,14 +55,14 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
 		"host", req.Host)
 
 	// Build request representation
-	request := &netHttpRequest{
-		method:  req.Method,
-		url:     req.URL,
-		host:    req.Host,
-		header:  req.Header,
-		version: getProtocolVersion(req.ProtoMajor, req.ProtoMinor),
-		isTls:   req.TLS != nil,
-	}
+	request := nethttp.NewNetHttpRequest(
+		req.Method,
+		req.URL,
+		req.Host,
+		req.Header,
+		nethttp.GetProtocolVersion(req.ProtoMajor, req.ProtoMinor),
+		req.TLS != nil,
+	)
 
 	// Start instrumentation (this will inject trace context into headers)
 	ctx := getClientInstrumenter().Start(req.Context(), request)
@@ -103,7 +105,7 @@ func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 		return
 	}
 
-	request, ok := data["request"].(*netHttpRequest)
+	request, ok := data["request"].(*nethttp.NetHttpRequest)
 	if !ok {
 		logger.Debug("AfterRoundTrip: no request from before hook")
 		return
@@ -115,20 +117,19 @@ func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 	}
 
 	// Build response representation
-	var response *netHttpResponse
+	var response *nethttp.NetHttpResponse
 	if res != nil {
-		response = &netHttpResponse{
-			statusCode: res.StatusCode,
-			header:     res.Header,
-		}
+		response = nethttp.NewNetHttpResponse(res.StatusCode, res.Header)
 
 		// Update request with actual values from response
-		request.method = res.Request.Method
-		request.url = res.Request.URL
-		request.header = res.Request.Header
-		request.version = getProtocolVersion(res.Request.ProtoMajor, res.Request.ProtoMinor)
-		request.host = res.Request.Host
-		request.isTls = res.Request.TLS != nil
+		request = nethttp.NewNetHttpRequest(
+			res.Request.Method,
+			res.Request.URL,
+			res.Request.Host,
+			res.Request.Header,
+			nethttp.GetProtocolVersion(res.Request.ProtoMajor, res.Request.ProtoMinor),
+			res.Request.TLS != nil,
+		)
 
 		duration := time.Since(startTime)
 		logger.Debug("AfterRoundTrip called",
@@ -138,16 +139,14 @@ func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 			"duration_ms", duration.Milliseconds())
 	} else {
 		// Error case: no response
-		response = &netHttpResponse{
-			statusCode: 500,
-		}
+		response = nethttp.NewNetHttpResponse(500, nil)
 		logger.Debug("AfterRoundTrip called with error",
 			"error", err,
 			"duration_ms", time.Since(startTime).Milliseconds())
 	}
 
 	// End instrumentation
-	getClientInstrumenter().End(ctx, instrumenter.Invocation[*netHttpRequest, *netHttpResponse]{
+	getClientInstrumenter().End(ctx, instrumenter.Invocation[*nethttp.NetHttpRequest, *nethttp.NetHttpResponse]{
 		Request:        request,
 		Response:       response,
 		Err:            err,

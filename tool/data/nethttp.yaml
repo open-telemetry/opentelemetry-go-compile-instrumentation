@@ -4,7 +4,7 @@ server_hook:
   recv: serverHandler
   before: BeforeServeHTTP
   after: AfterServeHTTP
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server"
 
 client_hook:
   target: net/http
@@ -12,4 +12,4 @@ client_hook:
   recv: "*Transport"
   before: BeforeRoundTrip
   after: AfterRoundTrip
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client"

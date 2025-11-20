@@ -1,19 +1,20 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package nethttp
+package server
 
 import (
 	"net/http"
 	"net/url"
 	"testing"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestServerAttrsGetter_GetRequestMethod(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	req := &netHttpRequest{method: "POST"}
+	req := nethttp.NewNetHttpRequest("POST", nil, "", nil, "", false)
 	assert.Equal(t, "POST", getter.GetRequestMethod(req))
 }
 
@@ -24,7 +25,7 @@ func TestServerAttrsGetter_GetHTTPRequestHeader(t *testing.T) {
 	header.Add("Accept", "application/json")
 	header.Add("Accept", "text/html")
 
-	req := &netHttpRequest{header: header}
+	req := nethttp.NewNetHttpRequest("", nil, "", header, "", false)
 
 	contentType := getter.GetHTTPRequestHeader(req, "Content-Type")
 	assert.Equal(t, []string{"application/json"}, contentType)
@@ -38,17 +39,17 @@ func TestServerAttrsGetter_GetHTTPRequestHeader(t *testing.T) {
 
 func TestServerAttrsGetter_GetHTTPResponseStatusCode(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	req := &netHttpRequest{}
+	req := nethttp.NewNetHttpRequest("", nil, "", nil, "", false)
 
 	tests := []struct {
 		name       string
-		resp       *netHttpResponse
+		resp       *nethttp.NetHttpResponse
 		err        error
 		wantStatus int
 	}{
-		{"OK", &netHttpResponse{statusCode: 200}, nil, 200},
-		{"Not Found", &netHttpResponse{statusCode: 404}, nil, 404},
-		{"Server Error", &netHttpResponse{statusCode: 500}, nil, 500},
+		{"OK", nethttp.NewNetHttpResponse(200, nil), nil, 200},
+		{"Not Found", nethttp.NewNetHttpResponse(404, nil), nil, 404},
+		{"Server Error", nethttp.NewNetHttpResponse(500, nil), nil, 500},
 	}
 
 	for _, tt := range tests {
@@ -61,13 +62,13 @@ func TestServerAttrsGetter_GetHTTPResponseStatusCode(t *testing.T) {
 
 func TestServerAttrsGetter_GetHTTPResponseHeader(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	req := &netHttpRequest{}
+	req := nethttp.NewNetHttpRequest("", nil, "", nil, "", false)
 	header := http.Header{}
 	header.Set("Content-Type", "application/json")
 	header.Add("X-Custom", "value1")
 	header.Add("X-Custom", "value2")
 
-	resp := &netHttpResponse{header: header}
+	resp := nethttp.NewNetHttpResponse(0, header)
 
 	contentType := getter.GetHTTPResponseHeader(req, resp, "Content-Type")
 	assert.Equal(t, []string{"application/json"}, contentType)
@@ -78,8 +79,8 @@ func TestServerAttrsGetter_GetHTTPResponseHeader(t *testing.T) {
 
 func TestServerAttrsGetter_GetErrorType(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	req := &netHttpRequest{}
-	resp := &netHttpResponse{statusCode: 500}
+	req := nethttp.NewNetHttpRequest("", nil, "", nil, "", false)
+	resp := nethttp.NewNetHttpResponse(500, nil)
 
 	// Currently returns empty string (TODO in loongsuite implementation)
 	errorType := getter.GetErrorType(req, resp, nil)
@@ -104,7 +105,7 @@ func TestServerAttrsGetter_GetURLScheme(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parsedURL, _ := url.Parse(tt.url)
-			req := &netHttpRequest{url: parsedURL, isTls: tt.isTls}
+			req := nethttp.NewNetHttpRequest("", parsedURL, "", nil, "", tt.isTls)
 			scheme := getter.GetURLScheme(req)
 			assert.Equal(t, tt.wantScheme, scheme)
 		})
@@ -128,7 +129,7 @@ func TestServerAttrsGetter_GetURLPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parsedURL, _ := url.Parse(tt.url)
-			req := &netHttpRequest{url: parsedURL}
+			req := nethttp.NewNetHttpRequest("", parsedURL, "", nil, "", false)
 			path := getter.GetURLPath(req)
 			assert.Equal(t, tt.wantPath, path)
 		})
@@ -152,7 +153,7 @@ func TestServerAttrsGetter_GetURLQuery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parsedURL, _ := url.Parse(tt.url)
-			req := &netHttpRequest{url: parsedURL}
+			req := nethttp.NewNetHttpRequest("", parsedURL, "", nil, "", false)
 			query := getter.GetURLQuery(req)
 			assert.Equal(t, tt.wantQuery, query)
 		})
@@ -161,8 +162,8 @@ func TestServerAttrsGetter_GetURLQuery(t *testing.T) {
 
 func TestServerAttrsGetter_GetNetworkType(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	req := &netHttpRequest{}
-	resp := &netHttpResponse{}
+	req := nethttp.NewNetHttpRequest("", nil, "", nil, "", false)
+	resp := nethttp.NewNetHttpResponse(0, nil)
 
 	// Currently returns "ipv4" (hardcoded in loongsuite)
 	netType := getter.GetNetworkType(req, resp)
@@ -171,8 +172,8 @@ func TestServerAttrsGetter_GetNetworkType(t *testing.T) {
 
 func TestServerAttrsGetter_GetNetworkTransport(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	req := &netHttpRequest{}
-	resp := &netHttpResponse{}
+	req := nethttp.NewNetHttpRequest("", nil, "", nil, "", false)
+	resp := nethttp.NewNetHttpResponse(0, nil)
 
 	transport := getter.GetNetworkTransport(req, resp)
 	assert.Equal(t, "tcp", transport)
@@ -180,7 +181,7 @@ func TestServerAttrsGetter_GetNetworkTransport(t *testing.T) {
 
 func TestServerAttrsGetter_GetNetworkProtocolName(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	resp := &netHttpResponse{}
+	resp := nethttp.NewNetHttpResponse(0, nil)
 
 	tests := []struct {
 		name         string
@@ -193,7 +194,7 @@ func TestServerAttrsGetter_GetNetworkProtocolName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &netHttpRequest{isTls: tt.isTls}
+			req := nethttp.NewNetHttpRequest("", nil, "", nil, "", tt.isTls)
 			protocol := getter.GetNetworkProtocolName(req, resp)
 			assert.Equal(t, tt.wantProtocol, protocol)
 		})
@@ -202,7 +203,7 @@ func TestServerAttrsGetter_GetNetworkProtocolName(t *testing.T) {
 
 func TestServerAttrsGetter_GetNetworkProtocolVersion(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	resp := &netHttpResponse{}
+	resp := nethttp.NewNetHttpResponse(0, nil)
 
 	tests := []struct {
 		name        string
@@ -216,7 +217,7 @@ func TestServerAttrsGetter_GetNetworkProtocolVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &netHttpRequest{version: tt.version}
+			req := nethttp.NewNetHttpRequest("", nil, "", nil, tt.version, false)
 			version := getter.GetNetworkProtocolVersion(req, resp)
 			assert.Equal(t, tt.wantVersion, version)
 		})
@@ -225,8 +226,8 @@ func TestServerAttrsGetter_GetNetworkProtocolVersion(t *testing.T) {
 
 func TestServerAttrsGetter_GetNetworkLocalInetAddress(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	req := &netHttpRequest{}
-	resp := &netHttpResponse{}
+	req := nethttp.NewNetHttpRequest("", nil, "", nil, "", false)
+	resp := nethttp.NewNetHttpResponse(0, nil)
 
 	// Currently returns empty string (not captured in HTTP requests)
 	addr := getter.GetNetworkLocalInetAddress(req, resp)
@@ -235,8 +236,8 @@ func TestServerAttrsGetter_GetNetworkLocalInetAddress(t *testing.T) {
 
 func TestServerAttrsGetter_GetNetworkLocalPort(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	req := &netHttpRequest{}
-	resp := &netHttpResponse{}
+	req := nethttp.NewNetHttpRequest("", nil, "", nil, "", false)
+	resp := nethttp.NewNetHttpResponse(0, nil)
 
 	// Currently returns 0 (not captured in HTTP requests)
 	port := getter.GetNetworkLocalPort(req, resp)
@@ -245,16 +246,16 @@ func TestServerAttrsGetter_GetNetworkLocalPort(t *testing.T) {
 
 func TestServerAttrsGetter_GetNetworkPeerInetAddress(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	resp := &netHttpResponse{}
+	resp := nethttp.NewNetHttpResponse(0, nil)
 
-	req := &netHttpRequest{host: "example.com"}
+	req := nethttp.NewNetHttpRequest("", nil, "example.com", nil, "", false)
 	addr := getter.GetNetworkPeerInetAddress(req, resp)
 	assert.Equal(t, "example.com", addr)
 }
 
 func TestServerAttrsGetter_GetNetworkPeerPort(t *testing.T) {
 	getter := &netHttpServerAttrsGetter{}
-	resp := &netHttpResponse{}
+	resp := nethttp.NewNetHttpResponse(0, nil)
 
 	tests := []struct {
 		name     string
@@ -270,7 +271,7 @@ func TestServerAttrsGetter_GetNetworkPeerPort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parsedURL, _ := url.Parse(tt.url)
-			req := &netHttpRequest{url: parsedURL}
+			req := nethttp.NewNetHttpRequest("", parsedURL, "", nil, "", false)
 			port := getter.GetNetworkPeerPort(req, resp)
 			assert.Equal(t, tt.wantPort, port)
 		})
@@ -293,7 +294,7 @@ func TestServerAttrsGetter_GetHTTPRoute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parsedURL, _ := url.Parse(tt.url)
-			req := &netHttpRequest{url: parsedURL}
+			req := nethttp.NewNetHttpRequest("", parsedURL, "", nil, "", false)
 			route := getter.GetHTTPRoute(req)
 			assert.Equal(t, tt.wantRoute, route)
 		})
