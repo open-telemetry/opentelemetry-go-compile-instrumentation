@@ -54,7 +54,7 @@ RUN addgroup -g 1000 appuser && \
 USER appuser
 
 # Environment variables for OpenTelemetry
-ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317 \
     OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
     OTEL_SERVICE_NAME=grpc-client \
     OTEL_RESOURCE_ATTRIBUTES="service.namespace=demo,service.version=1.0.0" \

@@ -77,6 +77,9 @@ logs-grafana: ## Follow Grafana logs
 logs-grpc: ## Follow gRPC server and client logs
 	@docker-compose logs -f grpc-server grpc-client
 
+logs-http: ## Follow HTTP server and client logs
+	@docker-compose logs -f http-server http-client
+
 health: ## Check health of all services
 	@echo "$(BLUE)Health Check:$(NC)"
 	@echo ""
