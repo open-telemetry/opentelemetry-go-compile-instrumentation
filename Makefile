@@ -95,7 +95,6 @@ format/go: ## Format Go code only
 format/go: golangci-lint
 	@echo "Formatting Go code..."
 	golangci-lint fmt --config .config/golangci.yml
-	golangci-lint run --config .config/golangci.yml --fix
 
 format/yaml: ## Format YAML files only (excludes testdata)
 format/yaml: yamlfmt
@@ -114,6 +113,11 @@ lint/go: ## Run golangci-lint on Go code
 lint/go: golangci-lint
 	@echo "Linting Go code..."
 	golangci-lint run --config .config/golangci.yml
+
+lint/go/fix: ## Run golangci-lint on Go code and fix the issues
+lint/go/fix: golangci-lint
+	@echo "Linting Go code..."
+	golangci-lint run --config .config/golangci.yml --fix
 
 lint/yaml: ## Lint YAML formatting
 lint/yaml: yamlfmt
