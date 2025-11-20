@@ -62,8 +62,23 @@ func TestInstrument(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			// TODO: Link the instrumented binary and run it and further check
-			// output content
+			// Build the instrumented binary and run it, then verify output
+			binPath := filepath.Join(tempDir, "app")
+			buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+			buildCmd.Dir = tempDir
+			buildCmd.Env = append(os.Environ(), "GO111MODULE=off")
+			out, err := buildCmd.CombinedOutput()
+			require.NoErrorf(t, err, "go build failed: %s", string(out))
+
+			runCmd := exec.Command(binPath)
+			runtimeOut, err := runCmd.CombinedOutput()
+			require.NoErrorf(t, err, "running app failed: %s", string(runtimeOut))
+
+			output := string(runtimeOut)
+			// Base output from source.go
+			require.Contains(t, output, "Hello, World!")
+			// Output from added raw rule newfile.go(func2)
+			require.Contains(t, output, "func2")
 		})
 	}
 }
@@ -108,6 +123,69 @@ func createCompileArgs(tempDir string) []string {
 }
 
 func createTestRuleJSON(mainGoFile string) ([]byte, error) {
+	ruleSet := []*rule.InstRuleSet{
+		{
+			PackageName: "main",
+			ModulePath:  "main",
+			RawRules: map[string][]*rule.InstRawRule{
+				mainGoFile: {
+					{
+						InstBaseRule: rule.InstBaseRule{
+							Name:   "add_raw_code",
+							Target: "main",
+						},
+						Func: "Func1",
+						Raw:  "func2()",
+					},
+				},
+			},
+			FileRules: []*rule.InstFileRule{
+				{
+					InstBaseRule: rule.InstBaseRule{
+						Name:   "add_new_file",
+						Target: "main",
+					},
+					File: "newfile.go",
+					Path: filepath.Join(".", "testdata"),
+				},
+			},
+		},
+	}
+	return json.Marshal(ruleSet)
+}
+
+// TestInstrumentWithHooks tests FuncRules and StructRules instrumentation
+func TestInstrumentWithHooks(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	ctx := util.ContextWithLogger(t.Context(), logger)
+
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelWorkDir, tempDir)
+
+	// Create source code file
+	mainGoFile := filepath.Join(tempDir, "main.go")
+	err := os.MkdirAll(filepath.Dir(mainGoFile), 0o755)
+	require.NoError(t, err)
+	err = util.CopyFile(filepath.Join("testdata", "source.go"), mainGoFile)
+	require.NoError(t, err)
+
+	// Create matched.json with FuncRules and StructRules
+	matchedJSON, err := createTestRuleJSONWithHooks(mainGoFile)
+	require.NoError(t, err)
+	matchedFile := filepath.Join(tempDir, util.BuildTempDir, matchedJSONFile)
+	err = os.MkdirAll(filepath.Dir(matchedFile), 0o755)
+	require.NoError(t, err)
+	err = util.WriteFile(matchedFile, string(matchedJSON))
+	require.NoError(t, err)
+
+	args := createCompileArgs(tempDir)
+	err = Toolexec(ctx, args)
+	require.NoError(t, err, "Instrumentation with FuncRules and StructRules should succeed")
+}
+
+func createTestRuleJSONWithHooks(mainGoFile string) ([]byte, error) {
 	ruleSet := []*rule.InstRuleSet{
 		{
 			PackageName: "main",
@@ -193,18 +271,6 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 					},
 				},
 			},
-			RawRules: map[string][]*rule.InstRawRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "add_raw_code",
-							Target: "main",
-						},
-						Func: "Func1",
-						Raw:  "func2()",
-					},
-				},
-			},
 			StructRules: map[string][]*rule.InstStructRule{
 				mainGoFile: {
 					{
@@ -220,16 +286,6 @@ func createTestRuleJSON(mainGoFile string) ([]byte, error) {
 							},
 						},
 					},
-				},
-			},
-			FileRules: []*rule.InstFileRule{
-				{
-					InstBaseRule: rule.InstBaseRule{
-						Name:   "add_new_file",
-						Target: "main",
-					},
-					File: "newfile.go",
-					Path: filepath.Join(".", "testdata"),
 				},
 			},
 		},
