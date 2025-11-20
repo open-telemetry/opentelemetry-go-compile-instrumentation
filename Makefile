@@ -8,7 +8,7 @@ SHELL := /bin/bash
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
-        test-unit/coverage test-integration/coverage test-e2e/coverage
+        test-unit/coverage test-integration/coverage test-e2e/coverage test-unit/update-golden test-unit/update-golden
 
 # Constant variables
 BINARY_NAME := otel
@@ -206,6 +206,13 @@ test-unit: package gotestfmt
 	@echo "Running unit tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
+
+.ONESHELL:
+test-unit/update-golden: ## Run unit tests and update golden files
+test-unit/update-golden: package
+	@echo "Running unit tests and updating golden files..."
+	set -euo pipefail
+	cd tool/internal/instrument && go test -v -timeout=5m -count=1 -update
 
 .ONESHELL:
 test-unit/coverage: ## Run unit tests with coverage report

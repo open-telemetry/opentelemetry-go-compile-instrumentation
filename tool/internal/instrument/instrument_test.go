@@ -3,6 +3,15 @@
 
 //go:build !windows
 
+// Package instrument tests verify that the instrumentation process generates
+// the expected output by comparing against golden files.
+//
+// To update golden files after intentional changes:
+//
+//		go test -update ./tool/internal/instrument/...
+//	 or
+//		make test-unit/update-golden
+
 package instrument
 
 import (
@@ -21,8 +30,22 @@ import (
 	"gotest.tools/v3/golden"
 )
 
+const (
+	testdataDir        = "testdata"
+	goldenDir          = "golden"
+	sourceFileName     = "source.go"
+	rulesFileName      = "rules.yml"
+	mainGoFileName     = "main.go"
+	mainPackage        = "main"
+	buildID            = "foo/bar"
+	compiledOutput     = "_pkg_.a"
+	goldenExt          = ".golden"
+	invalidReceiver    = "invalid-receiver"
+	invalidReceiverMsg = "can not find function"
+)
+
 func TestInstrumentation_Integration(t *testing.T) {
-	entries, _ := os.ReadDir("testdata/golden")
+	entries, _ := os.ReadDir(filepath.Join(testdataDir, goldenDir))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -36,20 +59,23 @@ func TestInstrumentation_Integration(t *testing.T) {
 func runTest(t *testing.T, testName string) {
 	tempDir := t.TempDir()
 	t.Setenv(util.EnvOtelWorkDir, tempDir)
-	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	ctx := util.ContextWithLogger(
+		t.Context(),
+		slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	)
 
-	sourceFile := filepath.Join(tempDir, "main.go")
-	util.CopyFile("testdata/source.go", sourceFile)
+	sourceFile := filepath.Join(tempDir, mainGoFileName)
+	util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
 
 	ruleSet := loadRulesYAML(testName, sourceFile)
-	writeMatchedJSON(tempDir, ruleSet)
+	writeMatchedJSON(ruleSet)
 
 	args := compileArgs(tempDir, sourceFile)
 	err := Toolexec(ctx, args)
 
-	if testName == "invalid-receiver" {
+	if testName == invalidReceiver {
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "can not find function")
+		require.Contains(t, err.Error(), invalidReceiverMsg)
 		return
 	}
 
@@ -58,14 +84,14 @@ func runTest(t *testing.T, testName string) {
 }
 
 func loadRulesYAML(testName, sourceFile string) *rule.InstRuleSet {
-	data, _ := os.ReadFile(filepath.Join("testdata/golden", testName, "rules.yml"))
+	data, _ := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
 
-	var rawRules map[string]map[string]interface{}
+	var rawRules map[string]map[string]any
 	yaml.Unmarshal(data, &rawRules)
 
 	ruleSet := &rule.InstRuleSet{
-		PackageName: "main",
-		ModulePath:  "main",
+		PackageName: mainPackage,
+		ModulePath:  mainPackage,
 		FuncRules:   make(map[string][]*rule.InstFuncRule),
 		StructRules: make(map[string][]*rule.InstStructRule),
 		RawRules:    make(map[string][]*rule.InstRawRule),
@@ -95,9 +121,9 @@ func loadRulesYAML(testName, sourceFile string) *rule.InstRuleSet {
 	return ruleSet
 }
 
-func writeMatchedJSON(tempDir string, ruleSet *rule.InstRuleSet) {
+func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 	matchedJSON, _ := json.Marshal([]*rule.InstRuleSet{ruleSet})
-	matchedFile := filepath.Join(tempDir, util.BuildTempDir, "matched.json")
+	matchedFile := util.GetMatchedRuleFile()
 	os.MkdirAll(filepath.Dir(matchedFile), 0o755)
 	util.WriteFile(matchedFile, string(matchedJSON))
 }
@@ -106,32 +132,29 @@ func compileArgs(tempDir, sourceFile string) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
 	return []string{
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
-		"-o", filepath.Join(tempDir, "_pkg_.a"),
-		"-p", "main",
+		"-o", filepath.Join(tempDir, compiledOutput),
+		"-p", mainPackage,
 		"-complete",
-		"-buildid", "foo/bar",
+		"-buildid", buildID,
 		"-pack",
 		sourceFile,
 	}
 }
 
 func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
-	entries, _ := os.ReadDir(filepath.Join("testdata/golden", testName))
+	entries, _ := os.ReadDir(filepath.Join(testdataDir, goldenDir, testName))
 	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".golden") {
+		if !strings.HasSuffix(entry.Name(), goldenExt) {
 			continue
 		}
 		actualFile := actualFileFromGolden(entry.Name())
-		if actualFile == "" {
-			continue
-		}
 		actual, _ := os.ReadFile(filepath.Join(tempDir, actualFile))
-		golden.Assert(t, string(actual), filepath.Join("golden", testName, entry.Name()))
+		golden.Assert(t, string(actual), filepath.Join(goldenDir, testName, entry.Name()))
 	}
 }
 
 func actualFileFromGolden(goldenName string) string {
-	parts := strings.SplitN(strings.TrimSuffix(goldenName, ".golden"), ".", 2)
+	parts := strings.SplitN(strings.TrimSuffix(goldenName, goldenExt), ".", 2)
 	if len(parts) == 2 {
 		return parts[1]
 	}
