@@ -3,7 +3,25 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '**/*.go'
+      - '**/go.mod'
+      - '**/go.sum'
+      - 'Makefile'
+      - 'tool/**'
+      - 'pkg/**'
+      - 'test/**'
+      - '.github/workflows/test-integration.yaml'
   pull_request:
+    paths:
+      - '**/*.go'
+      - '**/go.mod'
+      - '**/go.sum'
+      - 'Makefile'
+      - 'tool/**'
+      - 'pkg/**'
+      - 'test/**'
+      - '.github/workflows/test-integration.yaml'
 # Declare default permissions as read only.
 permissions: read-all
 jobs:
