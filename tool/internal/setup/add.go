@@ -54,43 +54,28 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		// Second variable declaration
 		// //go:linkname _printstack%d %s.OtelPrintStackImpl
 		// var _printstack%d = func (bt []byte){ _otel_log.Printf(string(bt)) }
-		val := &dst.FuncLit{
+		// Build: string(bt)
+		stringCall := &dst.CallExpr{
+			Fun:  ast.Ident("string"),
+			Args: []dst.Expr{ast.Ident("bt")},
+		}
+		// Build: _otel_log.Printf(string(bt))
+		printfCall := &dst.CallExpr{
+			Fun:  ast.SelectorExpr(ast.Ident("_otel_log"), "Printf"),
+			Args: []dst.Expr{stringCall},
+		}
+		// Build: func (bt []byte) { _otel_log.Printf(string(bt)) }
+		printStackFunc := &dst.FuncLit{
 			Type: &dst.FuncType{
 				Params: &dst.FieldList{
 					List: []*dst.Field{
-						{
-							Names: []*dst.Ident{
-								{Name: "bt"},
-							},
-							Type: &dst.ArrayType{
-								Elt: &dst.Ident{Name: "byte"},
-							},
-						},
+						ast.Field("bt", ast.ArrayType(ast.Ident("byte"))),
 					},
 				},
 			},
-			Body: &dst.BlockStmt{
-				List: []dst.Stmt{
-					&dst.ExprStmt{
-						X: &dst.CallExpr{
-							Fun: &dst.SelectorExpr{
-								X:   &dst.Ident{Name: "_otel_log"},
-								Sel: &dst.Ident{Name: "Printf"},
-							},
-							Args: []dst.Expr{
-								&dst.CallExpr{
-									Fun: &dst.Ident{Name: "string"},
-									Args: []dst.Expr{
-										&dst.Ident{Name: "bt"},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
+			Body: ast.BlockStmts(ast.ExprStmt(printfCall)),
 		}
-		printStackVar := ast.VarDecl(fmt.Sprintf("_printstack%d", i), val)
+		printStackVar := ast.VarDecl(fmt.Sprintf("_printstack%d", i), printStackFunc)
 		printStackVar.Decs = dst.GenDeclDecorations{
 			NodeDecs: ast.LineComments(
 				fmt.Sprintf("//go:linkname _printstack%d %s.OtelPrintStackImpl", i, m.Path)),
