@@ -325,22 +325,29 @@ func SplitMultiNameFields(fieldList *dst.FieldList) *dst.FieldList {
 	}
 	result := &dst.FieldList{List: []*dst.Field{}}
 	for _, field := range fieldList.List {
-		if len(field.Names) <= 1 {
-			clonedField, ok := dst.Clone(field).(*dst.Field)
-			util.Assert(ok, "field is not a Field")
-			result.List = append(result.List, clonedField)
-		} else {
-			for _, name := range field.Names {
-				clonedType, ok := dst.Clone(field.Type).(dst.Expr)
-				util.Assert(ok, "field.Type is not an Expr")
-				clonedName, ok := dst.Clone(name).(*dst.Ident)
-				util.Assert(ok, "name is not an Ident")
-				newField := &dst.Field{
-					Names: []*dst.Ident{clonedName},
-					Type:  clonedType,
-				}
-				result.List = append(result.List, newField)
+		// Handle unnamed fields (e.g., embedded types) or fields with single/multiple names
+		namesToProcess := field.Names
+		if len(namesToProcess) == 0 {
+			// For unnamed fields, create one field with no names
+			namesToProcess = []*dst.Ident{nil}
+		}
+
+		for _, name := range namesToProcess {
+			clonedType, ok := dst.Clone(field.Type).(dst.Expr)
+			util.Assert(ok, "field.Type is not an Expr")
+
+			var names []*dst.Ident
+			if name != nil {
+				clonedName, okC := dst.Clone(name).(*dst.Ident)
+				util.Assert(okC, "name is not an Ident")
+				names = []*dst.Ident{clonedName}
 			}
+
+			newField := &dst.Field{
+				Names: names,
+				Type:  clonedType,
+			}
+			result.List = append(result.List, newField)
 		}
 	}
 	return result

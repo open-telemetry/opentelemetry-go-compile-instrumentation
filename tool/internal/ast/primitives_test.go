@@ -50,96 +50,75 @@ func assertIndexListExprCall(
 	assert.Len(t, expr.Args, expectedArgCount)
 }
 
+// Helper function to parse a complete function and extract its type parameters
+func parseFuncTypeParams(t *testing.T, funcSource string) *dst.FieldList {
+	parser := NewAstParser()
+	file, err := parser.ParseSource("package main\n" + funcSource)
+	require.NoError(t, err)
+	require.Len(t, file.Decls, 1)
+	funcDecl, ok := file.Decls[0].(*dst.FuncDecl)
+	require.True(t, ok)
+	return funcDecl.Type.TypeParams
+}
+
 func TestCallToGeneric(t *testing.T) {
 	tests := []struct {
 		name       string
 		funcName   string
-		typeParams *dst.FieldList
+		funcSource string // Source code for parsing type params
 		args       []dst.Expr
 		validate   func(*testing.T, *dst.CallExpr)
 	}{
 		{
 			name:       "nil type params returns simple call",
 			funcName:   "Foo",
-			typeParams: nil,
+			funcSource: "func Foo(x, y int) {}", // No type params
 			args:       []dst.Expr{Ident("x"), Ident("y")},
 			validate: func(t *testing.T, expr *dst.CallExpr) {
 				assertSimpleCall(t, expr, "Foo", 2)
 			},
 		},
 		{
-			name:     "single type parameter creates IndexExpr",
-			funcName: "GenericFunc",
-			typeParams: &dst.FieldList{
-				List: []*dst.Field{
-					{
-						Names: []*dst.Ident{Ident("T")},
-						Type:  Ident("any"),
-					},
-				},
-			},
-			args: []dst.Expr{Ident("value")},
+			name:       "single type parameter creates IndexExpr",
+			funcName:   "GenericFunc",
+			funcSource: "func GenericFunc[T any](value T) {}",
+			args:       []dst.Expr{Ident("value")},
 			validate: func(t *testing.T, expr *dst.CallExpr) {
 				assertIndexExprCall(t, expr, "GenericFunc", "T", 1)
 			},
 		},
 		{
-			name:     "multiple type parameters creates IndexListExpr",
-			funcName: "MultiGeneric",
-			typeParams: &dst.FieldList{
-				List: []*dst.Field{
-					{
-						Names: []*dst.Ident{Ident("T")},
-						Type:  Ident("any"),
-					},
-					{
-						Names: []*dst.Ident{Ident("U")},
-						Type:  Ident("comparable"),
-					},
-				},
-			},
-			args: []dst.Expr{Ident("x"), Ident("y")},
+			name:       "multiple type parameters creates IndexListExpr",
+			funcName:   "MultiGeneric",
+			funcSource: "func MultiGeneric[T any, U comparable](x T, y U) {}",
+			args:       []dst.Expr{Ident("x"), Ident("y")},
 			validate: func(t *testing.T, expr *dst.CallExpr) {
 				assertIndexListExprCall(t, expr, "MultiGeneric", []string{"T", "U"}, 2)
 			},
 		},
 		{
-			name:     "field with multiple names creates multiple indices",
-			funcName: "MultiNameGeneric",
-			typeParams: &dst.FieldList{
-				List: []*dst.Field{
-					{
-						Names: []*dst.Ident{Ident("T"), Ident("U")},
-						Type:  Ident("any"),
-					},
-				},
-			},
-			args: []dst.Expr{Ident("value")},
+			name:       "field with multiple names creates multiple indices",
+			funcName:   "MultiNameGeneric",
+			funcSource: "func MultiNameGeneric[T, U any](value T) {}",
+			args:       []dst.Expr{Ident("value")},
 			validate: func(t *testing.T, expr *dst.CallExpr) {
 				assertIndexListExprCall(t, expr, "MultiNameGeneric", []string{"T", "U"}, 1)
 			},
 		},
 		{
-			name:     "no arguments with type parameters",
-			funcName: "NoArgsGeneric",
-			typeParams: &dst.FieldList{
-				List: []*dst.Field{
-					{
-						Names: []*dst.Ident{Ident("T")},
-						Type:  Ident("any"),
-					},
-				},
-			},
-			args: []dst.Expr{},
+			name:       "no arguments with type parameters",
+			funcName:   "NoArgsGeneric",
+			funcSource: "func NoArgsGeneric[T any]() {}",
+			args:       []dst.Expr{},
 			validate: func(t *testing.T, expr *dst.CallExpr) {
 				assertIndexExprCall(t, expr, "NoArgsGeneric", "T", 0)
 			},
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CallToGeneric(tt.funcName, tt.typeParams, tt.args)
+			typeParams := parseFuncTypeParams(t, tt.funcSource)
+			result := CallToGeneric(tt.funcName, typeParams, tt.args)
 			require.NotNil(t, result)
 			tt.validate(t, result)
 		})
