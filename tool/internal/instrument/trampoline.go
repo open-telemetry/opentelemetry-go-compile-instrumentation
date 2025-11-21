@@ -864,6 +864,12 @@ func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 			Key:   replaceTypeParamsWithAny(tType.Key, typeParams),
 			Value: replaceTypeParamsWithAny(tType.Value, typeParams),
 		}
+	case *dst.ChanType:
+		// chan T, <-chan T, chan<- T -> chan interface{}, etc.
+		return &dst.ChanType{
+			Dir:   tType.Dir,
+			Value: replaceTypeParamsWithAny(tType.Value, typeParams),
+		}
 	case *dst.IndexExpr:
 		// GenStruct[T] -> interface{} (for generic receiver methods)
 		// The hook function expects interface{} for generic types
@@ -871,8 +877,16 @@ func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 	case *dst.IndexListExpr:
 		// GenStruct[T, U] -> interface{} (for generic receiver methods with multiple type params)
 		return ast.InterfaceType()
+	case *dst.Ident, *dst.SelectorExpr, *dst.InterfaceType:
+		// Base types without type parameters, return as-is
+		return t
+	default:
+		// Unsupported cases:
+		// - *dst.FuncType (function types with type parameters)
+		// - Other uncommon type expressions
+		util.ShouldNotReachHere()
+		return t
 	}
-	return t
 }
 
 func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
