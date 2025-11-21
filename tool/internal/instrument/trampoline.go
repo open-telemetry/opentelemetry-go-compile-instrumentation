@@ -316,35 +316,26 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 	return nil
 }
 
-func rectifyAnyType(paramList *dst.FieldList, traits []ParamTrait) error {
-	if len(paramList.List) != len(traits) {
-		return ex.New("hook func signature can not match with target function")
-	}
-	for i, field := range paramList.List {
-		trait := traits[i]
-		if trait.IsInterfaceAny {
-			// Rectify type to "interface{}"
-			field.Type = ast.InterfaceType()
-		}
-	}
-	return nil
-}
-
 func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 	traits []ParamTrait, before bool,
 ) error {
 	paramTypes := ip.buildTrampolineType(before)
 	addHookContext(paramTypes)
-	// Hook functions may uses interface{} as parameter type, as some types of
-	// raw function is not exposed
-	err := rectifyAnyType(paramTypes, traits)
-	if err != nil {
-		return err
+	combinedTypeParams := combineTypeParams(ip.targetFunc)
+
+	if len(paramTypes.List) != len(traits) {
+		return ex.New("hook func signature can not match with target function")
 	}
-	// For generic target functions, replace type parameters with interface{}
-	// in the linkname declaration (since linkname doesn't support generics)
-	for _, field := range paramTypes.List {
-		field.Type = replaceTypeParamsWithAny(field.Type, ip.targetFunc.Type.TypeParams)
+
+	for i, field := range paramTypes.List {
+		trait := traits[i]
+		if trait.IsInterfaceAny {
+			// Hook explicitly uses interface{} for this parameter
+			field.Type = ast.InterfaceType()
+		} else {
+			// Replace type parameters with interface{} (for linkname compatibility)
+			field.Type = replaceTypeParamsWithAny(field.Type, combinedTypeParams)
+		}
 	}
 
 	// Generate var decl and append it to the target file, note that many target
@@ -432,6 +423,7 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
 	// func S(h* HookContext, recv type, arg1 type, arg2 type, ...)
 	// For after trampoline, it's signature is:
 	// func S(h* HookContext, arg1 type, arg2 type, ...)
+	// All grouped parameters (like a, b int) are expanded into separate parameters (a int, b int)
 	paramList := &dst.FieldList{List: []*dst.Field{}}
 	if before {
 		if ast.HasReceiver(ip.targetFunc) {
