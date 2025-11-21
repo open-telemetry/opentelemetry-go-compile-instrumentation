@@ -38,4 +38,22 @@ func TestBasic(t *testing.T) {
 	for _, e := range expect {
 		require.Contains(t, output, e)
 	}
+
+	verifyGenericHookContextLogs(t, output)
+}
+
+func verifyGenericHookContextLogs(t *testing.T, output string) {
+	expectedGenericLogs := []string{
+		"[Generic] Function: main.GenericExample",
+		"[Generic] Param count: 2",
+		"[Generic] Skip call: false",
+		"[Generic] Param[0]: 1",
+		"[Generic] Param[1]: 2",
+		"[Generic] Data from Before: test-data",
+		"[Generic] Return value count: 1",
+		"[Generic] Return[0]: 2",
+	}
+	for _, log := range expectedGenericLogs {
+		require.Contains(t, output, log, "Expected generic HookContext log: %s", log)
+	}
 }

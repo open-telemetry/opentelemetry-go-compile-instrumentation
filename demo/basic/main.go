@@ -72,7 +72,7 @@ func main() {
 	m.NewField = "abc"
 	m.Example()
 
-	GenericExample(1, 2)
+	_ = GenericExample(1, 2)
 	g := &GenStruct[string]{Value: "Hello"}
 	_ = g.GenericRecvExample(", Generic Recv World!")
 
