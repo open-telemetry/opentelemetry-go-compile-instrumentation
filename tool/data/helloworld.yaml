@@ -57,3 +57,18 @@ underscore_param:
   func: Underscore
   before: BeforeUnderscore
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+
+hook_generic:
+  target: main
+  func: GenericExample
+  before: MyHookGenericBefore
+  after: MyHookGenericAfter
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+
+hook_generic_recv:
+  target: main
+  func: GenericRecvExample
+  recv: "*GenStruct"
+  before: MyHookRecvBefore
+  after: MyHookRecvAfter
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"

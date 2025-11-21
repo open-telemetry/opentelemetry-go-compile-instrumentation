@@ -43,9 +43,31 @@ func AddressOf(name string) *dst.UnaryExpr {
 	return &dst.UnaryExpr{Op: token.AND, X: Ident(name)}
 }
 
-func CallTo(name string, args []dst.Expr) *dst.CallExpr {
+// CallTo creates a call expression to a function with optional type arguments for generics.
+// For non-generic functions (typeArgs is nil or empty), creates a simple call: Foo(args...)
+// For generic functions with type arguments, creates: Foo[T1, T2](args...)
+func CallTo(name string, typeArgs *dst.FieldList, args []dst.Expr) *dst.CallExpr {
+	if typeArgs == nil || len(typeArgs.List) == 0 {
+		return &dst.CallExpr{
+			Fun:  &dst.Ident{Name: name},
+			Args: args,
+		}
+	}
+
+	var indices []dst.Expr
+	for _, field := range typeArgs.List {
+		for _, ident := range field.Names {
+			indices = append(indices, Ident(ident.Name))
+		}
+	}
+	var fun dst.Expr
+	if len(indices) == 1 {
+		fun = IndexExpr(Ident(name), indices[0])
+	} else {
+		fun = IndexListExpr(Ident(name), indices)
+	}
 	return &dst.CallExpr{
-		Fun:  &dst.Ident{Name: name},
+		Fun:  fun,
 		Args: args,
 	}
 }
@@ -100,6 +122,14 @@ func IndexExpr(x, index dst.Expr) *dst.IndexExpr {
 	return &dst.IndexExpr{
 		X:     e,
 		Index: i,
+	}
+}
+
+func IndexListExpr(x dst.Expr, indices []dst.Expr) *dst.IndexListExpr {
+	e := util.AssertType[dst.Expr](dst.Clone(x))
+	return &dst.IndexListExpr{
+		X:       e,
+		Indices: indices,
 	}
 }
 
@@ -276,4 +306,15 @@ func StructLit(typeName string, fields ...*dst.KeyValueExpr) dst.Expr {
 		Op: token.AND,
 		X:  CompositeLit(Ident(typeName), exprs),
 	}
+}
+
+// CloneTypeParams safely clones a type parameter field list for generic functions.
+// Returns nil if the input is nil.
+func CloneTypeParams(typeParams *dst.FieldList) *dst.FieldList {
+	if typeParams == nil {
+		return nil
+	}
+	cloned, ok := dst.Clone(typeParams).(*dst.FieldList)
+	util.Assert(ok, "typeParams is not a FieldList")
+	return cloned
 }
