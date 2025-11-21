@@ -62,15 +62,9 @@ func CallTo(name string, typeArgs *dst.FieldList, args []dst.Expr) *dst.CallExpr
 	}
 	var fun dst.Expr
 	if len(indices) == 1 {
-		fun = &dst.IndexExpr{
-			X:     Ident(name),
-			Index: indices[0],
-		}
+		fun = IndexExpr(Ident(name), indices[0])
 	} else {
-		fun = &dst.IndexListExpr{
-			X:       Ident(name),
-			Indices: indices,
-		}
+		fun = IndexListExpr(Ident(name), indices)
 	}
 	return &dst.CallExpr{
 		Fun:  fun,
@@ -128,6 +122,14 @@ func IndexExpr(x, index dst.Expr) *dst.IndexExpr {
 	return &dst.IndexExpr{
 		X:     e,
 		Index: i,
+	}
+}
+
+func IndexListExpr(x dst.Expr, indices []dst.Expr) *dst.IndexListExpr {
+	e := util.AssertType[dst.Expr](dst.Clone(x))
+	return &dst.IndexListExpr{
+		X:       e,
+		Indices: indices,
 	}
 }
 
