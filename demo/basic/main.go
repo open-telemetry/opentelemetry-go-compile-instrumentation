@@ -31,6 +31,15 @@ type MyStruct struct{}
 
 func (m *MyStruct) Example() { println("MyStruct.Example") }
 
+type GenStruct[T any] struct {
+	Value T
+}
+
+func (m *GenStruct[T]) GenericRecvExample(t T) T {
+	fmt.Printf("%s%s\n", m.Value, t)
+	return t
+}
+
 func GenericExample[K comparable, V any](key K, value V) V {
 	println("Hello, Generic World!", key, value)
 	return value
@@ -59,10 +68,13 @@ func main() {
 	// Call the Example function to trigger the instrumentation
 	Example()
 	m := &MyStruct{}
-	GenericExample(1, 2)
 	// Add a new field to the struct
 	m.NewField = "abc"
 	m.Example()
+
+	GenericExample(1, 2)
+	g := &GenStruct[string]{Value: "Hello"}
+	_ = g.GenericRecvExample(", Generic Recv World!")
 
 	// Call real module function
 	println(rate.Every(time.Duration(1)))

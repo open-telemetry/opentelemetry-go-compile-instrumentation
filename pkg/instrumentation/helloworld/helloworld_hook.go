@@ -71,6 +71,14 @@ func MyHook1After(ictx inst.HookContext) {
 	println("After MyStruct.Example()")
 }
 
+func MyHookRecvBefore(ictx inst.HookContext, recv, _ interface{}) {
+	println("GenericRecvExample before hook")
+}
+
+func MyHookRecvAfter(ictx inst.HookContext, _ interface{}) {
+	println("GenericRecvExample after hook")
+}
+
 func MyHookGenericBefore(ictx inst.HookContext, _, _ interface{}) {
 	println("GenericExample before hook")
 }

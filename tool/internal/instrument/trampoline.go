@@ -473,8 +473,9 @@ func (ip *InstrumentPhase) buildTrampolineTypes() {
 		}
 	}
 	addHookContext(afterHookFunc.Type.Params)
-	beforeHookFunc.Type.TypeParams = ast.CloneTypeParams(ip.targetFunc.Type.TypeParams)
-	afterHookFunc.Type.TypeParams = ast.CloneTypeParams(ip.targetFunc.Type.TypeParams)
+	trampolineTypeParams := combineTypeParams(ip.targetFunc)
+	beforeHookFunc.Type.TypeParams = ast.CloneTypeParams(trampolineTypeParams)
+	afterHookFunc.Type.TypeParams = ast.CloneTypeParams(trampolineTypeParams)
 }
 
 func assignString(assignStmt *dst.AssignStmt, val string) bool {
@@ -640,6 +641,108 @@ func setReturnValClause(idx int, t dst.Expr) *dst.CaseClause {
 	return setValue(trampolineReturnValsIdentifier, idx, t)
 }
 
+// extractReceiverTypeParams extracts type parameters from a receiver type expression
+// For example: *GenStruct[T] or GenStruct[T, U] -> FieldList with T and U as type parameters
+func extractReceiverTypeParams(recvType dst.Expr) *dst.FieldList {
+	switch t := recvType.(type) {
+	case *dst.StarExpr:
+		// *GenStruct[T] - recurse into X
+		return extractReceiverTypeParams(t.X)
+	case *dst.IndexExpr:
+		// GenStruct[T] - single type parameter
+		if ident, ok := t.Index.(*dst.Ident); ok {
+			return &dst.FieldList{
+				List: []*dst.Field{{
+					Names: []*dst.Ident{ident},
+					Type:  ast.Ident("any"), // Type constraint for the parameter
+				}},
+			}
+		}
+	case *dst.IndexListExpr:
+		// GenStruct[T, U, ...] - multiple type parameters
+		fields := make([]*dst.Field, 0, len(t.Indices))
+		for _, idx := range t.Indices {
+			if ident, ok := idx.(*dst.Ident); ok {
+				fields = append(fields, &dst.Field{
+					Names: []*dst.Ident{ident},
+					Type:  ast.Ident("any"), // Type constraint for the parameter
+				})
+			}
+		}
+		if len(fields) > 0 {
+			return &dst.FieldList{List: fields}
+		}
+	}
+	return nil
+}
+
+// combineTypeParams combines type parameters from the receiver and function type parameters.
+// For methods on generic types, it extracts type parameters from the receiver and merges
+// them with the function's type parameters.
+// Receiver type parameters come first, followed by function type parameters.
+//
+// Example:
+//
+//	Original: func (c *Container[K]) Transform[V any]() V
+//	Result: [K, V]
+//
+//	Generated trampolines:
+//	  func OtelBeforeTrampoline_Container_Transform[K comparable, V any](
+//	      hookContext *HookContext,
+//	      recv0 *Container[K],  // ← Uses K
+//	  ) { ... }
+//
+//	  func OtelAfterTrampoline_Container_Transform[K comparable, V any](
+//	      hookContext *HookContext,
+//	      arg0 *V,  // ← Uses V (return type)
+//	  ) { ... }
+func combineTypeParams(targetFunc *dst.FuncDecl) *dst.FieldList {
+	var trampolineTypeParams *dst.FieldList
+	if ast.HasReceiver(targetFunc) {
+		receiverTypeParams := extractReceiverTypeParams(targetFunc.Recv.List[0].Type)
+		if receiverTypeParams != nil {
+			trampolineTypeParams = receiverTypeParams
+		}
+	}
+	if targetFunc.Type.TypeParams != nil {
+		if trampolineTypeParams == nil {
+			trampolineTypeParams = targetFunc.Type.TypeParams
+		} else {
+			combined := &dst.FieldList{List: make([]*dst.Field, 0)}
+			combined.List = append(combined.List, trampolineTypeParams.List...)
+			combined.List = append(combined.List, targetFunc.Type.TypeParams.List...)
+			trampolineTypeParams = combined
+		}
+	}
+	return trampolineTypeParams
+}
+
+// replaceGenericInstantiations replaces generic type instantiations with interface{}
+// For example: *GenStruct[T] -> *interface{}, []GenStruct[T, U] -> []interface{}
+func replaceGenericInstantiations(t dst.Expr) dst.Expr {
+	switch tType := t.(type) {
+	case *dst.StarExpr:
+		// *GenStruct[T] -> *interface{}
+		return ast.DereferenceOf(replaceGenericInstantiations(tType.X))
+	case *dst.ArrayType:
+		// []GenStruct[T] -> []interface{}
+		return ast.ArrayType(replaceGenericInstantiations(tType.Elt))
+	case *dst.MapType:
+		// map[K]GenStruct[T] -> map[interface{}]interface{}
+		return &dst.MapType{
+			Key:   replaceGenericInstantiations(tType.Key),
+			Value: replaceGenericInstantiations(tType.Value),
+		}
+	case *dst.IndexExpr:
+		// GenStruct[T] -> interface{}
+		return ast.InterfaceType()
+	case *dst.IndexListExpr:
+		// GenStruct[T, U] -> interface{}
+		return ast.InterfaceType()
+	}
+	return t
+}
+
 // desugarType desugars parameter type to its original type, if parameter
 // is type of ...T, it will be converted to []T
 func desugarType(param *dst.Field) dst.Expr {
@@ -677,10 +780,22 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 	methodGetParamBody := findSwitchBlock(methodGetParam, 0)
 	methodSetRetValBody := findSwitchBlock(methodSetRetVal, 1)
 	methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
+
+	combinedTypeParams := combineTypeParams(ip.targetFunc)
+
+	ip.rewriteHookContextParams(methodSetParamBody, methodGetParamBody, combinedTypeParams)
+	ip.rewriteHookContextResults(methodSetRetValBody, methodGetRetValBody, combinedTypeParams)
+}
+
+func (ip *InstrumentPhase) rewriteHookContextParams(
+	methodSetParamBody, methodGetParamBody *dst.BlockStmt,
+	combinedTypeParams *dst.FieldList,
+) {
 	idx := 0
 	if ast.HasReceiver(ip.targetFunc) {
 		splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
-		recvType := replaceTypeParamsWithAny(splitRecv.List[0].Type, ip.targetFunc.Type.TypeParams)
+		recvType := replaceGenericInstantiations(splitRecv.List[0].Type)
+		recvType = replaceTypeParamsWithAny(recvType, combinedTypeParams)
 		clause := setParamClause(idx, recvType)
 		methodSetParamBody.List = append(methodSetParamBody.List, clause)
 		clause = getParamClause(idx, recvType)
@@ -689,19 +804,24 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 	}
 	splitParams := ast.SplitMultiNameFields(ip.targetFunc.Type.Params)
 	for _, param := range splitParams.List {
-		paramType := replaceTypeParamsWithAny(desugarType(param), ip.targetFunc.Type.TypeParams)
+		paramType := replaceTypeParamsWithAny(desugarType(param), combinedTypeParams)
 		clause := setParamClause(idx, paramType)
 		methodSetParamBody.List = append(methodSetParamBody.List, clause)
 		clause = getParamClause(idx, paramType)
 		methodGetParamBody.List = append(methodGetParamBody.List, clause)
 		idx++
 	}
-	// Rewrite GetReturnVal and SetReturnVal methods
+}
+
+func (ip *InstrumentPhase) rewriteHookContextResults(
+	methodSetRetValBody, methodGetRetValBody *dst.BlockStmt,
+	combinedTypeParams *dst.FieldList,
+) {
 	if ip.targetFunc.Type.Results != nil {
-		idx = 0
+		idx := 0
 		splitResults := ast.SplitMultiNameFields(ip.targetFunc.Type.Results)
 		for _, retval := range splitResults.List {
-			retType := replaceTypeParamsWithAny(desugarType(retval), ip.targetFunc.Type.TypeParams)
+			retType := replaceTypeParamsWithAny(desugarType(retval), combinedTypeParams)
 			clause := getReturnValClause(idx, retType)
 			methodGetRetValBody.List = append(methodGetRetValBody.List, clause)
 			clause = setReturnValClause(idx, retType)
@@ -752,6 +872,13 @@ func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 			Key:   replaceTypeParamsWithAny(tType.Key, typeParams),
 			Value: replaceTypeParamsWithAny(tType.Value, typeParams),
 		}
+	case *dst.IndexExpr:
+		// GenStruct[T] -> interface{} (for generic receiver methods)
+		// The hook function expects interface{} for generic types
+		return ast.InterfaceType()
+	case *dst.IndexListExpr:
+		// GenStruct[T, U] -> interface{} (for generic receiver methods with multiple type params)
+		return ast.InterfaceType()
 	}
 	return t
 }
