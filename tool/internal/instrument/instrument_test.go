@@ -46,7 +46,8 @@ const (
 )
 
 func TestInstrumentation_Integration(t *testing.T) {
-	entries, _ := os.ReadDir(filepath.Join(testdataDir, goldenDir))
+	entries, err := os.ReadDir(filepath.Join(testdataDir, goldenDir))
+	require.NoError(t, err)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -68,7 +69,7 @@ func runTest(t *testing.T, testName string) {
 	sourceFile := filepath.Join(tempDir, mainGoFileName)
 	util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
 
-	ruleSet := loadRulesYAML(testName, sourceFile)
+	ruleSet := loadRulesYAML(t, testName, sourceFile)
 	writeMatchedJSON(ruleSet)
 
 	args := compileArgs(tempDir, sourceFile)
@@ -84,8 +85,9 @@ func runTest(t *testing.T, testName string) {
 	verifyGoldenFiles(t, tempDir, testName)
 }
 
-func loadRulesYAML(testName, sourceFile string) *rule.InstRuleSet {
-	data, _ := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
+func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet {
+	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
+	require.NoError(t, err)
 
 	var rawRules map[string]map[string]any
 	yaml.Unmarshal(data, &rawRules)
