@@ -27,6 +27,11 @@ func TestBasic(t *testing.T) {
 		"[MyHook]",
 		"=setupOpenTelemetry=",
 		"RawCode",
+		"funcName:Example",
+		"packageName:main",
+		"paramCount:1",
+		"returnValCount:0",
+		"isSkipCall:false",
 	}
 	for _, e := range expect {
 		require.Contains(t, output, e)

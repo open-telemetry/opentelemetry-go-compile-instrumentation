@@ -16,8 +16,6 @@ import (
 )
 
 const (
-	exitCodeFailure = -1
-
 	debugLogFilename = "debug.log"
 )
 

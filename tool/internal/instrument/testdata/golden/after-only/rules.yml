@@ -1,0 +1,6 @@
+hook_after_only:
+  target: main
+  func: Func1
+  after: H1After
+  path: testdata
+

@@ -36,12 +36,10 @@ func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
 	// appropriate jump point to insert trampoline jump.
 	if len(jumpIf.Decs.If) == 1 && jumpIf.Decs.If[0] == tJumpLabel {
 		// Insert trampoline jump within the else block
-		elseBlock, ok := jumpIf.Else.(*dst.BlockStmt)
-		util.Assert(ok, "elseBlock is not a BlockStmt")
+		elseBlock := util.AssertType[*dst.BlockStmt](jumpIf.Else)
 		if len(elseBlock.List) > 1 {
 			// One trampoline jump already exists, recursively find last one
-			ifStmt, ok1 := elseBlock.List[len(elseBlock.List)-1].(*dst.IfStmt)
-			util.Assert(ok1, "unexpected statement in trampoline-jump-if")
+			ifStmt := util.AssertType[*dst.IfStmt](elseBlock.List[len(elseBlock.List)-1])
 			return findJumpPoint(ifStmt)
 		}
 		// Otherwise, this is the appropriate jump point
@@ -95,7 +93,7 @@ func createHookArgs(names []string) []dst.Expr {
 	// If we find "a type" in target func, we pass "&a" to trampoline func,
 	// if we find "_ type" in target func, we pass "nil" to trampoline func,
 	for _, name := range names {
-		if name == "_" {
+		if name == ast.IdentIgnore {
 			exprs = append(exprs, ast.Nil())
 		} else {
 			exprs = append(exprs, ast.AddressOf(name))
@@ -317,7 +315,7 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 	ip.target = root
 	// Every time we parse a file, we need to reset the trampoline jumps
 	// because they are associated with one certain file
-	ip.tjumps = ip.tjumps[:0]
+	ip.tjumps = make([]*TJump, 0)
 	return root, nil
 }
 

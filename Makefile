@@ -8,7 +8,8 @@ SHELL := /bin/bash
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
-        test-unit/coverage test-integration/coverage test-e2e/coverage
+        test-unit/coverage test-integration/coverage test-e2e/coverage test-unit/update-golden \
+        registry-diff registry-check registry-resolve weaver-install
 
 # Constant variables
 BINARY_NAME := otel
@@ -34,14 +35,15 @@ endif
 
 .PHONY: help
 help: ## Show this help message
+	@echo -e "\033[1;3;34mOpenTelemetry Go Compile Instrumentation.\033[0m\n"
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[A-Za-z0-9_.\/-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf ""} /^[a-zA-Z_0-9\/-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 all: build format lint test
 
-# Build targets
+##@ Core Build
 
 build: package ## Build the instrumentation tool
 	@echo "Building instrumentation tool..."
@@ -101,7 +103,7 @@ build-demo-http: ## Build HTTP demo server and client
 	@(cd demo/http/server && go build -o server .)
 	@(cd demo/http/client && go build -o client .)
 
-# Format targets
+##@ Code Quality
 
 format: ## Format Go code and YAML files
 format: format/go format/yaml lint/license-header/fix
@@ -109,15 +111,13 @@ format: format/go format/yaml lint/license-header/fix
 format/go: ## Format Go code only
 format/go: golangci-lint
 	@echo "Formatting Go code..."
-	golangci-lint fmt
-	golangci-lint run --fix
+	golangci-lint fmt --config .config/golangci.yml
+	golangci-lint run --config .config/golangci.yml --fix
 
 format/yaml: ## Format YAML files only (excludes testdata)
 format/yaml: yamlfmt
 	@echo "Formatting YAML files..."
-	yamlfmt -dstar '**/*.yml' '**/*.yaml'
-
-# Lint targets
+	yamlfmt -conf .config/yamlfmt -dstar '**/*.yml' '**/*.yaml'
 
 lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile)
 lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile
@@ -130,12 +130,12 @@ lint/action: actionlint ratchet/check
 lint/go: ## Run golangci-lint on Go code
 lint/go: golangci-lint
 	@echo "Linting Go code..."
-	golangci-lint run
+	golangci-lint run --config .config/golangci.yml
 
 lint/yaml: ## Lint YAML formatting
 lint/yaml: yamlfmt
 	@echo "Linting YAML files..."
-	yamlfmt -lint -dstar '**/*.yml' '**/*.yaml'
+	yamlfmt -conf .config/yamlfmt -lint -dstar '**/*.yml' '**/*.yaml'
 
 lint/dockerfile: ## Lint Dockerfiles
 lint/dockerfile: hadolint
@@ -146,21 +146,29 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	$$HADOLINT_CMD demo/grpc/client/Dockerfile demo/grpc/server/Dockerfile demo/http/client/Dockerfile demo/http/server/Dockerfile
+	$$HADOLINT_CMD -c .config/hadolint.yaml demo/grpc/client/Dockerfile demo/grpc/server/Dockerfile demo/http/client/Dockerfile demo/http/server/Dockerfile
 
 lint/makefile: ## Lint Makefile
 lint/makefile: checkmake
 	@echo "Linting Makefile..."
-	checkmake --config .checkmake Makefile
-
-# License header targets
+	checkmake --config .config/checkmake Makefile
 
 lint/license-header: ## Check license headers in source files
-	@./scripts/license-check.sh
+	@.github/scripts/license-check.sh
 
 .PHONY: lint/license-header/fix
 lint/license-header/fix: ## Add missing license headers to source files
-	@./scripts/license-check.sh --fix
+	@.github/scripts/license-check.sh --fix
+
+##@ Markdown
+
+.PHONY: lint/markdown
+lint/markdown: ## Lint Check the markdown files.
+	npx markdownlint-cli -c .config/markdownlint.yaml **/*.md
+
+.PHONY: lint/markdown/fix
+lint/markdown/fix: ## Lint Check the markdown files and fix them.
+	npx markdownlint-cli -c .config/markdownlint.yaml --fix **/*.md
 
 # Ratchet targets for GitHub Actions pinning
 
@@ -179,7 +187,7 @@ ratchet/check: ratchet
 	@echo "Checking GitHub Actions are pinned..."
 	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs ratchet lint
 
-# Documentation targets
+##@ Documentation
 
 docs: ## Update embedded documentation in markdown files
 docs: embedmd tmp/make-help.txt
@@ -191,7 +199,7 @@ tmp/make-help.txt: $(MAKEFILE_LIST)
 	@mkdir -p tmp
 	@$(MAKE) --no-print-directory help > tmp/make-help.txt
 
-# Validation targets
+##@ Validation
 
 check-embed: ## Verify that embedded files exist (required for tests)
 	@echo "Checking embedded files..."
@@ -207,7 +215,7 @@ check-embed: ## Verify that embedded files exist (required for tests)
 	fi
 	@echo "All embedded files present"
 
-# Test targets
+##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
 # uses //go:embed to embed otel-pkg.gz at compile time. If the file doesn't exist
 # when Go compiles the test packages, the embed will fail.
@@ -221,6 +229,13 @@ test-unit: package gotestfmt
 	@echo "Running unit tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
+
+.ONESHELL:
+test-unit/update-golden: ## Run unit tests and update golden files
+test-unit/update-golden: package
+	@echo "Running unit tests and updating golden files..."
+	set -euo pipefail
+	cd tool/internal/instrument && go test -v -timeout=5m -count=1 -update
 
 .ONESHELL:
 test-unit/coverage: ## Run unit tests with coverage report
@@ -257,7 +272,7 @@ test-e2e/coverage: build gotestfmt
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log | gotestfmt
 
-# Clean targets
+##@ Utilities
 
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
@@ -274,8 +289,6 @@ clean: ## Clean build artifacts
 	rm -rf demo/http/server/.otel-build
 	rm -rf demo/http/client/.otel-build
 	rm -f ./gotest-unit.log ./gotest-integration.log ./gotest-e2e.log
-
-# Tool installation targets
 
 gotestfmt: ## Install gotestfmt if not present
 	@if ! command -v gotestfmt >/dev/null 2>&1; then \
@@ -349,4 +362,154 @@ hadolint: ## Install hadolint if not present
 			echo "Please install hadolint manually from https://github.com/hadolint/hadolint#install"; \
 			exit 1; \
 		fi; \
+	fi
+
+# Semantic Convention Registry targets
+
+weaver-install: ## Install OTel Weaver if not present
+	@if ! command -v weaver >/dev/null 2>&1; then \
+		echo "Installing OTel Weaver..."; \
+		WEAVER_VERSION="v0.19.0"; \
+		if [ "$$(uname -s)" = "Darwin" ]; then \
+			if [ "$$(uname -m)" = "arm64" ]; then \
+				WEAVER_ARCH="aarch64-apple-darwin"; \
+			else \
+				WEAVER_ARCH="x86_64-apple-darwin"; \
+			fi; \
+		elif [ "$$(uname -s)" = "Linux" ]; then \
+			WEAVER_ARCH="x86_64-unknown-linux-gnu"; \
+		else \
+			echo "Error: Unsupported platform $$(uname -s)"; \
+			exit 1; \
+		fi; \
+		WEAVER_URL="https://github.com/open-telemetry/weaver/releases/download/$${WEAVER_VERSION}/weaver-$${WEAVER_ARCH}.tar.xz"; \
+		echo "Downloading weaver from $${WEAVER_URL}..."; \
+		mkdir -p /tmp/weaver-install; \
+		curl -fsSL "$${WEAVER_URL}" -o /tmp/weaver-install/weaver.tar.xz; \
+		tar -xJf /tmp/weaver-install/weaver.tar.xz -C /tmp/weaver-install; \
+		WEAVER_BIN=$$(find /tmp/weaver-install -name weaver -type f); \
+		if [ -z "$$WEAVER_BIN" ]; then \
+			echo "Error: weaver binary not found in archive"; \
+			rm -rf /tmp/weaver-install; \
+			exit 1; \
+		fi; \
+		chmod +x "$$WEAVER_BIN"; \
+		mkdir -p "$$(go env GOPATH)/bin"; \
+		mv "$$WEAVER_BIN" "$$(go env GOPATH)/bin/weaver"; \
+		rm -rf /tmp/weaver-install; \
+		echo "Installed weaver to $$(go env GOPATH)/bin/weaver"; \
+		weaver --version; \
+	else \
+		echo "OTel Weaver is already installed at $$(command -v weaver)"; \
+		weaver --version; \
+	fi
+
+# Semantic Conventions Validation Targets
+lint/semantic-conventions: ## Validate semantic convention registry against the project's version
+lint/semantic-conventions: weaver-install
+	@echo "Validating semantic convention registry..."
+	@# Read the semconv version from .semconv-version file (ignore comments and empty lines)
+	@if [ ! -f .semconv-version ]; then \
+		echo "Error: .semconv-version file not found"; \
+		exit 1; \
+	fi; \
+	CURRENT_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]'); \
+	if [ -z "$$CURRENT_VERSION" ]; then \
+		echo "Error: No version found in .semconv-version file"; \
+		exit 1; \
+	fi; \
+	echo "Checking semantic conventions registry at version: $$CURRENT_VERSION"; \
+	echo "Cloning semantic-conventions repository..."; \
+	rm -rf /tmp/semconv-$$$$; \
+	git clone --depth 1 --branch $$CURRENT_VERSION https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-$$$$ 2>/dev/null || { \
+		echo "::error::Failed to clone semantic-conventions repository at version $$CURRENT_VERSION"; \
+		rm -rf /tmp/semconv-$$$$; \
+		exit 1; \
+	}; \
+	weaver registry check --registry /tmp/semconv-$$$$/model; \
+	EXIT_CODE=$$?; \
+	rm -rf /tmp/semconv-$$$$; \
+	exit $$EXIT_CODE
+
+semantic-conventions/diff: ## Generate diff between current version and latest (non-blocking informational check)
+semantic-conventions/diff: weaver-install
+	@echo "Generating semantic convention registry diff (current vs latest)..."
+	@mkdir -p tmp
+	@# Read the semconv version from .semconv-version file (ignore comments and empty lines)
+	@if [ ! -f .semconv-version ]; then \
+		echo "Error: .semconv-version file not found"; \
+		exit 1; \
+	fi; \
+	CURRENT_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]'); \
+	if [ -z "$$CURRENT_VERSION" ]; then \
+		echo "Error: No version found in .semconv-version file"; \
+		exit 1; \
+	fi; \
+	echo "Current project version: $$CURRENT_VERSION"; \
+	echo "Cloning semantic-conventions repositories..."; \
+	rm -rf /tmp/semconv-current-$$$$ /tmp/semconv-latest-$$$$ tmp/registry-diff-latest; \
+	git clone --depth 1 --branch $$CURRENT_VERSION https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-current-$$$$ 2>/dev/null && \
+	git clone --depth 1 https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-latest-$$$$ 2>/dev/null || { \
+		echo "⚠️  Warning: Failed to clone repositories (this is non-blocking)"; \
+		echo "⚠️  Registry diff generation failed." > tmp/registry-diff-latest.md; \
+		rm -rf /tmp/semconv-current-$$$$ /tmp/semconv-latest-$$$$; \
+		exit 0; \
+	}; \
+	mkdir -p tmp/registry-diff-latest; \
+	weaver registry diff \
+		--registry /tmp/semconv-latest-$$$$/model \
+		--baseline-registry /tmp/semconv-current-$$$$/model \
+		--diff-format markdown \
+		--output tmp/registry-diff-latest || { \
+			echo "⚠️  Warning: Registry diff generation failed (this is non-blocking)"; \
+			rm -rf tmp/registry-diff-latest; \
+			echo "⚠️  Registry diff generation failed." > tmp/registry-diff-latest.md; \
+		}; \
+	rm -rf /tmp/semconv-current-$$$$ /tmp/semconv-latest-$$$$; \
+	if [ -f tmp/registry-diff-latest/diff.md ]; then \
+		mv tmp/registry-diff-latest/diff.md tmp/registry-diff-latest.md; \
+		rm -rf tmp/registry-diff-latest; \
+		echo ""; \
+		echo "🆕 Available updates (latest vs $$CURRENT_VERSION):"; \
+		echo "Saved to: tmp/registry-diff-latest.md"; \
+		echo ""; \
+		cat tmp/registry-diff-latest.md; \
+	elif [ -f tmp/registry-diff-latest.md ]; then \
+		echo ""; \
+		echo "⚠️  Registry diff generation failed."; \
+		cat tmp/registry-diff-latest.md; \
+	fi; \
+	exit 0
+
+semantic-conventions/resolve: ## Display the current semantic conventions version
+semantic-conventions/resolve:
+	@echo "Semantic conventions version management"
+	@echo "========================================"
+	@if [ ! -f .semconv-version ]; then \
+		echo "Error: .semconv-version file not found"; \
+		exit 1; \
+	fi; \
+	CURRENT_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]'); \
+	if [ -z "$$CURRENT_VERSION" ]; then \
+		echo "Error: No version found in .semconv-version file"; \
+		exit 1; \
+	fi; \
+	echo "Current version: $$CURRENT_VERSION"; \
+	echo ""; \
+	echo "Checking for latest version..."; \
+	LATEST_TAG=$$(git ls-remote --tags --refs https://github.com/open-telemetry/semantic-conventions.git 2>/dev/null | \
+		grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$$' | \
+		awk -F/ '{print $$NF}' | \
+		sort -t. -k1,1n -k2,2n -k3,3n | \
+		tail -1); \
+	if [ -n "$$LATEST_TAG" ]; then \
+		echo "Latest available: $$LATEST_TAG"; \
+		if [ "$$CURRENT_VERSION" != "$$LATEST_TAG" ]; then \
+			echo ""; \
+			echo "🆕 Update available: $$CURRENT_VERSION → $$LATEST_TAG"; \
+		else \
+			echo "✅ You are using the latest version"; \
+		fi; \
+	else \
+		echo "⚠️  Unable to check latest version"; \
 	fi

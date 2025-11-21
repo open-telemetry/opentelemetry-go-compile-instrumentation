@@ -1,0 +1,8 @@
+hook_method:
+  target: main
+  func: Func1
+  recv: "*T"
+  before: H3Before
+  after: H3After
+  path: testdata
+

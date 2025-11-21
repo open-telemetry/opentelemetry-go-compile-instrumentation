@@ -60,8 +60,7 @@ func (ap *AstParser) ParseSnippet(source string) ([]dst.Stmt, error) {
 	if err != nil {
 		return nil, ex.Wrap(err)
 	}
-	funcDecl, ok := file.Decls[0].(*dst.FuncDecl)
-	util.Assert(ok, "must be a func decl")
+	funcDecl := util.AssertType[*dst.FuncDecl](file.Decls[0])
 	return funcDecl.Body.List, nil
 }
 

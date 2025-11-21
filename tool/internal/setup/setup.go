@@ -81,7 +81,6 @@ func Setup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	sp.Info("Setup completed successfully")
 	return nil
 }
 
@@ -119,4 +118,36 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
 
 	return util.RunCmdWithEnv(ctx, env, newArgs...)
+}
+
+func GoBuild(ctx context.Context, args []string) error {
+	logger := util.LoggerFromContext(ctx)
+	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+	err := util.BackupFile(backupFiles)
+	if err != nil {
+		logger.DebugContext(ctx, "failed to back up files", "error", err)
+	}
+	defer func() {
+		err = os.RemoveAll(OtelRuntimeFile)
+		if err != nil {
+			logger.DebugContext(ctx, "failed to remove otel runtime file", "error", err)
+		}
+		err = util.RestoreFile(backupFiles)
+		if err != nil {
+			logger.DebugContext(ctx, "failed to restore files", "error", err)
+		}
+	}()
+
+	err = Setup(ctx, os.Args[1:])
+	if err != nil {
+		return err
+	}
+	logger.InfoContext(ctx, "Setup completed successfully")
+
+	err = BuildWithToolexec(ctx, args)
+	if err != nil {
+		return err
+	}
+	logger.InfoContext(ctx, "Instrumentation completed successfully")
+	return nil
 }

@@ -39,6 +39,7 @@ const (
 	trampolineGetParamName          = "GetParam"
 	trampolineSetReturnValName      = "SetReturnVal"
 	trampolineGetReturnValName      = "GetReturnVal"
+	trampolineSetSkipCallName       = "SetSkipCall"
 	trampolineValIdentifier         = "val"
 	trampolineCtxIdentifier         = "c"
 	trampolineParamsIdentifier      = "params"
@@ -86,7 +87,8 @@ func (ip *InstrumentPhase) ensureUnsafeImport() {
 			}
 		}
 	}
-	ip.target.Decls = append([]dst.Decl{ast.ImportDecl("_", unsafePackageName)}, ip.target.Decls...)
+	unsafeImport := ast.ImportDecl(ast.IdentIgnore, unsafePackageName)
+	ip.target.Decls = append([]dst.Decl{unsafeImport}, ip.target.Decls...)
 }
 
 func (ip *InstrumentPhase) materializeTemplate() error {
@@ -113,10 +115,8 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 			default:
 				if ast.HasReceiver(decl) {
 					// We know exactly this is HookContextImpl method
-					t, ok1 := decl.Recv.List[0].Type.(*dst.StarExpr)
-					util.Assert(ok1, "t is not a StarExpr")
-					t2, ok2 := t.X.(*dst.Ident)
-					util.Assert(ok2, "t2 is not a Ident")
+					t := util.AssertType[*dst.StarExpr](decl.Recv.List[0].Type)
+					t2 := util.AssertType[*dst.Ident](t.X)
 					util.Assert(t2.Name == trampolineHookContextImplType, "sanity check")
 					ip.hookCtxMethods = append(ip.hookCtxMethods, decl)
 					ip.addDecl(decl)
@@ -429,21 +429,18 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
 	paramList := &dst.FieldList{List: []*dst.Field{}}
 	if before {
 		if ast.HasReceiver(ip.targetFunc) {
-			recvField, ok := dst.Clone(ip.targetFunc.Recv.List[0]).(*dst.Field)
-			util.Assert(ok, "recvField is not a Field")
+			recvField := util.AssertType[*dst.Field](dst.Clone(ip.targetFunc.Recv.List[0]))
 			renameField(recvField, "recv")
 			paramList.List = append(paramList.List, recvField)
 		}
 		for _, field := range ip.targetFunc.Type.Params.List {
-			paramField, ok := dst.Clone(field).(*dst.Field)
-			util.Assert(ok, "paramField is not a Field")
+			paramField := util.AssertType[*dst.Field](dst.Clone(field))
 			renameField(paramField, "param")
 			paramList.List = append(paramList.List, paramField)
 		}
 	} else if ip.targetFunc.Type.Results != nil {
 		for _, field := range ip.targetFunc.Type.Results.List {
-			retField, ok := dst.Clone(field).(*dst.Field)
-			util.Assert(ok, "retField is not a Field")
+			retField := util.AssertType[*dst.Field](dst.Clone(field))
 			renameField(retField, "arg")
 			paramList.List = append(paramList.List, retField)
 		}
@@ -473,7 +470,7 @@ func assignString(assignStmt *dst.AssignStmt, val string) bool {
 	rhs := assignStmt.Rhs
 	if len(rhs) == 1 {
 		rhsExpr := rhs[0]
-		if basicLit, ok2 := rhsExpr.(*dst.BasicLit); ok2 {
+		if basicLit, ok := rhsExpr.(*dst.BasicLit); ok {
 			if basicLit.Kind == token.STRING {
 				basicLit.Value = strconv.Quote(val)
 				return true
@@ -555,16 +552,13 @@ func (ip *InstrumentPhase) populateHookContext(before bool) bool {
 // trampoline template
 func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 	suffix := util.CRC32(t.String())
-	structType, ok := ip.hookCtxDecl.Specs[0].(*dst.TypeSpec)
-	util.Assert(ok, "structType is not a TypeSpec")
+	structType := util.AssertType[*dst.TypeSpec](ip.hookCtxDecl.Specs[0])
 	util.Assert(structType.Name.Name == trampolineHookContextImplType,
 		"sanity check")
 	structType.Name.Name += suffix             // type declaration
 	for _, method := range ip.hookCtxMethods { // method declaration
-		t1, ok1 := method.Recv.List[0].Type.(*dst.StarExpr)
-		util.Assert(ok1, "t1 is not a StarExpr")
-		t2, ok2 := t1.X.(*dst.Ident)
-		util.Assert(ok2, "t2 is not a Ident")
+		t1 := util.AssertType[*dst.StarExpr](method.Recv.List[0].Type)
+		t2 := util.AssertType[*dst.Ident](t1.X)
 		t2.Name += suffix
 	}
 	for _, node := range []dst.Node{ip.beforeHookFunc, ip.afterHookFunc} {
@@ -645,8 +639,7 @@ func desugarType(param *dst.Field) dst.Expr {
 }
 
 func (ip *InstrumentPhase) rewriteHookContext() {
-	const expectMinMethodCount = 4
-	util.Assert(len(ip.hookCtxMethods) > expectMinMethodCount, "sanity check")
+	util.Assert(len(ip.hookCtxMethods) > 4, "sanity check")
 	var methodSetParam, methodGetParam, methodGetRetVal, methodSetRetVal *dst.FuncDecl
 	for _, decl := range ip.hookCtxMethods {
 		switch decl.Name.Name {
@@ -664,8 +657,7 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 	// Don't believe what you see in template, we will null out it and rewrite
 	// the whole switch statement
 	findSwitchBlock := func(fn *dst.FuncDecl, idx int) *dst.BlockStmt {
-		stmt, ok := fn.Body.List[idx].(*dst.SwitchStmt)
-		util.Assert(ok, "sanity check")
+		stmt := util.AssertType[*dst.SwitchStmt](fn.Body.List[idx])
 		body := stmt.Body
 		body.List = nil
 		return body

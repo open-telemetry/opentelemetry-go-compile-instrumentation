@@ -1,0 +1,14 @@
+hook_func_1:
+  target: main
+  func: Func1
+  before: H1Before
+  after: H1After
+  path: testdata
+
+hook_func_2:
+  target: main
+  func: Func1
+  before: H2Before
+  after: H2After
+  path: testdata
+

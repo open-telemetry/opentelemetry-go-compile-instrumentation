@@ -65,6 +65,11 @@ func MyHookAfter(ictx inst.HookContext) {
 
 func MyHook1Before(ictx inst.HookContext, recv interface{}) {
 	println("Before MyStruct.Example()")
+	fmt.Printf("funcName:%s\n", ictx.GetFuncName())
+	fmt.Printf("packageName:%s\n", ictx.GetPackageName())
+	fmt.Printf("paramCount:%d\n", ictx.GetParamCount())
+	fmt.Printf("returnValCount:%d\n", ictx.GetReturnValCount())
+	fmt.Printf("isSkipCall:%t\n", ictx.IsSkipCall())
 }
 
 func MyHook1After(ictx inst.HookContext) {

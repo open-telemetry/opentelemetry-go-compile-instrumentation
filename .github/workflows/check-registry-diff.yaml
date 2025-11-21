@@ -1,0 +1,205 @@
+name: Check Semantic Convention Registry
+
+on:
+  pull_request:
+    paths:
+      - 'pkg/inst-api-semconv/**'
+      - '.semconv-version'
+  pull_request_target:
+    paths:
+      - 'pkg/inst-api-semconv/**'
+      - '.semconv-version'
+  push:
+    branches:
+      - main
+    paths:
+      - 'pkg/inst-api-semconv/**'
+      - '.semconv-version'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  # OTel Weaver version to use for registry checks
+  WEAVER_VERSION: v0.19.0
+  # Semantic conventions registry URL
+  SEMCONV_REGISTRY: https://github.com/open-telemetry/semantic-conventions.git
+
+jobs:
+  registry-check:
+    name: Validate Semantic Conventions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+      - uses: actions/setup-go@3a0c2c82458cbb45a3cbfeeb2b91ce8f85420560  # v6.0.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install OTel Weaver
+        run: make weaver-install
+
+      - name: Read semconv version
+        id: read-version
+        run: |
+          if [ ! -f .semconv-version ]; then
+            echo "::error::.semconv-version file not found"
+            exit 1
+          fi
+          CURRENT_VERSION=$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]')
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "::error::No version found in .semconv-version file"
+            exit 1
+          fi
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current semantic conventions version: $CURRENT_VERSION"
+
+      - name: Validate code uses correct semconv version
+        run: |
+          # Detect the semconv version used in the Go code imports
+          DETECTED_VERSION=$(grep -r "semconv/v" pkg/inst-api-semconv/ --include="*.go" | \
+            grep -o "semconv/v[0-9]*\.[0-9]*\.[0-9]*" | \
+            sort -u | \
+            head -1 | \
+            sed 's/semconv\///')
+
+          EXPECTED_VERSION="${{ steps.read-version.outputs.current_version }}"
+
+          if [ -z "$DETECTED_VERSION" ]; then
+            echo "::error::No semconv version detected in Go imports in pkg/inst-api-semconv/"
+            exit 1
+          fi
+
+          echo "Detected version in Go code: $DETECTED_VERSION"
+          echo "Expected version from .semconv-version: $EXPECTED_VERSION"
+
+          if [ "$DETECTED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Version mismatch! Go code imports $DETECTED_VERSION but .semconv-version specifies $EXPECTED_VERSION"
+            echo "::error::Please update either the Go imports or the .semconv-version file to match"
+            exit 1
+          fi
+
+          echo "✅ Version consistency check passed"
+
+      - name: Check registry for violations
+        run: |
+          echo "Validating semantic convention registry for version ${{ steps.read-version.outputs.current_version }}"
+          make lint/semantic-conventions
+
+  registry-diff:
+    name: Check Available Updates (Non-blocking)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@3a0c2c82458cbb45a3cbfeeb2b91ce8f85420560  # v5.2.0
+        with:
+          go-version-file: 'go.mod'
+      - name: Install OTel Weaver
+        run: make weaver-install
+
+      - name: Read semconv version
+        id: read-version
+        run: |
+          CURRENT_VERSION=$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]')
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Generate registry diff (current vs latest)
+        continue-on-error: true
+        run: |
+          echo "Generating diff between current version and latest (main branch)"
+          make semantic-conventions/diff || echo "::warning::Registry diff generation failed (non-blocking)"
+
+      - name: Upload diff report
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
+        with:
+          name: registry-diff-report
+          path: tmp/registry-diff-latest.md
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Comment PR with diff summary
+        if: always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const diffFile = 'tmp/registry-diff-latest.md';
+
+            let comment = '## 📊 Semantic Convention Registry Update Check\n\n';
+
+            const currentVersion = '${{ steps.read-version.outputs.current_version }}';
+            comment += `**Current Project Version**: \`${currentVersion}\` (from \`.semconv-version\`)\n\n`;
+
+            comment += '> ℹ️ This is a **non-blocking informational check** that shows what semantic convention updates are available. ';
+            comment += 'It helps you stay informed about new conventions without requiring immediate action.\n\n';
+
+            comment += '### 🆕 Available Updates\n\n';
+            comment += `Comparing **latest** (main branch) vs **${currentVersion}** (current)\n\n`;
+
+            if (fs.existsSync(diffFile)) {
+              const diffContent = fs.readFileSync(diffFile, 'utf8');
+              if (diffContent.includes('Registry diff generation failed')) {
+                comment += '⚠️ Could not generate diff (possibly due to network issues). This check is non-blocking.\n\n';
+              } else if (diffContent.trim().length < 50 || diffContent.includes('No changes')) {
+                comment += '✅ **Your project is using the latest semantic conventions!**\n\n';
+                comment += 'No updates are available at this time.\n\n';
+              } else {
+                comment += '💡 **New semantic conventions are available.** Consider updating if these changes are relevant to your instrumentation:\n\n';
+                comment += '<details>\n<summary>📋 View available updates</summary>\n\n';
+                comment += diffContent;
+                comment += '\n</details>\n\n';
+              }
+            } else {
+              comment += '⚠️ Diff report was not generated. This check is non-blocking.\n\n';
+            }
+
+            comment += '---\n\n';
+            comment += '### 📝 What This Means\n\n';
+            comment += '- **Non-blocking**: This check will never fail your PR\n';
+            comment += '- **Informational**: Shows what\'s new in the semantic conventions\n';
+            comment += '- **Optional**: You can choose when to adopt new conventions\n\n';
+
+            comment += '**How to Update** (if desired):\n';
+            comment += '1. Review the changes above to see if they\'re relevant to your use case\n';
+            comment += '2. Update Go imports in `pkg/inst-api-semconv/` to the new semconv version\n';
+            comment += '3. Update the version in `.semconv-version` file\n';
+            comment += '4. Run `make registry-check` locally to validate\n\n';
+
+            comment += '*Generated by [OTel Weaver](https://github.com/open-telemetry/weaver) • Run `make semantic-conventions/diff` locally for details*';
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Semantic Convention Registry Update Check')
+            );
+
+            // Update or create comment
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }

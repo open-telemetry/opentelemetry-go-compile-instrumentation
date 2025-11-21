@@ -26,13 +26,13 @@ import (
 
 var (
 	conventionalLabels = map[string]string{
-		"chore":    "conventional-commit/chore",
-		"doc":      "conventional-commit/chore",
-		"docs":     "conventional-commit/chore",
-		"feat":     "conventional-commit/feat",
-		"fix":      "conventional-commit/fix",
-		"release":  "conventional-commit/chore",
-		"refactor": "conventional-commit/refactor",
+		"chore":    "scope:chore",
+		"doc":      "scope:chore",
+		"docs":     "scope:chore",
+		"feat":     "scope:feat",
+		"fix":      "scope:fix",
+		"release":  "scope:chore",
+		"refactor": "scope:refactor",
 	}
 	titleRegexp = regexp.MustCompile(fmt.Sprintf(`^(%s)(?:\(.+\))?!?: .*$`, strings.Join(slices.Collect(maps.Keys(conventionalLabels)), "|")))
 )

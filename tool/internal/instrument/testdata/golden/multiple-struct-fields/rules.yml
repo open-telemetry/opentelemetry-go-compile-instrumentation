@@ -1,0 +1,11 @@
+add_multiple_fields:
+  target: main
+  struct: T
+  new_field:
+    - name: Field1
+      type: string
+    - name: Field2
+      type: int
+    - name: Field3
+      type: bool
+

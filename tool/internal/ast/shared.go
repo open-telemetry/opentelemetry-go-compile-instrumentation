@@ -148,12 +148,9 @@ func IsEllipsis(t dst.Expr) bool {
 }
 
 func AddStructField(decl dst.Decl, name, t string) {
-	gen, ok := decl.(*dst.GenDecl)
-	util.Assert(ok, "decl is not a GenDecl")
+	gen := util.AssertType[*dst.GenDecl](decl)
 	fd := Field(name, Ident(t))
-	ty, ok := gen.Specs[0].(*dst.TypeSpec)
-	util.Assert(ok, "ty is not a TypeSpec")
-	st, ok := ty.Type.(*dst.StructType)
-	util.Assert(ok, "st is not a StructType")
+	ty := util.AssertType[*dst.TypeSpec](gen.Specs[0])
+	st := util.AssertType[*dst.StructType](ty.Type)
 	st.Fields.List = append(st.Fields.List, fd)
 }

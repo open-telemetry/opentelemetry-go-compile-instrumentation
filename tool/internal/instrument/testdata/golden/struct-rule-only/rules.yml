@@ -1,0 +1,7 @@
+add_new_field:
+  target: main
+  struct: T
+  new_field:
+    - name: NewField
+      type: string
+

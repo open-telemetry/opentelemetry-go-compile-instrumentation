@@ -3,208 +3,174 @@
 
 //go:build !windows
 
+// Package instrument tests verify that the instrumentation process generates
+// the expected output by comparing against golden files.
+//
+// To update golden files after intentional changes:
+//
+//		go test -update ./tool/internal/instrument/...
+//	 or
+//		make test-unit/update-golden
+
 package instrument
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+	"gotest.tools/v3/golden"
 )
 
 const (
-	matchedJSONFile = "matched.json"
+	testdataDir        = "testdata"
+	goldenDir          = "golden"
+	sourceFileName     = "source.go"
+	rulesFileName      = "rules.yml"
+	mainGoFileName     = "main.go"
+	mainPackage        = "main"
+	buildID            = "foo/bar"
+	compiledOutput     = "_pkg_.a"
+	goldenExt          = ".golden"
+	invalidReceiver    = "invalid-receiver"
+	invalidReceiverMsg = "can not find function"
 )
 
-func findGoToolCompile() string {
-	cmd := exec.Command("go", "env", "GOTOOLDIR")
-	output, err := cmd.Output()
-	if err != nil {
-		fmt.Printf("Error getting GOROOT: %v\n", err)
-		return ""
-	}
-
-	goroot := strings.TrimSpace(string(output))
-	if goroot == "" {
-		fmt.Println("GOROOT not set")
-		return ""
-	}
-	return filepath.Join(goroot, "compile")
-}
-
-func TestInstrument(t *testing.T) {
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		{"valid compile with instrumentation", false},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
-	ctx := util.ContextWithLogger(t.Context(), logger)
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tempDir := setupTestEnvironment(t)
-
-			args := createCompileArgs(tempDir)
-			err := Toolexec(ctx, args)
-			if tt.wantErr {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-			// TODO: Link the instrumented binary and run it and further check
-			// output content
+func TestInstrumentation_Integration(t *testing.T) {
+	entries, err := os.ReadDir(filepath.Join(testdataDir, goldenDir))
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		t.Run(entry.Name(), func(t *testing.T) {
+			runTest(t, entry.Name())
 		})
 	}
 }
 
-func setupTestEnvironment(t *testing.T) string {
+func runTest(t *testing.T, testName string) {
 	tempDir := t.TempDir()
 	t.Setenv(util.EnvOtelWorkDir, tempDir)
+	ctx := util.ContextWithLogger(
+		t.Context(),
+		slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	)
 
-	// Create source code file
-	mainGoFile := filepath.Join(tempDir, "main.go")
-	err := os.MkdirAll(filepath.Dir(mainGoFile), 0o755)
-	require.NoError(t, err)
-	err = util.CopyFile(filepath.Join("testdata", "source.go"), mainGoFile)
-	require.NoError(t, err)
+	sourceFile := filepath.Join(tempDir, mainGoFileName)
+	util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
 
-	// Create matched.json with test rules
-	matchedJSON, err := createTestRuleJSON(mainGoFile)
-	require.NoError(t, err)
-	matchedFile := filepath.Join(tempDir, util.BuildTempDir, matchedJSONFile)
-	err = os.MkdirAll(filepath.Dir(matchedFile), 0o755)
-	require.NoError(t, err)
-	err = util.WriteFile(matchedFile, string(matchedJSON))
-	require.NoError(t, err)
+	ruleSet := loadRulesYAML(t, testName, sourceFile)
+	writeMatchedJSON(ruleSet)
 
-	return tempDir
+	args := compileArgs(tempDir, sourceFile)
+	err := Toolexec(ctx, args)
+
+	if testName == invalidReceiver {
+		require.Error(t, err)
+		require.Contains(t, err.Error(), invalidReceiverMsg)
+		return
+	}
+
+	require.NoError(t, err)
+	verifyGoldenFiles(t, tempDir, testName)
 }
 
-func createCompileArgs(tempDir string) []string {
-	sourcePath := filepath.Join(tempDir, "main.go")
-	outputPath := filepath.Join(tempDir, "_pkg_.a")
-	compilePath := findGoToolCompile()
+func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet {
+	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
+	require.NoError(t, err)
 
+	var rawRules map[string]map[string]any
+	yaml.Unmarshal(data, &rawRules)
+
+	ruleSet := &rule.InstRuleSet{
+		PackageName: mainPackage,
+		ModulePath:  mainPackage,
+		FuncRules:   make(map[string][]*rule.InstFuncRule),
+		StructRules: make(map[string][]*rule.InstStructRule),
+		RawRules:    make(map[string][]*rule.InstRawRule),
+		FileRules:   make([]*rule.InstFileRule, 0),
+	}
+
+	// Sort rule names to ensure deterministic order in tests
+	ruleNames := make([]string, 0, len(rawRules))
+	for name := range rawRules {
+		ruleNames = append(ruleNames, name)
+	}
+	sort.Strings(ruleNames)
+
+	for _, name := range ruleNames {
+		props := rawRules[name]
+		props["name"] = name
+		ruleData, _ := yaml.Marshal(props)
+
+		switch {
+		case props["struct"] != nil:
+			r, _ := rule.NewInstStructRule(ruleData, name)
+			ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
+		case props["file"] != nil:
+			r, _ := rule.NewInstFileRule(ruleData, name)
+			ruleSet.FileRules = append(ruleSet.FileRules, r)
+		case props["raw"] != nil:
+			r, _ := rule.NewInstRawRule(ruleData, name)
+			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
+		case props["func"] != nil:
+			r, _ := rule.NewInstFuncRule(ruleData, name)
+			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
+		}
+	}
+
+	return ruleSet
+}
+
+func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
+	matchedJSON, _ := json.Marshal([]*rule.InstRuleSet{ruleSet})
+	matchedFile := util.GetMatchedRuleFile()
+	os.MkdirAll(filepath.Dir(matchedFile), 0o755)
+	util.WriteFile(matchedFile, string(matchedJSON))
+}
+
+func compileArgs(tempDir, sourceFile string) []string {
+	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
 	return []string{
-		compilePath,
-		"-o", outputPath,
-		"-p", "main",
+		filepath.Join(strings.TrimSpace(string(output)), "compile"),
+		"-o", filepath.Join(tempDir, compiledOutput),
+		"-p", mainPackage,
 		"-complete",
-		"-buildid", "foo/bar",
+		"-buildid", buildID,
 		"-pack",
-		sourcePath,
+		sourceFile,
 	}
 }
 
-func createTestRuleJSON(mainGoFile string) ([]byte, error) {
-	ruleSet := []*rule.InstRuleSet{
-		{
-			PackageName: "main",
-			ModulePath:  "main",
-			FuncRules: map[string][]*rule.InstFuncRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Before: "H1Before",
-						After:  "H1After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_same_func",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Before: "H2Before",
-						After:  "H2After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func_with_recv",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Recv:   "*T",
-						Before: "H3Before",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func_no_before",
-							Target: "main",
-						},
-						Path:  filepath.Join(".", "testdata"),
-						Func:  "Func1",
-						Recv:  "*T",
-						After: "H3After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "underscore_param",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func2",
-						Before: "H4Before",
-					},
-				},
-			},
-			RawRules: map[string][]*rule.InstRawRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "add_raw_code",
-							Target: "main",
-						},
-						Func: "Func1",
-						Raw:  "func2()",
-					},
-				},
-			},
-			StructRules: map[string][]*rule.InstStructRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "add_new_field",
-							Target: "main",
-						},
-						Struct: "T",
-						NewField: []*rule.InstStructField{
-							{
-								Name: "NewField",
-								Type: "string",
-							},
-						},
-					},
-				},
-			},
-			FileRules: []*rule.InstFileRule{
-				{
-					InstBaseRule: rule.InstBaseRule{
-						Name:   "add_new_file",
-						Target: "main",
-					},
-					File: "newfile.go",
-					Path: filepath.Join(".", "testdata"),
-				},
-			},
-		},
+func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
+	entries, _ := os.ReadDir(filepath.Join(testdataDir, goldenDir, testName))
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), goldenExt) {
+			continue
+		}
+		actualFile := actualFileFromGolden(t, entry.Name())
+		actual, _ := os.ReadFile(filepath.Join(tempDir, actualFile))
+		golden.Assert(t, string(actual), filepath.Join(goldenDir, testName, entry.Name()))
 	}
-	return json.Marshal(ruleSet)
+}
+
+func actualFileFromGolden(t *testing.T, goldenName string) string {
+	// Golden files are named: <prefix>.<actual_file_name>.golden
+	// Example: func_rule_only.main.go.golden -> main.go
+	nameWithoutExt := strings.TrimSuffix(goldenName, goldenExt)
+	parts := strings.SplitN(nameWithoutExt, ".", 2)
+	if len(parts) != 2 {
+		t.Fatalf("invalid golden file name format: %s (expected: <prefix>.<filename>.golden)", goldenName)
+	}
+	return parts[1]
 }

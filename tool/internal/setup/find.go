@@ -64,9 +64,12 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([]string, error) {
 	const goBuildMinArgs = 2 // go build
 	const buildPlanLogName = "build-plan.log"
-
-	util.Assert(len(goBuildCmd) >= goBuildMinArgs, "at least one argument is required")
-	util.Assert(goBuildCmd[1] == "build" || goBuildCmd[1] == "install", "sanity check")
+	if len(goBuildCmd) < goBuildMinArgs {
+		return nil, ex.Newf("at least %d arguments are required", goBuildMinArgs)
+	}
+	if goBuildCmd[1] != "build" && goBuildCmd[1] != "install" {
+		return nil, ex.Newf("must be go build/install, got %s", goBuildCmd[1])
+	}
 
 	// Create a build plan log file in the temporary directory
 	buildPlanLog, err := os.Create(util.GetBuildTemp(buildPlanLogName))
@@ -95,7 +98,10 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	cmd.Dir = ""
 	err = cmd.Run()
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to run build plan")
+		// Read the build plan log to see what went wrong
+		_, _ = buildPlanLog.Seek(0, 0)
+		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
+		return nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
 	}
 
 	// Find compile commands from build plan log

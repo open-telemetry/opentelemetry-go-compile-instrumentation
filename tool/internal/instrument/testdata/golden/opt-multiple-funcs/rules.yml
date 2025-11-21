@@ -1,0 +1,19 @@
+opt_good:
+  target: main
+  func: OptGood
+  before: H5Before
+  path: testdata
+
+opt_bad:
+  target: main
+  func: OptBad
+  before: H6Before
+  path: testdata
+
+opt_bad2:
+  target: main
+  func: OptBad2
+  before: H7Before
+  after: H7After
+  path: testdata
+

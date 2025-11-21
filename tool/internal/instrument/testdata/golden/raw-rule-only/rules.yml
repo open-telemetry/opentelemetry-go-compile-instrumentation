@@ -1,0 +1,5 @@
+add_raw_code:
+  target: main
+  func: Func1
+  raw: "_ = 123"
+
