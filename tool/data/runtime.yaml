@@ -10,7 +10,7 @@ add_gls_field:
 gls_linker:
   target: "runtime"
   file: "runtime_gls.go"
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/runtime"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/contrib/runtime"
 
 goroutine_propagate:
   target: "runtime"
