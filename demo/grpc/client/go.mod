@@ -4,7 +4,7 @@ go 1.23.0
 
 require (
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server v0.0.0
-	google.golang.org/grpc v1.64.1
+	google.golang.org/grpc v1.77.0
 )
 
 require (
