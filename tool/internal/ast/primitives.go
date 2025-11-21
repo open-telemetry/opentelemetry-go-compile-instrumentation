@@ -43,19 +43,17 @@ func AddressOf(name string) *dst.UnaryExpr {
 	return &dst.UnaryExpr{Op: token.AND, X: Ident(name)}
 }
 
-func CallTo(name string, args []dst.Expr) *dst.CallExpr {
-	return &dst.CallExpr{
-		Fun:  &dst.Ident{Name: name},
-		Args: args,
-	}
-}
-
-// CallToGeneric creates a call expression to a generic function with explicit type arguments.
-// For example: CallToGeneric("Foo", typeArgs, args) creates Foo[T1, T2](args...)
-func CallToGeneric(name string, typeArgs *dst.FieldList, args []dst.Expr) *dst.CallExpr {
+// CallTo creates a call expression to a function with optional type arguments for generics.
+// For non-generic functions (typeArgs is nil or empty), creates a simple call: Foo(args...)
+// For generic functions with type arguments, creates: Foo[T1, T2](args...)
+func CallTo(name string, typeArgs *dst.FieldList, args []dst.Expr) *dst.CallExpr {
 	if typeArgs == nil || len(typeArgs.List) == 0 {
-		return CallTo(name, args)
+		return &dst.CallExpr{
+			Fun:  &dst.Ident{Name: name},
+			Args: args,
+		}
 	}
+
 	var indices []dst.Expr
 	for _, field := range typeArgs.List {
 		for _, ident := range field.Names {
@@ -315,40 +313,4 @@ func CloneTypeParams(typeParams *dst.FieldList) *dst.FieldList {
 	cloned, ok := dst.Clone(typeParams).(*dst.FieldList)
 	util.Assert(ok, "typeParams is not a FieldList")
 	return cloned
-}
-
-// SplitMultiNameFields splits fields that have multiple names into separate fields.
-// For example, a field like "a, b int" becomes two fields: "a int" and "b int".
-func SplitMultiNameFields(fieldList *dst.FieldList) *dst.FieldList {
-	if fieldList == nil {
-		return nil
-	}
-	result := &dst.FieldList{List: []*dst.Field{}}
-	for _, field := range fieldList.List {
-		// Handle unnamed fields (e.g., embedded types) or fields with single/multiple names
-		namesToProcess := field.Names
-		if len(namesToProcess) == 0 {
-			// For unnamed fields, create one field with no names
-			namesToProcess = []*dst.Ident{nil}
-		}
-
-		for _, name := range namesToProcess {
-			clonedType, ok := dst.Clone(field.Type).(dst.Expr)
-			util.Assert(ok, "field.Type is not an Expr")
-
-			var names []*dst.Ident
-			if name != nil {
-				clonedName, okC := dst.Clone(name).(*dst.Ident)
-				util.Assert(okC, "name is not an Ident")
-				names = []*dst.Ident{clonedName}
-			}
-
-			newField := &dst.Field{
-				Names: names,
-				Type:  clonedType,
-			}
-			result.List = append(result.List, newField)
-		}
-	}
-	return result
 }

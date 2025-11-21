@@ -185,3 +185,39 @@ func AddStructField(decl dst.Decl, name, t string) {
 	st := util.AssertType[*dst.StructType](ty.Type)
 	st.Fields.List = append(st.Fields.List, fd)
 }
+
+// SplitMultiNameFields splits fields that have multiple names into separate fields.
+// For example, a field like "a, b int" becomes two fields: "a int" and "b int".
+func SplitMultiNameFields(fieldList *dst.FieldList) *dst.FieldList {
+	if fieldList == nil {
+		return nil
+	}
+	result := &dst.FieldList{List: []*dst.Field{}}
+	for _, field := range fieldList.List {
+		// Handle unnamed fields (e.g., embedded types) or fields with single/multiple names
+		namesToProcess := field.Names
+		if len(namesToProcess) == 0 {
+			// For unnamed fields, create one field with no names
+			namesToProcess = []*dst.Ident{nil}
+		}
+
+		for _, name := range namesToProcess {
+			clonedType, ok := dst.Clone(field.Type).(dst.Expr)
+			util.Assert(ok, "field.Type is not an Expr")
+
+			var names []*dst.Ident
+			if name != nil {
+				clonedName, okC := dst.Clone(name).(*dst.Ident)
+				util.Assert(okC, "name is not an Ident")
+				names = []*dst.Ident{clonedName}
+			}
+
+			newField := &dst.Field{
+				Names: names,
+				Type:  clonedType,
+			}
+			result.List = append(result.List, newField)
+		}
+	}
+	return result
+}

@@ -61,7 +61,7 @@ func parseFuncTypeParams(t *testing.T, funcSource string) *dst.FieldList {
 	return funcDecl.Type.TypeParams
 }
 
-func TestCallToGeneric(t *testing.T) {
+func TestCallTo(t *testing.T) {
 	tests := []struct {
 		name       string
 		funcName   string
@@ -118,7 +118,7 @@ func TestCallToGeneric(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			typeParams := parseFuncTypeParams(t, tt.funcSource)
-			result := CallToGeneric(tt.funcName, typeParams, tt.args)
+			result := CallTo(tt.funcName, typeParams, tt.args)
 			require.NotNil(t, result)
 			tt.validate(t, result)
 		})

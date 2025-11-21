@@ -269,7 +269,7 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTr
 		}
 	}
 	fnName := makeOnXName(t, true)
-	call := ast.ExprStmt(ast.CallTo(fnName, args))
+	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
 	iff := ast.IfNotNilStmt(
 		ast.Ident(fnName),
 		ast.Block(call),
@@ -306,7 +306,7 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 		}
 	}
 	fnName := makeOnXName(t, false)
-	call := ast.ExprStmt(ast.CallTo(fnName, args))
+	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
 	iff := ast.IfNotNilStmt(
 		ast.Ident(fnName),
 		ast.Block(call),

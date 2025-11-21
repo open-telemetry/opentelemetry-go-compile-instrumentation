@@ -113,8 +113,8 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	argsToAfter := createHookArgs(retVals)
 	argHookContext := ast.Ident(trampolineHookContextName + funcSuffix)
 	argsToAfter = append([]dst.Expr{argHookContext}, argsToAfter...)
-	beforeCall := ast.CallToGeneric(makeName(t, funcDecl, true), funcDecl.Type.TypeParams, argsToBefore)
-	afterCall := ast.CallToGeneric(makeName(t, funcDecl, false), funcDecl.Type.TypeParams, argsToAfter)
+	beforeCall := ast.CallTo(makeName(t, funcDecl, true), funcDecl.Type.TypeParams, argsToBefore)
+	afterCall := ast.CallTo(makeName(t, funcDecl, false), funcDecl.Type.TypeParams, argsToAfter)
 	tjumpInit := ast.DefineStmts(
 		ast.Exprs(
 			ast.Ident(trampolineHookContextName+funcSuffix),
