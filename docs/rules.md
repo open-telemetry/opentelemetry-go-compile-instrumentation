@@ -46,34 +46,6 @@ hook_helloworld:
 
 This rule will inject `MyHookBefore` at the start of the `Example` function in the `main` package, and `MyHookAfter` at the end. The hook functions are located in the specified `path`.
 
-**Generic Function Support:**
-
-Generic functions are supported. The instrumentation tool automatically handles type parameters, propagating them to the generated trampoline functions.
-
-Func rules work identically whether `Process` is a regular function or a generic function like `Process[T any](value T)`. The tool will automatically generate the appropriate generic hook calls with type parameters preserved.
-
-**Important Limitation - Hook Signature for Generic Functions:**
-
-Due to `//go:linkname` implementation constraints, hook functions for generic functions must use `interface{}` (or `any`) for parameters and return values that correspond to type parameters in the target function. The linkname directive only affects linker behavior and does not handle generic type instantiation, so hook signatures must be compatible (not identical) with the target function.
-
-**Example:**
-
-Target generic function:
-
-```go
-func GenericExample[K comparable, V any](key K, value V) map[K]V { ... }
-```
-
-Hook functions must use `interface{}`:
-
-```go
-func GenericHookBefore(ctx inst.HookContext, key interface{}, value interface{}) { ... }
-
-func GenericHookAfter(ctx inst.HookContext, result interface{}) { ... }
-```
-
-This is a current implementation limitation. The hook signature must be compatible with the target function's signature when type parameters are replaced with `interface{}`.
-
 ### 2. Struct Field Injection Rule
 
 This rule adds one or more new fields to a specified struct type.
