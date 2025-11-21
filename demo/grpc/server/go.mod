@@ -3,8 +3,8 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/g
 go 1.23.0
 
 require (
-	google.golang.org/grpc v1.64.1
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/grpc v1.77.0
+	google.golang.org/protobuf v1.36.10
 )
 
 require (

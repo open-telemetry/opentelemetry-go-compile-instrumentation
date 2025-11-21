@@ -13,7 +13,7 @@ jobs:
     name: FOSSA Scanning
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
       - uses: fossas/fossa-action@3ebcea1862c6ffbd5cf1b4d0bd6b3fe7bd6f2cac  # v1.7.0
         with:
           api-key: ${{secrets.FOSSA_API_KEY}}
