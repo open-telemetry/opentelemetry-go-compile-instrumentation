@@ -44,14 +44,14 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 	return decls[0]
 }
 
-// extractBaseReceiverType extracts the base type name from a receiver expression,
+// stripGenericTypes extracts the base type name from a receiver expression,
 // handling both generic and non-generic types.
 // For example:
 // - *MyStruct -> *MyStruct
 // - MyStruct -> MyStruct
 // - *GenStruct[T] -> *GenStruct
 // - GenStruct[T] -> GenStruct
-func extractBaseReceiverType(recvTypeExpr dst.Expr) string {
+func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	switch expr := recvTypeExpr.(type) {
 	case *dst.StarExpr: // func (*Recv)T or func (*Recv[T])T
 		// Check if X is an Ident (non-generic) or IndexExpr/IndexListExpr (generic)
@@ -102,7 +102,7 @@ func FindFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 		// Receiver type is specified, and target function has receiver
 		// Match both func name and receiver type
 		recvTypeExpr := funcDecl.Recv.List[0].Type
-		baseType := extractBaseReceiverType(recvTypeExpr)
+		baseType := stripGenericTypes(recvTypeExpr)
 
 		if baseType == "" {
 			msg := fmt.Sprintf("unexpected receiver type: %T", recvTypeExpr)
@@ -202,13 +202,11 @@ func SplitMultiNameFields(fieldList *dst.FieldList) *dst.FieldList {
 		}
 
 		for _, name := range namesToProcess {
-			clonedType, ok := dst.Clone(field.Type).(dst.Expr)
-			util.Assert(ok, "field.Type is not an Expr")
+			clonedType := util.AssertType[dst.Expr](dst.Clone(field.Type))
 
 			var names []*dst.Ident
 			if name != nil {
-				clonedName, okC := dst.Clone(name).(*dst.Ident)
-				util.Assert(okC, "name is not an Ident")
+				clonedName := util.AssertType[*dst.Ident](dst.Clone(name))
 				names = []*dst.Ident{clonedName}
 			}
 
@@ -220,4 +218,13 @@ func SplitMultiNameFields(fieldList *dst.FieldList) *dst.FieldList {
 		}
 	}
 	return result
+}
+
+// CloneTypeParams safely clones a type parameter field list for generic functions.
+// Returns nil if the input is nil.
+func CloneTypeParams(typeParams *dst.FieldList) *dst.FieldList {
+	if typeParams == nil {
+		return nil
+	}
+	return util.AssertType[*dst.FieldList](dst.Clone(typeParams))
 }

@@ -305,14 +305,3 @@ func StructLit(typeName string, fields ...*dst.KeyValueExpr) dst.Expr {
 		X:  CompositeLit(Ident(typeName), exprs),
 	}
 }
-
-// CloneTypeParams safely clones a type parameter field list for generic functions.
-// Returns nil if the input is nil.
-func CloneTypeParams(typeParams *dst.FieldList) *dst.FieldList {
-	if typeParams == nil {
-		return nil
-	}
-	cloned, ok := dst.Clone(typeParams).(*dst.FieldList)
-	util.Assert(ok, "typeParams is not a FieldList")
-	return cloned
-}
