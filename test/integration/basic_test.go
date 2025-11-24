@@ -52,6 +52,8 @@ func verifyGenericHookContextLogs(t *testing.T, output string) {
 		"[Generic] Data from Before: test-data",
 		"[Generic] Return value count: 1",
 		"[Generic] Return[0]: 2",
+		"[Generic] SetParam panic (expected): SetParam is unsupported for generic functions",
+		"[Generic] SetReturnVal panic (expected): SetReturnVal is unsupported for generic functions",
 	}
 	for _, log := range expectedGenericLogs {
 		require.Contains(t, output, log, "Expected generic HookContext log: %s", log)

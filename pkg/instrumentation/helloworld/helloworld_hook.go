@@ -88,6 +88,13 @@ func MyHookGenericBefore(ictx inst.HookContext, _, _ interface{}) {
 		fmt.Printf("[Generic] Param[%d]: %v\n", i, *ictx.GetParam(i).(*int))
 	}
 	ictx.SetData("test-data")
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[Generic] SetParam panic (expected): %v\n", r)
+		}
+	}()
+	ictx.SetParam(0, 999)
 }
 
 func MyHookGenericAfter(ictx inst.HookContext, _ interface{}) {
@@ -97,6 +104,13 @@ func MyHookGenericAfter(ictx inst.HookContext, _ interface{}) {
 	for i := 0; i < ictx.GetReturnValCount(); i++ {
 		fmt.Printf("[Generic] Return[%d]: %v\n", i, *ictx.GetReturnVal(i).(*int))
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[Generic] SetReturnVal panic (expected): %v\n", r)
+		}
+	}()
+	ictx.SetReturnVal(0, 999)
 }
 
 func BeforeUnderscore(ictx inst.HookContext, _ int, _ float32) {}

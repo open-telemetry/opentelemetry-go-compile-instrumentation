@@ -759,6 +759,9 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 			methodSetRetVal = decl
 		}
 	}
+
+	combinedTypeParams := combineTypeParams(ip.targetFunc)
+
 	// Rewrite SetParam and GetParam methods
 	// Don't believe what you see in template, we will null out it and rewrite
 	// the whole switch statement
@@ -768,15 +771,26 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 		body.List = nil
 		return body
 	}
-	methodSetParamBody := findSwitchBlock(methodSetParam, 1)
-	methodGetParamBody := findSwitchBlock(methodGetParam, 0)
-	methodSetRetValBody := findSwitchBlock(methodSetRetVal, 1)
-	methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
 
-	combinedTypeParams := combineTypeParams(ip.targetFunc)
+	// For generic functions, SetParam and SetReturnVal should panic
+	// as modifying parameters/return values is unsupported for generic functions
+	if combinedTypeParams != nil {
+		makeMethodPanic(methodSetParam, "SetParam is unsupported for generic functions")
+		makeMethodPanic(methodSetRetVal, "SetReturnVal is unsupported for generic functions")
+		methodGetParamBody := findSwitchBlock(methodGetParam, 0)
+		methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
 
-	ip.rewriteHookContextParams(methodSetParamBody, methodGetParamBody, combinedTypeParams)
-	ip.rewriteHookContextResults(methodSetRetValBody, methodGetRetValBody, combinedTypeParams)
+		ip.rewriteHookContextParams(nil, methodGetParamBody, combinedTypeParams)
+		ip.rewriteHookContextResults(nil, methodGetRetValBody, combinedTypeParams)
+	} else {
+		methodSetParamBody := findSwitchBlock(methodSetParam, 1)
+		methodGetParamBody := findSwitchBlock(methodGetParam, 0)
+		methodSetRetValBody := findSwitchBlock(methodSetRetVal, 1)
+		methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
+
+		ip.rewriteHookContextParams(methodSetParamBody, methodGetParamBody, combinedTypeParams)
+		ip.rewriteHookContextResults(methodSetRetValBody, methodGetRetValBody, combinedTypeParams)
+	}
 }
 
 func (ip *InstrumentPhase) rewriteHookContextParams(
@@ -788,18 +802,22 @@ func (ip *InstrumentPhase) rewriteHookContextParams(
 		splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
 		recvType := replaceGenericInstantiations(splitRecv.List[0].Type)
 		recvType = replaceTypeParamsWithAny(recvType, combinedTypeParams)
-		clause := setParamClause(idx, recvType)
-		methodSetParamBody.List = append(methodSetParamBody.List, clause)
-		clause = getParamClause(idx, recvType)
+		if methodSetParamBody != nil {
+			clause := setParamClause(idx, recvType)
+			methodSetParamBody.List = append(methodSetParamBody.List, clause)
+		}
+		clause := getParamClause(idx, recvType)
 		methodGetParamBody.List = append(methodGetParamBody.List, clause)
 		idx++
 	}
 	splitParams := ast.SplitMultiNameFields(ip.targetFunc.Type.Params)
 	for _, param := range splitParams.List {
 		paramType := replaceTypeParamsWithAny(desugarType(param), combinedTypeParams)
-		clause := setParamClause(idx, paramType)
-		methodSetParamBody.List = append(methodSetParamBody.List, clause)
-		clause = getParamClause(idx, paramType)
+		if methodSetParamBody != nil {
+			clause := setParamClause(idx, paramType)
+			methodSetParamBody.List = append(methodSetParamBody.List, clause)
+		}
+		clause := getParamClause(idx, paramType)
 		methodGetParamBody.List = append(methodGetParamBody.List, clause)
 		idx++
 	}
@@ -816,11 +834,27 @@ func (ip *InstrumentPhase) rewriteHookContextResults(
 			retType := replaceTypeParamsWithAny(desugarType(retval), combinedTypeParams)
 			clause := getReturnValClause(idx, retType)
 			methodGetRetValBody.List = append(methodGetRetValBody.List, clause)
-			clause = setReturnValClause(idx, retType)
-			methodSetRetValBody.List = append(methodSetRetValBody.List, clause)
+			if methodSetRetValBody != nil {
+				clause = setReturnValClause(idx, retType)
+				methodSetRetValBody.List = append(methodSetRetValBody.List, clause)
+			}
 			idx++
 		}
 	}
+}
+
+// makeMethodPanic replaces a method's body with a panic statement
+func makeMethodPanic(method *dst.FuncDecl, message string) {
+	// Replace the entire method body with: panic("message")
+	panicStmt := ast.ExprStmt(
+		ast.CallTo("panic", nil, []dst.Expr{
+			&dst.BasicLit{
+				Kind:  token.STRING,
+				Value: strconv.Quote(message),
+			},
+		}),
+	)
+	method.Body.List = []dst.Stmt{panicStmt}
 }
 
 // isTypeParameter checks if a type expression is a bare type parameter identifier
