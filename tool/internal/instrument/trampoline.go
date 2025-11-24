@@ -316,13 +316,8 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 	return nil
 }
 
-func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
-	traits []ParamTrait, before bool,
-) error {
-	paramTypes := ip.buildTrampolineType(before)
-	addHookContext(paramTypes)
-	combinedTypeParams := combineTypeParams(ip.targetFunc)
-
+// replaceTypeWithAny replaces parameter types with interface{} based on generic type parameters.
+func replaceTypeWithAny(traits []ParamTrait, paramTypes, genericTypes *dst.FieldList) error {
 	if len(paramTypes.List) != len(traits) {
 		return ex.New("hook func signature can not match with target function")
 	}
@@ -334,8 +329,20 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 			field.Type = ast.InterfaceType()
 		} else {
 			// Replace type parameters with interface{} (for linkname compatibility)
-			field.Type = replaceTypeParamsWithAny(field.Type, combinedTypeParams)
+			field.Type = replaceTypeParamsWithAny(field.Type, genericTypes)
 		}
+	}
+	return nil
+}
+
+func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
+	traits []ParamTrait, before bool,
+) error {
+	paramTypes, genericTypes := ip.buildTrampolineType(before)
+	addHookContext(paramTypes)
+	err := replaceTypeWithAny(traits, paramTypes, genericTypes)
+	if err != nil {
+		return err
 	}
 
 	// Generate var decl and append it to the target file, note that many target
@@ -407,7 +414,8 @@ func addHookContext(list *dst.FieldList) {
 	list.List = append([]*dst.Field{hookCtx}, list.List...)
 }
 
-func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
+//nolint:revive // Return types are clear from context and usage. It collides with nonamedreturns
+func (ip *InstrumentPhase) buildTrampolineType(before bool) (*dst.FieldList, *dst.FieldList) {
 	// Since target function parameter names might be "_", we may use the target
 	// function parameters in the trampoline function, which would cause a syntax
 	// error, so we assign them a specific name and use them.
@@ -424,35 +432,36 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) *dst.FieldList {
 	// For after trampoline, it's signature is:
 	// func S(h* HookContext, arg1 type, arg2 type, ...)
 	// All grouped parameters (like a, b int) are expanded into separate parameters (a int, b int)
-	paramList := &dst.FieldList{List: []*dst.Field{}}
+	paramTypes := &dst.FieldList{List: []*dst.Field{}}
 	if before {
 		if ast.HasReceiver(ip.targetFunc) {
 			splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
 			recvField := util.AssertType[*dst.Field](dst.Clone(splitRecv.List[0]))
 			renameField(recvField, "recv")
-			paramList.List = append(paramList.List, recvField)
+			paramTypes.List = append(paramTypes.List, recvField)
 		}
 		splitParams := ast.SplitMultiNameFields(ip.targetFunc.Type.Params)
 		for _, field := range splitParams.List {
 			paramField := util.AssertType[*dst.Field](dst.Clone(field))
 			renameField(paramField, "param")
-			paramList.List = append(paramList.List, paramField)
+			paramTypes.List = append(paramTypes.List, paramField)
 		}
 	} else if ip.targetFunc.Type.Results != nil {
 		splitResults := ast.SplitMultiNameFields(ip.targetFunc.Type.Results)
 		for _, field := range splitResults.List {
 			retField := util.AssertType[*dst.Field](dst.Clone(field))
 			renameField(retField, "arg")
-			paramList.List = append(paramList.List, retField)
+			paramTypes.List = append(paramTypes.List, retField)
 		}
 	}
-	return paramList
+	genericTypes := combineTypeParams(ip.targetFunc)
+	return paramTypes, genericTypes
 }
 
 func (ip *InstrumentPhase) buildTrampolineTypes() {
 	beforeHookFunc, afterHookFunc := ip.beforeHookFunc, ip.afterHookFunc
-	beforeHookFunc.Type.Params = ip.buildTrampolineType(true)
-	afterHookFunc.Type.Params = ip.buildTrampolineType(false)
+	beforeHookFunc.Type.Params, _ = ip.buildTrampolineType(true)
+	afterHookFunc.Type.Params, _ = ip.buildTrampolineType(false)
 	candidate := []*dst.FieldList{
 		beforeHookFunc.Type.Params,
 		afterHookFunc.Type.Params,
@@ -797,12 +806,13 @@ func (ip *InstrumentPhase) rewriteHookContextParams(
 	methodSetParamBody, methodGetParamBody *dst.BlockStmt,
 	combinedTypeParams *dst.FieldList,
 ) {
+	isGeneric := combinedTypeParams != nil
 	idx := 0
 	if ast.HasReceiver(ip.targetFunc) {
 		splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
 		recvType := replaceGenericInstantiations(splitRecv.List[0].Type)
 		recvType = replaceTypeParamsWithAny(recvType, combinedTypeParams)
-		if methodSetParamBody != nil {
+		if !isGeneric {
 			clause := setParamClause(idx, recvType)
 			methodSetParamBody.List = append(methodSetParamBody.List, clause)
 		}
@@ -813,7 +823,7 @@ func (ip *InstrumentPhase) rewriteHookContextParams(
 	splitParams := ast.SplitMultiNameFields(ip.targetFunc.Type.Params)
 	for _, param := range splitParams.List {
 		paramType := replaceTypeParamsWithAny(desugarType(param), combinedTypeParams)
-		if methodSetParamBody != nil {
+		if !isGeneric {
 			clause := setParamClause(idx, paramType)
 			methodSetParamBody.List = append(methodSetParamBody.List, clause)
 		}
@@ -827,6 +837,7 @@ func (ip *InstrumentPhase) rewriteHookContextResults(
 	methodSetRetValBody, methodGetRetValBody *dst.BlockStmt,
 	combinedTypeParams *dst.FieldList,
 ) {
+	isGeneric := combinedTypeParams != nil
 	if ip.targetFunc.Type.Results != nil {
 		idx := 0
 		splitResults := ast.SplitMultiNameFields(ip.targetFunc.Type.Results)
@@ -834,7 +845,7 @@ func (ip *InstrumentPhase) rewriteHookContextResults(
 			retType := replaceTypeParamsWithAny(desugarType(retval), combinedTypeParams)
 			clause := getReturnValClause(idx, retType)
 			methodGetRetValBody.List = append(methodGetRetValBody.List, clause)
-			if methodSetRetValBody != nil {
+			if !isGeneric {
 				clause = setReturnValClause(idx, retType)
 				methodSetRetValBody.List = append(methodSetRetValBody.List, clause)
 			}
@@ -845,7 +856,6 @@ func (ip *InstrumentPhase) rewriteHookContextResults(
 
 // makeMethodPanic replaces a method's body with a panic statement
 func makeMethodPanic(method *dst.FuncDecl, message string) {
-	// Replace the entire method body with: panic("message")
 	panicStmt := ast.ExprStmt(
 		ast.CallTo("panic", nil, []dst.Expr{
 			&dst.BasicLit{
