@@ -17,6 +17,10 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
+const (
+	unzippedPkgDir = "pkg"
+)
+
 func normalizePath(name string) string {
 	const pkg, pkgTemp = "pkg", "pkg_temp"
 	const contrib, contribTemp = "contrib", "contrib_temp"

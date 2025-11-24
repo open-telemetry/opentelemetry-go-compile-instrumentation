@@ -7,7 +7,13 @@ import _ "unsafe"
 
 type T struct{}
 
-func (t *T) Func1(p1 string, p2 int) (float32, error) {
+func (t *T) Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+	//line <generated>:1
+	if false {
+	} else {
+		defer OtelAfterTrampoline_Func11091117693(&HookContextImpl1091117693{params: []interface{}{&t, &p1, &p2}, returnVals: []interface{}{&_unnamedRetVal0, &_unnamedRetVal1}}, &_unnamedRetVal0, &_unnamedRetVal1)
+	}
+	//line main.go:9:2
 	return 0.0, nil
 }
 
@@ -138,3 +144,115 @@ func OtelAfterTrampoline_Func13335793671(hookContext HookContext, arg0 *float32,
 
 //go:linkname H1After testdata.H1After
 func H1After(hookContext HookContext, arg0 float32, arg1 error)
+
+//line <generated>:1
+type HookContextImpl1091117693 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl1091117693) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl1091117693) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl1091117693) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl1091117693) GetData() interface{}     { return c.data }
+func (c *HookContextImpl1091117693) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl1091117693) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl1091117693) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl1091117693) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(**T))
+	case 1:
+		return *(c.params[1].(*string))
+	case 2:
+		return *(c.params[2].(*int))
+	}
+	return nil
+}
+
+func (c *HookContextImpl1091117693) SetParam(idx int, val interface{}) {
+	if val == nil {
+		c.params[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.params[0].(**T)) = val.(*T)
+	case 1:
+		*(c.params[1].(*string)) = val.(string)
+	case 2:
+		*(c.params[2].(*int)) = val.(int)
+	}
+}
+
+func (c *HookContextImpl1091117693) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*float32))
+	case 1:
+		return *(c.returnVals[1].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl1091117693) SetReturnVal(idx int, val interface{}) {
+	if val == nil {
+		c.returnVals[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.returnVals[0].(*float32)) = val.(float32)
+	case 1:
+		*(c.returnVals[1].(*error)) = val.(error)
+	}
+}
+func (c *HookContextImpl1091117693) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl1091117693) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl1091117693) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl1091117693) GetPackageName() string { return c.packageName }
+
+func OtelAfterTrampoline_Func11091117693(hookContext HookContext, arg0 *float32, arg1 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "H8After")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl1091117693).returnVals = []interface{}{arg0, arg1}
+	if H8After != nil {
+		H8After(hookContext, *arg0, *arg1)
+	}
+}
+
+//go:linkname H8After testdata.H8After
+func H8After(hookContext HookContext, arg0 float32, arg1 error)
