@@ -4,3 +4,10 @@ hook_after_only:
   after: H1After
   path: testdata
 
+hook_with_receiver_after_only:
+  target: main
+  func: Func1
+  recv: "*T"
+  after: H8After
+  path: testdata
+

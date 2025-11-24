@@ -176,8 +176,7 @@ func OtelAfterTrampoline_Func12501994857(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname H3Before testdata.H3Before
-func H3Before(hookContext HookContext, recv0 interface {
-}, param1 string, param2 int)
+func H3Before(hookContext HookContext, recv0 interface{}, param1 string, param2 int)
 
 //go:linkname H3After testdata.H3After
 func H3After(hookContext HookContext, arg0 float32, arg1 error)

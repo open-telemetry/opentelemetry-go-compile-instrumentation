@@ -17,8 +17,12 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
+const (
+	unzippedPkgDir = "pkg"
+)
+
 func normalizePath(name string) string {
-	const pkg, pkgTemp = "pkg", "pkg_temp"
+	const pkg, pkgTemp = unzippedPkgDir, "pkg_temp"
 	cleanName := filepath.ToSlash(filepath.Clean(name))
 	if strings.HasPrefix(cleanName, pkgTemp+"/") {
 		cleanName = strings.Replace(cleanName, pkgTemp+"/", pkg+"/", 1)

@@ -157,7 +157,9 @@ func BoolFalse() *dst.BasicLit {
 }
 
 func InterfaceType() *dst.InterfaceType {
-	return &dst.InterfaceType{Methods: &dst.FieldList{List: nil}}
+	return &dst.InterfaceType{
+		Methods: &dst.FieldList{Opening: true, Closing: true},
+	}
 }
 
 func ArrayType(elem dst.Expr) *dst.ArrayType {

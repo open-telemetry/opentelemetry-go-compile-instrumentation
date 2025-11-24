@@ -160,12 +160,10 @@ func OtelAfterTrampoline_GenericFunc3543564877[T any](hookContext HookContext, a
 }
 
 //go:linkname GenericFuncBefore testdata.GenericFuncBefore
-func GenericFuncBefore(hookContext HookContext, param0 interface {
-}, param1 int)
+func GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 int)
 
 //go:linkname GenericFuncAfter testdata.GenericFuncAfter
-func GenericFuncAfter(hookContext HookContext, arg0 interface {
-}, arg1 error)
+func GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)
 
 //line <generated>:1
 type HookContextImpl3378413897 struct {
@@ -206,8 +204,7 @@ func (c *HookContextImpl3378413897) HasKeyData(key string) bool {
 func (c *HookContextImpl3378413897) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
-		return *(c.params[0].(**interface {
-		}))
+		return *(c.params[0].(**interface{}))
 	case 1:
 		return c.params[1]
 	case 2:
@@ -282,10 +279,7 @@ func OtelAfterTrampoline_GenericMethod3378413897[T any](hookContext HookContext,
 }
 
 //go:linkname GenericMethodBefore testdata.GenericMethodBefore
-func GenericMethodBefore(hookContext HookContext, recv0 interface {
-}, param1 interface {
-}, param2 string)
+func GenericMethodBefore(hookContext HookContext, recv0 interface{}, param1 interface{}, param2 string)
 
 //go:linkname GenericMethodAfter testdata.GenericMethodAfter
-func GenericMethodAfter(hookContext HookContext, arg0 interface {
-}, arg1 error)
+func GenericMethodAfter(hookContext HookContext, arg0 interface{}, arg1 error)
