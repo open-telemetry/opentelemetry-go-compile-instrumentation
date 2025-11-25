@@ -23,6 +23,13 @@ func TestBasic(t *testing.T) {
 		"Every1",
 		"Every3",
 		"MyStruct.Example",
+		"GenericExample before hook",
+		"Hello, Generic World! 1 2",
+		"GenericExample after hook",
+		"traceID: 123, spanID: 456",
+		"GenericRecvExample before hook",
+		"Hello, Generic Recv World!",
+		"GenericRecvExample after hook",
 		"traceID: 123, spanID: 456",
 		"[MyHook]",
 		"=setupOpenTelemetry=",
@@ -35,5 +42,25 @@ func TestBasic(t *testing.T) {
 	}
 	for _, e := range expect {
 		require.Contains(t, output, e)
+	}
+
+	verifyGenericHookContextLogs(t, output)
+}
+
+func verifyGenericHookContextLogs(t *testing.T, output string) {
+	expectedGenericLogs := []string{
+		"[Generic] Function: main.GenericExample",
+		"[Generic] Param count: 2",
+		"[Generic] Skip call: false",
+		"[Generic] Param[0]: 1",
+		"[Generic] Param[1]: 2",
+		"[Generic] Data from Before: test-data",
+		"[Generic] Return value count: 1",
+		"[Generic] Return[0]: 2",
+		"[Generic] SetParam panic (expected): SetParam is unsupported for generic functions",
+		"[Generic] SetReturnVal panic (expected): SetReturnVal is unsupported for generic functions",
+	}
+	for _, log := range expectedGenericLogs {
+		require.Contains(t, output, log, "Expected generic HookContext log: %s", log)
 	}
 }
