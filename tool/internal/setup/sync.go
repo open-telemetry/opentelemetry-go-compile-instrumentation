@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -72,7 +73,7 @@ func discoverParentModules(modulePath string) map[string]string {
 
 	// Check for parent instrumentation modules
 	for i := len(pathParts) - 1; i > 0; i-- {
-		parentPath := util.OtelRoot + "/" + filepath.Join(pathParts[:i]...)
+		parentPath := util.OtelRoot + "/" + path.Join(pathParts[:i]...)
 		parentLocalPath := filepath.Join(util.GetBuildTempDir(), filepath.Join(pathParts[:i]...))
 		// Check if parent directory has a go.mod file
 		parentGoMod := filepath.Join(parentLocalPath, "go.mod")

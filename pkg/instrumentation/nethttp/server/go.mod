@@ -6,9 +6,12 @@ replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg =
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp => ..
 
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client => ../client
+
 require (
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20251111000000-000000000000
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp v0.0.0-20251111000000-000000000000
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client v0.0.0-20251111000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/sdk v1.38.0
