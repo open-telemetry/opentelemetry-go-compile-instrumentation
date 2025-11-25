@@ -35,9 +35,12 @@ jobs:
     steps:
       - name: Check result
         run: |
-          echo ${{ needs.check-license-headers.result }}
-          if [ "${{ needs.check-license-headers.result }}" = "success" ] || [ "${{ needs.check-license-headers.result }}" = "skipped" ]; then
+          result="${{ needs.check-license-headers.result }}"
+          echo "Test result: $result"
+          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
+            echo "✅ Tests passed or were skipped"
             exit 0
           else
+            echo "❌ Tests failed"
             exit 1
           fi
