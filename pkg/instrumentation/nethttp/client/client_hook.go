@@ -23,6 +23,8 @@ const (
 	otelExporterPrefix     = "OTel OTLP Exporter Go"
 	instrumentationName    = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
 	instrumentationVersion = "0.1.0"
+	instrumentationKey     = "NETHTTP"
+	requestParamIndex      = 1
 )
 
 var (
@@ -50,7 +52,7 @@ func initInstrumentation() {
 type netHttpClientEnabler struct{}
 
 func (n netHttpClientEnabler) Enable() bool {
-	return shared.IsInstrumentationEnabled("NETHTTP")
+	return shared.Instrumented(instrumentationKey)
 }
 
 var clientEnabler = netHttpClientEnabler{}
@@ -92,7 +94,7 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
 
 	// Update request with new context
 	newReq := req.WithContext(ctx)
-	ictx.SetParam(1, newReq)
+	ictx.SetParam(requestParamIndex, newReq)
 
 	// Store data for after hook
 	ictx.SetData(map[string]interface{}{
@@ -105,6 +107,7 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
 
 func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 	if !clientEnabler.Enable() {
+		logger.Debug("HTTP client instrumentation disabled")
 		return
 	}
 
@@ -121,10 +124,9 @@ func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 	}
 	defer span.End()
 
-	startTime, _ := data["start"].(time.Time)
-
 	// Add response attributes
 	if res != nil {
+		startTime, _ := data["start"].(time.Time)
 		attrs := semconv.HTTPClientResponseTraceAttrs(res)
 		span.SetAttributes(attrs...)
 

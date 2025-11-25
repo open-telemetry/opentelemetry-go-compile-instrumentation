@@ -21,6 +21,8 @@ import (
 const (
 	instrumentationName    = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
 	instrumentationVersion = "0.1.0"
+	instrumentationKey     = "NETHTTP"
+	responseWriterIndex    = 1
 )
 
 var (
@@ -48,7 +50,7 @@ func initInstrumentation() {
 type netHttpServerEnabler struct{}
 
 func (n netHttpServerEnabler) Enable() bool {
-	return shared.IsInstrumentationEnabled("NETHTTP")
+	return shared.Instrumented(instrumentationKey)
 }
 
 var serverEnabler = netHttpServerEnabler{}
@@ -93,7 +95,7 @@ func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWri
 		ResponseWriter: w,
 		statusCode:     http.StatusOK,
 	}
-	ictx.SetParam(1, wrapper)
+	ictx.SetParam(responseWriterIndex, wrapper)
 
 	// Store data for after hook
 	ictx.SetData(map[string]interface{}{
@@ -121,11 +123,9 @@ func AfterServeHTTP(ictx inst.HookContext) {
 	}
 	defer span.End()
 
-	startTime, _ := data["start"].(time.Time)
-
 	// Extract status code from wrapped ResponseWriter
 	statusCode := http.StatusOK
-	if p, ok := ictx.GetParam(1).(http.ResponseWriter); ok {
+	if p, ok := ictx.GetParam(responseWriterIndex).(http.ResponseWriter); ok {
 		if wrapper, ok := p.(*writerWrapper); ok {
 			statusCode = wrapper.statusCode
 		}
@@ -141,6 +141,7 @@ func AfterServeHTTP(ictx inst.HookContext) {
 		span.SetStatus(code, desc)
 	}
 
+	startTime, _ := data["start"].(time.Time)
 	logger.Debug("AfterServeHTTP called",
 		"status_code", statusCode,
 		"duration_ms", time.Since(startTime).Milliseconds())

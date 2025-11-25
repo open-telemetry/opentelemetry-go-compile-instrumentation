@@ -3,17 +3,17 @@ name: Check Semantic Convention Registry
 on:
   pull_request:
     paths:
-      - 'pkg/inst-api-semconv/**'
+      - 'pkg/instrumentation/**/semconv/**'
       - '.semconv-version'
   pull_request_target:
     paths:
-      - 'pkg/inst-api-semconv/**'
+      - 'pkg/instrumentation/**/semconv/**'
       - '.semconv-version'
   push:
     branches:
       - main
     paths:
-      - 'pkg/inst-api-semconv/**'
+      - 'pkg/instrumentation/**/semconv/**'
       - '.semconv-version'
 
 permissions:
@@ -57,7 +57,7 @@ jobs:
       - name: Validate code uses correct semconv version
         run: |
           # Detect the semconv version used in the Go code imports
-          DETECTED_VERSION=$(grep -r "semconv/v" pkg/inst-api-semconv/ --include="*.go" | \
+          DETECTED_VERSION=$(grep -r "semconv/v" pkg/instrumentation/ --include="*.go" | \
             grep -o "semconv/v[0-9]*\.[0-9]*\.[0-9]*" | \
             sort -u | \
             head -1 | \
@@ -66,7 +66,7 @@ jobs:
           EXPECTED_VERSION="${{ steps.read-version.outputs.current_version }}"
 
           if [ -z "$DETECTED_VERSION" ]; then
-            echo "::error::No semconv version detected in Go imports in pkg/inst-api-semconv/"
+            echo "::error::No semconv version detected in Go imports in pkg/instrumentation/**/semconv/"
             exit 1
           fi
 
@@ -169,7 +169,7 @@ jobs:
 
             comment += '**How to Update** (if desired):\n';
             comment += '1. Review the changes above to see if they\'re relevant to your use case\n';
-            comment += '2. Update Go imports in `pkg/inst-api-semconv/` to the new semconv version\n';
+            comment += '2. Update Go imports in `pkg/instrumentation/**/semconv/` to the new semconv version\n';
             comment += '3. Update the version in `.semconv-version` file\n';
             comment += '4. Run `make registry-check` locally to validate\n\n';
 

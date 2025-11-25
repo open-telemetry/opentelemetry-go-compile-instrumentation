@@ -8,11 +8,12 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -21,10 +22,18 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
 
+const (
+	// Default export intervals and batch sizes
+	defaultTraceBatchTimeout = 5 * time.Second
+	defaultMetricInterval    = 10 * time.Second
+	defaultTraceBatchSize    = 512
+)
+
 var (
 	logger         *slog.Logger
 	meterProvider  *sdkmetric.MeterProvider
 	tracerProvider *sdktrace.TracerProvider
+	initOnce       sync.Once
 )
 
 // Config holds configuration for OpenTelemetry setup
@@ -38,28 +47,30 @@ type Config struct {
 // Initialize sets up OpenTelemetry with defensive error handling
 // This function is safe to call multiple times - it will only initialize once
 func Initialize(cfg Config) {
-	// Defensive: ensure instrumentation initialization never crashes user application
-	defer func() {
-		if rec := recover(); rec != nil {
-			// Log panic but don't propagate - user application must continue
-			if logger != nil {
-				logger.Error("panic during OpenTelemetry initialization", "panic", rec)
-			} else {
-				// Fallback if logger isn't initialized
-				slog.Default().Error("panic during OpenTelemetry initialization", "panic", rec)
+	initOnce.Do(func() {
+		// Defensive: ensure instrumentation initialization never crashes user application
+		defer func() {
+			if rec := recover(); rec != nil {
+				// Log panic but don't propagate - user application must continue
+				if logger != nil {
+					logger.Error("panic during OpenTelemetry initialization", "panic", rec)
+				} else {
+					// Fallback if logger isn't initialized
+					slog.Default().Error("panic during OpenTelemetry initialization", "panic", rec)
+				}
 			}
+		}()
+
+		// Initialize logger
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: getLogLevel(),
+		}))
+
+		// Setup OpenTelemetry
+		if err := setupOpenTelemetry(cfg); err != nil {
+			logger.Error("failed to setup OpenTelemetry", "error", err)
 		}
-	}()
-
-	// Initialize logger
-	logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: getLogLevel(),
-	}))
-
-	// Setup OpenTelemetry
-	if err := setupOpenTelemetry(cfg); err != nil {
-		logger.Error("failed to setup OpenTelemetry", "error", err)
-	}
+	})
 }
 
 // GetLogger returns the package logger
@@ -218,8 +229,8 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 	tracerProvider = sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
 		sdktrace.WithBatcher(traceExporter,
-			sdktrace.WithBatchTimeout(5*time.Second),
-			sdktrace.WithMaxExportBatchSize(512),
+			sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
+			sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
 		),
 	)
 
@@ -232,44 +243,24 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 
 // setupMeterProvider creates and configures the meter provider
 func setupMeterProvider(ctx context.Context, res *resource.Resource) error {
-	// Get OTLP endpoint from environment
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
-		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
-	}
-
-	// If no endpoint is configured, skip meter provider setup
-	if endpoint == "" {
-		logger.Debug("no OTLP endpoint configured, skipping meter provider setup")
-		return nil
-	}
-
-	// Strip http:// or https:// prefix for gRPC (gRPC expects host:port only)
-	grpcEndpoint := stripScheme(endpoint)
-
-	// Create OTLP metric exporter
-	metricExporter, err := otlpmetricgrpc.New(ctx,
-		otlpmetricgrpc.WithEndpoint(grpcEndpoint),
-		otlpmetricgrpc.WithInsecure(), // Use insecure for demo purposes
-	)
+	// Use autoexport to automatically select the right exporter based on
+	// OTEL_EXPORTER_OTLP_PROTOCOL (defaults to http/protobuf)
+	// Supports: otlp, console, and none
+	metricReader, err := autoexport.NewMetricReader(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Create meter provider with periodic reader
+	// Create meter provider with the auto-configured reader
 	meterProvider = sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(
-			sdkmetric.NewPeriodicReader(metricExporter,
-				sdkmetric.WithInterval(10*time.Second),
-			),
-		),
+		sdkmetric.WithReader(metricReader),
 	)
 
 	// Set global meter provider
 	otel.SetMeterProvider(meterProvider)
 
-	logger.Info("meter provider initialized", "endpoint", endpoint)
+	logger.Info("meter provider initialized with auto-export")
 	return nil
 }
 

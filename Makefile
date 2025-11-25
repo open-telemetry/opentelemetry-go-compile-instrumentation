@@ -219,6 +219,9 @@ test: ## Run all tests (unit + integration + e2e)
 test: test-unit test-integration test-e2e
 
 test-unit: test-unit/tool test-unit/pkg ## Run all unit tests (tool + pkg)
+	@echo "Running pkg unit tests (semconv only - hook tests require full instrumentation)..."
+	set -euo pipefail
+	cd pkg/instrumentation/nethttp/semconv && go test -json -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee ../../../gotest-unit-pkg.log | gotestfmt
 
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
@@ -263,6 +266,9 @@ test-unit/pkg/coverage: package gotestfmt ## Run unit tests with coverage for pk
 		echo "Testing $$moddir..."; \
 		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
 	done
+	@echo "Running pkg unit tests with coverage report (semconv only - hook tests require full instrumentation)..."
+	set -euo pipefail
+	cd pkg/instrumentation/nethttp/semconv && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ../../../gotest-unit-pkg.log | gotestfmt
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests

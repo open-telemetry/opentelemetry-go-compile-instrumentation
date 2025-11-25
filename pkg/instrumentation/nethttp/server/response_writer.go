@@ -28,6 +28,15 @@ func (w *writerWrapper) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
+// Write implements http.ResponseWriter.Write and ensures WriteHeader is called
+func (w *writerWrapper) Write(b []byte) (int, error) {
+	// If WriteHeader wasn't called yet, call it with 200 OK (default HTTP behavior)
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
 // Hijack implements the http.Hijacker interface
 func (w *writerWrapper) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if h, ok := w.ResponseWriter.(http.Hijacker); ok {

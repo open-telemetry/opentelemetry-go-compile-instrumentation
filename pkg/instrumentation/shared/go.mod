@@ -1,21 +1,12 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared
 
 go 1.23.0
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../..
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared => ../../shared
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp => ..
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../..
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20251111000000-000000000000
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp v0.0.0-20251111000000-000000000000
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared v0.0.0-00010101000000-000000000000
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
-	go.opentelemetry.io/otel v1.38.0
-	go.opentelemetry.io/otel/sdk v1.38.0
-	go.opentelemetry.io/otel/trace v1.38.0
 )
 
 require (
@@ -39,6 +30,7 @@ require (
 	go.opentelemetry.io/contrib/bridges/prometheus v0.63.0 // indirect
 	go.opentelemetry.io/contrib/exporters/autoexport v0.63.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.63.0 // indirect
+	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.14.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.14.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.38.0 // indirect
@@ -52,8 +44,10 @@ require (
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.38.0 // indirect
 	go.opentelemetry.io/otel/log v0.14.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.38.0 // indirect
 	go.opentelemetry.io/otel/sdk/log v0.14.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.38.0 // indirect
+	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.7.1 // indirect
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect

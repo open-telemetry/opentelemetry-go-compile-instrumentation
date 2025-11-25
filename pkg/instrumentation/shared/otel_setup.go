@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otelsetup"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/otelsetup"
 )
 
 var setupOnce sync.Once
@@ -48,9 +48,9 @@ func SetupOTelSDK() error {
 	return nil
 }
 
-// IsInstrumentationEnabled checks if instrumentation is enabled via environment variable
+// Instrumented checks if instrumentation is enabled via environment variable
 // Default is enabled unless explicitly set to "false"
-func IsInstrumentationEnabled(instrumentationName string) bool {
+func Instrumented(instrumentationName string) bool {
 	// Check global flag
 	if os.Getenv("OTEL_INSTRUMENTATION_ENABLED") == "false" {
 		return false

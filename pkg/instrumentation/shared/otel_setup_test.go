@@ -28,7 +28,7 @@ func TestSetupOTelSDK(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestIsInstrumentationEnabled(t *testing.T) {
+func TestInstrumented(t *testing.T) {
 	tests := []struct {
 		name                string
 		globalEnv           string
@@ -76,7 +76,7 @@ func TestIsInstrumentationEnabled(t *testing.T) {
 				t.Setenv(envVar, tt.specificEnv)
 			}
 
-			result := IsInstrumentationEnabled(tt.instrumentationName)
+			result := Instrumented(tt.instrumentationName)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

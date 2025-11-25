@@ -443,13 +443,10 @@ If you see infinite loops, check the exporter's user-agent string.
 - 🔄 **HTTP/2 & HTTP/3**: Protocol-specific attributes
 - 🔄 **Public Endpoint Detection**: Differentiate internal vs external traffic
 
-See [nethttp-hybrid-design.md](../../../docs/nethttp-hybrid-design.md) for detailed roadmap.
-
 ## Related Documentation
 
 - [Implementation Details](../../../docs/implementation.md)
 - [Upstream otelhttp Analysis](../../../docs/upstream-otelhttp-analysis.md)
-- [Hybrid Design](../../../docs/nethttp-hybrid-design.md)
 - [Getting Started](../../../docs/getting-started.md)
 
 ## Contributing
@@ -459,4 +456,3 @@ See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for development guidelines.
 ## License
 
 Apache License 2.0 - See [LICENSE](../../../LICENSE) for details.
-

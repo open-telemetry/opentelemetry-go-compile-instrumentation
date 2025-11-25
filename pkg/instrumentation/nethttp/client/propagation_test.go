@@ -18,6 +18,19 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const (
+	testParentSpanName = "parent_operation"
+	testChildSpanName  = "http_client_request"
+)
+
+var (
+	testTraceID = trace.TraceID{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	}
+	testSpanID = trace.SpanID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+)
+
 // TestClientContextPropagation verifies that trace context is properly injected
 // into outgoing HTTP requests via the traceparent header.
 func TestClientContextPropagation(t *testing.T) {
@@ -34,25 +47,8 @@ func TestClientContextPropagation(t *testing.T) {
 	otel.SetTextMapPropagator(prop)
 
 	// Create expected trace context
-	expectedTraceID := trace.TraceID{
-		0x01,
-		0x02,
-		0x03,
-		0x04,
-		0x05,
-		0x06,
-		0x07,
-		0x08,
-		0x09,
-		0x0a,
-		0x0b,
-		0x0c,
-		0x0d,
-		0x0e,
-		0x0f,
-		0x10,
-	}
-	expectedSpanID := trace.SpanID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+	expectedTraceID := testTraceID
+	expectedSpanID := testSpanID
 
 	var receivedTraceID trace.TraceID
 	var receivedTraceparent string
@@ -127,25 +123,8 @@ func TestClientContextPropagationWithBaggage(t *testing.T) {
 	defer ts.Close()
 
 	// Create context with trace and baggage
-	traceID := trace.TraceID{
-		0x01,
-		0x02,
-		0x03,
-		0x04,
-		0x05,
-		0x06,
-		0x07,
-		0x08,
-		0x09,
-		0x0a,
-		0x0b,
-		0x0c,
-		0x0d,
-		0x0e,
-		0x0f,
-		0x10,
-	}
-	spanID := trace.SpanID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+	traceID := testTraceID
+	spanID := testSpanID
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID:    traceID,
 		SpanID:     spanID,
@@ -192,10 +171,10 @@ func TestSpanParentChildRelationship(t *testing.T) {
 	defer ts.Close()
 
 	// Create parent span
-	ctx, parentSpan := tracer.Start(context.Background(), "parent_operation")
+	ctx, parentSpan := tracer.Start(context.Background(), testParentSpanName)
 
 	// Create child span (simulating what instrumentation does)
-	ctx, childSpan := tracer.Start(ctx, "http_client_request")
+	ctx, childSpan := tracer.Start(ctx, testChildSpanName)
 
 	// Create and execute request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
@@ -221,9 +200,9 @@ func TestSpanParentChildRelationship(t *testing.T) {
 	var parentSpanCtx, childSpanCtx trace.SpanContext
 	var childParentSpanID trace.SpanID
 	for _, span := range spans {
-		if span.Name() == "parent_operation" {
+		if span.Name() == testParentSpanName {
 			parentSpanCtx = span.SpanContext()
-		} else if span.Name() == "http_client_request" {
+		} else if span.Name() == testChildSpanName {
 			childSpanCtx = span.SpanContext()
 			childParentSpanID = span.Parent().SpanID()
 		}
