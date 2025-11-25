@@ -720,32 +720,6 @@ func combineTypeParams(targetFunc *dst.FuncDecl) *dst.FieldList {
 	return trampolineTypeParams
 }
 
-// replaceGenericInstantiations replaces generic type instantiations with interface{}
-// For example: *GenStruct[T] -> *interface{}, []GenStruct[T, U] -> []interface{}
-func replaceGenericInstantiations(t dst.Expr) dst.Expr {
-	switch tType := t.(type) {
-	case *dst.StarExpr:
-		// *GenStruct[T] -> *interface{}
-		return ast.DereferenceOf(replaceGenericInstantiations(tType.X))
-	case *dst.ArrayType:
-		// []GenStruct[T] -> []interface{}
-		return ast.ArrayType(replaceGenericInstantiations(tType.Elt))
-	case *dst.MapType:
-		// map[K]GenStruct[T] -> map[interface{}]interface{}
-		return &dst.MapType{
-			Key:   replaceGenericInstantiations(tType.Key),
-			Value: replaceGenericInstantiations(tType.Value),
-		}
-	case *dst.IndexExpr:
-		// GenStruct[T] -> interface{}
-		return ast.InterfaceType()
-	case *dst.IndexListExpr:
-		// GenStruct[T, U] -> interface{}
-		return ast.InterfaceType()
-	}
-	return t
-}
-
 // desugarType desugars parameter type to its original type, if parameter
 // is type of ...T, it will be converted to []T
 func desugarType(param *dst.Field) dst.Expr {
@@ -812,8 +786,7 @@ func (ip *InstrumentPhase) rewriteHookContextParams(
 	idx := 0
 	if ast.HasReceiver(ip.targetFunc) {
 		splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
-		recvType := replaceGenericInstantiations(splitRecv.List[0].Type)
-		recvType = replaceTypeParamsWithAny(recvType, combinedTypeParams)
+		recvType := replaceTypeParamsWithAny(splitRecv.List[0].Type, combinedTypeParams)
 		if !isGeneric {
 			clause := setParamClause(idx, recvType)
 			methodSetParamBody.List = append(methodSetParamBody.List, clause)
@@ -930,7 +903,7 @@ func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 		// Unsupported cases:
 		// - *dst.FuncType (function types with type parameters)
 		// - Other uncommon type expressions
-		util.ShouldNotReachHere()
+		util.Unimplemented(fmt.Sprintf("unexpected generic type: %T", tType))
 		return t
 	}
 }
