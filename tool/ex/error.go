@@ -146,9 +146,11 @@ func Fatal(err error) {
 	e := &stackfulError{}
 	if errors.As(err, &e) {
 		em := ""
+		var emSb149 strings.Builder
 		for i, m := range e.message {
-			em += fmt.Sprintf("[%d] %s\n", i, m)
+			emSb149.WriteString(fmt.Sprintf("[%d] %s\n", i, m))
 		}
+		em += emSb149.String()
 		_, _ = fmt.Fprintf(os.Stderr, "Error:\n%s\nStack:\n%s\n",
 			em, strings.Join(e.frame, "\n"))
 		os.Exit(1)

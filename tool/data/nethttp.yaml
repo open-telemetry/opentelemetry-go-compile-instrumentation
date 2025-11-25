@@ -3,4 +3,4 @@ server_hook:
   func: ServeHTTP
   recv: serverHandler
   before: BeforeServeHTTP
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/contrib/nethttp"

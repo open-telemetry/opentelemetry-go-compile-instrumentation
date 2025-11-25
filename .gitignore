@@ -12,5 +12,6 @@ demo/demo
 
 otel.runtime.go
 otel-pkg.gz
+otel-contrib.gz
 pkg_temp
 coverage.txt

@@ -22,14 +22,24 @@ const (
 )
 
 func normalizePath(name string) string {
-	const pkg, pkgTemp = unzippedPkgDir, "pkg_temp"
+	const pkg, pkgTemp = "pkg", "pkg_temp"
+	const contrib, contribTemp = "contrib", "contrib_temp"
+
 	cleanName := filepath.ToSlash(filepath.Clean(name))
-	if strings.HasPrefix(cleanName, pkgTemp+"/") {
-		cleanName = strings.Replace(cleanName, pkgTemp+"/", pkg+"/", 1)
-	} else if cleanName == pkgTemp {
-		cleanName = pkg
+	switch {
+	case cleanName == pkgTemp:
+		return pkg
+	case cleanName == contribTemp:
+		return contrib
+	case strings.HasPrefix(cleanName, pkgTemp+"/"):
+		return strings.Replace(cleanName, pkgTemp+"/", pkg+"/", 1)
+
+	case strings.HasPrefix(cleanName, contribTemp+"/"):
+		return strings.Replace(cleanName, contribTemp+"/", contrib+"/", 1)
+
+	default:
+		return cleanName
 	}
-	return cleanName
 }
 
 func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error {
@@ -129,8 +139,18 @@ func extractGZip(data []byte, targetDir string) error {
 
 func (*SetupPhase) extract() error {
 	const embeddedInstPkgGzip = "otel-pkg.gz"
+	const embeddedInstContribGzib = "otel-contrib.gz"
 	// Read the instrumentation code from the embedded binary file
 	bs, err := data.ReadEmbedFile(embeddedInstPkgGzip)
+	if err != nil {
+		return err
+	}
+	err = extractGZip(bs, util.GetBuildTempDir())
+	if err != nil {
+		return err
+	}
+
+	bs, err = data.ReadEmbedFile(embeddedInstContribGzib)
 	if err != nil {
 		return err
 	}
