@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
 )
 
 func init() {
@@ -35,25 +34,32 @@ func setupOpenTelemetry() {
 	otel.SetMeterProvider(stdoutMeterProvider)
 }
 
-var helloWorldInstrumenter = BuildNetHttpClientOtelInstrumenter()
-
 func MyHookBefore(ictx inst.HookContext) {
-	// Use instrumenter to create span and metrics
-	// When the main is executed, we should instrumenter#start to create span
+	// Use direct tracer to create span - simpler pattern
 	ctx := context.Background()
-	// We should assign the returned context to ctx variable to make sure the context to be propagated properly
+
 	fmt.Println("[MyHook] start to instrument hello world!")
-	ctx = helloWorldInstrumenter.Start(ctx, HelloWorldRequest{})
-	// biz logic
-	// .........
-	// .........
-	// .........
+
+	// Create request with some demo attributes
+	req := HelloWorldRequest{
+		Path: "/api/hello",
+		Params: map[string]string{
+			"name": "world",
+		},
+	}
+
+	// Start instrumentation
+	ctx, span := StartInstrumentation(ctx, req)
+
+	// Simulate some work
 	time.Sleep(2 * time.Second)
-	// We should use instrumenter#end to end the span and to aggregate the metrics
-	helloWorldInstrumenter.End(ctx, instrumenter.Invocation[HelloWorldRequest, HelloWorldResponse]{
-		Request:  HelloWorldRequest{},
-		Response: HelloWorldResponse{},
-	})
+
+	// End instrumentation
+	resp := HelloWorldResponse{
+		Status: 200,
+	}
+	EndInstrumentation(span, resp)
+
 	fmt.Println("[MyHook] hello world is instrumented!")
 	time.Sleep(2 * time.Second)
 }
