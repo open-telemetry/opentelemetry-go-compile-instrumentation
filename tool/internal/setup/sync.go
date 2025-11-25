@@ -62,6 +62,43 @@ func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (b
 	return false, nil
 }
 
+// discoverParentModules finds parent modules that need replace directives
+func discoverParentModules(modulePath string) map[string]string {
+	parentModules := make(map[string]string)
+	pathParts := strings.Split(strings.TrimPrefix(modulePath, util.OtelRoot+"/"), "/")
+	if len(pathParts) <= 1 {
+		return parentModules
+	}
+
+	// Check for parent instrumentation modules
+	for i := len(pathParts) - 1; i > 0; i-- {
+		parentPath := util.OtelRoot + "/" + filepath.Join(pathParts[:i]...)
+		parentLocalPath := filepath.Join(util.GetBuildTempDir(), filepath.Join(pathParts[:i]...))
+		// Check if parent directory has a go.mod file
+		parentGoMod := filepath.Join(parentLocalPath, "go.mod")
+		if _, statErr := os.Stat(parentGoMod); statErr == nil {
+			parentModules[parentPath] = parentLocalPath
+		}
+	}
+	return parentModules
+}
+
+// addModuleReplaces adds replace directives for the given modules
+func (sp *SetupPhase) addModuleReplaces(modfile *modfile.File, modules map[string]string) (bool, error) {
+	changed := false
+	for oldPath, newPath := range modules {
+		added, addErr := addReplace(modfile, oldPath, "", newPath, "")
+		if addErr != nil {
+			return false, addErr
+		}
+		if added {
+			sp.Info("Replace parent dependency", "old", oldPath, "new", newPath)
+			changed = true
+		}
+	}
+	return changed, nil
+}
+
 func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet) error {
 	rules := make([]*rule.InstFuncRule, 0)
 	for _, m := range matched {
@@ -81,6 +118,9 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet)
 		return err
 	}
 	changed := false
+	// Track parent modules that need replace directives
+	allParentModules := make(map[string]string)
+
 	// Add matched dependencies to go.mod
 	for _, m := range rules {
 		util.Assert(strings.HasPrefix(m.Path, util.OtelRoot), "sanity check")
@@ -95,10 +135,24 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet)
 			return addErr
 		}
 		changed = changed || added
-		if changed {
+		if added {
 			sp.Info("Replace dependency", "old", oldPath, "new", newPath)
 		}
+
+		// Check if this module has parent modules that also need replace directives
+		parentModules := discoverParentModules(m.Path)
+		for k, v := range parentModules {
+			allParentModules[k] = v
+		}
 	}
+
+	// Add replace directives for parent modules
+	parentChanged, err := sp.addModuleReplaces(modfile, allParentModules)
+	if err != nil {
+		return err
+	}
+	changed = changed || parentChanged
+
 	// TODO: Since we haven't published the pkg packages yet, we need to add the
 	// replace directive to the local path. Once the pkg packages are published,
 	// we can remove this.

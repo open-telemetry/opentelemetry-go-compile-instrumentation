@@ -4,6 +4,9 @@
 package instrument
 
 import (
+	"path/filepath"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -28,6 +31,47 @@ func groupRules(rset *rule.InstRuleSet) map[string][]rule.InstRule {
 	return file2rules
 }
 
+// findActualFile finds the actual file in compile arguments that matches the rule file.
+// This handles cases where file paths differ between setup and build phases
+// (e.g., different module versions in the cache).
+func (ip *InstrumentPhase) findActualFile(ruleFile string) (string, error) {
+	ruleBasename := filepath.Base(ruleFile)
+
+	// First try exact match
+	for _, arg := range ip.compileArgs {
+		if !util.IsGoFile(arg) {
+			continue
+		}
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			continue
+		}
+		if abs == ruleFile {
+			return abs, nil
+		}
+	}
+
+	// Fallback to basename match if exact match fails
+	for _, arg := range ip.compileArgs {
+		if !util.IsGoFile(arg) {
+			continue
+		}
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			continue
+		}
+		if filepath.Base(abs) == ruleBasename {
+			ip.Debug("File path mismatch, using basename match",
+				"rule_file", ruleFile,
+				"actual_file", abs)
+			return abs, nil
+		}
+	}
+
+	return "", ex.Newf("cannot find file %s (basename: %s) in compile args %v",
+		ruleFile, ruleBasename, ip.compileArgs)
+}
+
 func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
@@ -39,8 +83,15 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 		}
 	}
 	for file, rules := range groupRules(rset) {
+		// Find the actual file in compile args that matches this rule file
+		// This handles cases where paths differ between setup and build phases
+		actualFile, err := ip.findActualFile(file)
+		if err != nil {
+			return err
+		}
+
 		// Group rules by file, then parse the target file once
-		root, err := ip.parseFile(file)
+		root, err := ip.parseFile(actualFile)
 		if err != nil {
 			return err
 		}
@@ -77,7 +128,7 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 		}
 		// Once all func rules targeting this file are applied, write instrumented
 		// AST to new file and replace the original file in the compile command
-		err = ip.writeInstrumented(root, file)
+		err = ip.writeInstrumented(root, actualFile)
 		if err != nil {
 			return err
 		}
