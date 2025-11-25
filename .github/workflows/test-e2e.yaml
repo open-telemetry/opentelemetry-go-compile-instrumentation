@@ -66,8 +66,16 @@ jobs:
     name: Done (E2E Tests)
     runs-on: ubuntu-latest
     needs: [test-e2e]
+    if: always()
     steps:
-      - name: Success
+      - name: Check result
         run: |
-          echo ${{ needs.test-e2e.result }}
-          test ${{ needs.test-e2e.result }} == "success"
+          result="${{ needs.test-e2e.result }}"
+          echo "Test result: $result"
+          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
+            echo "✅ Tests passed or were skipped"
+            exit 0
+          else
+            echo "❌ Tests failed"
+            exit 1
+          fi
