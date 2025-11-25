@@ -457,14 +457,13 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) (*dst.FieldList, *ds
 	// Build type parameter list of trampoline function according to the target
 	// function's type parameters and receiver type parameters
 	genericTypes := combineTypeParams(ip.targetFunc)
-	return paramTypes, genericTypes
+	return paramTypes, ast.CloneTypeParams(genericTypes)
 }
 
 func (ip *InstrumentPhase) buildTrampolineTypes() {
 	beforeHookFunc, afterHookFunc := ip.beforeHookFunc, ip.afterHookFunc
-	var beforeGenericTypes, afterGenericTypes *dst.FieldList
-	beforeHookFunc.Type.Params, beforeGenericTypes = ip.buildTrampolineType(true)
-	afterHookFunc.Type.Params, afterGenericTypes = ip.buildTrampolineType(false)
+	beforeHookFunc.Type.Params, beforeHookFunc.Type.TypeParams = ip.buildTrampolineType(true)
+	afterHookFunc.Type.Params, afterHookFunc.Type.TypeParams = ip.buildTrampolineType(false)
 	candidate := []*dst.FieldList{
 		beforeHookFunc.Type.Params,
 		afterHookFunc.Type.Params,
@@ -477,8 +476,6 @@ func (ip *InstrumentPhase) buildTrampolineTypes() {
 		}
 	}
 	addHookContext(afterHookFunc.Type.Params)
-	beforeHookFunc.Type.TypeParams = ast.CloneTypeParams(beforeGenericTypes)
-	afterHookFunc.Type.TypeParams = ast.CloneTypeParams(afterGenericTypes)
 }
 
 func assignString(assignStmt *dst.AssignStmt, val string) bool {
