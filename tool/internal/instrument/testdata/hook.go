@@ -34,3 +34,11 @@ func H7Before(ctx inst.HookContext) { ctx.SetSkipCall(true) }
 func H7After(ctx inst.HookContext) { _ = ctx }
 
 func H8After(ctx inst.HookContext, ret1 float32, ret2 error) {}
+
+func GenericFuncBefore(ctx inst.HookContext, p1 interface{}, p2 int) {}
+
+func GenericFuncAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
+
+func GenericMethodBefore(ctx inst.HookContext, recv interface{}, p1 interface{}, p2 string) {}
+
+func GenericMethodAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}

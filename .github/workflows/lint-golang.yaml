@@ -41,9 +41,12 @@ jobs:
     steps:
       - name: Check result
         run: |
-          echo ${{ needs.golangci-lint.result }}
-          if [ "${{ needs.golangci-lint.result }}" = "success" ] || [ "${{ needs.golangci-lint.result }}" = "skipped" ]; then
+          result="${{ needs.golangci-lint.result }}"
+          echo "Test result: $result"
+          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
+            echo "✅ Tests passed or were skipped"
             exit 0
           else
+            echo "❌ Tests failed"
             exit 1
           fi
