@@ -454,6 +454,8 @@ func (ip *InstrumentPhase) buildTrampolineType(before bool) (*dst.FieldList, *ds
 			paramTypes.List = append(paramTypes.List, retField)
 		}
 	}
+	// Build type parameter list of trampoline function according to the target
+	// function's type parameters and receiver type parameters
 	genericTypes := combineTypeParams(ip.targetFunc)
 	return paramTypes, genericTypes
 }
