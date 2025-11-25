@@ -207,6 +207,9 @@ test-unit: package gotestfmt
 	@echo "Running unit tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit.log | gotestfmt
+	@echo "Running pkg unit tests (semconv only - hook tests require full instrumentation)..."
+	set -euo pipefail
+	cd pkg/instrumentation/nethttp/semconv && go test -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee ../../../gotest-unit-pkg.log
 
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
@@ -221,6 +224,9 @@ test-unit/coverage: package gotestfmt
 	@echo "Running unit tests with coverage report..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-unit.log | gotestfmt
+	@echo "Running pkg unit tests with coverage report (semconv only - hook tests require full instrumentation)..."
+	set -euo pipefail
+	cd pkg/instrumentation/nethttp/semconv && go test -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ../../../gotest-unit-pkg.log
 
 .ONESHELL:
 test-integration: ## Run integration tests
