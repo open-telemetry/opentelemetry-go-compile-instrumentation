@@ -45,7 +45,7 @@ func runModTidy(ctx context.Context) error {
 	return util.RunCmd(ctx, "go", "mod", "tidy")
 }
 
-func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (bool, error) {
+func addReplace(modfile *modfile.File, path, rpath string) (bool, error) {
 	hasReplace := false
 	for _, r := range modfile.Replace {
 		if r.Old.Path == path {
@@ -54,7 +54,7 @@ func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (b
 		}
 	}
 	if !hasReplace {
-		err := modfile.AddReplace(path, version, rpath, rversion)
+		err := modfile.AddReplace(path, "", rpath, "")
 		if err != nil {
 			return false, ex.Wrapf(err, "failed to add replace directive")
 		}
@@ -88,7 +88,7 @@ func discoverParentModules(modulePath string) map[string]string {
 func (sp *SetupPhase) addModuleReplaces(modfile *modfile.File, modules map[string]string) (bool, error) {
 	changed := false
 	for oldPath, newPath := range modules {
-		added, addErr := addReplace(modfile, oldPath, "", newPath, "")
+		added, addErr := addReplace(modfile, oldPath, newPath)
 		if addErr != nil {
 			return false, addErr
 		}
@@ -131,7 +131,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet)
 		oldPath := m.Path
 		newPath := strings.TrimPrefix(oldPath, util.OtelRoot)
 		newPath = filepath.Join(util.GetBuildTempDir(), newPath)
-		added, addErr := addReplace(modfile, oldPath, "", newPath, "")
+		added, addErr := addReplace(modfile, oldPath, newPath)
 		if addErr != nil {
 			return addErr
 		}
@@ -160,7 +160,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet)
 	// Add special pkg module to go.mod
 	oldPath := util.OtelRoot + "/pkg"
 	newPath := filepath.Join(util.GetBuildTempDir(), unzippedPkgDir)
-	added, addErr := addReplace(modfile, oldPath, "", newPath, "")
+	added, addErr := addReplace(modfile, oldPath, newPath)
 	if addErr != nil {
 		return addErr
 	}
