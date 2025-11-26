@@ -1,0 +1,285 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import _ "unsafe"
+
+type T struct{}
+
+func (t *T) Func1(p1 string, p2 int) (float32, error) {
+	return 0.0, nil
+}
+
+func Func1(p1 string, p2 int) (float32, error) {
+	println("Hello, World!")
+	return 0.0, nil
+}
+
+func Func2(p1 string, _ int) {}
+
+func OptGood() {}
+func OptBad()  {}
+func OptBad2() {}
+
+func GenericFunc[T any](p1 T, p2 int) (_unnamedRetVal0 T, _unnamedRetVal1 error) {
+	//line <generated>:1
+	if hookContext3543564877, _ := OtelBeforeTrampoline_GenericFunc3543564877[T](&p1, &p2); false {
+	} else {
+		defer OtelAfterTrampoline_GenericFunc3543564877[T](hookContext3543564877, &_unnamedRetVal0, &_unnamedRetVal1)
+	}
+	//line main.go:24:2
+	return p1, nil
+}
+
+type GenStruct[T any] struct {
+	value T
+}
+
+func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal0 T, _unnamedRetVal1 error) {
+	//line <generated>:1
+	if hookContext3378413897, _ := OtelBeforeTrampoline_GenericMethod3378413897(&g, &p1, &p2); false {
+	} else {
+		defer OtelAfterTrampoline_GenericMethod3378413897(hookContext3378413897, &_unnamedRetVal0, &_unnamedRetVal1)
+	}
+	//line main.go:32:2
+	return p1, nil
+}
+
+func main() { Func1("hello", 123) }
+
+//line <generated>:1
+type HookContextImpl3543564877 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl3543564877) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl3543564877) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl3543564877) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl3543564877) GetData() interface{}     { return c.data }
+func (c *HookContextImpl3543564877) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl3543564877) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl3543564877) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl3543564877) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return c.params[0]
+	case 1:
+		return *(c.params[1].(*int))
+	}
+	return nil
+}
+
+func (c *HookContextImpl3543564877) SetParam(idx int, val interface{}) {
+	panic("SetParam is unsupported for generic functions")
+}
+
+func (c *HookContextImpl3543564877) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return c.returnVals[0]
+	case 1:
+		return *(c.returnVals[1].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl3543564877) SetReturnVal(idx int, val interface{}) {
+	panic("SetReturnVal is unsupported for generic functions")
+}
+func (c *HookContextImpl3543564877) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl3543564877) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl3543564877) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl3543564877) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_GenericFunc3543564877[T any](param0 *T, param1 *int) (hookContext *HookContextImpl3543564877, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "GenericFuncBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl3543564877{}
+	hookContext.params = []interface{}{param0, param1}
+	hookContext.funcName = "GenericFunc"
+	hookContext.packageName = "main"
+	if GenericFuncBefore != nil {
+		GenericFuncBefore(hookContext, *param0, *param1)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_GenericFunc3543564877[T any](hookContext HookContext, arg0 *T, arg1 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "GenericFuncAfter")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl3543564877).returnVals = []interface{}{arg0, arg1}
+	if GenericFuncAfter != nil {
+		GenericFuncAfter(hookContext, *arg0, *arg1)
+	}
+}
+
+//go:linkname GenericFuncBefore testdata.GenericFuncBefore
+func GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 int)
+
+//go:linkname GenericFuncAfter testdata.GenericFuncAfter
+func GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)
+
+//line <generated>:1
+type HookContextImpl3378413897 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl3378413897) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl3378413897) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl3378413897) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl3378413897) GetData() interface{}     { return c.data }
+func (c *HookContextImpl3378413897) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl3378413897) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl3378413897) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl3378413897) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(**interface{}))
+	case 1:
+		return c.params[1]
+	case 2:
+		return *(c.params[2].(*string))
+	}
+	return nil
+}
+
+func (c *HookContextImpl3378413897) SetParam(idx int, val interface{}) {
+	panic("SetParam is unsupported for generic functions")
+}
+
+func (c *HookContextImpl3378413897) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return c.returnVals[0]
+	case 1:
+		return *(c.returnVals[1].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl3378413897) SetReturnVal(idx int, val interface{}) {
+	panic("SetReturnVal is unsupported for generic functions")
+}
+func (c *HookContextImpl3378413897) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl3378413897) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl3378413897) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl3378413897) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_GenericMethod3378413897[T any](recv0 **GenStruct[T], param1 *T, param2 *string) (hookContext *HookContextImpl3378413897, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "GenericMethodBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl3378413897{}
+	hookContext.params = []interface{}{recv0, param1, param2}
+	hookContext.funcName = "GenericMethod"
+	hookContext.packageName = "main"
+	if GenericMethodBefore != nil {
+		GenericMethodBefore(hookContext, *recv0, *param1, *param2)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_GenericMethod3378413897[T any](hookContext HookContext, arg0 *T, arg1 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "GenericMethodAfter")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl3378413897).returnVals = []interface{}{arg0, arg1}
+	if GenericMethodAfter != nil {
+		GenericMethodAfter(hookContext, *arg0, *arg1)
+	}
+}
+
+//go:linkname GenericMethodBefore testdata.GenericMethodBefore
+func GenericMethodBefore(hookContext HookContext, recv0 interface{}, param1 interface{}, param2 string)
+
+//go:linkname GenericMethodAfter testdata.GenericMethodAfter
+func GenericMethodAfter(hookContext HookContext, arg0 interface{}, arg1 error)

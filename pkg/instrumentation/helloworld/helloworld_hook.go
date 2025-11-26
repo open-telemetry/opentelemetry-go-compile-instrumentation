@@ -76,4 +76,46 @@ func MyHook1After(ictx inst.HookContext) {
 	println("After MyStruct.Example()")
 }
 
+func MyHookRecvBefore(ictx inst.HookContext, recv, _ interface{}) {
+	println("GenericRecvExample before hook")
+}
+
+func MyHookRecvAfter(ictx inst.HookContext, _ interface{}) {
+	println("GenericRecvExample after hook")
+}
+
+func MyHookGenericBefore(ictx inst.HookContext, _, _ interface{}) {
+	println("GenericExample before hook")
+	fmt.Printf("[Generic] Function: %s.%s\n", ictx.GetPackageName(), ictx.GetFuncName())
+	fmt.Printf("[Generic] Param count: %d\n", ictx.GetParamCount())
+	fmt.Printf("[Generic] Skip call: %v\n", ictx.IsSkipCall())
+	for i := 0; i < ictx.GetParamCount(); i++ {
+		fmt.Printf("[Generic] Param[%d]: %v\n", i, *ictx.GetParam(i).(*int))
+	}
+	ictx.SetData("test-data")
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[Generic] SetParam panic (expected): %v\n", r)
+		}
+	}()
+	ictx.SetParam(0, 999)
+}
+
+func MyHookGenericAfter(ictx inst.HookContext, _ interface{}) {
+	println("GenericExample after hook")
+	fmt.Printf("[Generic] Data from Before: %v\n", ictx.GetData())
+	fmt.Printf("[Generic] Return value count: %d\n", ictx.GetReturnValCount())
+	for i := 0; i < ictx.GetReturnValCount(); i++ {
+		fmt.Printf("[Generic] Return[%d]: %v\n", i, *ictx.GetReturnVal(i).(*int))
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[Generic] SetReturnVal panic (expected): %v\n", r)
+		}
+	}()
+	ictx.SetReturnVal(0, 999)
+}
+
 func BeforeUnderscore(ictx inst.HookContext, _ int, _ float32) {}
