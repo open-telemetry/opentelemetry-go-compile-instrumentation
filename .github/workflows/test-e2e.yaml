@@ -70,10 +70,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.mod"
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # ratchet:arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: make test-e2e
-        env:
-          GOARCH: ${{ matrix.platform.arch }}
-
   done:
     name: Done (E2E Tests)
     runs-on: ubuntu-latest
