@@ -5,6 +5,7 @@ package setup
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/dave/dst"
 
@@ -96,7 +97,7 @@ func buildOtelRuntimeAst(decls []dst.Decl) *dst.File {
 	}
 }
 
-func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet) error {
+func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) error {
 	rules := make([]*rule.InstFuncRule, 0)
 	for _, m := range matched {
 		funcRules := m.GetFuncRules()
@@ -113,10 +114,12 @@ func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet) error {
 	// Build the ast
 	root := buildOtelRuntimeAst(append(importDecls, varDecls...))
 	// Write the ast to file
-	err := ast.WriteFile(OtelRuntimeFile, root)
+	runtimeFilePath := filepath.Join(packagePath, OtelRuntimeFile)
+	err := ast.WriteFile(runtimeFilePath, root)
 	if err != nil {
 		return err
 	}
-	sp.keepForDebug(OtelRuntimeFile)
+	sp.keepForDebug(runtimeFilePath)
+	sp.Info("Created otel.runtime.go", "path", runtimeFilePath)
 	return nil
 }

@@ -62,7 +62,8 @@ func Setup(ctx context.Context, args []string) error {
 		return err
 	}
 	// Introduce additional hook code by generating otel.instrumentation.go
-	err = sp.addDeps(matched)
+	packagePath := util.GetBuildTarget(args)
+	err = sp.addDeps(matched, packagePath)
 	if err != nil {
 		return err
 	}
@@ -77,11 +78,7 @@ func Setup(ctx context.Context, args []string) error {
 		return err
 	}
 	// Write the matched hook to matched.txt for further instrument phase
-	err = sp.store(matched)
-	if err != nil {
-		return err
-	}
-	return nil
+	return sp.store(matched)
 }
 
 // BuildWithToolexec builds the project with the toolexec mode
@@ -128,16 +125,14 @@ func GoBuild(ctx context.Context, args []string) error {
 		logger.DebugContext(ctx, "failed to back up files", "error", err)
 	}
 	defer func() {
-		err = os.RemoveAll(OtelRuntimeFile)
-		if err != nil {
-			logger.DebugContext(ctx, "failed to remove otel runtime file", "error", err)
+		otelRuntimeFilePath := filepath.Join(util.GetBuildTarget(os.Args[1:]), OtelRuntimeFile)
+		if err = os.RemoveAll(otelRuntimeFilePath); err != nil {
+			logger.DebugContext(ctx, "failed to remove otel runtime file", "path", otelRuntimeFilePath, "error", err)
 		}
-		err = os.RemoveAll(unzippedPkgDir)
-		if err != nil {
+		if err = os.RemoveAll(unzippedPkgDir); err != nil {
 			logger.DebugContext(ctx, "failed to remove unzipped pkg", "error", err)
 		}
-		err = util.RestoreFile(backupFiles)
-		if err != nil {
+		if err = util.RestoreFile(backupFiles); err != nil {
 			logger.DebugContext(ctx, "failed to restore files", "error", err)
 		}
 	}()
