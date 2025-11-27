@@ -4,6 +4,7 @@
 package util
 
 import (
+	"path"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -88,4 +89,51 @@ func SplitCompileCmds(input string) []string {
 
 func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
+}
+
+// flagsWithPathValues contains flags that accept a directory or file path as value.
+// From: go help build
+//
+//nolint:gochecknoglobals // constant lookup table
+var flagsWithPathValues = map[string]bool{
+	"-o":       true,
+	"-modfile": true,
+	"-overlay": true,
+	"-pgo":     true,
+	"-pkgdir":  true,
+}
+
+// GetBuildTarget extracts the build target path from the go build command.
+// For example:
+//   - "go build -a cmd/" returns "cmd"
+//   - "go build -a ./app/vmctl" returns "app/vmctl"
+//   - "go build -a ." returns ""
+//   - "go build" returns ""
+//   - "go build -o ./bin/" returns ""
+func GetBuildTarget(goBuildCmd []string) string {
+	for i := len(goBuildCmd) - 1; i >= 0; i-- {
+		arg := goBuildCmd[i]
+
+		// If preceded by a flag that takes a path value, this is a flag value
+		if i > 0 && flagsWithPathValues[goBuildCmd[i-1]] {
+			break
+		}
+
+		// If we hit a flag, stop - packages come after all flags
+		// go build [-o output] [build flags] [packages]
+		if strings.HasPrefix(arg, "-") {
+			break
+		}
+
+		if arg == "go" || arg == "build" {
+			continue
+		}
+
+		if target := path.Clean(arg); target != "." {
+			return target
+		}
+		return ""
+	}
+
+	return ""
 }
