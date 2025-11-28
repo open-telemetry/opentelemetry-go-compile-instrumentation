@@ -36,6 +36,21 @@ func RunCmd(ctx context.Context, args ...string) error {
 	return RunCmdWithEnv(ctx, nil, args...)
 }
 
+func RunCmdInDir(ctx context.Context, dir string, args ...string) error {
+	path := args[0]
+	args = args[1:]
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Dir = dir
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		return ex.Wrapf(err, "failed to run command %q in dir %q with args: %v", path, dir, args)
+	}
+	return nil
+}
+
 func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }

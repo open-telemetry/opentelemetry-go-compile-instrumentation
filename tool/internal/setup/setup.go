@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"golang.org/x/tools/go/packages"
 )
 
 type SetupPhase struct {
@@ -51,6 +52,14 @@ func Setup(ctx context.Context, args []string) error {
 	sp := &SetupPhase{
 		logger: logger,
 	}
+
+	// Introduce additional hook code by generating otel.instrumentation.go
+	// Use GetPackage to determine the build target directory
+	pkgs, err := util.GetBuildPackages(args)
+	if err != nil {
+		return err
+	}
+
 	// Find all dependencies of the project being build
 	deps, err := sp.findDeps(ctx, args)
 	if err != nil {
@@ -61,11 +70,11 @@ func Setup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Introduce additional hook code by generating otel.instrumentation.go
-	packagePath := util.GetBuildTarget(args)
-	err = sp.addDeps(matched, packagePath)
-	if err != nil {
-		return err
+	for _, pkg := range pkgs {
+		err = sp.addDeps(matched, pkg.Module.Dir)
+		if err != nil {
+			return err
+		}
 	}
 	// Extract the embedded instrumentation modules into local directory
 	err = sp.extract()
@@ -125,9 +134,15 @@ func GoBuild(ctx context.Context, args []string) error {
 		logger.DebugContext(ctx, "failed to back up files", "error", err)
 	}
 	defer func() {
-		otelRuntimeFilePath := filepath.Join(util.GetBuildTarget(os.Args[1:]), OtelRuntimeFile)
-		if err = os.RemoveAll(otelRuntimeFilePath); err != nil {
-			logger.DebugContext(ctx, "failed to remove otel runtime file", "path", otelRuntimeFilePath, "error", err)
+		var pkgs []*packages.Package
+		pkgs, err = util.GetBuildPackages(os.Args[1:])
+		if err != nil {
+			logger.DebugContext(ctx, "failed to get build packages", "error", err)
+		}
+		for _, pkg := range pkgs {
+			if err = os.RemoveAll(filepath.Join(pkg.Module.Dir, OtelRuntimeFile)); err != nil {
+				logger.DebugContext(ctx, "failed to remove package", "path", pkg.PkgPath, "error", err)
+			}
 		}
 		if err = os.RemoveAll(unzippedPkgDir); err != nil {
 			logger.DebugContext(ctx, "failed to remove unzipped pkg", "error", err)

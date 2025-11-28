@@ -4,8 +4,9 @@
 package util
 
 import (
-	"path"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
@@ -103,37 +104,58 @@ var flagsWithPathValues = map[string]bool{
 	"-pkgdir":  true,
 }
 
-// GetBuildTarget extracts the build target path from the go build command.
+// GetBuildPackages loads all packages from the go build command arguments.
+// Returns a list of loaded packages. If no package patterns are found in args,
+// defaults to loading the current directory package.
+// The args parameter should be the go build command arguments (e.g., ["build", "-a", "./cmd"]).
+// Returns an error if package loading fails or if invalid patterns are provided.
 // For example:
-//   - "go build -a cmd/" returns "cmd"
-//   - "go build -a ./app/vmctl" returns "app/vmctl"
-//   - "go build -a ." returns ""
-//   - "go build" returns ""
-//   - "go build -o ./bin/" returns ""
-func GetBuildTarget(goBuildCmd []string) string {
-	for i := len(goBuildCmd) - 1; i >= 0; i-- {
-		arg := goBuildCmd[i]
+//   - args ["build", "-a", "cmd/"] returns packages for "./cmd/"
+//   - args ["build", "-a", "./app/vmctl"] returns packages for "./app/vmctl"
+//   - args ["build", "-a", ".", "./cmd"] returns packages for both "." and "./cmd"
+//   - args ["build"] returns packages for "."
+func GetBuildPackages(args []string) ([]*packages.Package, error) {
+	buildPkgs := make([]*packages.Package, 0)
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedModule,
+	}
+	found := false
+	for i := len(args) - 1; i >= 0; i-- {
+		arg := args[i]
 
 		// If preceded by a flag that takes a path value, this is a flag value
-		if i > 0 && flagsWithPathValues[goBuildCmd[i-1]] {
+		// We want to avoid scenarios like "go build -o ./tmp ./app" where tmp also contains Go files,
+		// as it would be treated as a package.
+		if i > 0 && flagsWithPathValues[args[i-1]] {
 			break
 		}
 
-		// If we hit a flag, stop - packages come after all flags
+		// If we hit a flag, stop. Packages come after all flags
 		// go build [-o output] [build flags] [packages]
-		if strings.HasPrefix(arg, "-") {
+		if strings.HasPrefix(arg, "-") || arg == "go" || arg == "build" || arg == "install" {
 			break
 		}
 
-		if arg == "go" || arg == "build" {
-			continue
+		pkgs, err := packages.Load(cfg, arg)
+		if err != nil {
+			return nil, ex.Wrapf(err, "failed to load packages for pattern %s", arg)
+		}
+		for _, pkg := range pkgs {
+			if pkg.Errors != nil {
+				continue
+			}
 		}
 
-		if target := path.Clean(arg); target != "." {
-			return target
-		}
-		return ""
+		buildPkgs = append(buildPkgs, pkgs...)
+		found = true
 	}
 
-	return ""
+	if !found {
+		var err error
+		buildPkgs, err = packages.Load(cfg, ".")
+		if err != nil {
+			return nil, ex.Wrapf(err, "failed to load packages for pattern .")
+		}
+	}
+	return buildPkgs, nil
 }
