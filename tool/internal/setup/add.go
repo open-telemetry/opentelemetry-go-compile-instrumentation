@@ -119,12 +119,12 @@ func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) e
 	// Build the ast
 	root := buildOtelRuntimeAst(append(importDecls, varDecls...))
 	// Write the ast to file
-	runtimeFilePath := filepath.Join(packagePath, OtelRuntimeFile)
-	err := ast.WriteFile(runtimeFilePath, root)
+	otelRuntimeFilePath := filepath.Join(packagePath, OtelRuntimeFile)
+	err := ast.WriteFile(otelRuntimeFilePath, root)
 	if err != nil {
 		return err
 	}
-	sp.keepForDebug(runtimeFilePath)
-	sp.Info("Created otel.runtime.go", "path", runtimeFilePath)
+	sp.keepForDebug(otelRuntimeFilePath)
+	sp.Info("Created otel.runtime.go", "path", otelRuntimeFilePath)
 	return nil
 }

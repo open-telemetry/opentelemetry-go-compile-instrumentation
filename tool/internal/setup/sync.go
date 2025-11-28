@@ -40,8 +40,8 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 	return nil
 }
 
-func runModTidy(ctx context.Context, moduleDir string) error {
-	return util.RunCmdInDir(ctx, moduleDir, "go", "mod", "tidy")
+func runModTidy(ctx context.Context) error {
+	return util.RunCmd(ctx, "go", "mod", "tidy")
 }
 
 func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (bool, error) {
@@ -62,7 +62,7 @@ func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (b
 	return false, nil
 }
 
-func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
+func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet) error {
 	rules := make([]*rule.InstFuncRule, 0)
 	for _, m := range matched {
 		funcRules := m.GetFuncRules()
@@ -75,7 +75,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	// In a matching rule, such as InstFuncRule, the hook code is defined in a
 	// separate module. Since this module is local, we need to add a replace
 	// directive in go.mod to point the module name to its local path.
-	goModFile := filepath.Join(moduleDir, "go.mod")
+	const goModFile = "go.mod"
 	modfile, err := parseGoMod(goModFile)
 	if err != nil {
 		return err
@@ -118,7 +118,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 		if err != nil {
 			return err
 		}
-		err = runModTidy(ctx, moduleDir)
+		err = runModTidy(ctx)
 		if err != nil {
 			return err
 		}
