@@ -5,7 +5,9 @@ package setup
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 
 	"github.com/dave/dst"
 
@@ -28,9 +30,10 @@ func genImportDecl(matched []*rule.InstFuncRule) []dst.Decl {
 	for _, m := range matched {
 		requiredImports[m.Path] = ast.IdentIgnore
 	}
-	importDecls := make([]dst.Decl, 0)
-	for k, v := range requiredImports {
-		importDecls = append(importDecls, ast.ImportDecl(v, k))
+	importDecls := make([]dst.Decl, 0, len(requiredImports))
+	// Sort the keys to ensure deterministic order
+	for _, k := range slices.Sorted(maps.Keys(requiredImports)) {
+		importDecls = append(importDecls, ast.ImportDecl(requiredImports[k], k))
 	}
 	return importDecls
 }
