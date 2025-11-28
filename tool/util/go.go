@@ -95,7 +95,7 @@ func IsGoFile(path string) bool {
 // flagsWithPathValues contains flags that accept a directory or file path as value.
 // From: go help build
 //
-//nolint:gochecknoglobals // constant lookup table
+//nolint:gochecknoglobals // private lookup table
 var flagsWithPathValues = map[string]bool{
 	"-o":       true,
 	"-modfile": true,
@@ -117,7 +117,7 @@ var flagsWithPathValues = map[string]bool{
 func GetBuildPackages(args []string) ([]*packages.Package, error) {
 	buildPkgs := make([]*packages.Package, 0)
 	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedModule,
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedModule,
 	}
 	found := false
 	for i := len(args) - 1; i >= 0; i-- {
@@ -141,13 +141,12 @@ func GetBuildPackages(args []string) ([]*packages.Package, error) {
 			return nil, ex.Wrapf(err, "failed to load packages for pattern %s", arg)
 		}
 		for _, pkg := range pkgs {
-			if pkg.Errors != nil {
+			if pkg.Errors != nil || pkg.Module == nil {
 				continue
 			}
+			buildPkgs = append(buildPkgs, pkg)
+			found = true
 		}
-
-		buildPkgs = append(buildPkgs, pkgs...)
-		found = true
 	}
 
 	if !found {

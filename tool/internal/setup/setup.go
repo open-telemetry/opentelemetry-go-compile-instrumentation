@@ -71,8 +71,8 @@ func Setup(ctx context.Context, args []string) error {
 		return err
 	}
 	for _, pkg := range pkgs {
-		err = sp.addDeps(matched, pkg.Module.Dir)
-		if err != nil {
+		// Introduce additional hook code by generating otel.instrumentation.go
+		if err = sp.addDeps(matched, pkg.Dir); err != nil {
 			return err
 		}
 	}
@@ -140,7 +140,7 @@ func GoBuild(ctx context.Context, args []string) error {
 			logger.DebugContext(ctx, "failed to get build packages", "error", err)
 		}
 		for _, pkg := range pkgs {
-			if err = os.RemoveAll(filepath.Join(pkg.Module.Dir, OtelRuntimeFile)); err != nil {
+			if err = os.RemoveAll(filepath.Join(pkg.Dir, OtelRuntimeFile)); err != nil {
 				logger.DebugContext(ctx, "failed to remove package", "path", pkg.PkgPath, "error", err)
 			}
 		}

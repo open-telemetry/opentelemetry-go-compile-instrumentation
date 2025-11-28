@@ -6,77 +6,57 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
 
 func TestGetPackages(t *testing.T) {
-	setupTestModule(t, []string{"cmd", "app/vmctl", "pkg/lib"})
+	setupTestModule(t, []string{"cmd", "foo/demo"})
 
 	tests := []struct {
-		name          string
-		args          []string
-		expectedCount int
-		checkPackages func(t *testing.T, pkgs []string)
+		name             string
+		args             []string
+		expectedCount    int
+		expectedPackages []string
 	}{
 		{
-			name:          "single package",
-			args:          []string{"build", "-a", "-o", "tmp", "./cmd"},
-			expectedCount: 1,
-			checkPackages: func(t *testing.T, pkgs []string) {
-				if !strings.Contains(pkgs[0], "testmodule/cmd") {
-					t.Errorf("Expected package to contain 'testmodule/cmd', got %s", pkgs[0])
-				}
-			},
+			name:             "single package",
+			args:             []string{"build", "-a", "-o", "tmp", "./cmd"},
+			expectedCount:    1,
+			expectedPackages: []string{"testmodule/cmd"},
 		},
 		{
-			name:          "multiple packages",
-			args:          []string{"build", "./cmd", "./app/vmctl"},
-			expectedCount: 2,
-			checkPackages: func(t *testing.T, pkgs []string) {
-				foundCmd, foundVmctl := false, false
-				for _, pkg := range pkgs {
-					if strings.Contains(pkg, "testmodule/cmd") {
-						foundCmd = true
-					}
-					if strings.Contains(pkg, "testmodule/app/vmctl") {
-						foundVmctl = true
-					}
-				}
-				if !foundCmd || !foundVmctl {
-					t.Errorf("Expected to find both cmd and vmctl packages, got %v", pkgs)
-				}
-			},
+			name:             "multiple packages",
+			args:             []string{"build", "./cmd", "./foo/demo"},
+			expectedCount:    2,
+			expectedPackages: []string{"testmodule/cmd", "testmodule/foo/demo"},
 		},
 		{
-			name:          "wildcard pattern",
-			args:          []string{"build", "./cmd/..."},
-			expectedCount: 1,
-			checkPackages: func(t *testing.T, pkgs []string) {
-				if !strings.Contains(pkgs[0], "testmodule/cmd") {
-					t.Errorf("Expected package to contain 'testmodule/cmd', got %s", pkgs[0])
-				}
-			},
+			name:             "wildcard pattern",
+			args:             []string{"build", "./cmd/..."},
+			expectedCount:    1,
+			expectedPackages: []string{"testmodule/cmd"},
 		},
 		{
-			name:          "default to current directory",
-			args:          []string{"build"},
-			expectedCount: 1,
-			checkPackages: func(t *testing.T, pkgs []string) {
-				if pkgs[0] != "." && !strings.Contains(pkgs[0], "testmodule") {
-					t.Errorf("Expected root package, got %s", pkgs[0])
-				}
-			},
+			name:             "default to current directory",
+			args:             []string{"build"},
+			expectedCount:    1,
+			expectedPackages: []string{"."},
 		},
 		{
-			name:          "current directory explicit",
-			args:          []string{"build", "."},
-			expectedCount: 1,
+			name:             "current directory explicit",
+			args:             []string{"build", "."},
+			expectedCount:    1,
+			expectedPackages: []string{"."},
 		},
 		{
-			name:          "nonexistent package mixed with valid",
-			args:          []string{"build", "./cmd", "./nonexistent"},
-			expectedCount: 2, // Function loads all patterns, including errored packages.
+			name:             "nonexistent package mixed with valid",
+			args:             []string{"build", "./cmd", "./nonexistent"},
+			expectedCount:    1,
+			expectedPackages: []string{"testmodule/cmd"},
 		},
 	}
 
@@ -91,20 +71,38 @@ func TestGetPackages(t *testing.T) {
 				t.Errorf("Expected %d packages, got %d", tt.expectedCount, len(pkgs))
 			}
 
-			if tt.checkPackages != nil {
-				pkgIDs := make([]string, len(pkgs))
-				for i, pkg := range pkgs {
-					pkgIDs[i] = pkg.ID
-				}
-				tt.checkPackages(t, pkgIDs)
+			if tt.expectedPackages != nil {
+				pkgIDs := extractPackageIDs(pkgs)
+				checkPackages(t, pkgIDs, tt.expectedPackages)
 			}
 		})
 	}
 }
 
+func extractPackageIDs(pkgs []*packages.Package) []string {
+	ids := make([]string, len(pkgs))
+	for i, pkg := range pkgs {
+		ids[i] = pkg.ID
+	}
+	return ids
+}
+
+// checkPackages returns a function that verifies all expected strings are found in the packages.
+func checkPackages(t *testing.T, pkgs, expectedPkgs []string) {
+	t.Helper()
+	if len(pkgs) == 0 {
+		t.Fatal("No packages to check")
+	}
+
+	for _, exp := range expectedPkgs {
+		if !slices.ContainsFunc(pkgs, func(pkg string) bool { return strings.Contains(pkg, exp) }) {
+			t.Errorf("Expected package containing %q not found in %v", exp, pkgs)
+		}
+	}
+}
+
 // setupTestModule creates a temporary Go module with the given subdirectories.
 // Each subdirectory will contain a simple main.go file.
-// Returns cleanup function to restore the original working directory.
 func setupTestModule(t *testing.T, subDirs []string) {
 	t.Helper()
 
@@ -127,16 +125,5 @@ func setupTestModule(t *testing.T, subDirs []string) {
 		t.Fatalf("Failed to create go.mod: %v", err)
 	}
 
-	originalWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current working directory: %v", err)
-	}
-
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("Failed to change to temp directory: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_ = os.Chdir(originalWd)
-	})
+	t.Chdir(tmpDir)
 }
