@@ -107,10 +107,10 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 		if decl, ok := node.(*dst.FuncDecl); ok {
 			switch decl.Name.Name {
 			case trampolineBeforeName:
-				ip.beforeHookFunc = decl
+				ip.beforeTrampFunc = decl
 				ip.addDecl(decl)
 			case trampolineAfterName:
-				ip.afterHookFunc = decl
+				ip.afterTrampFunc = decl
 				ip.addDecl(decl)
 			default:
 				if ast.HasReceiver(decl) {
@@ -139,8 +139,8 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 		}
 	}
 	util.Assert(ip.hookCtxDecl != nil &&
-		ip.beforeHookFunc != nil &&
-		ip.afterHookFunc != nil, "sanity check")
+		ip.beforeTrampFunc != nil &&
+		ip.afterTrampFunc != nil, "sanity check")
 	util.Assert(len(ip.varDecls) > 0, "sanity check")
 	return nil
 }
@@ -251,14 +251,14 @@ func getHookParamTraits(t *rule.InstFuncRule, before bool) ([]ParamTrait, error)
 func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTrait) error {
 	// The actual parameter list of hook function should be the same as the
 	// target function
-	if len(traits) != (len(ip.beforeHookFunc.Type.Params.List) + 1) {
+	if len(traits) != (len(ip.beforeTrampFunc.Type.Params.List) + 1) {
 		return ex.Newf("hook func signature mismatch, expected %d, got %d",
-			len(ip.beforeHookFunc.Type.Params.List)+1, len(traits))
+			len(ip.beforeTrampFunc.Type.Params.List)+1, len(traits))
 	}
-	// Hook: 	   func beforeFoo(hookContext* HookContext, p*[]int)
-	// Trampoline: func OtelBeforeTrampoline_foo(p *[]int)
+	// Hook: 	   func A(hookContext* HookContext, p*[]int)
+	// Trampoline: func B(p *[]int)
 	args := []dst.Expr{ast.Ident(trampolineHookContextName)}
-	for idx, field := range ip.beforeHookFunc.Type.Params.List {
+	for idx, field := range ip.beforeTrampFunc.Type.Params.List {
 		trait := traits[idx+1 /*HookContext*/]
 		for _, name := range field.Names { // syntax of n1,n2 type
 			if trait.IsVariadic {
@@ -275,21 +275,21 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTr
 		ast.Block(call),
 		nil,
 	)
-	insertAt(ip.beforeHookFunc, iff, len(ip.beforeHookFunc.Body.List)-1)
+	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
 	return nil
 }
 
 func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTrait) error {
 	// The actual parameter list of hook function should be the same as the
 	// target function
-	if len(traits) != len(ip.afterHookFunc.Type.Params.List) {
+	if len(traits) != len(ip.afterTrampFunc.Type.Params.List) {
 		return ex.Newf("hook func signature mismatch, expected %d, got %d",
-			len(ip.afterHookFunc.Type.Params.List), len(traits))
+			len(ip.afterTrampFunc.Type.Params.List), len(traits))
 	}
-	// Hook: 	   func afterFoo(ctx* HookContext, p*[]int)
-	// Trampoline: func OtelAfterTrampoline_foo(ctx* HookContext, p *[]int)
+	// Hook: 	   func A(ctx* HookContext, p*[]int)
+	// Trampoline: func B(ctx* HookContext, p *[]int)
 	var args []dst.Expr
-	for idx, field := range ip.afterHookFunc.Type.Params.List {
+	for idx, field := range ip.afterTrampFunc.Type.Params.List {
 		if idx == 0 {
 			args = append(args, ast.Ident(trampolineHookContextName))
 			continue
@@ -312,43 +312,11 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 		ast.Block(call),
 		nil,
 	)
-	insertAtEnd(ip.afterHookFunc, iff)
+	insertAtEnd(ip.afterTrampFunc, iff)
 	return nil
 }
 
-// replaceTypeWithAny replaces parameter types with interface{} based on generic type parameters.
-func replaceTypeWithAny(traits []ParamTrait, paramTypes, genericTypes *dst.FieldList) error {
-	if len(paramTypes.List) != len(traits) {
-		return ex.New("hook func signature can not match with target function")
-	}
-
-	for i, field := range paramTypes.List {
-		trait := traits[i]
-		if trait.IsInterfaceAny {
-			// Hook explicitly uses interface{} for this parameter
-			field.Type = ast.InterfaceType()
-		} else {
-			// Replace type parameters with interface{} (for linkname compatibility)
-			field.Type = replaceTypeParamsWithAny(field.Type, genericTypes)
-		}
-	}
-	return nil
-}
-
-func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
-	traits []ParamTrait, before bool,
-) error {
-	paramTypes, genericTypes := ip.buildTrampolineType(before)
-	addHookContext(paramTypes)
-	err := replaceTypeWithAny(traits, paramTypes, genericTypes)
-	if err != nil {
-		return err
-	}
-
-	// Generate var decl and append it to the target file, note that many target
-	// functions may match the same hook function, it's a fatal error to append
-	// multiple hook function declarations to the same file, so we need to check
-	// if the hook function variable is already declared in the target file
+func (ip *InstrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {
 	fnName := makeOnXName(t, before)
 	funcDecl := &dst.FuncDecl{
 		Name: ast.Ident(fnName),
@@ -366,7 +334,6 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 	if exist == nil {
 		ip.addDecl(funcDecl)
 	}
-
 	return nil
 }
 
@@ -383,10 +350,10 @@ func insertAtEnd(funcDecl *dst.FuncDecl, stmt dst.Stmt) {
 	insertAt(funcDecl, stmt, len(funcDecl.Body.List))
 }
 
-func (ip *InstrumentPhase) renameTrampolineFunc(t *rule.InstFuncRule) {
+func (ip *InstrumentPhase) renameTrampFunc(t *rule.InstFuncRule) {
 	// Randomize trampoline function names
-	ip.beforeHookFunc.Name.Name = makeName(t, ip.targetFunc, trampolineBefore)
-	dst.Inspect(ip.beforeHookFunc, func(node dst.Node) bool {
+	ip.beforeTrampFunc.Name.Name = makeName(t, ip.targetFunc, trampolineBefore)
+	dst.Inspect(ip.beforeTrampFunc, func(node dst.Node) bool {
 		if basicLit, ok := node.(*dst.BasicLit); ok {
 			// Replace OtelBeforeTrampolinePlaceHolder to real hook func name
 			if basicLit.Value == trampolineBeforeNamePlaceholder {
@@ -395,8 +362,8 @@ func (ip *InstrumentPhase) renameTrampolineFunc(t *rule.InstFuncRule) {
 		}
 		return true
 	})
-	ip.afterHookFunc.Name.Name = makeName(t, ip.targetFunc, trampolineAfter)
-	dst.Inspect(ip.afterHookFunc, func(node dst.Node) bool {
+	ip.afterTrampFunc.Name.Name = makeName(t, ip.targetFunc, trampolineAfter)
+	dst.Inspect(ip.afterTrampFunc, func(node dst.Node) bool {
 		if basicLit, ok := node.(*dst.BasicLit); ok {
 			if basicLit.Value == trampolineAfterNamePlaceholder {
 				basicLit.Value = strconv.Quote(t.After)
@@ -414,68 +381,140 @@ func addHookContext(list *dst.FieldList) {
 	list.List = append([]*dst.Field{hookCtx}, list.List...)
 }
 
-//nolint:revive // Return types are clear from context and usage. It collides with nonamedreturns
-func (ip *InstrumentPhase) buildTrampolineType(before bool) (*dst.FieldList, *dst.FieldList) {
-	// Since target function parameter names might be "_", we may use the target
-	// function parameters in the trampoline function, which would cause a syntax
-	// error, so we assign them a specific name and use them.
+// findTargetParamType finds the parameter list of the target function
+//
+// func (recv *Type1) Target(arg1 Type2, arg2 Type3, ...) (ret1 Type4, ret2 Type5, ...)
+// ->
+// [recv *Type1, arg1 Type2, arg2 Type3, ...]
+func findTargetParamType(targetFunc *dst.FuncDecl) *dst.FieldList {
+	paramTypes := &dst.FieldList{}
 	idx := 0
-	renameField := func(field *dst.Field, prefix string) {
-		for _, names := range field.Names {
-			names.Name = fmt.Sprintf("%s%d", prefix, idx)
+	if ast.HasReceiver(targetFunc) {
+		splitRecv := ast.SplitMultiNameFields(targetFunc.Recv)
+		recvField := util.AssertType[*dst.Field](dst.Clone(splitRecv.List[0]))
+		for _, names := range recvField.Names {
+			names.Name = fmt.Sprintf("%s%d", "recv", idx)
 			idx++
 		}
+		paramTypes.List = append(paramTypes.List, recvField)
 	}
-	// Build parameter list of trampoline function.
-	// For before trampoline, it's signature is:
-	// func S(h* HookContext, recv type, arg1 type, arg2 type, ...)
-	// For after trampoline, it's signature is:
-	// func S(h* HookContext, arg1 type, arg2 type, ...)
-	// All grouped parameters (like a, b int) are expanded into separate parameters (a int, b int)
-	paramTypes := &dst.FieldList{List: []*dst.Field{}}
-	if before {
-		if ast.HasReceiver(ip.targetFunc) {
-			splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
-			recvField := util.AssertType[*dst.Field](dst.Clone(splitRecv.List[0]))
-			renameField(recvField, "recv")
-			paramTypes.List = append(paramTypes.List, recvField)
+	idx = 0
+	splitParams := ast.SplitMultiNameFields(targetFunc.Type.Params)
+	for _, field := range splitParams.List {
+		paramField := util.AssertType[*dst.Field](dst.Clone(field))
+		for _, names := range paramField.Names {
+			names.Name = fmt.Sprintf("%s%d", "param", idx)
+			idx++
 		}
-		splitParams := ast.SplitMultiNameFields(ip.targetFunc.Type.Params)
-		for _, field := range splitParams.List {
-			paramField := util.AssertType[*dst.Field](dst.Clone(field))
-			renameField(paramField, "param")
-			paramTypes.List = append(paramTypes.List, paramField)
-		}
-	} else if ip.targetFunc.Type.Results != nil {
-		splitResults := ast.SplitMultiNameFields(ip.targetFunc.Type.Results)
+		paramTypes.List = append(paramTypes.List, paramField)
+	}
+	return paramTypes
+}
+
+// findTargetResultType finds the result list of the target function
+//
+// func (recv *Type1) Target(arg1 Type2, arg2 Type3, ...) (ret1 Type4, ret2 Type5, ...)
+// ->
+// [ret1 Type4, ret2 Type5, ...]
+func findTargetResultType(targetFunc *dst.FuncDecl) *dst.FieldList {
+	paramTypes := &dst.FieldList{}
+	if targetFunc.Type.Results != nil {
+		splitResults := ast.SplitMultiNameFields(targetFunc.Type.Results)
+		idx := 0
 		for _, field := range splitResults.List {
 			retField := util.AssertType[*dst.Field](dst.Clone(field))
-			renameField(retField, "arg")
+			for _, names := range retField.Names {
+				names.Name = fmt.Sprintf("%s%d", "arg", idx)
+				idx++
+			}
 			paramTypes.List = append(paramTypes.List, retField)
 		}
 	}
-	// Build type parameter list of trampoline function according to the target
-	// function's type parameters and receiver type parameters
-	genericTypes := combineTypeParams(ip.targetFunc)
-	return paramTypes, ast.CloneTypeParams(genericTypes)
+	return paramTypes
 }
 
-func (ip *InstrumentPhase) buildTrampolineTypes() {
-	beforeHookFunc, afterHookFunc := ip.beforeHookFunc, ip.afterHookFunc
-	beforeHookFunc.Type.Params, beforeHookFunc.Type.TypeParams = ip.buildTrampolineType(true)
-	afterHookFunc.Type.Params, afterHookFunc.Type.TypeParams = ip.buildTrampolineType(false)
-	candidate := []*dst.FieldList{
-		beforeHookFunc.Type.Params,
-		afterHookFunc.Type.Params,
-	}
-	for _, list := range candidate {
-		for i := range len(list.List) {
-			paramField := list.List[i]
-			paramFieldType := desugarType(paramField)
-			paramField.Type = ast.DereferenceOf(paramFieldType)
+// findTargetGenericType finds the type parameter list of the target function
+//
+// func (c *Type1[K]) Target[V any]() V
+// ->
+// [K, V]
+func findTargetGenericType(targetFunc *dst.FuncDecl) *dst.FieldList {
+	var trampolineTypeParams *dst.FieldList
+	if ast.HasReceiver(targetFunc) {
+		receiverTypeParams := extractReceiverTypeParams(targetFunc.Recv.List[0].Type)
+		if receiverTypeParams != nil {
+			trampolineTypeParams = receiverTypeParams
 		}
 	}
-	addHookContext(afterHookFunc.Type.Params)
+	if targetFunc.Type.TypeParams != nil {
+		if trampolineTypeParams == nil {
+			trampolineTypeParams = targetFunc.Type.TypeParams
+		} else {
+			combined := &dst.FieldList{List: make([]*dst.Field, 0)}
+			combined.List = append(combined.List, trampolineTypeParams.List...)
+			combined.List = append(combined.List, targetFunc.Type.TypeParams.List...)
+			trampolineTypeParams = combined
+		}
+	}
+
+	if trampolineTypeParams != nil {
+		clone := dst.Clone(trampolineTypeParams)
+		trampolineTypeParams = util.AssertType[*dst.FieldList](clone)
+	}
+	return trampolineTypeParams
+}
+
+func (ip *InstrumentPhase) buildTrampSignature(before bool) {
+	var fields *dst.FieldList
+	if before {
+		beforeTramp := ip.beforeTrampFunc
+		beforeTramp.Type.Params = findTargetParamType(ip.targetFunc)
+		beforeTramp.Type.TypeParams = findTargetGenericType(ip.targetFunc)
+		fields = beforeTramp.Type.Params
+	} else {
+		afterTramp := ip.afterTrampFunc
+		afterTramp.Type.Params = findTargetResultType(ip.targetFunc)
+		afterTramp.Type.TypeParams = findTargetGenericType(ip.targetFunc)
+		fields = afterTramp.Type.Params
+	}
+	// All types should be replaced with dereferenced types, so that the trampoline
+	// function can modify the target function's parameters.
+	for i := range len(fields.List) {
+		paramField := fields.List[i]
+		paramFieldType := desugarType(paramField)
+		paramField.Type = ast.DereferenceOf(paramFieldType)
+	}
+
+	// If it's after trampoline, add hook context as the first parameter
+	if !before {
+		addHookContext(fields)
+	}
+}
+
+func (ip *InstrumentPhase) buildHookSignature(traits []ParamTrait, before bool) (*dst.FieldList, error) {
+	var paramTypes, genericTypes *dst.FieldList
+	if before {
+		paramTypes = findTargetParamType(ip.targetFunc)
+	} else {
+		paramTypes = findTargetResultType(ip.targetFunc)
+	}
+	addHookContext(paramTypes)
+
+	if len(paramTypes.List) != len(traits) {
+		return nil, ex.New("hook func signature can not match with target function")
+	}
+
+	genericTypes = findTargetGenericType(ip.targetFunc)
+	for i, field := range paramTypes.List {
+		trait := traits[i]
+		if trait.IsInterfaceAny {
+			// Hook explicitly uses interface{} for this parameter
+			field.Type = ast.InterfaceType()
+		} else {
+			field.Type = replaceTypeParamsWithAny(field.Type, genericTypes)
+		}
+	}
+	return paramTypes, nil
 }
 
 func assignString(assignStmt *dst.AssignStmt, val string) bool {
@@ -508,9 +547,9 @@ func assignSliceLiteral(assignStmt *dst.AssignStmt, vals []dst.Expr) bool {
 
 // populateHookContext populates the hook context before hook invocation
 func (ip *InstrumentPhase) populateHookContext(before bool) bool {
-	funcDecl := ip.beforeHookFunc
+	funcDecl := ip.beforeTrampFunc
 	if !before {
-		funcDecl = ip.afterHookFunc
+		funcDecl = ip.afterTrampFunc
 	}
 	for _, stmt := range funcDecl.Body.List {
 		if assignStmt, ok := stmt.(*dst.AssignStmt); ok {
@@ -573,7 +612,7 @@ func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 		t2 := util.AssertType[*dst.Ident](t1.X)
 		t2.Name += suffix
 	}
-	for _, node := range []dst.Node{ip.beforeHookFunc, ip.afterHookFunc} {
+	for _, node := range []dst.Node{ip.beforeTrampFunc, ip.afterTrampFunc} {
 		dst.Inspect(node, func(node dst.Node) bool {
 			if ident, ok1 := node.(*dst.Ident); ok1 {
 				if ident.Name == trampolineHookContextImplType {
@@ -676,47 +715,6 @@ func extractReceiverTypeParams(recvType dst.Expr) *dst.FieldList {
 	return nil
 }
 
-// combineTypeParams combines type parameters from the receiver and function type parameters.
-// For methods on generic types, it extracts type parameters from the receiver and merges
-// them with the function's type parameters.
-// Receiver type parameters come first, followed by function type parameters.
-//
-// Example:
-//
-//	Original: func (c *Container[K]) Transform[V any]() V
-//	Result: [K, V]
-//
-//	Generated trampolines:
-//	  func OtelBeforeTrampoline_Container_Transform[K comparable, V any](
-//	      hookContext *HookContext,
-//	      recv0 *Container[K],  // ← Uses K
-//	  ) { ... }
-//
-//	  func OtelAfterTrampoline_Container_Transform[K comparable, V any](
-//	      hookContext *HookContext,
-//	      arg0 *V,  // ← Uses V (return type)
-//	  ) { ... }
-func combineTypeParams(targetFunc *dst.FuncDecl) *dst.FieldList {
-	var trampolineTypeParams *dst.FieldList
-	if ast.HasReceiver(targetFunc) {
-		receiverTypeParams := extractReceiverTypeParams(targetFunc.Recv.List[0].Type)
-		if receiverTypeParams != nil {
-			trampolineTypeParams = receiverTypeParams
-		}
-	}
-	if targetFunc.Type.TypeParams != nil {
-		if trampolineTypeParams == nil {
-			trampolineTypeParams = targetFunc.Type.TypeParams
-		} else {
-			combined := &dst.FieldList{List: make([]*dst.Field, 0)}
-			combined.List = append(combined.List, trampolineTypeParams.List...)
-			combined.List = append(combined.List, targetFunc.Type.TypeParams.List...)
-			trampolineTypeParams = combined
-		}
-	}
-	return trampolineTypeParams
-}
-
 // desugarType desugars parameter type to its original type, if parameter
 // is type of ...T, it will be converted to []T
 func desugarType(param *dst.Field) dst.Expr {
@@ -726,7 +724,43 @@ func desugarType(param *dst.Field) dst.Expr {
 	return param.Type
 }
 
-func (ip *InstrumentPhase) rewriteHookContext() {
+func rewriteParamMethods(targetFunc *dst.FuncDecl, methodSetParam, methodGetParam *dst.BlockStmt) {
+	idx := 0
+	if ast.HasReceiver(targetFunc) {
+		recvType := targetFunc.Recv.List[0].Type
+		clause := setParamClause(idx, recvType)
+		methodSetParam.List = append(methodSetParam.List, clause)
+		clause = getParamClause(idx, recvType)
+		methodGetParam.List = append(methodGetParam.List, clause)
+		idx++
+	}
+	for _, param := range targetFunc.Type.Params.List {
+		paramType := desugarType(param)
+		for range param.Names {
+			clause := setParamClause(idx, paramType)
+			methodSetParam.List = append(methodSetParam.List, clause)
+			clause = getParamClause(idx, paramType)
+			methodGetParam.List = append(methodGetParam.List, clause)
+			idx++
+		}
+	}
+}
+
+func rewriteReturnValMethods(targetFunc *dst.FuncDecl, methodSetRetVal, methodGetRetVal *dst.BlockStmt) {
+	idx := 0
+	for _, retval := range targetFunc.Type.Results.List {
+		retType := desugarType(retval)
+		for range retval.Names {
+			clause := getReturnValClause(idx, retType)
+			methodGetRetVal.List = append(methodGetRetVal.List, clause)
+			clause = setReturnValClause(idx, retType)
+			methodSetRetVal.List = append(methodSetRetVal.List, clause)
+			idx++
+		}
+	}
+}
+
+func (ip *InstrumentPhase) rewriteHookContextMethods() {
 	util.Assert(len(ip.hookCtxMethods) > 4, "sanity check")
 	var methodSetParam, methodGetParam, methodGetRetVal, methodSetRetVal *dst.FuncDecl
 	for _, decl := range ip.hookCtxMethods {
@@ -742,87 +776,31 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 		}
 	}
 
-	combinedTypeParams := combineTypeParams(ip.targetFunc)
+	// For generic functions, we need to panic the methods that are not supported
+	if findTargetGenericType(ip.targetFunc) != nil {
+		makeMethodPanic(methodGetParam, "GetParam is unsupported for generic functions")
+		makeMethodPanic(methodGetRetVal, "GetReturnVal is unsupported for generic functions")
+		makeMethodPanic(methodSetParam, "SetParam is unsupported for generic functions")
+		makeMethodPanic(methodSetRetVal, "SetReturnVal is unsupported for generic functions")
+		return
+	}
 
 	// Rewrite SetParam and GetParam methods
-	// Don't believe what you see in template, we will null out it and rewrite
-	// the whole switch statement
 	findSwitchBlock := func(fn *dst.FuncDecl, idx int) *dst.BlockStmt {
 		stmt := util.AssertType[*dst.SwitchStmt](fn.Body.List[idx])
 		body := stmt.Body
 		body.List = nil
 		return body
 	}
+	methodSetParamBody := findSwitchBlock(methodSetParam, 1)
+	methodGetParamBody := findSwitchBlock(methodGetParam, 0)
+	rewriteParamMethods(ip.targetFunc, methodSetParamBody, methodGetParamBody)
 
-	// For generic functions, SetParam and SetReturnVal should panic
-	// as modifying parameters/return values is unsupported for generic functions
-	if combinedTypeParams != nil {
-		makeMethodPanic(methodSetParam, "SetParam is unsupported for generic functions")
-		makeMethodPanic(methodSetRetVal, "SetReturnVal is unsupported for generic functions")
-		methodGetParamBody := findSwitchBlock(methodGetParam, 0)
-		methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
-
-		ip.rewriteHookContextParams(nil, methodGetParamBody, combinedTypeParams)
-		ip.rewriteHookContextResults(nil, methodGetRetValBody, combinedTypeParams)
-	} else {
-		methodSetParamBody := findSwitchBlock(methodSetParam, 1)
-		methodGetParamBody := findSwitchBlock(methodGetParam, 0)
+	// Rewrite SetReturnVal and GetReturnVal methods
+	if ip.targetFunc.Type.Results != nil {
 		methodSetRetValBody := findSwitchBlock(methodSetRetVal, 1)
 		methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
-
-		ip.rewriteHookContextParams(methodSetParamBody, methodGetParamBody, combinedTypeParams)
-		ip.rewriteHookContextResults(methodSetRetValBody, methodGetRetValBody, combinedTypeParams)
-	}
-}
-
-func (ip *InstrumentPhase) rewriteHookContextParams(
-	methodSetParamBody, methodGetParamBody *dst.BlockStmt,
-	combinedTypeParams *dst.FieldList,
-) {
-	isGeneric := combinedTypeParams != nil
-	idx := 0
-	if ast.HasReceiver(ip.targetFunc) {
-		splitRecv := ast.SplitMultiNameFields(ip.targetFunc.Recv)
-		recvType := replaceTypeParamsWithAny(splitRecv.List[0].Type, combinedTypeParams)
-		if !isGeneric {
-			clause := setParamClause(idx, recvType)
-			methodSetParamBody.List = append(methodSetParamBody.List, clause)
-		}
-		clause := getParamClause(idx, recvType)
-		methodGetParamBody.List = append(methodGetParamBody.List, clause)
-		idx++
-	}
-	splitParams := ast.SplitMultiNameFields(ip.targetFunc.Type.Params)
-	for _, param := range splitParams.List {
-		paramType := replaceTypeParamsWithAny(desugarType(param), combinedTypeParams)
-		if !isGeneric {
-			clause := setParamClause(idx, paramType)
-			methodSetParamBody.List = append(methodSetParamBody.List, clause)
-		}
-		clause := getParamClause(idx, paramType)
-		methodGetParamBody.List = append(methodGetParamBody.List, clause)
-		idx++
-	}
-}
-
-func (ip *InstrumentPhase) rewriteHookContextResults(
-	methodSetRetValBody, methodGetRetValBody *dst.BlockStmt,
-	combinedTypeParams *dst.FieldList,
-) {
-	isGeneric := combinedTypeParams != nil
-	if ip.targetFunc.Type.Results != nil {
-		idx := 0
-		splitResults := ast.SplitMultiNameFields(ip.targetFunc.Type.Results)
-		for _, retval := range splitResults.List {
-			retType := replaceTypeParamsWithAny(desugarType(retval), combinedTypeParams)
-			clause := getReturnValClause(idx, retType)
-			methodGetRetValBody.List = append(methodGetRetValBody.List, clause)
-			if !isGeneric {
-				clause = setReturnValClause(idx, retType)
-				methodSetRetValBody.List = append(methodSetRetValBody.List, clause)
-			}
-			idx++
-		}
+		rewriteReturnValMethods(ip.targetFunc, methodSetRetValBody, methodGetRetValBody)
 	}
 }
 
@@ -910,9 +888,13 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	if err != nil {
 		return err
 	}
+	paramTypes, err := ip.buildHookSignature(traits, before)
+	if err != nil {
+		return err
+	}
 	// Add the body-less real hook function declaration. They will be linked to
 	// the real hook function.
-	err = ip.addHookFuncVar(t, traits, before)
+	err = ip.addHookDecl(t, paramTypes, before)
 	if err != nil {
 		return err
 	}
@@ -943,24 +925,24 @@ func (ip *InstrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
 	}
 	// Implement HookContext interface methods dynamically
 	ip.implementHookContext(t)
-	// Rewrite type-aware HookContext APIs
 	// Make all HookContext methods type-aware according to the target function
 	// signature.
-	ip.rewriteHookContext()
+	ip.rewriteHookContextMethods()
 	// Rename template function to trampoline function
-	ip.renameTrampolineFunc(t)
+	ip.renameTrampFunc(t)
 	// Build types of trampoline functions. The parameters of the Before trampoline
 	// function are the same as the target function, the parameters of the After
 	// trampoline function are the same as the target function.
-	ip.buildTrampolineTypes()
 	// Generate calls to real hook functions
 	if t.Before != "" {
+		ip.buildTrampSignature(trampolineBefore)
 		err = ip.callHookFunc(t, trampolineBefore)
 		if err != nil {
 			return err
 		}
 	}
 	if t.After != "" {
+		ip.buildTrampSignature(trampolineAfter)
 		err = ip.callHookFunc(t, trampolineAfter)
 		if err != nil {
 			return err
