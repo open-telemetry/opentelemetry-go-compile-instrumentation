@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"golang.org/x/tools/go/packages"
 )
 
 type SetupPhase struct {
@@ -51,6 +52,14 @@ func Setup(ctx context.Context, args []string) error {
 	sp := &SetupPhase{
 		logger: logger,
 	}
+
+	// Introduce additional hook code by generating otel.instrumentation.go
+	// Use GetPackage to determine the build target directory
+	pkgs, err := util.GetBuildPackages(args)
+	if err != nil {
+		return err
+	}
+
 	// Find all dependencies of the project being build
 	deps, err := sp.findDeps(ctx, args)
 	if err != nil {
@@ -61,10 +70,11 @@ func Setup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Introduce additional hook code by generating otel.instrumentation.go
-	err = sp.addDeps(matched)
-	if err != nil {
-		return err
+	for _, pkg := range pkgs {
+		// Introduce additional hook code by generating otel.instrumentation.go
+		if err = sp.addDeps(matched, pkg.Dir); err != nil {
+			return err
+		}
 	}
 	// Extract the embedded instrumentation modules into local directory
 	err = sp.extract()
@@ -77,11 +87,7 @@ func Setup(ctx context.Context, args []string) error {
 		return err
 	}
 	// Write the matched hook to matched.txt for further instrument phase
-	err = sp.store(matched)
-	if err != nil {
-		return err
-	}
-	return nil
+	return sp.store(matched)
 }
 
 // BuildWithToolexec builds the project with the toolexec mode
@@ -128,16 +134,20 @@ func GoBuild(ctx context.Context, args []string) error {
 		logger.DebugContext(ctx, "failed to back up files", "error", err)
 	}
 	defer func() {
-		err = os.RemoveAll(OtelRuntimeFile)
+		var pkgs []*packages.Package
+		pkgs, err = util.GetBuildPackages(os.Args[1:])
 		if err != nil {
-			logger.DebugContext(ctx, "failed to remove otel runtime file", "error", err)
+			logger.DebugContext(ctx, "failed to get build packages", "error", err)
 		}
-		err = os.RemoveAll(unzippedPkgDir)
-		if err != nil {
+		for _, pkg := range pkgs {
+			if err = os.RemoveAll(filepath.Join(pkg.Dir, OtelRuntimeFile)); err != nil {
+				logger.DebugContext(ctx, "failed to remove package", "path", pkg.PkgPath, "error", err)
+			}
+		}
+		if err = os.RemoveAll(unzippedPkgDir); err != nil {
 			logger.DebugContext(ctx, "failed to remove unzipped pkg", "error", err)
 		}
-		err = util.RestoreFile(backupFiles)
-		if err != nil {
+		if err = util.RestoreFile(backupFiles); err != nil {
 			logger.DebugContext(ctx, "failed to restore files", "error", err)
 		}
 	}()
