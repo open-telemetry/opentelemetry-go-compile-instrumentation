@@ -6,7 +6,7 @@ version: '3.8'
 services:
   # Jaeger - Distributed tracing backend (v2 with native OTLP support + SPM)
   jaeger:
-    image: jaegertracing/jaeger:2.11.0@sha256:b585df1b6299bbbd16bf7c679da30389349736e4b6bc8f4f500142a75bf26ca8
+    image: jaegertracing/jaeger:2.12.0@sha256:4c8423cd8fa8b727bd632f0acda2cc39118f21a4bdcef322a6c9ddbeb6dcd424
     container_name: jaeger
     command:
       - --config=/etc/jaeger/config.yaml
@@ -57,7 +57,7 @@ services:
 
   # OpenTelemetry Collector - Receives, processes, and exports telemetry
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.139.0@sha256:faf125d656fa47cea568b2f3b4494efd2525083bc75c1e96038bc23f05cd68fd
+    image: otel/opentelemetry-collector-contrib:0.140.1@sha256:5901567d6f684547bafee53f02403869b5655e13a4e0af65aa6ae9f6301075d9
     container_name: otel-collector
     command:
       - "--config=/etc/otelcol-contrib/config.yaml"
@@ -81,7 +81,7 @@ services:
 
   # Grafana - Visualization and dashboards
   grafana:
-    image: grafana/grafana:12.2.1@sha256:35c41e0fd0295f5d0ee5db7e780cf33506abfaf47686196f825364889dee878b
+    image: grafana/grafana:12.3.0@sha256:70d9599b186ce287be0d2c5ba9a78acb2e86c1a68c9c41449454d0fc3eeb84e8
     container_name: grafana
     ports:
       - "3000:3000"
@@ -185,7 +185,7 @@ services:
 
   # k6 gRPC Load Testing - Generates continuous load against gRPC server
   k6-grpc:
-    image: grafana/k6:1.3.0@sha256:3ddc8b1a33a2c3d8edc6e99b6a762ae36cba08788463458f5e6a7703e14eb77d
+    image: grafana/k6:1.4.1@sha256:200d24a0770ad12761569993c723fd7d48b29fc7983ff5f976bf8b8dba4c7d21
     container_name: k6-grpc
     command: run --quiet /scripts/grpc-load-test.js
     volumes:
@@ -203,7 +203,7 @@ services:
 
   # k6 HTTP Load Testing - Generates continuous load against HTTP server
   k6-http:
-    image: grafana/k6:1.3.0@sha256:3ddc8b1a33a2c3d8edc6e99b6a762ae36cba08788463458f5e6a7703e14eb77d
+    image: grafana/k6:1.4.1@sha256:200d24a0770ad12761569993c723fd7d48b29fc7983ff5f976bf8b8dba4c7d21
     container_name: k6-http
     command: run --quiet /scripts/http-load-test.js
     volumes:

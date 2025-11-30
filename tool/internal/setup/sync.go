@@ -104,7 +104,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet)
 	// we can remove this.
 	// Add special pkg module to go.mod
 	oldPath := util.OtelRoot + "/pkg"
-	newPath := filepath.Join(util.GetBuildTempDir(), "pkg")
+	newPath := filepath.Join(util.GetBuildTempDir(), unzippedPkgDir)
 	added, addErr := addReplace(modfile, oldPath, "", newPath, "")
 	if addErr != nil {
 		return addErr

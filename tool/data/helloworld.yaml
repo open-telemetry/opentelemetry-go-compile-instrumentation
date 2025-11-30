@@ -27,14 +27,14 @@ hook_recv:
 
 version_range:
   target: golang.org/x/time/rate
-  version: "v0.11.0,v0.12.0"
+  version: "v0.14.0,v0.15.0"
   func: Every
   raw: |
     println("Every1")
 
 version_min_bad:
   target: golang.org/x/time/rate
-  version: "v0.12.0"
+  version: "v0.15.0"
   func: Every
   raw: |
     println("Every2")
@@ -56,4 +56,19 @@ underscore_param:
   target: main
   func: Underscore
   before: BeforeUnderscore
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+
+hook_generic:
+  target: main
+  func: GenericExample
+  before: MyHookGenericBefore
+  after: MyHookGenericAfter
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+
+hook_generic_recv:
+  target: main
+  func: GenericRecvExample
+  recv: "*GenStruct"
+  before: MyHookRecvBefore
+  after: MyHookRecvAfter
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"

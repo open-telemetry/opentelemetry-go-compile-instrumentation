@@ -1,0 +1,15 @@
+generic_func_rule:
+  target: main
+  func: GenericFunc
+  before: GenericFuncBefore
+  after: GenericFuncAfter
+  path: testdata
+
+generic_method_rule:
+  target: main
+  func: GenericMethod
+  recv: "*GenStruct"
+  before: GenericMethodBefore
+  after: GenericMethodAfter
+  path: testdata
+

@@ -4,40 +4,58 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "**/*.go"
-      - "**/*.sh"
-      - "Makefile"
-      - ".github/workflows/check-license-headers.yaml"
   pull_request:
-    paths:
-      - "**/*.go"
-      - "**/*.sh"
-      - "Makefile"
-      - ".github/workflows/check-license-headers.yaml"
 
 permissions:
   contents: read
 
 jobs:
+  # This is a required workflow, so it must always run and report a status.
+  # We use dorny/paths-filter at the job level instead of workflow-level path filters
+  # to ensure the workflow runs and the "done" job reports success even when no relevant files change.
+  # This prevents PRs from being blocked by missing status checks.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # ratchet:dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - "**/*.go"
+              - "**/*.sh"
+              - "Makefile"
+              - ".github/workflows/check-license-headers.yaml"
+
   check-license-headers:
     name: Check License Headers
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
       - run: make lint/license-header
 
   done:
     name: Done (Check License Headers)
     runs-on: ubuntu-latest
-    needs: [check-license-headers]
+    needs: [changes, check-license-headers]
     if: always()
     steps:
       - name: Check result
         run: |
-          echo ${{ needs.check-license-headers.result }}
-          if [ "${{ needs.check-license-headers.result }}" = "success" ] || [ "${{ needs.check-license-headers.result }}" = "skipped" ]; then
+          result="${{ needs.check-license-headers.result }}"
+          echo "Test result: $result"
+          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
+            echo "✅ Tests passed or were skipped"
             exit 0
           else
+            echo "❌ Tests failed"
             exit 1
           fi
