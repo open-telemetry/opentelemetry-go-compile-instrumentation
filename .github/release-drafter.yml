@@ -3,25 +3,14 @@ tag-template: 'v$RESOLVED_VERSION'
 categories:
   - title: '🚀 Features'
     labels:
-      - 'feature'
-      - 'enhancement'
+      - 'scope:feat'
   - title: '🐛 Bug Fixes'
     labels:
-      - 'fix'
-      - 'bugfix'
-      - 'bug'
-  - title: '📚 Documentation'
+      - 'scope:fix'
+  - title: '🧰 Maintenance'
     labels:
-      - 'documentation'
-      - 'docs'
-  - title: 'Maintenance'
-    labels:
-      - 'chore'
-      - 'maintenance'
-  - title: '⬆️ Dependencies'
-    labels:
-      - 'dependencies'
-      - 'deps'
+      - 'scope:chore'
+      - 'scope:refactor'
 change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
 change-title-escapes: '\<*_&'
 version-resolver:
@@ -31,14 +20,28 @@ version-resolver:
       - 'breaking'
   minor:
     labels:
-      - 'minor'
-      - 'feature'
+      - 'scope:feat'
   patch:
     labels:
-      - 'patch'
-      - 'fix'
-      - 'bugfix'
+      - 'scope:fix'
+      - 'scope:chore'
+      - 'scope:refactor'
   default: patch
+autolabeler:
+  - label: 'scope:feat'
+    title:
+      - '/^feat(\(.*\))?!?:/i'
+  - label: 'scope:fix'
+    title:
+      - '/^fix(\(.*\))?!?:/i'
+  - label: 'scope:chore'
+    title:
+      - '/^chore(\(.*\))?!?:/i'
+      - '/^docs?(\(.*\))?!?:/i'
+      - '/^release(\(.*\))?!?:/i'
+  - label: 'scope:refactor'
+    title:
+      - '/^refactor(\(.*\))?!?:/i'
 template: |
   ## What's Changed
 
