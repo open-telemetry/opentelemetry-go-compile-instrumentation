@@ -11,6 +11,7 @@ categories:
     labels:
       - 'scope:chore'
       - 'scope:refactor'
+      - 'scope:perf'
 change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
 change-title-escapes: '\<*_&'
 version-resolver:
