@@ -27,6 +27,8 @@ version-resolver:
       - 'scope:fix'
       - 'scope:chore'
       - 'scope:refactor'
+      - 'scope:perf'
+      
   default: patch
 autolabeler:
   - label: 'scope:feat'
