@@ -185,7 +185,7 @@ services:
 
   # k6 gRPC Load Testing - Generates continuous load against gRPC server
   k6-grpc:
-    image: grafana/k6:1.4.1@sha256:200d24a0770ad12761569993c723fd7d48b29fc7983ff5f976bf8b8dba4c7d21
+    image: grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7
     container_name: k6-grpc
     command: run --quiet /scripts/grpc-load-test.js
     volumes:
@@ -203,7 +203,7 @@ services:
 
   # k6 HTTP Load Testing - Generates continuous load against HTTP server
   k6-http:
-    image: grafana/k6:1.4.1@sha256:200d24a0770ad12761569993c723fd7d48b29fc7983ff5f976bf8b8dba4c7d21
+    image: grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7
     container_name: k6-http
     command: run --quiet /scripts/http-load-test.js
     volumes:
