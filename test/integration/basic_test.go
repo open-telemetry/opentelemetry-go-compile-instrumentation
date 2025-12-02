@@ -39,6 +39,7 @@ func TestBasic(t *testing.T) {
 		"paramCount:1",
 		"returnValCount:0",
 		"isSkipCall:false",
+		"Hello from stdio",
 	}
 	for _, e := range expect {
 		require.Contains(t, output, e)

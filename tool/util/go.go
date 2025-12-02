@@ -4,6 +4,7 @@
 package util
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -88,4 +89,27 @@ func SplitCompileCmds(input string) []string {
 
 func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
+}
+
+const (
+	cgoSuffix = ".cgo1.go"
+	goSuffix  = ".go"
+)
+
+// resolveCgoSourceFile maps a CGO-generated file back to its original source.
+// Returns the original file path and true if successful, empty string and false otherwise.
+func ResolveCgoFile(cgoFile string) (string, error) {
+	baseName := filepath.Base(cgoFile)
+	if !strings.HasSuffix(baseName, cgoSuffix) {
+		return "", ex.Newf("file %s is not a CGO generated file", cgoFile)
+	}
+	originalBase := strings.TrimSuffix(baseName, cgoSuffix) + goSuffix
+	abs, err := filepath.Abs(originalBase)
+	if err != nil {
+		return "", ex.Wrapf(err, "failed to get absolute path of %s", originalBase)
+	}
+	if !PathExists(abs) {
+		return "", ex.Newf("file %s does not exist", abs)
+	}
+	return abs, nil
 }

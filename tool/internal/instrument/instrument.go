@@ -11,23 +11,11 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-func groupRules(rset *rule.InstRuleSet) map[string][]rule.InstRule {
+func (ip *InstrumentPhase) groupRules(rset *rule.InstRuleSet) map[string][]rule.InstRule {
 	file2rules := make(map[string][]rule.InstRule)
-	for file, rules := range rset.FuncRules {
-		for _, rule := range rules {
-			file2rules[file] = append(file2rules[file], rule)
-		}
-	}
-	for file, rules := range rset.StructRules {
-		for _, rule := range rules {
-			file2rules[file] = append(file2rules[file], rule)
-		}
-	}
-	for file, rules := range rset.RawRules {
-		for _, rule := range rules {
-			file2rules[file] = append(file2rules[file], rule)
-		}
-	}
+	addRulesToMap(rset.FuncRules, file2rules, rset.CgoFileMap, ip.workDir)
+	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, ip.workDir)
+	addRulesToMap(rset.RawRules, file2rules, rset.CgoFileMap, ip.workDir)
 	return file2rules
 }
 
@@ -72,6 +60,22 @@ func (ip *InstrumentPhase) findActualFile(ruleFile string) (string, error) {
 		ruleFile, ruleBasename, ip.compileArgs)
 }
 
+func addRulesToMap[T rule.InstRule](
+	source map[string][]T,
+	file2rules map[string][]rule.InstRule,
+	cgoMap map[string]string,
+	workDir string,
+) {
+	for file, rules := range source {
+		if cgoBase, ok := cgoMap[file]; ok {
+			file = filepath.Join(workDir, cgoBase)
+		}
+		for _, r := range rules {
+			file2rules[file] = append(file2rules[file], r)
+		}
+	}
+}
+
 func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
@@ -82,7 +86,7 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 			return err
 		}
 	}
-	for file, rules := range groupRules(rset) {
+	for file, rules := range ip.groupRules(rset) {
 		// Find the actual file in compile args that matches this rule file
 		// This handles cases where paths differ between setup and build phases
 		actualFile, err := ip.findActualFile(file)
@@ -122,14 +126,12 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 		}
 		// Since trampoline-jump-if is performance-critical, perform AST level
 		// optimization for them before writing to file
-		err = ip.optimizeTJumps()
-		if err != nil {
+		if err = ip.optimizeTJumps(); err != nil {
 			return err
 		}
 		// Once all func rules targeting this file are applied, write instrumented
 		// AST to new file and replace the original file in the compile command
-		err = ip.writeInstrumented(root, actualFile)
-		if err != nil {
+		if err = ip.writeInstrumented(root, actualFile); err != nil {
 			return err
 		}
 	}
