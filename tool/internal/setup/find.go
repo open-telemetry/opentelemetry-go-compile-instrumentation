@@ -42,28 +42,6 @@ func parseCdDir(line string) (string, bool) {
 	return strings.TrimSpace(parts[0]), true
 }
 
-// findCompileCommands finds the compile commands from the build plan log.
-func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
-	scanner, err := util.NewFileScanner(buildPlanLog, maxBuildPlanBufferSize)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to seek to beginning of build plan log")
-	}
-
-	var compileCmds []string
-	for scanner.Scan() {
-		line := scanner.Text()
-		if util.IsCompileCommand(line) {
-			line = strings.Trim(line, " ")
-			compileCmds = append(compileCmds, line)
-		}
-	}
-
-	if err = scanner.Err(); err != nil {
-		return nil, ex.Wrapf(err, "failed to parse build plan log")
-	}
-	return compileCmds, nil
-}
-
 // isCgoCommand checks if the line is a cgo tool invocation with -objdir and -importpath flags.
 func isCgoCommand(line string) bool {
 	return strings.Contains(line, "cgo") &&
@@ -72,37 +50,47 @@ func isCgoCommand(line string) bool {
 		!strings.Contains(line, "-dynimport")
 }
 
-// findCgoObjDirs parses the build plan to extract CGO object directory mappings.
-// Returns map[objDir]sourceDir
-func findCgoObjDirs(buildPlanLog *os.File) (map[string]string, error) {
+// parseBuildPlan scans the build plan log once and extracts both compile commands
+// and CGO object directory mappings.
+func parseBuildPlan(buildPlanLog *os.File) ([]string, map[string]string, error) {
 	scanner, err := util.NewFileScanner(buildPlanLog, maxBuildPlanBufferSize)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	var compileCmds []string
 	cgoDirsMap := make(map[string]string)
 	var currentDir string
 
 	for scanner.Scan() {
-		line := filepath.ToSlash(strings.TrimSpace(scanner.Text()))
+		line := strings.TrimSpace(scanner.Text())
+		if util.IsWindows() {
+			line = strings.ReplaceAll(line, `\\`, `\`)
+		}
+		line = filepath.ToSlash(line)
 
 		if dir, ok := parseCdDir(line); ok {
 			currentDir = dir
 			continue
 		}
 
+		// Extract CGO object directory mappings
 		if isCgoCommand(line) && currentDir != "" {
 			if objDir := util.FindFlagValue(util.SplitCompileCmds(line), "-objdir"); objDir != "" {
-				normalizedObjDir := strings.TrimSuffix(filepath.ToSlash(objDir), "/")
-				cgoDirsMap[normalizedObjDir] = currentDir
+				cgoDirsMap[util.NormalizePath(objDir)] = currentDir
 			}
+		}
+
+		// Collect compile commands
+		if util.IsCompileCommand(line) {
+			compileCmds = append(compileCmds, line)
 		}
 	}
 
 	if err = scanner.Err(); err != nil {
-		return nil, ex.Wrapf(err, "failed to parse build plan log for cgo commands")
+		return nil, nil, ex.Wrapf(err, "failed to parse build plan log")
 	}
-	return cgoDirsMap, nil
+	return compileCmds, cgoDirsMap, nil
 }
 
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
@@ -150,17 +138,12 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 		return nil, nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
 	}
 
-	cgoObjDirs, err := findCgoObjDirs(buildPlanLog)
+	// Parse build plan in a single scan for both compile commands and CGO mappings
+	compileCmds, cgoObjDirs, err := parseBuildPlan(buildPlanLog)
 	if err != nil {
 		return nil, nil, err
 	}
 	sp.Debug("Found CGO object directories", "mappings", cgoObjDirs)
-
-	// Find compile commands from build plan log
-	compileCmds, err := findCompileCommands(buildPlanLog)
-	if err != nil {
-		return nil, nil, err
-	}
 	sp.Debug("Found compile commands", "compileCmds", compileCmds)
 	return compileCmds, cgoObjDirs, nil
 }
@@ -207,7 +190,7 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 			}
 			// This is a generated file during compilation (CGO file)
 			if !util.PathExists(arg) {
-				objDir := filepath.ToSlash(filepath.Dir(arg))
+				objDir := util.NormalizePath(filepath.Dir(arg))
 				sourceDir, ok := cgoObjDirs[objDir]
 				if !ok {
 					// Not a CGO file from a known package, skip

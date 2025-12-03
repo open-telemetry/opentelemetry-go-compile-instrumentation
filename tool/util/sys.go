@@ -122,3 +122,7 @@ func PathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+func NormalizePath(path string) string {
+	return strings.TrimSuffix(filepath.ToSlash(path), "/")
+}
