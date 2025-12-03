@@ -110,8 +110,8 @@ var flagsWithPathValues = map[string]bool{
 // The args parameter should be the go build command arguments (e.g., ["build", "-a", "./cmd"]).
 // Returns an error if package loading fails or if invalid patterns are provided.
 // For example:
-//   - args ["build", "-a", "cmd/"] returns packages for "./cmd/"
-//   - args ["build", "-a", "./app/vmctl"] returns packages for "./app/vmctl"
+//   - args ["build", "-a", "./cmd"] returns packages for "./cmd"
+//   - args ["build", "-a", "cmd"] returns packages for the "cmd" package in the module
 //   - args ["build", "-a", ".", "./cmd"] returns packages for both "." and "./cmd"
 //   - args ["build"] returns packages for "."
 func GetBuildPackages(args []string) ([]*packages.Package, error) {

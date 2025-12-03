@@ -87,7 +87,7 @@ func extractPackageIDs(pkgs []*packages.Package) []string {
 	return ids
 }
 
-// checkPackages returns a function that verifies all expected strings are found in the packages.
+// checkPackages verifies all expected strings are found in the packages.
 func checkPackages(t *testing.T, pkgs, expectedPkgs []string) {
 	t.Helper()
 	if len(pkgs) == 0 {
