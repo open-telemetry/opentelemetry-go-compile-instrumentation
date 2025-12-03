@@ -68,6 +68,7 @@ func addRulesToMap[T rule.InstRule](
 ) {
 	for file, rules := range source {
 		if cgoBase, ok := cgoMap[file]; ok {
+			// CGO file path is always relative to the working directory
 			file = filepath.Join(workDir, cgoBase)
 		}
 		for _, r := range rules {

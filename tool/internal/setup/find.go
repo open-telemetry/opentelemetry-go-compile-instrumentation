@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -16,6 +15,8 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
+
+const maxBuildPlanBufferSize = 10 * 1024 * 1024 // 10MB
 
 type Dependency struct {
 	ImportPath string
@@ -31,21 +32,24 @@ func (d *Dependency) String() string {
 	return fmt.Sprintf("{%s@%s: %v}", d.ImportPath, d.Version, d.Sources)
 }
 
+// parseCdDir extracts the directory path from a "cd" command line.
+func parseCdDir(line string) (string, bool) {
+	if !strings.HasPrefix(line, "cd ") {
+		return "", false
+	}
+	const cdCommandSplitLimit = 2 // Split "cd dir" into [dir, rest] to ignore trailing comments
+	parts := strings.SplitN(line[3:], " ", cdCommandSplitLimit)
+	return strings.TrimSpace(parts[0]), true
+}
+
 // findCompileCommands finds the compile commands from the build plan log.
 func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
-	const buildPlanBufSize = 10 * 1024 * 1024 // 10MB buffer size
-
-	// Filter compile commands from build plan log
-	compileCmds := make([]string, 0)
-	scanner := bufio.NewScanner(buildPlanLog)
-	// Seek to the beginning of the file before reading
-	_, err := buildPlanLog.Seek(0, 0)
+	scanner, err := util.NewFileScanner(buildPlanLog, maxBuildPlanBufferSize)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to seek to beginning of build plan log")
 	}
-	// 10MB should be enough to accommodate most long line
-	buffer := make([]byte, 0, buildPlanBufSize)
-	scanner.Buffer(buffer, cap(buffer))
+
+	var compileCmds []string
 	for scanner.Scan() {
 		line := scanner.Text()
 		if util.IsCompileCommand(line) {
@@ -53,29 +57,77 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 			compileCmds = append(compileCmds, line)
 		}
 	}
-	err = scanner.Err()
-	if err != nil {
+
+	if err = scanner.Err(); err != nil {
 		return nil, ex.Wrapf(err, "failed to parse build plan log")
 	}
 	return compileCmds, nil
 }
 
+// isCgoCommand checks in the build plan log if the line is a cgo tool invocation.
+// CGO commands contain the cgo tool path and -importpath flag.
+func isCgoCommand(line string) bool {
+	if !strings.Contains(line, "/cgo ") && !strings.Contains(line, "/cgo.exe ") {
+		return false
+	}
+	if !strings.Contains(line, "-importpath") {
+		return false
+	}
+	if strings.Contains(line, "-dynimport") {
+		return false
+	}
+	return true
+}
+
+// findCgoObjDirs parses the build plan to extract CGO object directory mappings.
+// Returns map[objDir]sourceDir
+func findCgoObjDirs(buildPlanLog *os.File) (map[string]string, error) {
+	scanner, err := util.NewFileScanner(buildPlanLog, maxBuildPlanBufferSize)
+	if err != nil {
+		return nil, err
+	}
+
+	cgoDirsMap := make(map[string]string)
+	var currentDir string
+
+	for scanner.Scan() {
+		line := filepath.ToSlash(strings.TrimSpace(scanner.Text()))
+
+		if dir, ok := parseCdDir(line); ok {
+			currentDir = dir
+			continue
+		}
+
+		if isCgoCommand(line) && currentDir != "" {
+			if objDir := util.FindFlagValue(util.SplitCompileCmds(line), "-objdir"); objDir != "" {
+				normalized := strings.TrimSuffix(filepath.ToSlash(objDir), "/")
+				cgoDirsMap[normalized] = currentDir
+			}
+		}
+	}
+
+	if err = scanner.Err(); err != nil {
+		return nil, ex.Wrapf(err, "failed to parse build plan log for cgo commands")
+	}
+	return cgoDirsMap, nil
+}
+
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
-// and then filtering the compile commands from the build plan log.
-func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([]string, error) {
+// and then filtering the compile commands and CGO object directory mappings from the build plan log.
+func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([]string, map[string]string, error) {
 	const goBuildMinArgs = 2 // go build
 	const buildPlanLogName = "build-plan.log"
 	if len(goBuildCmd) < goBuildMinArgs {
-		return nil, ex.Newf("at least %d arguments are required", goBuildMinArgs)
+		return nil, nil, ex.Newf("at least %d arguments are required", goBuildMinArgs)
 	}
 	if goBuildCmd[1] != "build" && goBuildCmd[1] != "install" {
-		return nil, ex.Newf("must be go build/install, got %s", goBuildCmd[1])
+		return nil, nil, ex.Newf("must be go build/install, got %s", goBuildCmd[1])
 	}
 
 	// Create a build plan log file in the temporary directory
 	buildPlanLog, err := os.Create(util.GetBuildTemp(buildPlanLogName))
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to create build plan log file")
+		return nil, nil, ex.Wrapf(err, "failed to create build plan log file")
 	}
 	defer buildPlanLog.Close()
 	// The full build command is: "go build/install -a -x -n  {...}"
@@ -102,16 +154,22 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 		// Read the build plan log to see what went wrong
 		_, _ = buildPlanLog.Seek(0, 0)
 		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
-		return nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
+		return nil, nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
 	}
+
+	cgoObjDirs, err := findCgoObjDirs(buildPlanLog)
+	if err != nil {
+		return nil, nil, err
+	}
+	sp.Debug("Found CGO object directories", "mappings", cgoObjDirs)
 
 	// Find compile commands from build plan log
 	compileCmds, err := findCompileCommands(buildPlanLog)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sp.Debug("Found compile commands", "compileCmds", compileCmds)
-	return compileCmds, nil
+	return compileCmds, cgoObjDirs, nil
 }
 
 var versionRegexp = regexp.MustCompile(`@v\d+\.\d+\.\d+(-.*?)?/`)
@@ -128,7 +186,7 @@ func findModVersion(path string) string {
 
 // findDeps finds the dependencies of the project by listing the build plan.
 func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dependency, error) {
-	buildPlan, err := sp.listBuildPlan(ctx, goBuildCmd)
+	buildPlan, cgoObjDirs, err := sp.listBuildPlan(ctx, goBuildCmd)
 	if err != nil {
 		return nil, err
 	}
@@ -156,16 +214,20 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 			}
 			// This is a generated file during compilation
 			if !util.PathExists(arg) {
-				originalAbsFile, err1 := util.ResolveCgoFile(arg)
-				if err1 != nil {
-					// Skip non-CGO generated files (_cgo_gotypes.go, _cgo_import.go, ...)
-					// or cgo files that are not generated by the current project like cgo.cgo1.go
-					sp.Debug("Skip generated file", "file", arg)
+				// Get the object directory from the CGO file path (e.g., $WORK/b001)
+				objDir := filepath.ToSlash(filepath.Dir(arg))
+				sourceDir, ok := cgoObjDirs[objDir]
+				if !ok {
+					// Not a CGO file from a known package, skip
+					sp.Debug("Skip generated file - unknown objdir", "file", arg, "objDir", objDir)
 					continue
 				}
-				// Store the CGO mapping: original -> base CGO file path
-				// We store the base CGO file path because its based on the WORK directory
-				// defined at compile time.
+				originalAbsFile, err1 := util.ResolveCgoFile(arg, sourceDir)
+				if err1 != nil {
+					// Skip non-CGO generated files (_cgo_gotypes.go, _cgo_import.go, ...)
+					sp.Debug("Skip generated file", "file", arg, "error", err1)
+					continue
+				}
 				dep.CgoFiles[originalAbsFile] = filepath.Base(arg)
 				dep.Sources = append(dep.Sources, originalAbsFile)
 				sp.Info("Resolved CGO source", "cgo", arg, "original", originalAbsFile)

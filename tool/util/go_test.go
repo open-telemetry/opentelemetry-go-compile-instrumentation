@@ -12,38 +12,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolveCgoSourceFile(t *testing.T) {
+func TestResolveCgoFile(t *testing.T) {
 	tests := []struct {
-		name        string
-		cgoFile     string
-		createFile  string
-		wantErr     bool
-		wantErrType error
+		name       string
+		cgoFile    string
+		createFile string
+		wantErr    bool
 	}{
 		{
-			name:       "valid cgo file with existing original",
-			cgoFile:    "main.cgo1.go",
+			name:       "valid cgo file with source dir",
+			cgoFile:    "$WORK/b001/main.cgo1.go",
 			createFile: "main.go",
 			wantErr:    false,
 		},
 		{
-			name:       "valid cgo file with path prefix",
-			cgoFile:    "/some/path/handler.cgo1.go",
+			name:       "valid cgo file in subdirectory",
+			cgoFile:    "/tmp/work/subpkg/handler.cgo1.go",
 			createFile: "handler.go",
 			wantErr:    false,
 		},
 		{
-			name:    "not a cgo file - regular go file",
+			name:    "not a cgo file",
 			cgoFile: "main.go",
 			wantErr: true,
 		},
 		{
-			name:    "not a cgo file - wrong suffix",
-			cgoFile: "main.cgo2.go",
-			wantErr: true,
-		},
-		{
-			name:    "cgo file but original does not exist",
+			name:    "cgo file but original does not exist in source dir",
 			cgoFile: "missing.cgo1.go",
 			wantErr: true,
 		},
@@ -52,19 +46,15 @@ func TestResolveCgoSourceFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			t.Chdir(tmpDir)
 			if tt.createFile != "" {
-				err := os.WriteFile(tt.createFile, []byte("package main"), 0o644)
+				err := os.WriteFile(filepath.Join(tmpDir, tt.createFile), []byte("package main"), 0o644)
 				require.NoError(t, err)
 			}
 
-			goFile, err := ResolveCgoFile(tt.cgoFile)
+			goFile, err := ResolveCgoFile(tt.cgoFile, tmpDir)
 
 			if tt.wantErr {
 				assert.Error(t, err)
-				if tt.wantErrType != nil {
-					require.ErrorIs(t, err, tt.wantErrType)
-				}
 				return
 			}
 
@@ -76,4 +66,20 @@ func TestResolveCgoSourceFile(t *testing.T) {
 			assert.Equal(t, expectedPath, gotPath)
 		})
 	}
+}
+
+func TestResolveCgoFile_EmptyParams(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("empty sourceDir returns error", func(t *testing.T) {
+		_, err := ResolveCgoFile("server.cgo1.go", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be empty")
+	})
+
+	t.Run("empty cgoFile returns error", func(t *testing.T) {
+		_, err := ResolveCgoFile("", tmpDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be empty")
+	})
 }

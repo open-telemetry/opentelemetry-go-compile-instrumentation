@@ -4,6 +4,8 @@
 package util
 
 import (
+	"bufio"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -91,23 +93,34 @@ func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
 }
 
+func NewFileScanner(file *os.File, size int) (*bufio.Scanner, error) {
+	if _, err := file.Seek(0, 0); err != nil {
+		return nil, ex.Wrapf(err, "failed to seek to beginning of build plan log")
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, size), size)
+	return scanner, nil
+}
+
 const (
 	cgoSuffix = ".cgo1.go"
 	goSuffix  = ".go"
 )
 
-// resolveCgoSourceFile maps a CGO-generated file back to its original source.
-// Returns the original file path and true if successful, empty string and false otherwise.
-func ResolveCgoFile(cgoFile string) (string, error) {
+// ResolveCgoFile maps a CGO-generated file back to its original source
+// in the specified source directory. Both cgoFile and sourceDir must be non-empty.
+func ResolveCgoFile(cgoFile, sourceDir string) (string, error) {
+	if cgoFile == "" || sourceDir == "" {
+		return "", ex.Newf("cgoFile and sourceDir cannot be empty, cgoFile: %q, sourceDir: %q", cgoFile, sourceDir)
+	}
+
 	baseName := filepath.Base(cgoFile)
 	if !strings.HasSuffix(baseName, cgoSuffix) {
-		return "", ex.Newf("file %s is not a CGO generated file", cgoFile)
+		return "", ex.Newf("file %s is not a CGO (%s) generated file", cgoFile, cgoSuffix)
 	}
+
 	originalBase := strings.TrimSuffix(baseName, cgoSuffix) + goSuffix
-	abs, err := filepath.Abs(originalBase)
-	if err != nil {
-		return "", ex.Wrapf(err, "failed to get absolute path of %s", originalBase)
-	}
+	abs := filepath.Join(sourceDir, originalBase)
 	if !PathExists(abs) {
 		return "", ex.Newf("file %s does not exist", abs)
 	}
