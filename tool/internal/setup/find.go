@@ -32,9 +32,9 @@ func (d *Dependency) String() string {
 	return fmt.Sprintf("{%s@%s: %v}", d.ImportPath, d.Version, d.Sources)
 }
 
-// parseCdDir extracts the directory path from a "cd" command line.
+// parseCdDir extracts the directory path from a "cd" command line (case-insensitive).
 func parseCdDir(line string) (string, bool) {
-	if !strings.HasPrefix(line, "cd ") {
+	if !strings.HasPrefix(strings.ToLower(line), "cd ") {
 		return "", false
 	}
 	const cdCommandSplitLimit = 2 // Split "cd dir" into [dir, rest] to ignore trailing comments
@@ -64,19 +64,12 @@ func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
 	return compileCmds, nil
 }
 
-// isCgoCommand checks in the build plan log if the line is a cgo tool invocation.
-// CGO commands contain the cgo tool path and -importpath flag.
+// isCgoCommand checks if the line is a cgo tool invocation with -objdir and -importpath flags.
 func isCgoCommand(line string) bool {
-	if !strings.Contains(line, "/cgo ") && !strings.Contains(line, "/cgo.exe ") {
-		return false
-	}
-	if !strings.Contains(line, "-importpath") {
-		return false
-	}
-	if strings.Contains(line, "-dynimport") {
-		return false
-	}
-	return true
+	return strings.Contains(line, "cgo") &&
+		strings.Contains(line, "-objdir") &&
+		strings.Contains(line, "-importpath") &&
+		!strings.Contains(line, "-dynimport")
 }
 
 // findCgoObjDirs parses the build plan to extract CGO object directory mappings.
@@ -100,8 +93,8 @@ func findCgoObjDirs(buildPlanLog *os.File) (map[string]string, error) {
 
 		if isCgoCommand(line) && currentDir != "" {
 			if objDir := util.FindFlagValue(util.SplitCompileCmds(line), "-objdir"); objDir != "" {
-				normalized := strings.TrimSuffix(filepath.ToSlash(objDir), "/")
-				cgoDirsMap[normalized] = currentDir
+				normalizedObjDir := strings.TrimSuffix(filepath.ToSlash(objDir), "/")
+				cgoDirsMap[normalizedObjDir] = currentDir
 			}
 		}
 	}
@@ -212,9 +205,8 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 			if !util.IsGoFile(arg) {
 				continue
 			}
-			// This is a generated file during compilation
+			// This is a generated file during compilation (CGO file)
 			if !util.PathExists(arg) {
-				// Get the object directory from the CGO file path (e.g., $WORK/b001)
 				objDir := filepath.ToSlash(filepath.Dir(arg))
 				sourceDir, ok := cgoObjDirs[objDir]
 				if !ok {
