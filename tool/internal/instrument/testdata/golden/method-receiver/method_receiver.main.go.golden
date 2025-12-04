@@ -133,7 +133,7 @@ func (c *HookContextImpl2501994857) GetFuncName() string    { return c.funcName 
 func (c *HookContextImpl2501994857) GetPackageName() string { return c.packageName }
 
 // Trampoline Template
-func OtelBeforeTrampoline_Func12501994857(recv0 **T, param1 *string, param2 *int) (hookContext *HookContextImpl2501994857, skipCall bool) {
+func OtelBeforeTrampoline_Func12501994857(recv0 **T, param0 *string, param1 *int) (hookContext *HookContextImpl2501994857, skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H3Before")
@@ -147,11 +147,11 @@ func OtelBeforeTrampoline_Func12501994857(recv0 **T, param1 *string, param2 *int
 		}
 	}()
 	hookContext = &HookContextImpl2501994857{}
-	hookContext.params = []interface{}{recv0, param1, param2}
+	hookContext.params = []interface{}{recv0, param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
 	if H3Before != nil {
-		H3Before(hookContext, *recv0, *param1, *param2)
+		H3Before(hookContext, *recv0, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -176,7 +176,7 @@ func OtelAfterTrampoline_Func12501994857(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname H3Before testdata.H3Before
-func H3Before(hookContext HookContext, recv0 interface{}, param1 string, param2 int)
+func H3Before(hookContext HookContext, recv0 interface{}, param0 string, param1 int)
 
 //go:linkname H3After testdata.H3After
 func H3After(hookContext HookContext, arg0 float32, arg1 error)
