@@ -290,10 +290,8 @@ func flattenTJump(tjump *TJump, removedOnExit bool) error {
 	// does not escape, and the tjump represents a valid candidate for optimization.
 	// This would significantly boost performance.
 	ifStmt := tjump.ifStmt
-	initStmt, ok := ifStmt.Init.(*dst.AssignStmt)
-	const twoLhs = 2
-	util.Assert(ok, "init statement is not an AssignStmt")
-	util.Assert(len(initStmt.Lhs) == twoLhs, "must have two lhs")
+	initStmt := util.AssertType[*dst.AssignStmt](ifStmt.Init)
+	util.Assert(len(initStmt.Lhs) == 2, "must have two lhs")
 
 	// Set condition to false and empty the then block
 	ifStmt.Cond = ast.BoolFalse()
@@ -307,8 +305,7 @@ func flattenTJump(tjump *TJump, removedOnExit bool) error {
 		// TODO: Remove After declaration as well
 	} else {
 		// Otherwise, mark skipCall identifier as unused
-		skipCallIdent, ok1 := initStmt.Lhs[1].(*dst.Ident)
-		util.Assert(ok1, "skipCall identifier is not an Ident")
+		skipCallIdent := util.AssertType[*dst.Ident](initStmt.Lhs[1])
 		ast.MakeUnusedIdent(skipCallIdent)
 	}
 	return nil

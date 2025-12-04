@@ -152,7 +152,7 @@ func OtelBeforeTrampoline_Func12350319093(param0 *string, param1 *int) (hookCont
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_Func12350319093(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func12350319093(hookContext HookContext) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "")
