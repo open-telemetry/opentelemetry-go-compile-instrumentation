@@ -25,6 +25,11 @@ type Dependency struct {
 	CgoFiles   map[string]string
 }
 
+type parsedBuildPlan struct {
+	CompileCmds []string
+	CgoObjDirs  map[string]string
+}
+
 func (d *Dependency) String() string {
 	if d.Version == "" {
 		return fmt.Sprintf("{%s: %v}", d.ImportPath, d.Sources)
@@ -52,15 +57,17 @@ func isCgoCommand(line string) bool {
 
 // parseBuildPlan scans the build plan log once and extracts both compile commands
 // and CGO object directory mappings.
-func parseBuildPlan(buildPlanLog *os.File) ([]string, map[string]string, error) {
+func parseBuildPlan(buildPlanLog *os.File) (parsedBuildPlan, error) {
 	scanner, err := util.NewFileScanner(buildPlanLog, maxBuildPlanBufferSize)
 	if err != nil {
-		return nil, nil, err
+		return parsedBuildPlan{}, err
 	}
 
-	var compileCmds []string
-	cgoDirsMap := make(map[string]string)
-	var currentDir string
+	var (
+		compileCmds []string
+		cgoDirsMap  = make(map[string]string)
+		currentDir  string
+	)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -88,27 +95,30 @@ func parseBuildPlan(buildPlanLog *os.File) ([]string, map[string]string, error) 
 	}
 
 	if err = scanner.Err(); err != nil {
-		return nil, nil, ex.Wrapf(err, "failed to parse build plan log")
+		return parsedBuildPlan{}, ex.Wrapf(err, "failed to parse build plan log")
 	}
-	return compileCmds, cgoDirsMap, nil
+	return parsedBuildPlan{
+		CompileCmds: compileCmds,
+		CgoObjDirs:  cgoDirsMap,
+	}, nil
 }
 
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
 // and then filtering the compile commands and CGO object directory mappings from the build plan log.
-func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([]string, map[string]string, error) {
+func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) (parsedBuildPlan, error) {
 	const goBuildMinArgs = 2 // go build
 	const buildPlanLogName = "build-plan.log"
 	if len(goBuildCmd) < goBuildMinArgs {
-		return nil, nil, ex.Newf("at least %d arguments are required", goBuildMinArgs)
+		return parsedBuildPlan{}, ex.Newf("at least %d arguments are required", goBuildMinArgs)
 	}
 	if goBuildCmd[1] != "build" && goBuildCmd[1] != "install" {
-		return nil, nil, ex.Newf("must be go build/install, got %s", goBuildCmd[1])
+		return parsedBuildPlan{}, ex.Newf("must be go build/install, got %s", goBuildCmd[1])
 	}
 
 	// Create a build plan log file in the temporary directory
 	buildPlanLog, err := os.Create(util.GetBuildTemp(buildPlanLogName))
 	if err != nil {
-		return nil, nil, ex.Wrapf(err, "failed to create build plan log file")
+		return parsedBuildPlan{}, ex.Wrapf(err, "failed to create build plan log file")
 	}
 	defer buildPlanLog.Close()
 	// The full build command is: "go build/install -a -x -n  {...}"
@@ -135,17 +145,17 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 		// Read the build plan log to see what went wrong
 		_, _ = buildPlanLog.Seek(0, 0)
 		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
-		return nil, nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
+		return parsedBuildPlan{}, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
 	}
 
 	// Parse build plan in a single scan for both compile commands and CGO mappings
-	compileCmds, cgoObjDirs, err := parseBuildPlan(buildPlanLog)
+	plan, err := parseBuildPlan(buildPlanLog)
 	if err != nil {
-		return nil, nil, err
+		return parsedBuildPlan{}, err
 	}
-	sp.Debug("Found CGO object directories", "mappings", cgoObjDirs)
-	sp.Debug("Found compile commands", "compileCmds", compileCmds)
-	return compileCmds, cgoObjDirs, nil
+	sp.Debug("Found CGO object directories", "mappings", plan.CgoObjDirs)
+	sp.Debug("Found compile commands", "compileCmds", plan.CompileCmds)
+	return plan, nil
 }
 
 var versionRegexp = regexp.MustCompile(`@v\d+\.\d+\.\d+(-.*?)?/`)
@@ -162,13 +172,13 @@ func findModVersion(path string) string {
 
 // findDeps finds the dependencies of the project by listing the build plan.
 func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dependency, error) {
-	buildPlan, cgoObjDirs, err := sp.listBuildPlan(ctx, goBuildCmd)
+	bp, err := sp.listBuildPlan(ctx, goBuildCmd)
 	if err != nil {
 		return nil, err
 	}
 	// import path -> list of go files
 	deps := make([]*Dependency, 0)
-	for _, plan := range buildPlan {
+	for _, plan := range bp.CompileCmds {
 		util.Assert(util.IsCompileCommand(plan), "must be compile command")
 		dep := &Dependency{
 			ImportPath: "",
@@ -191,7 +201,7 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 			// This is a generated file during compilation (CGO file)
 			if !util.PathExists(arg) {
 				objDir := util.NormalizePath(filepath.Dir(arg))
-				sourceDir, ok := cgoObjDirs[objDir]
+				sourceDir, ok := bp.CgoObjDirs[objDir]
 				if !ok {
 					// Not a CGO file from a known package, skip
 					sp.Debug("Skip generated file - unknown objdir", "file", arg, "objDir", objDir)
