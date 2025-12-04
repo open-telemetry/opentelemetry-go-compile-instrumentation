@@ -27,10 +27,10 @@ type InstrumentPhase struct {
 	compileArgs []string
 	// The target function to be instrumented
 	targetFunc *dst.FuncDecl
-	// The enter hook function, it should be inserted into the target source file
-	beforeHookFunc *dst.FuncDecl
-	// The exit hook function, it should be inserted into the target source file
-	afterHookFunc *dst.FuncDecl
+	// The before trampoline function
+	beforeTrampFunc *dst.FuncDecl
+	// The after trampoline function
+	afterTrampFunc *dst.FuncDecl
 	// Variable declarations waiting to be inserted into target source file
 	varDecls []dst.Decl
 	// The declaration of the hook context, it should be populated later
