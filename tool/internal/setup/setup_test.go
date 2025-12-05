@@ -62,7 +62,7 @@ func TestGetPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgs, err := getBuildPackages(tt.args)
+			pkgs, err := getBuildPackages(t.Context(), tt.args)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}

@@ -109,7 +109,7 @@ func (sp *SetupPhase) addModuleReplaces(modfile *modfile.File, modules map[strin
 	return changed, nil
 }
 
-func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
+func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet) error {
 	rules := make([]*rule.InstFuncRule, 0)
 	for _, m := range matched {
 		funcRules := m.GetFuncRules()
