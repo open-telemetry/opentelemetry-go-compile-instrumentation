@@ -44,6 +44,7 @@ func (ibr *InstBaseRule) GetVersion() string { return ibr.Version }
 type InstRuleSet struct {
 	PackageName string                       `json:"package_name"`
 	ModulePath  string                       `json:"module_path"`
+	CgoFileMap  map[string]string            `json:"cgo_file_map,omitempty"` // go -> cgo
 	RawRules    map[string][]*InstRawRule    `json:"raw_rules"`
 	FuncRules   map[string][]*InstFuncRule   `json:"func_rules"`
 	StructRules map[string][]*InstStructRule `json:"struct_rules"`
@@ -54,6 +55,7 @@ func NewInstRuleSet(importPath string) *InstRuleSet {
 	return &InstRuleSet{
 		PackageName: "",
 		ModulePath:  importPath,
+		CgoFileMap:  make(map[string]string),
 		RawRules:    make(map[string][]*InstRawRule),
 		FuncRules:   make(map[string][]*InstFuncRule),
 		StructRules: make(map[string][]*InstStructRule),
@@ -105,6 +107,11 @@ func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
 func (irs *InstRuleSet) SetPackageName(name string) {
 	util.Assert(name != "", "package name is empty")
 	irs.PackageName = name
+}
+
+// SetCgoFileMap sets the CGO file mapping for this rule set.
+func (irs *InstRuleSet) SetCgoFileMap(cgoFiles map[string]string) {
+	irs.CgoFileMap = cgoFiles
 }
 
 // GetFuncRules returns all function rules from the rule set.

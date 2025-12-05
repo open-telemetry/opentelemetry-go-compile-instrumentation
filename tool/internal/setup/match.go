@@ -120,6 +120,11 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.InstRule) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
+	if len(dep.CgoFiles) > 0 {
+		set.SetCgoFileMap(dep.CgoFiles)
+		sp.Info("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
+	}
+
 	// Filter rules by target
 	relevantRules := rulesByTarget[dep.ImportPath]
 	if len(relevantRules) == 0 {
@@ -153,7 +158,16 @@ func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.
 		return set, nil
 	}
 
-	// Precise matching
+	return sp.preciseMatching(dep, preciseRules, set)
+}
+
+// preciseMatching performs AST-based matching of instrumentation rules against
+// the dependency's source files. It returns the rule set with the matched rules.
+func (sp *SetupPhase) preciseMatching(
+	dep *Dependency,
+	rules []rule.InstRule,
+	set *rule.InstRuleSet,
+) (*rule.InstRuleSet, error) {
 	for _, source := range dep.Sources {
 		// Parse the source code. Since the only purpose here is to match,
 		// no node updates, we can use fast variant.
@@ -166,7 +180,7 @@ func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.
 		}
 		set.SetPackageName(tree.Name.Name)
 
-		for _, r := range preciseRules {
+		for _, r := range rules {
 			// Let's match with the rule precisely
 			switch rt := r.(type) {
 			case *rule.InstFuncRule:
