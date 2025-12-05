@@ -84,29 +84,23 @@ func TestResolveCgoFile_EmptyParams(t *testing.T) {
 	})
 }
 
-func TestParseBuildPlan(t *testing.T) {
+func TestFindCommands(t *testing.T) {
 	tests := []struct {
 		name             string
 		buildPlanContent string
-		expectedCompile  []string
-		expectedCgoDirs  map[string]string
-		expectError      bool
+		expectedCommands []string
 	}{
 		{
 			name:             "empty build plan",
 			buildPlanContent: "",
-			expectedCompile:  nil,
-			expectedCgoDirs:  map[string]string{},
-			expectError:      false,
+			expectedCommands: nil,
 		},
 		{
 			name:             "single compile command",
 			buildPlanContent: `/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out.a -p main -buildid abc main.go`,
-			expectedCompile: []string{
+			expectedCommands: []string{
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out.a -p main -buildid abc main.go",
 			},
-			expectedCgoDirs: map[string]string{},
-			expectError:     false,
 		},
 		{
 			name: "multiple compile commands",
@@ -115,28 +109,24 @@ func TestParseBuildPlan(t *testing.T) {
 /usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/pkg2.a -p pkg2 -buildid abc2 pkg2.go
 /usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/main.a -p main -buildid abc3 main.go
 `,
-			expectedCompile: []string{
+			expectedCommands: []string{
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/pkg1.a -p pkg1 -buildid abc1 pkg1.go",
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/pkg2.a -p pkg2 -buildid abc2 pkg2.go",
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/main.a -p main -buildid abc3 main.go",
 			},
-			expectedCgoDirs: map[string]string{},
-			expectError:     false,
 		},
 		{
-			name: "cgo command with cd",
+			name: "cd and cgo commands included",
 			buildPlanContent: `
 cd /home/user/project/pkg/cgopkg
 /usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg
 /usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go
 `,
-			expectedCompile: []string{
+			expectedCommands: []string{
+				"cd /home/user/project/pkg/cgopkg",
+				"/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg",
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go",
 			},
-			expectedCgoDirs: map[string]string{
-				"/tmp/go-build123/b001": "/home/user/project/pkg/cgopkg",
-			},
-			expectError: false,
 		},
 		{
 			name: "multiple cgo packages",
@@ -148,15 +138,14 @@ cd /project/pkg/cgo2
 /usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/build/b001/out.a -p pkg/cgo1 -buildid a file.go
 /usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/build/b002/out.a -p pkg/cgo2 -buildid b file.go
 `,
-			expectedCompile: []string{
+			expectedCommands: []string{
+				"cd /project/pkg/cgo1",
+				"/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/build/b001 -importpath pkg/cgo1",
+				"cd /project/pkg/cgo2",
+				"/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/build/b002 -importpath pkg/cgo2",
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/build/b001/out.a -p pkg/cgo1 -buildid a file.go",
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/build/b002/out.a -p pkg/cgo2 -buildid b file.go",
 			},
-			expectedCgoDirs: map[string]string{
-				"/tmp/build/b001": "/project/pkg/cgo1",
-				"/tmp/build/b002": "/project/pkg/cgo2",
-			},
-			expectError: false,
 		},
 		{
 			name: "skip pgo compile commands",
@@ -164,11 +153,9 @@ cd /project/pkg/cgo2
 /usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out.a -p main -buildid abc -pgoprofile /tmp/profile.pgo main.go
 /usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out2.a -p main -buildid def main.go
 `,
-			expectedCompile: []string{
+			expectedCommands: []string{
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out2.a -p main -buildid def main.go",
 			},
-			expectedCgoDirs: map[string]string{},
-			expectError:     false,
 		},
 		{
 			name: "cgo dynimport should be ignored",
@@ -177,14 +164,13 @@ cd /project/pkg/cgo
 /usr/local/go/pkg/tool/darwin_arm64/cgo -dynimport /tmp/build/_cgo_.o -objdir /tmp/build/b001 -importpath pkg/cgo
 /usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/build/b001 -importpath pkg/cgo
 `,
-			expectedCompile: nil,
-			expectedCgoDirs: map[string]string{
-				"/tmp/build/b001": "/project/pkg/cgo",
+			expectedCommands: []string{
+				"cd /project/pkg/cgo",
+				"/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/build/b001 -importpath pkg/cgo",
 			},
-			expectError: false,
 		},
 		{
-			name: "mixed content with non-relevant lines",
+			name: "filters non-relevant lines",
 			buildPlanContent: `
 # comment line
 mkdir -p /tmp/build
@@ -193,23 +179,10 @@ echo "Building..."
 /usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out.a -p main -buildid xyz main.go
 /usr/local/go/pkg/tool/darwin_arm64/link -o /tmp/output -importcfg /tmp/importcfg
 `,
-			expectedCompile: []string{
+			expectedCommands: []string{
+				"cd /project/src",
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out.a -p main -buildid xyz main.go",
 			},
-			expectedCgoDirs: map[string]string{},
-			expectError:     false,
-		},
-		{
-			name: "cgo command without prior cd - should not add mapping",
-			buildPlanContent: `
-/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/build/b001 -importpath pkg/cgo
-/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out.a -p main -buildid abc main.go
-`,
-			expectedCompile: []string{
-				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/out.a -p main -buildid abc main.go",
-			},
-			expectedCgoDirs: map[string]string{},
-			expectError:     false,
 		},
 		{
 			name: "windows style paths",
@@ -218,13 +191,11 @@ cd C:/Users/test/project/pkg
 C:/Go/pkg/tool/windows_amd64/cgo.exe -objdir C:/tmp/build/b001 -importpath pkg/cgo
 C:/Go/pkg/tool/windows_amd64/compile.exe -o C:/tmp/out.a -p main -buildid abc main.go
 `,
-			expectedCompile: []string{
+			expectedCommands: []string{
+				"cd C:/Users/test/project/pkg",
+				"C:/Go/pkg/tool/windows_amd64/cgo.exe -objdir C:/tmp/build/b001 -importpath pkg/cgo",
 				"C:/Go/pkg/tool/windows_amd64/compile.exe -o C:/tmp/out.a -p main -buildid abc main.go",
 			},
-			expectedCgoDirs: map[string]string{
-				"C:/tmp/build/b001": "C:/Users/test/project/pkg",
-			},
-			expectError: false,
 		},
 	}
 
@@ -237,16 +208,9 @@ C:/Go/pkg/tool/windows_amd64/compile.exe -o C:/tmp/out.a -p main -buildid abc ma
 			_, err = tmpFile.WriteString(tt.buildPlanContent)
 			require.NoError(t, err)
 
-			result, err := parseBuildPlan(tmpFile)
-
-			if tt.expectError {
-				require.Error(t, err)
-				return
-			}
-
+			commands, err := findCommands(tmpFile)
 			require.NoError(t, err)
-			require.Equal(t, tt.expectedCompile, result.CompileCmds)
-			require.Equal(t, tt.expectedCgoDirs, result.CgoObjDirs)
+			assert.Equal(t, tt.expectedCommands, commands)
 		})
 	}
 }
