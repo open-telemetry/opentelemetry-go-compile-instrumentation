@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
@@ -40,6 +41,73 @@ func isSetup() bool {
 	return false
 }
 
+// flagsWithPathValues contains flags that accept a directory or file path as value.
+// From: go help build
+//
+//nolint:gochecknoglobals // private lookup table
+var flagsWithPathValues = map[string]bool{
+	"-o":       true,
+	"-modfile": true,
+	"-overlay": true,
+	"-pgo":     true,
+	"-pkgdir":  true,
+}
+
+// GetBuildPackages loads all packages from the go build command arguments.
+// Returns a list of loaded packages. If no package patterns are found in args,
+// defaults to loading the current directory package.
+// The args parameter should be the go build command arguments (e.g., ["build", "-a", "./cmd"]).
+// Returns an error if package loading fails or if invalid patterns are provided.
+// For example:
+//   - args ["build", "-a", "./cmd"] returns packages for "./cmd"
+//   - args ["build", "-a", "cmd"] returns packages for the "cmd" package in the module
+//   - args ["build", "-a", ".", "./cmd"] returns packages for both "." and "./cmd"
+//   - args ["build"] returns packages for "."
+func getBuildPackages(args []string) ([]*packages.Package, error) {
+	buildPkgs := make([]*packages.Package, 0)
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedModule,
+	}
+	found := false
+	for i := len(args) - 1; i >= 0; i-- {
+		arg := args[i]
+
+		// If preceded by a flag that takes a path value, this is a flag value
+		// We want to avoid scenarios like "go build -o ./tmp ./app" where tmp also contains Go files,
+		// as it would be treated as a package.
+		if i > 0 && flagsWithPathValues[args[i-1]] {
+			break
+		}
+
+		// If we hit a flag, stop. Packages come after all flags
+		// go build [-o output] [build flags] [packages]
+		if strings.HasPrefix(arg, "-") || arg == "go" || arg == "build" || arg == "install" {
+			break
+		}
+
+		pkgs, err := packages.Load(cfg, arg)
+		if err != nil {
+			return nil, ex.Wrapf(err, "failed to load packages for pattern %s", arg)
+		}
+		for _, pkg := range pkgs {
+			if pkg.Errors != nil || pkg.Module == nil {
+				continue
+			}
+			buildPkgs = append(buildPkgs, pkg)
+			found = true
+		}
+	}
+
+	if !found {
+		var err error
+		buildPkgs, err = packages.Load(cfg, ".")
+		if err != nil {
+			return nil, ex.Wrapf(err, "failed to load packages for pattern .")
+		}
+	}
+	return buildPkgs, nil
+}
+
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, args []string) error {
 	logger := util.LoggerFromContext(ctx)
@@ -55,7 +123,7 @@ func Setup(ctx context.Context, args []string) error {
 
 	// Introduce additional hook code by generating otel.runtime.go
 	// Use GetPackage to determine the build target directory
-	pkgs, err := util.GetBuildPackages(args)
+	pkgs, err := getBuildPackages(args)
 	if err != nil {
 		return err
 	}
@@ -135,7 +203,7 @@ func GoBuild(ctx context.Context, args []string) error {
 	}
 	defer func() {
 		var pkgs []*packages.Package
-		pkgs, err = util.GetBuildPackages(args)
+		pkgs, err = getBuildPackages(args)
 		if err != nil {
 			logger.DebugContext(ctx, "failed to get build packages", "error", err)
 		}

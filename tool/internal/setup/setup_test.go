@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package util
+package setup
 
 import (
 	"os"
@@ -62,7 +62,7 @@ func TestGetPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgs, err := GetBuildPackages(tt.args)
+			pkgs, err := getBuildPackages(tt.args)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
