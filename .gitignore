@@ -14,3 +14,9 @@ otel.runtime.go
 otel-pkg.gz
 pkg_temp
 coverage.txt
+
+go.work
+go.work.sum
+
+coverage*.txt
+gotest*.log

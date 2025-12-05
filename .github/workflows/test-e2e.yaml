@@ -75,6 +75,9 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: make test-e2e
+        env:
+          GOARCH: ${{ matrix.platform.arch }}
+
   done:
     name: Done (E2E Tests)
     runs-on: ubuntu-latest

@@ -13,6 +13,12 @@ type HookContext interface {
 	SetData(interface{})
 	// Get the data field, can be used to pass information between Before and After hooks
 	GetData() interface{}
+	// Get a value from the data field by key
+	GetKeyData(key string) interface{}
+	// Set a key-value pair in the data field
+	SetKeyData(key string, val interface{})
+	// Check if a key exists in the data field
+	HasKeyData(key string) bool
 	// Number of original function parameters
 	GetParamCount() int
 	// Get the original function parameter at index idx

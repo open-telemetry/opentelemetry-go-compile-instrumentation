@@ -8,8 +8,8 @@ SHELL := /bin/bash
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
-        test-unit/coverage test-integration/coverage test-e2e/coverage test-unit/update-golden \
-        test-unit/tool test-unit/pkg test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
+        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/semconv \
+        test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install
 
@@ -218,7 +218,7 @@ check-embed: ## Verify that embedded files exist (required for tests)
 test: ## Run all tests (unit + integration + e2e)
 test: test-unit test-integration test-e2e
 
-test-unit: test-unit/tool test-unit/pkg ## Run all unit tests (tool + pkg)
+test-unit: test-unit/tool test-unit/pkg test-unit/semconv ## Run all unit tests (tool + pkg)
 
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
@@ -228,9 +228,6 @@ test-unit/update-golden: package
 	cd tool/internal/instrument && go test -v -timeout=5m -count=1 -update
 
 .ONESHELL:
-test-unit/coverage: ## Run unit tests with coverage report
-test-unit/coverage: package gotestfmt
-	@echo "Running unit tests with coverage report..."
 test-unit/tool: build package gotestfmt ## Run unit tests for tool modules only
 	@echo "Running tool unit tests..."
 	set -euo pipefail
@@ -246,6 +243,12 @@ test-unit/pkg: package gotestfmt ## Run unit tests for pkg modules only
 		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
 	done
 
+.ONESHELL:
+test-unit/semconv: package gotestfmt ## Run unit tests for semconv modules only
+	@echo "Running semconv unit tests..."
+	set -euo pipefail
+	go test -C pkg/instrumentation/nethttp/semconv -json -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee ./gotest-unit-semconv.log | gotestfmt
+
 test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage ## Run all unit tests with coverage
 
 .ONESHELL:
@@ -258,11 +261,14 @@ test-unit/tool/coverage: package gotestfmt ## Run unit tests with coverage for t
 test-unit/pkg/coverage: package gotestfmt ## Run unit tests with coverage for pkg modules only
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
-	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime"); \
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime" | grep -v "pkg/instrumentation/nethttp/semconv"); \
 	for moddir in $$PKG_MODULES; do \
 		echo "Testing $$moddir..."; \
 		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
 	done
+	@echo "Running pkg unit tests with coverage report (semconv only - hook tests require full instrumentation)..."
+	set -euo pipefail
+	cd pkg/instrumentation/nethttp/semconv && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ../../../gotest-unit-pkg.log | gotestfmt
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests

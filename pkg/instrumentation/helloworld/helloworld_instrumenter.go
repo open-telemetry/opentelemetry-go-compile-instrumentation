@@ -4,55 +4,66 @@
 package helloworld
 
 import (
-	"log/slog"
+	"context"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/sdk/instrumentation"
-
-	instrumenter "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/http"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst-api-semconv/instrumenter/net"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-type HelloWorldRequest struct{}
+const (
+	instrumentationName    = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+	instrumentationVersion = "0.1.0"
+)
 
-type HelloWorldResponse struct{}
-
-type HelloWorldAttributesGetter struct{}
-
-type helloWorldSpanNameExtractor struct{}
-
-func (h helloWorldSpanNameExtractor) Extract(request HelloWorldRequest) string {
-	return "hello-world"
+// HelloWorldRequest represents a simple request for demonstration purposes
+type HelloWorldRequest struct {
+	Path   string
+	Params map[string]string
 }
 
-func (h HelloWorldAttributesGetter) GetURLScheme(request HelloWorldRequest) string {
-	return "http"
+// HelloWorldResponse represents a simple response for demonstration purposes
+type HelloWorldResponse struct {
+	Status int
 }
 
-func (h HelloWorldAttributesGetter) GetURLPath(request HelloWorldRequest) string {
-	return "/a"
+var tracer trace.Tracer
+
+func init() {
+	tracer = otel.GetTracerProvider().Tracer(
+		instrumentationName,
+		trace.WithInstrumentationVersion(instrumentationVersion),
+	)
 }
 
-func (h HelloWorldAttributesGetter) GetURLQuery(request HelloWorldRequest) string {
-	return "a=5"
-}
-
-func BuildNetHttpClientOtelInstrumenter() instrumenter.Instrumenter[HelloWorldRequest, HelloWorldResponse] {
-	builder := &instrumenter.Builder[HelloWorldRequest, HelloWorldResponse]{}
-	helloWorldGetter := HelloWorldAttributesGetter{}
-	urlAttributesExtractor := &net.URLAttrsExtractor[HelloWorldRequest, HelloWorldResponse, HelloWorldAttributesGetter]{
-		Getter: helloWorldGetter,
+// StartInstrumentation starts a span for the hello world operation
+func StartInstrumentation(ctx context.Context, req HelloWorldRequest) (context.Context, trace.Span) {
+	// Create attributes from request
+	attrs := []attribute.KeyValue{
+		attribute.String("hello.path", req.Path),
 	}
-	clientMetricRegistry := http.NewMetricsRegistry(slog.Default(), otel.GetMeterProvider().Meter("hello-world"))
-	// TODO: return noop instrumenter when there is an error
-	clientMetrics, _ := clientMetricRegistry.NewHTTPClientMetric("hello.world.client")
-	return builder.Init().SetSpanNameExtractor(helloWorldSpanNameExtractor{}).
-		SetSpanKindExtractor(&instrumenter.AlwaysInternalExtractor[HelloWorldRequest]{}).
-		AddAttributesExtractor(urlAttributesExtractor).
-		AddOperationListeners(clientMetrics).
-		SetInstrumentationScope(instrumentation.Scope{
-			Name:    "hello-world",
-			Version: "0.0.1",
-		}).BuildInstrumenter()
+
+	// Add params as attributes if present
+	for key, value := range req.Params {
+		attrs = append(attrs, attribute.String("hello.param."+key, value))
+	}
+
+	// Start span with attributes
+	ctx, span := tracer.Start(ctx,
+		"hello-world",
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(attrs...),
+	)
+
+	return ctx, span
+}
+
+// EndInstrumentation ends the span and records response attributes
+func EndInstrumentation(span trace.Span, resp HelloWorldResponse) {
+	// Add response attributes
+	span.SetAttributes(
+		attribute.Int("hello.status", resp.Status),
+	)
+
+	span.End()
 }

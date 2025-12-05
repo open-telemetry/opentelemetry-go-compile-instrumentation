@@ -11,7 +11,7 @@ Semantic conventions define a common set of attribute names and values used acro
 The project's semantic conventions version is tracked in the `.semconv-version` file at the root of the repository. This file:
 
 - Specifies which semantic conventions version the project intends to abide by
-- Must match the `semconv` imports used in `pkg/inst-api-semconv/` Go code
+- Must match the `semconv` imports used in `pkg/instrumentation/**/semconv/` Go code
 - Is validated by CI to ensure consistency
 
 **Example `.semconv-version` file**:
@@ -23,7 +23,7 @@ v1.30.0
 When updating to a new semantic conventions version:
 
 1. Update the version in `.semconv-version`
-2. Update Go imports in `pkg/inst-api-semconv/` to match
+2. Update Go imports in `pkg/instrumentation/**/semconv/` to match
 3. Run `make registry-check` to validate
 4. Update code to handle any breaking changes
 
@@ -55,7 +55,7 @@ This command:
 - Uses the `--future` flag to enable stricter validation rules
 - **This check is blocking** - violations will fail CI
 
-**When to use**: Run this before committing changes to semantic convention definitions in `pkg/inst-api-semconv/`.
+**When to use**: Run this before committing changes to semantic convention definitions in `pkg/instrumentation/**/semconv/`.
 
 ### Generate Registry Diff
 
@@ -90,7 +90,7 @@ Available updates (latest vs v1.30.0):
 
 - Understanding what's in your current semconv version
 - Deciding whether to upgrade to a newer version
-- Reviewing changes before modifying `pkg/inst-api-semconv/`
+- Reviewing changes before modifying `pkg/instrumentation/**/semconv/`
 
 **Requirements**:
 
@@ -148,15 +148,15 @@ grep "your.attribute.name" tmp/resolved-schema.yaml
 
 If the attribute doesn't exist upstream (or you need a project-specific attribute):
 
-1. Add your attribute definition to the appropriate file in `pkg/inst-api-semconv/instrumenter/`
+1. Add your attribute definition to the appropriate file in `pkg/instrumentation/**/semconv/`
 2. Follow the [OpenTelemetry attribute naming conventions](https://opentelemetry.io/docs/specs/semconv/general/attribute-naming/)
 3. Include proper documentation and examples
 
 Example structure:
 
 ```go
-// pkg/inst-api-semconv/instrumenter/http/http.go
-package http
+// pkg/instrumentation/nethttp/semconv/client.go
+package semconv
 
 const (
     // HTTPRequestMethod represents the HTTP request method.
@@ -213,15 +213,17 @@ When submitting a PR with semantic convention changes:
 Semantic convention definitions in this project are located in:
 
 ```
-pkg/inst-api-semconv/
-├── instrumenter/
-│   ├── http/           # HTTP semantic conventions
-│   │   ├── http.go
-│   │   └── ...
-│   ├── net/            # Network semantic conventions
-│   │   ├── net.go
-│   │   └── ...
-│   └── utils/          # Utility functions
+pkg/instrumentation/
+├── nethttp/
+│   └── semconv/        # HTTP semantic conventions
+│       ├── client.go
+│       ├── server.go
+│       ├── util.go
+│       └── ...
+├── grpc/
+│   └── semconv/        # gRPC semantic conventions (future)
+│       └── ...
+└── .../
 ```
 
 These definitions extend or implement the official [OpenTelemetry Semantic Conventions](https://github.com/open-telemetry/semantic-conventions) for use in compile-time instrumentation.
@@ -232,14 +234,14 @@ The project includes automated checks for semantic conventions:
 
 ### On Pull Requests
 
-When you modify files in `pkg/inst-api-semconv/` or `.semconv-version`:
+When you modify files in `pkg/instrumentation/**/semconv/` or `.semconv-version`:
 
 #### Job 1: Validate Semantic Conventions (Blocking)
 
 This job ensures your code follows the correct semantic conventions version:
 
 1. **Read Version**: Reads the version from `.semconv-version` file
-2. **Validate Consistency**: Checks that Go imports in `pkg/inst-api-semconv/` match the version in `.semconv-version`
+2. **Validate Consistency**: Checks that Go imports in `pkg/instrumentation/**/semconv/` match the version in `.semconv-version`
 3. **Registry Validation**: Runs `make registry-check` to validate against the registry
    - **This check is blocking** - violations will fail the PR
 
@@ -298,7 +300,7 @@ Consider updating your `semconv` version when:
 **Steps to update**:
 
 1. Review the "Available Updates" diff
-2. Update Go imports: `semconv/v1.30.0` → `semconv/v1.31.0`
+2. Update Go imports in `pkg/instrumentation/**/semconv/`: `semconv/v1.30.0` → `semconv/v1.31.0`
 3. Update the version in `.semconv-version` file
 4. Update code to handle any breaking changes
 5. Run `make registry-check` to validate the new version
