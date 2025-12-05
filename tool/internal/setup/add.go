@@ -5,6 +5,9 @@ package setup
 
 import (
 	"fmt"
+	"maps"
+	"path/filepath"
+	"slices"
 
 	"github.com/dave/dst"
 
@@ -27,9 +30,10 @@ func genImportDecl(matched []*rule.InstFuncRule) []dst.Decl {
 	for _, m := range matched {
 		requiredImports[m.Path] = ast.IdentIgnore
 	}
-	importDecls := make([]dst.Decl, 0)
-	for k, v := range requiredImports {
-		importDecls = append(importDecls, ast.ImportDecl(v, k))
+	importDecls := make([]dst.Decl, 0, len(requiredImports))
+	// Sort the keys to ensure deterministic order
+	for _, k := range slices.Sorted(maps.Keys(requiredImports)) {
+		importDecls = append(importDecls, ast.ImportDecl(requiredImports[k], k))
 	}
 	return importDecls
 }
@@ -96,7 +100,9 @@ func buildOtelRuntimeAst(decls []dst.Decl) *dst.File {
 	}
 }
 
-func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet) error {
+// addDeps generates and writes otel.runtime.go with required imports and variable
+// declarations for OpenTelemetry instrumentation based on matched rules.
+func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) error {
 	rules := make([]*rule.InstFuncRule, 0)
 	for _, m := range matched {
 		funcRules := m.GetFuncRules()
@@ -113,10 +119,12 @@ func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet) error {
 	// Build the ast
 	root := buildOtelRuntimeAst(append(importDecls, varDecls...))
 	// Write the ast to file
-	err := ast.WriteFile(OtelRuntimeFile, root)
+	otelRuntimeFilePath := filepath.Join(packagePath, OtelRuntimeFile)
+	err := ast.WriteFile(otelRuntimeFilePath, root)
 	if err != nil {
 		return err
 	}
-	sp.keepForDebug(OtelRuntimeFile)
+	sp.keepForDebug(otelRuntimeFilePath)
+	sp.Info("Created otel.runtime.go", "path", otelRuntimeFilePath)
 	return nil
 }
