@@ -39,6 +39,8 @@ The instrumentation framework follows a simplified, direct approach:
    - `GetParam(index)`: Retrieve function parameter
    - `SetParam(index, value)`: Modify function parameter (e.g., inject context)
    - `GetData()` / `SetData(data)`: Pass data between Before/After hooks
+   - `GetKeyData(key)` / `SetKeyData(key, value)`: Pass keyed data between Before/After hooks
+   - `HasKeyData(key)`: Check if a key exists in the hook data
 
 4. **Shared Setup**: Common OTel SDK initialization and configuration
    - Idempotent SDK setup using `sync.Once`
@@ -75,17 +77,17 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
     ictx.SetParam(requestParamIndex, newReq)
 
     // 6. Store data for After hook
-    ictx.SetData(map[string]interface{}{
-        "span": span,
-        "start": time.Now(),
-    })
+    ictx.SetKeyData("span", span)
+    ictx.SetKeyData("start", time.Now())
 }
 
 // After hook: Record results, end span
 func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
     // 1. Retrieve data from Before hook
-    data := ictx.GetData().(map[string]interface{})
-    span := data["span"].(trace.Span)
+    span, ok := ictx.GetKeyData("span").(trace.Span)
+    if !ok || span == nil {
+        return
+    }
     defer span.End()
 
     // 2. Add response attributes
@@ -130,16 +132,16 @@ func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWri
     ictx.SetParam(responseWriterIndex, wrapper)
 
     // 5. Store span for After hook
-    ictx.SetData(map[string]interface{}{
-        "span": span,
-        "start": time.Now(),
-    })
+    ictx.SetKeyData("span", span)
+    ictx.SetKeyData("start", time.Now())
 }
 
 // After hook: Extract status, finalize span
 func AfterServeHTTP(ictx inst.HookContext) {
-    data := ictx.GetData().(map[string]interface{})
-    span := data["span"].(trace.Span)
+    span, ok := ictx.GetKeyData("span").(trace.Span)
+    if !ok || span == nil {
+        return
+    }
     defer span.End()
 
     // Extract status code from wrapped ResponseWriter

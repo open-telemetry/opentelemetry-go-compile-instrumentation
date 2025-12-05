@@ -111,13 +111,7 @@ func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 		return
 	}
 
-	data, ok := ictx.GetData().(map[string]interface{})
-	if !ok || data == nil {
-		logger.Debug("AfterRoundTrip: no data from before hook")
-		return
-	}
-
-	span, ok := data["span"].(trace.Span)
+	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterRoundTrip: no span from before hook")
 		return
@@ -126,7 +120,7 @@ func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 
 	// Add response attributes
 	if res != nil {
-		startTime, _ := data["start"].(time.Time)
+		startTime, _ := ictx.GetKeyData("start").(time.Time)
 		attrs := semconv.HTTPClientResponseTraceAttrs(res)
 		span.SetAttributes(attrs...)
 

@@ -115,13 +115,7 @@ func AfterServeHTTP(ictx inst.HookContext) {
 		return
 	}
 
-	data, ok := ictx.GetData().(map[string]interface{})
-	if !ok || data == nil {
-		logger.Debug("AfterServeHTTP: no data from before hook")
-		return
-	}
-
-	span, ok := data["span"].(trace.Span)
+	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterServeHTTP: no span from before hook")
 		return
@@ -146,7 +140,7 @@ func AfterServeHTTP(ictx inst.HookContext) {
 		span.SetStatus(code, desc)
 	}
 
-	startTime, _ := data["start"].(time.Time)
+	startTime, _ := ictx.GetKeyData("start").(time.Time)
 	logger.Debug("AfterServeHTTP called",
 		"status_code", statusCode,
 		"duration_ms", time.Since(startTime).Milliseconds())

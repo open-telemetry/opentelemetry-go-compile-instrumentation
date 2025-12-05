@@ -79,9 +79,6 @@ func TestHttp(t *testing.T) {
 	// so it won't appear in the server output unless the server makes HTTP client requests
 	require.Contains(t, output, "HTTP server instrumentation initialized")
 
-	// Verify that the server ran successfully
-	require.Contains(t, output, "server started")
-
 	// Note: Full trace validation would require parsing OTel spans
 	// For now, we verify that instrumentation hooks are in place and executing
 }

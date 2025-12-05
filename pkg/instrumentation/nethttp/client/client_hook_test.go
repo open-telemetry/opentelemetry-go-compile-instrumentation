@@ -81,6 +81,41 @@ func (m *mockHookContext) GetData() interface{} {
 	return m.data
 }
 
+func (m *mockHookContext) GetKeyData(key string) interface{} {
+	if m.data == nil {
+		return nil
+	}
+	dataMap, ok := m.data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return dataMap[key]
+}
+
+func (m *mockHookContext) SetKeyData(key string, val interface{}) {
+	if m.data == nil {
+		m.data = make(map[string]interface{})
+	}
+	dataMap, ok := m.data.(map[string]interface{})
+	if !ok {
+		m.data = make(map[string]interface{})
+		dataMap = m.data.(map[string]interface{})
+	}
+	dataMap[key] = val
+}
+
+func (m *mockHookContext) HasKeyData(key string) bool {
+	if m.data == nil {
+		return false
+	}
+	dataMap, ok := m.data.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	_, exists := dataMap[key]
+	return exists
+}
+
 func (m *mockHookContext) GetFuncName() string {
 	return m.funcName
 }
