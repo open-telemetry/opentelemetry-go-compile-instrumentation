@@ -41,16 +41,30 @@ func isSetup() bool {
 	return false
 }
 
-// flagsWithPathValues contains flags that accept a directory or file path as value.
-// From: go help build
+// flagsWithPathValues contains flags that accept a value from "go build" command.
 //
 //nolint:gochecknoglobals // private lookup table
 var flagsWithPathValues = map[string]bool{
-	"-o":       true,
-	"-modfile": true,
-	"-overlay": true,
-	"-pgo":     true,
-	"-pkgdir":  true,
+	"-C":             true,
+	"-o":             true,
+	"-p":             true,
+	"-covermode":     true,
+	"-coverpkg":      true,
+	"-asmflags":      true,
+	"-buildmode":     true,
+	"-buildvcs":      true,
+	"-compiler":      true,
+	"-gccgoflags":    true,
+	"-gcflags":       true,
+	"-installsuffix": true,
+	"-ldflags":       true,
+	"-mod":           true,
+	"-modfile":       true,
+	"-overlay":       true,
+	"-pgo":           true,
+	"-pkgdir":        true,
+	"-tags":          true,
+	"-toolexec":      true,
 }
 
 // GetBuildPackages loads all packages from the go build command arguments.
@@ -63,7 +77,9 @@ var flagsWithPathValues = map[string]bool{
 //   - args ["build", "-a", "cmd"] returns packages for the "cmd" package in the module
 //   - args ["build", "-a", ".", "./cmd"] returns packages for both "." and "./cmd"
 //   - args ["build"] returns packages for "."
-func getBuildPackages(args []string) ([]*packages.Package, error) {
+func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
+	logger := util.LoggerFromContext(ctx)
+
 	buildPkgs := make([]*packages.Package, 0)
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedModule,
@@ -91,6 +107,7 @@ func getBuildPackages(args []string) ([]*packages.Package, error) {
 		}
 		for _, pkg := range pkgs {
 			if pkg.Errors != nil || pkg.Module == nil {
+				logger.DebugContext(ctx, "skipping package", "pattern", arg, "errors", pkg.Errors, "module", pkg.Module)
 				continue
 			}
 			buildPkgs = append(buildPkgs, pkg)
@@ -123,7 +140,7 @@ func Setup(ctx context.Context, args []string) error {
 
 	// Introduce additional hook code by generating otel.runtime.go
 	// Use GetPackage to determine the build target directory
-	pkgs, err := getBuildPackages(args)
+	pkgs, err := getBuildPackages(ctx, args)
 	if err != nil {
 		return err
 	}
@@ -203,7 +220,7 @@ func GoBuild(ctx context.Context, args []string) error {
 	}
 	defer func() {
 		var pkgs []*packages.Package
-		pkgs, err = getBuildPackages(args)
+		pkgs, err = getBuildPackages(ctx, args)
 		if err != nil {
 			logger.DebugContext(ctx, "failed to get build packages", "error", err)
 		}
