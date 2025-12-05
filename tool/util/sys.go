@@ -124,5 +124,5 @@ func PathExists(path string) bool {
 }
 
 func NormalizePath(path string) string {
-	return strings.TrimSuffix(filepath.ToSlash(path), "/")
+	return filepath.ToSlash(filepath.Clean(path))
 }

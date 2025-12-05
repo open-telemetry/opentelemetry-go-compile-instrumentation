@@ -158,6 +158,31 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) (p
 	return plan, nil
 }
 
+const (
+	cgoSuffix = ".cgo1.go"
+	goSuffix  = ".go"
+)
+
+// resolveCgoFile maps a CGO-generated file back to its original source
+// in the specified source directory. Both cgoFile and sourceDir must be non-empty.
+func resolveCgoFile(cgoFile, sourceDir string) (string, error) {
+	if cgoFile == "" || sourceDir == "" {
+		return "", ex.Newf("cgoFile and sourceDir cannot be empty, cgoFile: %q, sourceDir: %q", cgoFile, sourceDir)
+	}
+
+	baseName := filepath.Base(cgoFile)
+	if !strings.HasSuffix(baseName, cgoSuffix) {
+		return "", ex.Newf("file %s is not a CGO (%s) generated file", cgoFile, cgoSuffix)
+	}
+
+	originalBase := strings.TrimSuffix(baseName, cgoSuffix) + goSuffix
+	abs := filepath.Join(sourceDir, originalBase)
+	if !util.PathExists(abs) {
+		return "", ex.Newf("file %s does not exist", abs)
+	}
+	return abs, nil
+}
+
 var versionRegexp = regexp.MustCompile(`@v\d+\.\d+\.\d+(-.*?)?/`)
 
 func findModVersion(path string) string {
@@ -207,7 +232,7 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 					sp.Debug("Skip generated file - unknown objdir", "file", arg, "objDir", objDir)
 					continue
 				}
-				originalAbsFile, err1 := util.ResolveCgoFile(arg, sourceDir)
+				originalAbsFile, err1 := resolveCgoFile(arg, sourceDir)
 				if err1 != nil {
 					// Skip non-CGO generated files (_cgo_gotypes.go, _cgo_import.go, ...)
 					sp.Debug("Skip generated file", "file", arg, "error", err1)
