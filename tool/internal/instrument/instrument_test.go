@@ -291,7 +291,10 @@ func TestGroupRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			grouped := groupRules(tt.ruleSet)
+			ip := &InstrumentPhase{
+				logger: slog.Default(),
+			}
+			grouped := ip.groupRules(tt.ruleSet)
 
 			// Check expected files are present
 			for _, file := range tt.expectedFiles {

@@ -36,6 +36,14 @@ func IsCompileCommand(line string) bool {
 	return true
 }
 
+// isCgoCommand checks if the line is a cgo tool invocation with -objdir and -importpath flags.
+func IsCgoCommand(line string) bool {
+	return strings.Contains(line, "cgo") &&
+		strings.Contains(line, "-objdir") &&
+		strings.Contains(line, "-importpath") &&
+		!strings.Contains(line, "-dynimport")
+}
+
 // FindFlagValue finds the value of a flag in the command line.
 func FindFlagValue(cmd []string, flag string) string {
 	for i, v := range cmd {
