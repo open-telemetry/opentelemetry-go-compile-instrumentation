@@ -98,8 +98,11 @@ server_hook:
 Control instrumentation behavior at runtime:
 
 ```bash
-# Enable/disable net/http instrumentation
-export OTEL_INSTRUMENTATION_NETHTTP_ENABLED=true  # default: true
+# Enable only specific instrumentations (comma-separated list)
+export OTEL_GO_ENABLED_INSTRUMENTATIONS=nethttp,grpc
+
+# Disable specific instrumentations (comma-separated list)
+export OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp
 
 # General OpenTelemetry configuration
 export OTEL_SERVICE_NAME=my-service
@@ -388,7 +391,10 @@ For a typical web request taking 10-100ms, instrumentation overhead is **< 0.01%
 **Check 1: Is instrumentation enabled?**
 
 ```bash
-export OTEL_INSTRUMENTATION_NETHTTP_ENABLED=true
+# Make sure nethttp is not in the disabled list
+unset OTEL_GO_DISABLED_INSTRUMENTATIONS
+# Or explicitly enable it
+export OTEL_GO_ENABLED_INSTRUMENTATIONS=nethttp
 ```
 
 **Check 2: Was the app built with the otel tool?**

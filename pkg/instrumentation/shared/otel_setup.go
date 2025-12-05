@@ -6,6 +6,7 @@ package shared
 import (
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/otelsetup"
@@ -48,15 +49,60 @@ func SetupOTelSDK() error {
 	return nil
 }
 
-// Instrumented checks if instrumentation is enabled via environment variable
-// Default is enabled unless explicitly set to "false"
+// Instrumented checks if instrumentation is enabled via environment variables.
+//
+// Environment variables (following OTel JS pattern):
+//   - OTEL_GO_ENABLED_INSTRUMENTATIONS: comma-separated list of enabled instrumentations (e.g., "nethttp,grpc")
+//   - OTEL_GO_DISABLED_INSTRUMENTATIONS: comma-separated list of disabled instrumentations (e.g., "nethttp")
+//
+// Logic:
+//  1. If OTEL_GO_ENABLED_INSTRUMENTATIONS is set, only those instrumentations are enabled
+//  2. Then OTEL_GO_DISABLED_INSTRUMENTATIONS is applied to disable specific ones
+//  3. If neither is set, all instrumentations are enabled by default
+//
+// The instrumentationName should be lowercase (e.g., "nethttp", "grpc").
 func Instrumented(instrumentationName string) bool {
-	// Check global flag
-	if os.Getenv("OTEL_INSTRUMENTATION_ENABLED") == "false" {
-		return false
+	name := strings.ToLower(instrumentationName)
+
+	// Check if specific instrumentations are enabled
+	enabledList := os.Getenv("OTEL_GO_ENABLED_INSTRUMENTATIONS")
+	if enabledList != "" {
+		enabled := parseInstrumentationList(enabledList)
+		if !contains(enabled, name) {
+			return false
+		}
 	}
 
-	// Check specific instrumentation flag (e.g., OTEL_INSTRUMENTATION_NETHTTP_ENABLED)
-	envVar := "OTEL_INSTRUMENTATION_" + instrumentationName + "_ENABLED"
-	return os.Getenv(envVar) != "false"
+	// Check if this instrumentation is explicitly disabled
+	disabledList := os.Getenv("OTEL_GO_DISABLED_INSTRUMENTATIONS")
+	if disabledList != "" {
+		disabled := parseInstrumentationList(disabledList)
+		if contains(disabled, name) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// parseInstrumentationList parses a comma-separated list of instrumentation names.
+func parseInstrumentationList(list string) []string {
+	var result []string
+	for _, item := range strings.Split(list, ",") {
+		trimmed := strings.TrimSpace(strings.ToLower(item))
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// contains checks if a slice contains a string.
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

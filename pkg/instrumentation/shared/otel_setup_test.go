@@ -31,49 +31,69 @@ func TestSetupOTelSDK(t *testing.T) {
 func TestInstrumented(t *testing.T) {
 	tests := []struct {
 		name                string
-		globalEnv           string
-		specificEnv         string
+		enabledList         string
+		disabledList        string
 		instrumentationName string
 		expected            bool
 	}{
 		{
 			name:                "default enabled",
-			globalEnv:           "",
-			specificEnv:         "",
-			instrumentationName: "NETHTTP",
+			enabledList:         "",
+			disabledList:        "",
+			instrumentationName: "nethttp",
 			expected:            true,
 		},
 		{
-			name:                "globally disabled",
-			globalEnv:           "false",
-			specificEnv:         "",
-			instrumentationName: "NETHTTP",
+			name:                "explicitly enabled",
+			enabledList:         "nethttp,grpc",
+			disabledList:        "",
+			instrumentationName: "nethttp",
+			expected:            true,
+		},
+		{
+			name:                "not in enabled list",
+			enabledList:         "grpc",
+			disabledList:        "",
+			instrumentationName: "nethttp",
 			expected:            false,
 		},
 		{
-			name:                "specifically disabled",
-			globalEnv:           "",
-			specificEnv:         "false",
-			instrumentationName: "NETHTTP",
+			name:                "explicitly disabled",
+			enabledList:         "",
+			disabledList:        "nethttp",
+			instrumentationName: "nethttp",
 			expected:            false,
 		},
 		{
-			name:                "specifically enabled overrides nothing",
-			globalEnv:           "",
-			specificEnv:         "true",
-			instrumentationName: "NETHTTP",
+			name:                "enabled then disabled",
+			enabledList:         "nethttp,grpc",
+			disabledList:        "nethttp",
+			instrumentationName: "nethttp",
+			expected:            false,
+		},
+		{
+			name:                "case insensitive",
+			enabledList:         "NETHTTP,GRPC",
+			disabledList:        "",
+			instrumentationName: "NetHTTP",
+			expected:            true,
+		},
+		{
+			name:                "with spaces",
+			enabledList:         " nethttp , grpc ",
+			disabledList:        "",
+			instrumentationName: "nethttp",
 			expected:            true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.globalEnv != "" {
-				t.Setenv("OTEL_INSTRUMENTATION_ENABLED", tt.globalEnv)
+			if tt.enabledList != "" {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", tt.enabledList)
 			}
-			if tt.specificEnv != "" {
-				envVar := "OTEL_INSTRUMENTATION_" + tt.instrumentationName + "_ENABLED"
-				t.Setenv(envVar, tt.specificEnv)
+			if tt.disabledList != "" {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", tt.disabledList)
 			}
 
 			result := Instrumented(tt.instrumentationName)

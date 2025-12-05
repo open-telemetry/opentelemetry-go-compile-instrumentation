@@ -100,7 +100,7 @@ func setupTestTracer() (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
 func TestBeforeRoundTrip(t *testing.T) {
 	tests := []struct {
 		name            string
-		setupEnv        func()
+		setupEnv        func(t *testing.T)
 		setupRequest    func() *http.Request
 		expectSpan      bool
 		validateSpan    func(*testing.T, trace.Span)
@@ -108,9 +108,8 @@ func TestBeforeRoundTrip(t *testing.T) {
 	}{
 		{
 			name: "basic request creates span",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
@@ -127,8 +126,8 @@ func TestBeforeRoundTrip(t *testing.T) {
 		},
 		{
 			name: "instrumentation disabled",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "false")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
@@ -138,9 +137,8 @@ func TestBeforeRoundTrip(t *testing.T) {
 		},
 		{
 			name: "OTel exporter request filtered",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				req, _ := http.NewRequest("POST", "http://localhost:4318/v1/traces", nil)
@@ -151,9 +149,8 @@ func TestBeforeRoundTrip(t *testing.T) {
 		},
 		{
 			name: "POST request",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				req, _ := http.NewRequest("POST", "http://example.com/api/data", nil)
@@ -163,9 +160,8 @@ func TestBeforeRoundTrip(t *testing.T) {
 		},
 		{
 			name: "request with existing context",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				ctx := context.WithValue(context.Background(), "test-key", "test-value")
@@ -181,7 +177,7 @@ func TestBeforeRoundTrip(t *testing.T) {
 			// Reset initialization for each test by creating a new once
 			initOnce = *new(sync.Once)
 
-			tt.setupEnv()
+			tt.setupEnv(t)
 			sr, tp := setupTestTracer()
 			defer tp.Shutdown(context.Background())
 
@@ -229,21 +225,21 @@ func TestBeforeRoundTrip(t *testing.T) {
 func TestAfterRoundTrip(t *testing.T) {
 	tests := []struct {
 		name         string
-		setupEnv     func()
-		setupContext func(*tracetest.SpanRecorder) inst.HookContext
+		setupEnv     func(t *testing.T)
+		setupContext func(*sdktrace.TracerProvider) inst.HookContext
 		response     *http.Response
 		err          error
 		validateSpan func(*testing.T, []sdktrace.ReadOnlySpan)
 	}{
 		{
 			name: "successful response",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := tracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := newMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -266,13 +262,13 @@ func TestAfterRoundTrip(t *testing.T) {
 		},
 		{
 			name: "error response",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := tracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := newMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -298,13 +294,13 @@ func TestAfterRoundTrip(t *testing.T) {
 		},
 		{
 			name: "4xx client error",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := tracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := newMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -322,19 +318,19 @@ func TestAfterRoundTrip(t *testing.T) {
 			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
 				require.Len(t, spans, 1)
 				span := spans[0]
-				// 4xx is not an error from OTel perspective
-				assert.Equal(t, codes.Unset, span.Status().Code)
+				// 4xx is an error for HTTP client requests per OTel HTTP semconv
+				assert.Equal(t, codes.Error, span.Status().Code)
 			},
 		},
 		{
 			name: "5xx server error",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := tracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := newMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -357,11 +353,10 @@ func TestAfterRoundTrip(t *testing.T) {
 		},
 		{
 			name: "no data in context",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
 				return newMockHookContext()
 			},
 			response: &http.Response{
@@ -376,12 +371,13 @@ func TestAfterRoundTrip(t *testing.T) {
 		},
 		{
 			name: "instrumentation disabled",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "false")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := tracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := newMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -408,11 +404,11 @@ func TestAfterRoundTrip(t *testing.T) {
 			// Reset initialization for each test by creating a new once
 			initOnce = *new(sync.Once)
 
-			tt.setupEnv()
+			tt.setupEnv(t)
 			sr, tp := setupTestTracer()
 			defer tp.Shutdown(context.Background())
 
-			mockCtx := tt.setupContext(sr)
+			mockCtx := tt.setupContext(tp)
 
 			AfterRoundTrip(mockCtx, tt.response, tt.err)
 
@@ -427,36 +423,34 @@ func TestAfterRoundTrip(t *testing.T) {
 func TestClientEnabler(t *testing.T) {
 	tests := []struct {
 		name     string
-		setupEnv func()
+		setupEnv func(t *testing.T)
 		expected bool
 	}{
 		{
 			name: "enabled explicitly",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			expected: true,
 		},
 		{
 			name: "disabled explicitly",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "false")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			expected: false,
 		},
 		{
-			name: "nethttp disabled",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "false")
+			name: "not in enabled list",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
 			},
 			expected: false,
 		},
 		{
-			name: "global enabled, nethttp not set",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
+			name: "default enabled when no env set",
+			setupEnv: func(t *testing.T) {
+				// No environment variables set - should be enabled by default
 			},
 			expected: true,
 		},
@@ -464,7 +458,7 @@ func TestClientEnabler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setupEnv()
+			tt.setupEnv(t)
 
 			enabler := netHttpClientEnabler{}
 			result := enabler.Enable()

@@ -224,8 +224,8 @@ The instrumentation respects standard OpenTelemetry environment variables:
 - `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`: Metrics-specific endpoint
 - `OTEL_SERVICE_NAME`: Service name for telemetry
 - `OTEL_LOG_LEVEL`: Log level (`debug`, `info`, `warn`, `error`)
-- `OTEL_INSTRUMENTATION_ENABLED`: Global enable/disable flag (default: enabled)
-- `OTEL_INSTRUMENTATION_<NAME>_ENABLED`: Per-instrumentation enable/disable (e.g., `OTEL_INSTRUMENTATION_NETHTTP_ENABLED`)
+- `OTEL_GO_ENABLED_INSTRUMENTATIONS`: Comma-separated list of enabled instrumentations (e.g., `nethttp,grpc`)
+- `OTEL_GO_DISABLED_INSTRUMENTATIONS`: Comma-separated list of disabled instrumentations (e.g., `nethttp`)
 
 ## Adding New Instrumentation
 

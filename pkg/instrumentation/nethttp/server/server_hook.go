@@ -23,6 +23,7 @@ const (
 	instrumentationVersion = "0.1.0"
 	instrumentationKey     = "NETHTTP"
 	responseWriterIndex    = 1
+	requestIndex           = 2
 )
 
 var (
@@ -96,6 +97,10 @@ func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWri
 		statusCode:     http.StatusOK,
 	}
 	ictx.SetParam(responseWriterIndex, wrapper)
+
+	// Update request with new context containing the span
+	newReq := r.WithContext(ctx)
+	ictx.SetParam(requestIndex, newReq)
 
 	// Store data for after hook
 	ictx.SetData(map[string]interface{}{

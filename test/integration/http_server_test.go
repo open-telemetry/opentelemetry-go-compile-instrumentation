@@ -110,9 +110,9 @@ func TestHTTPServerIntegration(t *testing.T) {
 func TestHTTPServerInstrumentationDisabled(t *testing.T) {
 	serverDir := filepath.Join("..", "..", "demo", "http", "server")
 
-	// Enable debug logging and disable instrumentation
+	// Enable debug logging and disable nethttp instrumentation
 	t.Setenv("OTEL_LOG_LEVEL", "debug")
-	t.Setenv("OTEL_INSTRUMENTATION_NETHTTP_ENABLED", "false")
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 
 	// Build the server with instrumentation
 	t.Log("Building instrumented HTTP server...")

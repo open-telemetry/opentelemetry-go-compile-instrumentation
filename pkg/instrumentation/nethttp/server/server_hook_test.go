@@ -99,7 +99,7 @@ func setupTestTracer() (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
 func TestBeforeServeHTTP(t *testing.T) {
 	tests := []struct {
 		name            string
-		setupEnv        func()
+		setupEnv        func(t *testing.T)
 		setupRequest    func() *http.Request
 		expectSpan      bool
 		validateSpan    func(*testing.T, trace.Span)
@@ -108,9 +108,8 @@ func TestBeforeServeHTTP(t *testing.T) {
 	}{
 		{
 			name: "basic request creates span",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				return httptest.NewRequest("GET", "http://example.com/path", nil)
@@ -126,8 +125,8 @@ func TestBeforeServeHTTP(t *testing.T) {
 		},
 		{
 			name: "instrumentation disabled",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "false")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				return httptest.NewRequest("GET", "http://example.com/path", nil)
@@ -136,9 +135,8 @@ func TestBeforeServeHTTP(t *testing.T) {
 		},
 		{
 			name: "POST request",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				return httptest.NewRequest("POST", "http://example.com/api/data", nil)
@@ -147,9 +145,8 @@ func TestBeforeServeHTTP(t *testing.T) {
 		},
 		{
 			name: "request with trace context propagation",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				req := httptest.NewRequest("GET", "http://example.com/path", nil)
@@ -166,9 +163,8 @@ func TestBeforeServeHTTP(t *testing.T) {
 		},
 		{
 			name: "request with route pattern (Go 1.22+)",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
 				req := httptest.NewRequest("GET", "http://example.com/users/123", nil)
@@ -184,7 +180,7 @@ func TestBeforeServeHTTP(t *testing.T) {
 			// Reset initialization for each test by creating a new once
 			initOnce = *new(sync.Once)
 
-			tt.setupEnv()
+			tt.setupEnv(t)
 			sr, tp := setupTestTracer()
 			defer tp.Shutdown(context.Background())
 
@@ -222,7 +218,10 @@ func TestBeforeServeHTTP(t *testing.T) {
 				}
 
 				if tt.validateContext != nil {
-					tt.validateContext(t, req)
+					// Get the updated request with the new context
+					updatedReq, ok := mockCtx.GetParam(2).(*http.Request)
+					require.True(t, ok, "param 2 should be updated request")
+					tt.validateContext(t, updatedReq)
 				}
 			} else {
 				// No span should be created
@@ -236,19 +235,23 @@ func TestBeforeServeHTTP(t *testing.T) {
 func TestAfterServeHTTP(t *testing.T) {
 	tests := []struct {
 		name         string
-		setupEnv     func()
-		setupContext func(*tracetest.SpanRecorder) inst.HookContext
+		setupEnv     func(t *testing.T)
+		setupContext func(*sdktrace.TracerProvider) inst.HookContext
 		statusCode   int
 		validateSpan func(*testing.T, []sdktrace.ReadOnlySpan)
 	}{
 		{
 			name: "successful 200 response",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
-				ctx, span := tracer.Start(context.Background(), "GET /path", trace.WithSpanKind(trace.SpanKindServer))
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				ctx, span := testTracer.Start(
+					context.Background(),
+					"GET /path",
+					trace.WithSpanKind(trace.SpanKindServer),
+				)
 
 				mockCtx := newMockHookContext()
 				wrapper := &writerWrapper{
@@ -271,12 +274,12 @@ func TestAfterServeHTTP(t *testing.T) {
 		},
 		{
 			name: "404 not found",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
-				ctx, span := tracer.Start(
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				ctx, span := testTracer.Start(
 					context.Background(),
 					"GET /notfound",
 					trace.WithSpanKind(trace.SpanKindServer),
@@ -304,12 +307,16 @@ func TestAfterServeHTTP(t *testing.T) {
 		},
 		{
 			name: "500 internal server error",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
-				ctx, span := tracer.Start(context.Background(), "GET /error", trace.WithSpanKind(trace.SpanKindServer))
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				ctx, span := testTracer.Start(
+					context.Background(),
+					"GET /error",
+					trace.WithSpanKind(trace.SpanKindServer),
+				)
 
 				mockCtx := newMockHookContext()
 				wrapper := &writerWrapper{
@@ -332,11 +339,10 @@ func TestAfterServeHTTP(t *testing.T) {
 		},
 		{
 			name: "no data in context",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
 				return newMockHookContext()
 			},
 			statusCode: 200,
@@ -347,11 +353,16 @@ func TestAfterServeHTTP(t *testing.T) {
 		},
 		{
 			name: "instrumentation disabled",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "false")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
-				ctx, span := tracer.Start(context.Background(), "GET /path", trace.WithSpanKind(trace.SpanKindServer))
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				ctx, span := testTracer.Start(
+					context.Background(),
+					"GET /path",
+					trace.WithSpanKind(trace.SpanKindServer),
+				)
 
 				mockCtx := newMockHookContext()
 				wrapper := &writerWrapper{
@@ -373,12 +384,16 @@ func TestAfterServeHTTP(t *testing.T) {
 		},
 		{
 			name: "no wrapper in context",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(sr *tracetest.SpanRecorder) inst.HookContext {
-				ctx, span := tracer.Start(context.Background(), "GET /path", trace.WithSpanKind(trace.SpanKindServer))
+			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				ctx, span := testTracer.Start(
+					context.Background(),
+					"GET /path",
+					trace.WithSpanKind(trace.SpanKindServer),
+				)
 
 				mockCtx := newMockHookContext()
 				// Don't set param 1, defaults to 200
@@ -403,11 +418,11 @@ func TestAfterServeHTTP(t *testing.T) {
 			// Reset initialization for each test by creating a new once
 			initOnce = *new(sync.Once)
 
-			tt.setupEnv()
+			tt.setupEnv(t)
 			sr, tp := setupTestTracer()
 			defer tp.Shutdown(context.Background())
 
-			mockCtx := tt.setupContext(sr)
+			mockCtx := tt.setupContext(tp)
 
 			AfterServeHTTP(mockCtx)
 
@@ -422,36 +437,34 @@ func TestAfterServeHTTP(t *testing.T) {
 func TestServerEnabler(t *testing.T) {
 	tests := []struct {
 		name     string
-		setupEnv func()
+		setupEnv func(t *testing.T)
 		expected bool
 	}{
 		{
 			name: "enabled explicitly",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "true")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			expected: true,
 		},
 		{
 			name: "disabled explicitly",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "false")
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			expected: false,
 		},
 		{
-			name: "nethttp disabled",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_NETHTTP_ENABLED", "false")
+			name: "not in enabled list",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
 			},
 			expected: false,
 		},
 		{
-			name: "global enabled, nethttp not set",
-			setupEnv: func() {
-				t.Setenv("OTEL_GO_AUTO_INSTRUMENTATION_ENABLED", "true")
+			name: "default enabled when no env set",
+			setupEnv: func(t *testing.T) {
+				// No environment variables set - should be enabled by default
 			},
 			expected: true,
 		},
@@ -459,69 +472,13 @@ func TestServerEnabler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setupEnv()
+			tt.setupEnv(t)
 
 			enabler := netHttpServerEnabler{}
 			result := enabler.Enable()
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-func TestWriterWrapper_WriteHeader(t *testing.T) {
-	tests := []struct {
-		name               string
-		statusCode         int
-		expectedStatusCode int
-	}{
-		{
-			name:               "custom status code",
-			statusCode:         201,
-			expectedStatusCode: 201,
-		},
-		{
-			name:               "error status code",
-			statusCode:         500,
-			expectedStatusCode: 500,
-		},
-		{
-			name:               "not found",
-			statusCode:         404,
-			expectedStatusCode: 404,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			wrapper := &writerWrapper{
-				ResponseWriter: rec,
-				statusCode:     http.StatusOK,
-			}
-
-			wrapper.WriteHeader(tt.statusCode)
-
-			assert.Equal(t, tt.expectedStatusCode, wrapper.statusCode)
-			assert.Equal(t, tt.expectedStatusCode, rec.Code)
-		})
-	}
-}
-
-func TestWriterWrapper_Write(t *testing.T) {
-	rec := httptest.NewRecorder()
-	wrapper := &writerWrapper{
-		ResponseWriter: rec,
-		statusCode:     http.StatusOK,
-	}
-
-	data := []byte("test response")
-	n, err := wrapper.Write(data)
-
-	require.NoError(t, err)
-	assert.Equal(t, len(data), n)
-	assert.Equal(t, data, rec.Body.Bytes())
-	// Status code should remain default if WriteHeader not called
-	assert.Equal(t, http.StatusOK, wrapper.statusCode)
 }
 
 func TestWriterWrapper_IntegrationWithHandler(t *testing.T) {

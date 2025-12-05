@@ -17,3 +17,6 @@ coverage.txt
 
 go.work
 go.work.sum
+
+coverage*.txt
+gotest*.log
