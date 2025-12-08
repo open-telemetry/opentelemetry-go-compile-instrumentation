@@ -138,52 +138,6 @@ func TestResolveCgoFile_EmptyParams(t *testing.T) {
 	})
 }
 
-func TestFindModVersion(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		expected string
-	}{
-		{
-			name:     "simple version",
-			path:     "/go/pkg/mod/github.com/example/pkg@v1.2.3/file.go",
-			expected: "v1.2.3",
-		},
-		{
-			name:     "prerelease version",
-			path:     "/go/pkg/mod/github.com/example/pkg@v1.0.0-beta.1/file.go",
-			expected: "v1.0.0-beta.1",
-		},
-		{
-			name:     "pseudo version",
-			path:     "/go/pkg/mod/github.com/example/pkg@v0.0.0-20210101120000-abcdef123456/file.go",
-			expected: "v0.0.0-20210101120000-abcdef123456",
-		},
-		{
-			name:     "no version",
-			path:     "/home/user/project/file.go",
-			expected: "",
-		},
-		{
-			name:     "local path",
-			path:     "./internal/pkg/file.go",
-			expected: "",
-		},
-		{
-			name:     "windows path with version",
-			path:     "C:\\go\\pkg\\mod\\github.com\\example\\pkg@v2.0.0\\file.go",
-			expected: "v2.0.0",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := findModVersion(tt.path)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestFindCommands(t *testing.T) {
 	tests := []struct {
 		name             string
