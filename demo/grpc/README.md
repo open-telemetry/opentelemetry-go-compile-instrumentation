@@ -66,6 +66,16 @@ cd client
 # Output: Greeting: Hello world
 ```
 
+To send multiple requests:
+
+```bash
+# Send 10 requests sequentially with 500ms delay between each
+./client -count=10
+
+# For load testing, send many requests
+./client -count=1000
+```
+
 #### Streaming RPC Call
 
 ```bash
@@ -82,12 +92,19 @@ cd client
 # Send a custom name
 ./client -name="OpenTelemetry"
 
+# Send multiple requests with a custom name
+./client -name="Testing" -count=5
+
 # Combine options
 ./client -addr=localhost:50052 -name="Testing" -stream=true
 
 # Send a shutdown request to the server, this will exit the server process gracefully.
 ./client -shutdown
 ```
+
+#### Telemetry Export Note
+
+The client includes a 6-second sleep after completing requests to ensure the batch span processor (default 5-second timeout) has time to flush pending telemetry before the process exits. This is particularly important for single or low-count requests. For continuous monitoring, use a higher `-count` value which naturally provides enough runtime for span export.
 
 ## Regenerating Protocol Buffer Code
 

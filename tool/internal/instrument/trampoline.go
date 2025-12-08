@@ -871,6 +871,9 @@ func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 	case *dst.IndexListExpr:
 		// GenStruct[T, U] -> interface{} (for generic receiver methods with multiple type params)
 		return ast.InterfaceType()
+	case *dst.Ellipsis:
+		// ...T -> []T with type parameter replacement
+		return ast.ArrayType(replaceTypeParamsWithAny(tType.Elt, typeParams))
 	case *dst.Ident, *dst.SelectorExpr, *dst.InterfaceType:
 		// Base types without type parameters, return as-is
 		return t

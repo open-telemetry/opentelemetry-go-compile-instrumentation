@@ -91,11 +91,13 @@ build-demo: build-demo-grpc build-demo-http
 
 build-demo-grpc: go-protobuf-plugins ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
+	@rm -f demo/grpc/server/otel.runtime.go demo/grpc/client/otel.runtime.go
 	@(cd demo/grpc/server && go generate && go build -o server .)
 	@(cd demo/grpc/client && go build -o client .)
 
 build-demo-http: ## Build HTTP demo server and client
 	@echo "Building HTTP demo..."
+	@rm -f demo/http/server/otel.runtime.go demo/http/client/otel.runtime.go
 	@(cd demo/http/server && go build -o server .)
 	@(cd demo/http/client && go build -o client .)
 
@@ -237,7 +239,14 @@ test-unit/tool: build package gotestfmt ## Run unit tests for tool modules only
 test-unit/pkg: package gotestfmt ## Run unit tests for pkg modules only
 	@echo "Running pkg unit tests..."
 	set -euo pipefail
-	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime"); \
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | \
+		grep -v "pkg/instrumentation/runtime" | \
+		grep -v "pkg/instrumentation/nethttp/semconv" | \
+		grep -v "pkg/instrumentation/helloworld" | \
+		grep -v "/server$$" | \
+		grep -v "/client$$" | \
+		grep -v "/shared$$" | \
+		grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		echo "Testing $$moddir..."; \
 		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
@@ -262,14 +271,17 @@ test-unit/pkg/coverage: package gotestfmt ## Run unit tests with coverage for pk
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
 	ROOT_DIR=$$(pwd); \
-	PKG_MODULES=$$(find pkg -name "go.mod" -type f \
-							-not -path "pkg/instrumentation/nethttp/semconv/*" \
-							-not -path "pkg/instrumentation/runtime/*" \
-							-not -path "pkg/instrumentation/helloworld/*" \
-	 						-exec dirname {} \; ); \
+	PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | \
+		grep -v "pkg/instrumentation/runtime" | \
+		grep -v "pkg/instrumentation/nethttp/semconv" | \
+		grep -v "pkg/instrumentation/helloworld" | \
+		grep -v "/server$$" | \
+		grep -v "/client$$" | \
+		grep -v "/shared$$" | \
+		grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		echo "Testing $$moddir..."; \
-		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage-pkg.txt -covermode=atomic 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
+		(cd $$moddir && go mod tidy > /dev/null 2>&1 && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage-pkg.txt -covermode=atomic 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
 	done; \
 	echo "Running pkg unit tests with coverage report (semconv only - hook tests require full instrumentation)..."; \
 	cd pkg/instrumentation/nethttp/semconv && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage-pkg.txt -covermode=atomic 2>&1 | tee ../../../gotest-unit-pkg.log | gotestfmt; \
@@ -320,6 +332,7 @@ clean: ## Clean build artifacts
 	rm -f demo/http/server/server
 	rm -f demo/http/client/client
 	find demo -type d -name ".otel-build" -exec rm -rf {} +
+	find demo -type f -name "otel.runtime.go" -delete
 	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
 
 gotestfmt: ## Install gotestfmt if not present

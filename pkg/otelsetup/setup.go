@@ -7,14 +7,12 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -25,7 +23,6 @@ import (
 const (
 	// Default export intervals and batch sizes
 	defaultTraceBatchTimeout = 5 * time.Second
-	defaultMetricInterval    = 10 * time.Second
 	defaultTraceBatchSize    = 512
 )
 
@@ -192,13 +189,6 @@ func setupOpenTelemetry(cfg Config) (retErr error) {
 	return nil
 }
 
-// stripScheme removes http:// or https:// prefix from an endpoint for gRPC
-func stripScheme(endpoint string) string {
-	endpoint = strings.TrimPrefix(endpoint, "http://")
-	endpoint = strings.TrimPrefix(endpoint, "https://")
-	return endpoint
-}
-
 // setupTraceProvider creates and configures the trace provider
 func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 	// Get OTLP endpoint from environment
@@ -213,14 +203,9 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 		return nil
 	}
 
-	// Strip http:// or https:// prefix for gRPC (gRPC expects host:port only)
-	grpcEndpoint := stripScheme(endpoint)
-
-	// Create OTLP trace exporter
-	traceExporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(grpcEndpoint),
-		otlptracegrpc.WithInsecure(), // Use insecure for demo purposes
-	)
+	// Use autoexport to automatically select the right exporter based on
+	// OTEL_EXPORTER_OTLP_PROTOCOL (defaults to http/protobuf)
+	traceExporter, err := autoexport.NewSpanExporter(ctx)
 	if err != nil {
 		return err
 	}

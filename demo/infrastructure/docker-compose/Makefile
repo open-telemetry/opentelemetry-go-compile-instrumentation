@@ -3,7 +3,9 @@
 
 .PHONY: help start stop restart reload status logs clean build load-test urls health \
         start-http stop-http build-http build-http-nocache clean-docker-cache \
-        verify-traces test-propagation debug-http rebuild-http package
+        verify-traces test-propagation debug-http rebuild-http package \
+        start-grpc stop-grpc build-grpc build-grpc-nocache rebuild-grpc \
+        quickstart-grpc dev-grpc verify-traces-grpc debug-grpc
 
 # Default target - show help
 .DEFAULT_GOAL := help
@@ -17,6 +19,9 @@ NC := \033[0m # No Color
 
 # HTTP-only services (excludes gRPC which has known build issues)
 HTTP_SERVICES := prometheus jaeger otel-collector grafana http-server http-client
+
+# gRPC services list
+GRPC_SERVICES := prometheus jaeger otel-collector grafana grpc-server grpc-client
 
 # Path to main project Makefile
 PROJECT_ROOT := ../../..
@@ -381,4 +386,74 @@ quickstart-http: prereqs ports start-http health urls ## HTTP-only quickstart
 	@echo ""
 	@echo "$(GREEN)✓ HTTP observability stack is ready!$(NC)"
 	@echo "$(YELLOW)Note: gRPC demo excluded due to known build issues$(NC)"
+	@echo ""
+
+# =============================================================================
+# gRPC Targets (for testing gRPC instrumentation)
+# =============================================================================
+
+start-grpc: ## Start gRPC demo stack
+	@echo "$(BLUE)Starting gRPC demo stack...$(NC)"
+	@docker-compose up -d $(GRPC_SERVICES)
+	@echo "$(GREEN)✓ gRPC services started$(NC)"
+	@echo ""
+	@$(MAKE) urls
+
+stop-grpc: ## Stop gRPC demo services
+	@echo "$(BLUE)Stopping gRPC services...$(NC)"
+	@docker-compose stop grpc-server grpc-client
+	@echo "$(GREEN)✓ gRPC services stopped$(NC)"
+
+build-grpc: package ## Build only gRPC demo applications (auto-packages)
+	@echo "$(BLUE)Building gRPC demo applications...$(NC)"
+	@docker-compose build grpc-server grpc-client
+	@echo "$(GREEN)✓ gRPC build complete$(NC)"
+
+build-grpc-nocache: package ## Build gRPC apps without Docker cache (auto-packages)
+	@echo "$(BLUE)Building gRPC applications (no cache)...$(NC)"
+	@docker-compose build --no-cache grpc-server grpc-client
+	@echo "$(GREEN)✓ gRPC build complete$(NC)"
+
+rebuild-grpc: package clean-docker-cache ## Full rebuild: package, purge cache, rebuild gRPC apps
+	@echo "$(BLUE)Full gRPC rebuild...$(NC)"
+	@docker-compose build --no-cache grpc-server grpc-client
+	@echo "$(GREEN)✓ Full gRPC rebuild complete$(NC)"
+
+verify-traces-grpc: ## Verify gRPC traces are being collected in Jaeger
+	@echo "$(BLUE)Verifying gRPC trace collection...$(NC)"
+	@echo ""
+	@echo "$(YELLOW)gRPC Server traces:$(NC)"
+	@curl -s 'http://localhost:16686/api/traces?service=grpc-server&limit=3' 2>/dev/null | \
+		jq -r '.data[] | "  TraceID: \(.traceID) | Spans: \(.spans | length) | Op: \(.spans[0].operationName)"' 2>/dev/null || \
+		echo "$(RED)  ✗ Could not fetch traces (is Jaeger running?)$(NC)"
+	@echo ""
+	@echo "$(YELLOW)gRPC Client traces:$(NC)"
+	@curl -s 'http://localhost:16686/api/traces?service=grpc-client&limit=3' 2>/dev/null | \
+		jq -r '.data[] | "  TraceID: \(.traceID) | Spans: \(.spans | length) | Op: \(.spans[0].operationName)"' 2>/dev/null || \
+		echo "$(RED)  ✗ Could not fetch traces$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Verifying context propagation (traces with both services):$(NC)"
+	@curl -s 'http://localhost:16686/api/traces?service=grpc-server&limit=5' 2>/dev/null | \
+		jq -r '.data[] | select(.processes | to_entries | map(.value.serviceName) | unique | length > 1) | "  TraceID: \(.traceID) | Services: \([.processes | to_entries[] | .value.serviceName] | unique | join(", "))"' 2>/dev/null || \
+		echo "$(RED)  ✗ No traces found with both client and server$(NC)"
+	@echo ""
+
+debug-grpc: ## Start gRPC services with debug logging
+	@echo "$(BLUE)Starting gRPC services with DEBUG logging...$(NC)"
+	@docker-compose stop grpc-server grpc-client 2>/dev/null || true
+	@OTEL_LOG_LEVEL=debug docker-compose up -d grpc-server grpc-client
+	@echo "$(GREEN)✓ gRPC services started with debug logging$(NC)"
+	@echo "$(YELLOW)View logs with: make logs-grpc$(NC)"
+
+dev-grpc: start-grpc logs-grpc ## Start gRPC demo and follow logs
+
+dev-grpc-rebuild: rebuild-grpc start-grpc logs-grpc ## Full rebuild and start gRPC demo with logs
+
+quickstart-grpc: prereqs ports build-grpc start-grpc health urls ## gRPC quickstart with full build
+	@echo ""
+	@echo "$(GREEN)✓ gRPC observability stack is ready!$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Access gRPC services:$(NC)"
+	@echo "  Server: grpc://localhost:50051"
+	@echo "  Jaeger UI: http://localhost:16686"
 	@echo ""

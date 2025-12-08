@@ -340,13 +340,6 @@ cd pkg/instrumentation/nethttp/server
 go test -v ./...
 ```
 
-Test coverage:
-
-- ✅ Attribute getter logic (14 tests per side)
-- ✅ Response writer wrapper (12 tests)
-- ✅ Instrumenter building (2 tests per side)
-- ✅ Edge cases and error handling
-
 ### Integration Tests
 
 ```bash
