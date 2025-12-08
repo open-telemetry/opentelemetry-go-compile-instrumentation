@@ -18,6 +18,8 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      tool: ${{ steps.filter.outputs.tool }}
+      pkg: ${{ steps.filter.outputs.pkg }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
@@ -33,6 +35,10 @@ jobs:
               - 'pkg/**'
               - 'test/**'
               - '.github/workflows/test-unit.yaml'
+            tool:
+              - 'tool/**'
+            pkg:
+              - 'pkg/**'
 
   test-unit-coverage:
     name: Coverage Unit Tests
@@ -48,8 +54,18 @@ jobs:
           go-version-file: go.mod
       - name: Run unit test coverage
         run: make test-unit/coverage
-      - name: Upload coverage report
+      - name: Upload tool coverage report
+        if: needs.changes.outputs.tool == 'true'
         uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
+        with:
+          files: coverage-tool.txt
+          flags: tool
+      - name: Upload pkg coverage report
+        if: needs.changes.outputs.pkg == 'true'
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
+        with:
+          files: coverage-pkg.txt
+          flags: pkg
 
   test-unit:
     name: Unit Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
