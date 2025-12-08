@@ -12,6 +12,60 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestParseCdDir(t *testing.T) {
+	tests := []struct {
+		name        string
+		line        string
+		expectedDir string
+		expectedOk  bool
+	}{
+		{
+			name:        "valid cd command",
+			line:        "cd /home/user/project",
+			expectedDir: "/home/user/project",
+			expectedOk:  true,
+		},
+		{
+			name:        "cd command with comment",
+			line:        "cd /home/user/project # build comment",
+			expectedDir: "/home/user/project",
+			expectedOk:  true,
+		},
+		{
+			name:        "uppercase CD command",
+			line:        "CD /home/user/project",
+			expectedDir: "/home/user/project",
+			expectedOk:  true,
+		},
+		{
+			name:        "cd with Windows path",
+			line:        "cd C:\\Users\\test\\project",
+			expectedDir: "C:\\Users\\test\\project",
+			expectedOk:  true,
+		},
+		{
+			name:        "not a cd command",
+			line:        "compile -o output.a main.go",
+			expectedDir: "",
+			expectedOk:  false,
+		},
+		{
+			name:        "empty line",
+			line:        "",
+			expectedDir: "",
+			expectedOk:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, ok := parseCdDir(tt.line)
+			assert.Equal(t, tt.expectedOk, ok)
+			assert.Equal(t, tt.expectedDir, dir)
+		})
+	}
+}
+
 func TestResolveCgoFile(t *testing.T) {
 	tests := []struct {
 		name       string
