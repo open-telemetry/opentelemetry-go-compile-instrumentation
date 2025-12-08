@@ -4,7 +4,7 @@
 services:
   # Jaeger - Distributed tracing backend (v2 with native OTLP support + SPM)
   jaeger:
-    image: jaegertracing/jaeger:2.12.0@sha256:4c8423cd8fa8b727bd632f0acda2cc39118f21a4bdcef322a6c9ddbeb6dcd424
+    image: jaegertracing/jaeger:2.13.0@sha256:d5e5fe1c2b2f663b07c28c6f7cc5a6e61aef076752dab8df8eeb6b0f5494c94b
     container_name: jaeger
     command:
       - --config=/etc/jaeger/config.yaml
@@ -30,7 +30,7 @@ services:
 
   # Prometheus - Metrics backend with native OTLP support (v3)
   prometheus:
-    image: prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
+    image: prom/prometheus:v3.8.0@sha256:d936808bdea528155c0154a922cd42fd75716b8bb7ba302641350f9f3eaeba09
     container_name: prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -55,7 +55,7 @@ services:
 
   # OpenTelemetry Collector - Receives, processes, and exports telemetry
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.140.1@sha256:5901567d6f684547bafee53f02403869b5655e13a4e0af65aa6ae9f6301075d9
+    image: otel/opentelemetry-collector-contrib:0.141.0@sha256:b14234c4bc1b7364629af272e564913bb57bdc9736d45b8b6db5ab3417dc75f9
     container_name: otel-collector
     command:
       - "--config=/etc/otelcol-contrib/config.yaml"
