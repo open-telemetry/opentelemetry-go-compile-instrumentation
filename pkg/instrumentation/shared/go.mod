@@ -5,7 +5,7 @@ go 1.23.0
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../..
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20251207174910-947df235a956
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20251208011108-ac0fa4a155e3
 	github.com/stretchr/testify v1.11.1
 )
 
