@@ -11,11 +11,11 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-func (ip *InstrumentPhase) groupRules(rset *rule.InstRuleSet) map[string][]rule.InstRule {
+func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRule {
 	file2rules := make(map[string][]rule.InstRule)
-	addRulesToMap(rset.FuncRules, file2rules, rset.CgoFileMap, ip.workDir)
-	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, ip.workDir)
-	addRulesToMap(rset.RawRules, file2rules, rset.CgoFileMap, ip.workDir)
+	addRulesToMap(rset.FuncRules, file2rules, rset.CgoFileMap, workDir)
+	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, workDir)
+	addRulesToMap(rset.RawRules, file2rules, rset.CgoFileMap, workDir)
 	return file2rules
 }
 
@@ -87,7 +87,7 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 			return err
 		}
 	}
-	for file, rules := range ip.groupRules(rset) {
+	for file, rules := range groupRules(ip.workDir, rset) {
 		// Find the actual file in compile args that matches this rule file
 		// This handles cases where paths differ between setup and build phases
 		actualFile, err := ip.findActualFile(file)
