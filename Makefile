@@ -261,14 +261,20 @@ test-unit/tool/coverage: package gotestfmt ## Run unit tests with coverage for t
 test-unit/pkg/coverage: package gotestfmt ## Run unit tests with coverage for pkg modules only
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
-	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime" | grep -v "pkg/instrumentation/nethttp/semconv"); \
+	ROOT_DIR=$$(pwd); \
+	PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime" | grep -v "pkg/instrumentation/nethttp/semconv"); \
 	for moddir in $$PKG_MODULES; do \
 		echo "Testing $$moddir..."; \
-		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
-	done
-	@echo "Running pkg unit tests with coverage report (semconv only - hook tests require full instrumentation)..."
-	set -euo pipefail
-	cd pkg/instrumentation/nethttp/semconv && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ../../../gotest-unit-pkg.log | gotestfmt
+		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage-pkg.txt -covermode=atomic 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
+	done; \
+	echo "Running pkg unit tests with coverage report (semconv only - hook tests require full instrumentation)..."; \
+	cd pkg/instrumentation/nethttp/semconv && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage-pkg.txt -covermode=atomic 2>&1 | tee ../../../gotest-unit-pkg.log | gotestfmt; \
+	cd "$$ROOT_DIR"; \
+	echo "Merging coverage files into coverage-pkg.txt..."; \
+	echo "mode: atomic" > coverage-pkg.txt; \
+	find pkg -name "coverage-pkg.txt" -exec grep -h -v "^mode:" {} \; >> coverage-pkg.txt; \
+	find pkg -name "coverage-pkg.txt" -delete; \
+	echo "Coverage merged into coverage-pkg.txt"
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
@@ -282,7 +288,7 @@ test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo gotestfmt
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log | gotestfmt
+	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... -coverprofile=coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log | gotestfmt
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
@@ -296,7 +302,7 @@ test-e2e/coverage: ## Run e2e tests with coverage report
 test-e2e/coverage: build gotestfmt
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log | gotestfmt
+	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... -coverprofile=coverage-e2e.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log | gotestfmt
 
 ##@ Utilities
 
