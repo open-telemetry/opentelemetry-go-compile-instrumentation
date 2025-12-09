@@ -34,7 +34,7 @@ func (d *Dependency) String() string {
 
 // parseCdDir extracts the directory path from a "cd" command line.
 func parseCdDir(line string) (string, bool) {
-	if !strings.HasPrefix(strings.ToLower(line), "cd ") {
+	if !strings.HasPrefix(strings.ToLower(line), "cd") {
 		return "", false
 	}
 	const cdCommandSplitLimit = 2 // Split "cd dir" into [dir, rest] to ignore trailing comments
@@ -156,7 +156,7 @@ func findModVersion(path string) string {
 
 // findGoSources extracts Go source files from compile command arguments,
 // resolving CGO files using the provided objDir->sourceDir mapping.
-func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) *Dependency {
+func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) (*Dependency, error) {
 	dep := &Dependency{
 		ImportPath: util.FindFlagValue(args, "-p"),
 		Sources:    make([]string, 0),
@@ -189,14 +189,17 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 		}
 
 		// This is a Go source file, add it to the dependency sources
-		abs, _ := filepath.Abs(arg)
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			return nil, ex.Wrapf(err, "failed to get absolute path of source file %s", arg)
+		}
 		dep.Sources = append(dep.Sources, abs)
 	}
 	// We need to skip it as it is not part of the instrumentation target
 	if len(dep.Sources) > 0 {
 		dep.Version = findModVersion(dep.Sources[0])
 	}
-	return dep
+	return dep, nil
 }
 
 // findDeps finds dependencies by listing the build plan.
@@ -220,15 +223,18 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 
 		if util.IsCompileCommand(cmd) {
 			args := util.SplitCompileCmds(cmd)
-			dep := findGoSources(sp, args, cgoObjDirs)
+			dep, err1 := findGoSources(sp, args, cgoObjDirs)
+			if err1 != nil {
+				return nil, err1
+			}
 			deps = append(deps, dep)
 			sp.Info("Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {
 			args := util.SplitCompileCmds(cmd)
-			if objDir := util.FindFlagValue(args, "-objdir"); objDir != "" {
-				cgoObjDirs[util.NormalizePath(objDir)] = currentDir
-				sp.Debug("Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
-			}
+			objDir := util.FindFlagValue(args, "-objdir")
+			util.Assert(objDir != "", "sanity check")
+			cgoObjDirs[util.NormalizePath(objDir)] = currentDir
+			sp.Debug("Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
 		}
 	}
 	return deps, nil

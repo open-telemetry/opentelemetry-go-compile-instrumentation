@@ -102,7 +102,7 @@ func IsGoFile(path string) bool {
 
 func NewFileScanner(file *os.File, size int) (*bufio.Scanner, error) {
 	if _, err := file.Seek(0, 0); err != nil {
-		return nil, ex.Wrapf(err, "failed to seek to beginning of build plan log")
+		return nil, ex.Wrapf(err, "failed to seek file")
 	}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, size), size)
