@@ -115,16 +115,53 @@ func TestBeforeNewServer(t *testing.T) {
 	}
 }
 
+// TestAfterNewServer verifies the AfterNewServer hook handles server creation
+// without panicking. This hook is primarily for debug logging and doesn't modify state,
+// so we verify it gracefully handles various server states.
 func TestAfterNewServer(t *testing.T) {
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+	tests := []struct {
+		name       string
+		enabledEnv bool
+		server     *grpc.Server
+	}{
+		{
+			name:       "valid server with instrumentation enabled",
+			enabledEnv: true,
+			server:     grpc.NewServer(),
+		},
+		{
+			name:       "nil server with instrumentation enabled",
+			enabledEnv: true,
+			server:     nil,
+		},
+		{
+			name:       "valid server with instrumentation disabled",
+			enabledEnv: false,
+			server:     grpc.NewServer(),
+		},
+	}
 
-	server := grpc.NewServer()
-	defer server.Stop()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.enabledEnv {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+			} else {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
+			}
 
-	ictx := newMockHookContext()
-	AfterNewServer(ictx, server)
+			// Cleanup server if created
+			if tt.server != nil {
+				defer tt.server.Stop()
+			}
 
-	assert.NotNil(t, server)
+			ictx := newMockHookContext()
+
+			// Verify the hook doesn't panic and handles gracefully
+			assert.NotPanics(t, func() {
+				AfterNewServer(ictx, tt.server)
+			}, "AfterNewServer should not panic")
+		})
+	}
 }
 
 func TestServerStatsHandler_TagRPC(t *testing.T) {

@@ -6,10 +6,7 @@
 package test
 
 import (
-	"bufio"
-	"io"
 	"net/http"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,40 +16,6 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 )
-
-func waitForServerReady(t *testing.T, serverCmd *exec.Cmd, output io.ReadCloser) func() string {
-	t.Helper()
-
-	readyChan := make(chan struct{})
-	doneChan := make(chan struct{})
-	outputBuilder := strings.Builder{}
-	const readyMsg = "server started"
-
-	go func() {
-		defer close(doneChan)
-		scanner := bufio.NewScanner(output)
-		for scanner.Scan() {
-			line := scanner.Text()
-			outputBuilder.WriteString(line + "\n")
-			if strings.Contains(line, readyMsg) {
-				close(readyChan)
-			}
-		}
-	}()
-
-	select {
-	case <-readyChan:
-		t.Logf("Server is ready!")
-	case <-time.After(15 * time.Second):
-		t.Fatal("timeout waiting for server to be ready")
-	}
-
-	return func() string {
-		serverCmd.Wait()
-		<-doneChan
-		return outputBuilder.String()
-	}
-}
 
 func TestHTTPServerIntegration(t *testing.T) {
 	serverDir := filepath.Join("..", "..", "demo", "http", "server")
@@ -67,7 +30,8 @@ func TestHTTPServerIntegration(t *testing.T) {
 	// Start the server
 	t.Log("Starting HTTP server...")
 	serverCmd, outputPipe := app.Start(t, serverDir, "-port=8081", "-no-faults", "-no-latency")
-	waitUntilDone := waitForServerReady(t, serverCmd, outputPipe)
+	waitUntilDone, err := waitForServerReady(t, serverCmd, outputPipe)
+	require.NoError(t, err, "server should start successfully")
 
 	// Give server a moment to fully initialize
 	time.Sleep(500 * time.Millisecond)
@@ -122,7 +86,8 @@ func TestHTTPServerInstrumentationDisabled(t *testing.T) {
 	t.Log("Starting HTTP server with instrumentation disabled...")
 
 	serverCmd, outputPipe := app.Start(t, serverDir, "-port=8082", "-no-faults", "-no-latency")
-	waitUntilDone := waitForServerReady(t, serverCmd, outputPipe)
+	waitUntilDone, err := waitForServerReady(t, serverCmd, outputPipe)
+	require.NoError(t, err, "server should start successfully")
 
 	time.Sleep(500 * time.Millisecond)
 

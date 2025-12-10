@@ -119,17 +119,58 @@ func TestBeforeNewClient(t *testing.T) {
 	}
 }
 
+// TestAfterNewClient verifies the AfterNewClient hook handles various connection outcomes
+// without panicking. This hook is primarily for debug logging and doesn't modify state,
+// so we verify it gracefully handles both success and error cases.
 func TestAfterNewClient(t *testing.T) {
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+	tests := []struct {
+		name       string
+		enabledEnv bool
+		conn       *grpc.ClientConn
+		err        error
+	}{
+		{
+			name:       "successful connection with instrumentation enabled",
+			enabledEnv: true,
+			conn:       &grpc.ClientConn{},
+			err:        nil,
+		},
+		{
+			name:       "connection error with instrumentation enabled",
+			enabledEnv: true,
+			conn:       nil,
+			err:        assert.AnError,
+		},
+		{
+			name:       "successful connection with instrumentation disabled",
+			enabledEnv: false,
+			conn:       &grpc.ClientConn{},
+			err:        nil,
+		},
+		{
+			name:       "connection error with instrumentation disabled",
+			enabledEnv: false,
+			conn:       nil,
+			err:        assert.AnError,
+		},
+	}
 
-	ictx := newMockHookContext()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.enabledEnv {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+			} else {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
+			}
 
-	// Test with successful connection
-	conn := &grpc.ClientConn{}
-	AfterNewClient(ictx, conn, nil)
+			ictx := newMockHookContext()
 
-	// Test with error
-	AfterNewClient(ictx, nil, assert.AnError)
+			// Verify the hook doesn't panic and handles gracefully
+			assert.NotPanics(t, func() {
+				AfterNewClient(ictx, tt.conn, tt.err)
+			}, "AfterNewClient should not panic")
+		})
+	}
 }
 
 func TestBeforeDialContext(t *testing.T) {
@@ -191,17 +232,58 @@ func TestBeforeDialContext(t *testing.T) {
 	}
 }
 
+// TestAfterDialContext verifies the AfterDialContext hook handles various connection outcomes
+// without panicking. This hook is primarily for debug logging and doesn't modify state,
+// so we verify it gracefully handles both success and error cases.
 func TestAfterDialContext(t *testing.T) {
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+	tests := []struct {
+		name       string
+		enabledEnv bool
+		conn       *grpc.ClientConn
+		err        error
+	}{
+		{
+			name:       "successful connection with instrumentation enabled",
+			enabledEnv: true,
+			conn:       &grpc.ClientConn{},
+			err:        nil,
+		},
+		{
+			name:       "connection error with instrumentation enabled",
+			enabledEnv: true,
+			conn:       nil,
+			err:        assert.AnError,
+		},
+		{
+			name:       "successful connection with instrumentation disabled",
+			enabledEnv: false,
+			conn:       &grpc.ClientConn{},
+			err:        nil,
+		},
+		{
+			name:       "connection error with instrumentation disabled",
+			enabledEnv: false,
+			conn:       nil,
+			err:        assert.AnError,
+		},
+	}
 
-	ictx := newMockHookContext()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.enabledEnv {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+			} else {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
+			}
 
-	// Test with successful connection
-	conn := &grpc.ClientConn{}
-	AfterDialContext(ictx, conn, nil)
+			ictx := newMockHookContext()
 
-	// Test with error
-	AfterDialContext(ictx, nil, assert.AnError)
+			// Verify the hook doesn't panic and handles gracefully
+			assert.NotPanics(t, func() {
+				AfterDialContext(ictx, tt.conn, tt.err)
+			}, "AfterDialContext should not panic")
+		})
+	}
 }
 
 func TestClientStatsHandler_TagRPC(t *testing.T) {

@@ -6,11 +6,8 @@
 package test
 
 import (
-	"bufio"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -33,34 +30,15 @@ func TestGRPCClientIntegration(t *testing.T) {
 
 	t.Log("Starting gRPC server...")
 
-	// Start the server
+	// Start the server and wait for it to be ready
 	serverApp, outputPipe := app.Start(t, serverDir)
 	defer func() {
 		if serverApp.Process != nil {
 			_ = serverApp.Process.Kill()
 		}
 	}()
-
-	readyChan := make(chan struct{})
-	go func() {
-		serverOutput := strings.Builder{}
-		scanner := bufio.NewScanner(outputPipe)
-		for scanner.Scan() {
-			line := scanner.Text()
-			serverOutput.WriteString(line + "\n")
-			if strings.Contains(line, "server started") {
-				close(readyChan)
-			}
-		}
-	}()
-
-	// Wait for server to be ready
-	select {
-	case <-readyChan:
-		t.Log("Server is ready!")
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for server to be ready")
-	}
+	_, err := waitForServerReady(t, serverApp, outputPipe)
+	require.NoError(t, err, "server should start successfully")
 
 	t.Log("Running gRPC client (unary RPC)...")
 
@@ -109,34 +87,15 @@ func TestGRPCClientServerStreaming(t *testing.T) {
 
 	t.Log("Starting gRPC server...")
 
-	// Start the server
+	// Start the server and wait for it to be ready
 	serverApp, outputPipe := app.Start(t, serverDir)
 	defer func() {
 		if serverApp.Process != nil {
 			_ = serverApp.Process.Kill()
 		}
 	}()
-
-	readyChan := make(chan struct{})
-	go func() {
-		serverOutput := strings.Builder{}
-		scanner := bufio.NewScanner(outputPipe)
-		for scanner.Scan() {
-			line := scanner.Text()
-			serverOutput.WriteString(line + "\n")
-			if strings.Contains(line, "server started") {
-				close(readyChan)
-			}
-		}
-	}()
-
-	// Wait for server to be ready
-	select {
-	case <-readyChan:
-		t.Log("Server is ready!")
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for server to be ready")
-	}
+	_, err := waitForServerReady(t, serverApp, outputPipe)
+	require.NoError(t, err, "server should start successfully")
 
 	t.Log("Running gRPC client (streaming RPC)...")
 
