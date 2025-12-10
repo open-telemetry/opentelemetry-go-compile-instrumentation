@@ -91,6 +91,12 @@ func main() {
 		logger.Error("failed to listen", "error", err)
 		os.Exit(1)
 	}
+	defer lis.Close()
+
+	runServer(lis)
+}
+
+func runServer(lis net.Listener) {
 	s := grpc.NewServer()
 	pb.RegisterGreeterServer(s, &server{})
 	logger.Info("server listening", "address", lis.Addr())

@@ -8,7 +8,7 @@ SHELL := /bin/bash
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
-        test-unit/update-golden test-unit/tool test-unit/pkg \
+        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install
@@ -220,7 +220,7 @@ check-embed: ## Verify that embedded files exist (required for tests)
 test: ## Run all tests (unit + integration + e2e)
 test: test-unit test-integration test-e2e
 
-test-unit: test-unit/tool test-unit/pkg ## Run all unit tests (tool + pkg)
+test-unit: test-unit/tool test-unit/pkg test-unit/demo ## Run all unit tests (tool + pkg + demo)
 
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
@@ -258,6 +258,22 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 		echo "Testing $$moddir..."; \
 		(cd "$$moddir" && go mod tidy); \
 		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
+	done
+
+.ONESHELL:
+test-unit/demo: ## Run unit tests for demo applications
+	@echo "Running demo unit tests..."
+	set -euo pipefail
+	rm -f ./gotest-unit-demo.log
+	DEMO_MODULES=$$(find demo -maxdepth 3 -name "go.mod" -type f -exec dirname {} \;); \
+	for moddir in $$DEMO_MODULES; do \
+		if ! find "$$moddir" -maxdepth 1 -name "*_test.go" -type f | grep -q .; then \
+			echo "Skipping $$moddir (no tests)..."; \
+			continue; \
+		fi; \
+		echo "Testing $$moddir..."; \
+		(cd "$$moddir" && go mod tidy); \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-demo.log; \
 	done
 
 

@@ -99,8 +99,8 @@ func TestGRPCServerStreaming(t *testing.T) {
 
 	t.Log("Making gRPC streaming request...")
 
-	// Run streaming RPC
-	streamOutput := app.Run(t, clientDir, "-stream")
+	// Run streaming RPC - send 5 messages
+	streamOutput := app.Run(t, clientDir, "-stream", "-count=5")
 	require.Contains(t, streamOutput, "stream response", "Expected stream responses")
 
 	t.Log("Shutting down server...")

@@ -70,6 +70,8 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	defer finish()
+
 	if *shutdown {
 		// Send shutdown request
 		r, err := c.Shutdown(ctx, &pb.ShutdownRequest{})
@@ -78,87 +80,107 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Info("shutdown response", "message", r.GetMessage())
-	} else if *stream {
-		// Streaming RPC
-		streamClient, err := c.SayHelloStream(ctx)
-		if err != nil {
-			logger.Error("could not create stream", "error", err)
-			os.Exit(1)
+		return
+	}
+
+	if *stream {
+		runStream(ctx, c)
+		return
+	}
+
+	runUnary(ctx, c)
+}
+
+func runUnary(ctx context.Context, c pb.GreeterClient) {
+	// Unary RPC - loop count times with delay
+	successCount := 0
+	failureCount := 0
+
+	for i := 0; i < *count; i++ {
+		requestName := *name
+		if *count > 1 {
+			requestName = fmt.Sprintf("%s-%d", *name, i+1)
 		}
 
-		// Send multiple requests
-		for i := 0; i < 5; i++ {
-			req := &pb.HelloRequest{Name: *name + " " + time.Now().Format("15:04:05")}
-			if err := streamClient.Send(req); err != nil {
-				logger.Error("could not send", "error", err)
-				os.Exit(1)
-			}
-			logger.Info("sent request", "name", req.GetName())
+		logger.Info("sending request",
+			"request_number", i+1,
+			"total_requests", *count,
+			"name", requestName)
+
+		r, err := c.SayHello(ctx, &pb.HelloRequest{Name: requestName})
+		if err != nil {
+			logger.Error("could not greet",
+				"request_number", i+1,
+				"error", err)
+			failureCount++
+			continue
+		}
+		logger.Info("greeting",
+			"request_number", i+1,
+			"message", r.GetMessage())
+		successCount++
+
+		// Add delay between requests when sending multiple
+		if i < *count-1 {
 			time.Sleep(500 * time.Millisecond)
 		}
+	}
 
-		// Close sending side
-		if err := streamClient.CloseSend(); err != nil {
-			logger.Error("could not close send", "error", err)
-			os.Exit(1)
-		}
+	logger.Info("unary RPC completed",
+		"total_requests", *count,
+		"successful", successCount,
+		"failed", failureCount)
+}
 
-		// Receive responses
+func runStream(ctx context.Context, c pb.GreeterClient) {
+	// Streaming RPC
+	streamClient, err := c.SayHelloStream(ctx)
+	if err != nil {
+		logger.Error("could not create stream", "error", err)
+		os.Exit(1)
+	}
+
+	// Start receiving responses in a goroutine
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
 		for {
 			reply, err := streamClient.Recv()
 			if err == io.EOF {
-				break
+				return
 			}
 			if err != nil {
 				logger.Error("could not receive", "error", err)
-				os.Exit(1)
+				return
 			}
 			logger.Info("stream response", "message", reply.GetMessage())
 		}
-	} else {
-		// Unary RPC - loop count times with delay
-		successCount := 0
-		failureCount := 0
+	}()
 
-		for i := 0; i < *count; i++ {
-			requestName := *name
-			if *count > 1 {
-				requestName = fmt.Sprintf("%s-%d", *name, i+1)
-			}
-
-			logger.Info("sending request",
-				"request_number", i+1,
-				"total_requests", *count,
-				"name", requestName)
-
-			r, err := c.SayHello(ctx, &pb.HelloRequest{Name: requestName})
-			if err != nil {
-				logger.Error("could not greet",
-					"request_number", i+1,
-					"error", err)
-				failureCount++
-				continue
-			}
-			logger.Info("greeting",
-				"request_number", i+1,
-				"message", r.GetMessage())
-			successCount++
-
-			// Add delay between requests when sending multiple
-			if i < *count-1 {
-				time.Sleep(500 * time.Millisecond)
-			}
+	// Send multiple requests
+	for i := 0; i < *count; i++ {
+		req := &pb.HelloRequest{Name: *name + " " + time.Now().Format("15:04:05")}
+		if err := streamClient.Send(req); err != nil {
+			logger.Error("could not send", "error", err)
+			break
 		}
-
-		logger.Info("unary RPC completed",
-			"total_requests", *count,
-			"successful", successCount,
-			"failed", failureCount)
+		logger.Info("sent request", "name", req.GetName())
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	logger.Info("client finished")
+	// Close sending side
+	if err := streamClient.CloseSend(); err != nil {
+		logger.Error("could not close send", "error", err)
+	}
 
+	// Wait for receiver to finish
+	<-done
+}
+
+func finish() {
+	logger.Info("client finished")
 	// Allow time for batch span processor to flush (default timeout is 5s)
 	// This ensures traces are exported before the process exits
+	logger.Info("waiting to flush telemetry...")
 	time.Sleep(6 * time.Second)
 }
