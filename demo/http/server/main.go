@@ -187,7 +187,6 @@ func main() {
 		Level: level,
 	}
 	logger = slog.New(slog.NewJSONHandler(os.Stdout, opts))
-	slog.SetDefault(logger)
 
 	http.HandleFunc("/greet", greetHandler)
 	http.HandleFunc("/health", healthHandler)

@@ -8,7 +8,7 @@ SHELL := /bin/bash
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
-        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/semconv \
+        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install
@@ -91,11 +91,13 @@ build-demo: build-demo-grpc build-demo-http
 
 build-demo-grpc: go-protobuf-plugins ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
+	@rm -f demo/grpc/server/otel.runtime.go demo/grpc/client/otel.runtime.go
 	@(cd demo/grpc/server && go generate && go build -o server .)
 	@(cd demo/grpc/client && go build -o client .)
 
 build-demo-http: ## Build HTTP demo server and client
 	@echo "Building HTTP demo..."
+	@rm -f demo/http/server/otel.runtime.go demo/http/client/otel.runtime.go
 	@(cd demo/http/server && go build -o server .)
 	@(cd demo/http/client && go build -o client .)
 
@@ -218,7 +220,7 @@ check-embed: ## Verify that embedded files exist (required for tests)
 test: ## Run all tests (unit + integration + e2e)
 test: test-unit test-integration test-e2e
 
-test-unit: test-unit/tool test-unit/pkg test-unit/semconv ## Run all unit tests (tool + pkg)
+test-unit: test-unit/tool test-unit/pkg test-unit/demo ## Run all unit tests (tool + pkg + demo)
 
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
@@ -233,21 +235,47 @@ test-unit/tool: build package gotestfmt ## Run unit tests for tool modules only
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log | gotestfmt
 
+# Notes on test-unit/pkg implementation:
+# - Uses find -maxdepth 3 to discover modules at pkg/instrumentation/{name}/ level only.
+#   This naturally excludes client/ and server/ subdirectories (which will have link errors because it requires the parent module to be built).
+# - Excludes "runtime" module (has build errors because of runtime patching) and root "pkg" module (no tests).
+# - Skips modules without test files to avoid empty test output.
+# - Uses go test -C to run tests without changing directories (cleaner, more reliable).
+# - Does NOT use gotestfmt because v2.5.0 has a bug that causes panics when go test
+#   outputs build errors (JSON lines with ImportPath but no Package field).
+#   Standard go test -v output is readable enough without formatting.
 .ONESHELL:
-test-unit/pkg: package gotestfmt ## Run unit tests for pkg modules only
+test-unit/pkg: package ## Run unit tests for pkg modules only
 	@echo "Running pkg unit tests..."
 	set -euo pipefail
-	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime"); \
+	rm -f ./gotest-unit-pkg.log
+	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
+		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
+			echo "Skipping $$moddir (no tests)..."; \
+			continue; \
+		fi; \
 		echo "Testing $$moddir..."; \
-		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
+		(cd "$$moddir" && go mod tidy); \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
 	done
 
 .ONESHELL:
-test-unit/semconv: package gotestfmt ## Run unit tests for semconv modules only
-	@echo "Running semconv unit tests..."
+test-unit/demo: ## Run unit tests for demo applications
+	@echo "Running demo unit tests..."
 	set -euo pipefail
-	go test -C pkg/instrumentation/nethttp/semconv -json -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee ./gotest-unit-semconv.log | gotestfmt
+	rm -f ./gotest-unit-demo.log
+	DEMO_MODULES=$$(find demo -maxdepth 3 -name "go.mod" -type f -exec dirname {} \;); \
+	for moddir in $$DEMO_MODULES; do \
+		if ! find "$$moddir" -maxdepth 1 -name "*_test.go" -type f | grep -q .; then \
+			echo "Skipping $$moddir (no tests)..."; \
+			continue; \
+		fi; \
+		echo "Testing $$moddir..."; \
+		(cd "$$moddir" && go mod tidy); \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-demo.log; \
+	done
+
 
 test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage ## Run all unit tests with coverage
 
@@ -257,28 +285,27 @@ test-unit/tool/coverage: package gotestfmt ## Run unit tests with coverage for t
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log | gotestfmt
 
+# Same implementation as test-unit/pkg but with coverage flags.
+# Coverage files from each module are merged into a single coverage-pkg.txt file.
 .ONESHELL:
-test-unit/pkg/coverage: package gotestfmt ## Run unit tests with coverage for pkg modules only
+test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules only
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
-	ROOT_DIR=$$(pwd); \
-	PKG_MODULES=$$(find pkg -name "go.mod" -type f \
-							-not -path "pkg/instrumentation/nethttp/semconv/*" \
-							-not -path "pkg/instrumentation/runtime/*" \
-							-not -path "pkg/instrumentation/helloworld/*" \
-	 						-exec dirname {} \; ); \
+	rm -f ./gotest-unit-pkg.log
+	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
-		echo "Testing $$moddir..."; \
-		(cd $$moddir && go mod tidy && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage-pkg.txt -covermode=atomic 2>&1 | tee -a ../../gotest-unit-pkg.log | gotestfmt); \
-	done; \
-	echo "Running pkg unit tests with coverage report (semconv only - hook tests require full instrumentation)..."; \
-	cd pkg/instrumentation/nethttp/semconv && go test -json -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage-pkg.txt -covermode=atomic 2>&1 | tee ../../../gotest-unit-pkg.log | gotestfmt; \
-	cd "$$ROOT_DIR"; \
-	echo "Merging coverage files into coverage-pkg.txt..."; \
-	echo "mode: atomic" > coverage-pkg.txt; \
-	find pkg -name "coverage-pkg.txt" -exec grep -h -v "^mode:" {} \; >> coverage-pkg.txt; \
-	find pkg -name "coverage-pkg.txt" -delete; \
-	echo "Coverage merged into coverage-pkg.txt"
+		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
+			echo "Skipping $$moddir (no tests)..."; \
+			continue; \
+		fi; \
+		echo "Testing $$moddir with coverage..."; \
+		(cd "$$moddir" && go mod tidy); \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ./gotest-unit-pkg.log; \
+	done
+	@echo "Merging coverage files into coverage-pkg.txt..."
+	@echo "mode: atomic" > coverage-pkg.txt
+	@find pkg -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-pkg.txt 2>/dev/null || true
+	@find pkg -name "coverage.txt" -delete 2>/dev/null || true
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
@@ -320,6 +347,7 @@ clean: ## Clean build artifacts
 	rm -f demo/http/server/server
 	rm -f demo/http/client/client
 	find demo -type d -name ".otel-build" -exec rm -rf {} +
+	find demo -type f -name "otel.runtime.go" -delete
 	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
 
 gotestfmt: ## Install gotestfmt if not present

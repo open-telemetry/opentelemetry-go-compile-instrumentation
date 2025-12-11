@@ -67,12 +67,24 @@ func TestGrpc(t *testing.T) {
 	serverApp, outputPipe := app.Start(t, serverDir)
 	waitUntilDone := waitUntilGrpcReady(t, serverApp, outputPipe)
 
-	// Run the client, it will send a shutdown request to the server.
+	// Run the client to make a unary RPC call
+	app.Run(t, clientDir, "-name", "OpenTelemetry")
+
+	// Run the client again for streaming RPC
+	app.Run(t, clientDir, "-stream")
+
+	// Finally, send shutdown request to the server
 	app.Run(t, clientDir, "-shutdown")
 
 	// Wait for the server to exit and return the output.
 	output := waitUntilDone()
 
-	// Verify that the server hook was called.
-	require.Contains(t, output, "BeforeServe")
+	// Verify that the instrumentation was initialized
+	require.Contains(t, output, "gRPC server instrumentation initialized", "instrumentation should be initialized")
+
+	// Verify that the server started (JSON format)
+	require.Contains(t, output, `"msg":"server listening"`)
+
+	// The output should show that the gRPC server received requests (JSON format)
+	require.Contains(t, output, `"msg":"received request"`)
 }

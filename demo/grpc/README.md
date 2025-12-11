@@ -66,6 +66,16 @@ cd client
 # Output: Greeting: Hello world
 ```
 
+To send multiple requests:
+
+```bash
+# Send 10 requests sequentially with 500ms delay between each
+./client -count=10
+
+# For load testing, send many requests
+./client -count=1000
+```
+
 #### Streaming RPC Call
 
 ```bash
@@ -82,12 +92,19 @@ cd client
 # Send a custom name
 ./client -name="OpenTelemetry"
 
+# Send multiple requests with a custom name
+./client -name="Testing" -count=5
+
 # Combine options
 ./client -addr=localhost:50052 -name="Testing" -stream=true
 
 # Send a shutdown request to the server, this will exit the server process gracefully.
 ./client -shutdown
 ```
+
+#### Telemetry Export Note
+
+The instrumentation layer automatically handles graceful shutdown of the OpenTelemetry SDK. When the application receives SIGINT or SIGTERM, a signal handler ensures all pending telemetry is flushed before the process exits. No explicit sleep or shutdown code is needed in the application - the instrumentation handles this transparently.
 
 ## Regenerating Protocol Buffer Code
 

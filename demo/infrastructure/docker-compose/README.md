@@ -69,6 +69,36 @@ make build          # Rebuild applications
 make clean          # Clean up everything
 ```
 
+#### Protocol-Specific Targets
+
+The project includes both HTTP and gRPC demo applications. You can run them independently:
+
+**HTTP Demo:**
+
+```bash
+make quickstart-http  # Build and start HTTP demo with health checks
+make start-http       # Start HTTP demo services only
+make stop-http        # Stop HTTP demo services
+make build-http       # Build HTTP demo applications
+make rebuild-http     # Full rebuild (package + cache purge + build)
+make dev-http         # Start and follow HTTP logs
+make logs-http        # Follow HTTP server and client logs
+```
+
+**gRPC Demo:**
+
+```bash
+make quickstart-grpc  # Build and start gRPC demo with health checks
+make start-grpc       # Start gRPC demo services only
+make stop-grpc        # Stop gRPC demo services
+make build-grpc       # Build gRPC demo applications
+make rebuild-grpc     # Full rebuild (package + cache purge + build)
+make dev-grpc         # Start and follow gRPC logs
+make logs-grpc        # Follow gRPC server and client logs
+```
+
+**Note:** Building demo applications requires the project to be built first. Run `make help` from the demo/infrastructure/docker-compose directory for a complete list of available targets with descriptions.
+
 ### 1. Start All Services (Manual)
 
 ```bash

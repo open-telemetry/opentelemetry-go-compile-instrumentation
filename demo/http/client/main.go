@@ -137,7 +137,6 @@ func main() {
 		Level: level,
 	}
 	logger = slog.New(slog.NewJSONHandler(os.Stdout, opts))
-	slog.SetDefault(logger)
 
 	client := &http.Client{
 		Timeout: defaultTimeout,

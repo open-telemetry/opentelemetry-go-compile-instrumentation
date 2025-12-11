@@ -11,7 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"time"
@@ -20,14 +20,18 @@ import (
 	"google.golang.org/grpc"
 )
 
-var port = flag.Int("port", 50051, "The server port")
+var (
+	port     = flag.Int("port", 50051, "The server port")
+	logLevel = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	logger   *slog.Logger
+)
 
 type server struct {
 	pb.UnimplementedGreeterServer
 }
 
 func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
-	log.Printf("Received: %v", in.GetName())
+	logger.Info("received request", "name", in.GetName())
 	return &pb.HelloReply{Message: "Hello " + in.GetName()}, nil
 }
 
@@ -40,7 +44,7 @@ func (s *server) SayHelloStream(stream pb.Greeter_SayHelloStreamServer) error {
 		if err != nil {
 			return err
 		}
-		log.Printf("Received stream: %v", in.GetName())
+		logger.Info("received stream request", "name", in.GetName())
 		if err := stream.Send(&pb.HelloReply{Message: "Hello " + in.GetName()}); err != nil {
 			return err
 		}
@@ -48,7 +52,7 @@ func (s *server) SayHelloStream(stream pb.Greeter_SayHelloStreamServer) error {
 }
 
 func (s *server) Shutdown(ctx context.Context, in *pb.ShutdownRequest) (*pb.ShutdownReply, error) {
-	log.Printf("Shutdown request received")
+	logger.Info("shutdown request received")
 	go func() {
 		time.Sleep(100 * time.Millisecond) // Give time to send response
 		os.Exit(0)
@@ -58,15 +62,47 @@ func (s *server) Shutdown(ctx context.Context, in *pb.ShutdownRequest) (*pb.Shut
 
 func main() {
 	flag.Parse()
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+
+	// Initialize logger with appropriate level
+	var level slog.Level
+	switch *logLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
 	}
+
+	opts := &slog.HandlerOptions{
+		Level: level,
+	}
+	logger = slog.New(slog.NewJSONHandler(os.Stdout, opts))
+
+	addr := fmt.Sprintf(":%d", *port)
+	logger.Info("server starting", "address", addr, "log_level", *logLevel)
+
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		logger.Error("failed to listen", "error", err)
+		os.Exit(1)
+	}
+	defer lis.Close()
+
+	runServer(lis)
+}
+
+func runServer(lis net.Listener) {
 	s := grpc.NewServer()
 	pb.RegisterGreeterServer(s, &server{})
-	log.Printf("server listening at %v", lis.Addr())
-	log.Printf("server started")
+	logger.Info("server listening", "address", lis.Addr())
+	logger.Info("server started")
 	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		logger.Error("failed to serve", "error", err)
+		os.Exit(1)
 	}
 }
