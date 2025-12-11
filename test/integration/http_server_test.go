@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -30,11 +29,8 @@ func TestHTTPServerIntegration(t *testing.T) {
 	// Start the server
 	t.Log("Starting HTTP server...")
 	serverCmd, outputPipe := app.Start(t, serverDir, "-port=8081", "-no-faults", "-no-latency")
-	waitUntilDone, err := waitForServerReady(t, serverCmd, outputPipe)
+	waitUntilDone, err := app.WaitForServerReady(t, serverCmd, outputPipe)
 	require.NoError(t, err, "server should start successfully")
-
-	// Give server a moment to fully initialize
-	time.Sleep(500 * time.Millisecond)
 
 	// Make a test request
 	t.Log("Making test GET request...")
@@ -86,10 +82,8 @@ func TestHTTPServerInstrumentationDisabled(t *testing.T) {
 	t.Log("Starting HTTP server with instrumentation disabled...")
 
 	serverCmd, outputPipe := app.Start(t, serverDir, "-port=8082", "-no-faults", "-no-latency")
-	waitUntilDone, err := waitForServerReady(t, serverCmd, outputPipe)
+	waitUntilDone, err := app.WaitForServerReady(t, serverCmd, outputPipe)
 	require.NoError(t, err, "server should start successfully")
-
-	time.Sleep(500 * time.Millisecond)
 
 	// Make a test request
 	t.Log("Making test request...")

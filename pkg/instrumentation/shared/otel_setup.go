@@ -4,46 +4,55 @@
 package shared
 
 import (
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
-
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/otelsetup"
 )
 
 var setupOnce sync.Once
 
-func init() {
-	// Initialize OTel SDK when this package is first imported
-	// This ensures SDK is ready before other packages build their instrumenters
-	_ = SetupOTelSDK()
-}
-
-// GetLogger returns a shared logger instance for instrumentation
-// It uses OTEL_LOG_LEVEL environment variable (debug, info, warn, error)
-func GetLogger() *slog.Logger {
-	return otelsetup.GetLogger()
-}
-
-// SetupOTelSDK initializes the OpenTelemetry SDK if not already initialized
-// This function is idempotent and safe to call multiple times
-// Returns error only on first initialization failure
+// SetupOTelSDK initializes the OpenTelemetry SDK if not already initialized.
+// This function is idempotent and safe to call multiple times.
+// Returns error only on first initialization failure.
 //
-// The SDK automatically configures exporters based on environment variables:
-// - OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (e.g., http://localhost:4317)
-// - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: Traces-specific endpoint
-// - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics-specific endpoint
-// - OTEL_SERVICE_NAME: Service name for telemetry
-// - OTEL_LOG_LEVEL: Log level (debug, info, warn, error)
-func SetupOTelSDK() error {
+// Parameters:
+//   - instrumentationName: The scoped name of the instrumentation
+//     (e.g., "go.opentelemetry.io/compile-instrumentation/grpc/client")
+//   - instrumentationVersion: The version of the instrumentation module
+//     (typically obtained from runtime/debug.ReadBuildInfo())
+//
+// The SDK automatically configures exporters based on environment variables
+// following the OpenTelemetry specification:
+//
+// Service Configuration (highest to lowest precedence):
+//   - OTEL_RESOURCE_ATTRIBUTES: Key-value pairs (e.g., "service.name=myapp,service.version=1.2.3")
+//   - OTEL_SERVICE_NAME: Service name for telemetry
+//
+// Exporter Configuration:
+//   - OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (e.g., http://localhost:4317)
+//   - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: Traces-specific endpoint
+//   - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics-specific endpoint
+//   - OTEL_EXPORTER_OTLP_PROTOCOL: Protocol (grpc, http/protobuf, http/json)
+//   - OTEL_TRACES_EXPORTER: Trace exporter (otlp, console, none)
+//   - OTEL_METRICS_EXPORTER: Metrics exporter (otlp, console, none)
+//
+// Other Configuration:
+//   - OTEL_LOG_LEVEL: Log level (debug, info, warn, error)
+//   - OTEL_SDK_DISABLED: Disable the SDK (true/false)
+//
+// Example usage from an instrumentation:
+//
+//	version := instrumentationVersion()
+//	if err := shared.SetupOTelSDK("go.opentelemetry.io/compile-instrumentation/grpc/client", version); err != nil {
+//	    logger.Error("failed to setup OTel SDK", "error", err)
+//	}
+func SetupOTelSDK(instrumentationName, instrumentationVersion string) error {
 	setupOnce.Do(func() {
 		// Initialize OpenTelemetry SDK with defensive error handling
-		otelsetup.Initialize(otelsetup.Config{
+		Initialize(Config{
 			ServiceName:            "otel-instrumentation",
-			ServiceVersion:         "0.1.0",
-			InstrumentationName:    "github.com/open-telemetry/opentelemetry-go-compile-instrumentation",
-			InstrumentationVersion: "0.1.0",
+			InstrumentationName:    instrumentationName,
+			InstrumentationVersion: instrumentationVersion,
 		})
 	})
 	return nil

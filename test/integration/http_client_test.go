@@ -29,7 +29,7 @@ func TestHTTPClientIntegration(t *testing.T) {
 	// Start the server
 	t.Log("Starting HTTP server...")
 	serverCmd, outputPipe := app.Start(t, serverDir, "-port=8083", "-no-faults", "-no-latency")
-	waitUntilDone, err := waitForServerReady(t, serverCmd, outputPipe)
+	waitUntilDone, err := app.WaitForServerReady(t, serverCmd, outputPipe)
 	require.NoError(t, err, "server should start successfully")
 
 	// Run the client (makes request and exits)

@@ -179,8 +179,4 @@ func runStream(ctx context.Context, c pb.GreeterClient) {
 
 func finish() {
 	logger.Info("client finished")
-	// Allow time for batch span processor to flush (default timeout is 5s)
-	// This ensures traces are exported before the process exits
-	logger.Info("waiting to flush telemetry...")
-	time.Sleep(6 * time.Second)
 }

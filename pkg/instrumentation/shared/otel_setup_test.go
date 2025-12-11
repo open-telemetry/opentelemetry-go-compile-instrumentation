@@ -11,20 +11,24 @@ import (
 )
 
 func TestGetLogger(t *testing.T) {
-	logger1 := GetLogger()
+	logger1 := Logger()
 	require.NotNil(t, logger1)
 
 	// Should return the same instance (singleton)
-	logger2 := GetLogger()
+	logger2 := Logger()
 	assert.Equal(t, logger1, logger2)
 }
 
 func TestSetupOTelSDK(t *testing.T) {
-	err := SetupOTelSDK()
+	var (
+		instrumentationName    = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+		instrumentationVersion = "0.1.0"
+	)
+	err := SetupOTelSDK(instrumentationName, instrumentationVersion)
 	require.NoError(t, err)
 
 	// Should be idempotent
-	err = SetupOTelSDK()
+	err = SetupOTelSDK(instrumentationName, instrumentationVersion)
 	require.NoError(t, err)
 }
 

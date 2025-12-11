@@ -92,6 +92,20 @@ func TestBeforeNewClient(t *testing.T) {
 			enabledEnv:    false,
 			expectHandler: false,
 		},
+		{
+			name:          "nil options slice",
+			target:        "localhost:50051",
+			opts:          nil,
+			enabledEnv:    true,
+			expectHandler: true,
+		},
+		{
+			name:          "empty target with options",
+			target:        "",
+			opts:          []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+			enabledEnv:    true,
+			expectHandler: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -103,7 +117,11 @@ func TestBeforeNewClient(t *testing.T) {
 			}
 
 			ictx := newMockHookContext(tt.target, tt.opts)
-			BeforeNewClient(ictx, tt.target, tt.opts)
+
+			// Verify no panic even with edge cases
+			assert.NotPanics(t, func() {
+				BeforeNewClient(ictx, tt.target, tt.opts)
+			}, "BeforeNewClient should not panic")
 
 			newOpts, ok := ictx.GetParam(newClientOptionsParamIndex).([]grpc.DialOption)
 			require.True(t, ok)
@@ -152,6 +170,12 @@ func TestAfterNewClient(t *testing.T) {
 			enabledEnv: false,
 			conn:       nil,
 			err:        assert.AnError,
+		},
+		{
+			name:       "both nil conn and nil error",
+			enabledEnv: true,
+			conn:       nil,
+			err:        nil,
 		},
 	}
 

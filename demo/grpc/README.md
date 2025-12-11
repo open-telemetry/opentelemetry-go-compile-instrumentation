@@ -104,7 +104,7 @@ To send multiple requests:
 
 #### Telemetry Export Note
 
-The client includes a 6-second sleep after completing requests to ensure the batch span processor (default 5-second timeout) has time to flush pending telemetry before the process exits. This is particularly important for single or low-count requests. For continuous monitoring, use a higher `-count` value which naturally provides enough runtime for span export.
+The instrumentation layer automatically handles graceful shutdown of the OpenTelemetry SDK. When the application receives SIGINT or SIGTERM, a signal handler ensures all pending telemetry is flushed before the process exits. No explicit sleep or shutdown code is needed in the application - the instrumentation handles this transparently.
 
 ## Regenerating Protocol Buffer Code
 

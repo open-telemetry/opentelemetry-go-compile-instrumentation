@@ -32,12 +32,7 @@ func TestGRPCClientIntegration(t *testing.T) {
 
 	// Start the server and wait for it to be ready
 	serverApp, outputPipe := app.Start(t, serverDir)
-	defer func() {
-		if serverApp.Process != nil {
-			_ = serverApp.Process.Kill()
-		}
-	}()
-	_, err := waitForServerReady(t, serverApp, outputPipe)
+	_, err := app.WaitForServerReady(t, serverApp, outputPipe)
 	require.NoError(t, err, "server should start successfully")
 
 	t.Log("Running gRPC client (unary RPC)...")
@@ -89,12 +84,7 @@ func TestGRPCClientServerStreaming(t *testing.T) {
 
 	// Start the server and wait for it to be ready
 	serverApp, outputPipe := app.Start(t, serverDir)
-	defer func() {
-		if serverApp.Process != nil {
-			_ = serverApp.Process.Kill()
-		}
-	}()
-	_, err := waitForServerReady(t, serverApp, outputPipe)
+	_, err := app.WaitForServerReady(t, serverApp, outputPipe)
 	require.NoError(t, err, "server should start successfully")
 
 	t.Log("Running gRPC client (streaming RPC)...")

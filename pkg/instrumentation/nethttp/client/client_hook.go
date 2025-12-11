@@ -5,6 +5,7 @@ package client
 
 import (
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -20,30 +21,52 @@ import (
 )
 
 const (
-	otelExporterPrefix     = "OTel OTLP Exporter Go"
-	instrumentationName    = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
-	instrumentationVersion = "0.1.0"
-	instrumentationKey     = "NETHTTP"
-	requestParamIndex      = 1
+	otelExporterPrefix  = "OTel OTLP Exporter Go"
+	instrumentationName = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
+	instrumentationKey  = "NETHTTP"
+	requestParamIndex   = 1
 )
 
 var (
-	logger     = shared.GetLogger()
+	logger     = shared.Logger()
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator
 	initOnce   sync.Once
 )
 
+// moduleVersion extracts the version from the Go module system.
+// Falls back to "dev" if version cannot be determined.
+func moduleVersion() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+
+	// Return the main module version
+	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+
+	return "dev"
+}
+
 func initInstrumentation() {
 	initOnce.Do(func() {
-		if err := shared.SetupOTelSDK(); err != nil {
+		version := moduleVersion()
+		if err := shared.SetupOTelSDK("go.opentelemetry.io/compile-instrumentation/nethttp/client", version); err != nil {
 			logger.Error("failed to setup OTel SDK", "error", err)
 		}
 		tracer = otel.GetTracerProvider().Tracer(
 			instrumentationName,
-			trace.WithInstrumentationVersion(instrumentationVersion),
+			trace.WithInstrumentationVersion(version),
 		)
 		propagator = otel.GetTextMapPropagator()
+
+		// Start runtime metrics (respects OTEL_GO_ENABLED/DISABLED_INSTRUMENTATIONS)
+		if err := shared.StartRuntimeMetrics(); err != nil {
+			logger.Error("failed to start runtime metrics", "error", err)
+		}
+
 		logger.Info("HTTP client instrumentation initialized")
 	})
 }
