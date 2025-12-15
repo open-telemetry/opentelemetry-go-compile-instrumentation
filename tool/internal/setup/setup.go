@@ -169,37 +169,28 @@ func Setup(ctx context.Context, args []string) error {
 		return err
 	}
 
-	// Per-package operations
-	processedPkgDirs := make(map[string]bool)
-	processedModDirs := make(map[string]bool)
+	// Generate otel.runtime.go for all packages
+	moduleDirs := make(map[string]bool)
 	for _, pkg := range pkgs {
 		if pkg.Module == nil {
 			continue
 		}
-
 		moduleDir := pkg.Module.Dir
 		pkgDir := getPackageDir(pkg)
 		if pkgDir == "" {
-			// Fallback to module directory if no Go files found
 			pkgDir = moduleDir
 		}
-
-		// Generate otel.runtime.go in the package directory (not module directory)
-		// This ensures the file is compiled with the correct main package
-		if !processedPkgDirs[pkgDir] {
-			processedPkgDirs[pkgDir] = true
-			err = sp.addDeps(matched, pkgDir)
-			if err != nil {
-				return err
-			}
+		// Introduce additional hook code by generating otel.runtime.go
+		if err = sp.addDeps(matched, pkgDir); err != nil {
+			return err
 		}
-		// Sync new dependencies to go.mod (only once per module)
-		if !processedModDirs[moduleDir] {
-			processedModDirs[moduleDir] = true
-			err = sp.syncDeps(ctx, matched, moduleDir)
-			if err != nil {
-				return err
-			}
+		moduleDirs[moduleDir] = true
+	}
+
+	// Sync new dependencies to go.mod or vendor/modules.txt
+	for moduleDir := range moduleDirs {
+		if err = sp.syncDeps(ctx, matched, moduleDir); err != nil {
+			return err
 		}
 	}
 
