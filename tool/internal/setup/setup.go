@@ -125,6 +125,13 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	return buildPkgs, nil
 }
 
+func getPackageDir(pkg *packages.Package) string {
+	if len(pkg.GoFiles) > 0 {
+		return filepath.Dir(pkg.GoFiles[0])
+	}
+	return ""
+}
+
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, args []string) error {
 	logger := util.LoggerFromContext(ctx)
@@ -155,22 +162,47 @@ func Setup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, pkg := range pkgs {
-		// Introduce additional hook code by generating otel.runtime.go
-		if err = sp.addDeps(matched, pkg.Dir); err != nil {
-			return err
-		}
-	}
+
 	// Extract the embedded instrumentation modules into local directory
 	err = sp.extract()
 	if err != nil {
 		return err
 	}
-	// Sync new dependencies to go.mod or vendor/modules.txt
-	err = sp.syncDeps(ctx, matched)
-	if err != nil {
-		return err
+
+	// Per-package operations
+	processedPkgDirs := make(map[string]bool)
+	processedModDirs := make(map[string]bool)
+	for _, pkg := range pkgs {
+		if pkg.Module == nil {
+			continue
+		}
+
+		moduleDir := pkg.Module.Dir
+		pkgDir := getPackageDir(pkg)
+		if pkgDir == "" {
+			// Fallback to module directory if no Go files found
+			pkgDir = moduleDir
+		}
+
+		// Generate otel.runtime.go in the package directory (not module directory)
+		// This ensures the file is compiled with the correct main package
+		if !processedPkgDirs[pkgDir] {
+			processedPkgDirs[pkgDir] = true
+			err = sp.addDeps(matched, pkgDir)
+			if err != nil {
+				return err
+			}
+		}
+		// Sync new dependencies to go.mod (only once per module)
+		if !processedModDirs[moduleDir] {
+			processedModDirs[moduleDir] = true
+			err = sp.syncDeps(ctx, matched, moduleDir)
+			if err != nil {
+				return err
+			}
+		}
 	}
+
 	// Write the matched hook to matched.txt for further instrument phase
 	return sp.store(matched)
 }
