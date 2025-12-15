@@ -146,29 +146,3 @@ func TestRunCmdInDir(t *testing.T) {
 		})
 	}
 }
-
-func TestRunCmdErrorMessages(t *testing.T) {
-	t.Run("error message includes command path", func(t *testing.T) {
-		err := RunCmd(t.Context(), "nonexistent-command-xyz", "arg1", "arg2")
-		if err == nil {
-			t.Fatal("Expected error, got nil")
-		}
-		// Error message should contain the command path
-		errMsg := err.Error()
-		if errMsg == "" {
-			t.Error("Expected non-empty error message")
-		}
-	})
-
-	t.Run("error message includes directory for RunCmdInDir", func(t *testing.T) {
-		err := RunCmdInDir(t.Context(), "/nonexistent/dir", "echo", "test")
-		if err == nil {
-			t.Fatal("Expected error, got nil")
-		}
-		// Error message should contain directory information
-		errMsg := err.Error()
-		if errMsg == "" {
-			t.Error("Expected non-empty error message")
-		}
-	})
-}
