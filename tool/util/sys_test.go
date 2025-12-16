@@ -6,6 +6,7 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -145,4 +146,29 @@ func TestRunCmdInDir(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunCmdErrorMessages(t *testing.T) {
+	t.Run("error message includes command path", func(t *testing.T) {
+		err := RunCmd(t.Context(), "nonexistent-command-xyz", "arg1", "arg2")
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, "nonexistent-command-xyz") {
+			t.Errorf("Error message should contain command name, got: %s", errMsg)
+		}
+	})
+
+	t.Run("error message includes directory for RunCmdInDir", func(t *testing.T) {
+		dir := "/nonexistent/dir"
+		err := RunCmdInDir(t.Context(), dir, "echo", "test")
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, dir) {
+			t.Errorf("Error message should contain directory %q, got: %s", dir, errMsg)
+		}
+	})
 }

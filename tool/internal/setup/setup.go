@@ -173,6 +173,7 @@ func Setup(ctx context.Context, args []string) error {
 	moduleDirs := make(map[string]bool)
 	for _, pkg := range pkgs {
 		if pkg.Module == nil {
+			sp.Warn("skipping package without module", "package", pkg.PkgPath)
 			continue
 		}
 		moduleDir := pkg.Module.Dir

@@ -34,10 +34,7 @@ func runCmd(ctx context.Context, dir string, env []string, args ...string) error
 
 	err := cmd.Run()
 	if err != nil {
-		if dir != "" {
-			return ex.Wrapf(err, "failed to run command %q in dir %q with args: %v", path, dir, args)
-		}
-		return ex.Wrapf(err, "failed to run command %q with args: %v", path, args)
+		return ex.Wrapf(err, "failed to run command %q in dir '%q' with args: %v", path, dir, args)
 	}
 	return nil
 }
