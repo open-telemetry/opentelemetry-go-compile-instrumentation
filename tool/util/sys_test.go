@@ -44,66 +44,48 @@ func TestRunCmd(t *testing.T) {
 }
 
 func TestRunCmdWithEnv(t *testing.T) {
-	if IsWindows() {
-		t.Skip("Skipping test on Windows - env handling differs")
+	programPath := filepath.Join(t.TempDir(), "check_env.go")
+	err := os.WriteFile(programPath, []byte(`package main
+
+import "os"
+
+func main() {
+	if os.Getenv("TEST_VAR") == "test_value" {
+		os.Exit(0)
+	}
+	os.Exit(1)
+}
+`), 0o644)
+	if err != nil {
+		t.Fatalf("Failed to create test program: %v", err)
 	}
 
-	tmpDir := t.TempDir()
-	scriptPath := filepath.Join(tmpDir, "test_env.sh")
+	t.Run("passes environment variable to subprocess", func(t *testing.T) {
+		env := append(os.Environ(), "TEST_VAR=test_value")
+		err = RunCmdWithEnv(t.Context(), env, "go", "run", programPath)
+		if err != nil {
+			t.Errorf("Expected success when TEST_VAR is set, got: %v", err)
+		}
+	})
 
-	// Create a simple script that checks for an environment variable
-	scriptContent := `#!/bin/sh
-if [ "$TEST_VAR" = "test_value" ]; then
-    exit 0
-else
-    exit 1
-fi
-`
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
-		t.Fatalf("Failed to create test script: %v", err)
-	}
+	t.Run("fails when required variable is missing", func(t *testing.T) {
+		env := append(os.Environ(), "OTHER_VAR=other_value")
+		err = RunCmdWithEnv(t.Context(), env, "go", "run", programPath)
+		if err == nil {
+			t.Error("Expected failure when TEST_VAR is not set")
+		}
+	})
 
-	tests := []struct {
-		name      string
-		env       []string
-		args      []string
-		expectErr bool
-	}{
-		{
-			name:      "command with custom environment variable",
-			env:       []string{"TEST_VAR=test_value"},
-			args:      []string{scriptPath},
-			expectErr: false,
-		},
-		{
-			name:      "command with missing environment variable",
-			env:       []string{"OTHER_VAR=other_value"},
-			args:      []string{scriptPath},
-			expectErr: true,
-		},
-		{
-			name:      "command with multiple environment variables",
-			env:       []string{"TEST_VAR=test_value", "OTHER_VAR=other_value"},
-			args:      []string{scriptPath},
-			expectErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := RunCmdWithEnv(t.Context(), tt.env, tt.args...)
-			if (err != nil) != tt.expectErr {
-				t.Errorf("RunCmdWithEnv() error = %v, expectErr %v", err, tt.expectErr)
-			}
-		})
-	}
+	t.Run("works with multiple environment variables", func(t *testing.T) {
+		env := append(os.Environ(), "TEST_VAR=test_value", "OTHER_VAR=other_value")
+		err = RunCmdWithEnv(t.Context(), env, "go", "run", programPath)
+		if err != nil {
+			t.Errorf("Expected success with multiple env vars, got: %v", err)
+		}
+	})
 }
 
 func TestRunCmdInDir(t *testing.T) {
-	if IsWindows() {
-		t.Skip("Skipping test on Windows - pwd command not available")
-	}
-
 	tmpDir := t.TempDir()
 
 	// Create a subdirectory
@@ -115,32 +97,28 @@ func TestRunCmdInDir(t *testing.T) {
 	tests := []struct {
 		name      string
 		dir       string
-		args      []string
 		expectErr bool
 	}{
 		{
 			name:      "run command in valid directory",
 			dir:       tmpDir,
-			args:      []string{"pwd"},
 			expectErr: false,
 		},
 		{
 			name:      "run command in subdirectory",
 			dir:       subDir,
-			args:      []string{"pwd"},
 			expectErr: false,
 		},
 		{
 			name:      "run command in nonexistent directory",
 			dir:       filepath.Join(tmpDir, "nonexistent"),
-			args:      []string{"echo", "test"},
 			expectErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := RunCmdInDir(t.Context(), tt.dir, tt.args...)
+			err := RunCmdInDir(t.Context(), tt.dir, "go", "version")
 			if (err != nil) != tt.expectErr {
 				t.Errorf("RunCmdInDir() error = %v, expectErr %v", err, tt.expectErr)
 			}
@@ -161,8 +139,12 @@ func TestRunCmdErrorMessages(t *testing.T) {
 	})
 
 	t.Run("error message includes directory for RunCmdInDir", func(t *testing.T) {
-		dir := "/nonexistent/dir"
-		err := RunCmdInDir(t.Context(), dir, "echo", "test")
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("Failed to get current working directory: %v", err)
+		}
+		dir := filepath.Join(cwd, "nonexistent", "dir")
+		err = RunCmdInDir(t.Context(), dir, "go", "version")
 		if err == nil {
 			t.Fatal("Expected error, got nil")
 		}
