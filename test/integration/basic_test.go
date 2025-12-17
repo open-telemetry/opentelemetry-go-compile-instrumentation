@@ -7,6 +7,7 @@ package test
 
 import (
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,7 @@ func TestBasic(t *testing.T) {
 	}
 
 	verifyGenericHookContextLogs(t, output)
+	verifyTracePropagationBetweenFunctionAAndB(t, output)
 }
 
 func verifyGenericHookContextLogs(t *testing.T, output string) {
@@ -62,4 +64,20 @@ func verifyGenericHookContextLogs(t *testing.T, output string) {
 	for _, log := range expectedGenericLogs {
 		require.Contains(t, output, log, "Expected generic HookContext log: %s", log)
 	}
+}
+
+func verifyTracePropagationBetweenFunctionAAndB(t *testing.T, output string) {
+	traceA, spanA := extractSpanInfo(t, output, "FunctionABefore")
+	traceB, spanB := extractSpanInfo(t, output, "FunctionBBefore")
+
+	require.Equal(t, traceA, traceB, "expected FunctionA and FunctionB to share the same trace ID")
+	require.NotEqual(t, spanA, spanB, "expected FunctionA and FunctionB to have different span IDs")
+}
+
+//nolint:revive // just a helper function to extract span info from the output
+func extractSpanInfo(t *testing.T, output, funcName string) (string, string) {
+	re := regexp.MustCompile(funcName + `: TraceID: ([0-9a-f]{32}), SpanID: ([0-9a-f]{16})`)
+	match := re.FindStringSubmatch(output)
+	require.Len(t, match, 3, "expected log line for %s with trace and span IDs", funcName)
+	return match[1], match[2]
 }

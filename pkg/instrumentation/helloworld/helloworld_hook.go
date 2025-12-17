@@ -123,3 +123,15 @@ func BeforeUnderscore(ictx inst.HookContext, _ int, _ float32) {}
 func MyHookEllipsisBefore(ictx inst.HookContext, p1 []string) {
 	println("Ellipsis")
 }
+
+func FunctionABefore(ictx inst.HookContext, ctx context.Context) {
+	ctx, span := tracer.Start(ctx, "FunctionA")
+	ictx.SetParam(0, ctx)
+	fmt.Printf("FunctionABefore: TraceID: %s, SpanID: %s\n", span.SpanContext().TraceID().String(), span.SpanContext().SpanID().String())
+}
+
+func FunctionBBefore(ictx inst.HookContext, ctx context.Context) {
+	ctx, span := tracer.Start(ctx, "FunctionB")
+	ictx.SetParam(0, ctx)
+	fmt.Printf("FunctionBBefore: TraceID: %s, SpanID: %s\n", span.SpanContext().TraceID().String(), span.SpanContext().SpanID().String())
+}

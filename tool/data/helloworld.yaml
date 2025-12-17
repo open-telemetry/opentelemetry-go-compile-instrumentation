@@ -78,3 +78,15 @@ hook_ellipsis:
   func: Ellipsis
   before: MyHookEllipsisBefore
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+
+hook_function_a:
+  target: main
+  func: FunctionA
+  before: FunctionABefore
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+
+hook_function_b:
+  target: main
+  func: FunctionB
+  before: FunctionBBefore
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"

@@ -13,6 +13,7 @@ package main
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"time"
@@ -66,12 +67,22 @@ func Underscore(_ int, _ float32) {}
 
 func Ellipsis(p1 ...string) {}
 
+// FunctionA is the parent function that calls FunctionB.
+// It receives a context as the first parameter, which will be instrumented.
+func FunctionA(ctx context.Context) {
+	FunctionB(ctx)
+}
+
+// FunctionB is the child function called by FunctionA.
+// It receives a context as the first parameter, which will be instrumented.
+func FunctionB(ctx context.Context) {}
+
 func main() {
-	context := &traceContext{
+	ctx := &traceContext{
 		traceID: "123",
 		spanID:  "456",
 	}
-	runtime.SetTraceContextToGLS(context)
+	runtime.SetTraceContextToGLS(ctx)
 
 	go func() {
 		fmt.Printf("traceContext from parent goroutine: %s\n", runtime.GetTraceContextFromGLS())
@@ -97,4 +108,6 @@ func main() {
 	C.free(unsafe.Pointer(cs))
 
 	Ellipsis("a", "b")
+
+	FunctionA(context.Background())
 }
