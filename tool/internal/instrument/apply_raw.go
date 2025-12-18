@@ -14,7 +14,10 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-const unnamedRetValName = "_unnamedRetVal"
+const (
+	unnamedRetValName = "_unnamedRetVal"
+	ignoredParam      = "_ignoredParam"
+)
 
 func renameReturnValues(funcDecl *dst.FuncDecl) {
 	if retList := funcDecl.Type.Results; retList != nil {

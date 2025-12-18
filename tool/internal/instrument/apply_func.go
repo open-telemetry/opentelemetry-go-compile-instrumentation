@@ -65,6 +65,10 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 			} else {
 				// Collect only (for further use)
 				for _, name := range field.Names {
+					if name.Name == ast.IdentIgnore {
+						name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
+						idx++
+					}
 					retVals = append(retVals, name.Name)
 				}
 			}
@@ -80,8 +84,13 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 		receiver := funcDecl.Recv.List[0].Names[0].Name
 		args = append(args, receiver)
 	}
+	idx := 0
 	for _, field := range funcDecl.Type.Params.List {
 		for _, name := range field.Names {
+			if name.Name == ast.IdentIgnore {
+				name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
+				idx++
+			}
 			args = append(args, name.Name)
 		}
 	}
@@ -90,14 +99,9 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 
 func createHookArgs(names []string) []dst.Expr {
 	exprs := make([]dst.Expr, 0)
-	// If we find "a type" in target func, we pass "&a" to trampoline func,
-	// if we find "_ type" in target func, we pass "nil" to trampoline func,
 	for _, name := range names {
-		if name == ast.IdentIgnore {
-			exprs = append(exprs, ast.Nil())
-		} else {
-			exprs = append(exprs, ast.AddressOf(name))
-		}
+		util.Assert(name != ast.IdentIgnore, "must be processed before")
+		exprs = append(exprs, ast.AddressOf(name))
 	}
 	return exprs
 }

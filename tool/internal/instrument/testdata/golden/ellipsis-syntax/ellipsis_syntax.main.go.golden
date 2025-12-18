@@ -42,6 +42,8 @@ func EllipsisFunc(p1 ...string) {
 	//line main.go:35:33
 }
 
+func UnderscoreFunc(_ int, _ float32) {}
+
 func main() { Func1("hello", 123) }
 
 //line <generated>:1

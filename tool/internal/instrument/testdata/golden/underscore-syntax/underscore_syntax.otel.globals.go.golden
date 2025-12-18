@@ -1,0 +1,41 @@
+package main
+
+// Variable Template
+var (
+	OtelGetStackImpl   func() []byte = nil
+	OtelPrintStackImpl func([]byte)  = nil
+)
+
+// !!! pkg/inst/context.go will auto-sync to tool/internal/instrument/api.tmpl
+type HookContext interface {
+	// Set the skip call flag, can be used to skip the original function call
+	SetSkipCall(bool)
+	// Get the skip call flag, can be used to skip the original function call
+	IsSkipCall() bool
+	// Set the data field, can be used to pass information between Before and After hooks
+	SetData(interface{})
+	// Get the data field, can be used to pass information between Before and After hooks
+	GetData() interface{}
+	// Get a value from the data field by key
+	GetKeyData(key string) interface{}
+	// Set a key-value pair in the data field
+	SetKeyData(key string, val interface{})
+	// Check if a key exists in the data field
+	HasKeyData(key string) bool
+	// Number of original function parameters
+	GetParamCount() int
+	// Get the original function parameter at index idx
+	GetParam(idx int) interface{}
+	// Change the original function parameter at index idx
+	SetParam(idx int, val interface{})
+	// Number of original function return values
+	GetReturnValCount() int
+	// Get the original function return value at index idx
+	GetReturnVal(idx int) interface{}
+	// Change the original function return value at index idx
+	SetReturnVal(idx int, val interface{})
+	// Get the original function name
+	GetFuncName() string
+	// Get the package name of the original function
+	GetPackageName() string
+}
