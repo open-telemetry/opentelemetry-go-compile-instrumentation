@@ -352,7 +352,7 @@ go 1.21
 	// Change to temp directory
 	t.Chdir(tempDir)
 
-	err = runModTidy(t.Context())
+	err = runModTidy(t.Context(), tempDir)
 	// This might fail if go is not available or if the environment is weird,
 	// but we're mainly testing that the function doesn't crash
 	// In a real environment, this should succeed
@@ -362,11 +362,12 @@ go 1.21
 }
 
 func TestSyncDeps_NoRules(t *testing.T) {
+	tempDir := t.TempDir()
 	sp := &SetupPhase{
 		logger: slog.Default(),
 	}
 
-	err := sp.syncDeps(t.Context(), []*rule.InstRuleSet{})
+	err := sp.syncDeps(t.Context(), []*rule.InstRuleSet{}, tempDir)
 	assert.NoError(t, err)
 }
 
@@ -414,7 +415,7 @@ go 1.21
 		},
 	}
 
-	err = sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet})
+	err = sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir)
 	// This will likely fail due to missing instrumentation directories,
 	// but we're testing that it attempts to add replaces
 	if err != nil {

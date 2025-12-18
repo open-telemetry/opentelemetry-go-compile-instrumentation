@@ -17,23 +17,41 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
-func RunCmdWithEnv(ctx context.Context, env []string, args ...string) error {
+func runCmd(ctx context.Context, dir string, env []string, args ...string) error {
 	path := args[0]
 	args = args[1:]
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = env
+
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	if env != nil {
+		cmd.Env = env
+	}
+
 	err := cmd.Run()
 	if err != nil {
-		return ex.Wrapf(err, "failed to run command %q with args: %v", path, args)
+		return ex.Wrapf(err, "failed to run command %q in dir '%q' with args: %v", path, dir, args)
 	}
 	return nil
 }
 
+// RunCmdWithEnv executes a command with custom environment variables.
+func RunCmdWithEnv(ctx context.Context, env []string, args ...string) error {
+	return runCmd(ctx, "", env, args...)
+}
+
+// RunCmd executes a command with the default environment.
 func RunCmd(ctx context.Context, args ...string) error {
-	return RunCmdWithEnv(ctx, nil, args...)
+	return runCmd(ctx, "", nil, args...)
+}
+
+// RunCmdInDir executes a command in a specific directory.
+func RunCmdInDir(ctx context.Context, dir string, args ...string) error {
+	return runCmd(ctx, dir, nil, args...)
 }
 
 func IsWindows() bool {

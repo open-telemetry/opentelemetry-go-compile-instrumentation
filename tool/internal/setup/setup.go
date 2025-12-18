@@ -125,6 +125,13 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	return buildPkgs, nil
 }
 
+func getPackageDir(pkg *packages.Package) string {
+	if len(pkg.GoFiles) > 0 {
+		return filepath.Dir(pkg.GoFiles[0])
+	}
+	return ""
+}
+
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, args []string) error {
 	logger := util.LoggerFromContext(ctx)
@@ -155,22 +162,39 @@ func Setup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, pkg := range pkgs {
-		// Introduce additional hook code by generating otel.runtime.go
-		if err = sp.addDeps(matched, pkg.Dir); err != nil {
-			return err
-		}
-	}
+
 	// Extract the embedded instrumentation modules into local directory
 	err = sp.extract()
 	if err != nil {
 		return err
 	}
-	// Sync new dependencies to go.mod or vendor/modules.txt
-	err = sp.syncDeps(ctx, matched)
-	if err != nil {
-		return err
+
+	// Generate otel.runtime.go for all packages
+	moduleDirs := make(map[string]bool)
+	for _, pkg := range pkgs {
+		if pkg.Module == nil {
+			sp.Warn("skipping package without module", "package", pkg.PkgPath)
+			continue
+		}
+		moduleDir := pkg.Module.Dir
+		pkgDir := getPackageDir(pkg)
+		if pkgDir == "" {
+			pkgDir = moduleDir
+		}
+		// Introduce additional hook code by generating otel.runtime.go
+		if err = sp.addDeps(matched, pkgDir); err != nil {
+			return err
+		}
+		moduleDirs[moduleDir] = true
 	}
+
+	// Sync new dependencies to go.mod or vendor/modules.txt
+	for moduleDir := range moduleDirs {
+		if err = sp.syncDeps(ctx, matched, moduleDir); err != nil {
+			return err
+		}
+	}
+
 	// Write the matched hook to matched.txt for further instrument phase
 	return sp.store(matched)
 }

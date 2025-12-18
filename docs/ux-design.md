@@ -208,6 +208,18 @@ used directly to build, run, and test go applications directly:
    go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go test -shuffle=on ./...
    ```
 
+#### Building Multiple Packages
+
+The tool supports building multiple packages in a single command, which is useful
+for monorepos or projects with multiple binaries:
+
+```console
+otel go build -o /bin ./myapp1 ./myapp2
+```
+
+All packages specified in the build command will be instrumented with the same
+configuration, ensuring consistent observability across your application.
+
 ### Ongoing Maintenance
 
 Since the tool and configuration are registered in the `go.mod` file, users are
