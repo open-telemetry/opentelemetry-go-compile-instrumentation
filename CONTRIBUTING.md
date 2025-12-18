@@ -326,6 +326,7 @@ For more information about the maintainer role, see the [community repository](h
 - [Eliott Bouhana](https://github.com/eliottness), Datadog
 - [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
 - [Yi Yang](https://github.com/y1yang0), Alibaba
+- [Xabier Martinez](https://github.com/txabman42), Cabify
 
 For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
