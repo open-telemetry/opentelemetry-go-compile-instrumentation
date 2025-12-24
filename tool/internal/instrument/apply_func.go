@@ -65,6 +65,10 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 			} else {
 				// Collect only (for further use)
 				for _, name := range field.Names {
+					if name.Name == ast.IdentIgnore {
+						name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
+						idx++
+					}
 					retVals = append(retVals, name.Name)
 				}
 			}
@@ -80,24 +84,24 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 		receiver := funcDecl.Recv.List[0].Names[0].Name
 		args = append(args, receiver)
 	}
+	idx := 0
 	for _, field := range funcDecl.Type.Params.List {
 		for _, name := range field.Names {
+			if name.Name == ast.IdentIgnore {
+				name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
+				idx++
+			}
 			args = append(args, name.Name)
 		}
 	}
 	return args
 }
 
-func createHookArgs(names []string) []dst.Expr {
+func createTrampArgs(names []string) []dst.Expr {
 	exprs := make([]dst.Expr, 0)
-	// If we find "a type" in target func, we pass "&a" to trampoline func,
-	// if we find "_ type" in target func, we pass "nil" to trampoline func,
 	for _, name := range names {
-		if name == ast.IdentIgnore {
-			exprs = append(exprs, ast.Nil())
-		} else {
-			exprs = append(exprs, ast.AddressOf(name))
-		}
+		util.Assert(name != ast.IdentIgnore, "must be processed before")
+		exprs = append(exprs, ast.AddressOf(name))
 	}
 	return exprs
 }
@@ -106,15 +110,14 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	args, retVals []string,
 ) *dst.IfStmt {
 	funcSuffix := util.CRC32(t.String())
-	// Transparently pass the target function's parameters to trampoline func,
-	// with the only exception being that if the target func parameter is "_",
-	// then we directly pass "nil"
-	argsToBefore := createHookArgs(args)
-	argsToAfter := createHookArgs(retVals)
+	argsToBefore := createTrampArgs(args)
+	argsToAfter := createTrampArgs(retVals)
 	argHookContext := ast.Ident(trampolineHookContextName + funcSuffix)
 	argsToAfter = append([]dst.Expr{argHookContext}, argsToAfter...)
-	beforeCall := ast.CallTo(makeName(t, funcDecl, true), funcDecl.Type.TypeParams, argsToBefore)
-	afterCall := ast.CallTo(makeName(t, funcDecl, false), funcDecl.Type.TypeParams, argsToAfter)
+	beforeCallName := makeName(t, funcDecl, true)
+	afterCallName := makeName(t, funcDecl, false)
+	beforeCall := ast.CallTo(beforeCallName, funcDecl.Type.TypeParams, argsToBefore)
+	afterCall := ast.CallTo(afterCallName, funcDecl.Type.TypeParams, argsToAfter)
 	tjumpInit := ast.DefineStmts(
 		ast.Exprs(
 			ast.Ident(trampolineHookContextName+funcSuffix),

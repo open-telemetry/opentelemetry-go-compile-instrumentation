@@ -1,7 +1,7 @@
 # OpenTelemetry Semantic Conventions Version
 # This file specifies the semantic conventions version that this project intends to abide by.
-# The version should match the semconv imports used in pkg/inst-api-semconv/
+# The version should match the semconv imports used in pkg/instrumentation/**/semconv/**.
 # Format: vMAJOR.MINOR.PATCH (e.g., v1.30.0)
 # Latest available version: v1.38.0 (as of 2025-11-19)
 # Note: Run 'make registry-diff' to see what's new in the latest version
-v1.30.0
+v1.37.0

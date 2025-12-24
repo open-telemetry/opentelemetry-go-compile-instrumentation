@@ -3,7 +3,21 @@
 
 server_hook:
   target: google.golang.org/grpc
-  func: Serve
-  recv: "*Server"
-  before: BeforeServe
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc"
+  func: NewServer
+  before: BeforeNewServer
+  after: AfterNewServer
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/server"
+
+client_hook_newclient:
+  target: google.golang.org/grpc
+  func: NewClient
+  before: BeforeNewClient
+  after: AfterNewClient
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/client"
+
+client_hook_dialcontext:
+  target: google.golang.org/grpc
+  func: DialContext
+  before: BeforeDialContext
+  after: AfterDialContext
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/client"

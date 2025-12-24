@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -17,10 +16,13 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
+const maxBuildPlanBufferSize = 10 * 1024 * 1024 // 10MB
+
 type Dependency struct {
 	ImportPath string
 	Version    string
 	Sources    []string
+	CgoFiles   map[string]string
 }
 
 func (d *Dependency) String() string {
@@ -30,37 +32,44 @@ func (d *Dependency) String() string {
 	return fmt.Sprintf("{%s@%s: %v}", d.ImportPath, d.Version, d.Sources)
 }
 
-// findCompileCommands finds the compile commands from the build plan log.
-func findCompileCommands(buildPlanLog *os.File) ([]string, error) {
-	const buildPlanBufSize = 10 * 1024 * 1024 // 10MB buffer size
-
-	// Filter compile commands from build plan log
-	compileCmds := make([]string, 0)
-	scanner := bufio.NewScanner(buildPlanLog)
-	// Seek to the beginning of the file before reading
-	_, err := buildPlanLog.Seek(0, 0)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to seek to beginning of build plan log")
+// parseCdDir extracts the directory path from a "cd" command line.
+func parseCdDir(line string) (string, bool) {
+	if !strings.HasPrefix(strings.ToLower(line), "cd") {
+		return "", false
 	}
-	// 10MB should be enough to accommodate most long line
-	buffer := make([]byte, 0, buildPlanBufSize)
-	scanner.Buffer(buffer, cap(buffer))
+	const cdCommandSplitLimit = 2 // Split "cd dir" into [dir, rest] to ignore trailing comments
+	parts := strings.SplitN(line[3:], " ", cdCommandSplitLimit)
+	return strings.TrimSpace(parts[0]), true
+}
+
+// findCommands scans the build plan log and returns relevant commands
+// (cd, cgo, and compile) for processing by findDeps.
+func findCommands(buildPlanLog *os.File) ([]string, error) {
+	scanner, err := util.NewFileScanner(buildPlanLog, maxBuildPlanBufferSize)
+	if err != nil {
+		return nil, err
+	}
+
+	var commands []string
 	for scanner.Scan() {
-		line := scanner.Text()
-		if util.IsCompileCommand(line) {
-			line = strings.Trim(line, " ")
-			compileCmds = append(compileCmds, line)
+		line := strings.TrimSpace(scanner.Text())
+		if util.IsWindows() {
+			line = strings.ReplaceAll(line, `\\`, `\`)
+		}
+		line = filepath.ToSlash(line)
+
+		if _, ok := parseCdDir(line); ok || util.IsCgoCommand(line) || util.IsCompileCommand(line) {
+			commands = append(commands, line)
 		}
 	}
-	err = scanner.Err()
-	if err != nil {
+	if err = scanner.Err(); err != nil {
 		return nil, ex.Wrapf(err, "failed to parse build plan log")
 	}
-	return compileCmds, nil
+	return commands, nil
 }
 
 // listBuildPlan lists the build plan by running `go build/install -a -x -n`
-// and then filtering the compile commands from the build plan log.
+// and then filtering the commands (cd, cgo, compile) from the build plan log.
 func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([]string, error) {
 	const goBuildMinArgs = 2 // go build
 	const buildPlanLogName = "build-plan.log"
@@ -105,7 +114,7 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	}
 
 	// Find compile commands from build plan log
-	compileCmds, err := findCompileCommands(buildPlanLog)
+	compileCmds, err := findCommands(buildPlanLog)
 	if err != nil {
 		return nil, err
 	}
@@ -113,63 +122,120 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	return compileCmds, nil
 }
 
+const (
+	cgoSuffix = ".cgo1.go"
+	goSuffix  = ".go"
+)
+
+// resolveCgoFile maps a CGO-generated file back to its original source.
+func resolveCgoFile(cgoFile, sourceDir string) (string, error) {
+	if cgoFile == "" || sourceDir == "" {
+		return "", ex.Newf("cgoFile and sourceDir cannot be empty, cgoFile: %q, sourceDir: %q", cgoFile, sourceDir)
+	}
+	baseName := filepath.Base(cgoFile)
+	if !strings.HasSuffix(baseName, cgoSuffix) {
+		return "", ex.Newf("file %s is not a CGO (%s) generated file", cgoFile, cgoSuffix)
+	}
+	originalBase := strings.TrimSuffix(baseName, cgoSuffix) + goSuffix
+	abs := filepath.Join(sourceDir, originalBase)
+	if !util.PathExists(abs) {
+		return "", ex.Newf("file %s does not exist", abs)
+	}
+	return abs, nil
+}
+
 var versionRegexp = regexp.MustCompile(`@v\d+\.\d+\.\d+(-.*?)?/`)
 
 func findModVersion(path string) string {
-	path = filepath.ToSlash(path) // Unify the path to Unix style
-	version := versionRegexp.FindString(path)
+	version := versionRegexp.FindString(filepath.ToSlash(path))
 	if version == "" {
 		return ""
 	}
-	// Extract version number from the string
 	return version[1 : len(version)-1]
 }
 
-// findDeps finds the dependencies of the project by listing the build plan.
+// findGoSources extracts Go source files from compile command arguments,
+// resolving CGO files using the provided objDir->sourceDir mapping.
+func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) (*Dependency, error) {
+	dep := &Dependency{
+		ImportPath: util.FindFlagValue(args, "-p"),
+		Sources:    make([]string, 0),
+		CgoFiles:   make(map[string]string),
+	}
+	util.Assert(dep.ImportPath != "", "import path is empty")
+
+	// Find the go files belong to the package as dependency sources
+	for _, arg := range args {
+		if !util.IsGoFile(arg) {
+			continue
+		}
+		if !util.PathExists(arg) {
+			// Try to resolve as CGO generated file
+			objDir := util.NormalizePath(filepath.Dir(arg))
+			sourceDir, ok := cgoObjDirs[objDir]
+			if !ok {
+				sp.Debug("Skip generated file - unknown objdir", "file", arg, "objDir", objDir)
+				continue
+			}
+			originalAbsFile, err := resolveCgoFile(arg, sourceDir)
+			if err != nil {
+				sp.Debug("Skip generated file", "file", arg, "error", err)
+				continue
+			}
+			dep.CgoFiles[originalAbsFile] = filepath.Base(arg)
+			dep.Sources = append(dep.Sources, originalAbsFile)
+			sp.Info("Resolved CGO source", "cgo", arg, "original", originalAbsFile)
+			continue
+		}
+
+		// This is a Go source file, add it to the dependency sources
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			return nil, ex.Wrapf(err, "failed to get absolute path of source file %s", arg)
+		}
+		dep.Sources = append(dep.Sources, abs)
+	}
+	// We need to skip it as it is not part of the instrumentation target
+	if len(dep.Sources) > 0 {
+		dep.Version = findModVersion(dep.Sources[0])
+	}
+	return dep, nil
+}
+
+// findDeps finds dependencies by listing the build plan.
 func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dependency, error) {
 	buildPlan, err := sp.listBuildPlan(ctx, goBuildCmd)
 	if err != nil {
 		return nil, err
 	}
-	// import path -> list of go files
-	deps := make([]*Dependency, 0)
-	for _, plan := range buildPlan {
-		util.Assert(util.IsCompileCommand(plan), "must be compile command")
-		dep := &Dependency{
-			ImportPath: "",
-			Sources:    make([]string, 0),
+
+	var (
+		deps       []*Dependency
+		cgoObjDirs = make(map[string]string)
+		currentDir string
+	)
+
+	for _, cmd := range buildPlan {
+		if dir, ok := parseCdDir(cmd); ok {
+			currentDir = dir
+			continue
 		}
 
-		// Find the compiling package name as dependency import path
-		args := util.SplitCompileCmds(plan)
-		importPath := util.FindFlagValue(args, "-p")
-		util.Assert(importPath != "", "import path is empty")
-		dep.ImportPath = importPath
-
-		// Find the go files belong to the package as dependency sources
-		for _, arg := range args {
-			// Skip non-go files
-			if !util.IsGoFile(arg) {
-				continue
-			}
-			// This is a generated file during compilation, e.g. _cgo_gotypes.go
-			// We need to skip it as it is not part of the instrumentation target
-			if !util.PathExists(arg) {
-				continue
-			}
-			abs, err1 := filepath.Abs(arg)
+		if util.IsCompileCommand(cmd) {
+			args := util.SplitCompileCmds(cmd)
+			dep, err1 := findGoSources(sp, args, cgoObjDirs)
 			if err1 != nil {
-				return nil, ex.Wrap(err1)
+				return nil, err1
 			}
-			dep.Sources = append(dep.Sources, abs)
+			deps = append(deps, dep)
+			sp.Info("Found dependency", "dep", dep)
+		} else if util.IsCgoCommand(cmd) && currentDir != "" {
+			args := util.SplitCompileCmds(cmd)
+			objDir := util.FindFlagValue(args, "-objdir")
+			util.Assert(objDir != "", "sanity check")
+			cgoObjDirs[util.NormalizePath(objDir)] = currentDir
+			sp.Debug("Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
 		}
-		// Extract the version from the source file path if available
-		if len(dep.Sources) > 0 {
-			dep.Version = findModVersion(dep.Sources[0])
-		}
-
-		deps = append(deps, dep)
-		sp.Info("Found dependency", "dep", dep)
 	}
 	return deps, nil
 }

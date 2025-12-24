@@ -166,6 +166,10 @@ func ArrayType(elem dst.Expr) *dst.ArrayType {
 	return &dst.ArrayType{Elt: elem}
 }
 
+func Ellipsis(elem dst.Expr) *dst.Ellipsis {
+	return &dst.Ellipsis{Elt: elem}
+}
+
 func IfStmt(init dst.Stmt, cond dst.Expr, body, elseBody *dst.BlockStmt) *dst.IfStmt {
 	i := util.AssertType[dst.Stmt](dst.Clone(init))
 	e := util.AssertType[dst.Expr](dst.Clone(cond))

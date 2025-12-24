@@ -119,7 +119,7 @@ func newHookContextImpl(tjump *TJump) dst.Expr {
 	// Build params slice: []interface{}{&param1, &param2, ...}
 	// Use createHookArgs to handle underscore parameters correctly
 	paramNames := collectArguments(targetFunc)
-	paramExprs := createHookArgs(paramNames)
+	paramExprs := createTrampArgs(paramNames)
 	paramsSlice := ast.CompositeLit(
 		ast.ArrayType(ast.InterfaceType()),
 		paramExprs,
@@ -129,7 +129,7 @@ func newHookContextImpl(tjump *TJump) dst.Expr {
 	returnExprs := make([]dst.Expr, 0)
 	if targetFunc.Type.Results != nil {
 		returnNames := collectReturnValues(targetFunc)
-		returnExprs = createHookArgs(returnNames)
+		returnExprs = createTrampArgs(returnNames)
 	}
 	returnValsSlice := ast.CompositeLit(
 		ast.ArrayType(ast.InterfaceType()),

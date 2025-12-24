@@ -11,7 +11,7 @@
 项目的语义约定版本在仓库根目录的 `.semconv-version` 文件中跟踪。此文件：
 
 - 指定项目打算遵守的语义约定版本
-- 必须与 `pkg/inst-api-semconv/` Go 代码中使用的 `semconv` 导入匹配
+- 必须与 `pkg/instrumentation/**/semconv/` Go 代码中使用的 `semconv` 导入匹配
 - 由 CI 验证以确保一致性
 
 **`.semconv-version` 文件示例**：
@@ -23,7 +23,7 @@ v1.30.0
 更新到新的语义约定版本时：
 
 1. 更新 `.semconv-version` 中的版本
-2. 更新 `pkg/inst-api-semconv/` 中的 Go 导入以匹配
+2. 更新 `pkg/instrumentation/**/semconv/` 中的 Go 导入以匹配
 3. 运行 `make registry-check` 验证
 4. 更新代码以处理任何破坏性更改
 
@@ -55,7 +55,7 @@ make registry-check
 - 使用 `--future` 标志启用更严格的验证规则
 - **此检查会阻塞** - 违规将导致 CI 失败
 
-**何时使用**：在提交对 `pkg/inst-api-semconv/` 中语义约定定义的更改之前运行此命令。
+**何时使用**：在提交对 `pkg/instrumentation/**/semconv/` 中语义约定定义的更改之前运行此命令。
 
 ### 生成注册表差异
 
@@ -90,7 +90,7 @@ make registry-diff
 
 - 了解当前 semconv 版本包含的内容
 - 决定是否升级到更新版本
-- 修改 `pkg/inst-api-semconv/` 之前查看变更
+- 修改 `pkg/instrumentation/**/semconv/` 之前查看变更
 
 **要求**：
 
@@ -148,15 +148,15 @@ grep "your.attribute.name" tmp/resolved-schema.yaml
 
 如果属性在上游不存在（或你需要项目特定的属性）：
 
-1. 将属性定义添加到 `pkg/inst-api-semconv/instrumenter/` 中的适当文件
+1. 将属性定义添加到 `pkg/instrumentation/**/semconv/` 中的适当文件
 2. 遵循 [OpenTelemetry 属性命名约定](https://opentelemetry.io/docs/specs/semconv/general/attribute-naming/)
 3. 包含适当的文档和示例
 
 示例结构：
 
 ```go
-// pkg/inst-api-semconv/instrumenter/http/http.go
-package http
+// pkg/instrumentation/nethttp/semconv/client.go
+package semconv
 
 const (
     // HTTPRequestMethod 表示 HTTP 请求方法
@@ -213,15 +213,17 @@ make test
 本项目中的语义约定定义位于：
 
 ```
-pkg/inst-api-semconv/
-├── instrumenter/
-│   ├── http/           # HTTP 语义约定
-│   │   ├── http.go
-│   │   └── ...
-│   ├── net/            # 网络语义约定
-│   │   ├── net.go
-│   │   └── ...
-│   └── utils/          # 工具函数
+pkg/instrumentation/
+├── nethttp/
+│   └── semconv/        # HTTP 语义约定
+│       ├── client.go
+│       ├── server.go
+│       ├── util.go
+│       └── ...
+├── grpc/
+│   └── semconv/        # gRPC 语义约定（未来）
+│       └── ...
+└── .../
 ```
 
 这些定义扩展或实现了官方 [OpenTelemetry 语义约定](https://github.com/open-telemetry/semantic-conventions)，用于编译时插桩。
@@ -232,14 +234,14 @@ pkg/inst-api-semconv/
 
 ### Pull Request 阶段
 
-当你修改 `pkg/inst-api-semconv/` 或 `.semconv-version` 中的文件时：
+当你修改 `pkg/instrumentation/**/semconv/` 或 `.semconv-version` 中的文件时：
 
 #### 任务 1：验证语义约定（阻塞性检查）
 
 此任务确保你的代码遵循正确的语义约定版本：
 
 1. **读取版本**：从 `.semconv-version` 文件读取版本
-2. **验证一致性**：检查 `pkg/inst-api-semconv/` 中的 Go 导入是否与 `.semconv-version` 中的版本匹配
+2. **验证一致性**：检查 `pkg/instrumentation/**/semconv/` 中的 Go 导入是否与 `.semconv-version` 中的版本匹配
 3. **注册表验证**：运行 `make registry-check` 验证注册表
    - **这是阻塞性检查** - 违规将导致 PR 失败
 
@@ -298,7 +300,7 @@ CI 使用 Makefile 中定义的 Make 目标：
 **更新步骤**：
 
 1. 查看"可用更新"差异
-2. 更新 Go 导入：`semconv/v1.30.0` → `semconv/v1.31.0`
+2. 更新 `pkg/instrumentation/**/semconv/` 中的 Go 导入：`semconv/v1.30.0` → `semconv/v1.31.0`
 3. 更新 `.semconv-version` 文件中的版本号
 4. 更新代码以处理任何破坏性更改
 5. 运行 `make registry-check` 验证新版本

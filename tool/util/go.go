@@ -4,6 +4,8 @@
 package util
 
 import (
+	"bufio"
+	"os"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -32,6 +34,14 @@ func IsCompileCommand(line string) bool {
 		return false
 	}
 	return true
+}
+
+// isCgoCommand checks if the line is a cgo tool invocation with -objdir and -importpath flags.
+func IsCgoCommand(line string) bool {
+	return strings.Contains(line, "cgo") &&
+		strings.Contains(line, "-objdir") &&
+		strings.Contains(line, "-importpath") &&
+		!strings.Contains(line, "-dynimport")
 }
 
 // FindFlagValue finds the value of a flag in the command line.
@@ -88,4 +98,13 @@ func SplitCompileCmds(input string) []string {
 
 func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
+}
+
+func NewFileScanner(file *os.File, size int) (*bufio.Scanner, error) {
+	if _, err := file.Seek(0, 0); err != nil {
+		return nil, ex.Wrapf(err, "failed to seek file")
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, size), size)
+	return scanner, nil
 }

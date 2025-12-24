@@ -3,10 +3,21 @@
 
 package main
 
+// #include <stdio.h>
+// #include <stdlib.h>
+//
+// static void myCprint(char* s) {
+//   printf("%s\n", s);
+//   fflush(stdout);
+// }
+import "C"
+
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"time"
+	"unsafe"
 
 	"golang.org/x/time/rate"
 )
@@ -54,12 +65,24 @@ func Example() {
 
 func Underscore(_ int, _ float32) {}
 
+func Ellipsis(p1 ...string) {}
+
+// FunctionA is the parent function that calls FunctionB.
+// It receives a context as the first parameter, which will be instrumented.
+func FunctionA(ctx context.Context) {
+	FunctionB(ctx)
+}
+
+// FunctionB is the child function called by FunctionA.
+// It receives a context as the first parameter, which will be instrumented.
+func FunctionB(ctx context.Context) {}
+
 func main() {
-	context := &traceContext{
+	ctx := &traceContext{
 		traceID: "123",
 		spanID:  "456",
 	}
-	runtime.SetTraceContextToGLS(context)
+	runtime.SetTraceContextToGLS(ctx)
 
 	go func() {
 		fmt.Printf("traceContext from parent goroutine: %s\n", runtime.GetTraceContextFromGLS())
@@ -78,4 +101,15 @@ func main() {
 
 	// Call real module function
 	println(rate.Every(time.Duration(1)))
+
+	// Support cgo
+	cs := C.CString("Hello from stdio")
+	C.myCprint(cs)
+	C.free(unsafe.Pointer(cs))
+
+	Ellipsis("a", "b")
+
+	Underscore(1, 2)
+
+	FunctionA(context.Background())
 }

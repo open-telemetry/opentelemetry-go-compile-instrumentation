@@ -1,7 +1,11 @@
 # Makefile for OpenTelemetry Demo Infrastructure
 # Provides convenient commands for managing the observability stack
 
-.PHONY: help start stop restart reload status logs clean build load-test urls health
+.PHONY: help start stop restart reload status logs clean build load-test urls health \
+        start-http stop-http build-http build-http-nocache clean-docker-cache \
+        verify-traces test-propagation debug-http rebuild-http package \
+        start-grpc stop-grpc build-grpc build-grpc-nocache rebuild-grpc \
+        quickstart-grpc dev-grpc verify-traces-grpc debug-grpc
 
 # Default target - show help
 .DEFAULT_GOAL := help
@@ -13,18 +17,42 @@ YELLOW := \033[0;33m
 RED := \033[0;31m
 NC := \033[0m # No Color
 
+# HTTP-only services (excludes gRPC which has known build issues)
+HTTP_SERVICES := prometheus jaeger otel-collector grafana http-server http-client
+
+# gRPC services list
+GRPC_SERVICES := prometheus jaeger otel-collector grafana grpc-server grpc-client
+
+# Path to main project Makefile
+PROJECT_ROOT := ../../..
+
 help: ## Show this help message
 	@echo "$(BLUE)OpenTelemetry Demo Infrastructure$(NC)"
 	@echo "$(BLUE)====================================$(NC)"
 	@echo ""
 	@echo "Available targets:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-15s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "Examples:"
-	@echo "  $(YELLOW)make start$(NC)          - Start all services"
-	@echo "  $(YELLOW)make logs$(NC)           - Follow all logs"
-	@echo "  $(YELLOW)make reload$(NC)         - Reload configurations"
-	@echo "  $(YELLOW)make load-test$(NC)      - Run load tests"
+	@echo "$(BLUE)Quick Start Examples:$(NC)"
+	@echo "  $(YELLOW)make quickstart-http$(NC)   - Start HTTP demo (recommended)"
+	@echo "  $(YELLOW)make dev-http$(NC)          - Development mode with logs"
+	@echo "  $(YELLOW)make rebuild-http$(NC)      - Force full rebuild"
+	@echo ""
+	@echo "$(BLUE)Development:$(NC)"
+	@echo "  $(YELLOW)make package$(NC)           - Repackage instrumentation code"
+	@echo "  $(YELLOW)make build-http$(NC)        - Build HTTP apps (auto-packages)"
+	@echo "  $(YELLOW)make rebuild-http$(NC)      - Full rebuild with cache purge"
+	@echo ""
+	@echo "$(BLUE)Debugging:$(NC)"
+	@echo "  $(YELLOW)make verify-traces$(NC)     - Check traces in Jaeger"
+	@echo "  $(YELLOW)make test-propagation$(NC)  - Test context propagation"
+	@echo "  $(YELLOW)make debug-http$(NC)        - Start with debug logging"
+	@echo ""
+	@echo "$(BLUE)Note:$(NC) All build targets auto-run 'make package' to include latest code changes."
+	@echo ""
+	@echo "$(BLUE)Documentation:$(NC)"
+	@echo "  See CONTEXT_PROPAGATION.md for trace linking documentation"
+	@echo "  See VERIFICATION.md for manual verification steps"
 
 start: ## Start all observability services
 	@echo "$(BLUE)Starting observability stack...$(NC)"
@@ -77,6 +105,9 @@ logs-grafana: ## Follow Grafana logs
 logs-grpc: ## Follow gRPC server and client logs
 	@docker-compose logs -f grpc-server grpc-client
 
+logs-http: ## Follow HTTP server and client logs
+	@docker-compose logs -f http-server http-client
+
 health: ## Check health of all services
 	@echo "$(BLUE)Health Check:$(NC)"
 	@echo ""
@@ -105,12 +136,17 @@ urls: ## Show URLs for all UIs
 	@echo "  $(GREEN)Services: APM$(NC)             http://localhost:3000/d/opentelemetry-apm"
 	@echo ""
 
-build: ## Rebuild demo applications
+package: ## Package instrumentation code (run after changing pkg/ files)
+	@echo "$(BLUE)Packaging instrumentation code...$(NC)"
+	@cd $(PROJECT_ROOT) && make package
+	@echo "$(GREEN)✓ Package complete$(NC)"
+
+build: package ## Rebuild demo applications (auto-packages instrumentation)
 	@echo "$(BLUE)Building demo applications...$(NC)"
 	@docker-compose build
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
-build-nocache: ## Rebuild demo applications without cache
+build-nocache: package ## Rebuild demo applications without cache (auto-packages)
 	@echo "$(BLUE)Building demo applications (no cache)...$(NC)"
 	@docker-compose build --no-cache
 	@echo "$(GREEN)✓ Build complete$(NC)"
@@ -243,3 +279,181 @@ quickstart: prereqs ports start health urls ## Complete setup: check prereqs, po
 dev: start logs ## Start services and follow logs (development mode)
 
 dev-rebuild: build-nocache start logs ## Rebuild without cache, start, and follow logs
+
+# =============================================================================
+# HTTP-Only Targets (for when gRPC demo has issues)
+# =============================================================================
+
+start-http: ## Start HTTP demo only (no gRPC)
+	@echo "$(BLUE)Starting HTTP demo stack...$(NC)"
+	@docker-compose up -d $(HTTP_SERVICES)
+	@echo "$(GREEN)✓ HTTP services started$(NC)"
+	@echo ""
+	@$(MAKE) urls
+
+stop-http: ## Stop HTTP demo services
+	@echo "$(BLUE)Stopping HTTP services...$(NC)"
+	@docker-compose stop http-server http-client
+	@echo "$(GREEN)✓ HTTP services stopped$(NC)"
+
+build-http: package ## Build only HTTP demo applications (auto-packages)
+	@echo "$(BLUE)Building HTTP demo applications...$(NC)"
+	@docker-compose build http-server http-client
+	@echo "$(GREEN)✓ HTTP build complete$(NC)"
+
+build-http-nocache: package ## Build HTTP apps without Docker cache (auto-packages)
+	@echo "$(BLUE)Building HTTP applications (no cache)...$(NC)"
+	@docker-compose build --no-cache http-server http-client
+	@echo "$(GREEN)✓ HTTP build complete$(NC)"
+
+rebuild-http: package clean-docker-cache ## Full rebuild: package, purge cache, rebuild HTTP apps
+	@echo "$(BLUE)Full HTTP rebuild...$(NC)"
+	@docker-compose build --no-cache http-server http-client
+	@echo "$(GREEN)✓ Full HTTP rebuild complete$(NC)"
+
+# =============================================================================
+# Docker Cache Management
+# =============================================================================
+
+clean-docker-cache: ## Purge Docker builder cache
+	@echo "$(BLUE)Purging Docker builder cache...$(NC)"
+	@docker builder prune -af
+	@echo "$(GREEN)✓ Docker cache purged$(NC)"
+
+clean-images: ## Remove demo Docker images
+	@echo "$(BLUE)Removing demo images...$(NC)"
+	@docker rmi docker-compose-http-server docker-compose-http-client 2>/dev/null || true
+	@docker rmi docker-compose-grpc-server docker-compose-grpc-client 2>/dev/null || true
+	@echo "$(GREEN)✓ Demo images removed$(NC)"
+
+clean-full: clean clean-images clean-docker-cache ## Full cleanup: containers, images, and cache
+	@echo "$(GREEN)✓ Full cleanup complete$(NC)"
+
+# =============================================================================
+# Trace Verification and Debugging
+# =============================================================================
+
+verify-traces: ## Verify traces are being collected in Jaeger
+	@echo "$(BLUE)Verifying trace collection...$(NC)"
+	@echo ""
+	@echo "$(YELLOW)HTTP Server traces:$(NC)"
+	@curl -s 'http://localhost:16686/api/traces?service=http-server&limit=3' 2>/dev/null | \
+		jq -r '.data[] | "  TraceID: \(.traceID) | Spans: \(.spans | length) | Op: \(.spans[0].operationName)"' 2>/dev/null || \
+		echo "$(RED)  ✗ Could not fetch traces (is Jaeger running?)$(NC)"
+	@echo ""
+	@echo "$(YELLOW)HTTP Client traces:$(NC)"
+	@curl -s 'http://localhost:16686/api/traces?service=http-client&limit=3' 2>/dev/null | \
+		jq -r '.data[] | "  TraceID: \(.traceID) | Spans: \(.spans | length) | Op: \(.spans[0].operationName)"' 2>/dev/null || \
+		echo "$(RED)  ✗ Could not fetch traces$(NC)"
+	@echo ""
+
+test-propagation: ## Test context propagation with a specific trace ID
+	@echo "$(BLUE)Testing trace context propagation...$(NC)"
+	@TRACE_ID=$$(openssl rand -hex 16); \
+	SPAN_ID=$$(openssl rand -hex 8); \
+	echo "$(YELLOW)Sending request with:$(NC)"; \
+	echo "  Trace ID: $$TRACE_ID"; \
+	echo "  Span ID:  $$SPAN_ID"; \
+	curl -s -H "Traceparent: 00-$$TRACE_ID-$$SPAN_ID-01" 'http://localhost:8080/greet?name=propagation-test' > /dev/null; \
+	sleep 3; \
+	echo ""; \
+	echo "$(YELLOW)Checking Jaeger for trace:$(NC)"; \
+	RESULT=$$(curl -s "http://localhost:16686/api/traces/$$TRACE_ID" 2>/dev/null | jq -r '.data[0].traceID // "NOT_FOUND"'); \
+	if [ "$$RESULT" = "$$TRACE_ID" ]; then \
+		echo "  $(GREEN)✓ Context propagation WORKING - trace found in Jaeger$(NC)"; \
+		curl -s "http://localhost:16686/api/traces/$$TRACE_ID" | jq -r '.data[0] | "  Services: \([.processes | to_entries[] | .value.serviceName] | unique | join(", "))\n  Span count: \(.spans | length)"'; \
+	else \
+		echo "  $(RED)✗ Context propagation NOT WORKING - trace not found$(NC)"; \
+		echo "  $(YELLOW)Note: Server created its own trace instead of using the provided one$(NC)"; \
+	fi
+
+debug-http: ## Start HTTP services with debug logging
+	@echo "$(BLUE)Starting HTTP services with DEBUG logging...$(NC)"
+	@docker-compose stop http-server http-client 2>/dev/null || true
+	@OTEL_LOG_LEVEL=debug docker-compose up -d http-server http-client
+	@echo "$(GREEN)✓ HTTP services started with debug logging$(NC)"
+	@echo "$(YELLOW)View logs with: make logs-http$(NC)"
+
+# =============================================================================
+# Quick Development Workflow
+# =============================================================================
+
+dev-http: start-http logs-http ## Start HTTP demo and follow logs
+
+dev-http-rebuild: rebuild-http start-http logs-http ## Full rebuild and start HTTP demo with logs
+
+quickstart-http: prereqs ports start-http health urls ## HTTP-only quickstart
+	@echo ""
+	@echo "$(GREEN)✓ HTTP observability stack is ready!$(NC)"
+	@echo "$(YELLOW)Note: gRPC demo excluded due to known build issues$(NC)"
+	@echo ""
+
+# =============================================================================
+# gRPC Targets (for testing gRPC instrumentation)
+# =============================================================================
+
+start-grpc: ## Start gRPC demo stack
+	@echo "$(BLUE)Starting gRPC demo stack...$(NC)"
+	@docker-compose up -d $(GRPC_SERVICES)
+	@echo "$(GREEN)✓ gRPC services started$(NC)"
+	@echo ""
+	@$(MAKE) urls
+
+stop-grpc: ## Stop gRPC demo services
+	@echo "$(BLUE)Stopping gRPC services...$(NC)"
+	@docker-compose stop grpc-server grpc-client
+	@echo "$(GREEN)✓ gRPC services stopped$(NC)"
+
+build-grpc: package ## Build only gRPC demo applications (auto-packages)
+	@echo "$(BLUE)Building gRPC demo applications...$(NC)"
+	@docker-compose build grpc-server grpc-client
+	@echo "$(GREEN)✓ gRPC build complete$(NC)"
+
+build-grpc-nocache: package ## Build gRPC apps without Docker cache (auto-packages)
+	@echo "$(BLUE)Building gRPC applications (no cache)...$(NC)"
+	@docker-compose build --no-cache grpc-server grpc-client
+	@echo "$(GREEN)✓ gRPC build complete$(NC)"
+
+rebuild-grpc: package clean-docker-cache ## Full rebuild: package, purge cache, rebuild gRPC apps
+	@echo "$(BLUE)Full gRPC rebuild...$(NC)"
+	@docker-compose build --no-cache grpc-server grpc-client
+	@echo "$(GREEN)✓ Full gRPC rebuild complete$(NC)"
+
+verify-traces-grpc: ## Verify gRPC traces are being collected in Jaeger
+	@echo "$(BLUE)Verifying gRPC trace collection...$(NC)"
+	@echo ""
+	@echo "$(YELLOW)gRPC Server traces:$(NC)"
+	@curl -s 'http://localhost:16686/api/traces?service=grpc-server&limit=3' 2>/dev/null | \
+		jq -r '.data[] | "  TraceID: \(.traceID) | Spans: \(.spans | length) | Op: \(.spans[0].operationName)"' 2>/dev/null || \
+		echo "$(RED)  ✗ Could not fetch traces (is Jaeger running?)$(NC)"
+	@echo ""
+	@echo "$(YELLOW)gRPC Client traces:$(NC)"
+	@curl -s 'http://localhost:16686/api/traces?service=grpc-client&limit=3' 2>/dev/null | \
+		jq -r '.data[] | "  TraceID: \(.traceID) | Spans: \(.spans | length) | Op: \(.spans[0].operationName)"' 2>/dev/null || \
+		echo "$(RED)  ✗ Could not fetch traces$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Verifying context propagation (traces with both services):$(NC)"
+	@curl -s 'http://localhost:16686/api/traces?service=grpc-server&limit=5' 2>/dev/null | \
+		jq -r '.data[] | select(.processes | to_entries | map(.value.serviceName) | unique | length > 1) | "  TraceID: \(.traceID) | Services: \([.processes | to_entries[] | .value.serviceName] | unique | join(", "))"' 2>/dev/null || \
+		echo "$(RED)  ✗ No traces found with both client and server$(NC)"
+	@echo ""
+
+debug-grpc: ## Start gRPC services with debug logging
+	@echo "$(BLUE)Starting gRPC services with DEBUG logging...$(NC)"
+	@docker-compose stop grpc-server grpc-client 2>/dev/null || true
+	@OTEL_LOG_LEVEL=debug docker-compose up -d grpc-server grpc-client
+	@echo "$(GREEN)✓ gRPC services started with debug logging$(NC)"
+	@echo "$(YELLOW)View logs with: make logs-grpc$(NC)"
+
+dev-grpc: start-grpc logs-grpc ## Start gRPC demo and follow logs
+
+dev-grpc-rebuild: rebuild-grpc start-grpc logs-grpc ## Full rebuild and start gRPC demo with logs
+
+quickstart-grpc: prereqs ports build-grpc start-grpc health urls ## gRPC quickstart with full build
+	@echo ""
+	@echo "$(GREEN)✓ gRPC observability stack is ready!$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Access gRPC services:$(NC)"
+	@echo "  Server: grpc://localhost:50051"
+	@echo "  Jaeger UI: http://localhost:16686"
+	@echo ""
