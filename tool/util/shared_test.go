@@ -85,14 +85,8 @@ func TestBackupAndRestoreFile(t *testing.T) {
 	err = os.WriteFile(fn, []byte("some content"), 0o644)
 	require.NoError(t, err)
 
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-
-	err = os.Chdir(dir)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = os.Chdir(cwd)
-	})
+	// Change working directory to temp dir
+	t.Chdir(dir)
 
 	// backup
 	err = BackupFile([]string{"file1.txt"})

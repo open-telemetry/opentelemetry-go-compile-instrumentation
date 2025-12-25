@@ -41,14 +41,14 @@ func TestUnwrap(t *testing.T) {
 	w1 := Wrap(baseErr)
 	w2 := Wrap(w1)
 
-	assert.True(t, errors.Is(w2, baseErr))
+	assert.ErrorIs(t, w2, baseErr)
 }
 
 func TestStackTracePresent(t *testing.T) {
 	err := New("root cause")
 
 	var se *stackfulError
-	require.True(t, errors.As(err, &se))
+	require.ErrorAs(t, err, &se)
 	require.NotEmpty(t, se.frame)
 
 	pattern := regexp.MustCompile(`^\[[0-9]+].+:[0-9]+ .*`)
