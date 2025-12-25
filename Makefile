@@ -359,7 +359,7 @@ gotestfmt: ## Install gotestfmt if not present
 golangci-lint: ## Install golangci-lint if not present
 	@if ! command -v golangci-lint >/dev/null 2>&1; then \
 		echo "Installing golangci-lint..."; \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
 	fi
 
 actionlint: ## Install actionlint if not present
@@ -389,7 +389,7 @@ embedmd: ## Install embedmd if not present
 checkmake: ## Install checkmake if not present
 	@if ! command -v checkmake >/dev/null 2>&1; then \
 		echo "Installing checkmake..."; \
-		go install github.com/checkmake/checkmake/cmd/checkmake@latest; \
+		go install github.com/mrtazz/checkmake/cmd/checkmake@latest; \
 	fi
 
 go-protobuf-plugins: ## Install Go protobuf plugins if not present

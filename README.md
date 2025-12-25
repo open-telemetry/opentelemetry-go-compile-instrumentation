@@ -61,6 +61,7 @@ make test
 - [Implementation Details](./docs/implementation.md) - Technical architecture
 - [API Design](./docs/api-design-and-project-structure.md) - API structure
 - [Semantic Conventions](./docs/semantic-conventions.md) - Managing semantic conventions
+- [Instrumentation Guide](./docs/instrument-guide.md) - Add instrumentation hook for new libraries
 
 ### Video Talks
 

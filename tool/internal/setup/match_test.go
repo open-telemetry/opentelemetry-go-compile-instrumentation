@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -295,4 +296,12 @@ func validateCreatedRule(t *testing.T, createdRule rule.InstRule, ruleName strin
 			t.Errorf("rule version = %v, want %v", createdRule.GetVersion(), version)
 		}
 	}
+}
+
+func TestMaterializeRules(t *testing.T) {
+	rules, err := materializeRules()
+	if err != nil {
+		t.Fatalf("failed to materialize rules: %v", err)
+	}
+	require.NotEmpty(t, rules)
 }
