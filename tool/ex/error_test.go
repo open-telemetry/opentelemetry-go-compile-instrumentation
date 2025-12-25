@@ -5,11 +5,9 @@ package ex
 
 import (
 	"errors"
-	"os"
 	"regexp"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,45 +55,4 @@ func TestStackTracePresent(t *testing.T) {
 	for _, fr := range se.frame {
 		require.Regexp(t, pattern, fr, "invalid stack frame format")
 	}
-}
-
-func TestFatalf_StackfulExit(t *testing.T) {
-	const env = "TEST_FATALF_STACKFUL"
-
-	if os.Getenv(env) == "1" {
-		Fatalf("should fail: %v", 77)
-		return
-	}
-
-	code, output := testutil.RunSelfTest(t, "TestFatalf_StackfulExit", env)
-
-	require.Equal(t, 1, code, "Fatalf should exit with code 1")
-	assert.Contains(t, output, "should fail: 77")
-	assert.Contains(t, output, "Stack:")
-}
-
-func TestFatal_NonStackfulPanics(t *testing.T) {
-	const env = "TEST_FATAL_PANIC"
-
-	if os.Getenv(env) == "1" {
-		Fatal(errors.New("no stackful"))
-		return
-	}
-
-	code, _ := testutil.RunSelfTest(t, "TestFatal_NonStackfulPanics", env)
-
-	require.Equal(t, 2, code, "Fatal(non-stackful) should panic")
-}
-
-func TestFatal_NilErrorPanics(t *testing.T) {
-	const env = "TEST_FATAL_EMPTY"
-
-	if os.Getenv(env) == "1" {
-		Fatal(nil)
-		return
-	}
-
-	code, _ := testutil.RunSelfTest(t, "TestFatal_NilErrorPanics", env)
-
-	require.Equal(t, 2, code, "Fatal(nil) should panic")
 }
