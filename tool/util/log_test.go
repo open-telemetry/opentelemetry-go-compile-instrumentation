@@ -12,6 +12,7 @@ import (
 )
 
 func TestLoggerFromContext_Default(t *testing.T) {
+	//nolint:usetesting // explicitly testing behaviour with context.Background()
 	ctx := context.Background()
 
 	logger := LoggerFromContext(ctx)
@@ -20,6 +21,7 @@ func TestLoggerFromContext_Default(t *testing.T) {
 }
 
 func TestContextWithLogger_RoundTrip(t *testing.T) {
+	//nolint:usetesting // explicitly testing behaviour with context.Background()
 	ctx := context.Background()
 	customLogger := slog.New(slog.NewTextHandler(nil, nil))
 
@@ -30,6 +32,7 @@ func TestContextWithLogger_RoundTrip(t *testing.T) {
 }
 
 func TestLoggerFromContext_IgnoresWrongType(t *testing.T) {
+	//nolint:usetesting // explicitly testing behaviour with context.Background()
 	ctx := context.WithValue(context.Background(), contextKeyLogger{}, "not a logger")
 
 	logger := LoggerFromContext(ctx)
