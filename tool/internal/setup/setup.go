@@ -28,7 +28,8 @@ func (sp *SetupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args
 // keepForDebug copies the file to the build temp directory for debugging
 // Error is tolerated as it's not critical.
 func (sp *SetupPhase) keepForDebug(name string) {
-	dstFile := filepath.Join(util.GetBuildTemp("debug"), "main", name)
+	base := filepath.Base(name)
+	dstFile := filepath.Join(util.GetBuildTemp("debug"), "main", base)
 	err := util.CopyFile(name, dstFile)
 	if err != nil {
 		sp.Warn("failed to record added file", "file", name, "error", err)
