@@ -116,6 +116,11 @@ func makeRequest(ctx context.Context, client *http.Client, requestMethod, target
 }
 
 func main() {
+	defer func() {
+		// Wait for OpenTelemetry SDK to flush spans before exit
+		time.Sleep(2 * time.Second)
+	}()
+
 	flag.Parse()
 
 	// Initialize logger with appropriate level

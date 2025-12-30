@@ -162,7 +162,10 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func shutdownHandler(w http.ResponseWriter, _ *http.Request) {
-	os.Exit(0)
+	go func() {
+		time.Sleep(time.Second) // Give time for spans to be exported
+		os.Exit(0)
+	}()
 }
 
 func main() {
