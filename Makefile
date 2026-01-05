@@ -4,7 +4,7 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
-.PHONY: all test test-unit test-integration test-e2e format lint build build/pkg install package clean \
+.PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
@@ -15,6 +15,7 @@ SHELL := /bin/bash
 
 # Constant variables
 BINARY_NAME := otel
+PLATFORMS := darwin/amd64 linux/amd64 windows/amd64 darwin/arm64 linux/arm64
 TOOL_DIR := tool/cmd
 INST_PKG_GZIP = otel-pkg.gz
 INST_PKG_TMP = pkg_temp
@@ -26,6 +27,8 @@ GOOS ?= $(shell go env GOOS)
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
+LDFLAGS := -X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)
+GO_BUILD_CMD := go build -trimpath -a -ldflags "$(LDFLAGS)"
 EXT :=
 ifeq ($(GOOS),windows)
 	EXT = .exe
@@ -60,8 +63,23 @@ build: build/pkg package ## Build the instrumentation tool
 	@echo "Building instrumentation tool..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
-	@go build -a -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" -o $(BINARY_NAME)$(EXT) ./$(TOOL_DIR)
+	@$(GO_BUILD_CMD) -o $(BINARY_NAME)$(EXT) ./$(TOOL_DIR)
 	@./$(BINARY_NAME)$(EXT) version
+
+build-all: build/pkg package ## Build the instrumentation tool for all platforms
+	@echo "Building instrumentation tool for all platforms..."
+	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
+	@go mod tidy
+	@mkdir -p dist
+	@for platform in $(PLATFORMS); do \
+		GOOS=$${platform%/*}; \
+		GOARCH=$${platform#*/}; \
+		echo "Building for $$GOOS/$$GOARCH..."; \
+		EXT=""; \
+		if [ "$$GOOS" = "windows" ]; then EXT=".exe"; fi; \
+		env GOOS=$$GOOS GOARCH=$$GOARCH $(GO_BUILD_CMD) -o dist/$(BINARY_NAME)-$$GOOS-$$GOARCH$$EXT ./$(TOOL_DIR); \
+	done
+	@echo "All builds completed. Artifacts in dist/"
 
 install: package ## Install otel to $$GOPATH/bin (auto-packages instrumentation)
 	@echo "Installing otel..."
@@ -339,6 +357,7 @@ test-e2e/coverage: build gotestfmt
 
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
+	rm -rf dist
 	rm -f $(BINARY_NAME)$(EXT)
 	rm -f demo/basic/basic
 	rm -f demo/grpc/server/server
