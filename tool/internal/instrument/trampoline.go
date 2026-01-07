@@ -225,7 +225,7 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 // baseTypeName returns the unqualified type name, stripping pointers and package prefixes.
 // This is needed because trampolines use pointer types (*string) while hooks use value types (string),
 // and hooks may use package-qualified types (inst.HookContext) while trampolines use local types (HookContext).
-// Examples: *int → int, pkg.Type → Type, *pkg.Type → Type, interface{} → interface{}
+// Examples: *int → int, pkg.Type → Type, *pkg.Type → Type, interface{} → interface{}, []int → int, ...string → string
 func baseTypeName(expr dst.Expr) string {
 	switch t := expr.(type) {
 	case *dst.Ident:
@@ -234,6 +234,10 @@ func baseTypeName(expr dst.Expr) string {
 		return baseTypeName(t.X)
 	case *dst.SelectorExpr:
 		return t.Sel.Name
+	case *dst.ArrayType:
+		return baseTypeName(t.Elt)
+	case *dst.Ellipsis:
+		return baseTypeName(t.Elt)
 	case *dst.InterfaceType:
 		return trampolineInterfaceType
 	default:

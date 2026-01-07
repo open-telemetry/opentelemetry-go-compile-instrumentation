@@ -48,6 +48,41 @@ func TestBaseTypeName(t *testing.T) {
 			typeSrc:  "interface{}",
 			expected: "interface{}",
 		},
+		{
+			name:     "array type",
+			typeSrc:  "[]int",
+			expected: "int",
+		},
+		{
+			name:     "nested array type",
+			typeSrc:  "[][]string",
+			expected: "string",
+		},
+		{
+			name:     "array of pointer type",
+			typeSrc:  "[]*int",
+			expected: "int",
+		},
+		{
+			name:     "array of package qualified type",
+			typeSrc:  "[]pkg.Type",
+			expected: "Type",
+		},
+		{
+			name:     "ellipsis type",
+			typeSrc:  "...int",
+			expected: "int",
+		},
+		{
+			name:     "ellipsis of pointer type",
+			typeSrc:  "...*string",
+			expected: "string",
+		},
+		{
+			name:     "ellipsis of package qualified type",
+			typeSrc:  "...pkg.Type",
+			expected: "Type",
+		},
 	}
 
 	for _, tt := range tests {
