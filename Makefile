@@ -110,14 +110,14 @@ build-demo: build-demo-grpc build-demo-http
 build-demo-grpc: go-protobuf-plugins ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
 	@rm -f demo/grpc/server/otel.runtime.go demo/grpc/client/otel.runtime.go
-	@(cd demo/grpc/server && go generate && go build -o server .)
-	@(cd demo/grpc/client && go build -o client .)
+	@(cd demo/grpc/server && go generate && go build -a -o server .)
+	@(cd demo/grpc/client && go build -a -o client .)
 
 build-demo-http: ## Build HTTP demo server and client
 	@echo "Building HTTP demo..."
 	@rm -f demo/http/server/otel.runtime.go demo/http/client/otel.runtime.go
-	@(cd demo/http/server && go build -o server .)
-	@(cd demo/http/client && go build -o client .)
+	@(cd demo/http/server && go build -a -o server .)
+	@(cd demo/http/client && go build -a -o client .)
 
 ##@ Code Quality
 
