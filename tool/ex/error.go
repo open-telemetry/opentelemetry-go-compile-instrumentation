@@ -141,7 +141,8 @@ func Fatalf(format string, args ...any) {
 
 func Fatal(err error) {
 	if err == nil {
-		panic("Fatal error: unknown")
+		fmt.Fprintln(os.Stderr, "Fatal error: unknown")
+		os.Exit(1)
 	}
 	e := &stackfulError{}
 	if errors.As(err, &e) {
@@ -153,7 +154,6 @@ func Fatal(err error) {
 		em += emSb149.String()
 		_, _ = fmt.Fprintf(os.Stderr, "Error:\n%s\nStack:\n%s\n",
 			em, strings.Join(e.frame, "\n"))
-		os.Exit(1)
 	}
-	panic(err)
+	os.Exit(1)
 }
