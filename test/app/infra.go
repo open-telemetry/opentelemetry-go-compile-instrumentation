@@ -34,6 +34,7 @@ func newCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	args = args[1:]
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Dir = dir
+	cmd.Env = os.Environ()
 	return cmd
 }
 

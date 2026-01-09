@@ -34,6 +34,7 @@ const (
 	trampolineAfterName             = "OtelAfterTrampoline"
 	trampolineHookContextName       = "hookContext"
 	trampolineHookContextType       = "HookContext"
+	trampolineInterfaceType         = "interface{}"
 	trampolineSkipName              = "skip"
 	trampolineSetParamName          = "SetParam"
 	trampolineGetParamName          = "GetParam"
@@ -221,32 +222,59 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 	return target, nil
 }
 
-func countParameters(fields *dst.FieldList) int {
-	count := 0
-	for _, field := range fields.List {
-		for range field.Names {
-			count++
-		}
+// baseTypeName returns the unqualified type name, stripping pointers and package prefixes.
+// This is needed because trampolines use pointer types (*string) while hooks use value types (string),
+// and hooks may use package-qualified types (inst.HookContext) while trampolines use local types (HookContext).
+// Examples: *int → int, pkg.Type → Type, *pkg.Type → Type, interface{} → interface{}, []int → int, ...string → string
+func baseTypeName(expr dst.Expr) string {
+	switch t := expr.(type) {
+	case *dst.Ident:
+		return t.Name
+	case *dst.StarExpr:
+		return baseTypeName(t.X)
+	case *dst.SelectorExpr:
+		return t.Sel.Name
+	case *dst.ArrayType:
+		return baseTypeName(t.Elt)
+	case *dst.Ellipsis:
+		return baseTypeName(t.Elt)
+	case *dst.InterfaceType:
+		return trampolineInterfaceType
+	default:
+		return ""
 	}
-	return count
 }
 
 // checkHookDecl checks if the hook function declaration is correct, i.e. if they
-// have correct signature
+// have correct signature (parameter count and types)
 func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) error {
 	// TargetFunc:  func A(a int, b string) (ret string)
 	// BeforeTramp: func B(a *int, b *string) (ctx *HookContext, skip bool)
 	// BeforeHook:  func C(ctx *HookContext, a int, b string)
 	if before {
-		beforeTramp := ip.beforeTrampFunc
-		beforeHook := hookFunc
-		beforeTrampParams := ast.SplitMultiNameFields(beforeTramp.Type.Params)
-		beforeHookParams := ast.SplitMultiNameFields(beforeHook.Type.Params)
-		beforeTrampParamsCount := countParameters(beforeTrampParams)
-		beforeHookParamsCount := countParameters(beforeHookParams)
-		if (beforeTrampParamsCount + 1) != beforeHookParamsCount {
-			return ex.Newf("hook func signature mismatch, expected %d, got %d",
-				beforeTrampParamsCount+1, beforeHookParamsCount)
+		beforeTrampParams := ast.SplitMultiNameFields(ip.beforeTrampFunc.Type.Params)
+		beforeHookParams := ast.SplitMultiNameFields(hookFunc.Type.Params)
+
+		if len(beforeHookParams.List) != len(beforeTrampParams.List)+1 {
+			return ex.Newf("hook func signature mismatch, expected %d params, got %d",
+				len(beforeTrampParams.List)+1, len(beforeHookParams.List))
+		}
+
+		// First param must be HookContext
+		if baseTypeName(beforeHookParams.List[0].Type) != trampolineHookContextType {
+			return ex.Newf("hook func first param must be %s, got %s",
+				trampolineHookContextType, baseTypeName(beforeHookParams.List[0].Type))
+		}
+
+		// Remaining params must match dereferenced trampoline params
+		// (interface{} in hook accepts any type, used for generics)
+		for i, trampField := range beforeTrampParams.List {
+			trampBase := baseTypeName(trampField.Type)
+			hookBase := baseTypeName(beforeHookParams.List[i+1].Type)
+			if hookBase != trampolineInterfaceType && trampBase != hookBase {
+				return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
+					i+1, trampBase, hookBase)
+			}
 		}
 		return nil
 	}
@@ -254,15 +282,23 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	// TargetFunc:  func A(a int, b string) (ret string)
 	// AfterTramp:  func B(ctx *HookContext, ret *string)
 	// AfterHook:   func C(ctx *HookContext, ret string)
-	afterTramp := ip.afterTrampFunc
-	afterHook := hookFunc
-	afterTrampParams := ast.SplitMultiNameFields(afterTramp.Type.Params)
-	afterHookParams := ast.SplitMultiNameFields(afterHook.Type.Params)
-	afterTrampParamsCount := countParameters(afterTrampParams)
-	afterHookParamsCount := countParameters(afterHookParams)
-	if afterTrampParamsCount != afterHookParamsCount {
-		return ex.Newf("hook func signature mismatch, expected %d, got %d",
-			afterTrampParamsCount, afterHookParamsCount)
+	afterTrampParams := ast.SplitMultiNameFields(ip.afterTrampFunc.Type.Params)
+	afterHookParams := ast.SplitMultiNameFields(hookFunc.Type.Params)
+
+	if len(afterHookParams.List) != len(afterTrampParams.List) {
+		return ex.Newf("hook func signature mismatch, expected %d params, got %d",
+			len(afterTrampParams.List), len(afterHookParams.List))
+	}
+
+	// All params must match (first is HookContext, rest are dereferenced)
+	// (interface{} in hook accepts any type, used for generics)
+	for i, trampField := range afterTrampParams.List {
+		trampBase := baseTypeName(trampField.Type)
+		hookBase := baseTypeName(afterHookParams.List[i].Type)
+		if hookBase != trampolineInterfaceType && trampBase != hookBase {
+			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
+				i, trampBase, hookBase)
+		}
 	}
 	return nil
 }

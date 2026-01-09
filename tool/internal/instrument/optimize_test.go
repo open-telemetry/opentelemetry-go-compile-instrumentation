@@ -20,10 +20,13 @@ func parseFunc(t *testing.T, source string) *dst.FuncDecl {
 	parser := ast.NewAstParser()
 	file, err := parser.ParseSource(source)
 	require.NoError(t, err)
-	require.Len(t, file.Decls, 1)
-	funcDecl, ok := file.Decls[0].(*dst.FuncDecl)
-	require.True(t, ok)
-	return funcDecl
+	for _, decl := range file.Decls {
+		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
+			return funcDecl
+		}
+	}
+	require.Fail(t, "no function declaration found in source")
+	return nil
 }
 
 // Helper function to parse Go snippet into statements

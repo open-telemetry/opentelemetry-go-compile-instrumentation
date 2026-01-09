@@ -110,14 +110,14 @@ build-demo: build-demo-grpc build-demo-http
 build-demo-grpc: go-protobuf-plugins ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
 	@rm -f demo/grpc/server/otel.runtime.go demo/grpc/client/otel.runtime.go
-	@(cd demo/grpc/server && go generate && go build -o server .)
-	@(cd demo/grpc/client && go build -o client .)
+	@(cd demo/grpc/server && go generate && go build -a -o server .)
+	@(cd demo/grpc/client && go build -a -o client .)
 
 build-demo-http: ## Build HTTP demo server and client
 	@echo "Building HTTP demo..."
 	@rm -f demo/http/server/otel.runtime.go demo/http/client/otel.runtime.go
-	@(cd demo/http/server && go build -o server .)
-	@(cd demo/http/client && go build -o client .)
+	@(cd demo/http/server && go build -a -o server .)
+	@(cd demo/http/client && go build -a -o client .)
 
 ##@ Code Quality
 
@@ -330,28 +330,28 @@ test-integration: go-protobuf-plugins ## Run integration tests
 test-integration: build build-demo gotestfmt
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... 2>&1 | tee ./gotest-integration.log | gotestfmt
+	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log | gotestfmt
 
 .ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo gotestfmt
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./test/integration/... -coverprofile=coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log | gotestfmt
+	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ../gotest-integration.log | gotestfmt
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
 test-e2e: build build-demo gotestfmt
 	@echo "Running e2e tests..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... 2>&1 | tee ./gotest-e2e.log | gotestfmt
+	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ../gotest-e2e.log | gotestfmt
 
 .ONESHELL:
 test-e2e/coverage: ## Run e2e tests with coverage report
-test-e2e/coverage: build gotestfmt
+test-e2e/coverage: build build-demo gotestfmt
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./test/e2e/... -coverprofile=coverage-e2e.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log | gotestfmt
+	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ../gotest-e2e.log | gotestfmt
 
 ##@ Utilities
 

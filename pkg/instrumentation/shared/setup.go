@@ -23,7 +23,7 @@ import (
 
 const (
 	// Default export intervals and batch sizes
-	defaultTraceBatchTimeout = 5 * time.Second
+	defaultTraceBatchTimeout = time.Second
 	defaultTraceBatchSize    = 512
 )
 

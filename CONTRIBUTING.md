@@ -308,6 +308,14 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 [^2]: Trivial changes include: typo corrections, cosmetic non-substantive
   changes, documentation corrections or updates, dependency updates, etc.
 
+## Release Process
+
+The release process is automated using GitHub Actions. To create a new release:
+
+1. Push a new tag with the version number (e.g., `v0.1.0`).
+2. The [Release workflow](.github/workflows/release.yml) will automatically trigger, build the binaries, and create a draft release on GitHub.
+3. Maintainers should review the draft release, edit the release notes if necessary, and publish it.
+
 ## Approvers and Maintainers
 
 ### Maintainers
