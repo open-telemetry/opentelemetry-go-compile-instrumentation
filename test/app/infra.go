@@ -54,6 +54,14 @@ func Build(t *testing.T, appDir string, args ...string) {
 	require.NoError(t, err, string(out))
 }
 
+// BuildPlain builds the application WITHOUT instrumentation (regular go build).
+// Useful for testing client/server instrumentation in isolation.
+func BuildPlain(t *testing.T, appDir string) {
+	cmd := newCmd(t.Context(), appDir, "go", "build", "-a")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+}
+
 // Run runs the application and returns the output.
 // It waits for the application to complete.
 func Run(t *testing.T, dir string, args ...string) string {
