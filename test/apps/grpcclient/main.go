@@ -26,11 +26,6 @@ var (
 )
 
 func main() {
-	defer func() {
-		// Wait for OpenTelemetry SDK to flush spans before exit
-		time.Sleep(2 * time.Second)
-	}()
-
 	flag.Parse()
 
 	conn, err := grpc.NewClient(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))

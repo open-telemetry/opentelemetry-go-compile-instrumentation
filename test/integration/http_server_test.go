@@ -26,8 +26,8 @@ func TestHTTPServerInstrumentation(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+	time.Sleep(100 * time.Millisecond)
 
-	time.Sleep(2 * time.Second) // Wait for OpenTelemetry SDK to flush spans before exit
 	span := f.RequireSingleSpan()
 	app.RequireHTTPServerSemconv(t, span, "GET", "/hello", "http", 200)
 }

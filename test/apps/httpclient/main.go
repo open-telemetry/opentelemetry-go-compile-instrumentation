@@ -12,7 +12,6 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"time"
 )
 
 var (
@@ -21,11 +20,6 @@ var (
 )
 
 func main() {
-	defer func() {
-		// Wait for OpenTelemetry SDK to flush spans before exit
-		time.Sleep(2 * time.Second)
-	}()
-
 	flag.Parse()
 
 	url := fmt.Sprintf("%s/hello?name=%s", *addr, *name)

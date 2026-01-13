@@ -23,7 +23,7 @@ func TestGRPCServerInstrumentation(t *testing.T) {
 
 	f.BuildApp("grpcserver")
 	f.StartApp("grpcserver")
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 
 	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -33,7 +33,7 @@ func TestGRPCServerInstrumentation(t *testing.T) {
 	resp, err := client.SayHello(t.Context(), &pb.HelloRequest{Name: "TestUser"})
 	require.NoError(t, err)
 	require.Contains(t, resp.GetMessage(), "TestUser")
-	time.Sleep(2 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	span := f.RequireSingleSpan()
 	app.RequireGRPCServerSemconv(t, span)
@@ -44,7 +44,7 @@ func TestGRPCServerStreaming(t *testing.T) {
 
 	f.BuildApp("grpcserver")
 	f.StartApp("grpcserver")
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 
 	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestGRPCServerStreaming(t *testing.T) {
 		responseCount++
 	}
 	require.Equal(t, 3, responseCount, "Should receive 3 responses")
-	time.Sleep(2 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	span := f.RequireSingleSpan()
 	app.RequireGRPCServerSemconv(t, span)

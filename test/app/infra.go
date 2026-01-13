@@ -66,6 +66,9 @@ func Build(t *testing.T, appDir string, args ...string) {
 	cmd := newCmd(t.Context(), appDir, args...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
+	t.Cleanup(func() {
+		os.Remove(filepath.Join(appDir, outputName))
+	})
 }
 
 // Run runs the application and returns the output.

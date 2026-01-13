@@ -16,7 +16,6 @@ import (
 type E2EFixture struct {
 	t         *testing.T
 	collector *Collector
-	demoDir   string
 	appsDir   string // Directory for self-contained test apps (test/apps/)
 
 	ServiceName   string
@@ -52,7 +51,6 @@ func NewE2EFixture(t *testing.T, opts ...E2EFixtureOption) *E2EFixture {
 
 	pwd, err := os.Getwd()
 	require.NoError(t, err)
-	f.demoDir = filepath.Join(pwd, "..", "..", "demo")
 	f.appsDir = filepath.Join(pwd, "..", "apps")
 
 	// Start collector unless skipped
@@ -64,6 +62,7 @@ func NewE2EFixture(t *testing.T, opts ...E2EFixtureOption) *E2EFixture {
 		t.Setenv("OTEL_TRACES_EXPORTER", "otlp")
 		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", f.collector.URL)
 		t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+		t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "true")
 	}
 
 	return f
@@ -79,23 +78,10 @@ func (f *E2EFixture) CollectorURL() string {
 	return f.collector.URL
 }
 
-// // resolvePath converts a relative app path like "http/server" to full path.
-// // Deprecated: Use resolveAppPath for test/apps.
-// func (f *E2EFixture) resolvePath(appPath string) string {
-// 	return filepath.Join(f.demoDir, appPath)
-// }
-
 // resolveAppPath converts an app name like "httpserver" to full path in test/apps/.
 func (f *E2EFixture) resolveAppPath(appName string) string {
 	return filepath.Join(f.appsDir, appName)
 }
-
-// // Build builds an application with the instrumentation tool.
-// // appPath is relative to the demo directory, e.g., "http/server".
-// // Deprecated: Use BuildApp for test/apps.
-// func (f *E2EFixture) Build(appPath string) {
-// 	Build(f.t, f.resolvePath(appPath), "go", "build", "-a")
-// }
 
 // BuildApp builds a test application from test/apps/ with the instrumentation tool.
 // appName is the directory name in test/apps/, e.g., "httpserver".
@@ -103,34 +89,11 @@ func (f *E2EFixture) BuildApp(appName string) {
 	Build(f.t, f.resolveAppPath(appName), "go", "build", "-a")
 }
 
-// // BuildPlain builds an application WITHOUT instrumentation (regular go build).
-// // Useful for testing client/server in isolation.
-// func (f *E2EFixture) BuildPlain(appPath string) {
-// 	BuildPlain(f.t, f.resolvePath(appPath))
-// }
-
 // Server represents a running server process.
 type Server struct {
 	t       *testing.T
 	appPath string
 }
-
-// // StartServer starts a server application and waits for it to be ready.
-// // appPath is relative to the demo directory, e.g., "http/server".
-// // It returns a Server that can be stopped to get the output.
-// // Deprecated: Use StartApp for test/apps.
-// func (f *E2EFixture) StartServer(appPath string, args ...string) *Server {
-// 	fullPath := f.resolvePath(appPath)
-// 	cmd, output := Start(f.t, fullPath, args...)
-// 	stopFn, err := WaitForServerReady(f.t, cmd, output)
-// 	require.NoError(f.t, err)
-
-// 	return &Server{
-// 		t:       f.t,
-// 		stopFn:  stopFn,
-// 		appPath: appPath,
-// 	}
-// }
 
 // StartApp starts a test application from test/apps/ and waits for it to be ready.
 // appName is the directory name in test/apps/, e.g., "httpserver".
@@ -144,14 +107,6 @@ func (f *E2EFixture) StartApp(appName string, args ...string) *Server {
 		appPath: appName,
 	}
 }
-
-// // RunClient runs a client application and waits for it to complete.
-// // appPath is relative to the demo directory, e.g., "http/client".
-// // Returns the application output.
-// // Deprecated: Use RunApp for test/apps.
-// func (f *E2EFixture) RunClient(appPath string, args ...string) string {
-// 	return Run(f.t, f.resolvePath(appPath), args...)
-// }
 
 // RunApp runs a test application from test/apps/ and waits for it to complete.
 // appName is the directory name in test/apps/, e.g., "httpclient".

@@ -45,7 +45,6 @@ func (s *testGreeterServer) SayHelloStream(stream grpc.BidiStreamingServer[pb.He
 func TestGRPCClientInstrumentation(t *testing.T) {
 	f := app.NewE2EFixture(t)
 
-	// Start a non-instrumented test gRPC server
 	lis, err := net.Listen("tcp", "localhost:0")
 	require.NoError(t, err)
 
@@ -66,11 +65,9 @@ func TestGRPCClientInstrumentation(t *testing.T) {
 	app.RequireGRPCClientSemconv(t, span, "127.0.0.1")
 }
 
-// TestGRPCClientStreaming tests gRPC client streaming in isolation.
 func TestGRPCClientStreaming(t *testing.T) {
 	f := app.NewE2EFixture(t)
 
-	// Start a non-instrumented test gRPC server
 	lis, err := net.Listen("tcp", "localhost:0")
 	require.NoError(t, err)
 
@@ -84,7 +81,6 @@ func TestGRPCClientStreaming(t *testing.T) {
 
 	serverAddr := lis.Addr().String()
 
-	// Build and run the instrumented client
 	f.BuildApp("grpcclient")
 	output := f.RunApp("grpcclient", "-addr="+serverAddr, "-stream", "-count=3")
 
