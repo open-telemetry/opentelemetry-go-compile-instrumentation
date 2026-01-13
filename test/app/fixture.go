@@ -13,29 +13,24 @@ import (
 )
 
 // E2EFixture provides common setup for e2e and integration tests.
-// It optionally starts an in-memory collector, configures OTEL env vars,
-// and provides helpers for building/running applications.
 type E2EFixture struct {
 	t         *testing.T
 	collector *Collector
 	demoDir   string
+	appsDir   string // Directory for self-contained test apps (test/apps/)
 
-	// Config allows tests to override defaults
 	ServiceName   string
 	skipCollector bool
 }
 
-// E2EFixtureOption configures the fixture.
 type E2EFixtureOption func(*E2EFixture)
 
-// WithServiceName overrides the default service name.
 func WithServiceName(name string) E2EFixtureOption {
 	return func(f *E2EFixture) {
 		f.ServiceName = name
 	}
 }
 
-// WithoutCollector skips starting the collector (for integration tests).
 func WithoutCollector() E2EFixtureOption {
 	return func(f *E2EFixture) {
 		f.skipCollector = true
@@ -48,20 +43,19 @@ func WithoutCollector() E2EFixtureOption {
 func NewE2EFixture(t *testing.T, opts ...E2EFixtureOption) *E2EFixture {
 	f := &E2EFixture{
 		t:           t,
-		ServiceName: "test-service", // default
+		ServiceName: "test-service",
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(f)
 	}
 
-	// Resolve demo directory path
 	pwd, err := os.Getwd()
 	require.NoError(t, err)
 	f.demoDir = filepath.Join(pwd, "..", "..", "demo")
+	f.appsDir = filepath.Join(pwd, "..", "apps")
 
-	// Start collector unless skipped (e.g., for integration tests)
+	// Start collector unless skipped
 	if !f.skipCollector {
 		f.collector = StartCollector(t)
 
@@ -85,56 +79,85 @@ func (f *E2EFixture) CollectorURL() string {
 	return f.collector.URL
 }
 
-// resolvePath converts a relative app path like "http/server" to full path.
-func (f *E2EFixture) resolvePath(appPath string) string {
-	return filepath.Join(f.demoDir, appPath)
+// // resolvePath converts a relative app path like "http/server" to full path.
+// // Deprecated: Use resolveAppPath for test/apps.
+// func (f *E2EFixture) resolvePath(appPath string) string {
+// 	return filepath.Join(f.demoDir, appPath)
+// }
+
+// resolveAppPath converts an app name like "httpserver" to full path in test/apps/.
+func (f *E2EFixture) resolveAppPath(appName string) string {
+	return filepath.Join(f.appsDir, appName)
 }
 
-// Build builds an application with the instrumentation tool.
-// appPath is relative to the demo directory, e.g., "http/server".
-func (f *E2EFixture) Build(appPath string) {
-	Build(f.t, f.resolvePath(appPath), "go", "build", "-a")
+// // Build builds an application with the instrumentation tool.
+// // appPath is relative to the demo directory, e.g., "http/server".
+// // Deprecated: Use BuildApp for test/apps.
+// func (f *E2EFixture) Build(appPath string) {
+// 	Build(f.t, f.resolvePath(appPath), "go", "build", "-a")
+// }
+
+// BuildApp builds a test application from test/apps/ with the instrumentation tool.
+// appName is the directory name in test/apps/, e.g., "httpserver".
+func (f *E2EFixture) BuildApp(appName string) {
+	Build(f.t, f.resolveAppPath(appName), "go", "build", "-a")
 }
 
-// BuildPlain builds an application WITHOUT instrumentation (regular go build).
-// Useful for testing client/server in isolation.
-func (f *E2EFixture) BuildPlain(appPath string) {
-	BuildPlain(f.t, f.resolvePath(appPath))
-}
+// // BuildPlain builds an application WITHOUT instrumentation (regular go build).
+// // Useful for testing client/server in isolation.
+// func (f *E2EFixture) BuildPlain(appPath string) {
+// 	BuildPlain(f.t, f.resolvePath(appPath))
+// }
 
 // Server represents a running server process.
 type Server struct {
 	t       *testing.T
-	stopFn  func() string
 	appPath string
 }
 
-// Stop stops the server and returns its complete output.
-func (s *Server) Stop() string {
-	return s.stopFn()
-}
+// // StartServer starts a server application and waits for it to be ready.
+// // appPath is relative to the demo directory, e.g., "http/server".
+// // It returns a Server that can be stopped to get the output.
+// // Deprecated: Use StartApp for test/apps.
+// func (f *E2EFixture) StartServer(appPath string, args ...string) *Server {
+// 	fullPath := f.resolvePath(appPath)
+// 	cmd, output := Start(f.t, fullPath, args...)
+// 	stopFn, err := WaitForServerReady(f.t, cmd, output)
+// 	require.NoError(f.t, err)
 
-// StartServer starts a server application and waits for it to be ready.
-// appPath is relative to the demo directory, e.g., "http/server".
+// 	return &Server{
+// 		t:       f.t,
+// 		stopFn:  stopFn,
+// 		appPath: appPath,
+// 	}
+// }
+
+// StartApp starts a test application from test/apps/ and waits for it to be ready.
+// appName is the directory name in test/apps/, e.g., "httpserver".
 // It returns a Server that can be stopped to get the output.
-func (f *E2EFixture) StartServer(appPath string, args ...string) *Server {
-	fullPath := f.resolvePath(appPath)
-	cmd, output := Start(f.t, fullPath, args...)
-	stopFn, err := WaitForServerReady(f.t, cmd, output)
-	require.NoError(f.t, err)
+func (f *E2EFixture) StartApp(appName string, args ...string) *Server {
+	fullPath := f.resolveAppPath(appName)
+	Start(f.t, fullPath, args...)
 
 	return &Server{
 		t:       f.t,
-		stopFn:  stopFn,
-		appPath: appPath,
+		appPath: appName,
 	}
 }
 
-// RunClient runs a client application and waits for it to complete.
-// appPath is relative to the demo directory, e.g., "http/client".
+// // RunClient runs a client application and waits for it to complete.
+// // appPath is relative to the demo directory, e.g., "http/client".
+// // Returns the application output.
+// // Deprecated: Use RunApp for test/apps.
+// func (f *E2EFixture) RunClient(appPath string, args ...string) string {
+// 	return Run(f.t, f.resolvePath(appPath), args...)
+// }
+
+// RunApp runs a test application from test/apps/ and waits for it to complete.
+// appName is the directory name in test/apps/, e.g., "httpclient".
 // Returns the application output.
-func (f *E2EFixture) RunClient(appPath string, args ...string) string {
-	return Run(f.t, f.resolvePath(appPath), args...)
+func (f *E2EFixture) RunApp(appName string, args ...string) string {
+	return Run(f.t, f.resolveAppPath(appName), args...)
 }
 
 // RequireTraceCount asserts the expected number of traces were collected.

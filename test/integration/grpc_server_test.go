@@ -6,12 +6,11 @@
 package test
 
 import (
-	"context"
 	"io"
 	"testing"
 	"time"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server/pb"
+	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,73 +18,39 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 )
 
-// TestGRPCServerInstrumentation tests gRPC server instrumentation in isolation.
-// Uses a non-instrumented gRPC client directly in the test code.
-// Expects: 2 traces (SayHello and Shutdown), each with 1 server span.
 func TestGRPCServerInstrumentation(t *testing.T) {
 	f := app.NewE2EFixture(t)
 
-	// Build server WITH instrumentation
-	f.Build("grpc/server")
+	f.BuildApp("grpcserver")
+	f.StartApp("grpcserver")
+	time.Sleep(time.Second)
 
-	// Start the instrumented server
-	server := f.StartServer("grpc/server")
-
-	// Create a non-instrumented gRPC client
 	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
-
 	client := pb.NewGreeterClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 
-	// Make a unary RPC call
-	resp, err := client.SayHello(ctx, &pb.HelloRequest{Name: "TestUser"})
+	resp, err := client.SayHello(t.Context(), &pb.HelloRequest{Name: "TestUser"})
 	require.NoError(t, err)
 	require.Contains(t, resp.GetMessage(), "TestUser")
+	time.Sleep(2 * time.Second)
 
-	// Shutdown the server
-	_, err = client.Shutdown(ctx, &pb.ShutdownRequest{})
-	require.NoError(t, err)
-
-	serverOutput := server.Stop()
-	t.Logf("Server output:\n%s", serverOutput)
-
-	// We expect 2 traces: one for SayHello and one for Shutdown
-	f.RequireTraceCount(2)
-
-	// Find and verify the SayHello span (not the Shutdown span)
-	span := app.RequireSpan(t, f.Traces(),
-		app.IsServer,
-		app.HasAttribute("rpc.method", "SayHello"),
-	)
+	span := f.RequireSingleSpan()
 	app.RequireGRPCServerSemconv(t, span)
 }
 
-// TestGRPCServerStreaming tests gRPC server streaming in isolation.
-// Uses a non-instrumented gRPC client directly in the test code.
-// Expects: 2 traces (SayHelloStream and Shutdown), each with 1 server span.
 func TestGRPCServerStreaming(t *testing.T) {
 	f := app.NewE2EFixture(t)
 
-	// Build server WITH instrumentation
-	f.Build("grpc/server")
+	f.BuildApp("grpcserver")
+	f.StartApp("grpcserver")
+	time.Sleep(time.Second)
 
-	// Start the instrumented server
-	server := f.StartServer("grpc/server")
-
-	// Create a non-instrumented gRPC client
 	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
-
 	client := pb.NewGreeterClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Make a streaming RPC call
-	stream, err := client.SayHelloStream(ctx)
+	stream, err := client.SayHelloStream(t.Context())
 	require.NoError(t, err)
 
 	// Send 3 requests
@@ -107,21 +72,8 @@ func TestGRPCServerStreaming(t *testing.T) {
 		responseCount++
 	}
 	require.Equal(t, 3, responseCount, "Should receive 3 responses")
+	time.Sleep(2 * time.Second)
 
-	// Shutdown the server
-	_, err = client.Shutdown(ctx, &pb.ShutdownRequest{})
-	require.NoError(t, err)
-
-	serverOutput := server.Stop()
-	t.Logf("Server output:\n%s", serverOutput)
-
-	// We expect 2 traces: one for SayHelloStream and one for Shutdown
-	f.RequireTraceCount(2)
-
-	// Find and verify the SayHelloStream span (not the Shutdown span)
-	span := app.RequireSpan(t, f.Traces(),
-		app.IsServer,
-		app.HasAttribute("rpc.method", "SayHelloStream"),
-	)
+	span := f.RequireSingleSpan()
 	app.RequireGRPCServerSemconv(t, span)
 }

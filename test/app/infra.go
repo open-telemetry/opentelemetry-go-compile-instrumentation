@@ -4,25 +4,21 @@
 package app
 
 import (
-	"bufio"
 	"context"
-	"errors"
-	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-const startupTimeout = 15 * time.Second
+const (
+	otelBinName = "otel"
+	appBinName  = "app"
+)
 
 // -----------------------------------------------------------------------------
 // E2E Test Infrastructure
@@ -40,24 +36,34 @@ func newCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 
 // Build builds the application with the instrumentation tool.
 func Build(t *testing.T, appDir string, args ...string) {
-	binName := "otel"
+	binName := otelBinName
 	if util.IsWindows() {
 		binName += ".exe"
 	}
 	pwd, err := os.Getwd()
 	require.NoError(t, err)
 	otelPath := filepath.Join(pwd, "..", "..", binName)
-	args = append([]string{otelPath}, args...)
+
+	// Use a consistent binary name for all test apps
+	outputName := appBinName
+	if util.IsWindows() {
+		outputName += ".exe"
+	}
+
+	// Insert -o flag after "build" in the args
+	// args typically contains ["go", "build", "-a"], we want ["go", "build", "-o", outputName, "-a"]
+	newArgs := make([]string, 0, len(args)+2)
+	for _, arg := range args {
+		newArgs = append(newArgs, arg)
+		if arg == "build" {
+			// Insert -o flag right after "build"
+			newArgs = append(newArgs, "-o", outputName)
+		}
+	}
+
+	args = append([]string{otelPath}, newArgs...)
 
 	cmd := newCmd(t.Context(), appDir, args...)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(out))
-}
-
-// BuildPlain builds the application WITHOUT instrumentation (regular go build).
-// Useful for testing client/server instrumentation in isolation.
-func BuildPlain(t *testing.T, appDir string) {
-	cmd := newCmd(t.Context(), appDir, "go", "build", "-a")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 }
@@ -65,7 +71,10 @@ func BuildPlain(t *testing.T, appDir string) {
 // Run runs the application and returns the output.
 // It waits for the application to complete.
 func Run(t *testing.T, dir string, args ...string) string {
-	appName := "./" + filepath.Base(dir)
+	appName := "./" + appBinName
+	if util.IsWindows() {
+		appName += ".exe"
+	}
 	cmd := newCmd(t.Context(), dir, append([]string{appName}, args...)...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
@@ -74,73 +83,18 @@ func Run(t *testing.T, dir string, args ...string) string {
 
 // Start starts the application but does not wait for it to complete.
 // It returns the command and the combined output pipe(stdout and stderr).
-func Start(t *testing.T, dir string, args ...string) (*exec.Cmd, io.ReadCloser) {
-	appName := "./" + filepath.Base(dir)
+func Start(t *testing.T, dir string, args ...string) {
+	appName := "./" + appBinName
+	if util.IsWindows() {
+		appName += ".exe"
+	}
 	cmd := newCmd(t.Context(), dir, append([]string{appName}, args...)...)
-	stdout, err := cmd.StdoutPipe()
-	require.NoError(t, err)
 	cmd.Stderr = cmd.Stdout // redirect stderr to stdout for easier debugging
-	err = cmd.Start()
+	err := cmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if cmd.Process != nil && cmd.ProcessState == nil {
 			require.NoError(t, cmd.Process.Kill())
 		}
 	})
-	return cmd, stdout
-}
-
-// WaitForServerReady waits for a server to be ready by monitoring its output for "server started".
-// It returns:
-//   - func() string: a cleanup function that waits for the server to exit and returns its complete output
-//   - error: non-nil if the server failed to start within the timeout
-//
-// This helper provides better error messages on timeout by including the server's output.
-// Callers should check the error and use require.NoError to fail the test with proper context.
-func WaitForServerReady(t *testing.T, serverCmd *exec.Cmd, output io.ReadCloser) (func() string, error) {
-	t.Helper()
-
-	readyChan := make(chan struct{})
-	doneChan := make(chan struct{})
-	outputBuilder := strings.Builder{}
-	const readyMsg = "server started"
-
-	// Use mutex to safely access outputBuilder from timeout handler
-	var mu sync.Mutex
-
-	go func() {
-		defer close(doneChan)
-		scanner := bufio.NewScanner(output)
-		for scanner.Scan() {
-			line := scanner.Text()
-			mu.Lock()
-			outputBuilder.WriteString(line + "\n")
-			mu.Unlock()
-			if strings.Contains(line, readyMsg) {
-				close(readyChan)
-			}
-		}
-	}()
-
-	waitUntilDone := func() string {
-		_ = serverCmd.Wait()
-		<-doneChan
-		mu.Lock()
-		defer mu.Unlock()
-		return outputBuilder.String()
-	}
-
-	select {
-	case <-readyChan:
-		t.Logf("Server is ready!")
-		return waitUntilDone, nil
-	case <-time.After(startupTimeout):
-		mu.Lock()
-		serverOutput := outputBuilder.String()
-		mu.Unlock()
-		if serverOutput == "" {
-			return nil, errors.New("timeout waiting for server to be ready - no server output received")
-		}
-		return nil, fmt.Errorf("timeout waiting for server to be ready - server output:\n%s", serverOutput)
-	}
 }

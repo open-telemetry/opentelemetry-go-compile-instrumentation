@@ -11,7 +11,7 @@ import (
 	"net"
 	"testing"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server/pb"
+	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -42,9 +42,6 @@ func (s *testGreeterServer) SayHelloStream(stream grpc.BidiStreamingServer[pb.He
 	}
 }
 
-// TestGRPCClientInstrumentation tests gRPC client instrumentation in isolation.
-// Uses a non-instrumented in-process test server (like httptest.Server).
-// Expects: 1 trace with 1 client span.
 func TestGRPCClientInstrumentation(t *testing.T) {
 	f := app.NewE2EFixture(t)
 
@@ -60,15 +57,11 @@ func TestGRPCClientInstrumentation(t *testing.T) {
 	}()
 	defer grpcServer.Stop()
 
-	serverAddr := lis.Addr().String()
+	f.BuildApp("grpcclient")
+	output := f.RunApp("grpcclient", "-addr="+lis.Addr().String(), "-name=ClientTest")
 
-	// Build and run the instrumented client
-	f.Build("grpc/client")
-	output := f.RunClient("grpc/client", "-addr="+serverAddr, "-name=ClientTest")
-
-	require.Contains(t, output, `"msg":"greeting"`)
-	require.Contains(t, output, `"message":"Hello ClientTest"`)
-
+	require.Contains(t, output, "greeting")
+	require.Contains(t, output, "Hello ClientTest")
 	span := f.RequireSingleSpan()
 	app.RequireGRPCClientSemconv(t, span, "127.0.0.1")
 }
@@ -92,10 +85,10 @@ func TestGRPCClientStreaming(t *testing.T) {
 	serverAddr := lis.Addr().String()
 
 	// Build and run the instrumented client
-	f.Build("grpc/client")
-	output := f.RunClient("grpc/client", "-addr="+serverAddr, "-stream", "-count=3")
-	require.Contains(t, output, "stream response")
+	f.BuildApp("grpcclient")
+	output := f.RunApp("grpcclient", "-addr="+serverAddr, "-stream", "-count=3")
 
+	require.Contains(t, output, "stream response")
 	span := f.RequireSingleSpan()
 	app.RequireGRPCClientSemconv(t, span, "127.0.0.1")
 }

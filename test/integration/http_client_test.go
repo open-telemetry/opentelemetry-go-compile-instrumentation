@@ -14,9 +14,6 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 )
 
-// TestHTTPClientInstrumentation tests HTTP client instrumentation in isolation.
-// Uses a non-instrumented httptest.Server as the target.
-// Expects: 1 trace with 1 client span.
 func TestHTTPClientInstrumentation(t *testing.T) {
 	f := app.NewE2EFixture(t)
 
@@ -26,10 +23,9 @@ func TestHTTPClientInstrumentation(t *testing.T) {
 	}))
 	defer testServer.Close()
 
-	f.Build("http/client")
-
-	f.RunClient("http/client", "-addr="+testServer.URL, "-count=1")
+	f.BuildApp("httpclient")
+	f.RunApp("httpclient", "-addr="+testServer.URL, "-name=world")
 
 	span := f.RequireSingleSpan()
-	app.RequireHTTPClientSemconv(t, span, "GET", testServer.URL+"/greet?name=world", "127.0.0.1", 200)
+	app.RequireHTTPClientSemconv(t, span, "GET", testServer.URL+"/hello?name=world", "127.0.0.1", 200)
 }
