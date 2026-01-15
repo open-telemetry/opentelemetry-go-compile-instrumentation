@@ -78,6 +78,10 @@ func MyHook1Before(ictx inst.HookContext, recv interface{}) {
 	fmt.Printf("isSkipCall:%t\n", ictx.IsSkipCall())
 }
 
+func MyHook2Before(ictx inst.HookContext, recv interface{}) {
+	println("Before MyStruct.Example2()")
+}
+
 func MyHook1After(ictx inst.HookContext) {
 	println("After MyStruct.Example()")
 }

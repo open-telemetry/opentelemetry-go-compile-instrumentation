@@ -25,6 +25,13 @@ hook_recv:
   after: MyHook1After
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
+hook_no_recv:
+  target: main
+  func: Example2
+  recv: "MyStruct"
+  before: MyHook2Before
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+
 version_range:
   target: golang.org/x/time/rate
   version: "v0.14.0,v0.15.0"

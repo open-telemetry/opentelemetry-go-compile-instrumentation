@@ -18,12 +18,14 @@ func Func1(p1 string, p2 int) (float32, error) {
 
 func Func2(p1 string, _ int) {}
 
+func (T) Func3() {}
+
 func OptGood() {
 	//line <generated>:1
 	if OtelBeforeTrampoline_OptGood3887151894(); false {
 	} else {
 	}
-	//line main.go:19:16
+	//line main.go:21:16
 }
 func OptBad() {
 	//line <generated>:1
@@ -32,7 +34,7 @@ func OptBad() {
 		return
 	} else {
 	}
-	//line main.go:20:16
+	//line main.go:22:16
 }
 func OptBad2() {
 	//line <generated>:1
@@ -42,7 +44,7 @@ func OptBad2() {
 	} else {
 		defer OtelAfterTrampoline_OptBad23138243364(hookContext3138243364)
 	}
-	//line main.go:21:16
+	//line main.go:23:16
 }
 
 func GenericFunc[T any](p1 T, p2 int) (T, error) {

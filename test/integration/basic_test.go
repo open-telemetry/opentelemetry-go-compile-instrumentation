@@ -24,6 +24,7 @@ func TestBasic(t *testing.T) {
 		"Every1",
 		"Every3",
 		"MyStruct.Example",
+		"MyStruct.Example2",
 		"GenericExample before hook",
 		"Hello, Generic World! 1 2",
 		"GenericExample after hook",

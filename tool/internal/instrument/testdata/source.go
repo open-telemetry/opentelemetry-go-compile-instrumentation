@@ -16,6 +16,8 @@ func Func1(p1 string, p2 int) (float32, error) {
 
 func Func2(p1 string, _ int) {}
 
+func (T) Func3() {}
+
 func OptGood() {}
 func OptBad()  {}
 func OptBad2() {}

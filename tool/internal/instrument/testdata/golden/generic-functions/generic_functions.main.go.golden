@@ -18,6 +18,8 @@ func Func1(p1 string, p2 int) (float32, error) {
 
 func Func2(p1 string, _ int) {}
 
+func (T) Func3() {}
+
 func OptGood() {}
 func OptBad()  {}
 func OptBad2() {}
@@ -28,7 +30,7 @@ func GenericFunc[T any](p1 T, p2 int) (_unnamedRetVal0 T, _unnamedRetVal1 error)
 	} else {
 		defer OtelAfterTrampoline_GenericFunc3543564877[T](hookContext3543564877, &_unnamedRetVal0, &_unnamedRetVal1)
 	}
-	//line main.go:24:2
+	//line main.go:26:2
 	return p1, nil
 }
 
@@ -42,7 +44,7 @@ func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal0 T, _unnam
 	} else {
 		defer OtelAfterTrampoline_GenericMethod3378413897(hookContext3378413897, &_unnamedRetVal0, &_unnamedRetVal1)
 	}
-	//line main.go:32:2
+	//line main.go:34:2
 	return p1, nil
 }
 

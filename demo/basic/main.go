@@ -42,6 +42,8 @@ type MyStruct struct{}
 
 func (m *MyStruct) Example() { println("MyStruct.Example") }
 
+func (MyStruct) Example2() { println("MyStruct.Example2") }
+
 type GenStruct[T any] struct {
 	Value T
 }
@@ -94,6 +96,7 @@ func main() {
 	// Add a new field to the struct
 	m.NewField = "abc"
 	m.Example()
+	MyStruct{}.Example2()
 
 	_ = GenericExample(1, 2)
 	g := &GenStruct[string]{Value: "Hello"}

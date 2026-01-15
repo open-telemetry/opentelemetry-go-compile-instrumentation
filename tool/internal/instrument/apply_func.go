@@ -80,11 +80,20 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 
 func collectArguments(funcDecl *dst.FuncDecl) []string {
 	args := make([]string, 0)
-	if ast.HasReceiver(funcDecl) {
-		receiver := funcDecl.Recv.List[0].Names[0].Name
-		args = append(args, receiver)
-	}
 	idx := 0
+	if ast.HasReceiver(funcDecl) {
+		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
+			// Named receiver
+			receiver := funcDecl.Recv.List[0].Names[0].Name
+			args = append(args, receiver)
+		} else {
+			// Unnamed receiver, i.e. func (R) F() {}
+			receiver := fmt.Sprintf("%s%d", ignoredParam, idx)
+			idx++
+			funcDecl.Recv.List[0].Names = []*dst.Ident{ast.Ident(receiver)}
+			args = append(args, receiver)
+		}
+	}
 	for _, field := range funcDecl.Type.Params.List {
 		for _, name := range field.Names {
 			if name.Name == ast.IdentIgnore {
