@@ -208,6 +208,31 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	return sp.store(matched)
 }
 
+// setupFreshCache creates a temporary GOCACHE if one isn't already set.
+// This prevents cache pollution when modifying core packages via //go:linkname.
+func setupFreshCache(ctx context.Context, env []string) ([]string, func(), error) {
+	if os.Getenv("GOCACHE") != "" {
+		// User has explicitly set GOCACHE, respect it
+		return env, func() {}, nil
+	}
+
+	logger := util.LoggerFromContext(ctx)
+	cacheDir, err := os.MkdirTemp(util.GetBuildTempDir(), "gocache-")
+	if err != nil {
+		return nil, nil, ex.Wrapf(err, "failed to create temporary GOCACHE")
+	}
+
+	cleanup := func() {
+		if removeErr := os.RemoveAll(cacheDir); removeErr != nil {
+			logger.ErrorContext(ctx, "failed to remove temporary GOCACHE", "path", cacheDir, "error", removeErr)
+		}
+	}
+
+	env = append(env, "GOCACHE="+cacheDir)
+	logger.DebugContext(ctx, "using temporary GOCACHE", "path", cacheDir)
+	return env, cleanup, nil
+}
+
 // BuildWithToolexec builds the project with the toolexec mode
 func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
@@ -241,6 +266,13 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	pwd := util.GetOtelWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
+
+	// Use a fresh GOCACHE to prevent cache pollution when modifying core packages
+	env, cleanup, err := setupFreshCache(ctx, env)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	return util.RunCmdWithEnv(ctx, env, newArgs...)
 }

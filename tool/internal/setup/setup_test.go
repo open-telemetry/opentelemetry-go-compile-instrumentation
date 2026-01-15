@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -176,4 +177,53 @@ func TestGetPackageDir(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetupFreshCache(t *testing.T) {
+	t.Run("respects existing GOCACHE", func(t *testing.T) {
+		t.Setenv("GOCACHE", "/existing/cache")
+		env, cleanup, err := setupFreshCache(t.Context(), nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer cleanup()
+
+		for _, e := range env {
+			if strings.HasPrefix(e, "GOCACHE=") {
+				t.Error("should not add GOCACHE when already set")
+			}
+		}
+	})
+
+	t.Run("creates and cleans up temporary cache", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		env, cleanup, err := setupFreshCache(t.Context(), nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var cacheDir string
+		for _, e := range env {
+			if strings.HasPrefix(e, "GOCACHE=") {
+				cacheDir = strings.TrimPrefix(e, "GOCACHE=")
+				break
+			}
+		}
+		if cacheDir == "" {
+			t.Fatal("GOCACHE not set in environment")
+		}
+		if _, statErr := os.Stat(cacheDir); os.IsNotExist(statErr) {
+			t.Errorf("cache directory not created: %s", cacheDir)
+		}
+
+		cleanup()
+		if _, statErr := os.Stat(cacheDir); !os.IsNotExist(statErr) {
+			t.Errorf("cache directory not cleaned up: %s", cacheDir)
+		}
+	})
 }
