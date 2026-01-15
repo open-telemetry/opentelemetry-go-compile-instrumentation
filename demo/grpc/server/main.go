@@ -54,7 +54,7 @@ func (s *server) SayHelloStream(stream pb.Greeter_SayHelloStreamServer) error {
 func (s *server) Shutdown(ctx context.Context, in *pb.ShutdownRequest) (*pb.ShutdownReply, error) {
 	logger.Info("shutdown request received")
 	go func() {
-		time.Sleep(2 * time.Second) // Give time to send response and for spans to be exported
+		time.Sleep(time.Second) // Give time to send response and for spans to be exported
 		os.Exit(0)
 	}()
 	return &pb.ShutdownReply{Message: "Server is shutting down"}, nil

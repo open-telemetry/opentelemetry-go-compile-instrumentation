@@ -12,6 +12,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 func TestGrpc(t *testing.T) {
@@ -32,7 +33,11 @@ func TestGrpc(t *testing.T) {
 		app.IsClient,
 		app.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
 	)
-	app.RequireGRPCClientSemconv(t, grpcClientSpan, "::1")
+	expectedServerAddress := "::1"
+	if util.IsWindows() {
+		expectedServerAddress = "127.0.0.1"
+	}
+	app.RequireGRPCClientSemconv(t, grpcClientSpan, expectedServerAddress)
 
 	grpcServerSpan := app.RequireSpan(t, f.Traces(),
 		app.IsServer,

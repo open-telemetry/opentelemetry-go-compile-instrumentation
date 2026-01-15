@@ -96,8 +96,8 @@ func Start(t *testing.T, dir string, args ...string) {
 	err := cmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		if cmd.Process != nil && cmd.ProcessState == nil {
-			require.NoError(t, cmd.Process.Kill())
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
 		}
 	})
 }

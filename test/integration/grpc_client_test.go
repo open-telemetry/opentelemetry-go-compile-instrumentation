@@ -47,7 +47,9 @@ func TestGRPCClient(t *testing.T) {
 
 			require.Contains(t, output, tc.expectedOutput)
 			span := f.RequireSingleSpan()
-			app.RequireGRPCClientSemconv(t, span, "127.0.0.1")
+			host, _, err := net.SplitHostPort(server.Addr)
+			require.NoError(t, err)
+			app.RequireGRPCClientSemconv(t, span, host)
 		})
 	}
 }
