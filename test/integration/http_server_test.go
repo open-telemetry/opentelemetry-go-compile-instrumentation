@@ -6,6 +6,7 @@
 package test
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -15,19 +16,40 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 )
 
-func TestHTTPServerInstrumentation(t *testing.T) {
-	f := app.NewE2EFixture(t)
+func TestHTTPServer(t *testing.T) {
+	testCases := []struct {
+		name   string
+		scheme string
+		port   int
+		path   string
+		method string
+	}{
+		{
+			name:   "basic",
+			scheme: "http",
+			port:   8081,
+			path:   "/hello",
+			method: "GET",
+		},
+	}
 
-	f.BuildApp("httpserver")
-	f.StartApp("httpserver", "-port=8081")
-	time.Sleep(time.Second)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := app.NewE2EFixture(t)
 
-	resp, err := http.Get("http://localhost:8081/hello?name=test")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	time.Sleep(100 * time.Millisecond)
+			f.BuildApp("httpserver")
+			f.StartApp("httpserver", fmt.Sprintf("-port=%d", tc.port))
+			time.Sleep(time.Second)
 
-	span := f.RequireSingleSpan()
-	app.RequireHTTPServerSemconv(t, span, "GET", "/hello", "http", 200)
+			url := fmt.Sprintf("%s://localhost:%d%s?name=test", tc.scheme, tc.port, tc.path)
+			resp, err := http.Get(url)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			time.Sleep(100 * time.Millisecond)
+
+			span := f.RequireSingleSpan()
+			app.RequireHTTPServerSemconv(t, span, tc.method, tc.path, tc.scheme, 200)
+		})
+	}
 }

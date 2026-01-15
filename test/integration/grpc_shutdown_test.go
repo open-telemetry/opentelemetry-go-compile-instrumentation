@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// TestGRPCClientTelemetryFlushOnExit verifies that telemetry is properly flushed
+// GRPCClientTelemetryFlushOnExit verifies that telemetry is properly flushed
 // when the client application exits, without needing an explicit sleep.
 // This test validates that the signal-based shutdown handler in the instrumentation
 // layer works correctly.

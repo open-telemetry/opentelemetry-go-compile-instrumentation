@@ -10,57 +10,93 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 )
 
-func TestGRPCServerInstrumentation(t *testing.T) {
-	f := app.NewE2EFixture(t)
+func TestGRPCServer(t *testing.T) {
+	testCases := []struct {
+		name     string
+		exercise func(t *testing.T, client *GRPCClient)
+	}{
+		{
+			name: "unary",
+			exercise: func(t *testing.T, client *GRPCClient) {
+				client.SayHello(t, "TestUser")
+			},
+		},
+		{
+			name: "streaming",
+			exercise: func(t *testing.T, client *GRPCClient) {
+				client.SayHelloStream(t, "StreamUser", 3)
+			},
+		},
+	}
 
-	f.BuildApp("grpcserver")
-	f.StartApp("grpcserver")
-	time.Sleep(2 * time.Second)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := app.NewE2EFixture(t)
 
-	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	defer conn.Close()
-	client := pb.NewGreeterClient(conn)
+			f.BuildApp("grpcserver")
+			f.StartApp("grpcserver")
+			time.Sleep(2 * time.Second)
 
-	resp, err := client.SayHello(t.Context(), &pb.HelloRequest{Name: "TestUser"})
-	require.NoError(t, err)
-	require.Contains(t, resp.GetMessage(), "TestUser")
-	time.Sleep(100 * time.Millisecond)
+			client := NewGRPCClient(t, "localhost:50051")
+			tc.exercise(t, client)
+			time.Sleep(100 * time.Millisecond)
 
-	span := f.RequireSingleSpan()
-	app.RequireGRPCServerSemconv(t, span)
+			span := f.RequireSingleSpan()
+			app.RequireGRPCServerSemconv(t, span)
+		})
+	}
 }
 
-func TestGRPCServerStreaming(t *testing.T) {
-	f := app.NewE2EFixture(t)
+// GRPCClient wraps a test gRPC client connection.
+type GRPCClient struct {
+	conn   *grpc.ClientConn
+	client pb.GreeterClient
+}
 
-	f.BuildApp("grpcserver")
-	f.StartApp("grpcserver")
-	time.Sleep(2 * time.Second)
+// NewGRPCClient creates a new test gRPC client connected to the given address.
+// The connection is automatically closed when the test completes.
+func NewGRPCClient(t *testing.T, addr string) *GRPCClient {
+	t.Helper()
 
-	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
-	defer conn.Close()
-	client := pb.NewGreeterClient(conn)
-	stream, err := client.SayHelloStream(t.Context())
+	t.Cleanup(func() { conn.Close() })
+
+	return &GRPCClient{
+		conn:   conn,
+		client: pb.NewGreeterClient(conn),
+	}
+}
+
+// SayHello sends a unary request and validates the response.
+func (c *GRPCClient) SayHello(t *testing.T, name string) {
+	t.Helper()
+
+	resp, err := c.client.SayHello(t.Context(), &pb.HelloRequest{Name: name})
+	require.NoError(t, err)
+	require.Contains(t, resp.GetMessage(), name)
+}
+
+// SayHelloStream sends multiple streaming requests and validates responses.
+func (c *GRPCClient) SayHelloStream(t *testing.T, name string, count int) {
+	t.Helper()
+
+	stream, err := c.client.SayHelloStream(t.Context())
 	require.NoError(t, err)
 
-	// Send 3 requests
-	for i := 0; i < 3; i++ {
-		err := stream.Send(&pb.HelloRequest{Name: "StreamUser"})
+	for i := 0; i < count; i++ {
+		err := stream.Send(&pb.HelloRequest{Name: name})
 		require.NoError(t, err)
 	}
 	require.NoError(t, stream.CloseSend())
 
-	// Receive responses
 	responseCount := 0
 	for {
 		resp, err := stream.Recv()
@@ -68,12 +104,8 @@ func TestGRPCServerStreaming(t *testing.T) {
 			break
 		}
 		require.NoError(t, err)
-		require.Contains(t, resp.GetMessage(), "StreamUser")
+		require.Contains(t, resp.GetMessage(), name)
 		responseCount++
 	}
-	require.Equal(t, 3, responseCount, "Should receive 3 responses")
-	time.Sleep(100 * time.Millisecond)
-
-	span := f.RequireSingleSpan()
-	app.RequireGRPCServerSemconv(t, span)
+	require.Equal(t, count, responseCount, "Should receive %d responses", count)
 }

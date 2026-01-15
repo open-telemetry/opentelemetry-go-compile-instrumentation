@@ -11,19 +11,65 @@ import (
 	"net"
 	"testing"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
 )
+
+func TestGRPCClient(t *testing.T) {
+	testCases := []struct {
+		name           string
+		extraArgs      []string
+		expectedOutput string
+	}{
+		{
+			name:           "unary",
+			extraArgs:      []string{"-name=ClientTest"},
+			expectedOutput: "Hello ClientTest",
+		},
+		{
+			name:           "streaming",
+			extraArgs:      []string{"-stream", "-count=3"},
+			expectedOutput: "stream response",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := app.NewE2EFixture(t)
+			server := StartGRPCServer(t)
+
+			args := append([]string{"-addr=" + server.Addr}, tc.extraArgs...)
+			f.BuildApp("grpcclient")
+			output := f.RunApp("grpcclient", args...)
+
+			require.Contains(t, output, tc.expectedOutput)
+			span := f.RequireSingleSpan()
+			app.RequireGRPCClientSemconv(t, span, "127.0.0.1")
+		})
+	}
+}
+
+// GRPCServer wraps a test gRPC server with its address.
+type GRPCServer struct {
+	*grpc.Server
+	Addr     string
+	listener net.Listener
+}
+
+// Stop gracefully stops the gRPC server.
+func (s *GRPCServer) Stop() {
+	s.Server.Stop()
+}
 
 // testGreeterServer is a simple non-instrumented gRPC server for testing.
 type testGreeterServer struct {
 	pb.UnimplementedGreeterServer
 }
 
-func (s *testGreeterServer) SayHello(ctx context.Context, req *pb.HelloRequest) (*pb.HelloReply, error) {
+func (s *testGreeterServer) SayHello(_ context.Context, req *pb.HelloRequest) (*pb.HelloReply, error) {
 	return &pb.HelloReply{Message: "Hello " + req.GetName()}, nil
 }
 
@@ -42,49 +88,26 @@ func (s *testGreeterServer) SayHelloStream(stream grpc.BidiStreamingServer[pb.He
 	}
 }
 
-func TestGRPCClientInstrumentation(t *testing.T) {
-	f := app.NewE2EFixture(t)
+// StartGRPCServer creates and starts a test gRPC server.
+// The server is automatically stopped when the test completes.
+func StartGRPCServer(t *testing.T, opts ...grpc.ServerOption) *GRPCServer {
+	t.Helper()
 
 	lis, err := net.Listen("tcp", "localhost:0")
 	require.NoError(t, err)
 
-	grpcServer := grpc.NewServer()
-	pb.RegisterGreeterServer(grpcServer, &testGreeterServer{})
+	server := grpc.NewServer(opts...)
+	pb.RegisterGreeterServer(server, &testGreeterServer{})
 
 	go func() {
-		_ = grpcServer.Serve(lis)
+		_ = server.Serve(lis)
 	}()
-	defer grpcServer.Stop()
 
-	f.BuildApp("grpcclient")
-	output := f.RunApp("grpcclient", "-addr="+lis.Addr().String(), "-name=ClientTest")
+	t.Cleanup(server.Stop)
 
-	require.Contains(t, output, "greeting")
-	require.Contains(t, output, "Hello ClientTest")
-	span := f.RequireSingleSpan()
-	app.RequireGRPCClientSemconv(t, span, "127.0.0.1")
-}
-
-func TestGRPCClientStreaming(t *testing.T) {
-	f := app.NewE2EFixture(t)
-
-	lis, err := net.Listen("tcp", "localhost:0")
-	require.NoError(t, err)
-
-	grpcServer := grpc.NewServer()
-	pb.RegisterGreeterServer(grpcServer, &testGreeterServer{})
-
-	go func() {
-		_ = grpcServer.Serve(lis)
-	}()
-	defer grpcServer.Stop()
-
-	serverAddr := lis.Addr().String()
-
-	f.BuildApp("grpcclient")
-	output := f.RunApp("grpcclient", "-addr="+serverAddr, "-stream", "-count=3")
-
-	require.Contains(t, output, "stream response")
-	span := f.RequireSingleSpan()
-	app.RequireGRPCClientSemconv(t, span, "127.0.0.1")
+	return &GRPCServer{
+		Server:   server,
+		Addr:     lis.Addr().String(),
+		listener: lis,
+	}
 }
