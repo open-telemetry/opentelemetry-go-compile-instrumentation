@@ -210,7 +210,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 
 // setupFreshCache creates a temporary GOCACHE if one isn't already set.
 // This prevents cache pollution when modifying core packages via //go:linkname.
-func setupFreshCache(ctx context.Context, env []string) ([]string, func(), error) {
+func setupGoCache(ctx context.Context, env []string) ([]string, func(), error) {
 	if os.Getenv("GOCACHE") != "" {
 		// User has explicitly set GOCACHE, respect it
 		return env, func() {}, nil
