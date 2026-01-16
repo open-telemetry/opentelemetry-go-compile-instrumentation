@@ -208,29 +208,24 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	return sp.store(matched)
 }
 
-// setupFreshCache creates a temporary GOCACHE if one isn't already set.
-// This prevents cache pollution when modifying core packages via //go:linkname.
-func setupGoCache(ctx context.Context, env []string) ([]string, func(), error) {
+// setupGoCache creates a persistent GOCACHE in .otel-build/gocache if one isn't already set.
+// This prevents cache pollution when modifying core packages via //go:linkname while
+// allowing incremental builds to work properly.
+func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 	if os.Getenv("GOCACHE") != "" {
 		// User has explicitly set GOCACHE, respect it
-		return env, func() {}, nil
+		return env, nil
 	}
 
 	logger := util.LoggerFromContext(ctx)
-	cacheDir, err := os.MkdirTemp(util.GetBuildTempDir(), "gocache-")
-	if err != nil {
-		return nil, nil, ex.Wrapf(err, "failed to create temporary GOCACHE")
-	}
-
-	cleanup := func() {
-		if removeErr := os.RemoveAll(cacheDir); removeErr != nil {
-			logger.ErrorContext(ctx, "failed to remove temporary GOCACHE", "path", cacheDir, "error", removeErr)
-		}
+	cacheDir := util.GetBuildTemp("gocache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return nil, ex.Wrapf(err, "failed to create persistent GOCACHE")
 	}
 
 	env = append(env, "GOCACHE="+cacheDir)
-	logger.DebugContext(ctx, "using temporary GOCACHE", "path", cacheDir)
-	return env, cleanup, nil
+	logger.DebugContext(ctx, "using GOCACHE", "path", cacheDir)
+	return env, nil
 }
 
 // BuildWithToolexec builds the project with the toolexec mode
@@ -268,11 +263,10 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
 
 	// Use a fresh GOCACHE to prevent cache pollution when modifying core packages
-	env, cleanup, err := setupFreshCache(ctx, env)
+	env, err = setupGoCache(ctx, env)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
 
 	return util.RunCmdWithEnv(ctx, env, newArgs...)
 }
