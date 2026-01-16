@@ -14,7 +14,7 @@ import (
 // This test validates that the signal-based shutdown handler in the instrumentation
 // layer works correctly.
 func TestGRPCClientTelemetryFlushOnExit(t *testing.T) {
-	// f := app.NewE2EFixture(t, app.WithoutCollector())
+	// f := testutil.NewTestFixture(t, testutil.WithoutCollector())
 
 	// serverDir := filepath.Join("..", "apps", "grpcserver")
 	// clientDir := filepath.Join("..", "apps", "grpcclient")
@@ -27,13 +27,13 @@ func TestGRPCClientTelemetryFlushOnExit(t *testing.T) {
 	// t.Log("Building instrumented gRPC applications...")
 
 	// // Build server and client
-	// f.BuildApp("grpcserver")
-	// f.BuildApp("grpcclient")
+	// f.Build("grpcserver")
+	// f.Build("grpcclient")
 
 	// t.Log("Starting gRPC server...")
 
 	// // Start the server
-	// serverApp, outputPipe := app.Start(t, serverDir)
+	// serverApp, outputPipe := testutil.Start(t, serverDir)
 	// defer func() {
 	// 	if serverApp.Process != nil {
 	// 		_ = serverApp.Process.Kill()
@@ -47,7 +47,7 @@ func TestGRPCClientTelemetryFlushOnExit(t *testing.T) {
 	// // Run client with a single request
 	// // The client should exit cleanly and export telemetry WITHOUT the 6s sleep
 	// start := time.Now()
-	// clientOutput := app.Run(t, clientDir, "-name", "ShutdownTest")
+	// clientOutput := testutil.Run(t, clientDir, "-name", "ShutdownTest")
 	// duration := time.Since(start)
 
 	// t.Logf("Client completed in %v", duration)

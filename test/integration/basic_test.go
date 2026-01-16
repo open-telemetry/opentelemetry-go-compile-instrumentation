@@ -12,14 +12,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
 func TestBasic(t *testing.T) {
 	appDir := filepath.Join("..", "..", "demo", "basic")
 
-	app.Build(t, appDir, "go", "build", "-a")
-	output := app.Run(t, appDir)
+	testutil.Build(t, appDir, "go", "build", "-a")
+	output := testutil.Run(t, appDir)
 	expect := []string{
 		"Every1",
 		"Every3",

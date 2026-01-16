@@ -14,42 +14,44 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
 	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
 func TestGRPCClient(t *testing.T) {
 	testCases := []struct {
 		name           string
 		extraArgs      []string
+		method         string
 		expectedOutput string
 	}{
 		{
 			name:           "unary",
 			extraArgs:      []string{"-name=ClientTest"},
+			method:         "SayHello",
 			expectedOutput: "Hello ClientTest",
 		},
 		{
 			name:           "streaming",
 			extraArgs:      []string{"-stream", "-count=3"},
+			method:         "SayHelloStream",
 			expectedOutput: "stream response",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := app.NewE2EFixture(t)
+			f := testutil.NewTestFixture(t)
 			server := StartGRPCServer(t)
 
 			args := append([]string{"-addr=" + server.Addr}, tc.extraArgs...)
-			f.BuildApp("grpcclient")
-			output := f.RunApp("grpcclient", args...)
+			output := f.BuildAndRun("grpcclient", args...)
 
 			require.Contains(t, output, tc.expectedOutput)
 			span := f.RequireSingleSpan()
 			host, _, err := net.SplitHostPort(server.Addr)
 			require.NoError(t, err)
-			app.RequireGRPCClientSemconv(t, span, host)
+			testutil.RequireGRPCClientSemconv(t, span, host, "greeter.Greeter", tc.method, 0)
 		})
 	}
 }
@@ -93,8 +95,6 @@ func (s *testGreeterServer) SayHelloStream(stream grpc.BidiStreamingServer[pb.He
 // StartGRPCServer creates and starts a test gRPC server.
 // The server is automatically stopped when the test completes.
 func StartGRPCServer(t *testing.T, opts ...grpc.ServerOption) *GRPCServer {
-	t.Helper()
-
 	lis, err := net.Listen("tcp", "localhost:0")
 	require.NoError(t, err)
 

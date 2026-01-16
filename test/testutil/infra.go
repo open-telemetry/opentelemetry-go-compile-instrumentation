@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package app
+package testutil
 
 import (
 	"context"
@@ -50,18 +50,8 @@ func Build(t *testing.T, appDir string, args ...string) {
 		outputName += ".exe"
 	}
 
-	// Insert -o flag after "build" in the args
-	// args typically contains ["go", "build", "-a"], we want ["go", "build", "-o", outputName, "-a"]
-	newArgs := make([]string, 0, len(args)+2)
-	for _, arg := range args {
-		newArgs = append(newArgs, arg)
-		if arg == "build" {
-			// Insert -o flag right after "build"
-			newArgs = append(newArgs, "-o", outputName)
-		}
-	}
-
-	args = append([]string{otelPath}, newArgs...)
+	args = append(args, "-o", outputName)
+	args = append([]string{otelPath}, args...)
 
 	cmd := newCmd(t.Context(), appDir, args...)
 	out, err := cmd.CombinedOutput()

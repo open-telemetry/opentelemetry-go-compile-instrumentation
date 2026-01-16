@@ -11,37 +11,30 @@ import (
 
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
 func TestGrpc(t *testing.T) {
-	f := app.NewE2EFixture(t)
+	f := testutil.NewTestFixture(t)
 
-	f.BuildApp("grpcserver")
-	f.StartApp("grpcserver")
+	f.BuildAndStart("grpcserver")
 	time.Sleep(time.Second)
 
-	f.BuildApp("grpcclient")
-	f.RunApp("grpcclient", "-name", "OpenTelemetry")
-	f.RunApp("grpcclient", "-stream")
+	f.BuildAndRun("grpcclient", "-addr", "127.0.0.1:50051", "-name", "OpenTelemetry")
+	f.Run("grpcclient", "-addr", "127.0.0.1:50051", "-stream")
 
 	f.RequireTraceCount(2)    // unary + stream
 	f.RequireSpansPerTrace(2) // client + server per trace
 
-	grpcClientSpan := app.RequireSpan(t, f.Traces(),
-		app.IsClient,
-		app.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+	grpcClientSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsClient,
+		testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
 	)
-	expectedServerAddress := "::1"
-	if util.IsWindows() {
-		expectedServerAddress = "127.0.0.1"
-	}
-	app.RequireGRPCClientSemconv(t, grpcClientSpan, expectedServerAddress)
+	testutil.RequireGRPCClientSemconv(t, grpcClientSpan, "127.0.0.1", "greeter.Greeter", "SayHello", 0)
 
-	grpcServerSpan := app.RequireSpan(t, f.Traces(),
-		app.IsServer,
-		app.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+	grpcServerSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsServer,
+		testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
 	)
-	app.RequireGRPCServerSemconv(t, grpcServerSpan)
+	testutil.RequireGRPCServerSemconv(t, grpcServerSpan, "greeter.Greeter", "SayHello", 0)
 }

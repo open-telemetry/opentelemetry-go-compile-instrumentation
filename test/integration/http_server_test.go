@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
 func TestHTTPServer(t *testing.T) {
@@ -35,13 +35,12 @@ func TestHTTPServer(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := app.NewE2EFixture(t)
+			f := testutil.NewTestFixture(t)
 
-			f.BuildApp("httpserver")
-			f.StartApp("httpserver", fmt.Sprintf("-port=%d", tc.port))
+			f.BuildAndStart("httpserver", fmt.Sprintf("-port=%d", tc.port))
 			time.Sleep(time.Second)
 
-			url := fmt.Sprintf("%s://localhost:%d%s?name=test", tc.scheme, tc.port, tc.path)
+			url := fmt.Sprintf("%s://127.0.0.1:%d%s?name=test", tc.scheme, tc.port, tc.path)
 			resp, err := http.Get(url)
 			require.NoError(t, err)
 			defer resp.Body.Close()
@@ -49,7 +48,7 @@ func TestHTTPServer(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 
 			span := f.RequireSingleSpan()
-			app.RequireHTTPServerSemconv(t, span, tc.method, tc.path, tc.scheme, 200)
+			testutil.RequireHTTPServerSemconv(t, span, tc.method, tc.path, tc.scheme, 200, int64(tc.port), "127.0.0.1", "Go-http-client/1.1", "1.1", "127.0.0.1")
 		})
 	}
 }

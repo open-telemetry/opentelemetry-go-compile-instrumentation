@@ -11,31 +11,29 @@ import (
 
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
 func TestHttp(t *testing.T) {
-	f := app.NewE2EFixture(t)
+	f := testutil.NewTestFixture(t)
 
-	f.BuildApp("httpserver")
-	f.StartApp("httpserver")
+	f.BuildAndStart("httpserver")
 	time.Sleep(time.Second)
 
-	f.BuildApp("httpclient")
-	f.RunApp("httpclient", "-name", "test")
+	f.BuildAndRun("httpclient", "-addr", "http://127.0.0.1:8080", "-name", "test")
 
 	f.RequireTraceCount(1)    // hello request
 	f.RequireSpansPerTrace(2) // client + server per trace
 
-	helloClientSpan := app.RequireSpan(t, f.Traces(),
-		app.IsClient,
-		app.HasAttributeContaining(string(semconv.URLFullKey), "/hello"),
+	helloClientSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsClient,
+		testutil.HasAttributeContaining(string(semconv.URLFullKey), "/hello"),
 	)
-	app.RequireHTTPClientSemconv(t, helloClientSpan, "GET", "http://localhost:8080/hello?name=test", "localhost", 200)
+	testutil.RequireHTTPClientSemconv(t, helloClientSpan, "GET", "http://127.0.0.1:8080/hello?name=test", "127.0.0.1", 200, 8080, "1.1", "http")
 
-	helloServerSpan := app.RequireSpan(t, f.Traces(),
-		app.IsServer,
-		app.HasAttribute(string(semconv.URLPathKey), "/hello"),
+	helloServerSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsServer,
+		testutil.HasAttribute(string(semconv.URLPathKey), "/hello"),
 	)
-	app.RequireHTTPServerSemconv(t, helloServerSpan, "GET", "/hello", "http", 200)
+	testutil.RequireHTTPServerSemconv(t, helloServerSpan, "GET", "/hello", "http", 200, 8080, "127.0.0.1", "Go-http-client/1.1", "1.1", "127.0.0.1")
 }
