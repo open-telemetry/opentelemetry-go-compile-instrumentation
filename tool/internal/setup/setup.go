@@ -208,6 +208,26 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	return sp.store(matched)
 }
 
+// setupGoCache creates a persistent GOCACHE in .otel-build/gocache if one isn't already set.
+// This prevents cache pollution when modifying core packages via //go:linkname while
+// allowing incremental builds to work properly.
+func setupGoCache(ctx context.Context, env []string) ([]string, error) {
+	if os.Getenv("GOCACHE") != "" {
+		// User has explicitly set GOCACHE, respect it
+		return env, nil
+	}
+
+	logger := util.LoggerFromContext(ctx)
+	cacheDir := util.GetBuildTemp("gocache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return nil, ex.Wrapf(err, "failed to create persistent GOCACHE")
+	}
+
+	env = append(env, "GOCACHE="+cacheDir)
+	logger.DebugContext(ctx, "using GOCACHE", "path", cacheDir)
+	return env, nil
+}
+
 // BuildWithToolexec builds the project with the toolexec mode
 func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
@@ -241,6 +261,12 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	pwd := util.GetOtelWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
+
+	// Use a fresh GOCACHE to prevent cache pollution when modifying core packages
+	env, err = setupGoCache(ctx, env)
+	if err != nil {
+		return err
+	}
 
 	return util.RunCmdWithEnv(ctx, env, newArgs...)
 }
