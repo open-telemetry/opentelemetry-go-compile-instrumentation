@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -230,7 +231,6 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 	if sp.ruleConfig != "" {
 		// Custom map to store deduplicate rules
 		ruleSet := make(map[string]rule.InstRule)
-		var allRules []rule.InstRule
 		ruleFiles := strings.SplitSeq(sp.ruleConfig, ",")
 
 		for file := range ruleFiles {
@@ -240,7 +240,10 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 			if err != nil {
 				return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
 			}
-			rules, _ := parseRuleFromYaml(content)
+			rules, err := parseRuleFromYaml(content)
+			if err != nil {
+				return nil, ex.Wrapf(err, "failed to parse rules from file %q", file)
+			}
 
 			for _, rule := range rules {
 				key := rule.GetName()
@@ -248,11 +251,11 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 			}
 		}
 
-		allRules = make([]rule.InstRule, 0, len(ruleSet))
+		allRules := make([]rule.InstRule, 0, len(ruleSet))
 		for _, r := range ruleSet {
 			allRules = append(allRules, r)
 		}
-		return allRules, nil
+		return slices.Clone(allRules), nil
 	}
 
 	// Load default rules from the unzipped pkg directory
