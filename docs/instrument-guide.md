@@ -88,11 +88,11 @@ When implementing hooks, we must adhere to certain limitations:
 
 2. **Generic Functions**: If the target function is generic, we cannot use `HookContext` APIs to modify parameters or return values (e.g., `SetParam`, `SetReturnVal`).
 
-## 3. Verify
-
-We verify the instrumentation through unit and integration tests.
+## 3. Testing
 
 ### Unit Tests
+
+We verify the instrumentation through unit and integration tests.
 
 Create standard Go tests (`*_test.go`) alongside the hook functions to verify logic.
 
@@ -104,8 +104,23 @@ go test ./pkg/instrumentation/<library>/...
 
 Integration tests run the instrumented code to ensure hooks are triggered correctly. These are located in `test/integration/`.
 
+They should:
+
+* Build the test app with the `otel` tool and run the produced binary. The binary must live under `test/apps/<name>/...`
+* Assert exported telemetry (traces/spans).
+* Validate semantic conventions (required + recommended attributes) for the spans created by the instrumentation.
+
 To run integration tests:
 
 ```bash
 make test-integration
 ```
+
+## 4. Verify
+
+Check that your instrumentation package have following elements:
+
+* A rule YAML in `tool/data/` with a correct `target` and version range.
+* Hook implementation under `pkg/instrumentation/<library>/...`
+* Unit tests alongside the hooks for logic-level behavior.
+* Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
