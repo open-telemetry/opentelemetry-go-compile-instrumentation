@@ -104,7 +104,7 @@ go test ./pkg/instrumentation/<library>/...
 
 Integration tests run the instrumented code to ensure hooks are triggered correctly. These are located in `test/integration/`.
 
-They should:
+We should:
 
 * Build the test app with the `otel` tool and run the produced binary. The binary must live under `test/apps/<name>/...`
 * Assert exported telemetry (traces/spans).

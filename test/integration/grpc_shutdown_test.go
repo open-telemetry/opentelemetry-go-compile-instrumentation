@@ -24,6 +24,10 @@ import (
 // This test validates that the signal-based shutdown handler in the instrumentation
 // layer correctly triggers a flush before exit.
 func TestGRPCServerTelemetryFlushOnSignal(t *testing.T) {
+	if util.IsWindows() {
+		t.Skip("SIGINT is not supported on windows")
+	}
+
 	f := testutil.NewTestFixture(t)
 	t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
 
