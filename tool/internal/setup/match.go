@@ -228,8 +228,11 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 
 	// Load custom rule(s) from config file if specified
 	if sp.ruleConfig != "" {
+		// Custom map to store deduplicate rules
+		ruleSet := make(map[string]rule.InstRule)
 		var allRules []rule.InstRule
 		ruleFiles := strings.SplitSeq(sp.ruleConfig, ",")
+
 		for file := range ruleFiles {
 			file = strings.TrimSpace(file)
 			// Starting Point for each rule file
@@ -238,7 +241,16 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 				return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
 			}
 			rules, _ := parseRuleFromYaml(content)
-			allRules = append(allRules, rules...)
+
+			for _, rule := range rules {
+				key := rule.GetName()
+				ruleSet[key] = rule
+			}
+		}
+
+		allRules = make([]rule.InstRule, 0, len(ruleSet))
+		for _, r := range ruleSet {
+			allRules = append(allRules, r)
 		}
 		return allRules, nil
 	}
