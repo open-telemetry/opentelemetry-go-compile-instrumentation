@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"maps"
 	"os"
 	"runtime"
 	"slices"
@@ -251,11 +252,7 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 			}
 		}
 
-		allRules := make([]rule.InstRule, 0, len(ruleSet))
-		for _, r := range ruleSet {
-			allRules = append(allRules, r)
-		}
-		return slices.Clone(allRules), nil
+		return slices.Collect(maps.Values(ruleSet)), nil
 	}
 
 	// Load default rules from the unzipped pkg directory
