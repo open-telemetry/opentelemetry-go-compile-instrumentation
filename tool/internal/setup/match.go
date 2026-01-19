@@ -226,13 +226,21 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 		return parseRuleFromYaml(content)
 	}
 
-	// Load custom rules from config file if specified
+	// Load custom rule(s) from config file if specified
 	if sp.ruleConfig != "" {
-		content, err := os.ReadFile(sp.ruleConfig)
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to read %s from -rules flag", sp.ruleConfig)
+		var allRules []rule.InstRule
+		ruleFiles := strings.SplitSeq(sp.ruleConfig, ",")
+		for file := range ruleFiles {
+			file = strings.TrimSpace(file)
+			// Starting Point for each rule file
+			content, err := os.ReadFile(file)
+			if err != nil {
+				return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
+			}
+			rules, _ := parseRuleFromYaml(content)
+			allRules = append(allRules, rules...)
 		}
-		return parseRuleFromYaml(content)
+		return allRules, nil
 	}
 
 	// Load default rules from the unzipped pkg directory
