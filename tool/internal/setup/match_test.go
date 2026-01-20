@@ -310,6 +310,46 @@ func writeCustomRules(t *testing.T, name, content string) string {
 	return path
 }
 
+func TestMultipleRuleFiles(t *testing.T) {
+	content1 := `h1:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+	content2 := `h2:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+
+	p1 := writeCustomRules(t, "r1.yaml", content1)
+	p2 := writeCustomRules(t, "r2.yaml", content2)
+
+	t.Setenv(util.EnvOtelRules, "")
+
+	sp := newTestSetupPhase()
+	err := sp.extract()
+	require.NoError(t, err)
+
+	sp.ruleConfig = p1 + "," + p2
+
+	rules, err := sp.loadRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+	require.Equal(t, "h1", rules[0].GetName())
+	require.Equal(t, "h2", rules[1].GetName())
+
+	// Check for duplicate rule by name
+	sp = newTestSetupPhase()
+	err = sp.extract()
+	require.NoError(t, err)
+
+	sp.ruleConfig = p1 + "," + p1
+
+	rules, err = sp.loadRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	require.Equal(t, "h1", rules[0].GetName())
+}
+
 func TestLoadDefaultRules(t *testing.T) {
 	// Write custom rules to temporary files
 	content1 := `h1:
