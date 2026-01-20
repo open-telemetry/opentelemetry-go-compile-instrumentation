@@ -5,8 +5,10 @@ package setup
 
 import (
 	"context"
+	"maps"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -226,13 +228,31 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 		return parseRuleFromYaml(content)
 	}
 
-	// Load custom rules from config file if specified
+	// Load custom rule(s) from config file if specified
 	if sp.ruleConfig != "" {
-		content, err := os.ReadFile(sp.ruleConfig)
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to read %s from -rules flag", sp.ruleConfig)
+		// Custom map to store deduplicate rules
+		ruleSet := make(map[string]rule.InstRule)
+		ruleFiles := strings.SplitSeq(sp.ruleConfig, ",")
+
+		for file := range ruleFiles {
+			file = strings.TrimSpace(file)
+			// Starting Point for each rule file
+			content, err := os.ReadFile(file)
+			if err != nil {
+				return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
+			}
+			rules, err := parseRuleFromYaml(content)
+			if err != nil {
+				return nil, ex.Wrapf(err, "failed to parse rules from file %q", file)
+			}
+
+			for _, rule := range rules {
+				key := rule.GetName()
+				ruleSet[key] = rule
+			}
 		}
-		return parseRuleFromYaml(content)
+
+		return slices.Collect(maps.Values(ruleSet)), nil
 	}
 
 	// Load default rules from the unzipped pkg directory
