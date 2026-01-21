@@ -208,13 +208,18 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 		return err
 	}
 
-	// Create trace provider with batch span processor
+	spanProcessor := sdktrace.NewBatchSpanProcessor(traceExporter,
+		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
+		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
+	)
+	if os.Getenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR") == "true" {
+		spanProcessor = sdktrace.NewSimpleSpanProcessor(traceExporter)
+		logger.Debug("using SimpleSpanProcessor for immediate span export")
+	}
+
 	tracerProvider = sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
-		sdktrace.WithBatcher(traceExporter,
-			sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
-			sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
-		),
+		sdktrace.WithSpanProcessor(spanProcessor),
 	)
 
 	// Set global tracer provider

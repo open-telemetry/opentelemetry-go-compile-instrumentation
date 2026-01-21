@@ -21,3 +21,6 @@ go.work.sum
 coverage*.txt
 gotest*.log
 dist
+
+test/apps/*/app
+test/apps/*/app.exe
