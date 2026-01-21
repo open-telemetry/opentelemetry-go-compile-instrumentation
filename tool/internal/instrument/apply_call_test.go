@@ -115,8 +115,7 @@ func TestMatchesCallRule_QualifiedCallMatches(t *testing.T) {
 		},
 	}
 
-	file := &dst.File{}
-	matches := matchesCallRule(call, r, file)
+	matches := matchesCallRule(call, r, nil)
 
 	assert.True(t, matches)
 }
@@ -132,8 +131,7 @@ func TestMatchesCallRule_UnqualifiedCallDoesNotMatch(t *testing.T) {
 		Fun: &dst.Ident{Name: "Get"},
 	}
 
-	file := &dst.File{}
-	matches := matchesCallRule(call, r, file)
+	matches := matchesCallRule(call, r, nil)
 
 	assert.False(t, matches)
 }
@@ -154,8 +152,7 @@ func TestMatchesCallRule_WrongPackage(t *testing.T) {
 		},
 	}
 
-	file := &dst.File{}
-	matches := matchesCallRule(call, r, file)
+	matches := matchesCallRule(call, r, nil)
 
 	assert.False(t, matches)
 }
@@ -176,8 +173,7 @@ func TestMatchesCallRule_WrongFunctionName(t *testing.T) {
 		},
 	}
 
-	file := &dst.File{}
-	matches := matchesCallRule(call, r, file)
+	matches := matchesCallRule(call, r, nil)
 
 	assert.False(t, matches)
 }
@@ -193,10 +189,73 @@ func TestMatchesCallRule_NonSelectorExpression(t *testing.T) {
 		Fun: &dst.FuncLit{},
 	}
 
-	file := &dst.File{}
-	matches := matchesCallRule(call, r, file)
+	matches := matchesCallRule(call, r, nil)
 
 	assert.False(t, matches)
+}
+
+func TestMatchesCallRule_ImportAliasFromVersionSuffix(t *testing.T) {
+	r := &rule.InstCallRule{
+		ImportPath: "example.com/foo/v2",
+		FuncName:   "Bar",
+	}
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "foo"},
+			Sel: &dst.Ident{Name: "Bar"},
+		},
+	}
+
+	file := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.IMPORT,
+				Specs: []dst.Spec{
+					&dst.ImportSpec{
+						Path: &dst.BasicLit{Value: `"example.com/foo/v2"`},
+					},
+				},
+			},
+		},
+	}
+
+	importAliases := collectImportAliases(file)
+	matches := matchesCallRule(call, r, importAliases)
+
+	assert.True(t, matches)
+}
+
+func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
+	r := &rule.InstCallRule{
+		ImportPath: "gopkg.in/yaml.v3",
+		FuncName:   "Unmarshal",
+	}
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "yaml"},
+			Sel: &dst.Ident{Name: "Unmarshal"},
+		},
+	}
+
+	file := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.IMPORT,
+				Specs: []dst.Spec{
+					&dst.ImportSpec{
+						Path: &dst.BasicLit{Value: `"gopkg.in/yaml.v3"`},
+					},
+				},
+			},
+		},
+	}
+
+	importAliases := collectImportAliases(file)
+	matches := matchesCallRule(call, r, importAliases)
+
+	assert.True(t, matches)
 }
 
 func TestAddImportsFromRule_AddNewImport(t *testing.T) {
