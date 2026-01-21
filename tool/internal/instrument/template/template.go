@@ -106,6 +106,9 @@ func (t *Template) CompileExpression(node dst.Expr) (dst.Expr, error) {
 	if funcDecl.Body == nil || len(funcDecl.Body.List) == 0 {
 		return nil, errors.New("function body is empty")
 	}
+	if len(funcDecl.Body.List) != 1 {
+		return nil, fmt.Errorf("expected single expression statement, got %d statements", len(funcDecl.Body.List))
+	}
 
 	exprStmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
 	if !ok {
@@ -113,7 +116,10 @@ func (t *Template) CompileExpression(node dst.Expr) (dst.Expr, error) {
 	}
 
 	// Replace placeholder with the actual node
-	result := replacePlaceholder(exprStmt.X, node)
+	result, replaced := replacePlaceholder(exprStmt.X, node)
+	if !replaced {
+		return nil, errors.New("template output did not contain placeholder expression")
+	}
 
 	resultExpr, ok := result.(dst.Expr)
 	if !ok {
