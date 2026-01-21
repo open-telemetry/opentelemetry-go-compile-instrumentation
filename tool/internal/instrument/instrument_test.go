@@ -68,7 +68,13 @@ func runTest(t *testing.T, testName string) {
 	)
 
 	sourceFile := filepath.Join(tempDir, mainGoFileName)
-	util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
+	// Check if there's a test-specific source file first
+	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, sourceFileName)
+	if _, err := os.Stat(testSpecificSource); err == nil {
+		util.CopyFile(testSpecificSource, sourceFile)
+	} else {
+		util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
+	}
 
 	ruleSet := loadRulesYAML(t, testName, sourceFile)
 	writeMatchedJSON(ruleSet)
@@ -99,6 +105,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		FuncRules:   make(map[string][]*rule.InstFuncRule),
 		StructRules: make(map[string][]*rule.InstStructRule),
 		RawRules:    make(map[string][]*rule.InstRawRule),
+		CallRules:   make(map[string][]*rule.InstCallRule),
 		FileRules:   make([]*rule.InstFileRule, 0),
 	}
 
@@ -127,6 +134,9 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		case props["func"] != nil:
 			r, _ := rule.NewInstFuncRule(ruleData, name)
 			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
+		case props["function-call"] != nil:
+			r, _ := rule.NewInstCallRule(ruleData, name)
+			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
 		}
 	}
 
@@ -285,6 +295,23 @@ func TestGroupRules(t *testing.T) {
 			expectedFiles: []string{"file1.go"},
 			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
 				assert.Len(t, grouped["file1.go"], 3)
+			},
+		},
+		{
+			name: "call rules only",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				CallRules: map[string][]*rule.InstCallRule{
+					"file1.go": {
+						{InstBaseRule: rule.InstBaseRule{Name: "call1"}},
+					},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
+			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
+				assert.Len(t, grouped["file1.go"], 1)
 			},
 		},
 	}
