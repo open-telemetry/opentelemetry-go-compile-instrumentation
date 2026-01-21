@@ -117,7 +117,7 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 **Fields:**
 
 - `function-call` (string, required): Qualified function name in format `package/path.FunctionName`. Matches calls to functions from a specific import path.
-- `template` (string, required): Wrapper template using Go's `text/template` syntax with `{{ . }}` placeholder for the original call. The template must be a valid Go expression that produces the wrapped call.
+- `template` (string, required): Wrapper template using Go's `text/template` syntax with `{{ . }}` placeholder for the original call. The template must be a valid Go expression that produces a call expression (current limitation).
 - `imports` (map, optional): Additional imports needed for wrapper code (alias: path).
 
 **Template System:**
@@ -126,7 +126,7 @@ The `template` field uses Go's standard `text/template` package for code generat
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
 - **Type Safety**: The template is compiled at rule creation time and validated
-- **Expression Output**: The template must produce a valid Go expression
+- **Expression Output**: The template must produce a valid Go expression that evaluates to a call expression (current limitation)
 
 Currently supported template features:
 
@@ -242,11 +242,10 @@ func process() {
 **Important Notes:**
 
 - The `{{ . }}` placeholder in the template represents the original function call.
-- The template must be a valid Go expression that includes the placeholder.
+- The template must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
-- Use the qualified format `package/path.FunctionName` for functions from other packages.
-- Use just `FunctionName` for functions in the same package as the target.
+- Use the qualified format `package/path.FunctionName` for functions.
 
 ### 5. File Addition Rule
 
