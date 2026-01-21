@@ -11,8 +11,9 @@ import (
 // replacePlaceholder replaces all occurrences of _.PLACEHOLDER_0 in the AST
 // with the given node. This is used to inject the original call expression
 // into the template-generated code.
-func replacePlaceholder(ast, node dst.Node) dst.Node {
-	return dstutil.Apply(
+func replacePlaceholder(ast, node dst.Node) (dst.Node, bool) {
+	replaced := false
+	result := dstutil.Apply(
 		ast,
 		func(cursor *dstutil.Cursor) bool {
 			selectorExpr, ok := cursor.Node().(*dst.SelectorExpr)
@@ -28,6 +29,7 @@ func replacePlaceholder(ast, node dst.Node) dst.Node {
 
 			if selectorExpr.Sel.Name == "PLACEHOLDER_0" {
 				cursor.Replace(node)
+				replaced = true
 				return false
 			}
 
@@ -35,4 +37,5 @@ func replacePlaceholder(ast, node dst.Node) dst.Node {
 		},
 		nil,
 	)
+	return result, replaced
 }

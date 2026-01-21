@@ -222,6 +222,36 @@ func TestCompileExpression_EmptyResult(t *testing.T) {
 	assert.Contains(t, err.Error(), "function body is empty")
 }
 
+func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
+	tmpl, err := NewTemplate(`wrapper("{{ . }}")`)
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun: &dst.Ident{Name: "test"},
+	}
+
+	result, err := tmpl.CompileExpression(originalCall)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "placeholder")
+}
+
+func TestCompileExpression_MultipleStatements(t *testing.T) {
+	tmpl, err := NewTemplate("first(); {{ . }}")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun: &dst.Ident{Name: "test"},
+	}
+
+	result, err := tmpl.CompileExpression(originalCall)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "single expression statement")
+}
+
 func TestCompileExpression_NonExpressionStatement(t *testing.T) {
 	// Template that produces a non-expression statement
 	// This is tricky - we need something that parses as a statement but not as an expression

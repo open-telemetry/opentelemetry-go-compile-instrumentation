@@ -29,11 +29,12 @@ func TestReplacePlaceholder_SingleOccurrence(t *testing.T) {
 	}
 
 	// Replace
-	result := replacePlaceholder(astWithPlaceholder, replacement)
+	result, replaced := replacePlaceholder(astWithPlaceholder, replacement)
 
 	// Verify
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok)
+	assert.True(t, replaced)
 	assert.Equal(t, "wrapper", resultCall.Fun.(*dst.Ident).Name)
 
 	require.Len(t, resultCall.Args, 1)
@@ -60,10 +61,11 @@ func TestReplacePlaceholder_MultipleOccurrences(t *testing.T) {
 
 	replacement := &dst.Ident{Name: "value"}
 
-	result := replacePlaceholder(astWithPlaceholders, replacement)
+	result, replaced := replacePlaceholder(astWithPlaceholders, replacement)
 
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok)
+	assert.True(t, replaced)
 	require.Len(t, resultCall.Args, 2)
 
 	// Both should be replaced
@@ -87,11 +89,12 @@ func TestReplacePlaceholder_NoPlaceholders(t *testing.T) {
 
 	replacement := &dst.Ident{Name: "shouldNotAppear"}
 
-	result := replacePlaceholder(astWithoutPlaceholder, replacement)
+	result, replaced := replacePlaceholder(astWithoutPlaceholder, replacement)
 
 	// Verify AST is unchanged
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok)
+	assert.False(t, replaced)
 	assert.Equal(t, "simpleCall", resultCall.Fun.(*dst.Ident).Name)
 
 	require.Len(t, resultCall.Args, 1)
@@ -119,11 +122,12 @@ func TestReplacePlaceholder_NestedStructure(t *testing.T) {
 
 	replacement := &dst.Ident{Name: "innerValue"}
 
-	result := replacePlaceholder(astWithNested, replacement)
+	result, replaced := replacePlaceholder(astWithNested, replacement)
 
 	// Navigate to the nested location
 	outerCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok)
+	assert.True(t, replaced)
 
 	middleCall, ok := outerCall.Args[0].(*dst.CallExpr)
 	require.True(t, ok)
@@ -147,11 +151,12 @@ func TestReplacePlaceholder_WrongSelectorPrefix(t *testing.T) {
 
 	replacement := &dst.Ident{Name: "shouldNotReplace"}
 
-	result := replacePlaceholder(astWithWrongPrefix, replacement)
+	result, replaced := replacePlaceholder(astWithWrongPrefix, replacement)
 
 	// Verify not replaced
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok)
+	assert.False(t, replaced)
 
 	selector, ok := resultCall.Args[0].(*dst.SelectorExpr)
 	require.True(t, ok)
@@ -173,11 +178,12 @@ func TestReplacePlaceholder_WrongSelectorName(t *testing.T) {
 
 	replacement := &dst.Ident{Name: "shouldNotReplace"}
 
-	result := replacePlaceholder(astWithWrongName, replacement)
+	result, replaced := replacePlaceholder(astWithWrongName, replacement)
 
 	// Verify not replaced
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok)
+	assert.False(t, replaced)
 
 	selector, ok := resultCall.Args[0].(*dst.SelectorExpr)
 	require.True(t, ok)
@@ -208,11 +214,12 @@ func TestReplacePlaceholder_ComplexAST(t *testing.T) {
 
 	replacement := &dst.Ident{Name: "replacedValue"}
 
-	result := replacePlaceholder(astComplex, replacement)
+	result, replaced := replacePlaceholder(astComplex, replacement)
 
 	// Verify structure
 	binaryExpr, ok := result.(*dst.BinaryExpr)
 	require.True(t, ok)
+	assert.True(t, replaced)
 
 	leftCall, ok := binaryExpr.X.(*dst.CallExpr)
 	require.True(t, ok)
@@ -239,11 +246,12 @@ func TestReplacePlaceholder_NonSelectorNode(t *testing.T) {
 
 	replacement := &dst.Ident{Name: "shouldNotAppear"}
 
-	result := replacePlaceholder(astWithLiteral, replacement)
+	result, replaced := replacePlaceholder(astWithLiteral, replacement)
 
 	// Verify unchanged
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok)
+	assert.False(t, replaced)
 	require.Len(t, resultCall.Args, 2)
 
 	lit, ok := resultCall.Args[0].(*dst.BasicLit)
