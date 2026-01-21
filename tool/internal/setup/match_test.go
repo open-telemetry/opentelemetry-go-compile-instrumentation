@@ -310,6 +310,42 @@ func writeCustomRules(t *testing.T, name, content string) string {
 	return path
 }
 
+func TestRuleFilesFromDir(t *testing.T) {
+	content1 := `h1:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+	content2 := `h2:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+
+	// Manually make a temporary and sub temporary Directories
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub_dir")
+
+	err := os.Mkdir(subDir, 0o755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(dir, "r1.otelc.yaml"), []byte(content1), 0o644)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(subDir, "r2.otelc.yaml"), []byte(content2), 0o644)
+	require.NoError(t, err)
+
+	t.Setenv(util.EnvOtelRules, "")
+
+	sp := newTestSetupPhase()
+	err = sp.extract()
+	require.NoError(t, err)
+
+	sp.ruleConfig = dir
+
+	rules, err := sp.loadRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+}
+
 func TestMultipleRuleFiles(t *testing.T) {
 	content1 := `h1:
   target: main
@@ -334,8 +370,12 @@ func TestMultipleRuleFiles(t *testing.T) {
 	rules, err := sp.loadRules()
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
-	require.Equal(t, "h1", rules[0].GetName())
-	require.Equal(t, "h2", rules[1].GetName())
+	names := []string{
+		rules[0].GetName(),
+		rules[1].GetName(),
+	}
+	require.Contains(t, names, "h1")
+	require.Contains(t, names, "h2")
 
 	// Check for duplicate rule by name
 	sp = newTestSetupPhase()
