@@ -50,6 +50,7 @@ type InstCallRule struct {
 
 	// Template is the wrapper code with {{ . }} as placeholder for the original call.
 	// The template must be a valid Go expression.
+	// Currently the output must be a call expression.
 	//
 	// Examples:
 	//   - "wrapper({{ . }})" wraps the call with wrapper()
