@@ -1,4 +1,0 @@
-wrap_sizeof_with_strings:
-  target: main
-  function-call: unsafe.Sizeof
-  template: "(func() uintptr { r := {{ . }}; _ = unsafe.Pointer(&r); return r })()"
