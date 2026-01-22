@@ -3,15 +3,17 @@
 
 package main
 
+import fmt "fmt"
+
 import "unsafe"
 
 func CallSizeof() {
 	x := 42
-	size := (func() uintptr { r := unsafe.Sizeof(x); _ = unsafe.Pointer(&r); return r })()
+	size := (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(x) })()
 	_ = size
 }
 
 func main() {
 	y := "hello"
-	_ = (func() uintptr { r := unsafe.Sizeof(y); _ = unsafe.Pointer(&r); return r })()
+	_ = (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(y) })()
 }
