@@ -1,0 +1,17 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "unsafe"
+
+func CallSizeof() {
+	x := 42
+	size := (func() uintptr { r := unsafe.Sizeof(x); _ = unsafe.Pointer(&r); return r })()
+	_ = size
+}
+
+func main() {
+	y := "hello"
+	_ = (func() uintptr { r := unsafe.Sizeof(y); _ = unsafe.Pointer(&r); return r })()
+}
