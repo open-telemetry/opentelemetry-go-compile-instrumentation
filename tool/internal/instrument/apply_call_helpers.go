@@ -111,12 +111,12 @@ func collectImportAliases(file *dst.File) map[string]string {
 			continue
 		}
 		for _, spec := range genDecl.Specs {
-			importSpec, ok := spec.(*dst.ImportSpec)
-			if !ok || importSpec.Path == nil {
+			importSpec, isImport := spec.(*dst.ImportSpec)
+			if !isImport || importSpec.Path == nil {
 				continue
 			}
 			importPath := strings.Trim(importSpec.Path.Value, `"`)
-			alias := ""
+			var alias string
 			if importSpec.Name != nil {
 				alias = importSpec.Name.Name
 			} else {
