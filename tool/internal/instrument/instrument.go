@@ -36,6 +36,7 @@ func addRulesToMap[T rule.InstRule](
 	}
 }
 
+//nolint:gocognit
 func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
