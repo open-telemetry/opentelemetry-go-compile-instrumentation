@@ -6,6 +6,7 @@ package importcfg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -13,9 +14,9 @@ import (
 
 // PackageInfo represents the relevant fields from `go list -json` output.
 type PackageInfo struct {
-	ImportPath string
-	Export     string
-	Deps       []string
+	ImportPath string   `json:"ImportPath"`
+	Export     string   `json:"Export"`
+	Deps       []string `json:"Deps"`
 }
 
 // ResolvePackageFiles attempts to retrieve the archive for the designated import path
@@ -25,7 +26,8 @@ func ResolvePackageFiles(ctx context.Context, importPath string) (map[string]str
 	cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", "-deps", importPath)
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			return nil, fmt.Errorf("go list failed: %w\nstderr: %s", err, string(exitErr.Stderr))
 		}
 		return nil, fmt.Errorf("go list failed: %w", err)
@@ -37,8 +39,8 @@ func ResolvePackageFiles(ctx context.Context, importPath string) (map[string]str
 	// go list -json outputs one JSON object per line
 	for decoder.More() {
 		var pkg PackageInfo
-		if err := decoder.Decode(&pkg); err != nil {
-			return nil, fmt.Errorf("decoding package info: %w", err)
+		if err2 := decoder.Decode(&pkg); err2 != nil {
+			return nil, fmt.Errorf("decoding package info: %w", err2)
 		}
 
 		// Only include packages that have an export archive

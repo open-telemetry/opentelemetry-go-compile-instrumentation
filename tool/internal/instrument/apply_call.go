@@ -27,8 +27,8 @@ func findNewImports(root *dst.File, ruleImports map[string]string) map[string]st
 			continue
 		}
 		for _, spec := range genDecl.Specs {
-			importSpec, ok := spec.(*dst.ImportSpec)
-			if !ok || importSpec.Path == nil {
+			importSpec, isImport := spec.(*dst.ImportSpec)
+			if !isImport || importSpec.Path == nil {
 				continue
 			}
 			path := strings.Trim(importSpec.Path.Value, `"`)

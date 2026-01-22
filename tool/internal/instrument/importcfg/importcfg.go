@@ -36,13 +36,14 @@ func ParseFile(filename string) (ImportConfig, error) {
 }
 
 // parse parses the importcfg data from the provided reader.
-func parse(r io.Reader) (reg ImportConfig, err error) {
+func parse(r io.Reader) (ImportConfig, error) {
+	var reg ImportConfig
 	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 
 	for scanner.Scan() {
-		if err = scanner.Err(); err != nil {
-			return
+		if err := scanner.Err(); err != nil {
+			return reg, err
 		}
 
 		line := strings.TrimSpace(scanner.Text())
@@ -50,16 +51,16 @@ func parse(r io.Reader) (reg ImportConfig, err error) {
 			continue
 		}
 
-		directive, data, ok := strings.Cut(line, " ")
-		if !ok {
+		directive, data, found := strings.Cut(line, " ")
+		if !found {
 			reg.Extras = append(reg.Extras, line)
 			continue
 		}
 
 		switch directive {
 		case "packagefile":
-			importPath, archive, ok := strings.Cut(data, "=")
-			if !ok {
+			importPath, archive, hasEq := strings.Cut(data, "=")
+			if !hasEq {
 				reg.Extras = append(reg.Extras, line)
 				continue
 			}
@@ -70,8 +71,8 @@ func parse(r io.Reader) (reg ImportConfig, err error) {
 			reg.PackageFile[importPath] = archive
 
 		case "importmap":
-			importPath, mappedTo, ok := strings.Cut(data, "=")
-			if !ok {
+			importPath, mappedTo, hasEq := strings.Cut(data, "=")
+			if !hasEq {
 				reg.Extras = append(reg.Extras, line)
 				continue
 			}
@@ -86,7 +87,7 @@ func parse(r io.Reader) (reg ImportConfig, err error) {
 		}
 	}
 
-	return
+	return reg, nil
 }
 
 // WriteFile writes the content of the ImportConfig to the provided file,

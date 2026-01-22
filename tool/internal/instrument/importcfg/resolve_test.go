@@ -25,7 +25,7 @@ func TestResolvePackageFiles(t *testing.T) {
 
 	// fmt depends on other packages, so we should have more than one
 	assert.Greater(t, len(archives), 1, "should have dependencies")
-	
+
 	t.Logf("Resolved %d packages for fmt", len(archives))
 	t.Logf("fmt archive: %s", fmtArchive)
 }
@@ -35,7 +35,7 @@ func TestResolvePackageFiles_InvalidPackage(t *testing.T) {
 
 	// Test with a non-existent package
 	_, err := ResolvePackageFiles(ctx, "this/package/does/not/exist")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "go list failed")
 }
 

@@ -39,7 +39,7 @@ func TestParseFile(t *testing.T) {
 	content := `packagefile fmt=/path/to/fmt.a
 packagefile strings=/path/to/strings.a
 `
-	err := os.WriteFile(filename, []byte(content), 0644)
+	err := os.WriteFile(filename, []byte(content), 0o644)
 	require.NoError(t, err)
 
 	cfg, err := ParseFile(filename)
