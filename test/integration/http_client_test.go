@@ -6,56 +6,70 @@
 package test
 
 import (
-	"path/filepath"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
-func TestHTTPClientIntegration(t *testing.T) {
-	clientDir := filepath.Join("..", "..", "demo", "http", "client")
-	serverDir := filepath.Join("..", "..", "demo", "http", "server")
+func TestHTTPClient(t *testing.T) {
+	testCases := []struct {
+		name       string
+		queryParam string
+	}{
+		{
+			name:       "basic",
+			queryParam: "world",
+		},
+	}
 
-	// Enable debug logging
-	t.Setenv("OTEL_LOG_LEVEL", "debug")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := testutil.NewTestFixture(t)
+			server := StartHTTPServerWithResponse(t, 200, `{"message":"Hello"}`)
 
-	// Build both client and server with instrumentation
-	t.Log("Building instrumented HTTP client and server...")
-	app.Build(t, clientDir, "go", "build", "-a")
-	app.Build(t, serverDir, "go", "build", "-a")
+			f.BuildAndRun("httpclient", "-addr="+server.URL, "-name="+tc.queryParam)
 
-	// Start the server
-	t.Log("Starting HTTP server...")
-	serverCmd, outputPipe := app.Start(t, serverDir, "-port=8083", "-no-faults", "-no-latency")
-	waitUntilDone, err := app.WaitForServerReady(t, serverCmd, outputPipe)
-	require.NoError(t, err, "server should start successfully")
+			span := f.RequireSingleSpan()
+			expectedURL := server.URL + "/hello?name=" + tc.queryParam
+			testutil.RequireHTTPClientSemconv(t, span, "GET", expectedURL, "127.0.0.1", 200, server.Port(), "1.1", "http")
+		})
+	}
+}
 
-	// Run the client (makes request and exits)
-	t.Log("Running HTTP client...")
-	clientOutput := app.Run(t, clientDir, "-addr=http://localhost:8083", "-count=1")
+// HTTPServer wraps a test HTTP server.
+type HTTPServer struct {
+	t *testing.T
+	*httptest.Server
+}
 
-	// Shutdown the server
-	t.Log("Shutting down server...")
-	app.Run(t, clientDir, "-addr=http://localhost:8083", "-shutdown")
+func (s *HTTPServer) Port() int64 {
+	u, err := url.Parse(s.URL)
+	require.NoError(s.t, err)
+	port, err := strconv.ParseInt(u.Port(), 10, 64)
+	require.NoError(s.t, err)
+	return port
+}
 
-	// Wait for server to exit and get output
-	serverOutput := waitUntilDone()
+// StartHTTPServer creates and starts a test HTTP server with a custom handler.
+// The server is automatically closed when the test completes.
+func StartHTTPServer(t *testing.T, handler http.Handler) *HTTPServer {
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
 
-	// Verify client instrumentation
-	t.Log("Verifying client instrumentation...")
-	require.Contains(t, clientOutput,
-		"HTTP client instrumentation initialized", "client should initialize instrumentation")
-	require.Contains(t, clientOutput, "BeforeRoundTrip called", "client before hook should be called")
-	require.Contains(t, clientOutput, "AfterRoundTrip called", "client after hook should be called")
+	return &HTTPServer{t: t, Server: server}
+}
 
-	// Verify server instrumentation
-	t.Log("Verifying server instrumentation...")
-	require.Contains(t, serverOutput,
-		"HTTP server instrumentation initialized", "server should initialize instrumentation")
-	require.Contains(t, serverOutput, "BeforeServeHTTP called", "server before hook should be called")
-	require.Contains(t, serverOutput, "AfterServeHTTP called", "server after hook should be called")
-
-	t.Log("HTTP client integration test passed!")
+// StartHTTPServerWithResponse creates a test HTTP server that returns the given status and body.
+func StartHTTPServerWithResponse(t *testing.T, status int, body string) *HTTPServer {
+	return StartHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		fmt.Fprintln(w, body)
+	}))
 }

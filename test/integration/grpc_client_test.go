@@ -6,113 +6,110 @@
 package test
 
 import (
-	"path/filepath"
+	"context"
+	"io"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
-// TestGRPCClientIntegration tests gRPC client instrumentation with both NewClient and DialContext
-func TestGRPCClientIntegration(t *testing.T) {
-	serverDir := filepath.Join("..", "..", "demo", "grpc", "server")
-	clientDir := filepath.Join("..", "..", "demo", "grpc", "client")
+func TestGRPCClient(t *testing.T) {
+	testCases := []struct {
+		name           string
+		extraArgs      []string
+		method         string
+		expectedOutput string
+	}{
+		{
+			name:           "unary",
+			extraArgs:      []string{"-name=ClientTest"},
+			method:         "SayHello",
+			expectedOutput: "Hello ClientTest",
+		},
+		{
+			name:           "streaming",
+			extraArgs:      []string{"-stream", "-count=3"},
+			method:         "SayHelloStream",
+			expectedOutput: "stream response",
+		},
+	}
 
-	// Enable debug logging for instrumentation
-	t.Setenv("OTEL_LOG_LEVEL", "debug")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := testutil.NewTestFixture(t)
+			server := StartGRPCServer(t)
 
-	t.Log("Building instrumented gRPC client and server...")
+			args := append([]string{"-addr=" + server.Addr}, tc.extraArgs...)
+			output := f.BuildAndRun("grpcclient", args...)
 
-	// Build the server and client applications with the instrumentation tool
-	app.Build(t, serverDir, "go", "build", "-a")
-	app.Build(t, clientDir, "go", "build", "-a")
-
-	t.Log("Starting gRPC server...")
-
-	// Start the server and wait for it to be ready
-	serverApp, outputPipe := app.Start(t, serverDir)
-	_, err := app.WaitForServerReady(t, serverApp, outputPipe)
-	require.NoError(t, err, "server should start successfully")
-
-	t.Log("Running gRPC client (unary RPC)...")
-
-	// Test unary RPC - this uses grpc.NewClient internally
-	clientOutput := app.Run(t, clientDir, "-name", "ClientTest")
-	require.Contains(t, clientOutput, `"msg":"greeting"`, "Expected greeting response from server")
-	require.Contains(t, clientOutput, `"message":"Hello ClientTest"`, "Expected personalized greeting")
-
-	t.Log("Verifying client instrumentation...")
-
-	// Verify client instrumentation hooks were called
-	require.Contains(
-		t,
-		clientOutput,
-		"gRPC client instrumentation initialized",
-		"client instrumentation should be initialized",
-	)
-	require.Contains(t, clientOutput, "BeforeNewClient called", "client before hook should be called")
-	require.Contains(t, clientOutput, "AfterNewClient called", "client after hook should be called")
-
-	t.Log("Shutting down server...")
-
-	// Send shutdown
-	shutdownOutput := app.Run(t, clientDir, "-shutdown")
-	require.Contains(t, shutdownOutput, `"msg":"shutdown response"`, "Expected shutdown response")
-
-	// Wait for server to exit
-	_ = serverApp.Wait()
-
-	t.Log("gRPC client integration test passed!")
+			require.Contains(t, output, tc.expectedOutput)
+			span := f.RequireSingleSpan()
+			host, _, err := net.SplitHostPort(server.Addr)
+			require.NoError(t, err)
+			testutil.RequireGRPCClientSemconv(t, span, host, "greeter.Greeter", tc.method, 0)
+		})
+	}
 }
 
-// TestGRPCClientServerStreaming tests gRPC streaming RPC instrumentation
-func TestGRPCClientServerStreaming(t *testing.T) {
-	serverDir := filepath.Join("..", "..", "demo", "grpc", "server")
-	clientDir := filepath.Join("..", "..", "demo", "grpc", "client")
+// GRPCServer wraps a test gRPC server with its address.
+type GRPCServer struct {
+	*grpc.Server
+	Addr     string
+	listener net.Listener
+}
 
-	// Enable debug logging for instrumentation
-	t.Setenv("OTEL_LOG_LEVEL", "debug")
+// Stop gracefully stops the gRPC server.
+func (s *GRPCServer) Stop() {
+	s.Server.Stop()
+}
 
-	t.Log("Building instrumented gRPC applications...")
+// testGreeterServer is a simple non-instrumented gRPC server for testing.
+type testGreeterServer struct {
+	pb.UnimplementedGreeterServer
+}
 
-	// Build the applications
-	app.Build(t, serverDir, "go", "build", "-a")
-	app.Build(t, clientDir, "go", "build", "-a")
+func (s *testGreeterServer) SayHello(_ context.Context, req *pb.HelloRequest) (*pb.HelloReply, error) {
+	return &pb.HelloReply{Message: "Hello " + req.GetName()}, nil
+}
 
-	t.Log("Starting gRPC server...")
+func (s *testGreeterServer) SayHelloStream(stream grpc.BidiStreamingServer[pb.HelloRequest, pb.HelloReply]) error {
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(&pb.HelloReply{Message: "Hello " + req.GetName()}); err != nil {
+			return err
+		}
+	}
+}
 
-	// Start the server and wait for it to be ready
-	serverApp, outputPipe := app.Start(t, serverDir)
-	_, err := app.WaitForServerReady(t, serverApp, outputPipe)
-	require.NoError(t, err, "server should start successfully")
+// StartGRPCServer creates and starts a test gRPC server.
+// The server is automatically stopped when the test completes.
+func StartGRPCServer(t *testing.T, opts ...grpc.ServerOption) *GRPCServer {
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
 
-	t.Log("Running gRPC client (streaming RPC)...")
+	server := grpc.NewServer(opts...)
+	pb.RegisterGreeterServer(server, &testGreeterServer{})
 
-	// Test streaming RPC - send 5 messages
-	streamOutput := app.Run(t, clientDir, "-stream", "-count=5")
-	require.Contains(t, streamOutput, `"msg":"stream response"`, "Expected stream responses")
-	require.Contains(t, streamOutput, "Hello", "Expected greeting in stream response")
+	go func() {
+		_ = server.Serve(lis)
+	}()
 
-	t.Log("Verifying instrumentation output...")
+	t.Cleanup(server.Stop)
 
-	// Verify client instrumentation hooks were called
-	require.Contains(
-		t,
-		streamOutput,
-		"gRPC client instrumentation initialized",
-		"client instrumentation should be initialized",
-	)
-	require.Contains(t, streamOutput, "BeforeNewClient called", "client before hook should be called")
-	require.Contains(t, streamOutput, "AfterNewClient called", "client after hook should be called")
-
-	t.Log("Shutting down server...")
-
-	// Send shutdown
-	app.Run(t, clientDir, "-shutdown")
-
-	// Wait for server to exit
-	_ = serverApp.Wait()
-
-	t.Log("gRPC streaming integration test passed!")
+	return &GRPCServer{
+		Server:   server,
+		Addr:     lis.Addr().String(),
+		listener: lis,
+	}
 }

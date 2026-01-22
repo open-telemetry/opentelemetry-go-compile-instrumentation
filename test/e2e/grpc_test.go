@@ -6,140 +6,35 @@
 package test
 
 import (
-	"bufio"
-	"io"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
-func waitUntilGrpcReady(t *testing.T, serverApp *exec.Cmd, outputPipe io.ReadCloser) func() string {
-	t.Helper()
-
-	readyChan := make(chan struct{})
-	doneChan := make(chan struct{})
-	output := strings.Builder{}
-	const readyMsg = "server started"
-	go func() {
-		// Scan will return false when the application exits.
-		defer close(doneChan)
-		scanner := bufio.NewScanner(outputPipe)
-		for scanner.Scan() {
-			line := scanner.Text()
-			output.WriteString(line + "\n")
-			if strings.Contains(line, readyMsg) {
-				close(readyChan)
-			}
-		}
-	}()
-
-	select {
-	case <-readyChan:
-		t.Logf("gRPC Server is ready!")
-	case <-time.After(10 * time.Second):
-		t.Fatal("timeout waiting for gRPC server to be ready")
-	}
-
-	return func() string {
-		// Wait for the server to exit
-		serverApp.Wait()
-		// Wait for the output goroutine to finish
-		<-doneChan
-		// Return the complete output
-		return output.String()
-	}
-}
-
 func TestGrpc(t *testing.T) {
-	serverDir := filepath.Join("..", "..", "demo", "grpc", "server")
-	clientDir := filepath.Join("..", "..", "demo", "grpc", "client")
+	f := testutil.NewTestFixture(t)
 
-	collector := app.StartCollector(t)
-	defer collector.Close()
+	f.BuildAndStart("grpcserver")
+	time.Sleep(time.Second)
 
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
-	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
-	t.Setenv("OTEL_SERVICE_NAME", "test-service")
-	t.Setenv("OTEL_TRACES_EXPORTER", "otlp") // Explicitly enable OTLP trace exporter
+	f.BuildAndRun("grpcclient", "-addr", "127.0.0.1:50051", "-name", "OpenTelemetry")
+	f.Run("grpcclient", "-addr", "127.0.0.1:50051", "-stream")
 
-	// Build the server and client applications with the instrumentation tool.
-	app.Build(t, serverDir, "go", "build", "-a")
-	app.Build(t, clientDir, "go", "build", "-a")
+	f.RequireTraceCount(2)    // unary + stream
+	f.RequireSpansPerTrace(2) // client + server per trace
 
-	// Start the server and wait for it to be ready.
-	serverApp, outputPipe := app.Start(t, serverDir)
-	waitUntilDone := waitUntilGrpcReady(t, serverApp, outputPipe)
-
-	// Run the client to make a unary RPC call
-	app.Run(t, clientDir, "-name", "OpenTelemetry")
-
-	// Run the client again for streaming RPC
-	app.Run(t, clientDir, "-stream")
-
-	// Finally, send shutdown request to the server
-	app.Run(t, clientDir, "-shutdown")
-
-	// Wait for the server to exit and return the output.
-	output := waitUntilDone()
-
-	// Verify that the instrumentation was initialized
-	require.Contains(t, output, "gRPC server instrumentation initialized", "instrumentation should be initialized")
-
-	// Verify that the server started (JSON format)
-	require.Contains(t, output, `"msg":"server listening"`)
-
-	// The output should show that the gRPC server received requests (JSON format)
-	require.Contains(t, output, `"msg":"received request"`)
-
-	stats := app.AnalyzeTraces(t, collector.Traces)
-
-	// We make 3 requests: unary call, stream call, and shutdown
-	// Each request generates 1 trace with 2 spans (client + server)
-	require.Equal(t, 3, stats.TraceCount, "Expected 3 traces (unary + stream + shutdown requests)")
-	for traceID, count := range stats.SpansPerTrace {
-		require.Equal(t, 2, count, "Trace %s should have 2 spans (client + server)", traceID[:16])
-	}
-
-	grpcClientSpan := app.RequireSpan(t, collector.Traces,
-		app.IsClient,
-		app.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+	grpcClientSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsClient,
+		testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
 	)
-	requireGRPCClientSemconv(t, grpcClientSpan)
+	testutil.RequireGRPCClientSemconv(t, grpcClientSpan, "127.0.0.1", "greeter.Greeter", "SayHello", 0)
 
-	grpcServerSpan := app.RequireSpan(t, collector.Traces,
-		app.IsServer,
-		app.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+	grpcServerSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsServer,
+		testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
 	)
-	requireGRPCServerSemconv(t, grpcServerSpan)
-}
-
-// Reference: https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/
-func requireGRPCClientSemconv(t *testing.T, span ptrace.Span) {
-	// Required attributes
-	app.RequireAttribute(t, span, string(semconv.RPCSystemKey), "grpc")
-	app.RequireAttributeExists(t, span, string(semconv.ServerAddressKey))
-	// Recommended attributes
-	app.RequireAttributeExists(t, span, string(semconv.RPCServiceKey))
-	app.RequireAttributeExists(t, span, string(semconv.RPCMethodKey))
-	// Conditionally required (when server responds)
-	app.RequireAttributeExists(t, span, string(semconv.RPCGRPCStatusCodeKey))
-}
-
-// Reference: https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/
-func requireGRPCServerSemconv(t *testing.T, span ptrace.Span) {
-	// Required attributes
-	app.RequireAttribute(t, span, string(semconv.RPCSystemKey), "grpc")
-	// Recommended attributes
-	app.RequireAttributeExists(t, span, string(semconv.RPCServiceKey))
-	app.RequireAttributeExists(t, span, string(semconv.RPCMethodKey))
-	// Conditionally required (when response is sent)
-	app.RequireAttributeExists(t, span, string(semconv.RPCGRPCStatusCodeKey))
+	testutil.RequireGRPCServerSemconv(t, grpcServerSpan, "greeter.Greeter", "SayHello", 0)
 }

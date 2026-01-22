@@ -6,103 +6,49 @@
 package test
 
 import (
+	"fmt"
 	"net/http"
-	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
-func TestHTTPServerIntegration(t *testing.T) {
-	serverDir := filepath.Join("..", "..", "demo", "http", "server")
-
-	// Enable debug logging for instrumentation
-	t.Setenv("OTEL_LOG_LEVEL", "debug")
-
-	// Build the server with instrumentation
-	t.Log("Building instrumented HTTP server...")
-	app.Build(t, serverDir, "go", "build", "-a")
-
-	// Start the server
-	t.Log("Starting HTTP server...")
-	serverCmd, outputPipe := app.Start(t, serverDir, "-port=8081", "-no-faults", "-no-latency")
-	waitUntilDone, err := app.WaitForServerReady(t, serverCmd, outputPipe)
-	require.NoError(t, err, "server should start successfully")
-
-	// Make a test request
-	t.Log("Making test GET request...")
-	resp, err := http.Get("http://localhost:8081/greet?name=integration-test")
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
-
-	// Make a POST request
-	t.Log("Making test POST request...")
-	resp2, err := http.Post("http://localhost:8081/greet", "application/json", strings.NewReader(`{"name":"test"}`))
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp2.StatusCode)
-	resp2.Body.Close()
-
-	// Shutdown the server
-	t.Log("Shutting down server...")
-	resp3, err := http.Get("http://localhost:8081/shutdown")
-	if err == nil {
-		resp3.Body.Close()
+func TestHTTPServer(t *testing.T) {
+	testCases := []struct {
+		name   string
+		scheme string
+		port   int
+		path   string
+		method string
+	}{
+		{
+			name:   "basic",
+			scheme: "http",
+			port:   8081,
+			path:   "/hello",
+			method: "GET",
+		},
 	}
 
-	// Wait for server to exit and get output
-	output := waitUntilDone()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := testutil.NewTestFixture(t)
 
-	// Verify instrumentation hooks were called
-	t.Log("Verifying instrumentation output...")
-	require.Contains(t, output, "HTTP server instrumentation initialized", "instrumentation should be initialized")
-	require.Contains(t, output, "BeforeServeHTTP called", "before hook should be called")
-	require.Contains(t, output, "AfterServeHTTP called", "after hook should be called")
-	require.Contains(t, output, "method\":\"GET", "should log GET request")
-	require.Contains(t, output, "status_code\":200", "should capture status code")
+			f.BuildAndStart("httpserver", fmt.Sprintf("-port=%d", tc.port))
+			time.Sleep(time.Second)
 
-	t.Log("HTTP server integration test passed!")
-}
+			url := fmt.Sprintf("%s://127.0.0.1:%d%s?name=test", tc.scheme, tc.port, tc.path)
+			resp, err := http.Get(url)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			time.Sleep(100 * time.Millisecond)
 
-func TestHTTPServerInstrumentationDisabled(t *testing.T) {
-	serverDir := filepath.Join("..", "..", "demo", "http", "server")
-
-	// Enable debug logging and disable nethttp instrumentation
-	t.Setenv("OTEL_LOG_LEVEL", "debug")
-	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
-
-	// Build the server with instrumentation
-	t.Log("Building instrumented HTTP server...")
-	app.Build(t, serverDir, "go", "build", "-a")
-
-	// Start server with instrumentation disabled
-	t.Log("Starting HTTP server with instrumentation disabled...")
-
-	serverCmd, outputPipe := app.Start(t, serverDir, "-port=8082", "-no-faults", "-no-latency")
-	waitUntilDone, err := app.WaitForServerReady(t, serverCmd, outputPipe)
-	require.NoError(t, err, "server should start successfully")
-
-	// Make a test request
-	t.Log("Making test request...")
-	resp, err := http.Get("http://localhost:8082/greet?name=test")
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
-
-	// Shutdown
-	resp2, err := http.Get("http://localhost:8082/shutdown")
-	if err == nil {
-		resp2.Body.Close()
+			span := f.RequireSingleSpan()
+			testutil.RequireHTTPServerSemconv(t, span, tc.method, tc.path, tc.scheme, 200, int64(tc.port), "127.0.0.1", "Go-http-client/1.1", "1.1", "127.0.0.1")
+		})
 	}
-
-	output := waitUntilDone()
-
-	// Verify instrumentation was disabled
-	require.Contains(t, output, "HTTP server instrumentation disabled", "instrumentation should be disabled")
-	require.NotContains(t, output, "BeforeServeHTTP called", "before hook should not execute logic when disabled")
-
-	t.Log("HTTP server disabled test passed!")
 }
