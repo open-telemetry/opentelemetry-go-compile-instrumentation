@@ -1,6 +1,4 @@
 wrap_nested_call:
   target: "main"
   function-call: "unsafe.Sizeof"
-  template: "(func() uintptr { defer func() {}(); return {{ . }} })()"
-  imports:
-    unsafe: "unsafe"
+  template: "(func() uintptr { return {{ . }} })()"
