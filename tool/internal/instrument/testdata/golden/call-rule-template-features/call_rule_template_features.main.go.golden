@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import "unsafe"
@@ -9,6 +12,6 @@ type MyStruct struct {
 func main() {
 	s := MyStruct{Field: 42}
 	// Test wrapping a call with a complex nested expression
-	size := (func() uintptr { defer func() {}(); return unsafe.Sizeof(s) })()
+	size := (func() uintptr { return unsafe.Sizeof(s) })()
 	println(size)
 }
