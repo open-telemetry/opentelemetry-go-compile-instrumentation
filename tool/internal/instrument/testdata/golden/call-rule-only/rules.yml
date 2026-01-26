@@ -1,0 +1,4 @@
+wrap_sizeof_call:
+  target: main
+  function-call: unsafe.Sizeof
+  template: "Wrapper({{ . }})"
