@@ -33,7 +33,7 @@ func main() {
 				Value:     util.GetBuildTempDir(),
 			},
 			&cli.BoolFlag{
-				Name:    "-debug",
+				Name:    "debug",
 				Aliases: []string{"d"},
 				Usage:   "Enable debug mode",
 				Value:   false,
