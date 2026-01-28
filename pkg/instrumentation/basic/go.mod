@@ -2,17 +2,17 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/in
 
 go 1.24.0
 
-toolchain go1.24.2
+toolchain go1.25.6
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../..
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20251208011108-ac0fa4a155e3
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20260126020919-a9e5653e747c
 	go.opentelemetry.io/otel v1.39.0
-	go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.38.0
-	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.38.0
-	go.opentelemetry.io/otel/sdk v1.38.0
-	go.opentelemetry.io/otel/sdk/metric v1.38.0
+	go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.39.0
+	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.39.0
+	go.opentelemetry.io/otel/sdk v1.39.0
+	go.opentelemetry.io/otel/sdk/metric v1.39.0
 	go.opentelemetry.io/otel/trace v1.39.0
 )
 
@@ -23,5 +23,5 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/metric v1.39.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
 )
