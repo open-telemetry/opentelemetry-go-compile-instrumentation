@@ -8,7 +8,7 @@ replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/i
 
 require (
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared v0.0.0-00010101000000-000000000000
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared v0.0.0-20260126020919-a9e5653e747c
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/metric v1.39.0
