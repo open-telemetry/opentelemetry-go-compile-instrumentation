@@ -42,8 +42,6 @@ func (ip *InstrumentPhase) applyCallRule(r *rule.InstCallRule, root *dst.File) e
 	}
 
 	if modified {
-		// Add any required imports
-		addImportsFromRule(root, r)
 		ip.Info("Apply call rule", "rule", r)
 	}
 

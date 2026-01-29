@@ -10,7 +10,6 @@ import (
 
 	"github.com/dave/dst"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
@@ -57,50 +56,6 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 
 	resolvedPath, ok := importAliases[ident.Name]
 	return ok && resolvedPath == importPath
-}
-
-// addImportsFromRule adds any imports specified in the rule to the file.
-func addImportsFromRule(root *dst.File, r *rule.InstCallRule) {
-	if len(r.Imports) == 0 {
-		return
-	}
-
-	// Check existing imports to avoid duplicates
-	existingImports := make(map[string]string) // path -> alias
-	for _, decl := range root.Decls {
-		genDecl, ok := decl.(*dst.GenDecl)
-		if !ok || genDecl.Tok != token.IMPORT {
-			continue
-		}
-		for _, spec := range genDecl.Specs {
-			importSpec, isImport := spec.(*dst.ImportSpec)
-			if !isImport {
-				continue
-			}
-			path := strings.Trim(importSpec.Path.Value, `"`)
-			alias := ""
-			if importSpec.Name != nil {
-				alias = importSpec.Name.Name
-			}
-			existingImports[path] = alias
-		}
-	}
-
-	// Add new imports that don't already exist
-	for alias, path := range r.Imports {
-		if existingAlias, exists := existingImports[path]; exists {
-			// Import already exists, check if alias matches
-			if existingAlias != alias && alias != "" {
-				// Different alias - this might cause issues but we'll let it be
-				continue
-			}
-			continue
-		}
-
-		// Add the import
-		importDecl := ast.ImportDecl(alias, path)
-		root.Decls = append([]dst.Decl{importDecl}, root.Decls...)
-	}
 }
 
 func collectImportAliases(file *dst.File) map[string]string {
