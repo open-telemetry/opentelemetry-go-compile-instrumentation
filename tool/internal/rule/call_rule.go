@@ -27,12 +27,10 @@ import (
 //	wrap_http_get:
 //		target: "main"
 //		function-call: "net/http.Get"
-//		template: "instrumentation.tracedGet({{ . }})"
-//		imports:
-//			instrumentation: "myapp/instrumentation"
+//		template: "tracedGet({{ . }})"
 //
 // This transforms: http.Get("url")
-// Into: instrumentation.tracedGet(http.Get("url"))
+// Into: tracedGet(http.Get("url"))
 type InstCallRule struct {
 	InstBaseRule `yaml:",inline"`
 
@@ -56,15 +54,6 @@ type InstCallRule struct {
 	//   - "wrapper({{ . }})" wraps the call with wrapper()
 	//   - "(func() { return {{ . }} })()" uses an IIFE
 	Template string `json:"template" yaml:"template"`
-
-	// Imports specifies additional imports needed by the template code.
-	// Map key is the import alias, value is the import path.
-	//
-	// Example:
-	//   imports:
-	//     unsafe: "unsafe"
-	//     tracer: "myapp/tracing"
-	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"`
 
 	// CompiledTemplate is the compiled template object, created at rule creation time.
 	// This field is not serialized.

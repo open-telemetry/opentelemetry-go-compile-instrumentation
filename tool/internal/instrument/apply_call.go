@@ -79,7 +79,7 @@ func (ip *InstrumentPhase) applyCallRule(r *rule.InstCallRule, root *dst.File) e
 	}
 
 	if modified {
-		// Track which imports are new
+		/*// Track which imports are new
 		newImports := findNewImports(root, r.Imports)
 
 		// Add imports to AST
@@ -90,7 +90,7 @@ func (ip *InstrumentPhase) applyCallRule(r *rule.InstCallRule, root *dst.File) e
 			if err := ip.updateImportConfig(newImports); err != nil {
 				return err
 			}
-		}
+		}*/
 
 		ip.Info("Apply call rule", "rule", r)
 	}

@@ -202,8 +202,6 @@ wrap_http_get:
   target: myapp/server
   function-call: net/http.Get
   template: "tracedGet({{ . }})"
-  imports:
-    instrumentation: "myapp/instrumentation"
 ```
 
 In the `myapp/server` package, this transforms:
@@ -217,6 +215,8 @@ func fetchData(url string) {
     resp, err := tracedGet(http.Get(url))  // Wrapped call
 }
 ```
+
+**Note:** The `tracedGet` function must be available in the target package, either defined locally or imported.
 
 **What gets wrapped:** Only `http.Get()` calls where `http` is imported from `"net/http"`
 
@@ -234,8 +234,6 @@ wrap_redis_get:
   target: myapp/cache
   function-call: github.com/redis/go-redis/v9.Get
   template: "tracedRedisGet(ctx, {{ . }})"
-  imports:
-    tracer: "myapp/tracing"
 ```
 
 In the `myapp/cache` package:
@@ -246,9 +244,11 @@ import redis "github.com/redis/go-redis/v9"
 func getValue(ctx context.Context, key string) {
     val, err := redis.Get(ctx, key)  // Original
     // becomes:
-    val, err := tracing.tracedRedisGet(ctx, redis.Get(ctx, key))  // Wrapped
+    val, err := tracedRedisGet(ctx, redis.Get(ctx, key))  // Wrapped
 }
 ```
+
+**Note:** The `tracedRedisGet` function must be available in the target package.
 
 ---
 
@@ -261,8 +261,6 @@ wrap_with_unsafe:
   target: client
   function-call: myapp/utils.Helper
   template: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
-  imports:
-    unsafe: "unsafe"
 ```
 
 This uses an immediately-invoked function expression (IIFE) to inject logic after the call:
@@ -270,7 +268,10 @@ This uses an immediately-invoked function expression (IIFE) to inject logic afte
 ```go
 package client
 
-import utils "myapp/utils"
+import (
+    "unsafe"
+    utils "myapp/utils"
+)
 
 func process() {
     result, err := utils.Helper("test", 42)
@@ -283,10 +284,13 @@ func process() {
 }
 ```
 
+**Note:** The `unsafe` package must be imported in the target file for this template to work.
+
 **Important Notes:**
 
 - The `{{ . }}` placeholder in the template represents the original function call.
 - The template must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
+- Template code can only reference packages and functions that are already imported or defined in the target file.
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
 - Use the qualified format `package/path.FunctionName` for functions.
