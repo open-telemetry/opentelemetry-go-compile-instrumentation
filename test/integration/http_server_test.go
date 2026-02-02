@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -48,7 +47,19 @@ func TestHTTPServer(t *testing.T) {
 			testutil.WaitForSpanFlush(t)
 
 			span := f.RequireSingleSpan()
-			testutil.RequireHTTPServerSemconv(t, span, tc.method, tc.path, tc.scheme, 200, int64(tc.port), "127.0.0.1", "Go-http-client/1.1", "1.1", "127.0.0.1")
+			testutil.RequireHTTPServerSemconv(
+				t,
+				span,
+				tc.method,
+				tc.path,
+				tc.scheme,
+				200,
+				int64(tc.port),
+				"127.0.0.1",
+				"Go-http-client/1.1",
+				"1.1",
+				"127.0.0.1",
+			)
 		})
 	}
 }
