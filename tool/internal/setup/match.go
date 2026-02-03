@@ -5,8 +5,10 @@ package setup
 
 import (
 	"context"
+	"io/fs"
 	"maps"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -216,11 +218,92 @@ func (sp *SetupPhase) preciseMatching(
 	return set, nil
 }
 
+func ruleFromDir(path string) ([]string, error) {
+	ruleFilePatterns := []string{"*.otelc.yaml", "*.otelc.yml"}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, ex.Wrapf(err, "failed to stat %s", path)
+	}
+
+	if !info.IsDir() {
+		return []string{path}, nil
+	}
+
+	var filesToProcess []string
+
+	// Recursively traverse to each directories and include the rule files
+	err = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		var matched bool
+		for _, pat := range ruleFilePatterns {
+			matched, err = filepath.Match(pat, filepath.Base(p))
+			if err != nil {
+				return ex.Wrapf(err, "bad pattern %s", pat)
+			}
+
+			if matched {
+				filesToProcess = append(filesToProcess, p)
+				break
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, ex.Wrapf(err, "failed to walk directory %s", path)
+	}
+
+	return filesToProcess, nil
+}
+
+func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
+	// Custom map to deduplicate rules
+	ruleSet := make(map[string]rule.InstRule)
+	ruleFiles := strings.SplitSeq(ruleConfig, ",")
+	var content []byte
+	for path := range ruleFiles {
+		path = strings.TrimSpace(path)
+
+		// Get all rule files from path (file or directory)
+		files, err := ruleFromDir(path)
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range files {
+			content, err = os.ReadFile(file)
+			if err != nil {
+				return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
+			}
+
+			var rules []rule.InstRule
+			rules, err = parseRuleFromYaml(content)
+			if err != nil {
+				return nil, err
+			}
+
+			for _, r := range rules {
+				ruleSet[r.GetName()] = r
+			}
+		}
+	}
+
+	return slices.Collect(maps.Values(ruleSet)), nil
+}
+
 func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 	// Load rules from environment variable OTEL_RULES if specified. It has the
 	// highest priority.
 	rulePath := os.Getenv(util.EnvOtelRules)
 	if rulePath != "" {
+		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelRules, rulePath)
 		content, err := os.ReadFile(rulePath)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to read %s from env variable", rulePath)
@@ -230,32 +313,12 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 
 	// Load custom rule(s) from config file if specified
 	if sp.ruleConfig != "" {
-		// Custom map to store deduplicate rules
-		ruleSet := make(map[string]rule.InstRule)
-		ruleFiles := strings.SplitSeq(sp.ruleConfig, ",")
-
-		for file := range ruleFiles {
-			file = strings.TrimSpace(file)
-			// Starting Point for each rule file
-			content, err := os.ReadFile(file)
-			if err != nil {
-				return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
-			}
-			rules, err := parseRuleFromYaml(content)
-			if err != nil {
-				return nil, ex.Wrapf(err, "failed to parse rules from file %q", file)
-			}
-
-			for _, rule := range rules {
-				key := rule.GetName()
-				ruleSet[key] = rule
-			}
-		}
-
-		return slices.Collect(maps.Values(ruleSet)), nil
+		sp.Debug("rules source: ruleConfig (%s)", sp.ruleConfig)
+		return loadCustomRules(sp.ruleConfig)
 	}
 
 	// Load default rules from the unzipped pkg directory
+	sp.Debug("rules source: default rules")
 	return loadDefaultRules()
 }
 
