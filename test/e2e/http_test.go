@@ -7,7 +7,6 @@ package test
 
 import (
 	"testing"
-	"time"
 
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
@@ -18,7 +17,7 @@ func TestHttp(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
 	f.BuildAndStart("httpserver")
-	time.Sleep(time.Second)
+	testutil.WaitForTCP(t, "127.0.0.1:8080")
 
 	f.BuildAndRun("httpclient", "-addr", "http://127.0.0.1:8080", "-name", "test")
 
@@ -29,11 +28,33 @@ func TestHttp(t *testing.T) {
 		testutil.IsClient,
 		testutil.HasAttributeContaining(string(semconv.URLFullKey), "/hello"),
 	)
-	testutil.RequireHTTPClientSemconv(t, helloClientSpan, "GET", "http://127.0.0.1:8080/hello?name=test", "127.0.0.1", 200, 8080, "1.1", "http")
+	testutil.RequireHTTPClientSemconv(
+		t,
+		helloClientSpan,
+		"GET",
+		"http://127.0.0.1:8080/hello?name=test",
+		"127.0.0.1",
+		200,
+		8080,
+		"1.1",
+		"http",
+	)
 
 	helloServerSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsServer,
 		testutil.HasAttribute(string(semconv.URLPathKey), "/hello"),
 	)
-	testutil.RequireHTTPServerSemconv(t, helloServerSpan, "GET", "/hello", "http", 200, 8080, "127.0.0.1", "Go-http-client/1.1", "1.1", "127.0.0.1")
+	testutil.RequireHTTPServerSemconv(
+		t,
+		helloServerSpan,
+		"GET",
+		"/hello",
+		"http",
+		200,
+		8080,
+		"127.0.0.1",
+		"Go-http-client/1.1",
+		"1.1",
+		"127.0.0.1",
+	)
 }
