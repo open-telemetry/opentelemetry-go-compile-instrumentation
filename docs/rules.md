@@ -11,6 +11,7 @@ All rules share a set of common fields that define the target of the instrumenta
 - `imports` (map[string]string, optional): A map of imports to inject into the instrumented file. The key is the import alias and the value is the import path. For standard imports without an alias, use the package name as both key and value. For blank imports, use "_" as the key.
 
   Examples:
+
   ```yaml
   imports:
     fmt: "fmt"                                    # Standard import: import "fmt"
@@ -60,6 +61,7 @@ This rule will inject `MyHookBefore` at the start of the `Example` function in t
 The function hook rule automatically imports the package specified in `path` for the hook functions. If your hook functions need additional imports beyond the hook package, you can specify them using the `imports` field.
 
 Example with additional imports:
+
 ```yaml
 hook_with_imports:
   target: main
@@ -105,6 +107,7 @@ This rule adds a new field named `NewField` of type `string` to the `MyStruct` s
 If your new struct fields use types from external packages, specify those imports:
 
 Example:
+
 ```yaml
 add_context_field:
   target: main
@@ -149,6 +152,7 @@ This rule injects a new goroutine that prints "RawCode" at the start of the `Exa
 Raw code rules often need imports for the code being injected. Use the `imports` field to specify any packages your raw code references.
 
 Example:
+
 ```yaml
 raw_with_logging:
   target: main
@@ -188,6 +192,7 @@ This rule would take the file `new_helpers.go` from the `github.com/my-org/my-re
 File rules typically don't need the `imports` field because the added file already contains its own import declarations. However, you can use it to add additional imports to the file being added:
 
 Example:
+
 ```yaml
 add_file_with_extra_imports:
   target: main
