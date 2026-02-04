@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -71,6 +70,7 @@ func TestStripCompleteFlag(t *testing.T) {
 func TestUpdateImportConfig(t *testing.T) {
 	t.Run("no importcfg path", func(t *testing.T) {
 		ip := &InstrumentPhase{
+			ctx:              t.Context(),
 			importConfigPath: "",
 		}
 		err := ip.updateImportConfig(map[string]string{"fmt": "fmt"})
@@ -84,6 +84,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		ip := &InstrumentPhase{
+			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -105,6 +106,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		ip := &InstrumentPhase{
+			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -126,6 +128,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		ip := &InstrumentPhase{
+			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -147,6 +150,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		ip := &InstrumentPhase{
+			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -169,7 +173,7 @@ func TestUpdateImportConfig(t *testing.T) {
 
 		ip := &InstrumentPhase{
 			logger:           slog.Default(),
-			ctx:              context.Background(),
+			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: nil, // Intentionally nil
@@ -196,7 +200,7 @@ func TestUpdateImportConfig(t *testing.T) {
 
 		ip := &InstrumentPhase{
 			logger:           slog.Default(),
-			ctx:              context.Background(),
+			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -225,7 +229,7 @@ func TestUpdateImportConfig(t *testing.T) {
 
 		ip := &InstrumentPhase{
 			logger:           slog.Default(),
-			ctx:              context.Background(),
+			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},

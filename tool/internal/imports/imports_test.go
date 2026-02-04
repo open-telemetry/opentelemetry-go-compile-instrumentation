@@ -4,7 +4,6 @@
 package imports
 
 import (
-	"context"
 	"go/token"
 	"testing"
 
@@ -644,7 +643,7 @@ func TestCollectPaths(t *testing.T) {
 }
 
 func TestResolvePackageFiles(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test with a standard library package
 	archives, err := ResolvePackageInfo(ctx, "fmt")
@@ -663,7 +662,7 @@ func TestResolvePackageFiles(t *testing.T) {
 }
 
 func TestResolvePackageFiles_InvalidPackage(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test with a non-existent package
 	_, err := ResolvePackageInfo(ctx, "this/package/does/not/exist")
@@ -672,7 +671,7 @@ func TestResolvePackageFiles_InvalidPackage(t *testing.T) {
 }
 
 func TestResolvePackageFiles_MultiplePackages(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test with net/http which has many dependencies
 	archives, err := ResolvePackageInfo(ctx, "net/http")
@@ -691,7 +690,7 @@ func TestResolvePackageFiles_MultiplePackages(t *testing.T) {
 }
 
 func TestResolvePackageFiles_EmptyOutput(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test with "unsafe" which has no export archive
 	archives, err := ResolvePackageInfo(ctx, "unsafe")
