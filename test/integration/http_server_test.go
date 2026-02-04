@@ -48,7 +48,19 @@ func TestHTTPServer(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 
 			span := f.RequireSingleSpan()
-			testutil.RequireHTTPServerSemconv(t, span, tc.method, tc.path, tc.scheme, 200, int64(tc.port), "127.0.0.1", "Go-http-client/1.1", "1.1", "127.0.0.1")
+			testutil.RequireHTTPServerSemconv(
+				t,
+				span,
+				tc.method,
+				tc.path,
+				tc.scheme,
+				200,
+				int64(tc.port),
+				"127.0.0.1",
+				"Go-http-client/1.1",
+				"1.1",
+				"127.0.0.1",
+			)
 		})
 	}
 }

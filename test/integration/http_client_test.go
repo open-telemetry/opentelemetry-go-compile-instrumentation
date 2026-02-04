@@ -38,7 +38,17 @@ func TestHTTPClient(t *testing.T) {
 
 			span := f.RequireSingleSpan()
 			expectedURL := server.URL + "/hello?name=" + tc.queryParam
-			testutil.RequireHTTPClientSemconv(t, span, "GET", expectedURL, "127.0.0.1", 200, server.Port(), "1.1", "http")
+			testutil.RequireHTTPClientSemconv(
+				t,
+				span,
+				"GET",
+				expectedURL,
+				"127.0.0.1",
+				200,
+				server.Port(),
+				"1.1",
+				"http",
+			)
 		})
 	}
 }
