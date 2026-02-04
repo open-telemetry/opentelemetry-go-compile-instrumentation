@@ -338,6 +338,11 @@ func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, root *dst.File
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
+	// Handle imports if specified in the rule
+	if err := ip.handleRuleImports(root, rule.Imports, rule.Name, "func rule"); err != nil {
+		return err
+	}
+
 	err := ip.insertTJump(rule, funcDecl)
 	if err != nil {
 		return err
