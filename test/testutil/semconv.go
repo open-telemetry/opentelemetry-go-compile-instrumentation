@@ -12,7 +12,13 @@ import (
 
 // RequireHTTPClientSemconv verifies that an HTTP client span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client-span
-func RequireHTTPClientSemconv(t *testing.T, span ptrace.Span, method, urlFull, serverAddress string, statusCode, serverPort int64, networkProtocolVersion, urlScheme string) {
+func RequireHTTPClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	method, urlFull, serverAddress string,
+	statusCode, serverPort int64,
+	networkProtocolVersion, urlScheme string,
+) {
 	// Required attributes - all validated with exact values
 	RequireAttribute(t, span, string(semconv.HTTPRequestMethodKey), method)
 	RequireAttribute(t, span, string(semconv.ServerAddressKey), serverAddress)
@@ -27,7 +33,13 @@ func RequireHTTPClientSemconv(t *testing.T, span ptrace.Span, method, urlFull, s
 
 // RequireHTTPServerSemconv verifies that an HTTP server span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-span
-func RequireHTTPServerSemconv(t *testing.T, span ptrace.Span, method, urlPath, urlScheme string, statusCode, serverPort int64, clientAddress, userAgent, networkProtocolVersion, serverAddress string) {
+func RequireHTTPServerSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	method, urlPath, urlScheme string,
+	statusCode, serverPort int64,
+	clientAddress, userAgent, networkProtocolVersion, serverAddress string,
+) {
 	// Required attributes - all validated with exact values
 	RequireAttribute(t, span, string(semconv.HTTPRequestMethodKey), method)
 	RequireAttribute(t, span, string(semconv.URLPathKey), urlPath)
@@ -44,7 +56,12 @@ func RequireHTTPServerSemconv(t *testing.T, span ptrace.Span, method, urlPath, u
 
 // RequireGRPCClientSemconv verifies that a gRPC client span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/
-func RequireGRPCClientSemconv(t *testing.T, span ptrace.Span, serverAddress, rpcService, rpcMethod string, grpcStatusCode int64) {
+func RequireGRPCClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	serverAddress, rpcService, rpcMethod string,
+	grpcStatusCode int64,
+) {
 	// Required attributes - all validated with exact values
 	RequireAttribute(t, span, string(semconv.RPCSystemKey), "grpc")
 	RequireAttribute(t, span, string(semconv.ServerAddressKey), serverAddress)

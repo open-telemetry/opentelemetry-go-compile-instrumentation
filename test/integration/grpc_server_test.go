@@ -8,7 +8,6 @@ package test
 import (
 	"io"
 	"testing"
-	"time"
 
 	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
@@ -44,11 +43,11 @@ func TestGRPCServer(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 
 			f.BuildAndStart("grpcserver")
-			time.Sleep(2 * time.Second)
+			testutil.WaitForTCP(t, "localhost:50051")
 
 			client := NewGRPCClient(t, "localhost:50051")
 			tc.exercise(t, client)
-			time.Sleep(100 * time.Millisecond)
+			testutil.WaitForSpanFlush(t)
 
 			span := f.RequireSingleSpan()
 			testutil.RequireGRPCServerSemconv(t, span, "greeter.Greeter", tc.method, 0)

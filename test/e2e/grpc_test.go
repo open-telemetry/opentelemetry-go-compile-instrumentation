@@ -7,7 +7,6 @@ package test
 
 import (
 	"testing"
-	"time"
 
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
@@ -18,7 +17,7 @@ func TestGrpc(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
 	f.BuildAndStart("grpcserver")
-	time.Sleep(time.Second)
+	testutil.WaitForTCP(t, "127.0.0.1:50051")
 
 	f.BuildAndRun("grpcclient", "-addr", "127.0.0.1:50051", "-name", "OpenTelemetry")
 	f.Run("grpcclient", "-addr", "127.0.0.1:50051", "-stream")
