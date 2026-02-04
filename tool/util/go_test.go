@@ -34,7 +34,7 @@ func TestIsCompileCommand(t *testing.T) {
 		{
 			name:     "unquoted Windows path with spaces (go build -x -n output)",
 			line:     `C:/Program Files/Go/pkg/tool/windows_amd64/compile.exe -o C:/tmp/output.a -p main -buildid abc123`,
-			expected: true, // fallback pattern matching should detect compile.exe
+			expected: true,
 		},
 		{
 			name:     "missing -o flag",
@@ -106,96 +106,8 @@ func TestIsCompileCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsCompileCommand(tt.line)
+			result := IsCompileArgs(SplitCompileCmds(tt.line))
 			assert.Equal(t, tt.expected, result, "IsCompileCommand(%q) = %v, want %v", tt.line, result, tt.expected)
-		})
-	}
-}
-
-func TestIsLinkCommand(t *testing.T) {
-	tests := []struct {
-		name     string
-		line     string
-		expected bool
-	}{
-		{
-			name:     "valid link command on Unix",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/link -o /tmp/output -buildid abc123 -importcfg /tmp/importcfg.link",
-			expected: !IsWindows(),
-		},
-		{
-			name:     "valid link command on Windows",
-			line:     "C:\\Go\\pkg\\tool\\windows_amd64\\link.exe -o C:\\tmp\\output.exe -buildid abc123 -importcfg C:\\tmp\\importcfg.link",
-			expected: true, // link.exe is recognized on all platforms
-		},
-		{
-			name:     "valid link command on Windows with spaces in path",
-			line:     `"C:\Program Files\Go\pkg\tool\windows_amd64\link.exe" -o C:\tmp\output.exe -buildid abc123 -importcfg C:\tmp\importcfg.link`,
-			expected: true, // quoted path with spaces should be parsed correctly
-		},
-		{
-			name:     "unquoted Windows path with spaces (go build -x -n output)",
-			line:     `C:/Program Files/Go/pkg/tool/windows_amd64/link.exe -o C:/tmp/output.exe -buildid abc123 -importcfg C:/tmp/importcfg.link`,
-			expected: true, // fallback pattern matching should detect link.exe
-		},
-		{
-			name:     "missing -o flag",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/link -buildid abc123 -importcfg /tmp/importcfg.link",
-			expected: false,
-		},
-		{
-			name:     "missing -buildid flag",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/link -o /tmp/output -importcfg /tmp/importcfg.link",
-			expected: false,
-		},
-		{
-			name:     "missing -importcfg flag",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/link -o /tmp/output -buildid abc123",
-			expected: false,
-		},
-		{
-			name:     "compile command should not match",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123 -importcfg /tmp/importcfg",
-			expected: false,
-		},
-		{
-			name:     "link command with additional flags",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/link -o /tmp/output -buildid abc123 -importcfg /tmp/importcfg.link -extld gcc",
-			expected: !IsWindows(),
-		},
-		{
-			name:     "empty line",
-			line:     "",
-			expected: false,
-		},
-		{
-			name:     "link in path but missing flags",
-			line:     "/home/link/project/build",
-			expected: false,
-		},
-		{
-			name:     "complete link command with all common flags",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/link -o /tmp/main -buildid abc123 -importcfg /tmp/importcfg.link -X main.Version=1.0",
-			expected: !IsWindows(),
-		},
-		// Edge case: output path contains "link" - should still match if tool is link
-		{
-			name:     "link command with output path containing link",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/link -o /tmp/link -buildid abc123 -importcfg /tmp/importcfg.link",
-			expected: !IsWindows(), // Tool path is link, so this IS a link command
-		},
-		// Edge case: compile command should not match link even with link in output path
-		{
-			name:     "compile command with output path containing link",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/link -p main -buildid abc123 -importcfg /tmp/importcfg",
-			expected: false, // Tool path is compile, not link
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsLinkCommand(tt.line)
-			assert.Equal(t, tt.expected, result, "IsLinkCommand(%q) = %v, want %v", tt.line, result, tt.expected)
 		})
 	}
 }
