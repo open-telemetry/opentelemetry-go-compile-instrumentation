@@ -8,6 +8,15 @@ All rules share a set of common fields that define the target of the instrumenta
 
 - `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package.
 - `version` (string, optional): Specifies a version range for the target package. The rule will only be applied if the package's version falls within this range. The format is `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` means the rule applies to versions greater than or equal to `v0.11.0` and less than `v0.12.0`. If omitted, the rule applies to all versions.
+- `imports` (map[string]string, optional): A map of imports to inject into the instrumented file. The key is the import alias and the value is the import path. For standard imports without an alias, use the package name as both key and value. For blank imports, use "_" as the key.
+
+  Examples:
+  ```yaml
+  imports:
+    fmt: "fmt"                                    # Standard import: import "fmt"
+    ctx: "context"                                # Aliased import: import ctx "context"
+    _: "unsafe"                                   # Blank import: import _ "unsafe"
+  ```
 
 ---
 
@@ -46,6 +55,22 @@ hook_helloworld:
 
 This rule will inject `MyHookBefore` at the start of the `Example` function in the `main` package, and `MyHookAfter` at the end. The hook functions are located in the specified `path`.
 
+**Import Handling:**
+
+The function hook rule automatically imports the package specified in `path` for the hook functions. If your hook functions need additional imports beyond the hook package, you can specify them using the `imports` field.
+
+Example with additional imports:
+```yaml
+hook_with_imports:
+  target: main
+  func: Example
+  before: MyHookBefore
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+  imports:
+    log: "log"        # Additional import needed by the hook
+    _: "unsafe"       # Blank import if needed
+```
+
 ### 2. Struct Field Injection Rule
 
 This rule adds one or more new fields to a specified struct type.
@@ -75,6 +100,22 @@ add_new_field:
 
 This rule adds a new field named `NewField` of type `string` to the `MyStruct` struct in the `main` package.
 
+**Import Handling:**
+
+If your new struct fields use types from external packages, specify those imports:
+
+Example:
+```yaml
+add_context_field:
+  target: main
+  struct: MyStruct
+  new_field:
+    - name: Ctx
+      type: context.Context
+  imports:
+    context: "context"
+```
+
 ### 3. Raw Code Injection Rule
 
 This rule injects a string of raw Go code at the beginning of a target function. This offers great flexibility but should be used with caution as the injected code is not checked for correctness at definition time.
@@ -103,6 +144,20 @@ raw_helloworld:
 
 This rule injects a new goroutine that prints "RawCode" at the start of the `Example` function in the `main` package.
 
+**Import Handling:**
+
+Raw code rules often need imports for the code being injected. Use the `imports` field to specify any packages your raw code references.
+
+Example:
+```yaml
+raw_with_logging:
+  target: main
+  func: Example
+  raw: 'log.Printf("Executing Example with arg: %v", someVar)'
+  imports:
+    log: "log"
+```
+
 ### 4. File Addition Rule
 
 This rule adds a new Go source file to the target package.
@@ -127,3 +182,17 @@ add_new_file:
 ```
 
 This rule would take the file `new_helpers.go` from the `github.com/my-org/my-repo/instrumentation/helpers` package and add it to the `main` package during compilation.
+
+**Import Handling:**
+
+File rules typically don't need the `imports` field because the added file already contains its own import declarations. However, you can use it to add additional imports to the file being added:
+
+Example:
+```yaml
+add_file_with_extra_imports:
+  target: main
+  file: "helpers.go"
+  path: "github.com/my-org/my-repo/instrumentation/helpers"
+  imports:
+    log: "log"  # Add extra import to the copied file
+```
