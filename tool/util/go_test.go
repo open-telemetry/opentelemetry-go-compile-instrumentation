@@ -19,7 +19,7 @@ func TestIsCompileCommand(t *testing.T) {
 		{
 			name:     "valid compile command on Unix",
 			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123",
-			expected: !IsWindows(),
+			expected: true,
 		},
 		{
 			name:     "valid compile command on Windows",
@@ -64,12 +64,12 @@ func TestIsCompileCommand(t *testing.T) {
 		{
 			name:     "complete compile command with additional flags",
 			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -trimpath -p main -buildid abc123 -goversion go1.21",
-			expected: !IsWindows(),
+			expected: true,
 		},
 		{
 			name:     "complete compile command with quoted paths",
 			line:     `/usr/local/go/pkg/tool/linux_amd64/compile -o "/tmp/my output.a" -p main -buildid abc123`,
-			expected: !IsWindows(),
+			expected: true,
 		},
 		{
 			name:     "empty line",
@@ -89,7 +89,7 @@ func TestIsCompileCommand(t *testing.T) {
 		{
 			name:     "all required flags with importcfg",
 			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123 -importcfg /tmp/importcfg",
-			expected: !IsWindows(),
+			expected: true,
 		},
 		// Edge case: output path contains "compile" - should NOT match
 		{

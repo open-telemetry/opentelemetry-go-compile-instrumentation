@@ -142,6 +142,11 @@ func SplitCompileCmds(input string) []string {
 		args = append(args, arg.String())
 	}
 
+	// Handle unquoted Windows paths with spaces (e.g., from go build -x -n output)
+	// These look like: C:/Program Files/Go/pkg/tool/windows_amd64/compile.exe
+	// which gets incorrectly split into ["C:/Program", "Files/Go/pkg/tool/windows_amd64/compile.exe", ...]
+	args = mergeWindowsPathsWithSpaces(args)
+
 	// Fix the escaped backslashes on Windows
 	if IsWindows() {
 		for i, arg := range args {
@@ -149,6 +154,60 @@ func SplitCompileCmds(input string) []string {
 		}
 	}
 	return args
+}
+
+const (
+	minWindowsDrivePrefixLength = 3
+	minWindowsPathMergeLength   = 2
+)
+
+// isWindowsDrivePrefix checks if arg looks like the start of a Windows path (e.g., "C:/Program")
+func isWindowsDrivePrefix(arg string) bool {
+	if len(arg) < minWindowsDrivePrefixLength {
+		return false
+	}
+	// Check for X:/ or X:\ pattern where X is a letter
+	firstChar := arg[0]
+	isLetter := (firstChar >= 'A' && firstChar <= 'Z') || (firstChar >= 'a' && firstChar <= 'z')
+	return isLetter && arg[1] == ':' && (arg[2] == '/' || arg[2] == '\\')
+}
+
+// mergeWindowsPathsWithSpaces merges split Windows paths that contain spaces.
+// For example, ["C:/Program", "Files/Go/pkg/tool/windows_amd64/compile.exe", "-o", ...]
+// becomes ["C:/Program Files/Go/pkg/tool/windows_amd64/compile.exe", "-o", ...]
+func mergeWindowsPathsWithSpaces(args []string) []string {
+	if len(args) < minWindowsPathMergeLength {
+		return args
+	}
+
+	// Only process if first arg looks like a Windows drive prefix without .exe
+	if !isWindowsDrivePrefix(args[0]) || strings.HasSuffix(strings.ToLower(args[0]), ".exe") {
+		return args
+	}
+
+	// Find where the executable path ends (look for .exe suffix)
+	mergeEnd := -1
+	for i := 1; i < len(args); i++ {
+		// Stop if we hit a flag
+		if strings.HasPrefix(args[i], "-") {
+			break
+		}
+		if strings.HasSuffix(strings.ToLower(args[i]), ".exe") {
+			mergeEnd = i
+			break
+		}
+	}
+
+	if mergeEnd == -1 {
+		return args
+	}
+
+	// Merge args[0] through args[mergeEnd] into a single path
+	merged := strings.Join(args[:mergeEnd+1], " ")
+	result := make([]string, 0, len(args)-mergeEnd)
+	result = append(result, merged)
+	result = append(result, args[mergeEnd+1:]...)
+	return result
 }
 
 func IsGoFile(path string) bool {
