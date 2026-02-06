@@ -10,12 +10,23 @@ add_new_field:
   new_field:
     - name: NewField
       type: string
+    - name: Ctx
+      type: context.Context
+  imports:
+    context: "context"
 
 raw_helloworld:
   target: main
   func: Example
   raw: |
-    go func(){ println("RawCode") }()
+    go func(){
+      h := sha256.New()
+      h.Write([]byte("RawCode"))
+      fmt.Printf("RawCode: %x\n", h.Sum(nil))
+    }()
+  imports:
+    fmt: "fmt"
+    sha256: "crypto/sha256"
 
 hook_recv:
   target: main
@@ -37,21 +48,27 @@ version_range:
   version: "v0.14.0,v0.15.0"
   func: Every
   raw: |
-    println("Every1")
+    fmt.Println("Every1 from fmt")
+  imports:
+    fmt: "fmt"
 
 version_min_bad:
   target: golang.org/x/time/rate
   version: "v0.15.0"
   func: Every
   raw: |
-    println("Every2")
+    fmt.Println("Every2 from fmt")
+  imports:
+    fmt: "fmt"
 
 version_min_good:
   target: golang.org/x/time/rate
   version: "v0.11.0"
   func: Every
   raw: |
-    println("Every3")
+    fmt.Println("Every3 from fmt")
+  imports:
+    fmt: "fmt"
 
 only_after:
   target: main

@@ -58,7 +58,7 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 		}
 		line = filepath.ToSlash(line)
 
-		if _, ok := parseCdDir(line); ok || util.IsCgoCommand(line) || util.IsCompileCommand(line) {
+		if _, ok := parseCdDir(line); ok || util.IsCgoCommand(line) || util.IsCompileArgs(util.SplitCompileCmds(line)) {
 			commands = append(commands, line)
 		}
 	}
@@ -221,7 +221,7 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 			continue
 		}
 
-		if util.IsCompileCommand(cmd) {
+		if util.IsCompileArgs(util.SplitCompileCmds(cmd)) {
 			args := util.SplitCompileCmds(cmd)
 			dep, err1 := findGoSources(sp, args, cgoObjDirs)
 			if err1 != nil {

@@ -154,3 +154,79 @@ func TestRunCmdErrorMessages(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildFlagsRoundTrip(t *testing.T) {
+	tests := []struct {
+		name  string
+		flags []string
+	}{
+		{
+			name:  "simple flags",
+			flags: []string{"-race", "-tags=foo"},
+		},
+		{
+			name:  "flags with spaces in values",
+			flags: []string{"-tags", "foo bar baz"},
+		},
+		{
+			name:  "modfile with spaces in path",
+			flags: []string{"-modfile", "/path/with spaces/go.mod"},
+		},
+		{
+			name:  "mixed flags with spaces",
+			flags: []string{"-race", "-tags", "integration e2e", "-mod=vendor"},
+		},
+		{
+			name:  "empty flags",
+			flags: []string{},
+		},
+		{
+			name:  "nil flags",
+			flags: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded := EncodeBuildFlags(tt.flags)
+			if len(tt.flags) == 0 {
+				if encoded != "" {
+					t.Errorf("EncodeBuildFlags(%v) = %q, expected empty", tt.flags, encoded)
+				}
+				return
+			}
+
+			// Set environment variable and read back
+			t.Setenv(EnvOtelBuildFlags, encoded)
+			result := GetBuildFlags()
+
+			if len(result) != len(tt.flags) {
+				t.Errorf("GetBuildFlags() returned %d flags, expected %d", len(result), len(tt.flags))
+				return
+			}
+
+			for i, f := range tt.flags {
+				if result[i] != f {
+					t.Errorf("GetBuildFlags()[%d] = %q, expected %q", i, result[i], f)
+				}
+			}
+		})
+	}
+}
+
+func TestGetBuildFlags_InvalidJSON(t *testing.T) {
+	t.Setenv(EnvOtelBuildFlags, "not valid json")
+	result := GetBuildFlags()
+	if result != nil {
+		t.Errorf("GetBuildFlags() with invalid JSON should return nil, got %v", result)
+	}
+}
+
+func TestGetBuildFlags_Empty(t *testing.T) {
+	// Ensure env var is not set
+	t.Setenv(EnvOtelBuildFlags, "")
+	result := GetBuildFlags()
+	if result != nil {
+		t.Errorf("GetBuildFlags() with empty env should return nil, got %v", result)
+	}
+}

@@ -26,9 +26,10 @@ type InstRule interface {
 
 // InstBaseRule is the base rule for all instrumentation rules.
 type InstBaseRule struct {
-	Name    string `json:"name,omitempty"    yaml:"name,omitempty"`
-	Target  string `json:"target"            yaml:"target"`
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`
+	Target  string            `json:"target"            yaml:"target"`
+	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
+	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"` // map[alias]path
 }
 
 func (ibr *InstBaseRule) String() string     { return ibr.Name }

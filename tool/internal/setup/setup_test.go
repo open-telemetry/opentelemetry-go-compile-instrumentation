@@ -225,3 +225,162 @@ func TestSetupGoCache(t *testing.T) {
 		}
 	})
 }
+
+func TestExtractBuildFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected []string
+	}{
+		{
+			name:     "no build flags",
+			args:     []string{"build", "-o", "output", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "tags with equals",
+			args:     []string{"build", "-tags=integration,e2e", "./..."},
+			expected: []string{"-tags=integration,e2e"},
+		},
+		{
+			name:     "tags with space separator",
+			args:     []string{"build", "-tags", "integration,e2e", "./..."},
+			expected: []string{"-tags", "integration,e2e"},
+		},
+		{
+			name:     "tags with spaces in value",
+			args:     []string{"build", "-tags", "foo bar", "./..."},
+			expected: []string{"-tags", "foo bar"},
+		},
+		{
+			name:     "race flag",
+			args:     []string{"build", "-race", "./..."},
+			expected: []string{"-race"},
+		},
+		{
+			name:     "mod flag",
+			args:     []string{"build", "-mod=vendor", "./..."},
+			expected: []string{"-mod=vendor"},
+		},
+		{
+			name:     "multiple flags",
+			args:     []string{"build", "-tags=foo", "-race", "-mod=vendor", "./..."},
+			expected: []string{"-tags=foo", "-mod=vendor", "-race"}, // value flags first, then sorted bool flags
+		},
+		{
+			name:     "mixed format",
+			args:     []string{"build", "-tags", "foo", "-mod=readonly", "-cover", "./..."},
+			expected: []string{"-tags", "foo", "-mod=readonly", "-cover"}, // value flags first, then sorted bool flags
+		},
+		{
+			name:     "ignores non-context flags",
+			args:     []string{"build", "-v", "-x", "-tags=foo", "-o", "output", "./..."},
+			expected: []string{"-tags=foo"},
+		},
+		{
+			name:     "modfile flag",
+			args:     []string{"build", "-modfile=go.custom.mod", "./..."},
+			expected: []string{"-modfile=go.custom.mod"},
+		},
+		{
+			name:     "modfile with spaces in path",
+			args:     []string{"build", "-modfile", "path with spaces/go.mod", "./..."},
+			expected: []string{"-modfile", "path with spaces/go.mod"},
+		},
+		{
+			name:     "race=true is normalized",
+			args:     []string{"build", "-race=true", "./..."},
+			expected: []string{"-race"},
+		},
+		{
+			name:     "race=false is excluded",
+			args:     []string{"build", "-race=false", "./..."},
+			expected: []string{"-race=false"},
+		},
+		{
+			name:     "cover=true is normalized",
+			args:     []string{"build", "-cover=true", "./..."},
+			expected: []string{"-cover"},
+		},
+		{
+			name:     "mixed bool formats",
+			args:     []string{"build", "-race=true", "-cover", "-msan=false", "./..."},
+			expected: []string{"-cover", "-msan=false", "-race"}, // sorted alphabetically
+		},
+		{
+			name:     "race=1 is truthy",
+			args:     []string{"build", "-race=1", "./..."},
+			expected: []string{"-race"},
+		},
+		{
+			name:     "race=T is truthy",
+			args:     []string{"build", "-race=T", "./..."},
+			expected: []string{"-race"},
+		},
+		{
+			name:     "race=TRUE is truthy",
+			args:     []string{"build", "-race=TRUE", "./..."},
+			expected: []string{"-race"},
+		},
+		{
+			name:     "cover=True is truthy",
+			args:     []string{"build", "-cover=True", "./..."},
+			expected: []string{"-cover"},
+		},
+		{
+			name:     "race=0 is falsy",
+			args:     []string{"build", "-race=0", "./..."},
+			expected: []string{"-race=false"},
+		},
+		{
+			name:     "race=f is falsy",
+			args:     []string{"build", "-race=f", "./..."},
+			expected: []string{"-race=false"},
+		},
+		{
+			name:     "race=FALSE is falsy",
+			args:     []string{"build", "-race=FALSE", "./..."},
+			expected: []string{"-race=false"},
+		},
+		{
+			name:     "race=invalid is skipped",
+			args:     []string{"build", "-race=invalid", "./..."},
+			expected: nil,
+		},
+		// Override behavior tests - last value wins
+		{
+			name:     "race then race=false - false wins",
+			args:     []string{"build", "-race", "-race=false", "./..."},
+			expected: []string{"-race=false"},
+		},
+		{
+			name:     "race=false then race - true wins",
+			args:     []string{"build", "-race=false", "-race", "./..."},
+			expected: []string{"-race"},
+		},
+		{
+			name:     "race=true then race=false - false wins",
+			args:     []string{"build", "-race=true", "-race=false", "./..."},
+			expected: []string{"-race=false"},
+		},
+		{
+			name:     "multiple overrides - last wins",
+			args:     []string{"build", "-race", "-race=false", "-race=true", "-race=0", "./..."},
+			expected: []string{"-race=false"}, // Last is -race=0 which is false
+		},
+		{
+			name:     "cover disabled then enabled with tags",
+			args:     []string{"build", "-cover=false", "-tags=foo", "-cover", "./..."},
+			expected: []string{"-tags=foo", "-cover"}, // value flags first, then bool
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractBuildFlags(tt.args)
+			if !slices.Equal(result, tt.expected) {
+				t.Errorf("extractBuildFlags(%v) = %v, expected %v", tt.args, result, tt.expected)
+			}
+		})
+	}
+}
