@@ -91,17 +91,17 @@ install: package ## Install otel to $$GOPATH/bin (auto-packages instrumentation)
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
 	@set -euo pipefail
-	rm -rf $(INST_PKG_TMP)
-	if [ ! -d pkg ]; then \
+	@rm -rf $(INST_PKG_TMP)
+	@if [ ! -d pkg ]; then \
 		echo "Error: pkg directory does not exist"; \
 		exit 1; \
 	fi
-	cp -r pkg $(INST_PKG_TMP)
-	(cd $(INST_PKG_TMP) && go mod tidy)
-	tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
-	mkdir -p tool/data/
-	mv $(INST_PKG_GZIP) tool/data/
-	rm -rf $(INST_PKG_TMP)
+	@cp -r pkg $(INST_PKG_TMP)
+	@(cd $(INST_PKG_TMP) && go mod tidy)
+	@tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
+	@mkdir -p tool/data/
+	@mv $(INST_PKG_GZIP) tool/data/
+	@rm -rf $(INST_PKG_TMP)
 	@echo "Package created successfully at tool/data/$(INST_PKG_GZIP)"
 
 build-demo: ## Build all demos
