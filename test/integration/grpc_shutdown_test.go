@@ -33,14 +33,14 @@ func TestGRPCServerTelemetryFlushOnSignal(t *testing.T) {
 
 	f.Build("grpcserver")
 	cmd := startServerProcess(t, "-port=50052")
-	time.Sleep(time.Second)
+	testutil.WaitForTCP(t, "localhost:50052")
 
 	client := NewGRPCClient(t, "localhost:50052")
 	client.SayHello(t, "ShutdownTest")
 
 	require.NoError(t, cmd.Process.Signal(os.Interrupt))
 	waitForProcessExit(t, cmd, 10*time.Second)
-	time.Sleep(500 * time.Millisecond)
+	testutil.WaitForSpanFlush(t)
 
 	spans := testutil.AllSpans(f.Traces())
 	require.NotEmpty(t, spans, "expected spans to be flushed on SIGINT shutdown")

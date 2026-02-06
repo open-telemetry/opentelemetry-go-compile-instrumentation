@@ -7,7 +7,6 @@ package test
 
 import (
 	"testing"
-	"time"
 
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
@@ -18,7 +17,7 @@ func TestHttp(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
 	f.BuildAndStart("httpserver")
-	time.Sleep(time.Second)
+	testutil.WaitForTCP(t, "127.0.0.1:8080")
 
 	f.BuildAndRun("httpclient", "-addr", "http://127.0.0.1:8080", "-name", "test")
 
