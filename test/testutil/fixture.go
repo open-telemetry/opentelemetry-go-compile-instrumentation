@@ -58,6 +58,10 @@ func NewTestFixture(t *testing.T, opts ...TestFixtureOption) *TestFixture {
 		f.collector = StartCollector(t)
 
 		// Configure OTEL env vars (can be overridden by test after this)
+		// Clear signal-specific endpoints to ensure OTEL_EXPORTER_OTLP_ENDPOINT takes precedence
+		t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+		t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
+		t.Setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "")
 		t.Setenv("OTEL_SERVICE_NAME", f.serviceName)
 		t.Setenv("OTEL_TRACES_EXPORTER", "otlp")
 		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", f.collector.URL)
