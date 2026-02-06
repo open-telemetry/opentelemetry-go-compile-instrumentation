@@ -4,7 +4,7 @@
 services:
   # Jaeger - Distributed tracing backend (v2 with native OTLP support + SPM)
   jaeger:
-    image: jaegertracing/jaeger:2.13.0@sha256:d5e5fe1c2b2f663b07c28c6f7cc5a6e61aef076752dab8df8eeb6b0f5494c94b
+    image: jaegertracing/jaeger:2.15.0@sha256:a5221e8464fe7c3d77c9fb368dfc24771bfb02bf136f00b23ba374f1eac9c2bf
     container_name: jaeger
     command:
       - --config=/etc/jaeger/config.yaml
@@ -30,7 +30,7 @@ services:
 
   # Prometheus - Metrics backend with native OTLP support (v3)
   prometheus:
-    image: prom/prometheus:v3.8.0@sha256:d936808bdea528155c0154a922cd42fd75716b8bb7ba302641350f9f3eaeba09
+    image: prom/prometheus:v3.9.1@sha256:1f0f50f06acaceb0f5670d2c8a658a599affe7b0d8e78b898c1035653849a702
     container_name: prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -55,7 +55,7 @@ services:
 
   # OpenTelemetry Collector - Receives, processes, and exports telemetry
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.141.0@sha256:b14234c4bc1b7364629af272e564913bb57bdc9736d45b8b6db5ab3417dc75f9
+    image: otel/opentelemetry-collector-contrib:0.145.0@sha256:a7343f01869071ea3f4c5e1e97df1bb1b3c4d5c77247db80e053a80b9df530c4
     container_name: otel-collector
     command:
       - "--config=/etc/otelcol-contrib/config.yaml"
@@ -79,7 +79,7 @@ services:
 
   # Grafana - Visualization and dashboards
   grafana:
-    image: grafana/grafana:12.3.0@sha256:70d9599b186ce287be0d2c5ba9a78acb2e86c1a68c9c41449454d0fc3eeb84e8
+    image: grafana/grafana:12.3.2@sha256:ba93c9d192e58b23e064c7f501d453426ccf4a85065bf25b705ab1e98602bfb1
     container_name: grafana
     ports:
       - "3000:3000"
@@ -184,7 +184,7 @@ services:
 
   # k6 gRPC Load Testing - Generates continuous load against gRPC server
   k6-grpc:
-    image: grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7
+    image: grafana/k6:1.5.0@sha256:2072ea9eafa596532d9aee0cc0e0a50cfb0e7fb703981a46179af5f4f22c5ea4
     container_name: k6-grpc
     command: run --quiet /scripts/grpc-load-test.js
     volumes:
@@ -202,7 +202,7 @@ services:
 
   # k6 HTTP Load Testing - Generates continuous load against HTTP server
   k6-http:
-    image: grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7
+    image: grafana/k6:1.5.0@sha256:2072ea9eafa596532d9aee0cc0e0a50cfb0e7fb703981a46179af5f4f22c5ea4
     container_name: k6-http
     command: run --quiet /scripts/http-load-test.js
     volumes:
