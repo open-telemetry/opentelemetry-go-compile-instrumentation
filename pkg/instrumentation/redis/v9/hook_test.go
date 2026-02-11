@@ -163,7 +163,7 @@ func TestRedisV9AppendUTF8String(t *testing.T) {
 	assert.Equal(t, "prefix:suffix", string(result))
 }
 
-func TestNewOtRedisHook(t *testing.T) {
+func TestNewOtelRedisHook(t *testing.T) {
 	hook := newOtelRedisHook("localhost:6379")
 	assert.NotNil(t, hook)
 	assert.Equal(t, "localhost:6379", hook.Addr)
