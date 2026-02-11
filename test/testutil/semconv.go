@@ -83,3 +83,20 @@ func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMet
 	// Conditionally required (when response is sent) - validated with exact value
 	RequireAttribute(t, span, string(semconv.RPCGRPCStatusCodeKey), grpcStatusCode)
 }
+
+// RequireRedisClientSemconv verifies that a Redis client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
+func RequireRedisClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	operationName, networkPeerAddress, queryText string,
+) {
+	// Required attributes
+	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "redis")
+	RequireAttribute(t, span, string(semconv.DBOperationNameKey), operationName)
+	// Recommended attributes
+	RequireAttribute(t, span, string(semconv.NetworkPeerAddressKey), networkPeerAddress)
+	RequireAttribute(t, span, string(semconv.NetworkTransportKey), "tcp")
+	// Query text should contain the command
+	RequireAttribute(t, span, string(semconv.DBQueryTextKey), queryText)
+}
