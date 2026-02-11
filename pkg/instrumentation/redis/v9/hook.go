@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package v9
 
 import (
@@ -59,17 +62,17 @@ func initInstrumentation() {
 	})
 }
 
-type otRedisHook struct {
+type otelRedisHook struct {
 	Addr string
 }
 
-func newOtRedisHook(addr string) *otRedisHook {
-	return &otRedisHook{
+func newOtelRedisHook(addr string) *otelRedisHook {
+	return &otelRedisHook{
 		Addr: addr,
 	}
 }
 
-func (o *otRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
 		if !redisEnabler.Enable() {
 			logger.Debug("Redis Client instrumentation disabled")
@@ -103,7 +106,7 @@ func (o *otRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	}
 }
 
-func (o *otRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return func(ctx context.Context, cmds []redis.Cmder) error {
 		if !redisEnabler.Enable() {
 			logger.Debug("Redis Client instrumentation disabled")
@@ -151,7 +154,7 @@ func (o *otRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.
 	}
 }
 
-func (o *otRedisHook) DialHook(next redis.DialHook) redis.DialHook {
+func (o *otelRedisHook) DialHook(next redis.DialHook) redis.DialHook {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		conn, err := next(ctx, network, addr)
 		if err != nil {

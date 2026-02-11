@@ -164,7 +164,7 @@ func TestRedisV9AppendUTF8String(t *testing.T) {
 }
 
 func TestNewOtRedisHook(t *testing.T) {
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	assert.NotNil(t, hook)
 	assert.Equal(t, "localhost:6379", hook.Addr)
 }
@@ -176,7 +176,7 @@ func TestProcessHook_CreatesSpan(t *testing.T) {
 	sr, tp := setupTestTracer()
 	defer tp.Shutdown(context.Background())
 
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
 		return nil
 	})
@@ -208,7 +208,7 @@ func TestProcessHook_RecordsError(t *testing.T) {
 	sr, tp := setupTestTracer()
 	defer tp.Shutdown(context.Background())
 
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	expectedErr := errors.New("connection refused")
 	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
 		return expectedErr
@@ -233,7 +233,7 @@ func TestProcessHook_RedisNilNotError(t *testing.T) {
 	sr, tp := setupTestTracer()
 	defer tp.Shutdown(context.Background())
 
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
 		return redis.Nil
 	})
@@ -257,7 +257,7 @@ func TestProcessHook_Disabled(t *testing.T) {
 	sr, tp := setupTestTracer()
 	defer tp.Shutdown(context.Background())
 
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
 		return nil
 	})
@@ -277,7 +277,7 @@ func TestProcessPipelineHook_CreatesSpan(t *testing.T) {
 	sr, tp := setupTestTracer()
 	defer tp.Shutdown(context.Background())
 
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
 		return nil
 	})
@@ -312,7 +312,7 @@ func TestProcessPipelineHook_TruncatesLongPipeline(t *testing.T) {
 	sr, tp := setupTestTracer()
 	defer tp.Shutdown(context.Background())
 
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
 		return nil
 	})
@@ -336,7 +336,7 @@ func TestProcessPipelineHook_RecordsError(t *testing.T) {
 	sr, tp := setupTestTracer()
 	defer tp.Shutdown(context.Background())
 
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	expectedErr := errors.New("pipeline error")
 	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
 		return expectedErr
@@ -362,7 +362,7 @@ func TestProcessPipelineHook_Disabled(t *testing.T) {
 	sr, tp := setupTestTracer()
 	defer tp.Shutdown(context.Background())
 
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
 		return nil
 	})
@@ -378,7 +378,7 @@ func TestProcessPipelineHook_Disabled(t *testing.T) {
 }
 
 func TestDialHook_Success(t *testing.T) {
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 
 	// Create a mock connection using net.Pipe
 	serverConn, clientConn := net.Pipe()
@@ -395,7 +395,7 @@ func TestDialHook_Success(t *testing.T) {
 }
 
 func TestDialHook_Error(t *testing.T) {
-	hook := newOtRedisHook("localhost:6379")
+	hook := newOtelRedisHook("localhost:6379")
 	expectedErr := errors.New("dial tcp: connection refused")
 
 	dialHook := hook.DialHook(func(ctx context.Context, network, addr string) (net.Conn, error) {

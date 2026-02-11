@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package v9
 
 import (
@@ -21,29 +24,29 @@ func (g redisClientEnabler) Enable() bool {
 var redisEnabler = redisClientEnabler{}
 
 func afterNewRedisClientV9(ictx inst.HookContext, client *redis.Client) {
-	client.AddHook(newOtRedisHook(client.Options().Addr))
+	client.AddHook(newOtelRedisHook(client.Options().Addr))
 }
 
 func afterNewFailOverRedisClientV9(call inst.HookContext, client *redis.Client) {
-	client.AddHook(newOtRedisHook(client.Options().Addr))
+	client.AddHook(newOtelRedisHook(client.Options().Addr))
 }
 
 func afterNewRingClientV9(call inst.HookContext, client *redis.Ring) {
 	client.OnNewNode(func(rdb *redis.Client) {
-		rdb.AddHook(newOtRedisHook(rdb.Options().Addr))
+		rdb.AddHook(newOtelRedisHook(rdb.Options().Addr))
 	})
 }
 
 func afterNewClusterClientV9(call inst.HookContext, client *redis.ClusterClient) {
 	client.OnNewNode(func(rdb *redis.Client) {
-		rdb.AddHook(newOtRedisHook(rdb.Options().Addr))
+		rdb.AddHook(newOtelRedisHook(rdb.Options().Addr))
 	})
 }
 
 func afterNewSentinelClientV9(call inst.HookContext, client *redis.SentinelClient) {
-	client.AddHook(newOtRedisHook(client.String()))
+	client.AddHook(newOtelRedisHook(client.String()))
 }
 
 func afterClientConnV9(call inst.HookContext, client *redis.Conn) {
-	client.AddHook(newOtRedisHook(client.String()))
+	client.AddHook(newOtelRedisHook(client.String()))
 }
