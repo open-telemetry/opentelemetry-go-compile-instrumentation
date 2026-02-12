@@ -214,7 +214,7 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 				ctx: t.Context(),
 			}
 
-			err := ip.handleRuleImports(tt.root, tt.imports, "test-rule", "test")
+			err := ip.handleRuleImports(tt.root, tt.imports, "test-rule")
 			if tt.expectError {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorMsg)

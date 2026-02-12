@@ -60,7 +60,7 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 	}
 
 	// Add any rule-specified additional imports if defined.
-	if err = ip.handleRuleImports(root, rule.Imports, rule.Name, "file rule"); err != nil {
+	if err = ip.handleRuleImports(root, rule.Imports, rule.Name); err != nil {
 		return err
 	}
 
