@@ -10,6 +10,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 // ImportConfig represents the parsed contents of an importcfg (or importcfg.link) file,
@@ -84,7 +86,7 @@ func parse(r io.Reader) (ImportConfig, error) {
 
 	// Check for scanner errors after the loop
 	if err := scanner.Err(); err != nil {
-		return reg, fmt.Errorf("scanning importcfg: %w", err)
+		return reg, ex.Wrapf(err, "scanning importcfg")
 	}
 
 	return reg, nil

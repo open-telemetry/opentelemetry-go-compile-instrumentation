@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"go/token"
 	"io"
 	"os/exec"
@@ -71,9 +70,9 @@ func ResolvePackageInfo(ctx context.Context, importPath string, buildFlags ...st
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("go list failed: %w\nstderr: %s", err, string(exitErr.Stderr))
+			return nil, ex.Wrapf(err, "go list failed\nstderr: %s", string(exitErr.Stderr))
 		}
-		return nil, fmt.Errorf("go list failed: %w", err)
+		return nil, ex.Wrapf(err, "go list failed")
 	}
 
 	result := make(map[string]string)
@@ -86,7 +85,7 @@ func ResolvePackageInfo(ctx context.Context, importPath string, buildFlags ...st
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, fmt.Errorf("decoding package info: %w", err)
+			return nil, ex.Wrapf(err, "decoding package info")
 		}
 
 		// Only include packages that have an export archive
@@ -97,7 +96,7 @@ func ResolvePackageInfo(ctx context.Context, importPath string, buildFlags ...st
 
 	// Verify we found the requested package
 	if _, found := result[importPath]; !found {
-		return nil, fmt.Errorf("package %q not found in go list output", importPath)
+		return nil, ex.Newf("package %q not found in go list output", importPath)
 	}
 
 	return result, nil
