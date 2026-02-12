@@ -31,7 +31,7 @@ func TestInferPackageName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.importPath, func(t *testing.T) {
-			result := ResolvePackageName(t.Context(), tt.importPath)
+			result := resolvePackageName(t.Context(), tt.importPath)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

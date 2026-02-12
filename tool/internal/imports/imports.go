@@ -21,11 +21,11 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
-// ResolvePackageName resolves the package name for an import path using `go list -f '{{.Name}}'`.
+// resolvePackageName resolves the package name for an import path using `go list -f '{{.Name}}'`.
 // Results are cached for performance. Panics if the package cannot be resolved, as this
 // indicates a serious issue during compilation (packages should always be resolvable
 // during toolexec since the Go toolchain has already resolved all dependencies).
-func ResolvePackageName(ctx context.Context, importPath string, buildFlags ...string) string {
+func resolvePackageName(ctx context.Context, importPath string, buildFlags ...string) string {
 	// Build the go list command with any build flags
 	args := make([]string, 0, 3+len(buildFlags)+1)
 	args = append(args, "list", "-f", "{{.Name}}")
@@ -119,7 +119,7 @@ type Resolution struct {
 // parseFile extracts all imports from a file into bidirectional maps.
 // This avoids multiple AST traversals when checking import conflicts.
 //
-// For imports without explicit aliases, the alias is resolved using ResolvePackageName(),
+// For imports without explicit aliases, the alias is resolved using resolvePackageName(),
 // which uses `go list` to get the actual package name. The ExplicitAlias map tracks
 // which imports have user-specified aliases in the source file.
 func parseFile(ctx context.Context, root *dst.File, buildFlags ...string) importMapping {
@@ -146,7 +146,7 @@ func parseFile(ctx context.Context, root *dst.File, buildFlags ...string) import
 				alias = importSpec.Name.Name
 				maps.ExplicitAlias[importPath] = true
 			} else {
-				alias = ResolvePackageName(ctx, importPath, buildFlags...)
+				alias = resolvePackageName(ctx, importPath, buildFlags...)
 			}
 
 			maps.AliasToPath[alias] = importPath
@@ -203,7 +203,7 @@ func createSpec(ctx context.Context, alias, importPath string, buildFlags ...str
 		Path: &dst.BasicLit{Value: strconv.Quote(importPath)},
 	}
 
-	pkgName := ResolvePackageName(ctx, importPath, buildFlags...)
+	pkgName := resolvePackageName(ctx, importPath, buildFlags...)
 
 	// Set Name only if:
 	// 1. It's a blank import (alias == "_")

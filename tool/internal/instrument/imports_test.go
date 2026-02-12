@@ -64,7 +64,7 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 						Tok: token.IMPORT,
 						Specs: []dst.Spec{
 							&dst.ImportSpec{
-								// gopkg.in/yaml.v3 declares "package yaml" - ResolvePackageName correctly returns "yaml"
+								// gopkg.in/yaml.v3 declares "package yaml" - resolvePackageName correctly returns "yaml"
 								Path: &dst.BasicLit{Value: `"gopkg.in/yaml.v3"`},
 							},
 						},
