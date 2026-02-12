@@ -106,7 +106,7 @@ func TestIsCompileCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsCompileArgs(SplitCompileCmds(tt.line))
+			result := IsCompileCommandWithArgs(SplitCompileCmds(tt.line))
 			assert.Equal(t, tt.expected, result, "IsCompileCommand(%q) = %v, want %v", tt.line, result, tt.expected)
 		})
 	}
@@ -242,8 +242,8 @@ func TestIsCompileArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsCompileArgs(tt.args)
-			assert.Equal(t, tt.expected, result, "IsCompileArgs(%v) = %v, want %v", tt.args, result, tt.expected)
+			result := IsCompileCommandWithArgs(tt.args)
+			assert.Equal(t, tt.expected, result, "IsCompileCommandWithArgs(%v) = %v, want %v", tt.args, result, tt.expected)
 		})
 	}
 }
@@ -365,8 +365,8 @@ func TestIsLinkArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsLinkArgs(tt.args)
-			assert.Equal(t, tt.expected, result, "IsLinkArgs(%v) = %v, want %v", tt.args, result, tt.expected)
+			result := IsLinkCommandWithArgs(tt.args)
+			assert.Equal(t, tt.expected, result, "IsLinkCommandWithArgs(%v) = %v, want %v", tt.args, result, tt.expected)
 		})
 	}
 }

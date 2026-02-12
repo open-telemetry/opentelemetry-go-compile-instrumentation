@@ -350,7 +350,7 @@ func Toolexec(ctx context.Context, args []string) error {
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
 
 	// Intercept compile commands for instrumentation
-	if util.IsCompileArgs(args) {
+	if util.IsCompileCommandWithArgs(args) {
 		var err error
 		args, err = interceptCompile(ctx, args)
 		if err != nil {
@@ -359,7 +359,7 @@ func Toolexec(ctx context.Context, args []string) error {
 	}
 
 	// Intercept link commands to update importcfg with added dependencies
-	if util.IsLinkArgs(args) {
+	if util.IsLinkCommandWithArgs(args) {
 		var err error
 		args, err = interceptLink(ctx, args)
 		if err != nil {

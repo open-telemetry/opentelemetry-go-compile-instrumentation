@@ -33,10 +33,10 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
-// IsCompileArgs checks if the args slice represents a compile command.
+// IsCompileCommandWithArgs checks if the args slice represents a compile command.
 // This is preferred over IsCompileCommand when you have the args as a slice,
 // as it correctly handles tool paths with spaces (common on Windows).
-func IsCompileArgs(args []string) bool {
+func IsCompileCommandWithArgs(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
@@ -62,8 +62,8 @@ func IsCompileArgs(args []string) bool {
 	return true
 }
 
-// IsLinkArgs checks if the args slice represents a link command.
-func IsLinkArgs(args []string) bool {
+// IsLinkCommandWithArgs checks if the args slice represents a link command.
+func IsLinkCommandWithArgs(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
