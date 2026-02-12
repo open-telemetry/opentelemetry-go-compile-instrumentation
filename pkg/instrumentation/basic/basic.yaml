@@ -10,7 +10,7 @@ add_new_field:
   new_field:
     - name: NewField
       type: string
-    - name: Ctx
+    - name: ctx
       type: context.Context
   imports:
     context: "context"

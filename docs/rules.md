@@ -113,7 +113,7 @@ add_context_field:
   target: main
   struct: MyStruct
   new_field:
-    - name: Ctx
+    - name: ctx
       type: context.Context
   imports:
     context: "context"
