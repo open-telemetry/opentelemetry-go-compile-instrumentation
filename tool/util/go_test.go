@@ -243,7 +243,15 @@ func TestIsCompileArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := IsCompileCommandWithArgs(tt.args)
-			assert.Equal(t, tt.expected, result, "IsCompileCommandWithArgs(%v) = %v, want %v", tt.args, result, tt.expected)
+			assert.Equal(
+				t,
+				tt.expected,
+				result,
+				"IsCompileCommandWithArgs(%v) = %v, want %v",
+				tt.args,
+				result,
+				tt.expected,
+			)
 		})
 	}
 }
@@ -366,7 +374,15 @@ func TestIsLinkArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := IsLinkCommandWithArgs(tt.args)
-			assert.Equal(t, tt.expected, result, "IsLinkCommandWithArgs(%v) = %v, want %v", tt.args, result, tt.expected)
+			assert.Equal(
+				t,
+				tt.expected,
+				result,
+				"IsLinkCommandWithArgs(%v) = %v, want %v",
+				tt.args,
+				result,
+				tt.expected,
+			)
 		})
 	}
 }

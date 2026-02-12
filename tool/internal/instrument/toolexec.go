@@ -205,7 +205,7 @@ func trackAddedImports(packages map[string]string) error {
 		return ex.Wrapf(err, "marshaling added imports")
 	}
 
-	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+	if err = os.WriteFile(filePath, data, 0o600); err != nil {
 		return ex.Wrapf(err, "writing imports file")
 	}
 
@@ -328,7 +328,7 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 		return args, nil
 	}
 
-	if err := linkConfig.WriteFile(importCfgPath); err != nil {
+	if err = linkConfig.WriteFile(importCfgPath); err != nil {
 		return nil, ex.Wrapf(err, "writing link importcfg")
 	}
 

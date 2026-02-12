@@ -58,7 +58,8 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 		}
 		line = filepath.ToSlash(line)
 
-		if _, ok := parseCdDir(line); ok || util.IsCgoCommand(line) || util.IsCompileCommandWithArgs(util.SplitCompileCmds(line)) {
+		if _, ok := parseCdDir(line); ok || util.IsCgoCommand(line) ||
+			util.IsCompileCommandWithArgs(util.SplitCompileCmds(line)) {
 			commands = append(commands, line)
 		}
 	}

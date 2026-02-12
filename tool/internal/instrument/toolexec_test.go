@@ -184,7 +184,6 @@ func TestUpdateImportConfig(t *testing.T) {
 		err = ip.updateImportConfig(map[string]string{"unsafe": "unsafe"})
 		require.NoError(t, err)
 	})
-
 }
 
 func TestTrackAddedImports(t *testing.T) {
