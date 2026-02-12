@@ -58,7 +58,7 @@ func (ip *InstrumentPhase) applyRawRule(rule *rule.InstRawRule, root *dst.File) 
 	}
 
 	// Handle imports if specified in the rule
-	if err := ip.handleRuleImports(root, rule.Imports, rule.Name); err != nil {
+	if err := ip.addRuleImports(root, rule.Imports, rule.Name); err != nil {
 		return err
 	}
 

@@ -27,12 +27,12 @@ func (ip *InstrumentPhase) updateImportConfigForFile(root *dst.File, ruleName st
 	return nil
 }
 
-// handleRuleImports processes imports for a rule and updates the import config.
+// addRuleImports processes imports for a rule and updates the import config.
 //
 // This function validates that if a rule expects to use an import with a specific alias,
 // and the file already imports the same package with a different explicit alias, an error is returned.
 // This prevents silent failures where injected code uses an alias that doesn't exist in the file.
-func (ip *InstrumentPhase) handleRuleImports(
+func (ip *InstrumentPhase) addRuleImports(
 	root *dst.File,
 	ruleImports map[string]string,
 	ruleName string,
