@@ -40,21 +40,22 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 			errorMsg:    "import alias mismatch",
 		},
 		{
-			name: "implicit alias - no mismatch check for implicit aliases",
+			name: "implicit alias mismatch - file uses context but rule expects ctx",
 			root: &dst.File{
 				Decls: []dst.Decl{
 					&dst.GenDecl{
 						Tok: token.IMPORT,
 						Specs: []dst.Spec{
 							&dst.ImportSpec{
-								Path: &dst.BasicLit{Value: `"context"`}, // implicit alias from path.Base
+								Path: &dst.BasicLit{Value: `"context"`}, // implicit alias "context"
 							},
 						},
 					},
 				},
 			},
 			imports:     map[string]string{"ctx": "context"},
-			expectError: false, // No error - we can't reliably detect mismatch for implicit aliases
+			expectError: true,
+			errorMsg:    "import alias mismatch",
 		},
 		{
 			name: "gopkg.in style path - no mismatch for implicit alias",

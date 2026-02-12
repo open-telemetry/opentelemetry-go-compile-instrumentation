@@ -30,8 +30,9 @@ func (ip *InstrumentPhase) updateImportConfigForFile(root *dst.File, ruleName st
 // addRuleImports processes imports for a rule and updates the import config.
 //
 // This function validates that if a rule expects to use an import with a specific alias,
-// and the file already imports the same package with a different explicit alias, an error is returned.
-// This prevents silent failures where injected code uses an alias that doesn't exist in the file.
+// and the file already imports the same package with a different alias (whether explicit or
+// implicit), an error is returned. This prevents silent failures where injected code uses
+// an alias that doesn't exist in the file.
 func (ip *InstrumentPhase) addRuleImports(
 	root *dst.File,
 	ruleImports map[string]string,
@@ -63,11 +64,9 @@ func (ip *InstrumentPhase) addRuleImports(
 			continue // Blank imports are permissive
 		}
 
-		// Only validate if the file has an explicit alias for this import
-		if !resolution.ExplicitAliases[importPath] {
-			continue
-		}
-
+		// Validate alias matches for all existing imports (both explicit and implicit).
+		// When a file already imports a path, we won't add a duplicate, so injected code
+		// must use the alias that actually exists in the file.
 		if existingAlias, pathExists := resolution.ExistingAliases[importPath]; pathExists {
 			if existingAlias != ruleAlias {
 				return ex.Newf(
