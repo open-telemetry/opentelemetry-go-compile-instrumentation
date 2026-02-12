@@ -289,6 +289,7 @@ func extractBuildFlags(args []string) []string {
 				// Parse error: ignore invalid value
 				continue
 			}
+			// Unrecognized -flag=value: skip it
 			continue
 		}
 
