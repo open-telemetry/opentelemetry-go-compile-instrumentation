@@ -1,0 +1,25 @@
+handler_wrapper:
+  target: "log/slog"
+  file: "handler_wrapper.go"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/log/slog/internal"
+
+slog_handler_hook:
+  target: "log/slog"
+  func: Handler
+  recv: "*Logger"
+  before: BeforeHandler
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/log/slog"
+
+slog_with_hook:
+  target: "log/slog"
+  func: With
+  recv: "*Logger"
+  before: BeforeWith
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/log/slog"
+
+slog_withgroup_hook:
+  target: "log/slog"
+  func: WithGroup
+  recv: "*Logger"
+  before: BeforeWithGroup
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/log/slog"

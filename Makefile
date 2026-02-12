@@ -52,7 +52,7 @@ all: build format lint test
 build/pkg: ## Build all pkg modules to verify compilation
 	@echo "Building pkg modules..."
 	@set -euo pipefail
-	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime"); \
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v -e "pkg/instrumentation/runtime" -e "pkg/instrumentation/log/slog"); \
 	for moddir in $$PKG_MODULES; do \
 		echo "Building $$moddir..."; \
 		(cd $$moddir && go mod tidy && go build ./...); \

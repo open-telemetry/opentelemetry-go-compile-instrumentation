@@ -1,0 +1,6 @@
+zap_hook:
+  target: "go.uber.org/zap/zapcore"
+  func: Write
+  recv: "*CheckedEntry"
+  before: BeforeWrite
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/log/zap"
