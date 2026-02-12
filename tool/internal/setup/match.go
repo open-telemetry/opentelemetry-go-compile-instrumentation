@@ -44,6 +44,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstRawRule(raw, name)
 	case fields["func"] != nil:
 		return rule.NewInstFuncRule(raw, name)
+	case fields["function-call"] != nil:
+		return rule.NewInstCallRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
