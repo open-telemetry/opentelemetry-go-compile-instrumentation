@@ -174,29 +174,8 @@ func (ip *InstrumentPhase) updateImportConfig(newImports map[string]string) erro
 		return nil
 	}
 
-	// Atomic write: write to temp file first
-	tempPath := ip.importConfigPath + ".tmp"
-	if err := ip.importConfig.WriteFile(tempPath); err != nil {
-		return ex.Wrapf(err, "writing temp importcfg")
-	}
-
-	// Backup original only if backup doesn't exist yet
-	backupPath := ip.importConfigPath + ".original"
-	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
-		if err = util.CopyFile(ip.importConfigPath, backupPath); err != nil {
-			ip.Warn("failed to backup importcfg", "error", err)
-		}
-	}
-
-	// Atomic replacement
-	if util.IsWindows() {
-		if err := os.Remove(ip.importConfigPath); err != nil && !os.IsNotExist(err) {
-			_ = os.Remove(tempPath) // Cleanup temp file on error - failure is non-critical
-			return ex.Wrapf(err, "removing old importcfg")
-		}
-	}
-	if err := os.Rename(tempPath, ip.importConfigPath); err != nil {
-		return ex.Wrapf(err, "renaming temp importcfg")
+	if err := ip.importConfig.WriteFile(ip.importConfigPath); err != nil {
+		return ex.Wrapf(err, "writing importcfg")
 	}
 
 	ip.Info("Updated importcfg", "path", ip.importConfigPath)
@@ -226,21 +205,8 @@ func trackAddedImports(packages map[string]string) error {
 		return ex.Wrapf(err, "marshaling added imports")
 	}
 
-	// Atomic write: temp file + rename
-	tempPath := filePath + ".tmp"
-	if writeErr := os.WriteFile(tempPath, data, 0o600); writeErr != nil {
-		return ex.Wrapf(writeErr, "writing temp imports file")
-	}
-
-	// On Windows, os.Rename fails if destination exists
-	if util.IsWindows() {
-		if removeErr := os.Remove(filePath); removeErr != nil && !os.IsNotExist(removeErr) {
-			_ = os.Remove(tempPath) // Cleanup temp file on error
-			return ex.Wrapf(removeErr, "removing old imports file")
-		}
-	}
-	if renameErr := os.Rename(tempPath, filePath); renameErr != nil {
-		return ex.Wrapf(renameErr, "finalizing imports file")
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+		return ex.Wrapf(err, "writing imports file")
 	}
 
 	return nil
@@ -362,29 +328,8 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 		return args, nil
 	}
 
-	// Atomic write: write to temp file first
-	tempPath := importCfgPath + ".tmp"
-	if writeErr := linkConfig.WriteFile(tempPath); writeErr != nil {
-		return nil, ex.Wrapf(writeErr, "writing temp link importcfg")
-	}
-
-	// Backup original only if backup doesn't exist yet
-	backupPath := importCfgPath + ".original"
-	if _, statErr := os.Stat(backupPath); os.IsNotExist(statErr) {
-		if copyErr := util.CopyFile(importCfgPath, backupPath); copyErr != nil {
-			logger.WarnContext(ctx, "failed to backup link importcfg", "error", copyErr)
-		}
-	}
-
-	// Atomic replacement
-	if util.IsWindows() {
-		if removeErr := os.Remove(importCfgPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			_ = os.Remove(tempPath) // Cleanup temp file on error
-			return nil, ex.Wrapf(removeErr, "removing old link importcfg")
-		}
-	}
-	if renameErr := os.Rename(tempPath, importCfgPath); renameErr != nil {
-		return nil, ex.Wrapf(renameErr, "renaming temp link importcfg")
+	if err := linkConfig.WriteFile(importCfgPath); err != nil {
+		return nil, ex.Wrapf(err, "writing link importcfg")
 	}
 
 	logger.InfoContext(ctx, "Updated link importcfg", "path", importCfgPath, "added", len(addedImports))
