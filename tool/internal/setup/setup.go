@@ -248,10 +248,6 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	newArgs = append(newArgs, "-work")
 	// Add "-toolexec=..."
 	newArgs = append(newArgs, insert)
-	// TODO: We should support incremental build in the future, so we don't need
-	// to force rebuild here.
-	// Add "-a" to force rebuild
-	newArgs = append(newArgs, "-a")
 	// Add the rest
 	newArgs = append(newArgs, args[1:]...)
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
