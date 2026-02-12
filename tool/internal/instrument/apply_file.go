@@ -59,11 +59,6 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 		return err
 	}
 
-	// Add any rule-specified additional imports if defined.
-	if err = ip.addRuleImports(root, rule.Imports, rule.Name); err != nil {
-		return err
-	}
-
 	// Write back the modified AST to a new file in the working directory
 	base := filepath.Base(rule.File)
 	ext := filepath.Ext(base)
