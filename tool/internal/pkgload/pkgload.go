@@ -13,7 +13,12 @@ import (
 )
 
 // LoadPackages wraps packages.Load with context and build flags.
-func LoadPackages(ctx context.Context, mode packages.LoadMode, buildFlags []string, patterns ...string) ([]*packages.Package, error) {
+func LoadPackages(
+	ctx context.Context,
+	mode packages.LoadMode,
+	buildFlags []string,
+	patterns ...string,
+) ([]*packages.Package, error) {
 	cfg := &packages.Config{
 		Mode:       mode,
 		Context:    ctx,
