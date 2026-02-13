@@ -12,31 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInferPackageName(t *testing.T) {
-	tests := []struct {
-		importPath string
-		expected   string
-	}{
-		{"fmt", "fmt"},
-		{"encoding/json", "json"},
-		{"net/http", "http"},
-		{"context", "context"},
-		{"io", "io"},
-		{"strings", "strings"},
-		{"sync", "sync"},
-		{"time", "time"},
-		{"github.com/dave/dst", "dst"},
-		{"github.com/stretchr/testify/assert", "assert"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.importPath, func(t *testing.T) {
-			result := resolvePackageName(t.Context(), tt.importPath)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestGetExisting(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -640,61 +615,4 @@ func TestCollectPaths(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-func TestResolvePackageFiles(t *testing.T) {
-	ctx := t.Context()
-
-	// Test with a standard library package
-	archives, err := ResolvePackageInfo(ctx, "fmt")
-	require.NoError(t, err)
-
-	// Should have fmt and its dependencies
-	fmtArchive, exists := archives["fmt"]
-	assert.True(t, exists, "fmt should be in the result")
-	assert.NotEmpty(t, fmtArchive, "fmt archive path should not be empty")
-
-	// fmt depends on other packages, so we should have more than one
-	assert.Greater(t, len(archives), 1, "should have dependencies")
-
-	t.Logf("Resolved %d packages for fmt", len(archives))
-	t.Logf("fmt archive: %s", fmtArchive)
-}
-
-func TestResolvePackageFiles_InvalidPackage(t *testing.T) {
-	ctx := t.Context()
-
-	// Test with a non-existent package
-	_, err := ResolvePackageInfo(ctx, "this/package/does/not/exist")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "go list failed")
-}
-
-func TestResolvePackageFiles_MultiplePackages(t *testing.T) {
-	ctx := t.Context()
-
-	// Test with net/http which has many dependencies
-	archives, err := ResolvePackageInfo(ctx, "net/http")
-	require.NoError(t, err)
-
-	// Should include net/http itself
-	httpArchive, exists := archives["net/http"]
-	assert.True(t, exists, "net/http should be in the result")
-	assert.NotEmpty(t, httpArchive, "net/http archive path should not be empty")
-
-	// Should include some of its dependencies
-	assert.Contains(t, archives, "net")
-	assert.Contains(t, archives, "fmt")
-
-	t.Logf("Resolved %d packages for net/http", len(archives))
-}
-
-func TestResolvePackageFiles_EmptyOutput(t *testing.T) {
-	ctx := t.Context()
-
-	// Test with "unsafe" which has no export archive
-	archives, err := ResolvePackageInfo(ctx, "unsafe")
-	require.Error(t, err, "unsafe package should not have an export archive")
-	assert.Contains(t, err.Error(), "not found in go list output")
-	assert.Nil(t, archives)
 }

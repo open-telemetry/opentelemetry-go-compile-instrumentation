@@ -5,13 +5,8 @@
 package imports
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"go/token"
-	"io"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,88 +14,8 @@ import (
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
 )
-
-// resolvePackageName resolves the package name for an import path using `go list -f '{{.Name}}'`.
-// Results are cached for performance. Panics if the package cannot be resolved, as this
-// indicates a serious issue during compilation (packages should always be resolvable
-// during toolexec since the Go toolchain has already resolved all dependencies).
-func resolvePackageName(ctx context.Context, importPath string, buildFlags ...string) string {
-	// Build the go list command with any build flags
-	args := make([]string, 0, 3+len(buildFlags)+1)
-	args = append(args, "list", "-f", "{{.Name}}")
-	args = append(args, buildFlags...)
-	args = append(args, importPath)
-
-	cmd := exec.CommandContext(ctx, "go", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		ex.Fatalf("failed to resolve package name for %s: %v", importPath, err)
-	}
-
-	name := strings.TrimSpace(string(output))
-	if name == "" {
-		ex.Fatalf("go list returned empty package name for %s", importPath)
-	}
-
-	return name
-}
-
-// packageInfo represents the relevant fields from `go list -json` output.
-type packageInfo struct {
-	ImportPath string   `json:"ImportPath"`
-	Export     string   `json:"Export"`
-	Deps       []string `json:"Deps"`
-}
-
-// ResolvePackageInfo attempts to retrieve the archive for the designated import path
-// and its dependencies using `go list -export -json`.
-// The buildFlags parameter allows passing build flags (like -tags) to ensure the resolved
-// archives match the current build context.
-func ResolvePackageInfo(ctx context.Context, importPath string, buildFlags ...string) (map[string]string, error) {
-	// Build the go list command with any build flags
-	args := make([]string, 0, 4+len(buildFlags)+1)
-	args = append(args, "list", "-export", "-json", "-deps")
-	args = append(args, buildFlags...)
-	args = append(args, importPath)
-
-	// Use go list to find the package and its dependencies
-	cmd := exec.CommandContext(ctx, "go", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, ex.Wrapf(err, "go list failed\nstderr: %s", string(exitErr.Stderr))
-		}
-		return nil, ex.Wrapf(err, "go list failed")
-	}
-
-	result := make(map[string]string)
-	decoder := json.NewDecoder(bytes.NewReader(output))
-
-	// go list -json outputs one JSON object per line
-	for {
-		var pkg packageInfo
-		if err = decoder.Decode(&pkg); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, ex.Wrapf(err, "decoding package info")
-		}
-
-		// Only include packages that have an export archive
-		if pkg.Export != "" {
-			result[pkg.ImportPath] = pkg.Export
-		}
-	}
-
-	// Verify we found the requested package
-	if _, found := result[importPath]; !found {
-		return nil, ex.Newf("package %q not found in go list output", importPath)
-	}
-
-	return result, nil
-}
 
 // importMapping holds bidirectional import mappings for a file.
 type importMapping struct {
@@ -119,8 +34,8 @@ type Resolution struct {
 // parseFile extracts all imports from a file into bidirectional maps.
 // This avoids multiple AST traversals when checking import conflicts.
 //
-// For imports without explicit aliases, the alias is resolved using resolvePackageName(),
-// which uses `go list` to get the actual package name. The ExplicitAlias map tracks
+// For imports without explicit aliases, the alias is resolved using pkgload.ResolvePackageName(),
+// which uses the go/packages API to get the actual package name. The ExplicitAlias map tracks
 // which imports have user-specified aliases in the source file.
 func parseFile(ctx context.Context, root *dst.File, buildFlags ...string) importMapping {
 	maps := importMapping{
@@ -146,7 +61,7 @@ func parseFile(ctx context.Context, root *dst.File, buildFlags ...string) import
 				alias = importSpec.Name.Name
 				maps.ExplicitAlias[importPath] = true
 			} else {
-				alias = resolvePackageName(ctx, importPath, buildFlags...)
+				alias = pkgload.ResolvePackageName(ctx, importPath, buildFlags...)
 			}
 
 			maps.AliasToPath[alias] = importPath
@@ -203,7 +118,7 @@ func createSpec(ctx context.Context, alias, importPath string, buildFlags ...str
 		Path: &dst.BasicLit{Value: strconv.Quote(importPath)},
 	}
 
-	pkgName := resolvePackageName(ctx, importPath, buildFlags...)
+	pkgName := pkgload.ResolvePackageName(ctx, importPath, buildFlags...)
 
 	// Set Name only if:
 	// 1. It's a blank import (alias == "_")

@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
@@ -86,10 +87,8 @@ var flagsWithPathValues = map[string]bool{
 func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
 	buildPkgs := make([]*packages.Package, 0)
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedModule,
-	}
 	found := false
 	for i := len(args) - 1; i >= 0; i-- {
 		arg := args[i]
@@ -107,7 +106,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 			break
 		}
 
-		pkgs, err := packages.Load(cfg, arg)
+		pkgs, err := pkgload.LoadPackages(ctx, mode, nil, arg)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to load packages for pattern %s", arg)
 		}
@@ -123,7 +122,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 
 	if !found {
 		var err error
-		buildPkgs, err = packages.Load(cfg, ".")
+		buildPkgs, err = pkgload.LoadPackages(ctx, mode, nil, ".")
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to load packages for pattern .")
 		}

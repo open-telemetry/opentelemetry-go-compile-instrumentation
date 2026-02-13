@@ -16,6 +16,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/imports"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -156,7 +157,7 @@ func (ip *InstrumentPhase) updateImportConfig(newImports map[string]string) erro
 
 		// Resolve package archive location, passing build flags to match the current build context
 		buildFlags := util.GetBuildFlags()
-		archives, err := imports.ResolvePackageInfo(ip.ctx, importPath, buildFlags...)
+		archives, err := pkgload.ResolveExportFiles(ip.ctx, importPath, buildFlags...)
 		if err != nil {
 			return ex.Wrapf(err, "resolving %q", importPath)
 		}
