@@ -95,6 +95,7 @@ func main() {
 	m := &MyStruct{}
 	// Add a new field to the struct
 	m.NewField = "abc"
+	m.ctx = context.Background()
 	m.Example()
 	MyStruct{}.Example2()
 

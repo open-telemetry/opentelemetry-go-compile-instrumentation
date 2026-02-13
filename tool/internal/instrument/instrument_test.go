@@ -15,7 +15,9 @@
 package instrument
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -142,14 +144,63 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 
 func compileArgs(tempDir, sourceFile string) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
+
+	// Create importcfg file for the test
+	importCfgPath := filepath.Join(tempDir, "importcfg")
+	createImportCfg(importCfgPath)
+
 	return []string{
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
 		"-p", mainPackage,
 		"-complete",
 		"-buildid", buildID,
+		"-importcfg", importCfgPath,
 		"-pack",
 		sourceFile,
+	}
+}
+
+// createImportCfg creates a basic importcfg file with standard library packages.
+func createImportCfg(path string) {
+	// Get standard library package locations
+	// We'll use go list to populate common packages
+	ctx := context.Background()
+
+	// Start with an empty config
+	cfg := struct {
+		PackageFile map[string]string
+	}{
+		PackageFile: make(map[string]string),
+	}
+
+	// Resolve common standard library packages that might be needed
+	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io"}
+	for _, pkg := range commonPkgs {
+		cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkg)
+		output, err := cmd.Output()
+		if err != nil {
+			continue // Skip if package not found
+		}
+
+		var info struct {
+			ImportPath string `json:"ImportPath"`
+			Export     string `json:"Export"`
+		}
+		if err2 := json.Unmarshal(output, &info); err2 == nil && info.Export != "" {
+			cfg.PackageFile[info.ImportPath] = info.Export
+		}
+	}
+
+	// Write the importcfg file
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	for importPath, archive := range cfg.PackageFile {
+		fmt.Fprintf(f, "packagefile %s=%s\n", importPath, archive)
 	}
 }
 
