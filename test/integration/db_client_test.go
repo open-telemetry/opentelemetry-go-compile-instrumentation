@@ -21,10 +21,10 @@ func TestDBClientPing(t *testing.T) {
 	span := f.RequireSingleSpan()
 	require.Equal(t, "ping", span.Name())
 	testutil.RequireDBClientSemconv(t, span,
-		"ping", // db.operation.name
-		"ping", // db.query.text
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", // network.peer.address (parsed endpoint from DSN)
-		"testdb", // db.namespace
+		"ping",
+		"ping",
+		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", 0,
+		"testdb",
 	)
 }
 
@@ -38,7 +38,7 @@ func TestDBClientExec(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, span,
 		"INSERT",
 		"INSERT INTO users (name, email) VALUES (?, ?)",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
+		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", 0,
 		"testdb",
 	)
 }
@@ -53,7 +53,7 @@ func TestDBClientQuery(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, span,
 		"SELECT",
 		"SELECT id, name FROM users WHERE name = ?",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
+		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", 0,
 		"testdb",
 	)
 }

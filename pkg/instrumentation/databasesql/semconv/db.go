@@ -4,6 +4,9 @@
 package semconv
 
 import (
+	"net"
+	"strconv"
+
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
@@ -19,13 +22,25 @@ type DatabaseSqlRequest struct {
 }
 
 func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {
+	host, portStr, err := net.SplitHostPort(req.Endpoint)
+	if err != nil {
+		host = req.Endpoint
+	}
+
 	attrs := []attribute.KeyValue{
 		semconv.DBOperationName(req.OpType),
 		semconv.DBNamespace(req.DbName),
-		semconv.NetworkPeerAddress(req.Endpoint),
+		semconv.ServerAddress(host),
 		semconv.NetworkTransportTCP,
 		semconv.DBQueryText(req.Sql),
 	}
+
+	if err == nil {
+		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
+			attrs = append(attrs, semconv.ServerPort(port))
+		}
+	}
+
 	switch req.DriverName {
 	case "mysql":
 		attrs = append(attrs, semconv.DBSystemNameMySQL)

@@ -35,6 +35,10 @@ func TestDB(t *testing.T) {
 		t.Fatalf("Expected at least 7 spans, got %d", len(spans))
 	}
 
+	// For "testdb" driver, parseDSN falls back to the full DSN as the endpoint.
+	// net.SplitHostPort cannot parse a raw DSN, so server.address = full DSN, no port.
+	const serverAddr = "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8"
+
 	// Verify ping span
 	pingSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsClient,
@@ -43,7 +47,7 @@ func TestDB(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, pingSpan,
 		"ping",
 		"ping",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
+		serverAddr, 0,
 		"testdb",
 	)
 
@@ -55,7 +59,7 @@ func TestDB(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, execSpan,
 		"INSERT",
 		"INSERT INTO users (name, email) VALUES (?, ?)",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
+		serverAddr, 0,
 		"testdb",
 	)
 
@@ -67,7 +71,7 @@ func TestDB(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, querySpan,
 		"SELECT",
 		"SELECT id, name FROM users WHERE name = ?",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
+		serverAddr, 0,
 		"testdb",
 	)
 
@@ -79,7 +83,7 @@ func TestDB(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, beginSpan,
 		"START",
 		"START TRANSACTION",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
+		serverAddr, 0,
 		"testdb",
 	)
 
@@ -91,7 +95,7 @@ func TestDB(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, commitSpan,
 		"COMMIT",
 		"COMMIT",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
+		serverAddr, 0,
 		"testdb",
 	)
 }

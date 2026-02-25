@@ -77,13 +77,18 @@ func RequireGRPCClientSemconv(
 func RequireDBClientSemconv(
 	t *testing.T,
 	span ptrace.Span,
-	dbOperationName, dbQueryText, networkPeerAddress, dbNamespace string,
+	dbOperationName, dbQueryText, serverAddress string,
+	serverPort int64,
+	dbNamespace string,
 ) {
 	// Required attributes
 	RequireAttribute(t, span, string(semconv.DBOperationNameKey), dbOperationName)
 	// Recommended attributes
 	RequireAttribute(t, span, string(semconv.DBQueryTextKey), dbQueryText)
-	RequireAttribute(t, span, string(semconv.NetworkPeerAddressKey), networkPeerAddress)
+	RequireAttribute(t, span, string(semconv.ServerAddressKey), serverAddress)
+	if serverPort > 0 {
+		RequireAttribute(t, span, string(semconv.ServerPortKey), serverPort)
+	}
 	RequireAttribute(t, span, string(semconv.DBNamespaceKey), dbNamespace)
 }
 
