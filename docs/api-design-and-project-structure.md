@@ -11,6 +11,7 @@ The project structure is as follows:
       - `server`: HTTP server hooks
       - `semconv`: Semantic conventions for HTTP
     - `grpc`: gRPC instrumentation
+    - `redis`: redis instrumentation
     - `helloworld`: Example instrumentation
     - `runtime`: Runtime context management
     - `shared`: Shared utilities and OTel SDK setup
