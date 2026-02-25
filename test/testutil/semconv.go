@@ -4,6 +4,8 @@
 package testutil
 
 import (
+	"net"
+	"strconv"
 	"testing"
 
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -102,4 +104,29 @@ func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMet
 	RequireAttribute(t, span, string(semconv.RPCMethodKey), rpcMethod)
 	// Conditionally required (when response is sent) - validated with exact value
 	RequireAttribute(t, span, string(semconv.RPCGRPCStatusCodeKey), grpcStatusCode)
+}
+
+// RequireRedisClientSemconv verifies that a Redis client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
+func RequireRedisClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	operationName, endpoint, queryText string,
+) {
+	host, portStr, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		host = endpoint
+	}
+
+	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "redis")
+	RequireAttribute(t, span, string(semconv.DBOperationNameKey), operationName)
+	RequireAttribute(t, span, string(semconv.ServerAddressKey), host)
+	RequireAttribute(t, span, string(semconv.NetworkTransportKey), "tcp")
+	RequireAttribute(t, span, string(semconv.DBQueryTextKey), queryText)
+
+	if err == nil {
+		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
+			RequireAttribute(t, span, string(semconv.ServerPortKey), int64(port))
+		}
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -15,12 +16,20 @@ import (
 // Collector represents an in-memory OTLP collector for testing
 type Collector struct {
 	*httptest.Server
-	Traces ptrace.Traces
+	mu     sync.Mutex
+	traces ptrace.Traces
+}
+
+// GetTraces returns the collected traces with proper synchronization.
+func (c *Collector) GetTraces() ptrace.Traces {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.traces
 }
 
 // StartCollector starts an in-memory OTLP HTTP server that collects traces
 func StartCollector(t *testing.T) *Collector {
-	c := &Collector{Traces: ptrace.NewTraces()}
+	c := &Collector{traces: ptrace.NewTraces()}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +41,6 @@ func StartCollector(t *testing.T) *Collector {
 		}
 		defer r.Body.Close()
 
-		// Unmarshal OTLP protobuf traces
 		var unmarshaler ptrace.ProtoUnmarshaler
 		traces, err := unmarshaler.UnmarshalTraces(body)
 		if err != nil {
@@ -41,8 +49,9 @@ func StartCollector(t *testing.T) *Collector {
 			return
 		}
 
-		// Append to collected traces
-		traces.ResourceSpans().MoveAndAppendTo(c.Traces.ResourceSpans())
+		c.mu.Lock()
+		traces.ResourceSpans().MoveAndAppendTo(c.traces.ResourceSpans())
+		c.mu.Unlock()
 
 		w.WriteHeader(http.StatusOK)
 	})

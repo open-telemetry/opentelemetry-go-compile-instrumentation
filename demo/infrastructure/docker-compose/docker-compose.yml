@@ -217,12 +217,38 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
       - OTEL_SERVICE_NAME=db-server
+  # Redis - In-memory data store for Redis demo
+  redis:
+    image: redis:7-alpine@sha256:de54394aee845e52ef5fb940dad1c5bf12e4e57ef0e4eb89b4ad1c7e07be2e3d
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Client - Demo client making requests to Redis
+  redis-client:
+    build:
+      context: ../../..
+      dockerfile: demo/redis/client/Dockerfile
+    container_name: redis-client
+    command: ["-addr", "redis:6379", "-count", "10000"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_SERVICE_NAME=redis-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
     networks:
       - observability
     depends_on:
       mysql:
+      redis:
         condition: service_healthy
       otel-collector:
         condition: service_started
