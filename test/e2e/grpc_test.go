@@ -21,6 +21,7 @@ func TestGrpc(t *testing.T) {
 
 	f.BuildAndRun("grpcclient", "-addr", "127.0.0.1:50051", "-name", "OpenTelemetry")
 	f.Run("grpcclient", "-addr", "127.0.0.1:50051", "-stream")
+	testutil.WaitForSpanFlush(t)
 
 	f.RequireTraceCount(2)    // unary + stream
 	f.RequireSpansPerTrace(2) // client + server per trace
