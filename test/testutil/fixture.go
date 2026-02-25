@@ -74,7 +74,7 @@ func NewTestFixture(t *testing.T, opts ...TestFixtureOption) *TestFixture {
 
 // Traces returns the collected traces for assertions.
 func (f *TestFixture) Traces() ptrace.Traces {
-	return f.collector.Traces
+	return f.collector.GetTraces()
 }
 
 // CollectorURL returns the collector endpoint URL.
@@ -128,14 +128,14 @@ func (f *TestFixture) BuildAndRun(appName string, args ...string) string {
 
 // RequireTraceCount asserts the expected number of traces were collected.
 func (f *TestFixture) RequireTraceCount(expected int) {
-	stats := AnalyzeTraces(f.t, f.collector.Traces)
+	stats := AnalyzeTraces(f.t, f.collector.GetTraces())
 	require.Equal(f.t, expected, stats.TraceCount,
 		"Expected %d traces, got %d. %s", expected, stats.TraceCount, stats.String())
 }
 
 // RequireSpansPerTrace asserts each trace has the expected number of spans.
 func (f *TestFixture) RequireSpansPerTrace(expected int) {
-	stats := AnalyzeTraces(f.t, f.collector.Traces)
+	stats := AnalyzeTraces(f.t, f.collector.GetTraces())
 	for traceID, count := range stats.SpansPerTrace {
 		require.Equal(f.t, expected, count,
 			"Trace %s should have %d spans, got %d", traceID[:16], expected, count)
@@ -146,7 +146,7 @@ func (f *TestFixture) RequireSpansPerTrace(expected int) {
 func (f *TestFixture) RequireSingleSpan() ptrace.Span {
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(1)
-	spans := AllSpans(f.collector.Traces)
+	spans := AllSpans(f.collector.GetTraces())
 	require.Len(f.t, spans, 1, "Expected exactly 1 span")
 	return spans[0]
 }
