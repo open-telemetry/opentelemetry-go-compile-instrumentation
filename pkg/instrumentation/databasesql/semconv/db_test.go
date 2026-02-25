@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package semconv
 
 import (
@@ -25,10 +28,10 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 				Params:     []any{1},
 			},
 			expected: map[string]interface{}{
-				"db.operation.name":     "SELECT",
-				"db.namespace":          "testdb",
-				"network.peer.address":  "127.0.0.1:3306",
-				"db.query.text":         "SELECT * FROM users WHERE id=?",
+				"db.operation.name":    "SELECT",
+				"db.namespace":         "testdb",
+				"network.peer.address": "127.0.0.1:3306",
+				"db.query.text":        "SELECT * FROM users WHERE id=?",
 			},
 		},
 		{
@@ -43,10 +46,10 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 				Params:     []any{"john", "john@example.com"},
 			},
 			expected: map[string]interface{}{
-				"db.operation.name":     "INSERT",
-				"db.namespace":          "mydb",
-				"network.peer.address":  "10.0.0.1:5432",
-				"db.query.text":         "INSERT INTO users (name, email) VALUES (?, ?)",
+				"db.operation.name":    "INSERT",
+				"db.namespace":         "mydb",
+				"network.peer.address": "10.0.0.1:5432",
+				"db.query.text":        "INSERT INTO users (name, email) VALUES (?, ?)",
 			},
 		},
 		{
@@ -60,10 +63,10 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 				DbName:     "",
 			},
 			expected: map[string]interface{}{
-				"db.operation.name":     "",
-				"db.namespace":          "",
-				"network.peer.address":  "",
-				"db.query.text":         "",
+				"db.operation.name":    "",
+				"db.namespace":         "",
+				"network.peer.address": "",
+				"db.query.text":        "",
 			},
 		},
 		{
@@ -77,10 +80,10 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 				DbName:     "testdb",
 			},
 			expected: map[string]interface{}{
-				"db.operation.name":     "ping",
-				"db.namespace":          "testdb",
-				"network.peer.address":  "localhost:3306",
-				"db.query.text":         "ping",
+				"db.operation.name":    "ping",
+				"db.namespace":         "testdb",
+				"network.peer.address": "localhost:3306",
+				"db.query.text":        "ping",
 			},
 		},
 		{
@@ -94,9 +97,9 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 				DbName:     "prod",
 			},
 			expected: map[string]interface{}{
-				"db.operation.name":     "begin",
-				"db.namespace":          "prod",
-				"db.query.text":         "START TRANSACTION",
+				"db.operation.name": "begin",
+				"db.namespace":      "prod",
+				"db.query.text":     "START TRANSACTION",
 			},
 		},
 	}
