@@ -24,11 +24,12 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				Statement: "get mykey",
 			},
 			expected: map[string]interface{}{
-				"db.system.name":       "redis",
-				"db.operation.name":    "get",
-				"network.peer.address": "localhost:6379",
-				"network.transport":    "tcp",
-				"db.query.text":        "get mykey",
+				"db.system.name":    "redis",
+				"db.operation.name": "get",
+				"server.address":    "localhost",
+				"server.port":       int64(6379),
+				"network.transport": "tcp",
+				"db.query.text":     "get mykey",
 			},
 		},
 		{
@@ -39,11 +40,12 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				Statement: "set mykey myvalue",
 			},
 			expected: map[string]interface{}{
-				"db.system.name":       "redis",
-				"db.operation.name":    "set",
-				"network.peer.address": "redis.example.com:6380",
-				"network.transport":    "tcp",
-				"db.query.text":        "set mykey myvalue",
+				"db.system.name":    "redis",
+				"db.operation.name": "set",
+				"server.address":    "redis.example.com",
+				"server.port":       int64(6380),
+				"network.transport": "tcp",
+				"db.query.text":     "set mykey myvalue",
 			},
 		},
 		{
@@ -54,11 +56,12 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				Statement: "hset myhash field1 value1",
 			},
 			expected: map[string]interface{}{
-				"db.system.name":       "redis",
-				"db.operation.name":    "hset",
-				"network.peer.address": "127.0.0.1:6379",
-				"network.transport":    "tcp",
-				"db.query.text":        "hset myhash field1 value1",
+				"db.system.name":    "redis",
+				"db.operation.name": "hset",
+				"server.address":    "127.0.0.1",
+				"server.port":       int64(6379),
+				"network.transport": "tcp",
+				"db.query.text":     "hset myhash field1 value1",
 			},
 		},
 		{
@@ -69,11 +72,12 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				Statement: "pipeline get/set/del/...",
 			},
 			expected: map[string]interface{}{
-				"db.system.name":       "redis",
-				"db.operation.name":    "pipeline",
-				"network.peer.address": "localhost:6379",
-				"network.transport":    "tcp",
-				"db.query.text":        "pipeline get/set/del/...",
+				"db.system.name":    "redis",
+				"db.operation.name": "pipeline",
+				"server.address":    "localhost",
+				"server.port":       int64(6379),
+				"network.transport": "tcp",
+				"db.query.text":     "pipeline get/set/del/...",
 			},
 		},
 		{
@@ -84,11 +88,26 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				Statement: "",
 			},
 			expected: map[string]interface{}{
-				"db.system.name":       "redis",
-				"db.operation.name":    "",
-				"network.peer.address": "",
-				"network.transport":    "tcp",
-				"db.query.text":        "",
+				"db.system.name":    "redis",
+				"db.operation.name": "",
+				"server.address":    "",
+				"network.transport": "tcp",
+				"db.query.text":     "",
+			},
+		},
+		{
+			name: "endpoint without port",
+			req: RedisRequest{
+				Endpoint:  "redis.local",
+				FullName:  "ping",
+				Statement: "ping",
+			},
+			expected: map[string]interface{}{
+				"db.system.name":    "redis",
+				"db.operation.name": "ping",
+				"server.address":    "redis.local",
+				"network.transport": "tcp",
+				"db.query.text":     "ping",
 			},
 		},
 	}
@@ -97,14 +116,12 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			attrs := RedisClientRequestTraceAttrs(tt.req)
 
-			// Should always return 5 attributes
-			require.Len(t, attrs, 5, "should return 5 attributes")
-
-			// Convert to map for easier assertion
 			attrMap := make(map[string]interface{})
 			for _, attr := range attrs {
 				attrMap[string(attr.Key)] = attr.Value.AsInterface()
 			}
+
+			require.Len(t, attrMap, len(tt.expected), "attribute count mismatch")
 
 			for key, expectedVal := range tt.expected {
 				actualVal, ok := attrMap[key]
