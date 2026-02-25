@@ -62,7 +62,10 @@ func parsePostgres(url string) (addr string, err error) {
 		return "", fmt.Errorf("invalid connection protocol: %s", u.Scheme)
 	}
 
-	return u.Host + ":" + u.Port(), nil
+	if u.Port() != "" {
+		return u.Host, nil
+	}
+	return u.Hostname() + ":5432", nil
 }
 
 func parseMySQL(dsn string) (addr string, err error) {
