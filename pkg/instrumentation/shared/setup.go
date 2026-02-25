@@ -14,7 +14,9 @@ import (
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -31,6 +33,7 @@ var (
 	logger             *slog.Logger
 	meterProvider      *sdkmetric.MeterProvider
 	tracerProvider     *sdktrace.TracerProvider
+	loggerProvider     *sdklog.LoggerProvider
 	initOnce           sync.Once
 	runtimeMetricsOnce sync.Once
 )
@@ -173,6 +176,11 @@ func setupOpenTelemetry(cfg Config) (retErr error) {
 		logger.Warn("failed to setup meter provider", "error", err)
 	}
 
+	// Setup logger provider with OTLP exporter
+	if err := setupLoggerProvider(ctx, res); err != nil {
+		logger.Warn("failed to setup logger provider", "error", err)
+	}
+
 	// Set W3C Trace Context as the propagator
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
@@ -252,6 +260,27 @@ func setupMeterProvider(ctx context.Context, res *resource.Resource) error {
 	return nil
 }
 
+// setupLoggerProvider creates and configures the logger provider
+func setupLoggerProvider(ctx context.Context, res *resource.Resource) error {
+	// Use autoexport to automatically select the right exporter based on
+	// OTEL_EXPORTER_OTLP_PROTOCOL (defaults to http/protobuf)
+	logExporter, err := autoexport.NewLogExporter(ctx)
+	if err != nil {
+		return err
+	}
+
+	loggerProvider = sdklog.NewLoggerProvider(
+		sdklog.WithResource(res),
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
+	)
+
+	// Set global logger provider
+	global.SetLoggerProvider(loggerProvider)
+
+	logger.Info("logger provider initialized with auto-export")
+	return nil
+}
+
 // Shutdown gracefully shuts down the OpenTelemetry SDK
 func Shutdown(ctx context.Context) error {
 	var err error
@@ -266,6 +295,13 @@ func Shutdown(ctx context.Context) error {
 	if meterProvider != nil {
 		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown meter provider", "error", shutdownErr)
+			err = shutdownErr
+		}
+	}
+
+	if loggerProvider != nil {
+		if shutdownErr := loggerProvider.Shutdown(ctx); shutdownErr != nil {
+			Logger().Error("failed to shutdown logger provider", "error", shutdownErr)
 			err = shutdownErr
 		}
 	}
