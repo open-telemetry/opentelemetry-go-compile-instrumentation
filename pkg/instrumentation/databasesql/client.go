@@ -42,7 +42,7 @@ var clientEnabler = dbClientEnabler{}
 func beforeOpenInstrumentation(ictx inst.HookContext, driverName, dataSourceName string) {
 	addr, err := parseDSN(driverName, dataSourceName)
 	if err != nil {
-		addr = dataSourceName
+		addr = "unknown"
 	}
 	dbName := ParseDbName(dataSourceName)
 	ictx.SetData(map[string]string{
@@ -410,13 +410,14 @@ func beforeTxStmtContextInstrumentation(ictx inst.HookContext, tx *sql.Tx, ctx c
 	if !clientEnabler.Enable() {
 		return
 	}
-	if stmt == nil {
+	if stmt == nil || stmt.Data == nil {
 		return
 	}
 	ictx.SetData(map[string]string{
 		"endpoint": stmt.Data["endpoint"],
 		"driver":   stmt.Data["driver"],
 		"dsn":      stmt.DSN,
+		"sql":      stmt.Data["sql"],
 		"dbName":   stmt.Data["dbName"],
 	})
 }
@@ -632,12 +633,15 @@ func instrumentEnd(ictx inst.HookContext, err error) {
 }
 
 func calOp(sql string) string {
-	sqls := strings.Split(sql, " ")
-	var op string
-	if len(sqls) > 0 {
-		op = sqls[0]
+	trimmed := strings.TrimSpace(sql)
+	if trimmed == "" {
+		return ""
 	}
-	return op
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToUpper(fields[0])
 }
 
 // moduleVersion extracts the version from the Go module system.
