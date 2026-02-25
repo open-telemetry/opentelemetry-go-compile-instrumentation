@@ -52,7 +52,7 @@ all: build format lint test
 build/pkg: ## Build all pkg modules to verify compilation
 	@echo "Building pkg modules..."
 	@set -euo pipefail
-	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime"); \
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime" | grep -v "pkg/instrumentation/databasesql"); \
 	for moddir in $$PKG_MODULES; do \
 		echo "Building $$moddir..."; \
 		(cd $$moddir && go mod tidy && go build ./...); \
@@ -259,7 +259,7 @@ test-unit/tool: build package gotestfmt ## Run unit tests for tool modules only
 # Notes on test-unit/pkg implementation:
 # - Uses find -maxdepth 3 to discover modules at pkg/instrumentation/{name}/ level only.
 #   This naturally excludes client/ and server/ subdirectories (which will have link errors because it requires the parent module to be built).
-# - Excludes "runtime" module (has build errors because of runtime patching) and root "pkg" module (no tests).
+# - Excludes "runtime" and "databasesql" modules (have build errors because of compile-time field injection) and root "pkg" module (no tests).
 # - Skips modules without test files to avoid empty test output.
 # - Uses go test -C to run tests without changing directories (cleaner, more reliable).
 # - Does NOT use gotestfmt because v2.5.0 has a bug that causes panics when go test
@@ -270,7 +270,7 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	@echo "Running pkg unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -313,7 +313,7 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
