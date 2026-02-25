@@ -35,9 +35,9 @@ func TestDB(t *testing.T) {
 		t.Fatalf("Expected at least 7 spans, got %d", len(spans))
 	}
 
-	// For "testdb" driver, parseDSN falls back to the full DSN as the endpoint.
-	// net.SplitHostPort cannot parse a raw DSN, so server.address = full DSN, no port.
-	const serverAddr = "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8"
+	// For "testdb" driver, parseDSN returns an error (unknown driver),
+	// so beforeOpenInstrumentation falls back to "unknown" as the endpoint.
+	const serverAddr = "unknown"
 
 	// Verify ping span
 	pingSpan := testutil.RequireSpan(t, f.Traces(),

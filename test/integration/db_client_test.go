@@ -23,7 +23,7 @@ func TestDBClientPing(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, span,
 		"PING",
 		"ping",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", 0,
+		"unknown", 0,
 		"testdb",
 	)
 }
@@ -38,7 +38,7 @@ func TestDBClientExec(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, span,
 		"INSERT",
 		"INSERT INTO users (name, email) VALUES (?, ?)",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", 0,
+		"unknown", 0,
 		"testdb",
 	)
 }
@@ -53,7 +53,7 @@ func TestDBClientQuery(t *testing.T) {
 	testutil.RequireDBClientSemconv(t, span,
 		"SELECT",
 		"SELECT id, name FROM users WHERE name = ?",
-		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", 0,
+		"unknown", 0,
 		"testdb",
 	)
 }
