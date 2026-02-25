@@ -4,6 +4,8 @@
 package testutil
 
 import (
+	"net"
+	"strconv"
 	"testing"
 
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -89,14 +91,22 @@ func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMet
 func RequireRedisClientSemconv(
 	t *testing.T,
 	span ptrace.Span,
-	operationName, networkPeerAddress, queryText string,
+	operationName, endpoint, queryText string,
 ) {
-	// Required attributes
+	host, portStr, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		host = endpoint
+	}
+
 	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "redis")
 	RequireAttribute(t, span, string(semconv.DBOperationNameKey), operationName)
-	// Recommended attributes
-	RequireAttribute(t, span, string(semconv.NetworkPeerAddressKey), networkPeerAddress)
+	RequireAttribute(t, span, string(semconv.ServerAddressKey), host)
 	RequireAttribute(t, span, string(semconv.NetworkTransportKey), "tcp")
-	// Query text should contain the command
 	RequireAttribute(t, span, string(semconv.DBQueryTextKey), queryText)
+
+	if err == nil {
+		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
+			RequireAttribute(t, span, string(semconv.ServerPortKey), int64(port))
+		}
+	}
 }
