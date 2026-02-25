@@ -5,20 +5,31 @@ package instrument
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/dave/dst"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/imports"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 type InstrumentPhase struct {
 	logger *slog.Logger
+	// The context for this phase
+	ctx context.Context
 	// The working directory during compilation
 	workDir string
+	// The importcfg configuration
+	importConfig imports.ImportConfig
+	// The path to the importcfg file
+	importConfigPath string
 	// The target file to be instrumented
 	target *dst.File
 	// The parser for the target file
@@ -74,10 +85,25 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
 	util.Assert(target != "", "missing -o flag value")
+
+	// Extract -importcfg flag
+	importCfgPath := util.FindFlagValue(args, "-importcfg")
+
 	ip := &InstrumentPhase{
-		logger:      util.LoggerFromContext(ctx),
-		workDir:     filepath.Dir(target),
-		compileArgs: args,
+		logger:           util.LoggerFromContext(ctx),
+		ctx:              ctx,
+		workDir:          filepath.Dir(target),
+		compileArgs:      args,
+		importConfigPath: importCfgPath,
+	}
+
+	// Parse existing importcfg if present
+	if importCfgPath != "" {
+		imports, err := imports.ParseImportCfg(importCfgPath)
+		if err != nil {
+			return nil, ex.Wrapf(err, "parsing importcfg")
+		}
+		ip.importConfig = imports
 	}
 
 	// Load matched hook rules from setup phase
@@ -105,19 +131,243 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	return ip.compileArgs, nil
 }
 
+// updateImportConfig updates the importcfg file with new imports that were added during instrumentation.
+func (ip *InstrumentPhase) updateImportConfig(newImports map[string]string) error {
+	if ip.importConfigPath == "" {
+		// No importcfg file, skip (shouldn't happen in normal builds)
+		return nil
+	}
+
+	// Initialize PackageFile map if nil
+	if ip.importConfig.PackageFile == nil {
+		ip.importConfig.PackageFile = make(map[string]string)
+	}
+
+	var updated bool
+	for _, importPath := range newImports {
+		if importPath == "unsafe" || importPath == "C" {
+			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
+			continue
+		}
+
+		if _, exists := ip.importConfig.PackageFile[importPath]; exists {
+			// Already have this import
+			continue
+		}
+
+		// Resolve package archive location, passing build flags to match the current build context
+		buildFlags := util.GetBuildFlags()
+		archives, err := pkgload.ResolveExportFiles(ip.ctx, importPath, buildFlags...)
+		if err != nil {
+			return ex.Wrapf(err, "resolving %q", importPath)
+		}
+
+		for pkg, archive := range archives {
+			if _, exists := ip.importConfig.PackageFile[pkg]; !exists {
+				ip.Debug("Adding import to importcfg", "package", pkg, "archive", archive)
+				ip.importConfig.PackageFile[pkg] = archive
+				updated = true
+			}
+		}
+	}
+
+	if !updated {
+		return nil
+	}
+
+	if err := ip.importConfig.WriteFile(ip.importConfigPath); err != nil {
+		return ex.Wrapf(err, "writing importcfg")
+	}
+
+	ip.Info("Updated importcfg", "path", ip.importConfigPath)
+
+	// Track added imports for the link phase
+	if err := trackAddedImports(ip.importConfig.PackageFile); err != nil {
+		ip.Warn("failed to track added imports for link phase", "error", err)
+		// Non-fatal: link phase may still work if imports were already present
+	}
+
+	return nil
+}
+
+// trackAddedImports saves the resolved package files to a per-process tracking file.
+// During the link phase, all per-process files will be merged.
+// Each compile process writes to its own file to avoid inter-process race conditions.
+func trackAddedImports(packages map[string]string) error {
+	if len(packages) == 0 {
+		return nil
+	}
+
+	// Write to process-specific file (no locking needed)
+	filePath := util.GetAddedImportsFileForProcess()
+
+	data, err := json.MarshalIndent(packages, "", "  ")
+	if err != nil {
+		return ex.Wrapf(err, "marshaling added imports")
+	}
+
+	if err = os.WriteFile(filePath, data, 0o600); err != nil {
+		return ex.Wrapf(err, "writing imports file")
+	}
+
+	return nil
+}
+
+// CleanupImportTrackingFiles removes import tracking files from previous builds.
+// Should be called at the start of a new build to clean up stale files from prior runs.
+// This is exported for use by the setup phase.
+func CleanupImportTrackingFiles() {
+	pattern := util.GetAddedImportsPattern()
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return
+	}
+
+	for _, file := range files {
+		_ = os.Remove(file) // Best effort cleanup
+	}
+}
+
+// loadAddedImports discovers and merges all per-process import tracking files.
+func loadAddedImports() (map[string]string, error) {
+	pattern := util.GetAddedImportsPattern()
+
+	// Find all per-process import files
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, ex.Wrapf(err, "globbing import files")
+	}
+
+	if len(files) == 0 {
+		// No imports were added during compilation
+		return make(map[string]string), nil
+	}
+
+	// Merge all files
+	merged := make(map[string]string)
+	for _, filePath := range files {
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			// Log warning but continue with other files
+			//nolint:sloglint // no context available
+			slog.Warn(
+				"failed to read import file",
+				"path",
+				filePath,
+				"error",
+				readErr,
+			)
+			continue
+		}
+
+		var imports map[string]string
+		if unmarshalErr := json.Unmarshal(data, &imports); unmarshalErr != nil {
+			//nolint:sloglint // no context available
+			slog.Warn(
+				"failed to parse import file",
+				"path",
+				filePath,
+				"error",
+				unmarshalErr,
+			)
+			continue
+		}
+
+		// Merge into result
+		for pkg, archive := range imports {
+			merged[pkg] = archive
+		}
+	}
+
+	return merged, nil
+}
+
+// interceptLink updates the link-time importcfg with packages added during compilation.
+func interceptLink(ctx context.Context, args []string) ([]string, error) {
+	logger := util.LoggerFromContext(ctx)
+
+	// Extract -importcfg flag for link
+	importCfgPath := util.FindFlagValue(args, "-importcfg")
+	if importCfgPath == "" {
+		// No importcfg, nothing to update
+		return args, nil
+	}
+
+	// Load imports that were added during compilation
+	addedImports, err := loadAddedImports()
+	if err != nil {
+		logger.WarnContext(ctx, "failed to load added imports for link phase", "error", err)
+		return args, nil // Non-fatal, proceed with original args
+	}
+
+	if len(addedImports) == 0 {
+		// No imports were added during compilation
+		return args, nil
+	}
+
+	// Parse the link importcfg
+	linkConfig, err := imports.ParseImportCfg(importCfgPath)
+	if err != nil {
+		return nil, ex.Wrapf(err, "parsing link importcfg")
+	}
+
+	if linkConfig.PackageFile == nil {
+		linkConfig.PackageFile = make(map[string]string)
+	}
+
+	// Add missing packages from compilation phase
+	var updated bool
+	for pkg, archive := range addedImports {
+		if _, exists := linkConfig.PackageFile[pkg]; !exists {
+			logger.DebugContext(ctx, "Adding package to link importcfg", "package", pkg, "archive", archive)
+			linkConfig.PackageFile[pkg] = archive
+			updated = true
+		}
+	}
+
+	if !updated {
+		return args, nil
+	}
+
+	if err = linkConfig.WriteFile(importCfgPath); err != nil {
+		return nil, ex.Wrapf(err, "writing link importcfg")
+	}
+
+	logger.InfoContext(ctx, "Updated link importcfg", "path", importCfgPath, "added", len(addedImports))
+
+	// Note: We don't clean up tracking files here because multi-link builds
+	// (e.g., go build ./cmd/...) need the files available for all link steps.
+	// Cleanup happens at the start of the next build via CleanupImportTrackingFiles.
+
+	return args, nil
+}
+
 // Toolexec is the entry point of the toolexec command. It intercepts all the
 // commands(link, compile, asm, etc) during build process. Our responsibility is
 // to find out the compile command we are interested in and run it with the
-// instrumented code.
+// instrumented code, and ensure the link command has all necessary dependencies.
 func Toolexec(ctx context.Context, args []string) error {
-	// Only interested in compile commands
-	if util.IsCompileCommand(strings.Join(args, " ")) {
+	// Use slice-based detection to correctly handle tool paths with spaces
+	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
+
+	// Intercept compile commands for instrumentation
+	if util.IsCompileCommandWithArgs(args) {
 		var err error
 		args, err = interceptCompile(ctx, args)
 		if err != nil {
 			return err
 		}
 	}
-	// Just run the command as is
+
+	// Intercept link commands to update importcfg with added dependencies
+	if util.IsLinkCommandWithArgs(args) {
+		var err error
+		args, err = interceptLink(ctx, args)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Run the command
 	return util.RunCmd(ctx, args...)
 }

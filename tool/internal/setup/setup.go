@@ -9,9 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
@@ -83,10 +87,8 @@ var flagsWithPathValues = map[string]bool{
 func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
 	buildPkgs := make([]*packages.Package, 0)
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedModule,
-	}
 	found := false
 	for i := len(args) - 1; i >= 0; i-- {
 		arg := args[i]
@@ -104,7 +106,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 			break
 		}
 
-		pkgs, err := packages.Load(cfg, arg)
+		pkgs, err := pkgload.LoadPackages(ctx, mode, nil, arg)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to load packages for pattern %s", arg)
 		}
@@ -120,7 +122,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 
 	if !found {
 		var err error
-		buildPkgs, err = packages.Load(cfg, ".")
+		buildPkgs, err = pkgload.LoadPackages(ctx, mode, nil, ".")
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to load packages for pattern .")
 		}
@@ -228,6 +230,99 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 	return env, nil
 }
 
+// buildContextFlagsWithValue are go build flags that take a value and affect the build context.
+//
+//nolint:gochecknoglobals // private lookup table
+var buildContextFlagsWithValue = map[string]bool{
+	"-tags":    true, // Build tags
+	"-mod":     true, // Module mode (vendor, mod, readonly)
+	"-modfile": true, // Custom go.mod file
+}
+
+// buildContextBoolFlags are go build boolean flags that affect the build context.
+//
+//nolint:gochecknoglobals // private lookup table
+var buildContextBoolFlags = map[string]bool{
+	"-race":  true, // Race detector
+	"-msan":  true, // Memory sanitizer
+	"-cover": true, // Coverage
+	"-asan":  true, // Address sanitizer
+}
+
+// extractBuildFlags extracts flags that affect the build context from the arguments.
+// These flags need to be forwarded to `go list` when resolving import archives.
+// Returns a slice of flag arguments preserving their original form.
+//
+// For boolean flags, the last occurrence wins. This correctly handles cases like:
+//   - GOFLAGS=-race with -race=false on CLI (result: -race=false)
+//   - -race -race=false (result: -race=false)
+//   - -race=false -race (result: -race)
+func extractBuildFlags(args []string) []string {
+	var valueFlags []string
+	type boolFlagValue struct {
+		set   bool
+		value bool
+	}
+	boolFlagState := make(map[string]boolFlagValue) // Track final state of boolean flags
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// Handle -flag=value format
+		if idx := strings.Index(arg, "="); idx > 0 {
+			flagName := arg[:idx]
+			flagValue := arg[idx+1:]
+
+			// Handle value flags (e.g., -tags=foo, -mod=vendor)
+			if buildContextFlagsWithValue[flagName] {
+				valueFlags = append(valueFlags, arg)
+				continue
+			}
+
+			// Handle boolean flags in =value format (e.g., -race=true, -race=false)
+			// strconv.ParseBool accepts: 1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False
+			if buildContextBoolFlags[flagName] {
+				if enabled, err := strconv.ParseBool(flagValue); err == nil {
+					boolFlagState[flagName] = boolFlagValue{set: true, value: enabled} // Last value wins
+				}
+				// Parse error: ignore invalid value
+				continue
+			}
+			// Unrecognized -flag=value: skip it
+			continue
+		}
+
+		// Handle boolean flags like -race, -msan, -cover, -asan (implies true)
+		if buildContextBoolFlags[arg] {
+			boolFlagState[arg] = boolFlagValue{set: true, value: true}
+			continue
+		}
+
+		// Handle -flag value format (for flags that take values)
+		if buildContextFlagsWithValue[arg] && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			valueFlags = append(valueFlags, arg, args[i+1])
+			i++ // Skip the value
+		}
+	}
+
+	// Collect boolean flags that are enabled (in deterministic order)
+	var enabledBoolFlags []string
+	for flag := range buildContextBoolFlags {
+		if state, ok := boolFlagState[flag]; ok && state.set {
+			if state.value {
+				enabledBoolFlags = append(enabledBoolFlags, flag)
+			} else {
+				enabledBoolFlags = append(enabledBoolFlags, flag+"=false")
+			}
+		}
+	}
+	// Sort for deterministic output
+	sort.Strings(enabledBoolFlags)
+
+	// Combine: value flags first, then boolean flags
+	return append(valueFlags, enabledBoolFlags...)
+}
+
 // BuildWithToolexec builds the project with the toolexec mode
 func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
@@ -248,10 +343,6 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	newArgs = append(newArgs, "-work")
 	// Add "-toolexec=..."
 	newArgs = append(newArgs, insert)
-	// TODO: We should support incremental build in the future, so we don't need
-	// to force rebuild here.
-	// Add "-a" to force rebuild
-	newArgs = append(newArgs, "-a")
 	// Add the rest
 	newArgs = append(newArgs, args[1:]...)
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
@@ -261,6 +352,14 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	pwd := util.GetOtelWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
+
+	// Extract and forward build flags that affect the build context
+	// This ensures `go list` resolves archives matching the current build
+	if buildFlags := extractBuildFlags(args); len(buildFlags) > 0 {
+		encoded := util.EncodeBuildFlags(buildFlags)
+		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelBuildFlags, encoded))
+		logger.DebugContext(ctx, "forwarding build flags", "flags", buildFlags)
+	}
 
 	// Use a fresh GOCACHE to prevent cache pollution when modifying core packages
 	env, err = setupGoCache(ctx, env)
@@ -273,6 +372,11 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 
 func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	logger := util.LoggerFromContext(ctx)
+
+	// Clean up import tracking files from previous builds at the start
+	// to prevent stale data from affecting this build.
+	instrument.CleanupImportTrackingFiles()
+
 	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
 	err := util.BackupFile(backupFiles)
 	if err != nil {

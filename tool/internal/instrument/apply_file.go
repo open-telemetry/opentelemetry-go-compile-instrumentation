@@ -53,6 +53,12 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 	// Always rename the package name to the target package name
 	root.Name.Name = pkgName
 
+	// The file being added has its own imports that need to be in importcfg.
+	// Without this, the compiler will fail with "could not import X" errors.
+	if err = ip.updateImportConfigForFile(root, rule.Name); err != nil {
+		return err
+	}
+
 	// Write back the modified AST to a new file in the working directory
 	base := filepath.Base(rule.File)
 	ext := filepath.Ext(base)
