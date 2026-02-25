@@ -23,7 +23,7 @@ func TestDB(t *testing.T) {
 	)
 
 	// "all" operation produces 7 spans:
-	//   ping (PingContext)
+	//   PING (PingContext)
 	//   INSERT (ExecContext)
 	//   SELECT (QueryContext)
 	//   SELECT (Stmt.QueryContext via PrepareContext)
@@ -42,10 +42,10 @@ func TestDB(t *testing.T) {
 	// Verify ping span
 	pingSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsClient,
-		testutil.HasAttribute(string(semconv.DBOperationNameKey), "ping"),
+		testutil.HasAttribute(string(semconv.DBOperationNameKey), "PING"),
 	)
 	testutil.RequireDBClientSemconv(t, pingSpan,
-		"ping",
+		"PING",
 		"ping",
 		serverAddr, 0,
 		"testdb",

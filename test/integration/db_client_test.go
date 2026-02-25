@@ -19,9 +19,9 @@ func TestDBClientPing(t *testing.T) {
 	f.BuildAndRun("dbclient", "-op=ping")
 
 	span := f.RequireSingleSpan()
-	require.Equal(t, "ping", span.Name())
+	require.Equal(t, "PING", span.Name())
 	testutil.RequireDBClientSemconv(t, span,
-		"ping",
+		"PING",
 		"ping",
 		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", 0,
 		"testdb",
