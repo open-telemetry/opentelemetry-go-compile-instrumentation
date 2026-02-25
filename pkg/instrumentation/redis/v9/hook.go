@@ -77,7 +77,7 @@ func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
 		if !redisEnabler.Enable() {
 			logger.Debug("Redis Client instrumentation disabled")
-			return nil
+			return next(ctx, cmd)
 		}
 		initInstrumentation()
 		fullName := cmd.FullName()
@@ -111,7 +111,7 @@ func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 	return func(ctx context.Context, cmds []redis.Cmder) error {
 		if !redisEnabler.Enable() {
 			logger.Debug("Redis Client instrumentation disabled")
-			return nil
+			return next(ctx, cmds)
 		}
 		initInstrumentation()
 
