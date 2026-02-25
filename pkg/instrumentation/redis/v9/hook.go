@@ -5,12 +5,6 @@ package v9
 
 import (
 	"context"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/semconv"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
-	"github.com/redis/go-redis/v9"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 	"net"
 	"runtime/debug"
 	"strconv"
@@ -18,6 +12,13 @@ import (
 	"time"
 	"unicode/utf8"
 	"unsafe"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/semconv"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
+	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -191,7 +192,7 @@ func redisV9String(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
-func redisV9AppendUTF8String(dst []byte, src []byte) []byte {
+func redisV9AppendUTF8String(dst, src []byte) []byte {
 	dst = append(dst, src...)
 	return dst
 }

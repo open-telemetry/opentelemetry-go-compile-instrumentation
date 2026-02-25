@@ -14,9 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var (
-	addr = flag.String("addr", "localhost:6379", "The Redis server address")
-)
+var addr = flag.String("addr", "localhost:6379", "The Redis server address")
 
 func main() {
 	flag.Parse()
