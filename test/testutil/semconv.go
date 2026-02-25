@@ -72,6 +72,21 @@ func RequireGRPCClientSemconv(
 	RequireAttribute(t, span, string(semconv.RPCGRPCStatusCodeKey), grpcStatusCode)
 }
 
+// RequireDBClientSemconv verifies that a database client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/database/database-spans/
+func RequireDBClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	dbOperationName, dbQueryText, networkPeerAddress, dbNamespace string,
+) {
+	// Required attributes
+	RequireAttribute(t, span, string(semconv.DBOperationNameKey), dbOperationName)
+	// Recommended attributes
+	RequireAttribute(t, span, string(semconv.DBQueryTextKey), dbQueryText)
+	RequireAttribute(t, span, string(semconv.NetworkPeerAddressKey), networkPeerAddress)
+	RequireAttribute(t, span, string(semconv.DBNamespaceKey), dbNamespace)
+}
+
 // RequireGRPCServerSemconv verifies that a gRPC server span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/
 func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMethod string, grpcStatusCode int64) {
