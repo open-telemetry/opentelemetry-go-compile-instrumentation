@@ -6,16 +6,17 @@ package db
 import (
 	"context"
 	"database/sql"
+	"runtime/debug"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql/semconv"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"runtime/debug"
-	"strings"
-	"sync"
-	"time"
 )
 
 const (
@@ -131,7 +132,13 @@ func afterPrepareContextInstrumentation(ictx inst.HookContext, stmt *sql.Stmt, e
 	stmt.DSN = callDataMap["dsn"]
 }
 
-func beforeExecContextInstrumentation(ictx inst.HookContext, db *sql.DB, ctx context.Context, query string, args ...any) {
+func beforeExecContextInstrumentation(
+	ictx inst.HookContext,
+	db *sql.DB,
+	ctx context.Context,
+	query string,
+	args ...any,
+) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -148,7 +155,13 @@ func afterExecContextInstrumentation(ictx inst.HookContext, result sql.Result, e
 	instrumentEnd(ictx, err)
 }
 
-func beforeQueryContextInstrumentation(ictx inst.HookContext, db *sql.DB, ctx context.Context, query string, args ...any) {
+func beforeQueryContextInstrumentation(
+	ictx inst.HookContext,
+	db *sql.DB,
+	ctx context.Context,
+	query string,
+	args ...any,
+) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -294,7 +307,13 @@ func afterConnPrepareContextInstrumentation(ictx inst.HookContext, stmt *sql.Stm
 	stmt.DSN = callDataMap["dsn"]
 }
 
-func beforeConnExecContextInstrumentation(ictx inst.HookContext, conn *sql.Conn, ctx context.Context, query string, args ...any) {
+func beforeConnExecContextInstrumentation(
+	ictx inst.HookContext,
+	conn *sql.Conn,
+	ctx context.Context,
+	query string,
+	args ...any,
+) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -311,7 +330,13 @@ func afterConnExecContextInstrumentation(ictx inst.HookContext, result sql.Resul
 	instrumentEnd(ictx, err)
 }
 
-func beforeConnQueryContextInstrumentation(ictx inst.HookContext, conn *sql.Conn, ctx context.Context, query string, args ...any) {
+func beforeConnQueryContextInstrumentation(
+	ictx inst.HookContext,
+	conn *sql.Conn,
+	ctx context.Context,
+	query string,
+	args ...any,
+) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -426,7 +451,13 @@ func afterTxStmtContextInstrumentation(ictx inst.HookContext, stmt *sql.Stmt) {
 	}
 }
 
-func beforeTxExecContextInstrumentation(ictx inst.HookContext, tx *sql.Tx, ctx context.Context, query string, args ...any) {
+func beforeTxExecContextInstrumentation(
+	ictx inst.HookContext,
+	tx *sql.Tx,
+	ctx context.Context,
+	query string,
+	args ...any,
+) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -443,7 +474,13 @@ func afterTxExecContextInstrumentation(ictx inst.HookContext, result sql.Result,
 	instrumentEnd(ictx, err)
 }
 
-func beforeTxQueryContextInstrumentation(ictx inst.HookContext, tx *sql.Tx, ctx context.Context, query string, args ...any) {
+func beforeTxQueryContextInstrumentation(
+	ictx inst.HookContext,
+	tx *sql.Tx,
+	ctx context.Context,
+	query string,
+	args ...any,
+) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -536,7 +573,12 @@ func afterStmtQueryContextInstrumentation(ictx inst.HookContext, rows *sql.Rows,
 	instrumentEnd(ictx, err)
 }
 
-func instrumentStart(ictx inst.HookContext, ctx context.Context, spanName, query, endpoint, driverName, dsn, dbName string, args ...any) {
+func instrumentStart(
+	ictx inst.HookContext,
+	ctx context.Context,
+	spanName, query, endpoint, driverName, dsn, dbName string,
+	args ...any,
+) {
 	if !clientEnabler.Enable() {
 		logger.Debug("Db client instrumentation disabled")
 		return

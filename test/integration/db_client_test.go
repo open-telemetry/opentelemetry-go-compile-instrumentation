@@ -21,10 +21,10 @@ func TestDBClientPing(t *testing.T) {
 	span := f.RequireSingleSpan()
 	require.Equal(t, "ping", span.Name())
 	testutil.RequireDBClientSemconv(t, span,
-		"ping",                                  // db.operation.name
-		"ping",                                  // db.query.text
+		"ping", // db.operation.name
+		"ping", // db.query.text
 		"user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", // network.peer.address (parsed endpoint from DSN)
-		"testdb",                                // db.namespace
+		"testdb", // db.namespace
 	)
 }
 
