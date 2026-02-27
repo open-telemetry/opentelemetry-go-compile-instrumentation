@@ -182,6 +182,41 @@ services:
       - otel-collector
     restart: unless-stopped
 
+  # MySQL - Database backend for DB demo
+  mysql:
+    image: mysql:8.0@sha256:a09014e7b16e482d014379e26a4116f36e88d5c2be8579c12e0e2a142ac03870
+    container_name: mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=demodb
+      - MYSQL_USER=demo
+      - MYSQL_PASSWORD=demo
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # DB Server - Demo HTTP server with MySQL backend and compile-time instrumentation
+  db-server:
+    build:
+      context: ../../..
+      dockerfile: demo/db/server/Dockerfile
+    container_name: db-server
+    ports:
+      - "8081:8081"
+    command: ["-port", "8081", "-dsn", "demo:demo@tcp(mysql:3306)/demodb?parseTime=true"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_SERVICE_NAME=db-server
   # Redis - In-memory data store for Redis demo
   redis:
     image: redis:7-alpine@sha256:de54394aee845e52ef5fb940dad1c5bf12e4e57ef0e4eb89b4ad1c7e07be2e3d
@@ -212,10 +247,31 @@ services:
     networks:
       - observability
     depends_on:
+      mysql:
       redis:
         condition: service_healthy
       otel-collector:
         condition: service_started
+    restart: unless-stopped
+
+  # DB Client - Demo client making CRUD requests to DB server
+  db-client:
+    build:
+      context: ../../..
+      dockerfile: demo/db/client/Dockerfile
+    container_name: db-client
+    command: ["-addr", "http://db-server:8081", "-count", "10000"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_SERVICE_NAME=db-client
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      - db-server
+      - otel-collector
     restart: unless-stopped
 
   # k6 gRPC Load Testing - Generates continuous load against gRPC server
