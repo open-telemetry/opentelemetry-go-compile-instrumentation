@@ -54,7 +54,7 @@ func (m *GenStruct[T]) GenericRecvExample(t T) T {
 }
 
 func GenericExample[K comparable, V any](key K, value V) V {
-	println("Hello, Generic World!", key, value)
+	fmt.Println("Hello, Generic World!", key, value)
 	return value
 }
 
