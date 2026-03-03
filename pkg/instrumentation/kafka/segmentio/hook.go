@@ -76,5 +76,4 @@ func (c *Reader) ReadMessage(ctx context.Context) (kafka.Message, error) {
 		logger.Debug("Kafka Client instrumentation disabled")
 		return c.Reader.ReadMessage(ctx)
 	}
-	req := semconv.Kafka
 }
