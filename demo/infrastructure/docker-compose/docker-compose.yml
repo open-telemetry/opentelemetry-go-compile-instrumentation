@@ -184,7 +184,7 @@ services:
 
   # MySQL - Database backend for DB demo
   mysql:
-    image: mysql:8.0@sha256:a09014e7b16e482d014379e26a4116f36e88d5c2be8579c12e0e2a142ac03870
+    image: mysql:9.6@sha256:e5dc14f6e01c3e577e669337d2855c6d1561b30d8ef2c592e63e4e8a9a52650a
     container_name: mysql
     environment:
       - MYSQL_ROOT_PASSWORD=root
