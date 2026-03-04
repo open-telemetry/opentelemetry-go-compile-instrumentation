@@ -52,7 +52,7 @@ make help
 #### Build Targets
 
 - `make build` - Build the instrumentation tool (includes packaging)
-- `make install` - Install the `otel` binary to `$GOPATH/bin`
+- `make install` - Install the `otelc` binary to `$GOPATH/bin`
 - `make package` - Package the instrumentation code into a binary archive
 - `make build-demo-grpc` - Build gRPC demo server and client
 

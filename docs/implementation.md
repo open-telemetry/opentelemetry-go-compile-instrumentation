@@ -106,12 +106,12 @@ instrumentation logic will be applied during the build process.
 
 The build process can be integrated with custom toolchains in the following ways:
 
-- Command Prefix: `otel go build` (simple but requires manual prefixing)
-- Environment Variable: `GOFLAGS=-toolexec=otel toolexec` (global effect; no per-command setup)
-- Direct flag: `go build -toolexec=otel toolexec` (on-demand use; ideal for scripts/CI)
+- Command Prefix: `otelc go build` (simple but requires manual prefixing)
+- Environment Variable: `GOFLAGS=-toolexec=otelc toolexec` (global effect; no per-command setup)
+- Direct flag: `go build -toolexec=otelc toolexec` (on-demand use; ideal for scripts/CI)
 
 All of these leverage the `-toolexec` flag, which allows users to specify a
-custom tool (e.g., otel) that intercepts compilation commands. The tool identifies
+custom tool (e.g., otelc) that intercepts compilation commands. The tool identifies
 the target function from the compilation commands and injects trampoline code
 into the AST of these functions. Since the hook dependency was already imported
 in Phase 1, the tool can link the target function to the hook code via `//go:linkname`

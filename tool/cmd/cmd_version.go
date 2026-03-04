@@ -25,7 +25,7 @@ var commandVersion = cli.Command{
 	},
 	Before: addLoggerPhaseAttribute,
 	Action: func(_ context.Context, cmd *cli.Command) error {
-		_, err := fmt.Fprintf(cmd.Writer, "otel version %s", Version)
+		_, err := fmt.Fprintf(cmd.Writer, "otelc version %s", Version)
 		if err != nil {
 			return ex.Wrapf(err, "failed to print version")
 		}
