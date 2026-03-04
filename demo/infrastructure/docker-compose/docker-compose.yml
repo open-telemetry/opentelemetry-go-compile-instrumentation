@@ -219,7 +219,7 @@ services:
       - OTEL_SERVICE_NAME=db-server
   # Redis - In-memory data store for Redis demo
   redis:
-    image: redis:7-alpine@sha256:de54394aee845e52ef5fb940dad1c5bf12e4e57ef0e4eb89b4ad1c7e07be2e3d
+    image: redis:8-alpine@sha256:2afba59292f25f5d1af200496db41bea2c6c816b059f57ae74703a50a03a27d0
     container_name: redis
     ports:
       - "6379:6379"
