@@ -360,7 +360,7 @@ test-e2e/coverage: build build-demo gotestfmt
 
 ##@ Multi-module Management
 
-TOOLS = $(CURDIR)/_tools
+TOOLS := $(CURDIR)/_tools
 
 # Tools built from tools module
 $(TOOLS):
@@ -375,21 +375,17 @@ $(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
 
 .PHONY: crosslink
 crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
-	@# Avoid crosslink parsing generated go.mod under .otel-build (can be malformed)
+	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
 	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
 	@echo "Updating intra-repository dependencies in all go modules" \
-		&& $(CROSSLINK) --root=$(shell pwd)
+		&& $(CROSSLINK) --root=$(CURDIR)
 
 .PHONY: go-work
 go-work: $(CROSSLINK) ## Generate go.work file for local development
 	@echo "Generating go.work file for local development..."
-	@# Clean .otel-build directories before generating go.work to avoid duplicates
-	@find demo -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
-	$(CROSSLINK) work --root=$(shell pwd) --go=$(GO_VERSION)
+	@$(CROSSLINK) work --root=$(CURDIR) --go=$(GO_VERSION)
 	@# Fix go version to include patch version (crosslink only supports major.minor)
-	@if grep -q "^go $(GO_VERSION)$$" go.work; then \
-		sed -i.bak 's/^go $(GO_VERSION)$$/go $(GO_VERSION).0/' go.work && rm -f go.work.bak; \
-	fi
+	@sed -i.bak 's/^go $(GO_VERSION)$$/go $(GO_VERSION).0/' go.work && rm -f go.work.bak
 	@echo "go.work file generated successfully"
 
 .PHONY: go-mod-tidy
