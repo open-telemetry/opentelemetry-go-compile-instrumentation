@@ -5,20 +5,17 @@ package segmentio
 
 import (
 	"context"
-	"net"
 	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
-	"unicode/utf8"
-	"unsafe"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/kafka/semconv"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 	"github.com/segmentio/kafka-go"
-	"github.com/tushar1977/opentelemetry-go-compile-instrumentation/pkg/instrumentation/kafka/semconv"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -66,14 +63,38 @@ type Reader struct {
 	*kafka.Reader
 }
 
-func NewReader(config kafka.ReaderConfig) *Reader {
-	initInstrumentation()
-	return &Reader{Reader: kafka.NewReader(config)}
-}
-
-func (c *Reader) ReadMessage(ctx context.Context) (kafka.Message, error) {
+func BeforeReadMessage(ictx inst.HookContext, ctx context.Context, r *kafka.Reader) {
 	if !kafkaEnabler.Enable() {
 		logger.Debug("Kafka Client instrumentation disabled")
-		return c.Reader.ReadMessage(ctx)
+		return
 	}
+	initInstrumentation()
+
+	req := semconv.KafkaRequest{
+		EndPoint:        r.Config().Brokers[0],
+		Destination:     semconv.KafkaDestinationTopic,
+		Operation:       semconv.KafkaOperationReceive,
+		ConsumerGroupID: r.Config().GroupID,
+		Partition:       strconv.Itoa(r.Config().Partition),
+	}
+
+	attrs := semconv.KafkaRequestTraceAttrs(req)
+
+	spanName := r.Config().Topic + " " + "receive"
+
+	prop := otel.GetTextMapPropagator()
+	carrier := propagation.HeaderCarrier{}
+
+	extractCtx := prop.Extract(ctx, &carrier)
+
+	newctx, span := tracer.Start(extractCtx, spanName, trace.WithAttributes(attrs...), trace.WithSpanKind(trace.SpanKindConsumer))
+
+	ictx.SetData(map[string]interface{}{
+		"ctx":   newctx,
+		"span":  span,
+		"req":   req,
+		"start": time.Now(),
+	})
+
+	ictx.SetParam(1, newctx)
 }

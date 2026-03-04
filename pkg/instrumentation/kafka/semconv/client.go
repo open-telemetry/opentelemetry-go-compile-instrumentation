@@ -27,13 +27,14 @@ const (
 )
 
 type KafkaRequest struct {
-	EndPoint        string
-	Destination     KafkaDestination
-	Operation       KafkaOperation
-	Partition       string
-	Offset          int
-	ConsumerGroupID string
-	MessageKey      string
+	EndPoint           string
+	Destination        KafkaDestination
+	Operation          KafkaOperation
+	Partition          string
+	Offset             int
+	ConsumerGroupID    string
+	MessageKey         string
+	MessagePayloadSize int
 }
 
 func KafkaRequestTraceAttrs(req KafkaRequest) []attribute.KeyValue {
@@ -55,6 +56,9 @@ func KafkaRequestTraceAttrs(req KafkaRequest) []attribute.KeyValue {
 		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
 			attrs = append(attrs, semconv.ServerPort(port))
 		}
+	}
+	if req.MessagePayloadSize > 0 {
+		attrs = append(attrs, semconv.MessagingMessageBodySize(req.MessagePayloadSize))
 	}
 	return attrs
 }
