@@ -55,7 +55,7 @@ coupling them too tightly.
 The OpenTelemetry Go compile-time instrumentation tool is composed of the
 following software artifacts (in the form of Go packages):
 
-- `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel`,
+- `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc`,
   a command-line tool that can be installed using `go install` or using
   `go get -tool`;
 - `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/runtime`,
@@ -68,7 +68,7 @@ The tool offers a wizard for getting started with the tool automatically by
 following a series of prompts:
 
 ```console
-$ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel@latest setup
+$ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc@latest setup
 ╭──────────────────────────────────────────────────────────────────────╮
 │                                                                      │
 │           OpenTelemetry compile-time instrumentation tool            │
@@ -76,14 +76,14 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
 │                                                                      │
 ╰──────────────────────────────────────────────────────────────────────╯
 ✨ This setup assistant will guide you through the steps needed to properly
-   configure otel for your application. After you've answered all the prompts,
+   configure otelc for your application. After you've answered all the prompts,
    it will present you with the list of actions it will execute; and you will
    have an choice to apply those or not.
 🤖 Press enter to continue...
 
-ℹ️ Registering otel as a tool dependency is recommended: it allows you to
-   manage the dependency on otel like any other dependency of your application,
-   via the go.mod file. When using go 1.24 or newer, you can use `go tool otel`
+ℹ️ Registering otelc as a tool dependency is recommended: it allows you to
+   manage the dependency on otelc like any other dependency of your application,
+   via the go.mod file. When using go 1.24 or newer, you can use `go tool otelc`
    to use the correct version of the tool (for more information, see:
    https://go.dev/doc/modules/managing-dependencies#tools).
    Not registering a go tool dependency allows instrumenting applications
@@ -93,7 +93,7 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
    go toolchain, and the application may be built with newer versions of
    dependencies than those in the `go.mod` file if the enabled instrumentation
    package(s) requires it.
-🤖 Should I add otel as a tool dependency?
+🤖 Should I add otelc as a tool dependency?
    [Yes]  No
 🆗 I will add a tool dependency
 
@@ -125,25 +125,25 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/
 🆗 I will use go tool dependencies to enable integration packages.
 
 🤖 We're all set! Based on your answers, I will execute the following commands:
-   $ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel@v1.2.3
+   $ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc@v1.2.3
    $ go get -tool github.com/open-telemetry/opentelemetry-go
 🤖 Should I proceed?
    [Yes]  No
 
 🆗 Let's go!
-✅ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel@v1.2.3
+✅ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc@v1.2.3
 ✅ go get -tool github.com/open-telemetry/opentelemetry-go
 
-🤖 Your project is now configured to use otel with the following integrations:
+🤖 Your project is now configured to use otelc with the following integrations:
    OpenTelemetry.
 
 ℹ️ You should commit these changes. This can be done using the following commands:
    $ git add go.mod go.sum
-   $ git commit -m "chore: enable otel for compile-time instrumentation"
+   $ git commit -m "chore: enable otelc for compile-time instrumentation"
 ```
 
 Downstream projects are able to customize these prompts as necessary, either by
-documenting one or more flags users need to pass to the `otel setup` command, or
+documenting one or more flags users need to pass to the `otelc setup` command, or
 by directly wrapping it with their own command that manages these flags on
 behalf of the user. The exact API for this flow will be defined separately, as
 it is not part of the core experience.
@@ -161,11 +161,11 @@ tool at various steps in the software development lifecycle:
   application's codebase; it is typically maintained by a different group of
   people than the application's maintainers, usually Ops and/or SecOps personas.
 
-To allow for this, the `otel` tool allows managing configuration in several
+To allow for this, the `otelc` tool allows managing configuration in several
 ways:
 
 1. Using `tool` dependencies (requires `go1.24` or newer) allows the tool to be
-   used by the simpler invocation `go tool otel`, and has all instrumentation
+   used by the simpler invocation `go tool otelc`, and has all instrumentation
    configuration made available by `tool` dependencies, without requiring the
    addition of any new `.go` or `.yml` file;
 
@@ -189,23 +189,23 @@ used directly to build, run, and test go applications directly:
 1. If the tool is installed as a Go `tool` dependency (`go1.24` and newer):
 
    ```console
-   go tool otel go build -o bin/app .
-   go tool otel go test -shuffle=on ./...
+   go tool otelc go build -o bin/app .
+   go tool otelc go test -shuffle=on ./...
    ```
 
-2. Installing `otel` in `$GOBIN`
+2. Installing `otelc` in `$GOBIN`
 
    ```console
-   go install github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel
-   otel go build -o bin/app
-   otel go test -shuffle=on ./...
+   go install github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc
+   otelc go build -o bin/app
+   otelc go test -shuffle=on ./...
    ```
 
-3. Running `otel` with `go run`:
+3. Running `otelc` with `go run`:
 
    ```console
-   go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go build -o bin/app
-   go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel go test -shuffle=on ./...
+   go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc go build -o bin/app
+   go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc go test -shuffle=on ./...
    ```
 
 #### Building Multiple Packages
@@ -214,7 +214,7 @@ The tool supports building multiple packages in a single command, which is usefu
 for monorepos or projects with multiple binaries:
 
 ```console
-otel go build -o /bin ./myapp1 ./myapp2
+otelc go build -o /bin ./myapp1 ./myapp2
 ```
 
 All packages specified in the build command will be instrumented with the same
@@ -249,15 +249,15 @@ The contents of such configuration files uses the same schema as the
 Some users want to be able to apply compile-time instrumentation to a codebase
 without many _any_ modification to it.
 
-To support these users, the `otel` tool can be used without making any
-persistent modifications to the codebase: when using `otel go build` without
+To support these users, the `otelc` tool can be used without making any
+persistent modifications to the codebase: when using `otelc go build` without
 having created any configuration, the tool will automatically analyze the
 project's dependency tree to self-configure and build the project, before
 cleaning up any file system changes that may have needed to be made in the
 process.
 
 The self-configuration can be influenced by passing any and all relevant build
-flags to the `otel` command as part of the build.
+flags to the `otelc` command as part of the build.
 
 It is important to note that this mode of operation does not produce
 reproducible builds. Users who want or need fully reproducible builds must use
@@ -349,7 +349,7 @@ instrumentation: # Required with at least 1 item
 
 Supported _pointcuts_ and _advice_ types are dependent on the version of the
 tool used to apply the configuration. Instrumentation packages can declare the
-minimum required version of the `otel` tool by including it in their `go.mod`
+minimum required version of the `otelc` tool by including it in their `go.mod`
 files; for example by including a blank import of
 `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/sdk`
 to their `otel.instrumentation.go` file. The Go toolchain's Minimum Version
