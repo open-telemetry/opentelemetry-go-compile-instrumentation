@@ -8,9 +8,12 @@ Tests are organized in three categories, each with a distinct purpose and scope.
 | :------- | :------- | :-------- | :---- |
 | Unit | `tool/**/*_test.go`, `pkg/**/*_test.go` | none | Single function or component in isolation. |
 | Integration | `test/integration/` | `integration` | Instrumented binary against a local or in-process dependency. |
-| E2E | `test/e2e/` | `e2e` | Full client-server flow validating context propagation across services. |
+| E2E | `test/e2e/` | `e2e` | Multiple processes (e.g. client + server). |
 
 ## Unit Tests
+
+> [!IMPORTANT]
+> **When to write a unit test.** Any change to a single function, hook, or internal component. If the behavior can be validated without building an instrumented binary, it belongs here.
 
 Unit tests live next to the source code they exercise and require no build tags.
 
@@ -19,9 +22,13 @@ There are two main areas:
 - **Tool tests** (`tool/`). Cover the compile-time instrumentation pipeline: AST rewriting, import resolution, trampoline generation, package loading, and setup logic. Golden-file tests in `tool/internal/instrument/` snapshot expected output and can be updated with `make test-unit/update-golden`.
 - **Package tests** (`pkg/`). Cover the runtime instrumentation hooks and semantic convention helpers. Each hook package has tests that verify span creation, context propagation, error recording, and the enable/disable mechanism via `OTEL_GO_ENABLED_INSTRUMENTATIONS` / `OTEL_GO_DISABLED_INSTRUMENTATIONS`.
 
-**When to write a unit test.** Any change to a single function, hook, or internal component. If the behavior can be validated without building an instrumented binary, it belongs here.
-
 ## Integration Tests
+
+> [!IMPORTANT]
+> **When to write an integration test.**
+>
+> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `pkg/instrumentation/basic/` and validates the foundational hook machinery that all other instrumentations rely on.
+> - **Instrumentation package changes.** Every package in `pkg/instrumentation/` must have a corresponding integration test. If you add or modify a hook, there should be an integration test that builds an instrumented binary and asserts on the exported spans for that component.
 
 Integration tests build real binaries with the `otelc` tool and run them against **in-process** dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
 
@@ -32,23 +39,12 @@ Each test follows the same pattern:
 3. Run the instrumented binary against a local dependency.
 4. Assert on the exported spans and their semantic conventions.
 
-**When to write an integration test.**
-
-- **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `pkg/instrumentation/basic/` and validates the foundational hook machinery that all other instrumentations rely on.
-- **Instrumentation package changes.** Every package in `pkg/instrumentation/` must have a corresponding integration test. If you add or modify a hook, there should be an integration test that builds an instrumented binary and asserts on the exported spans for that component.
-
 ## E2E Tests
 
-E2E tests verify that context propagation works across service boundaries. Both client and server are instrumented binaries communicating over the network, and traces must contain spans from both sides sharing the same trace ID.
+> [!IMPORTANT]
+> **When to write an E2E test.** When the scenario involves multiple instrumented processes or services. Typical cases include context propagation across services, multi-service interactions or complex scenarios.
 
-Current coverage:
-
-| Test | What it validates |
-| :--- | :---------------- |
-| `http_test.go` | HTTP client and server spans in a single trace (1 trace, 2 spans). |
-| `grpc_test.go` | gRPC unary and streaming calls (2 traces, 2 spans each). |
-
-**When to write an E2E test.** When you need to validate that traces propagate correctly between two instrumented services over a real network boundary.
+E2E tests spin up multiple processes (e.g. an instrumented client and an instrumented server) and verify they produce a coherent trace with spans from every participant sharing the same trace ID.
 
 ## Test Applications
 
