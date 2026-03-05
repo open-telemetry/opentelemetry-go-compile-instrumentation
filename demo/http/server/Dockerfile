@@ -7,12 +7,12 @@ WORKDIR /build
 # Install build dependencies
 RUN apk add --no-cache git make gcc musl-dev
 
-# Copy the entire project to build the otel tool
+# Copy the entire project to build the otelc tool
 COPY go.mod go.sum ./
 COPY . .
 
-# Build the otel tool
-RUN go build -o /otel ./tool/cmd
+# Build the otelc tool
+RUN go build -o /otelc ./tool/cmd
 
 # Stage 2: Build the HTTP server with instrumentation
 FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS app-builder
@@ -22,8 +22,8 @@ WORKDIR /app
 # Install git for go mod download
 RUN apk add --no-cache git
 
-# Copy the otel tool from previous stage
-COPY --from=otel-builder /otel /usr/local/bin/otel
+# Copy the otelc tool from previous stage
+COPY --from=otel-builder /otelc /usr/local/bin/otelc
 
 # Copy HTTP server source
 COPY demo/http/server /app
@@ -31,8 +31,8 @@ COPY demo/http/server /app
 # Download dependencies
 RUN go mod download
 
-# Build the app with otel instrumentation
-RUN otel go build -o server .
+# Build the app with otelc instrumentation
+RUN otelc go build -o server .
 
 # Stage 3: Runtime image
 FROM alpine:3.23@sha256:51183f2cfa6320055da30872f211093f9ff1d3cf06f39a0bdb212314c5dc7375

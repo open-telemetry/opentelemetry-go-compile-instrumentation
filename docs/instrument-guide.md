@@ -12,7 +12,7 @@ The process consists of three main steps:
 
 ## 1. Define Rules
 
-Rules are defined in YAML format and stored in `tool/data/`. These files tell the `otel` which functions to instrument.
+Rules are defined in YAML format and stored in `tool/data/`. These files tell the `otelc` which functions to instrument.
 
 Create a new file `tool/data/<library-name>.yaml`. Below is an example configuration for instrumenting a function `NewServer`:
 
@@ -106,7 +106,7 @@ Integration tests run the instrumented code to ensure hooks are triggered correc
 
 We should:
 
-* Build the test app with the `otel` tool and run the produced binary. The binary must live under `test/apps/<name>/...`
+* Build the test app with the `otelc` tool and run the produced binary. The binary must live under `test/apps/<name>/...`
 * Assert exported telemetry (traces/spans).
 * Validate semantic conventions (required + recommended attributes) for the spans created by the instrumentation.
 
