@@ -23,7 +23,7 @@ There are two main areas:
 
 ## Integration Tests
 
-Integration tests build real binaries with the `otel` tool and run them against local or in-process dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
+Integration tests build real binaries with the `otelc` tool and run them against **in-process** dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
 
 Each test follows the same pattern:
 
