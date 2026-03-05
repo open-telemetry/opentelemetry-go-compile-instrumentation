@@ -5,7 +5,7 @@ This document describes the testing strategy for the project, the different test
 Tests are organized in three categories, each with a distinct purpose and scope.
 
 | Category | Location | Build Tag | Scope |
-|:---------|:---------|:----------|:------|
+| :------- | :------- | :-------- | :---- |
 | Unit | `tool/**/*_test.go`, `pkg/**/*_test.go` | none | Single function or component in isolation. |
 | Integration | `test/integration/` | `integration` | Instrumented binary against a local or in-process dependency. |
 | E2E | `test/e2e/` | `e2e` | Full client-server flow validating context propagation across services. |
@@ -44,7 +44,7 @@ E2E tests verify that context propagation works across service boundaries. Both 
 Current coverage:
 
 | Test | What it validates |
-|:-----|:------------------|
+| :--- | :---------------- |
 | `http_test.go` | HTTP client and server spans in a single trace (1 trace, 2 spans). |
 | `grpc_test.go` | gRPC unary and streaming calls (2 traces, 2 spans each). |
 

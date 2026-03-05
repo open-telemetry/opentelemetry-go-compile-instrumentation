@@ -16,13 +16,13 @@ import (
 )
 
 const (
-	otelBinName = "otel"
+	otelBinName = "otelc"
 	appBinName  = "app"
 )
 
 // -----------------------------------------------------------------------------
 // E2E Test Infrastructure
-// This infrastructure is used to actually build the application with the otel
+// This infrastructure is used to actually build the application with the otelc
 // instrumentation tool, execute the application and verify the output.
 
 func newCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {

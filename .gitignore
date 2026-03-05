@@ -1,7 +1,7 @@
 *.log
 opentelemetry-go-compile-instrumentation
-otel
-otel.exe
+otelc
+otelc.exe
 demo/basic/basic
 .idea
 tmp

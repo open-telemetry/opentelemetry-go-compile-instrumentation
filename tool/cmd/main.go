@@ -21,7 +21,7 @@ const (
 
 func main() {
 	app := cli.Command{
-		Name:        "otel",
+		Name:        "otelc",
 		Usage:       "OpenTelemetry Go Compile-Time Instrumentation Tool",
 		HideVersion: true,
 		Flags: []cli.Flag{

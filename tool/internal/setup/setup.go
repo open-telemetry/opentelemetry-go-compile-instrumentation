@@ -328,7 +328,7 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
-	// Add -toolexec=otel to the original build command and run it
+	// Add -toolexec=otelc to the original build command and run it
 	execPath, err := os.Executable()
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
