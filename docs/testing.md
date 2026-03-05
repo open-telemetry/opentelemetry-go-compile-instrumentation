@@ -52,7 +52,7 @@ Current coverage:
 
 ## Test Applications
 
-Minimal applications in `test/apps/` serve as instrumentation targets. Each is a standalone Go module that the test infrastructure builds with `otel go build`.
+Minimal applications in `test/apps/` serve as instrumentation targets. Each is a standalone Go module that the test infrastructure builds with `otelc go build`.
 
 Shared helpers in `test/testutil/` provide the OTLP collector, build/run wrappers, readiness probes, and semantic convention assertion functions used by both integration and E2E tests.
 
