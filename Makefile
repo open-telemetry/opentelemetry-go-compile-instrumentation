@@ -14,7 +14,7 @@ SHELL := /bin/bash
         registry-diff registry-check registry-resolve weaver-install
 
 # Constant variables
-BINARY_NAME := otel
+BINARY_NAME := otelc
 PLATFORMS := darwin/amd64 linux/amd64 windows/amd64 darwin/arm64 linux/arm64
 TOOL_DIR := tool/cmd
 INST_PKG_GZIP = otel-pkg.gz
@@ -83,8 +83,8 @@ build-all: build/pkg package ## Build the instrumentation tool for all platforms
 	done
 	@echo "All builds completed. Artifacts in dist/"
 
-install: package ## Install otel to $$GOPATH/bin (auto-packages instrumentation)
-	@echo "Installing otel..."
+install: package ## Install otelc to $$GOPATH/bin (auto-packages instrumentation)
+	@echo "Installing otelc..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
 	go install -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)" ./$(TOOL_DIR)

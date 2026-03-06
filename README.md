@@ -33,15 +33,15 @@ cd opentelemetry-go-compile-instrumentation
 make build
 ```
 
-The `otel` binary will be built in the root directory.
+The `otelc` binary will be built in the root directory.
 
 ### 2. Try the Demo
 
-Just prefix the original `go build` command with `otel`.
+Just prefix the original `go build` command with `otelc`.
 
 ```bash
 cd demo/basic
-../../otel go build
+../../otelc go build
 ./basic
 [... output ...]
 ```
@@ -62,6 +62,7 @@ make test
 - [API Design](./docs/api-design-and-project-structure.md) - API structure
 - [Semantic Conventions](./docs/semantic-conventions.md) - Managing semantic conventions
 - [Instrumentation Guide](./docs/instrument-guide.md) - Add instrumentation hook for new libraries
+- [Testing](./docs/testing.md) - Testing strategy, categories, and how to run tests
 
 ### Video Talks
 

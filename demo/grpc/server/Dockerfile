@@ -7,12 +7,12 @@ WORKDIR /build
 # Install build dependencies
 RUN apk add --no-cache git make gcc musl-dev
 
-# Copy the entire project to build the otel tool
+# Copy the entire project to build the otelc tool
 COPY go.mod go.sum ./
 COPY . .
 
-# Build the otel tool
-RUN go build -o /otel ./tool/cmd
+# Build the otelc tool
+RUN go build -o /otelc ./tool/cmd
 
 # Stage 2: Build the gRPC server with instrumentation
 FROM golang:1.24-alpine@sha256:06545cc1ff10ddf04aebe20db1352ec7c96d1e43135767931c473557d0378202 AS app-builder
@@ -26,8 +26,8 @@ RUN apk add --no-cache git protobuf-dev protoc
 RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.4 && \
     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 
-# Copy the otel tool from previous stage
-COPY --from=otel-builder /otel /usr/local/bin/otel
+# Copy the otelc tool from previous stage
+COPY --from=otel-builder /otelc /usr/local/bin/otelc
 
 # Copy demo app source
 COPY demo/grpc/server /app
@@ -41,8 +41,8 @@ RUN mkdir -p pb && \
 # Download dependencies
 RUN go mod download
 
-# Build the app with otel instrumentation
-RUN otel go build -o server .
+# Build the app with otelc instrumentation
+RUN otelc go build -o server .
 
 # Stage 3: Runtime image
 FROM alpine:3.23@sha256:51183f2cfa6320055da30872f211093f9ff1d3cf06f39a0bdb212314c5dc7375

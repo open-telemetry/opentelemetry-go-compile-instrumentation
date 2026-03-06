@@ -30,11 +30,11 @@ No manual code changes required.
 
    ```bash
    # Option 1: Direct build
-   ./otel go build -o myapp .
+   ./otelc go build -o myapp .
 
    # Option 2: Install as tool dependency (Go 1.24+)
-   go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otel
-   go tool otel go build -o myapp .
+   go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc
+   go tool otelc go build -o myapp .
    ```
 
 ## How It Works

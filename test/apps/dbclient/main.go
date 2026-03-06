@@ -3,7 +3,7 @@
 
 // Package main provides a minimal database/sql client for integration testing.
 // It uses a custom in-memory driver to avoid external dependencies.
-// This client is designed to be instrumented with the otel compile-time tool.
+// This client is designed to be instrumented with the otelc compile-time tool.
 package main
 
 import (

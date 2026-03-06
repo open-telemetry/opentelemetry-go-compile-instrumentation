@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package main provides a minimal gRPC client for integration testing.
-// This client is designed to be instrumented with the otel compile-time tool.
+// This client is designed to be instrumented with the otelc compile-time tool.
 package main
 
 import (

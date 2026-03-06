@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package main provides a minimal HTTP server for integration testing.
-// This server is designed to be instrumented with the otel compile-time tool.
+// This server is designed to be instrumented with the otelc compile-time tool.
 package main
 
 import (
