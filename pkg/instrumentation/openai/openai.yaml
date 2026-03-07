@@ -1,0 +1,39 @@
+openai_chat_completion_new:
+  target: github.com/openai/openai-go
+  func: New
+  recv: "*ChatCompletionService"
+  before: beforeChatCompletionNew
+  after: afterChatCompletionNew
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
+
+openai_chat_completion_new_streaming:
+  target: github.com/openai/openai-go
+  func: NewStreaming
+  recv: "*ChatCompletionService"
+  before: beforeChatCompletionNewStreaming
+  after: afterChatCompletionNewStreaming
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
+
+openai_embedding_new:
+  target: github.com/openai/openai-go
+  func: New
+  recv: "*EmbeddingService"
+  before: beforeEmbeddingNew
+  after: afterEmbeddingNew
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
+
+openai_completion_new:
+  target: github.com/openai/openai-go
+  func: New
+  recv: "*CompletionService"
+  before: beforeCompletionNew
+  after: afterCompletionNew
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
+
+openai_completion_new_streaming:
+  target: github.com/openai/openai-go
+  func: NewStreaming
+  recv: "*CompletionService"
+  before: beforeCompletionNewStreaming
+  after: afterCompletionNewStreaming
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
