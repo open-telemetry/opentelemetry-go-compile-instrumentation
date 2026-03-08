@@ -5,14 +5,12 @@ package openai
 
 import (
 	"context"
-	"errors"
 	"runtime/debug"
 	"sync"
 	"time"
 
 	openaisdk "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/packages/ssestream"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -37,7 +35,6 @@ var (
 	durationHist genaiconv.ClientOperationDuration
 	tokenUsage   genaiconv.ClientTokenUsage
 	initOnce     sync.Once
-	errNilStream = errors.New("nil stream returned")
 )
 
 // openaiClientEnabler controls whether OpenAI instrumentation is enabled.
@@ -224,49 +221,6 @@ func afterChatCompletionNew(ictx inst.HookContext, res *openaisdk.ChatCompletion
 }
 
 // ---------------------------------------------------------------------------
-// Chat Completion Streaming hooks
-// ---------------------------------------------------------------------------
-
-func beforeChatCompletionNewStreaming(
-	ictx inst.HookContext,
-	_ *openaisdk.ChatCompletionService,
-	ctx context.Context,
-	body openaisdk.ChatCompletionNewParams,
-	opts ...option.RequestOption,
-) {
-	if !clientEnabler.Enable() {
-		return
-	}
-	startSpan(ictx, ctx, semconv.OperationChat, string(body.Model))
-}
-
-// afterChatCompletionNewStreaming ends the span once the streaming connection
-// is established. Token usage and finish reasons are not available until the
-// stream is fully consumed, so only the connection latency is captured.
-func afterChatCompletionNewStreaming(ictx inst.HookContext, stream *ssestream.Stream[openaisdk.ChatCompletionChunk]) {
-	if !clientEnabler.Enable() {
-		return
-	}
-	span, ok := ictx.GetKeyData("span").(trace.Span)
-	if !ok || span == nil {
-		return
-	}
-	defer span.End()
-
-	var streamErr error
-	if stream == nil {
-		streamErr = errNilStream
-		span.SetStatus(codes.Error, "nil stream returned")
-	}
-
-	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	recordDuration(ctx, ictx, streamErr)
-}
-
-// ---------------------------------------------------------------------------
 // Embedding hooks
 // ---------------------------------------------------------------------------
 
@@ -365,44 +319,3 @@ func afterCompletionNew(ictx inst.HookContext, res *openaisdk.Completion, err er
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Legacy Completion Streaming hooks
-// ---------------------------------------------------------------------------
-
-func beforeCompletionNewStreaming(
-	ictx inst.HookContext,
-	_ *openaisdk.CompletionService,
-	ctx context.Context,
-	body openaisdk.CompletionNewParams,
-	opts ...option.RequestOption,
-) {
-	if !clientEnabler.Enable() {
-		return
-	}
-	startSpan(ictx, ctx, semconv.OperationTextCompletion, string(body.Model))
-}
-
-// afterCompletionNewStreaming ends the span once the streaming connection is
-// established. Token usage is not available until the stream is fully consumed.
-func afterCompletionNewStreaming(ictx inst.HookContext, stream *ssestream.Stream[openaisdk.Completion]) {
-	if !clientEnabler.Enable() {
-		return
-	}
-	span, ok := ictx.GetKeyData("span").(trace.Span)
-	if !ok || span == nil {
-		return
-	}
-	defer span.End()
-
-	var streamErr error
-	if stream == nil {
-		streamErr = errNilStream
-		span.SetStatus(codes.Error, "nil stream returned")
-	}
-
-	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	recordDuration(ctx, ictx, streamErr)
-}
