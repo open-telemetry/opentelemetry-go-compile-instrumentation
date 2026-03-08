@@ -7,7 +7,6 @@ import (
 	"context"
 	"runtime/debug"
 	"sync"
-	"time"
 
 	openaisdk "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -85,8 +84,7 @@ func startSpan(ictx inst.HookContext, ctx context.Context, operation, model stri
 
 	ictx.SetParam(ctxParamIndex, ctx)
 	ictx.SetData(map[string]interface{}{
-		"span":  span,
-		"start": time.Now(),
+		"span": span,
 	})
 }
 
