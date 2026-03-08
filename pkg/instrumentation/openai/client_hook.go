@@ -5,14 +5,19 @@ package openai
 
 import (
 	"context"
+	"errors"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	openaisdk "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/ssestream"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/semconv/v1.39.0/genaiconv"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
@@ -27,9 +32,12 @@ const (
 )
 
 var (
-	logger   = shared.Logger()
-	tracer   trace.Tracer
-	initOnce sync.Once
+	logger       = shared.Logger()
+	tracer       trace.Tracer
+	durationHist genaiconv.ClientOperationDuration
+	tokenUsage   genaiconv.ClientTokenUsage
+	initOnce     sync.Once
+	errNilStream = errors.New("nil stream returned")
 )
 
 // openaiClientEnabler controls whether OpenAI instrumentation is enabled.
@@ -62,6 +70,19 @@ func initInstrumentation() {
 			instrumentationName,
 			trace.WithInstrumentationVersion(version),
 		)
+		meter := otel.GetMeterProvider().Meter(
+			instrumentationName,
+			metric.WithInstrumentationVersion(version),
+		)
+		var err error
+		durationHist, err = genaiconv.NewClientOperationDuration(meter)
+		if err != nil {
+			logger.Error("failed to create duration histogram", "error", err)
+		}
+		tokenUsage, err = genaiconv.NewClientTokenUsage(meter)
+		if err != nil {
+			logger.Error("failed to create token usage histogram", "error", err)
+		}
 		if err := shared.StartRuntimeMetrics(); err != nil {
 			logger.Error("failed to start runtime metrics", "error", err)
 		}
@@ -84,7 +105,11 @@ func startSpan(ictx inst.HookContext, ctx context.Context, operation, model stri
 
 	ictx.SetParam(ctxParamIndex, ctx)
 	ictx.SetData(map[string]interface{}{
-		"span": span,
+		"span":      span,
+		"ctx":       ctx,
+		"start":     time.Now(),
+		"operation": operation,
+		"model":     model,
 	})
 }
 
@@ -99,6 +124,50 @@ func endSpanWithError(ictx inst.HookContext, err error) trace.Span {
 		span.SetStatus(codes.Error, err.Error())
 	}
 	return span
+}
+
+// recordDuration records the gen_ai.client.operation.duration metric.
+func recordDuration(ctx context.Context, ictx inst.HookContext, err error) {
+	start, ok := ictx.GetKeyData("start").(time.Time)
+	if !ok {
+		return
+	}
+	operation, _ := ictx.GetKeyData("operation").(string)
+	model, _ := ictx.GetKeyData("model").(string)
+
+	duration := float64(time.Since(start)) / float64(time.Second)
+	attrs := []attribute.KeyValue{
+		durationHist.AttrRequestModel(model),
+	}
+	if err != nil {
+		attrs = append(attrs, durationHist.AttrErrorType(genaiconv.ErrorTypeOther))
+	}
+	durationHist.Record(ctx, duration,
+		genaiconv.OperationNameAttr(operation),
+		genaiconv.ProviderNameOpenAI,
+		attrs...,
+	)
+}
+
+// recordTokenUsage records the gen_ai.client.token.usage metric for input and output tokens.
+func recordTokenUsage(ctx context.Context, operation, model string, inputTokens, outputTokens int64) {
+	modelAttr := tokenUsage.AttrRequestModel(model)
+	if inputTokens > 0 {
+		tokenUsage.Record(ctx, inputTokens,
+			genaiconv.OperationNameAttr(operation),
+			genaiconv.ProviderNameOpenAI,
+			genaiconv.TokenTypeInput,
+			modelAttr,
+		)
+	}
+	if outputTokens > 0 {
+		tokenUsage.Record(ctx, outputTokens,
+			genaiconv.OperationNameAttr(operation),
+			genaiconv.ProviderNameOpenAI,
+			genaiconv.TokenTypeOutput,
+			modelAttr,
+		)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +197,12 @@ func afterChatCompletionNew(ictx inst.HookContext, res *openaisdk.ChatCompletion
 	}
 	defer span.End()
 
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	recordDuration(ctx, ictx, err)
+
 	if res != nil {
 		finishReasons := make([]string, 0, len(res.Choices))
 		for _, choice := range res.Choices {
@@ -141,6 +216,10 @@ func afterChatCompletionNew(ictx inst.HookContext, res *openaisdk.ChatCompletion
 			res.Usage.CompletionTokens,
 		)
 		span.SetAttributes(attrs...)
+
+		operation, _ := ictx.GetKeyData("operation").(string)
+		model, _ := ictx.GetKeyData("model").(string)
+		recordTokenUsage(ctx, operation, model, res.Usage.PromptTokens, res.Usage.CompletionTokens)
 	}
 }
 
@@ -174,9 +253,17 @@ func afterChatCompletionNewStreaming(ictx inst.HookContext, stream *ssestream.St
 	}
 	defer span.End()
 
+	var streamErr error
 	if stream == nil {
+		streamErr = errNilStream
 		span.SetStatus(codes.Error, "nil stream returned")
 	}
+
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	recordDuration(ctx, ictx, streamErr)
 }
 
 // ---------------------------------------------------------------------------
@@ -206,12 +293,22 @@ func afterEmbeddingNew(ictx inst.HookContext, res *openaisdk.CreateEmbeddingResp
 	}
 	defer span.End()
 
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	recordDuration(ctx, ictx, err)
+
 	if res != nil {
 		attrs := semconv.EmbeddingResponseTraceAttrs(
 			res.Model,
 			res.Usage.PromptTokens,
 		)
 		span.SetAttributes(attrs...)
+
+		operation, _ := ictx.GetKeyData("operation").(string)
+		model, _ := ictx.GetKeyData("model").(string)
+		recordTokenUsage(ctx, operation, model, res.Usage.PromptTokens, 0)
 	}
 }
 
@@ -242,6 +339,12 @@ func afterCompletionNew(ictx inst.HookContext, res *openaisdk.Completion, err er
 	}
 	defer span.End()
 
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	recordDuration(ctx, ictx, err)
+
 	if res != nil {
 		finishReasons := make([]string, 0, len(res.Choices))
 		for _, choice := range res.Choices {
@@ -255,6 +358,10 @@ func afterCompletionNew(ictx inst.HookContext, res *openaisdk.Completion, err er
 			res.Usage.CompletionTokens,
 		)
 		span.SetAttributes(attrs...)
+
+		operation, _ := ictx.GetKeyData("operation").(string)
+		model, _ := ictx.GetKeyData("model").(string)
+		recordTokenUsage(ctx, operation, model, res.Usage.PromptTokens, res.Usage.CompletionTokens)
 	}
 }
 
@@ -287,7 +394,15 @@ func afterCompletionNewStreaming(ictx inst.HookContext, stream *ssestream.Stream
 	}
 	defer span.End()
 
+	var streamErr error
 	if stream == nil {
+		streamErr = errNilStream
 		span.SetStatus(codes.Error, "nil stream returned")
 	}
+
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	recordDuration(ctx, ictx, streamErr)
 }
