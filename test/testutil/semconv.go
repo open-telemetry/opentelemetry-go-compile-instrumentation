@@ -106,6 +106,18 @@ func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMet
 	RequireAttribute(t, span, string(semconv.RPCGRPCStatusCodeKey), grpcStatusCode)
 }
 
+// RequireGenAIClientSemconv verifies that a GenAI client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
+func RequireGenAIClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	operationName, requestModel string,
+) {
+	RequireAttribute(t, span, "gen_ai.system", "openai")
+	RequireAttribute(t, span, "gen_ai.operation.name", operationName)
+	RequireAttribute(t, span, "gen_ai.request.model", requestModel)
+}
+
 // RequireRedisClientSemconv verifies that a Redis client span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
 func RequireRedisClientSemconv(
