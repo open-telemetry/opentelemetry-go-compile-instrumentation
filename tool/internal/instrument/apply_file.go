@@ -22,7 +22,7 @@ func listRuleFiles(path string) ([]string, error) {
 	if util.PathExists(path) {
 		p = path
 	} else {
-		p = strings.TrimPrefix(path, util.OtelRoot)
+		p = strings.TrimPrefix(path, util.OtelcRoot)
 		p = filepath.Join(util.GetBuildTempDir(), p)
 	}
 	return util.ListFiles(p)
@@ -63,7 +63,7 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 	base := filepath.Base(rule.File)
 	ext := filepath.Ext(base)
 	newName := strings.TrimSuffix(base, ext)
-	newFile := filepath.Join(ip.workDir, fmt.Sprintf("otel.%s.go", newName))
+	newFile := filepath.Join(ip.workDir, fmt.Sprintf("otelc.%s.go", newName))
 	err = ast.WriteFile(newFile, root)
 	if err != nil {
 		return err

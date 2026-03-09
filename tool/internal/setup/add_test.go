@@ -4,7 +4,7 @@
 //go:build !windows
 
 // Package setup tests verify that the addDeps function generates
-// the expected otel.runtime.go file by comparing against golden files.
+// the expected otelc.runtime.go file by comparing against golden files.
 //
 // To update golden files after intentional changes:
 //
@@ -42,7 +42,7 @@ func TestAddDeps(t *testing.T) {
 					newTestFuncRule("github.com/example/pkg", "github.com/example/pkg"),
 				),
 			},
-			goldenFile: "single_func_rule.otel.runtime.go.golden",
+			goldenFile: "single_func_rule.otelc.runtime.go.golden",
 		},
 		{
 			name: "no_func_rules",
@@ -63,7 +63,7 @@ func TestAddDeps(t *testing.T) {
 					newTestFuncRule("github.com/example/pkg2", "github.com/example/pkg2"),
 				),
 			},
-			goldenFile: "multiple_rule_sets.otel.runtime.go.golden",
+			goldenFile: "multiple_rule_sets.otelc.runtime.go.golden",
 		},
 	}
 
@@ -75,7 +75,7 @@ func TestAddDeps(t *testing.T) {
 			err := sp.addDeps(tt.matched, tmpDir)
 			require.NoError(t, err)
 
-			runtimeFilePath := filepath.Join(tmpDir, OtelRuntimeFile)
+			runtimeFilePath := filepath.Join(tmpDir, OtelcRuntimeFile)
 
 			if tt.goldenFile == "" {
 				assert.NoFileExists(t, runtimeFilePath)

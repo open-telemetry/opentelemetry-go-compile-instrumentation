@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for HTTP client with OpenTelemetry compile-time instrumentation
-# Stage 1: Build the otel tool
-FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS otel-builder
+# Stage 1: Build the otelc tool
+FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS otelc-builder
 
 WORKDIR /build
 
@@ -23,7 +23,7 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 # Copy the otelc tool from previous stage
-COPY --from=otel-builder /otelc /usr/local/bin/otelc
+COPY --from=otelc-builder /otelc /usr/local/bin/otelc
 
 # Copy HTTP client source
 COPY demo/http/client /app

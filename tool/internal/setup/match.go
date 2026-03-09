@@ -299,11 +299,11 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 }
 
 func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
-	// Load rules from environment variable OTEL_RULES if specified. It has the
+	// Load rules from environment variable OTELC_RULES if specified. It has the
 	// highest priority.
-	rulePath := os.Getenv(util.EnvOtelRules)
+	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
-		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelRules, rulePath)
+		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
 		content, err := os.ReadFile(rulePath)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to read %s from env variable", rulePath)

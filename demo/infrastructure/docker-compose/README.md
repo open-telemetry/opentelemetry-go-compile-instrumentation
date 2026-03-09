@@ -543,18 +543,18 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 
 ### Custom Network
 
-The stack uses a dedicated bridge network `otel-demo-network`. Services can communicate using service names as hostnames.
+The stack uses a dedicated bridge network `otelc-demo-network`. Services can communicate using service names as hostnames.
 
 **Inspect network:**
 
 ```bash
-docker network inspect otel-demo-network
+docker network inspect otelc-demo-network
 ```
 
 **Connect external container:**
 
 ```bash
-docker run --network otel-demo-network \
+docker run --network otelc-demo-network \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
   my-instrumented-app
 ```

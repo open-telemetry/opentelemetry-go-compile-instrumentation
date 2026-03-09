@@ -333,7 +333,7 @@ func TestRuleFilesFromDir(t *testing.T) {
 	err = os.WriteFile(filepath.Join(subDir, "r2.otelc.yaml"), []byte(content2), 0o644)
 	require.NoError(t, err)
 
-	t.Setenv(util.EnvOtelRules, "")
+	t.Setenv(util.EnvOtelcRules, "")
 
 	sp := newTestSetupPhase()
 	err = sp.extract()
@@ -359,7 +359,7 @@ func TestMultipleRuleFiles(t *testing.T) {
 	p1 := writeCustomRules(t, "r1.yaml", content1)
 	p2 := writeCustomRules(t, "r2.yaml", content2)
 
-	t.Setenv(util.EnvOtelRules, "")
+	t.Setenv(util.EnvOtelcRules, "")
 
 	sp := newTestSetupPhase()
 	err := sp.extract()
@@ -402,7 +402,7 @@ func TestLoadDefaultRules(t *testing.T) {
   raw: "_ = 1"`
 	p1 := writeCustomRules(t, "r1.yaml", content1)
 	p2 := writeCustomRules(t, "r2.yaml", content2)
-	t.Setenv(util.EnvOtelRules, p1)
+	t.Setenv(util.EnvOtelcRules, p1)
 
 	// Prepare setup phase and set custom rules via environment variable and flag
 	sp := newTestSetupPhase()
@@ -420,7 +420,7 @@ func TestLoadDefaultRules(t *testing.T) {
 
 	// Verify that the custom rule specified by flag has higher priority than
 	// default rules
-	t.Setenv(util.EnvOtelRules, "")
+	t.Setenv(util.EnvOtelcRules, "")
 	rules, err = sp.loadRules()
 	require.NoError(t, err)
 	require.NotEmpty(t, rules)
@@ -428,7 +428,7 @@ func TestLoadDefaultRules(t *testing.T) {
 	require.Equal(t, "h2", rules[0].GetName())
 
 	// Verify that the default rules are loaded
-	t.Setenv(util.EnvOtelRules, "")
+	t.Setenv(util.EnvOtelcRules, "")
 	sp.ruleConfig = ""
 
 	rules, err = sp.loadRules()

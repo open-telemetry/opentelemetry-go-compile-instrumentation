@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	tJumpLabel      = "/* __TRAMPOLINE_JUMP_IF__ */"
-	otelGlobalsFile = "otel.globals.go"
+	tJumpLabel       = "/* __TRAMPOLINE_JUMP_IF__ */"
+	otelcGlobalsFile = "otelc.globals.go"
 )
 
 func makeName(r *rule.InstFuncRule, funcDecl *dst.FuncDecl, isBefore bool) string {
@@ -276,7 +276,7 @@ func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
 	trampoline.Decls = append(trampoline.Decls, api.Decls...)
 
 	// Write trampoline code to file
-	path := filepath.Join(ip.workDir, otelGlobalsFile)
+	path := filepath.Join(ip.workDir, otelcGlobalsFile)
 	err = ast.WriteFile(path, trampoline)
 	if err != nil {
 		return err
