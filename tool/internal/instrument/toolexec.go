@@ -57,7 +57,7 @@ func (ip *InstrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *InstrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *InstrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
-// keepForDebug keeps the the file to .otel-build directory for debugging
+// keepForDebug keeps the the file to .otelc-build directory for debugging
 func (ip *InstrumentPhase) keepForDebug(name string) {
 	escape := func(s string) string {
 		dirName := strings.ReplaceAll(s, "/", "_")

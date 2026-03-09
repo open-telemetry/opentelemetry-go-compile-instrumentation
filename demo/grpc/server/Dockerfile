@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for gRPC server with OpenTelemetry compile-time instrumentation
-# Stage 1: Build the otel tool
-FROM golang:1.24-alpine@sha256:06545cc1ff10ddf04aebe20db1352ec7c96d1e43135767931c473557d0378202 AS otel-builder
+# Stage 1: Build the otelc tool
+FROM golang:1.24-alpine@sha256:06545cc1ff10ddf04aebe20db1352ec7c96d1e43135767931c473557d0378202 AS otelc-builder
 
 WORKDIR /build
 
@@ -27,7 +27,7 @@ RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.4 && \
     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 
 # Copy the otelc tool from previous stage
-COPY --from=otel-builder /otelc /usr/local/bin/otelc
+COPY --from=otelc-builder /otelc /usr/local/bin/otelc
 
 # Copy demo app source
 COPY demo/grpc/server /app

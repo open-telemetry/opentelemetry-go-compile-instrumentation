@@ -312,7 +312,7 @@ services:
 networks:
   observability:
     driver: bridge
-    name: otel-demo-network
+    name: otelc-demo-network
 
 # Note: No volumes defined for ephemeral demo environment
 # Data will be lost when containers are stopped

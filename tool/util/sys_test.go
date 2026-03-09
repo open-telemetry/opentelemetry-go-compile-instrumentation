@@ -197,7 +197,7 @@ func TestBuildFlagsRoundTrip(t *testing.T) {
 			}
 
 			// Set environment variable and read back
-			t.Setenv(EnvOtelBuildFlags, encoded)
+			t.Setenv(EnvOtelcBuildFlags, encoded)
 			result := GetBuildFlags()
 
 			if len(result) != len(tt.flags) {
@@ -215,7 +215,7 @@ func TestBuildFlagsRoundTrip(t *testing.T) {
 }
 
 func TestGetBuildFlags_InvalidJSON(t *testing.T) {
-	t.Setenv(EnvOtelBuildFlags, "not valid json")
+	t.Setenv(EnvOtelcBuildFlags, "not valid json")
 	result := GetBuildFlags()
 	if result != nil {
 		t.Errorf("GetBuildFlags() with invalid JSON should return nil, got %v", result)
@@ -224,7 +224,7 @@ func TestGetBuildFlags_InvalidJSON(t *testing.T) {
 
 func TestGetBuildFlags_Empty(t *testing.T) {
 	// Ensure env var is not set
-	t.Setenv(EnvOtelBuildFlags, "")
+	t.Setenv(EnvOtelcBuildFlags, "")
 	result := GetBuildFlags()
 	if result != nil {
 		t.Errorf("GetBuildFlags() with empty env should return nil, got %v", result)

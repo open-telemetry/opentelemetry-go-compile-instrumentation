@@ -91,9 +91,9 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	}
 	replaces := make([]*replaceDirective, 0)
 	for _, m := range rules {
-		util.Assert(strings.HasPrefix(m.Path, util.OtelRoot), "sanity check")
+		util.Assert(strings.HasPrefix(m.Path, util.OtelcRoot), "sanity check")
 		oldPath := m.Path
-		newPath := strings.TrimPrefix(oldPath, util.OtelRoot)
+		newPath := strings.TrimPrefix(oldPath, util.OtelcRoot)
 		newPath = filepath.Join(util.GetBuildTempDir(), newPath)
 		replaces = append(replaces, &replaceDirective{
 			oldPath:    oldPath,
@@ -108,7 +108,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	// we need to add the replace directive to the local path.
 	// Once the instrumentation packages are published, we can remove this.
 	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelRoot + "/pkg",
+		oldPath:    util.OtelcRoot + "/pkg",
 		oldVersion: "",
 		newPath:    filepath.Join(util.GetBuildTempDir(), unzippedPkgDir),
 		newVersion: "",
@@ -118,7 +118,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	// shared module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
 	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelRoot + "/pkg/instrumentation/shared",
+		oldPath:    util.OtelcRoot + "/pkg/instrumentation/shared",
 		oldVersion: "",
 		newPath:    filepath.Join(util.GetBuildTempDir(), "pkg/instrumentation/shared"),
 		newVersion: "",

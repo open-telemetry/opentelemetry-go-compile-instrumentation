@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	otelBinName = "otelc"
-	appBinName  = "app"
+	otelcBinName = "otelc"
+	appBinName   = "app"
 )
 
 // -----------------------------------------------------------------------------
@@ -36,13 +36,13 @@ func newCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 
 // Build builds the application with the instrumentation tool.
 func Build(t *testing.T, appDir string, args ...string) {
-	binName := otelBinName
+	binName := otelcBinName
 	if util.IsWindows() {
 		binName += ".exe"
 	}
 	pwd, err := os.Getwd()
 	require.NoError(t, err)
-	otelPath := filepath.Join(pwd, "..", "..", binName)
+	otelcPath := filepath.Join(pwd, "..", "..", binName)
 
 	// Use a consistent binary name for all test apps
 	outputName := appBinName
@@ -51,7 +51,7 @@ func Build(t *testing.T, appDir string, args ...string) {
 	}
 
 	args = append(args, "-o", outputName)
-	args = append([]string{otelPath}, args...)
+	args = append([]string{otelcPath}, args...)
 
 	cmd := newCmd(t.Context(), appDir, args...)
 	out, err := cmd.CombinedOutput()

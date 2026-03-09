@@ -17,7 +17,7 @@ SHELL := /bin/bash
 BINARY_NAME := otelc
 PLATFORMS := darwin/amd64 linux/amd64 windows/amd64 darwin/arm64 linux/arm64
 TOOL_DIR := tool/cmd
-INST_PKG_GZIP = otel-pkg.gz
+INST_PKG_GZIP = otelc-pkg.gz
 INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
@@ -109,13 +109,13 @@ build-demo: build-demo-grpc build-demo-http
 
 build-demo-grpc: go-protobuf-plugins ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
-	@rm -f demo/grpc/server/otel.runtime.go demo/grpc/client/otel.runtime.go
+	@rm -f demo/grpc/server/otelc.runtime.go demo/grpc/client/otelc.runtime.go
 	@(cd demo/grpc/server && go generate && go build -a -o server .)
 	@(cd demo/grpc/client && go build -a -o client .)
 
 build-demo-http: ## Build HTTP demo server and client
 	@echo "Building HTTP demo..."
-	@rm -f demo/http/server/otel.runtime.go demo/http/client/otel.runtime.go
+	@rm -f demo/http/server/otelc.runtime.go demo/http/client/otelc.runtime.go
 	@(cd demo/http/server && go build -a -o server .)
 	@(cd demo/http/client && go build -a -o client .)
 
@@ -232,7 +232,7 @@ check-embed: ## Verify that embedded files exist (required for tests)
 
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
-# uses //go:embed to embed otel-pkg.gz at compile time. If the file doesn't exist
+# uses //go:embed to embed otelc-pkg.gz at compile time. If the file doesn't exist
 # when Go compiles the test packages, the embed will fail.
 
 test: ## Run all tests (unit + integration + e2e)
@@ -368,8 +368,8 @@ clean: ## Clean build artifacts
 	rm -f demo/grpc/client/client
 	rm -f demo/http/server/server
 	rm -f demo/http/client/client
-	find demo -type d -name ".otel-build" -exec rm -rf {} +
-	find demo -type f -name "otel.runtime.go" -delete
+	find demo -type d -name ".otelc-build" -exec rm -rf {} +
+	find demo -type f -name "otelc.runtime.go" -delete
 	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
 
 gotestfmt: ## Install gotestfmt if not present

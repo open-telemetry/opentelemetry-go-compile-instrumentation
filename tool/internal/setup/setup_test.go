@@ -194,9 +194,9 @@ func TestSetupGoCache(t *testing.T) {
 		}
 	})
 
-	t.Run("creates persistent cache in .otel-build/gocache", func(t *testing.T) {
+	t.Run("creates persistent cache in .otelc-build/gocache", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 		if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
 			t.Fatal(err)
 		}

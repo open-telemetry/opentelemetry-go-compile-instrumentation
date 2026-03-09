@@ -128,7 +128,7 @@ func extractGZip(data []byte, targetDir string) error {
 }
 
 func (*SetupPhase) extract() error {
-	const embeddedInstPkgGzip = "otel-pkg.gz"
+	const embeddedInstPkgGzip = "otelc-pkg.gz"
 	// Read the instrumentation code from the embedded binary file
 	bs, err := data.ReadEmbedFile(embeddedInstPkgGzip)
 	if err != nil {

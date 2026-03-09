@@ -30,7 +30,7 @@ The instrumentation is injected during the build process:
 │  2. Setup Phase:                            │
 │     - Scan dependencies                     │
 │     - Match net/http functions              │
-│     - Generate otel.runtime.go              │
+│     - Generate otelc.runtime.go              │
 │                                             │
 │  3. Instrument Phase:                       │
 │     - Inject trampolines into:              │
