@@ -189,7 +189,7 @@ func TestUpdateImportConfig(t *testing.T) {
 func TestTrackAddedImports(t *testing.T) {
 	t.Run("empty packages does nothing", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 		err := trackAddedImports(map[string]string{})
 		require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestTrackAddedImports(t *testing.T) {
 
 	t.Run("creates per-process file", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 		// Create build temp directory
 		err := os.MkdirAll(util.GetBuildTempDir(), 0o755)
@@ -236,7 +236,7 @@ func TestTrackAddedImports(t *testing.T) {
 func TestLoadAddedImports(t *testing.T) {
 	t.Run("no files returns empty map", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 		// Create build temp directory (empty)
 		err := os.MkdirAll(util.GetBuildTempDir(), 0o755)
@@ -250,7 +250,7 @@ func TestLoadAddedImports(t *testing.T) {
 
 	t.Run("merges multiple per-process files", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 		// Create build temp directory
 		buildDir := util.GetBuildTempDir()
@@ -283,7 +283,7 @@ func TestLoadAddedImports(t *testing.T) {
 
 	t.Run("handles corrupted JSON gracefully", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 		// Create build temp directory
 		buildDir := util.GetBuildTempDir()
@@ -308,7 +308,7 @@ func TestLoadAddedImports(t *testing.T) {
 
 	t.Run("later file overrides earlier for same package", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 		// Create build temp directory
 		buildDir := util.GetBuildTempDir()
@@ -337,7 +337,7 @@ func TestLoadAddedImports(t *testing.T) {
 func TestCleanupImportTrackingFiles(t *testing.T) {
 	t.Run("removes all tracking files", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 		// Create build temp directory
 		buildDir := util.GetBuildTempDir()
@@ -369,7 +369,7 @@ func TestCleanupImportTrackingFiles(t *testing.T) {
 
 	t.Run("handles empty directory gracefully", func(t *testing.T) {
 		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelWorkDir, tempDir)
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 		// Create build temp directory (empty)
 		err := os.MkdirAll(util.GetBuildTempDir(), 0o755)

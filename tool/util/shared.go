@@ -12,11 +12,11 @@ import (
 )
 
 const (
-	EnvOtelWorkDir    = "OTEL_WORK_DIR"
-	EnvOtelRules      = "OTEL_RULES"
-	EnvOtelBuildFlags = "OTEL_BUILD_FLAGS"
-	BuildTempDir      = ".otel-build"
-	OtelRoot          = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	EnvOtelcWorkDir    = "OTELC_WORK_DIR"
+	EnvOtelcRules      = "OTELC_RULES"
+	EnvOtelcBuildFlags = "OTELC_BUILD_FLAGS"
+	BuildTempDir       = ".otelc-build"
+	OtelcRoot          = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
 )
 
 func GetMatchedRuleFile() string {
@@ -37,8 +37,8 @@ func GetAddedImportsPattern() string {
 	return GetBuildTemp("added_imports.*.json")
 }
 
-func GetOtelWorkDir() string {
-	wd := os.Getenv(EnvOtelWorkDir)
+func GetOtelcWorkDir() string {
+	wd := os.Getenv(EnvOtelcWorkDir)
 	if wd == "" {
 		wd, _ = os.Getwd()
 		return wd
@@ -48,12 +48,12 @@ func GetOtelWorkDir() string {
 
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTempDir() string {
-	return filepath.Join(GetOtelWorkDir(), BuildTempDir)
+	return filepath.Join(GetOtelcWorkDir(), BuildTempDir)
 }
 
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
-	return filepath.Join(GetOtelWorkDir(), BuildTempDir, name)
+	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
 }
 
 func copyBackupFiles(names []string, src, dst string) error {
@@ -76,11 +76,11 @@ func RestoreFile(names []string) error {
 	return copyBackupFiles(names, GetBuildTemp("backup"), ".")
 }
 
-// GetBuildFlags returns the build flags from OTEL_BUILD_FLAGS environment variable.
+// GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.
 // The flags are stored as a JSON-encoded string array to preserve arguments that contain spaces.
 // Returns nil if not set or on decode error.
 func GetBuildFlags() []string {
-	encoded := os.Getenv(EnvOtelBuildFlags)
+	encoded := os.Getenv(EnvOtelcBuildFlags)
 	if encoded == "" {
 		return nil
 	}

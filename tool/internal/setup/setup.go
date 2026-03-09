@@ -155,7 +155,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		ruleConfig: cmd.String("rules"),
 	}
 
-	// Introduce additional hook code by generating otel.runtime.go
+	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
 	pkgs, err := getBuildPackages(ctx, args)
 	if err != nil {
@@ -180,7 +180,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// Generate otel.runtime.go for all packages
+	// Generate otelc.runtime.go for all packages
 	moduleDirs := make(map[string]bool)
 	for _, pkg := range pkgs {
 		if pkg.Module == nil {
@@ -192,7 +192,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		if pkgDir == "" {
 			pkgDir = moduleDir
 		}
-		// Introduce additional hook code by generating otel.runtime.go
+		// Introduce additional hook code by generating otelc.runtime.go
 		if err = sp.addDeps(matched, pkgDir); err != nil {
 			return err
 		}
@@ -210,7 +210,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	return sp.store(matched)
 }
 
-// setupGoCache creates a persistent GOCACHE in .otel-build/gocache if one isn't already set.
+// setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
 // This prevents cache pollution when modifying core packages via //go:linkname while
 // allowing incremental builds to work properly.
 func setupGoCache(ctx context.Context, env []string) ([]string, error) {
@@ -349,15 +349,15 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 
 	// Tell the sub-process the working directory
 	env := os.Environ()
-	pwd := util.GetOtelWorkDir()
+	pwd := util.GetOtelcWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
-	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
+	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcWorkDir, pwd))
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
 	if buildFlags := extractBuildFlags(args); len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)
-		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelBuildFlags, encoded))
+		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))
 		logger.DebugContext(ctx, "forwarding build flags", "flags", buildFlags)
 	}
 
@@ -389,9 +389,9 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 			logger.DebugContext(ctx, "failed to get build packages", "error", err)
 		}
 		for _, pkg := range pkgs {
-			if err = os.RemoveAll(filepath.Join(pkg.Dir, OtelRuntimeFile)); err != nil {
+			if err = os.RemoveAll(filepath.Join(pkg.Dir, OtelcRuntimeFile)); err != nil {
 				logger.DebugContext(ctx, "failed to remove generated file from package",
-					"file", filepath.Join(pkg.Dir, OtelRuntimeFile), "error", err)
+					"file", filepath.Join(pkg.Dir, OtelcRuntimeFile), "error", err)
 			}
 		}
 		if err = os.RemoveAll(unzippedPkgDir); err != nil {

@@ -20,4 +20,4 @@ exclude:
   - .git/
   - node_modules/
   - pb/
-  - .otel-build/
+  - .otelc-build/

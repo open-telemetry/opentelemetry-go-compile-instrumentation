@@ -183,14 +183,14 @@ go 1.21
 	t.Chdir(tempDir)
 
 	// Set environment variable to override build temp dir
-	t.Setenv(util.EnvOtelWorkDir, tempDir)
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 	// Create the pkg directory structure
 	pkgDir := filepath.Join(tempDir, "pkg")
 	err = os.MkdirAll(pkgDir, 0o755)
 	require.NoError(t, err)
 	pkgGoMod := filepath.Join(pkgDir, "go.mod")
-	err = os.WriteFile(pkgGoMod, []byte("module "+util.OtelRoot+"/pkg\ngo 1.21\n"), 0o644)
+	err = os.WriteFile(pkgGoMod, []byte("module "+util.OtelcRoot+"/pkg\ngo 1.21\n"), 0o644)
 	require.NoError(t, err)
 
 	sp := &SetupPhase{
@@ -202,7 +202,7 @@ go 1.21
 		InstBaseRule: rule.InstBaseRule{
 			Name: "test-rule",
 		},
-		Path: util.OtelRoot + "/pkg/instrumentation/nethttp",
+		Path: util.OtelcRoot + "/pkg/instrumentation/nethttp",
 	}
 
 	ruleSet := &rule.InstRuleSet{

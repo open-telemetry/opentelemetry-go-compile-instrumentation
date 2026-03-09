@@ -63,7 +63,7 @@ func TestInstrumentation_Integration(t *testing.T) {
 
 func runTest(t *testing.T, testName string) {
 	tempDir := t.TempDir()
-	t.Setenv(util.EnvOtelWorkDir, tempDir)
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
 	ctx := util.ContextWithLogger(
 		t.Context(),
 		slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),

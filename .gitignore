@@ -6,12 +6,12 @@ demo/basic/basic
 .idea
 tmp
 
-.otel-build
+.otelc-build
 **/.DS_Store
 demo/demo
 
-otel.runtime.go
-otel-pkg.gz
+otelc.runtime.go
+otelc-pkg.gz
 pkg_temp
 coverage.txt
 
