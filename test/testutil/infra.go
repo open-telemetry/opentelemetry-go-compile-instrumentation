@@ -17,7 +17,7 @@ import (
 
 const (
 	otelcBinName = "otelc"
-	appBinName  = "app"
+	appBinName   = "app"
 )
 
 // -----------------------------------------------------------------------------

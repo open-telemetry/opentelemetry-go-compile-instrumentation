@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	tJumpLabel      = "/* __TRAMPOLINE_JUMP_IF__ */"
+	tJumpLabel       = "/* __TRAMPOLINE_JUMP_IF__ */"
 	otelcGlobalsFile = "otelc.globals.go"
 )
 
