@@ -3,9 +3,11 @@
 
 package main
 
-import fmt "fmt"
+import (
+	"unsafe"
 
-import "unsafe"
+	"fmt"
+)
 
 func CallSizeof() {
 	x := 42
