@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
-	"unsafe"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/semconv"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
@@ -189,7 +188,7 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 }
 
 func redisV9String(b []byte) string {
-	return *(*string)(unsafe.Pointer(&b))
+	return string(b)
 }
 
 func redisV9AppendUTF8String(dst, src []byte) []byte {
@@ -198,12 +197,7 @@ func redisV9AppendUTF8String(dst, src []byte) []byte {
 }
 
 func redisV9Bytes(s string) []byte {
-	return *(*[]byte)(unsafe.Pointer(
-		&struct {
-			string
-			Cap int
-		}{s, len(s)},
-	))
+	return []byte(s)
 }
 
 func redisV9AppendArg(b []byte, v interface{}) []byte {
