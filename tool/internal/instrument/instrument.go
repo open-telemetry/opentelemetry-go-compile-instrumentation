@@ -6,6 +6,7 @@ package instrument
 import (
 	"path/filepath"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -44,14 +45,14 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	for _, rule := range rset.FileRules {
 		err := ip.applyFileRule(rule, rset.PackageName)
 		if err != nil {
-			return err
+			return ex.Wrapf(err, "applying file rule %s", rule.Name)
 		}
 	}
 	for file, rules := range groupRules(ip.workDir, rset) {
 		// Group rules by file, then parse the target file once
 		root, err := ip.parseFile(file)
 		if err != nil {
-			return err
+			return ex.Wrapf(err, "parsing file %s", file)
 		}
 
 		// Apply the rules to the target file
@@ -60,18 +61,18 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 			case *rule.InstFuncRule:
 				err1 := ip.applyFuncRule(rt, root)
 				if err1 != nil {
-					return err1
+					return ex.Wrapf(err1, "applying func rule %s to %s", rt.Name, file)
 				}
 				hasFuncRule = true
 			case *rule.InstStructRule:
 				err1 := ip.applyStructRule(rt, root)
 				if err1 != nil {
-					return err1
+					return ex.Wrapf(err1, "applying struct rule %s to %s", rt.Name, file)
 				}
 			case *rule.InstRawRule:
 				err1 := ip.applyRawRule(rt, root)
 				if err1 != nil {
-					return err1
+					return ex.Wrapf(err1, "applying raw rule %s to %s", rt.Name, file)
 				}
 				hasFuncRule = true
 			case *rule.InstCallRule:
@@ -86,12 +87,12 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 		// Since trampoline-jump-if is performance-critical, perform AST level
 		// optimization for them before writing to file
 		if err = ip.optimizeTJumps(); err != nil {
-			return err
+			return ex.Wrapf(err, "optimizing trampoline jumps for %s", file)
 		}
 		// Once all func rules targeting this file are applied, write instrumented
 		// AST to new file and replace the original file in the compile command
 		if err = ip.writeInstrumented(root, file); err != nil {
-			return err
+			return ex.Wrapf(err, "writing instrumented file %s", file)
 		}
 	}
 

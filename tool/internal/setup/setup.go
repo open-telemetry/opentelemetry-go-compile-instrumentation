@@ -171,13 +171,13 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	// Extract the embedded pkg module into local directory
 	err = sp.extract()
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "extracting embedded instrumentation pkg")
 	}
 
 	// Match the hook code with these dependencies
 	matched, err := sp.matchDeps(ctx, deps)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
 	// Generate otelc.runtime.go for all packages
@@ -194,7 +194,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		}
 		// Introduce additional hook code by generating otelc.runtime.go
 		if err = sp.addDeps(matched, pkgDir); err != nil {
-			return err
+			return ex.Wrapf(err, "adding deps for package %s", pkgDir)
 		}
 		moduleDirs[moduleDir] = true
 	}
@@ -202,7 +202,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	// Sync new dependencies to go.mod or vendor/modules.txt
 	for moduleDir := range moduleDirs {
 		if err = sp.syncDeps(ctx, matched, moduleDir); err != nil {
-			return err
+			return ex.Wrapf(err, "syncing deps for module %s", moduleDir)
 		}
 	}
 
@@ -364,7 +364,7 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	// Use a fresh GOCACHE to prevent cache pollution when modifying core packages
 	env, err = setupGoCache(ctx, env)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "configuring go cache")
 	}
 
 	return util.RunCmdWithEnv(ctx, env, newArgs...)

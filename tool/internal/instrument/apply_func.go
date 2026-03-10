@@ -263,7 +263,7 @@ func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
 	p := ast.NewAstParser()
 	trampoline, err := p.ParseSource("package " + pkgName)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "parsing globals header for package %s", pkgName)
 	}
 	// Declare common variable declarations
 	trampoline.Decls = append(trampoline.Decls, ip.varDecls...)
@@ -271,7 +271,7 @@ func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
 	// Declare the hook context interface
 	api, err := p.ParseSource(templateAPI)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "parsing api template")
 	}
 	trampoline.Decls = append(trampoline.Decls, api.Decls...)
 
@@ -279,7 +279,7 @@ func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
 	path := filepath.Join(ip.workDir, otelcGlobalsFile)
 	err = ast.WriteFile(path, trampoline)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "writing globals file %s", path)
 	}
 	ip.addCompileArg(path)
 	ip.keepForDebug(path)
@@ -322,7 +322,7 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 	ip.parser = ast.NewAstParser()
 	root, err := ip.parser.Parse(file, parser.ParseComments)
 	if err != nil {
-		return nil, err
+		return nil, ex.Wrapf(err, "parsing source file %s", file)
 	}
 	ip.target = root
 	// Every time we parse a file, we need to reset the trampoline jumps

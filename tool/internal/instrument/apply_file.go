@@ -33,7 +33,7 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 	// List all files in the rule module path
 	files, err := listRuleFiles(rule.Path)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "listing files for rule %s at path %s", rule.Name, rule.Path)
 	}
 
 	// Find the new file we want to introduce
@@ -48,7 +48,7 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 	// Parse the new file into AST nodes and modify it as needed
 	root, err := ip.parseFile(file)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "parsing rule source file %s", file)
 	}
 	// Always rename the package name to the target package name
 	root.Name.Name = pkgName
@@ -66,7 +66,7 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 	newFile := filepath.Join(ip.workDir, fmt.Sprintf("otelc.%s.go", newName))
 	err = ast.WriteFile(newFile, root)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "writing instrumented file %s", newFile)
 	}
 	ip.Info("Apply file rule", "rule", rule)
 
