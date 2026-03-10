@@ -75,7 +75,10 @@ func (ip *InstrumentPhase) keepForDebug(name string) {
 func stripCompleteFlag(args []string) []string {
 	for i, arg := range args {
 		if arg == "-complete" {
-			return append(args[:i], args[i+1:]...)
+			result := make([]string, 0, len(args)-1)
+			result = append(result, args[:i]...)
+			result = append(result, args[i+1:]...)
+			return result
 		}
 	}
 	return args
