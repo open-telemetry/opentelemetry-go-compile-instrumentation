@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -29,7 +30,7 @@ func listRuleFiles(path string) ([]string, error) {
 }
 
 // applyFileRule introduces the new file to the target package at compile time.
-func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string) error {
+func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
 	// List all files in the rule module path
 	files, err := listRuleFiles(rule.Path)
 	if err != nil {
@@ -55,7 +56,7 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 
 	// The file being added has its own imports that need to be in importcfg.
 	// Without this, the compiler will fail with "could not import X" errors.
-	if err = ip.updateImportConfigForFile(root, rule.Name); err != nil {
+	if err = ip.updateImportConfigForFile(ctx, root, rule.Name); err != nil {
 		return err
 	}
 
