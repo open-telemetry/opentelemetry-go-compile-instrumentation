@@ -106,7 +106,7 @@ func buildOtelcRuntimeAst(decls []dst.Decl) *dst.File {
 func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) error {
 	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
-		funcRules := m.GetFuncRules()
+		funcRules := m.AllFuncRules()
 		rules = append(rules, funcRules...)
 	}
 	if len(rules) == 0 {
