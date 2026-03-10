@@ -50,12 +50,17 @@ func TestStripCompleteFlag(t *testing.T) {
 		{
 			name:     "only complete flag",
 			args:     []string{"-complete"},
-			expected: []string{},
+			expected: nil, // slices.Concat returns nil for empty result; nil == empty slice in Go
 		},
 		{
 			name:     "complete as value not flag",
 			args:     []string{"-mode", "-complete", "-o", "output.a"},
 			expected: []string{"-mode", "-o", "output.a"},
+		},
+		{
+			name:     "multiple occurrences removes only first",
+			args:     []string{"-complete", "-o", "out", "-complete"},
+			expected: []string{"-o", "out", "-complete"},
 		},
 	}
 
@@ -65,6 +70,15 @@ func TestStripCompleteFlag(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+
+	t.Run("does not mutate original slice", func(t *testing.T) {
+		original := []string{"-o", "output.a", "-complete", "-p", "main"}
+		snapshot := make([]string, len(original))
+		copy(snapshot, original)
+		result := stripCompleteFlag(original)
+		require.Equal(t, []string{"-o", "output.a", "-p", "main"}, result)
+		require.Equal(t, snapshot, original, "must not mutate original slice")
+	})
 }
 
 func TestUpdateImportConfig(t *testing.T) {
