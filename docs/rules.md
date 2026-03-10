@@ -23,7 +23,7 @@ All rules share a set of common fields that define the target of the instrumenta
 
 ## Rule Types
 
-There are five types of rules, each designed for a specific kind of code modification.
+There are several types of rules, each designed for a specific kind of code modification.
 
 ### 1. Function Hook Rule
 
@@ -135,6 +135,7 @@ This rule injects a string of raw Go code at the beginning of a target function.
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
 - `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function.
+- `imports` (map[string]string, optional): A map of imports to inject into the instrumented file, needed when injected code references external packages. Same format as [Common Fields](#common-fields).
 
 **Example:**
 
