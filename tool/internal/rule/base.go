@@ -6,6 +6,7 @@ package rule
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -67,14 +68,20 @@ func NewInstRuleSet(importPath string) *InstRuleSet {
 }
 
 func (irs *InstRuleSet) String() string {
-	return fmt.Sprintf("{%s: %v, %v, %v, %v, %v}",
-		irs.ModulePath,
-		irs.RawRules,
-		irs.FuncRules,
-		irs.StructRules,
-		irs.CallRules,
-		irs.FileRules,
-	)
+	var sb strings.Builder
+	sb.WriteString("{")
+	sb.WriteString(irs.ModulePath)
+	parts := []string{
+		fmt.Sprintf("raw=%v", irs.RawRules),
+		fmt.Sprintf("func=%v", irs.FuncRules),
+		fmt.Sprintf("struct=%v", irs.StructRules),
+		fmt.Sprintf("call=%v", irs.CallRules),
+		fmt.Sprintf("file=%v", irs.FileRules),
+	}
+	sb.WriteString(": ")
+	sb.WriteString(strings.Join(parts, ", "))
+	sb.WriteString("}")
+	return sb.String()
 }
 
 func (irs *InstRuleSet) IsEmpty() bool {
