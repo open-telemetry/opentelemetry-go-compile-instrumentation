@@ -68,9 +68,6 @@ func NewInstRuleSet(importPath string) *InstRuleSet {
 }
 
 func (irs *InstRuleSet) String() string {
-	var sb strings.Builder
-	sb.WriteString("{")
-	sb.WriteString(irs.ModulePath)
 	parts := []string{
 		fmt.Sprintf("raw=%v", irs.RawRules),
 		fmt.Sprintf("func=%v", irs.FuncRules),
@@ -78,10 +75,7 @@ func (irs *InstRuleSet) String() string {
 		fmt.Sprintf("call=%v", irs.CallRules),
 		fmt.Sprintf("file=%v", irs.FileRules),
 	}
-	sb.WriteString(": ")
-	sb.WriteString(strings.Join(parts, ", "))
-	sb.WriteString("}")
-	return sb.String()
+	return fmt.Sprintf("{%s: %s}", irs.ModulePath, strings.Join(parts, ", "))
 }
 
 func (irs *InstRuleSet) IsEmpty() bool {

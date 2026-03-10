@@ -107,7 +107,7 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 }
 
 func createTrampArgs(names []string) []dst.Expr {
-	exprs := make([]dst.Expr, 0)
+	exprs := make([]dst.Expr, 0, len(names))
 	for _, name := range names {
 		util.Assert(name != ast.IdentIgnore, "must be processed before")
 		exprs = append(exprs, ast.AddressOf(name))
@@ -135,7 +135,7 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 		ast.Exprs(beforeCall),
 	)
 	tjumpCond := ast.Ident(trampolineSkipName + funcSuffix)
-	tjumpReturn := make([]dst.Expr, 0)
+	tjumpReturn := make([]dst.Expr, 0, len(retVals))
 	for _, retVal := range retVals {
 		tjumpReturn = append(tjumpReturn, ast.Ident(retVal))
 	}
