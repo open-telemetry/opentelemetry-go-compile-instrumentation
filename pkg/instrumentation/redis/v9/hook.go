@@ -5,6 +5,7 @@ package v9
 
 import (
 	"context"
+	"errors"
 	"net"
 	"runtime/debug"
 	"strconv"
@@ -97,12 +98,11 @@ func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 		)
 		defer span.End()
 
-		if err := next(ctx, cmd); err != nil && err != redis.Nil {
+		err := next(ctx, cmd)
+		if err != nil && !errors.Is(err, redis.Nil) {
 			span.SetStatus(codes.Error, err.Error())
-			return err
 		}
-
-		return nil
+		return err
 	}
 }
 
@@ -145,12 +145,11 @@ func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 		)
 		defer span.End()
 
-		if err := next(ctx, cmds); err != nil && err != redis.Nil {
+		err := next(ctx, cmds)
+		if err != nil && !errors.Is(err, redis.Nil) {
 			span.SetStatus(codes.Error, err.Error())
-			return err
 		}
-
-		return nil
+		return err
 	}
 }
 
@@ -174,7 +173,7 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 		b = redisV9AppendArg(b, arg)
 	}
 
-	if err := cmd.Err(); err != nil && err != redis.Nil {
+	if err := cmd.Err(); err != nil && !errors.Is(err, redis.Nil) {
 		b = append(b, ": "...)
 		b = append(b, err.Error()...)
 	}
@@ -184,39 +183,23 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 		b = redisV9AppendArg(b, cmd.Name())
 	}
 
-	return redisV9String(b)
-}
-
-func redisV9String(b []byte) string {
 	return string(b)
 }
 
-func redisV9AppendUTF8String(dst, src []byte) []byte {
-	dst = append(dst, src...)
-	return dst
-}
-
-func redisV9Bytes(s string) []byte {
-	return []byte(s)
-}
-
-func redisV9AppendArg(b []byte, v interface{}) []byte {
+func redisV9AppendArg(b []byte, v any) []byte {
 	switch v := v.(type) {
 	case nil:
 		return append(b, "<nil>"...)
 	case string:
-		bts := redisV9Bytes(v)
-		if utf8.Valid(bts) {
-			return redisV9AppendUTF8String(b, bts)
-		} else {
-			return redisV9AppendUTF8String(b, redisV9Bytes("<string>"))
+		if utf8.ValidString(v) {
+			return append(b, v...)
 		}
+		return append(b, "<string>"...)
 	case []byte:
 		if utf8.Valid(v) {
-			return redisV9AppendUTF8String(b, v)
-		} else {
-			return redisV9AppendUTF8String(b, redisV9Bytes("<byte>"))
+			return append(b, v...)
 		}
+		return append(b, "<byte>"...)
 	case int:
 		return strconv.AppendInt(b, int64(v), 10)
 	case int8:
