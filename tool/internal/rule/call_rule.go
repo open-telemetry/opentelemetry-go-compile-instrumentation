@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/template"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/template"
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,6 +78,10 @@ type InstCallRule struct {
 //   - "" (empty string)
 var funcNamePattern = regexp.MustCompile(`^(.+)\.([^\d\W]\w*)$`)
 
+// templatePlaceholderPattern matches Go text/template placeholder variants:
+// {{ . }}, {{.}}, {{- . -}}, {{ .  }}, etc.
+var templatePlaceholderPattern = regexp.MustCompile(`\{\{-?\s*\.\s*-?\}\}`)
+
 // NewInstCallRule loads and validates an InstCallRule from YAML data.
 func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 	var r InstCallRule
@@ -122,8 +126,8 @@ func (r *InstCallRule) validate() error {
 	if strings.TrimSpace(r.Template) == "" {
 		return ex.Newf("template cannot be empty")
 	}
-	if !strings.Contains(r.Template, "{{ . }}") {
-		return ex.Newf("template must contain {{ . }} placeholder")
+	if !templatePlaceholderPattern.MatchString(r.Template) {
+		return ex.Newf("template must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)")
 	}
 	return nil
 }

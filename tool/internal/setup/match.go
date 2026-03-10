@@ -210,6 +210,11 @@ func (sp *SetupPhase) preciseMatching(
 					sp.Info("Match raw rule", "rule", rt, "dep", dep)
 				}
 			case *rule.InstCallRule:
+				// Call rules are added unconditionally to all source files in the
+				// target package. Unlike func/struct/raw rules, there is no cheap
+				// AST predicate to pre-filter files (the matching requires import
+				// alias resolution which happens during the instrument phase).
+				// Files without matching calls are a no-op in applyCallRule.
 				set.AddCallRule(source, rt)
 				sp.Info("Match call rule", "rule", rt, "dep", dep)
 			case *rule.InstFileRule:

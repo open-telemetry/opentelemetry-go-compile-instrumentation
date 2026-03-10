@@ -141,12 +141,3 @@ func (irs *InstRuleSet) GetStructRules() []*InstStructRule {
 	}
 	return rules
 }
-
-// GetCallRules returns all call rules from the rule set.
-func (irs *InstRuleSet) GetCallRules() []*InstCallRule {
-	rules := make([]*InstCallRule, 0)
-	for _, rs := range irs.CallRules {
-		rules = append(rules, rs...)
-	}
-	return rules
-}

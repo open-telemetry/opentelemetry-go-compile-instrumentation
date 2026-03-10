@@ -86,6 +86,11 @@ func collectImportAliases(file *dst.File) map[string]string {
 	return aliases
 }
 
+// defaultImportAlias infers the package alias from an import path, replicating
+// Go's default alias rules (last path element, versioned-path stripping, gopkg.in
+// conventions). This is a best-effort reimplementation — edge cases like package
+// names containing hyphens, _test packages, or build-tag-conditional imports may
+// behave differently from the Go compiler's own resolution.
 func defaultImportAlias(importPath string) string {
 	base := path.Base(importPath)
 	if base == "." || base == "/" {

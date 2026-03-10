@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/template"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/template"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
@@ -96,7 +96,7 @@ func TestWrapCall_NonCallExpressionResult(t *testing.T) {
 	err = wrapCall(call, r)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "did not produce a call expression")
+	assert.Contains(t, err.Error(), "template output must be a call expression")
 }
 
 func TestMatchesCallRule_QualifiedCallMatches(t *testing.T) {

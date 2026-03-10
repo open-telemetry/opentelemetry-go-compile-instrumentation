@@ -21,7 +21,12 @@ import (
 // and supports placeholder substitution for AST nodes.
 type Template struct {
 	template *template.Template
-	Source   string
+	source   string
+}
+
+// String returns the original template source text.
+func (t *Template) String() string {
+	return t.source
 }
 
 // wrapper is a template that wraps user templates in a minimal function
@@ -52,7 +57,7 @@ func NewTemplate(text string) (*Template, error) {
 
 	return &Template{
 		template: tmpl,
-		Source:   text,
+		source:   text,
 	}, nil
 }
 

@@ -18,7 +18,7 @@ func TestNewTemplate_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, tmpl)
-	assert.Equal(t, text, tmpl.Source)
+	assert.Equal(t, text, tmpl.String())
 }
 
 func TestNewTemplate_InvalidSyntax(t *testing.T) {
@@ -38,7 +38,7 @@ func TestNewTemplate_EmptyTemplate(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, tmpl)
-	assert.Equal(t, text, tmpl.Source)
+	assert.Equal(t, text, tmpl.String())
 }
 
 func TestCompileExpression_SimpleWrapping(t *testing.T) {
