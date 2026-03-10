@@ -84,7 +84,9 @@ func stripCompleteFlag(args []string) []string {
 func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
-	util.Assert(target != "", "missing -o flag value")
+	if target == "" {
+		return nil, ex.New("missing -o flag value")
+	}
 
 	// Extract -importcfg flag
 	importCfgPath := util.FindFlagValue(args, "-importcfg")

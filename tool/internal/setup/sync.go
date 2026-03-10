@@ -91,7 +91,9 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	}
 	replaces := make([]*replaceDirective, 0)
 	for _, m := range rules {
-		util.Assert(strings.HasPrefix(m.Path, util.OtelcRoot), "sanity check")
+		if !strings.HasPrefix(m.Path, util.OtelcRoot) {
+			return ex.Newf("hook path %q does not have expected prefix %q", m.Path, util.OtelcRoot)
+		}
 		oldPath := m.Path
 		newPath := strings.TrimPrefix(oldPath, util.OtelcRoot)
 		newPath = filepath.Join(util.GetBuildTempDir(), newPath)

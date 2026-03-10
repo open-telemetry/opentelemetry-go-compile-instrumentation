@@ -163,7 +163,9 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 		Sources:    make([]string, 0),
 		CgoFiles:   make(map[string]string),
 	}
-	util.Assert(dep.ImportPath != "", "import path is empty")
+	if dep.ImportPath == "" {
+		return nil, ex.New("import path is empty (missing -p flag)")
+	}
 
 	// Find the go files belong to the package as dependency sources
 	for _, arg := range args {
@@ -233,7 +235,9 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {
 			args := util.SplitCompileCmds(cmd)
 			objDir := util.FindFlagValue(args, "-objdir")
-			util.Assert(objDir != "", "sanity check")
+			if objDir == "" {
+				return nil, ex.Newf("cgo command missing -objdir flag: %s", cmd)
+			}
 			cgoObjDirs[util.NormalizePath(objDir)] = currentDir
 			sp.Debug("Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
 		}

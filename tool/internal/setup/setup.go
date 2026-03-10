@@ -350,7 +350,9 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	// Tell the sub-process the working directory
 	env := os.Environ()
 	pwd := util.GetOtelcWorkDir()
-	util.Assert(pwd != "", "invalid working directory")
+	if pwd == "" {
+		return ex.New("invalid working directory: otelc work dir not configured")
+	}
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcWorkDir, pwd))
 
 	// Extract and forward build flags that affect the build context
