@@ -209,6 +209,9 @@ func (sp *SetupPhase) preciseMatching(
 					set.AddRawRule(source, rt)
 					sp.Info("Match raw rule", "rule", rt, "dep", dep)
 				}
+			case *rule.InstCallRule:
+				set.AddCallRule(source, rt)
+				sp.Info("Match call rule", "rule", rt, "dep", dep)
 			case *rule.InstFileRule:
 				// Skip as it's already processed
 				continue
