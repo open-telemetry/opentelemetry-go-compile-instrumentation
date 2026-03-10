@@ -68,7 +68,10 @@ func wrapCall(call *dst.CallExpr, r *rule.InstCallRule) error {
 	// Verify we got a call expression back
 	wrappedCall, ok := wrappedExpr.(*dst.CallExpr)
 	if !ok {
-		return ex.Newf("template output must be a call expression (e.g. \"wrapper({{ . }})\") but got %T; see docs/rules.md for supported template patterns", wrappedExpr)
+		return ex.Newf(
+			"template output must be a call expression (e.g. \"wrapper({{ . }})\") but got %T; see docs/rules.md for supported template patterns",
+			wrappedExpr,
+		)
 	}
 
 	// Clone the wrapped expression to avoid decoration conflicts

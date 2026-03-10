@@ -24,11 +24,6 @@ type Template struct {
 	source   string
 }
 
-// String returns the original template source text.
-func (t *Template) String() string {
-	return t.source
-}
-
 // wrapper is a template that wraps user templates in a minimal function
 // to allow them to be parsed as valid Go code.
 //
@@ -59,6 +54,11 @@ func NewTemplate(text string) (*Template, error) {
 		template: tmpl,
 		source:   text,
 	}, nil
+}
+
+// String returns the original template source text.
+func (t *Template) String() string {
+	return t.source
 }
 
 // CompileExpression executes the template with the given expression node as
