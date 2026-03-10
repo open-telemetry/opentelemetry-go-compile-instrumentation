@@ -74,8 +74,10 @@ func runTest(t *testing.T, testName string) {
 	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, sourceFileName)
 	if _, err := os.Stat(testSpecificSource); err == nil {
 		util.CopyFile(testSpecificSource, sourceFile)
-	} else {
+	} else if os.IsNotExist(err) {
 		util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
+	} else {
+		t.Fatalf("unexpected error checking test-specific source: %v", err)
 	}
 
 	ruleSet := loadRulesYAML(t, testName, sourceFile)
