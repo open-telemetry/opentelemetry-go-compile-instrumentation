@@ -314,7 +314,7 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
 		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
-		content, err := os.ReadFile(rulePath) //nolint:gosec // rulePath from trusted env var
+		content, err := os.ReadFile(rulePath)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to read %s from env variable", rulePath)
 		}
