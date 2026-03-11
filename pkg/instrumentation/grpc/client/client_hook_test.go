@@ -4,7 +4,6 @@
 package client
 
 import (
-	"context"
 	"net"
 	"testing"
 	"time"
@@ -58,9 +57,7 @@ func TestBeforeNewClient(t *testing.T) {
 		sdktrace.WithSyncer(exporter),
 	)
 	otel.SetTracerProvider(tp)
-	defer func() {
-		_ = tp.Shutdown(context.Background())
-	}()
+	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })
 
 	tests := []struct {
 		name          string
@@ -204,9 +201,7 @@ func TestBeforeDialContext(t *testing.T) {
 		sdktrace.WithSyncer(exporter),
 	)
 	otel.SetTracerProvider(tp)
-	defer func() {
-		_ = tp.Shutdown(context.Background())
-	}()
+	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })
 
 	tests := []struct {
 		name          string
@@ -241,7 +236,7 @@ func TestBeforeDialContext(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			ctx := context.Background()
+			ctx := t.Context()
 			ictx := newMockHookContext(ctx, tt.target, tt.opts)
 			BeforeDialContext(ictx, ctx, tt.target, tt.opts...)
 
@@ -323,10 +318,10 @@ func TestClientStatsHandler_TagRPC(t *testing.T) {
 	)
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer func() {
-		_ = tp.Shutdown(context.Background())
+	t.Cleanup(func() {
+		_ = tp.Shutdown(t.Context())
 		otel.SetTracerProvider(oldTP)
-	}()
+	})
 
 	// Re-initialize to use new tracer provider
 	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
@@ -349,7 +344,7 @@ func TestClientStatsHandler_TagRPC(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			info := &stats.RPCTagInfo{
 				FullMethodName: tt.fullMethodName,
 			}
@@ -399,7 +394,7 @@ func TestClientStatsHandler_Integration(t *testing.T) {
 	assert.Greater(t, len(newOpts), len(opts), "Expected stats handler to be added")
 
 	// Test DialContext as well
-	ctx := context.Background()
+	ctx := t.Context()
 	ictx2 := newMockHookContext(ctx, target, opts)
 	BeforeDialContext(ictx2, ctx, target, opts...)
 
@@ -410,7 +405,7 @@ func TestClientStatsHandler_Integration(t *testing.T) {
 func TestClientStatsHandler_TagConn(t *testing.T) {
 	handler := newClientStatsHandler()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	info := &stats.ConnTagInfo{
 		RemoteAddr: &net.TCPAddr{
 			IP:   net.ParseIP("127.0.0.1"),
@@ -425,7 +420,7 @@ func TestClientStatsHandler_TagConn(t *testing.T) {
 func TestClientStatsHandler_HandleConn(t *testing.T) {
 	handler := newClientStatsHandler()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	handler.HandleConn(ctx, &stats.ConnBegin{})
@@ -444,10 +439,10 @@ func TestClientStatsHandler_OTELExporterFiltering(t *testing.T) {
 	)
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer func() {
-		_ = tp.Shutdown(context.Background())
+	t.Cleanup(func() {
+		_ = tp.Shutdown(t.Context())
 		otel.SetTracerProvider(oldTP)
-	}()
+	})
 
 	// Re-initialize to use new tracer provider
 	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
@@ -483,7 +478,7 @@ func TestClientStatsHandler_OTELExporterFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			info := &stats.RPCTagInfo{
 				FullMethodName: tt.fullMethodName,
 			}
