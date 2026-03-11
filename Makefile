@@ -7,7 +7,7 @@ SHELL := /bin/bash
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
-        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
+        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
@@ -229,6 +229,30 @@ check-embed: ## Verify that embedded files exist (required for tests)
 		exit 1; \
 	fi
 	@echo "All embedded files present"
+
+check-api-sync: ## Verify api.tmpl is in sync with pkg/inst/context.go
+	@echo "Checking api.tmpl sync with $(API_SYNC_SOURCE)..."
+	@if ! diff -q $(API_SYNC_SOURCE) $(API_SYNC_TARGET) > /dev/null 2>&1; then \
+		echo "Error: $(API_SYNC_TARGET) is out of sync with $(API_SYNC_SOURCE)"; \
+		echo "Run 'make build' to sync, or: cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)"; \
+		diff $(API_SYNC_SOURCE) $(API_SYNC_TARGET) || true; \
+		exit 1; \
+	fi
+	@echo "api.tmpl is in sync with $(API_SYNC_SOURCE)"
+
+.ONESHELL:
+check-golden-files: ## Verify golden test files are up to date
+check-golden-files: package
+	@echo "Checking golden files are up to date..."
+	set -euo pipefail
+	cd tool/internal/instrument && go test -v -timeout=5m -count=1 -update
+	cd "$(CURDIR)"
+	if ! git diff --exit-code tool/internal/instrument/testdata/golden/; then \
+		echo "Error: golden files are stale"; \
+		echo "Run 'make test-unit/update-golden' to regenerate"; \
+		exit 1; \
+	fi
+	echo "Golden files are up to date"
 
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
