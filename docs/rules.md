@@ -161,7 +161,7 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 **Fields:**
 
-- `function-call` (string, required): Qualified function name in format `package/path.FunctionName`. Matches calls to functions from a specific import path.
+- `function_call` (string, required): Qualified function name in format `package/path.FunctionName`. Matches calls to functions from a specific import path.
 - `template` (string, required): Wrapper template using Go's `text/template` syntax with `{{ . }}` placeholder for the original call. The template must be a valid Go expression that produces a call expression (current limitation).
 - `imports` (map, optional): Additional imports needed for wrapper code (alias: path).
 
@@ -179,9 +179,9 @@ Currently supported template features:
 - IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
 - Complex expressions with multiple statements using IIFE
 
-**Understanding function-call Matching:**
+**Understanding function_call Matching:**
 
-The `function-call` field must use the qualified format: `package/path.FunctionName`
+The `function_call` field must use the qualified format: `package/path.FunctionName`
 
 Examples:
 
@@ -201,7 +201,7 @@ Examples:
 ```yaml
 wrap_http_get:
   target: myapp/server
-  function-call: net/http.Get
+  function_call: net/http.Get
   template: "tracedGet({{ . }})"
 ```
 
@@ -233,7 +233,7 @@ func fetchData(url string) {
 ```yaml
 wrap_redis_get:
   target: myapp/cache
-  function-call: github.com/redis/go-redis/v9.Get
+  function_call: github.com/redis/go-redis/v9.Get
   template: "tracedRedisGet(ctx, {{ . }})"
 ```
 
@@ -260,7 +260,7 @@ This example demonstrates the power of the `text/template` system by using an II
 ```yaml
 wrap_with_unsafe:
   target: client
-  function-call: myapp/utils.Helper
+  function_call: myapp/utils.Helper
   template: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
 ```
 

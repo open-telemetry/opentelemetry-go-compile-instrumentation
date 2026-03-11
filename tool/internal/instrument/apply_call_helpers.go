@@ -16,7 +16,7 @@ import (
 // matchesCallRule checks if a call expression matches the rule's criteria.
 //
 // Only qualified calls are supported: pkg.Function()
-// The function-call rule must specify the full import path: "package/path.FunctionName"
+// The function_call rule must specify the full import path: "package/path.FunctionName"
 //
 // Examples in source code:
 //   - http.Get() after "import 'net/http'" matches "net/http.Get"

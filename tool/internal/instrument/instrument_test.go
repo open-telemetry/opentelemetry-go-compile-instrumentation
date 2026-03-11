@@ -138,7 +138,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		case props["func"] != nil:
 			r, _ := rule.NewInstFuncRule(ruleData, name)
 			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
-		case props["function-call"] != nil:
+		case props["function_call"] != nil:
 			r, _ := rule.NewInstCallRule(ruleData, name)
 			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
 		}

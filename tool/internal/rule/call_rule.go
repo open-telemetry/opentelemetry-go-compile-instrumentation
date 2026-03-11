@@ -15,7 +15,7 @@ import (
 
 // InstCallRule represents a rule that wraps function calls at call sites.
 //
-// The function-call field must use the qualified format: "package/path.FunctionName"
+// The function_call field must use the qualified format: "package/path.FunctionName"
 // This matches calls to functions from a specific import path.
 //
 // Examples:
@@ -26,7 +26,7 @@ import (
 //
 //	wrap_http_get:
 //		target: "main"
-//		function-call: "net/http.Get"
+//		function_call: "net/http.Get"
 //		template: "tracedGet({{ . }})"
 //
 // This transforms: http.Get("url")
@@ -36,7 +36,7 @@ type InstCallRule struct {
 
 	// FunctionCall is the qualified function name from YAML (e.g., "net/http.Get")
 	// This field is parsed into ImportPath and FuncName during rule creation.
-	FunctionCall string `json:"function-call" yaml:"function-call"`
+	FunctionCall string `json:"function_call" yaml:"function_call"`
 
 	// ImportPath is the parsed package import path (e.g., "net/http")
 	// This field is populated during rule creation from FunctionCall.
@@ -95,7 +95,7 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 	// Parse the qualified function name once at creation
 	matches := funcNamePattern.FindStringSubmatch(r.FunctionCall)
 	if matches == nil {
-		return nil, ex.Newf("invalid function-call format: %q (expected 'package/path.FunctionName')", r.FunctionCall)
+		return nil, ex.Newf("invalid function_call format: %q (expected 'package/path.FunctionName')", r.FunctionCall)
 	}
 
 	// Store parsed components
@@ -120,7 +120,7 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 func (r *InstCallRule) validate() error {
 	// FunctionCall format already validated in NewInstCallRule
 	if strings.TrimSpace(r.FunctionCall) == "" {
-		return ex.Newf("function-call cannot be empty")
+		return ex.Newf("function_call cannot be empty")
 	}
 
 	if strings.TrimSpace(r.Template) == "" {
@@ -151,7 +151,7 @@ func (r *InstCallRule) UnmarshalJSON(data []byte) error {
 	if r.ImportPath == "" || r.FuncName == "" {
 		matches := funcNamePattern.FindStringSubmatch(r.FunctionCall)
 		if matches == nil {
-			return ex.Newf("invalid function-call format: %q", r.FunctionCall)
+			return ex.Newf("invalid function_call format: %q", r.FunctionCall)
 		}
 		r.ImportPath = matches[1]
 		r.FuncName = matches[2]
