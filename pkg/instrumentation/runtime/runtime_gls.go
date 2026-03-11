@@ -3,27 +3,27 @@
 
 package runtime
 
-func GetTraceContextFromGLS() interface{} {
+func GetTraceContextFromGLS() any {
 	return getg().m.curg.otel_trace_context
 }
 
-func GetBaggageContainerFromGLS() interface{} {
+func GetBaggageContainerFromGLS() any {
 	return getg().m.curg.otel_baggage_container
 }
 
-func SetTraceContextToGLS(traceContext interface{}) {
+func SetTraceContextToGLS(traceContext any) {
 	getg().m.curg.otel_trace_context = traceContext
 }
 
-func SetBaggageContainerToGLS(baggageContainer interface{}) {
+func SetBaggageContainerToGLS(baggageContainer any) {
 	getg().m.curg.otel_baggage_container = baggageContainer
 }
 
 type OtelContextCloner interface {
-	Clone() interface{}
+	Clone() any
 }
 
-func propagateOtelContext(context interface{}) interface{} {
+func propagateOtelContext(context any) any {
 	if context == nil {
 		return nil
 	}

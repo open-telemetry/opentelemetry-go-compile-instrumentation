@@ -31,7 +31,7 @@ func (tc *traceContext) String() string {
 	return fmt.Sprintf("traceID: %s, spanID: %s", tc.traceID, tc.spanID)
 }
 
-func (tc *traceContext) Clone() interface{} {
+func (tc *traceContext) Clone() any {
 	return &traceContext{
 		traceID: tc.traceID,
 		spanID:  tc.spanID,

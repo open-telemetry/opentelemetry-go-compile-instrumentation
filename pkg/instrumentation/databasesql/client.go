@@ -195,7 +195,7 @@ func afterTxInstrumentation(ictx inst.HookContext, tx *sql.Tx, err error) {
 	if tx == nil || ictx.GetData() == nil {
 		return
 	}
-	callData, ok := ictx.GetData().(map[string]interface{})
+	callData, ok := ictx.GetData().(map[string]any)
 	if !ok {
 		return
 	}
@@ -605,7 +605,7 @@ func instrumentStart(
 	)
 
 	// Store data for after hook
-	ictx.SetData(map[string]interface{}{
+	ictx.SetData(map[string]any{
 		"ctx":   ctx,
 		"span":  span,
 		"req":   req,

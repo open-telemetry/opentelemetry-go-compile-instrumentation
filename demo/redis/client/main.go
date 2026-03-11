@@ -89,7 +89,7 @@ func runHashCommands(ctx context.Context, rdb *redis.Client, iteration int) erro
 	key := fmt.Sprintf("demo:%d:user", iteration)
 
 	// HSET command
-	err := rdb.HSet(ctx, key, map[string]interface{}{
+	err := rdb.HSet(ctx, key, map[string]any{
 		"name":  "Alice",
 		"email": "alice@example.com",
 		"age":   "30",

@@ -267,11 +267,11 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 		}
 
 		// Remaining params must match dereferenced trampoline params
-		// (interface{} in hook accepts any type, used for generics)
+		// (interface{} or any in hook accepts any type, used for generics)
 		for i, trampField := range beforeTrampParams.List {
 			trampBase := baseTypeName(trampField.Type)
 			hookBase := baseTypeName(beforeHookParams.List[i+1].Type)
-			if hookBase != trampolineInterfaceType && trampBase != hookBase {
+			if hookBase != trampolineInterfaceType && hookBase != "any" && trampBase != hookBase {
 				return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 					i+1, trampBase, hookBase)
 			}
@@ -291,11 +291,11 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	}
 
 	// All params must match (first is HookContext, rest are dereferenced)
-	// (interface{} in hook accepts any type, used for generics)
+	// (interface{} or any in hook accepts any type, used for generics)
 	for i, trampField := range afterTrampParams.List {
 		trampBase := baseTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
-		if hookBase != trampolineInterfaceType && trampBase != hookBase {
+		if hookBase != trampolineInterfaceType && hookBase != "any" && trampBase != hookBase {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 				i, trampBase, hookBase)
 		}

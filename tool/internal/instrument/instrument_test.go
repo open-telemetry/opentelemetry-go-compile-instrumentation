@@ -22,7 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,7 +118,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	for name := range rawRules {
 		ruleNames = append(ruleNames, name)
 	}
-	sort.Strings(ruleNames)
+	slices.Sort(ruleNames)
 
 	for _, name := range ruleNames {
 		props := rawRules[name]

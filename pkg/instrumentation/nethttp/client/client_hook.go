@@ -123,7 +123,7 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
 	ictx.SetParam(requestParamIndex, newReq)
 
 	// Store data for after hook
-	ictx.SetData(map[string]interface{}{
+	ictx.SetData(map[string]any{
 		"ctx":   ctx,
 		"span":  span,
 		"req":   req,

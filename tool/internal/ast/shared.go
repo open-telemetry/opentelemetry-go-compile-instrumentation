@@ -169,8 +169,12 @@ func IsStringLit(expr dst.Expr, val string) bool {
 }
 
 func IsInterfaceType(t dst.Expr) bool {
-	_, ok := t.(*dst.InterfaceType)
-	return ok
+	if _, ok := t.(*dst.InterfaceType); ok {
+		return true
+	}
+	// "any" is the modern alias for interface{} (Go 1.18+), handle both
+	ident, ok := t.(*dst.Ident)
+	return ok && ident.Name == "any"
 }
 
 func IsEllipsis(t dst.Expr) bool {

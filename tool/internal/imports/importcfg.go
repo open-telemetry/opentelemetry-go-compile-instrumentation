@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -112,7 +112,7 @@ func (r *ImportConfig) write(w io.Writer) error {
 	for name := range r.ImportMap {
 		importMapKeys = append(importMapKeys, name)
 	}
-	sort.Strings(importMapKeys)
+	slices.Sort(importMapKeys)
 
 	for _, name := range importMapKeys {
 		if _, err := fmt.Fprintf(w, "importmap %s=%s\n", name, r.ImportMap[name]); err != nil {
@@ -125,7 +125,7 @@ func (r *ImportConfig) write(w io.Writer) error {
 	for name := range r.PackageFile {
 		packageFileKeys = append(packageFileKeys, name)
 	}
-	sort.Strings(packageFileKeys)
+	slices.Sort(packageFileKeys)
 
 	for _, name := range packageFileKeys {
 		if _, err := fmt.Fprintf(w, "packagefile %s=%s\n", name, r.PackageFile[name]); err != nil {

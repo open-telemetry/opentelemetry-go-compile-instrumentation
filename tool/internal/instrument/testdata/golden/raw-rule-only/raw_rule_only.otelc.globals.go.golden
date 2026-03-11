@@ -7,27 +7,27 @@ type HookContext interface {
 	// Get the skip call flag, can be used to skip the original function call
 	IsSkipCall() bool
 	// Set the data field, can be used to pass information between Before and After hooks
-	SetData(interface{})
+	SetData(any)
 	// Get the data field, can be used to pass information between Before and After hooks
-	GetData() interface{}
+	GetData() any
 	// Get a value from the data field by key
-	GetKeyData(key string) interface{}
+	GetKeyData(key string) any
 	// Set a key-value pair in the data field
-	SetKeyData(key string, val interface{})
+	SetKeyData(key string, val any)
 	// Check if a key exists in the data field
 	HasKeyData(key string) bool
 	// Number of original function parameters
 	GetParamCount() int
 	// Get the original function parameter at index idx
-	GetParam(idx int) interface{}
+	GetParam(idx int) any
 	// Change the original function parameter at index idx
-	SetParam(idx int, val interface{})
+	SetParam(idx int, val any)
 	// Number of original function return values
 	GetReturnValCount() int
 	// Get the original function return value at index idx
-	GetReturnVal(idx int) interface{}
+	GetReturnVal(idx int) any
 	// Change the original function return value at index idx
-	SetReturnVal(idx int, val interface{})
+	SetReturnVal(idx int, val any)
 	// Get the original function name
 	GetFuncName() string
 	// Get the package name of the original function
