@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package template
+package instrument
 
 import (
 	"bytes"
@@ -14,12 +14,15 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
+	"github.com/dave/dst/dstutil"
+
+	toolast "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 )
 
-// Template represents a code template that can be used to wrap or transform
+// callTemplate represents a code template that can be used to wrap or transform
 // Go expressions. It uses Go's text/template package for template execution
 // and supports placeholder substitution for AST nodes.
-type Template struct {
+type callTemplate struct {
 	template *template.Template
 	source   string
 }
@@ -35,33 +38,32 @@ func _() {
 }
 `))
 
-// NewTemplate creates a new Template from the provided template text.
+// newCallTemplate creates a new callTemplate from the provided template text.
 // The template text should contain {{ . }} as a placeholder for the expression
 // being wrapped.
 //
 // Example:
 //
-//	NewTemplate("wrapper({{ . }})")
-func NewTemplate(text string) (*Template, error) {
-	// Create a new template and parse the user's template text
+//	newCallTemplate("wrapper({{ . }})")
+func newCallTemplate(text string) (*callTemplate, error) {
 	tmpl := template.New("code")
 	tmpl, err := tmpl.Parse(text)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	return &Template{
+	return &callTemplate{
 		template: tmpl,
 		source:   text,
 	}, nil
 }
 
 // String returns the original template source text.
-func (t *Template) String() string {
+func (t *callTemplate) String() string {
 	return t.source
 }
 
-// CompileExpression executes the template with the given expression node as
+// compileExpression executes the template with the given expression node as
 // the placeholder value, parses the result, and returns the transformed expression.
 //
 // The process:
@@ -69,7 +71,7 @@ func (t *Template) String() string {
 // 2. Wrap the result in a minimal function and parse it
 // 3. Extract the expression from the parsed function
 // 4. Replace the placeholder with the actual AST node
-func (t *Template) CompileExpression(node dst.Expr) (dst.Expr, error) {
+func (t *callTemplate) compileExpression(node dst.Expr) (dst.Expr, error) {
 	// Execute the user's template with a fixed placeholder string
 	var userBuf bytes.Buffer
 	if err := t.template.Execute(&userBuf, "_.PLACEHOLDER_0"); err != nil {
@@ -132,4 +134,36 @@ func (t *Template) CompileExpression(node dst.Expr) (dst.Expr, error) {
 	}
 
 	return resultExpr, nil
+}
+
+// replacePlaceholder replaces all occurrences of _.PLACEHOLDER_0 in the AST
+// with the given node. This is used to inject the original call expression
+// into the template-generated code.
+func replacePlaceholder(node, replacement dst.Node) (dst.Node, bool) {
+	replaced := false
+	result := dstutil.Apply(
+		node,
+		func(cursor *dstutil.Cursor) bool {
+			selectorExpr, ok := cursor.Node().(*dst.SelectorExpr)
+			if !ok {
+				return true
+			}
+
+			// Check if this is _.PLACEHOLDER_0
+			ident, ok := selectorExpr.X.(*dst.Ident)
+			if !ok || ident.Name != toolast.IdentIgnore {
+				return true
+			}
+
+			if selectorExpr.Sel.Name == "PLACEHOLDER_0" {
+				cursor.Replace(replacement)
+				replaced = true
+				return false
+			}
+
+			return true
+		},
+		nil,
+	)
+	return result, replaced
 }

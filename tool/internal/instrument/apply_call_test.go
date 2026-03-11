@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/template"
 )
 
 func TestWrapCall_Success(t *testing.T) {
@@ -20,9 +19,6 @@ func TestWrapCall_Success(t *testing.T) {
 	r := &rule.InstCallRule{
 		Template: "wrapper({{ . }})",
 	}
-	tmpl, err := template.NewTemplate(r.Template)
-	require.NoError(t, err)
-	r.CompiledTemplate = tmpl
 
 	// Create a call expression
 	call := &dst.CallExpr{
@@ -30,7 +26,7 @@ func TestWrapCall_Success(t *testing.T) {
 	}
 
 	// Wrap it
-	err = wrapCall(call, r)
+	err := wrapCall(call, r)
 
 	// Verify - the call expression is modified in place
 	require.NoError(t, err)
@@ -45,10 +41,9 @@ func TestWrapCall_Success(t *testing.T) {
 	require.True(t, ok, "expected inner argument to be a call expression")
 }
 
-func TestWrapCall_NilTemplate(t *testing.T) {
+func TestWrapCall_EmptyTemplate(t *testing.T) {
 	r := &rule.InstCallRule{
-		Template:         "wrapper({{ . }})",
-		CompiledTemplate: nil, // No template
+		Template: "", // Empty template
 	}
 
 	call := &dst.CallExpr{
@@ -58,7 +53,7 @@ func TestWrapCall_NilTemplate(t *testing.T) {
 	err := wrapCall(call, r)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no compiled template")
+	assert.Contains(t, err.Error(), "failed to compile template")
 }
 
 func TestWrapCall_TemplateCompilationError(t *testing.T) {
@@ -66,15 +61,12 @@ func TestWrapCall_TemplateCompilationError(t *testing.T) {
 	r := &rule.InstCallRule{
 		Template: "func {{ . }}", // "func" keyword without proper syntax
 	}
-	tmpl, err := template.NewTemplate(r.Template)
-	require.NoError(t, err)
-	r.CompiledTemplate = tmpl
 
 	call := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	err = wrapCall(call, r)
+	err := wrapCall(call, r)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to compile template")
@@ -85,15 +77,12 @@ func TestWrapCall_NonCallExpressionResult(t *testing.T) {
 	r := &rule.InstCallRule{
 		Template: "{{ . }}.Field",
 	}
-	tmpl, err := template.NewTemplate(r.Template)
-	require.NoError(t, err)
-	r.CompiledTemplate = tmpl
 
 	call := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	err = wrapCall(call, r)
+	err := wrapCall(call, r)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "template output must be a call expression")

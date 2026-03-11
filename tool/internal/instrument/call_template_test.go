@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package template
+package instrument
 
 import (
 	"testing"
@@ -11,30 +11,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewTemplate_Success(t *testing.T) {
+func TestNewCallTemplate_Success(t *testing.T) {
 	text := "wrapper({{ . }})"
 
-	tmpl, err := NewTemplate(text)
+	tmpl, err := newCallTemplate(text)
 
 	require.NoError(t, err)
 	assert.NotNil(t, tmpl)
 	assert.Equal(t, text, tmpl.String())
 }
 
-func TestNewTemplate_InvalidSyntax(t *testing.T) {
+func TestNewCallTemplate_InvalidSyntax(t *testing.T) {
 	text := "wrapper({{ .Field )" // Invalid template syntax - missing closing }}
 
-	tmpl, err := NewTemplate(text)
+	tmpl, err := newCallTemplate(text)
 
 	require.Error(t, err)
 	assert.Nil(t, tmpl)
 	assert.Contains(t, err.Error(), "failed to parse template")
 }
 
-func TestNewTemplate_EmptyTemplate(t *testing.T) {
+func TestNewCallTemplate_EmptyTemplate(t *testing.T) {
 	text := ""
 
-	tmpl, err := NewTemplate(text)
+	tmpl, err := newCallTemplate(text)
 
 	require.NoError(t, err)
 	assert.NotNil(t, tmpl)
@@ -42,7 +42,7 @@ func TestNewTemplate_EmptyTemplate(t *testing.T) {
 }
 
 func TestCompileExpression_SimpleWrapping(t *testing.T) {
-	tmpl, err := NewTemplate("wrapper({{ . }})")
+	tmpl, err := newCallTemplate("wrapper({{ . }})")
 	require.NoError(t, err)
 
 	// Create a simple call expression: funcCall()
@@ -50,7 +50,7 @@ func TestCompileExpression_SimpleWrapping(t *testing.T) {
 		Fun: &dst.Ident{Name: "funcCall"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -74,14 +74,14 @@ func TestCompileExpression_SimpleWrapping(t *testing.T) {
 }
 
 func TestCompileExpression_IIFE(t *testing.T) {
-	tmpl, err := NewTemplate("(func() int { return {{ . }} })()")
+	tmpl, err := newCallTemplate("(func() int { return {{ . }} })()")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -93,14 +93,14 @@ func TestCompileExpression_IIFE(t *testing.T) {
 
 func TestCompileExpression_MultiplePlaceholders(t *testing.T) {
 	// Template with multiple {{ . }} occurrences
-	tmpl, err := NewTemplate("combine({{ . }}, {{ . }})")
+	tmpl, err := newCallTemplate("combine({{ . }}, {{ . }})")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -115,14 +115,14 @@ func TestCompileExpression_MultiplePlaceholders(t *testing.T) {
 
 func TestCompileExpression_InvalidGoSyntax(t *testing.T) {
 	// Template that parses fine but produces invalid Go syntax
-	tmpl, err := NewTemplate("func {{ . }}") // "func" keyword without proper syntax
+	tmpl, err := newCallTemplate("func {{ . }}") // "func" keyword without proper syntax
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -130,14 +130,14 @@ func TestCompileExpression_InvalidGoSyntax(t *testing.T) {
 }
 
 func TestCompileExpression_ComplexNestedExpression(t *testing.T) {
-	tmpl, err := NewTemplate("outer(middle({{ . }}))")
+	tmpl, err := newCallTemplate("outer(middle({{ . }}))")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "inner"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -159,14 +159,14 @@ func TestCompileExpression_ComplexNestedExpression(t *testing.T) {
 }
 
 func TestCompileExpression_WithBinaryExpression(t *testing.T) {
-	tmpl, err := NewTemplate("{{ . }} + 1")
+	tmpl, err := newCallTemplate("{{ . }} + 1")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -182,14 +182,14 @@ func TestCompileExpression_WithBinaryExpression(t *testing.T) {
 }
 
 func TestCompileExpression_SelectorExpression(t *testing.T) {
-	tmpl, err := NewTemplate("{{ . }}.Field")
+	tmpl, err := newCallTemplate("{{ . }}.Field")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "getStruct"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -207,14 +207,14 @@ func TestCompileExpression_SelectorExpression(t *testing.T) {
 
 func TestCompileExpression_EmptyResult(t *testing.T) {
 	// Template that produces nothing (empty expression)
-	tmpl, err := NewTemplate("")
+	tmpl, err := newCallTemplate("")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	// Should error because the function body is empty
 	require.Error(t, err)
@@ -223,14 +223,14 @@ func TestCompileExpression_EmptyResult(t *testing.T) {
 }
 
 func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
-	tmpl, err := NewTemplate(`wrapper("{{ . }}")`)
+	tmpl, err := newCallTemplate(`wrapper("{{ . }}")`)
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -238,14 +238,14 @@ func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
 }
 
 func TestCompileExpression_MultipleStatements(t *testing.T) {
-	tmpl, err := NewTemplate("first(); {{ . }}")
+	tmpl, err := newCallTemplate("first(); {{ . }}")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -255,14 +255,14 @@ func TestCompileExpression_MultipleStatements(t *testing.T) {
 func TestCompileExpression_NonExpressionStatement(t *testing.T) {
 	// Template that produces a non-expression statement
 	// This is tricky - we need something that parses as a statement but not as an expression
-	tmpl, err := NewTemplate("return")
+	tmpl, err := newCallTemplate("return")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.CompileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall)
 
 	// Should error because it's not an expression statement
 	require.Error(t, err)

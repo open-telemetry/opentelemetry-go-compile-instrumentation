@@ -53,14 +53,13 @@ func (ip *InstrumentPhase) applyCallRule(r *rule.InstCallRule, root *dst.File) e
 
 // wrapCall applies the template transformation to wrap the original call.
 func wrapCall(call *dst.CallExpr, r *rule.InstCallRule) error {
-	// Get the compiled template from the rule
-	tmpl := r.CompiledTemplate
-	if tmpl == nil {
-		return ex.Newf("rule has no compiled template")
+	tmpl, err := newCallTemplate(r.Template)
+	if err != nil {
+		return ex.Wrapf(err, "rule has no compiled template")
 	}
 
 	// Use the template to compile the wrapped expression
-	wrappedExpr, err := tmpl.CompileExpression(call)
+	wrappedExpr, err := tmpl.compileExpression(call)
 	if err != nil {
 		return ex.Wrapf(err, "failed to compile template")
 	}

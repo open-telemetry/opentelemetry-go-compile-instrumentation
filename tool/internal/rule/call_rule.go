@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"text/template"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/template"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,10 +54,6 @@ type InstCallRule struct {
 	//   - "wrapper({{ . }})" wraps the call with wrapper()
 	//   - "(func() { return {{ . }} })()" uses an IIFE
 	Template string `json:"template" yaml:"template"`
-
-	// CompiledTemplate is the compiled template object, created at rule creation time.
-	// This field is not serialized.
-	CompiledTemplate *template.Template `json:"-" yaml:"-"`
 }
 
 // funcNamePattern matches qualified function names like "net/http.Get".
@@ -107,12 +103,10 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 		return nil, ex.Wrapf(err, "invalid call rule %q", name)
 	}
 
-	// Compile the template once at creation time
-	tmpl, err := template.NewTemplate(r.Template)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to compile template for rule %q", name)
+	// Validate template syntax
+	if _, err := template.New("").Parse(r.Template); err != nil {
+		return nil, ex.Wrapf(err, "invalid template syntax for rule %q", name)
 	}
-	r.CompiledTemplate = tmpl
 
 	return &r, nil
 }
@@ -155,15 +149,6 @@ func (r *InstCallRule) UnmarshalJSON(data []byte) error {
 		}
 		r.ImportPath = matches[1]
 		r.FuncName = matches[2]
-	}
-
-	// Compile the template if not already compiled
-	if r.CompiledTemplate == nil && r.Template != "" {
-		tmpl, err := template.NewTemplate(r.Template)
-		if err != nil {
-			return ex.Wrapf(err, "failed to compile template")
-		}
-		r.CompiledTemplate = tmpl
 	}
 
 	return nil
