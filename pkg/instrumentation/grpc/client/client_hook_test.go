@@ -4,6 +4,7 @@
 package client
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -57,7 +58,7 @@ func TestBeforeNewClient(t *testing.T) {
 		sdktrace.WithSyncer(exporter),
 	)
 	otel.SetTracerProvider(tp)
-	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	tests := []struct {
 		name          string
@@ -201,7 +202,7 @@ func TestBeforeDialContext(t *testing.T) {
 		sdktrace.WithSyncer(exporter),
 	)
 	otel.SetTracerProvider(tp)
-	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	tests := []struct {
 		name          string
@@ -319,12 +320,12 @@ func TestClientStatsHandler_TagRPC(t *testing.T) {
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
 	t.Cleanup(func() {
-		_ = tp.Shutdown(t.Context())
+		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
 	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
 
 	handler := newClientStatsHandler()
 
@@ -440,12 +441,12 @@ func TestClientStatsHandler_OTELExporterFiltering(t *testing.T) {
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
 	t.Cleanup(func() {
-		_ = tp.Shutdown(t.Context())
+		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
 	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
 
 	handler := newClientStatsHandler()
 
