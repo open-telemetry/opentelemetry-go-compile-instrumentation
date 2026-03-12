@@ -69,7 +69,7 @@ func MyHookAfter(ictx inst.HookContext) {
 	fmt.Println("[MyHook] after hook executed!")
 }
 
-func MyHook1Before(ictx inst.HookContext, recv any) {
+func MyHook1Before(ictx inst.HookContext, recv interface{}) {
 	println("Before MyStruct.Example()")
 	fmt.Printf("funcName:%s\n", ictx.GetFuncName())
 	fmt.Printf("packageName:%s\n", ictx.GetPackageName())
@@ -78,7 +78,7 @@ func MyHook1Before(ictx inst.HookContext, recv any) {
 	fmt.Printf("isSkipCall:%t\n", ictx.IsSkipCall())
 }
 
-func MyHook2Before(ictx inst.HookContext, recv any) {
+func MyHook2Before(ictx inst.HookContext, recv interface{}) {
 	println("Before MyStruct.Example2()")
 }
 
@@ -86,15 +86,15 @@ func MyHook1After(ictx inst.HookContext) {
 	println("After MyStruct.Example()")
 }
 
-func MyHookRecvBefore(ictx inst.HookContext, recv, _ any) {
+func MyHookRecvBefore(ictx inst.HookContext, recv, _ interface{}) {
 	println("GenericRecvExample before hook")
 }
 
-func MyHookRecvAfter(ictx inst.HookContext, _ any) {
+func MyHookRecvAfter(ictx inst.HookContext, _ interface{}) {
 	println("GenericRecvExample after hook")
 }
 
-func MyHookGenericBefore(ictx inst.HookContext, _, _ any) {
+func MyHookGenericBefore(ictx inst.HookContext, _, _ interface{}) {
 	println("GenericExample before hook")
 	fmt.Printf("[Generic] Function: %s.%s\n", ictx.GetPackageName(), ictx.GetFuncName())
 	fmt.Printf("[Generic] Param count: %d\n", ictx.GetParamCount())
@@ -109,7 +109,7 @@ func MyHookGenericBefore(ictx inst.HookContext, _, _ any) {
 	ictx.SetParam(0, 999)
 }
 
-func MyHookGenericAfter(ictx inst.HookContext, _ any) {
+func MyHookGenericAfter(ictx inst.HookContext, _ interface{}) {
 	println("GenericExample after hook")
 	fmt.Printf("[Generic] Data from Before: %v\n", ictx.GetData())
 	fmt.Printf("[Generic] Return value count: %d\n", ictx.GetReturnValCount())

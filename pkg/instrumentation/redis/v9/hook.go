@@ -186,7 +186,7 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 	return string(b)
 }
 
-func redisV9AppendArg(b []byte, v any) []byte {
+func redisV9AppendArg(b []byte, v interface{}) []byte {
 	switch v := v.(type) {
 	case nil:
 		return append(b, "<nil>"...)

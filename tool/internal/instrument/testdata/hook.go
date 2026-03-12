@@ -19,7 +19,7 @@ func H2Before(ctx inst.HookContext, p1 string, p2 int) {}
 
 func H2After(ctx inst.HookContext, r1 float32, r2 error) {}
 
-func H3Before(ctx inst.HookContext, recv any, p1 string, p2 int) {}
+func H3Before(ctx inst.HookContext, recv interface{}, p1 string, p2 int) {}
 
 func H3After(ctx inst.HookContext, r1 float32, r2 error) {}
 
@@ -39,12 +39,12 @@ func H9Before(ctx inst.HookContext, p1 ...string) {}
 
 func H10Before(ctx inst.HookContext, _ int, _ float32) {}
 
-func H11Before(ctx inst.HookContext, recv any) {}
+func H11Before(ctx inst.HookContext, recv interface{}) {}
 
-func GenericFuncBefore(ctx inst.HookContext, p1 any, p2 int) {}
+func GenericFuncBefore(ctx inst.HookContext, p1 interface{}, p2 int) {}
 
-func GenericFuncAfter(ctx inst.HookContext, r1 any, r2 error) {}
+func GenericFuncAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
 
-func GenericMethodBefore(ctx inst.HookContext, recv any, p1 any, p2 string) {}
+func GenericMethodBefore(ctx inst.HookContext, recv interface{}, p1 interface{}, p2 string) {}
 
-func GenericMethodAfter(ctx inst.HookContext, r1 any, r2 error) {}
+func GenericMethodAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}

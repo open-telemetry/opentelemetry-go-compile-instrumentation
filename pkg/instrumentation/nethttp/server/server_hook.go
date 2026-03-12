@@ -82,7 +82,7 @@ func (n netHttpServerEnabler) Enable() bool {
 
 var serverEnabler = netHttpServerEnabler{}
 
-func BeforeServeHTTP(ictx inst.HookContext, recv any, w http.ResponseWriter, r *http.Request) {
+func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
 	if !serverEnabler.Enable() {
 		logger.Debug("HTTP server instrumentation disabled")
 		return
@@ -129,7 +129,7 @@ func BeforeServeHTTP(ictx inst.HookContext, recv any, w http.ResponseWriter, r *
 	ictx.SetParam(requestIndex, newReq)
 
 	// Store data for after hook
-	ictx.SetData(map[string]any{
+	ictx.SetData(map[string]interface{}{
 		"ctx":   ctx,
 		"span":  span,
 		"start": time.Now(),
