@@ -46,7 +46,7 @@ This starts MySQL, the DB server, the DB client, and the full observability stac
 
 ### Prerequisites
 
-- Go 1.24.0 or higher
+- Go 1.25.0 or higher
 - MySQL 8.0+ running locally
 
 ### Start MySQL

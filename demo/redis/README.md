@@ -9,7 +9,7 @@ This directory contains a Redis client implementation for demonstrating OpenTele
 
 ## Prerequisites
 
-- Go 1.24.0 or higher
+- Go 1.25.0 or higher
 - A running Redis server (default: `localhost:6379`)
 
 ## Building
