@@ -71,7 +71,7 @@ func addReplace(modfile *modfile.File, replace *replaceDirective) (bool, error) 
 }
 
 func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
-	rules := make([]*rule.InstFuncRule, 0)
+	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
 		funcRules := m.GetFuncRules()
 		rules = append(rules, funcRules...)
