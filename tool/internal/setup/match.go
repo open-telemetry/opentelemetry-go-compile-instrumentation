@@ -125,7 +125,11 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 
 // runMatch performs precise matching of rules against the dependency's source code.
 // It parses source files and matches rules by examining AST nodes
-func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.InstRule) (*rule.InstRuleSet, error) {
+func (sp *SetupPhase) runMatch(
+	ctx context.Context,
+	dep *Dependency,
+	rulesByTarget map[string][]rule.InstRule,
+) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
 	if len(dep.CgoFiles) > 0 {
@@ -166,17 +170,21 @@ func (sp *SetupPhase) runMatch(dep *Dependency, rulesByTarget map[string][]rule.
 		return set, nil
 	}
 
-	return sp.preciseMatching(dep, preciseRules, set)
+	return sp.preciseMatching(ctx, dep, preciseRules, set)
 }
 
 // preciseMatching performs AST-based matching of instrumentation rules against
 // the dependency's source files. It returns the rule set with the matched rules.
 func (sp *SetupPhase) preciseMatching(
+	ctx context.Context,
 	dep *Dependency,
 	rules []rule.InstRule,
 	set *rule.InstRuleSet,
 ) (*rule.InstRuleSet, error) {
 	for _, source := range dep.Sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Parse the source code. Since the only purpose here is to match,
 		// no node updates, we can use fast variant.
 		tree, err := ast.ParseFileFast(source)
@@ -353,12 +361,12 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRuleSet, 0)
 	var mu sync.Mutex
-	g, _ := errgroup.WithContext(ctx)
+	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.NumCPU() * matchDepsConcurrencyMultiplier)
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			m, err1 := sp.runMatch(dep, rulesByTarget)
+			m, err1 := sp.runMatch(gCtx, dep, rulesByTarget)
 			if err1 != nil {
 				return err1
 			}
