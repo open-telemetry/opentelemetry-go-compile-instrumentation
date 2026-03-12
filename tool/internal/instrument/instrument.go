@@ -45,7 +45,7 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	for _, rule := range rset.FileRules {
 		err := ip.applyFileRule(rule, rset.PackageName)
 		if err != nil {
-			return ex.Wrapf(err, "applying file rule %s", rule.Name)
+			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
 	}
 	for file, rules := range groupRules(ip.workDir, rset) {

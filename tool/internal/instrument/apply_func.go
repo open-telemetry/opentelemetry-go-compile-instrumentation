@@ -291,7 +291,7 @@ func (ip *InstrumentPhase) writeInstrumented(root *dst.File, oldFile string) err
 	newFile := filepath.Join(ip.workDir, filepath.Base(oldFile))
 	err := ast.WriteFile(newFile, root)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "writing instrumented file %s", newFile)
 	}
 	ip.keepForDebug(newFile)
 
