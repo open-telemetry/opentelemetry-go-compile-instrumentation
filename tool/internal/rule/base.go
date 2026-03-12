@@ -6,6 +6,7 @@ package rule
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -49,6 +50,7 @@ type InstRuleSet struct {
 	RawRules    map[string][]*InstRawRule    `json:"raw_rules"`
 	FuncRules   map[string][]*InstFuncRule   `json:"func_rules"`
 	StructRules map[string][]*InstStructRule `json:"struct_rules"`
+	CallRules   map[string][]*InstCallRule   `json:"call_rules"`
 	FileRules   []*InstFileRule              `json:"file_rules"`
 }
 
@@ -60,18 +62,20 @@ func NewInstRuleSet(importPath string) *InstRuleSet {
 		RawRules:    make(map[string][]*InstRawRule),
 		FuncRules:   make(map[string][]*InstFuncRule),
 		StructRules: make(map[string][]*InstStructRule),
+		CallRules:   make(map[string][]*InstCallRule),
 		FileRules:   make([]*InstFileRule, 0),
 	}
 }
 
 func (irs *InstRuleSet) String() string {
-	return fmt.Sprintf("{%s: %v, %v, %v, %v}",
-		irs.ModulePath,
-		irs.RawRules,
-		irs.FuncRules,
-		irs.StructRules,
-		irs.FileRules,
-	)
+	parts := []string{
+		fmt.Sprintf("raw=%v", irs.RawRules),
+		fmt.Sprintf("func=%v", irs.FuncRules),
+		fmt.Sprintf("struct=%v", irs.StructRules),
+		fmt.Sprintf("call=%v", irs.CallRules),
+		fmt.Sprintf("file=%v", irs.FileRules),
+	}
+	return fmt.Sprintf("{%s: %s}", irs.ModulePath, strings.Join(parts, ", "))
 }
 
 func (irs *InstRuleSet) IsEmpty() bool {
@@ -79,6 +83,7 @@ func (irs *InstRuleSet) IsEmpty() bool {
 		(len(irs.FuncRules) == 0 &&
 			len(irs.StructRules) == 0 &&
 			len(irs.RawRules) == 0 &&
+			len(irs.CallRules) == 0 &&
 			len(irs.FileRules) == 0)
 }
 
@@ -99,6 +104,10 @@ func (irs *InstRuleSet) AddFuncRule(file string, rule *InstFuncRule) {
 
 func (irs *InstRuleSet) AddStructRule(file string, rule *InstStructRule) {
 	addRule(file, rule, irs.StructRules)
+}
+
+func (irs *InstRuleSet) AddCallRule(file string, rule *InstCallRule) {
+	addRule(file, rule, irs.CallRules)
 }
 
 func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {

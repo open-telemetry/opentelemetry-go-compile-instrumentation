@@ -44,6 +44,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstRawRule(raw, name)
 	case fields["func"] != nil:
 		return rule.NewInstFuncRule(raw, name)
+	case fields["function_call"] != nil:
+		return rule.NewInstCallRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
@@ -207,6 +209,14 @@ func (sp *SetupPhase) preciseMatching(
 					set.AddRawRule(source, rt)
 					sp.Info("Match raw rule", "rule", rt, "dep", dep)
 				}
+			case *rule.InstCallRule:
+				// Call rules are added unconditionally to all source files in the
+				// target package. Unlike func/struct/raw rules, there is no cheap
+				// AST predicate to pre-filter files (the matching requires import
+				// alias resolution which happens during the instrument phase).
+				// Files without matching calls are a no-op in applyCallRule.
+				set.AddCallRule(source, rt)
+				sp.Info("Match call rule", "rule", rt, "dep", dep)
 			case *rule.InstFileRule:
 				// Skip as it's already processed
 				continue

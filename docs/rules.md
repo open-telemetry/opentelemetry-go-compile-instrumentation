@@ -23,7 +23,7 @@ All rules share a set of common fields that define the target of the instrumenta
 
 ## Rule Types
 
-There are four types of rules, each designed for a specific kind of code modification.
+There are several types of rules, each designed for a specific kind of code modification.
 
 ### 1. Function Hook Rule
 
@@ -135,6 +135,7 @@ This rule injects a string of raw Go code at the beginning of a target function.
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
 - `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function.
+- `imports` (map[string]string, optional): A map of imports to inject into the instrumented file, needed when injected code references external packages. Same format as [Common Fields](#common-fields).
 
 **Example:**
 
@@ -147,22 +148,155 @@ raw_helloworld:
 
 This rule injects a new goroutine that prints "RawCode" at the start of the `Example` function in the `main` package.
 
-**Import Handling:**
+### 4. Call Wrapping Rule
 
-Raw code rules often need imports for the code being injected. Use the `imports` field to specify any packages your raw code references.
+This rule wraps function calls at call sites with instrumentation code. Unlike the Function Hook Rule which instruments function definitions, this rule instruments where functions are called.
 
-Example:
+**Use Cases:**
+
+- Wrapping HTTP client calls with tracing.
+- Adding context to database query calls.
+- Monitoring third-party library calls without modifying the library.
+- Call-site specific instrumentation (different behavior per call location).
+
+**Fields:**
+
+- `function_call` (string, required): Qualified function name in format `package/path.FunctionName`. Matches calls to functions from a specific import path.
+- `template` (string, required): Wrapper template using Go's `text/template` syntax with `{{ . }}` placeholder for the original call. The template must be a valid Go expression that produces a call expression (current limitation).
+- `imports` (map, optional): Additional imports needed for wrapper code (alias: path).
+
+**Template System:**
+
+The `template` field uses Go's standard `text/template` package for code generation. This provides:
+
+- **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
+- **Type Safety**: The template is compiled at rule creation time and validated
+- **Expression Output**: The template must produce a valid Go expression that evaluates to a call expression (current limitation)
+
+Currently supported template features:
+
+- Simple wrapping: `wrapper({{ . }})`
+- IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
+- Complex expressions with multiple statements using IIFE
+
+**Understanding function_call Matching:**
+
+The `function_call` field must use the qualified format: `package/path.FunctionName`
+
+Examples:
+
+- `net/http.Get` matches `http.Get()` where `http` is imported from `"net/http"`
+- `github.com/redis/go-redis/v9.Get` matches `redis.Get()` from that package
+- `database/sql.Open` matches `sql.Open()` calls
+
+**What does NOT match:**
+
+- Unqualified calls like `Get()` without a package prefix
+- Calls from different packages (e.g., `other.Get()` when rule specifies `net/http.Get`)
+
+**Examples:**
+
+#### Example 1: Wrapping Standard Library Calls
 
 ```yaml
-raw_with_logging:
-  target: main
-  func: Example
-  raw: 'log.Printf("Executing Example with arg: %v", someVar)'
-  imports:
-    log: "log"
+wrap_http_get:
+  target: myapp/server
+  function_call: net/http.Get
+  template: "tracedGet({{ . }})"
 ```
 
-### 4. File Addition Rule
+In the `myapp/server` package, this transforms:
+
+```go
+import "net/http"
+
+func fetchData(url string) {
+    resp, err := http.Get(url)  // Original call
+    // becomes:
+    resp, err := tracedGet(http.Get(url))  // Wrapped call
+}
+```
+
+**Note:** The `tracedGet` function must be available in the target package, either defined locally or imported.
+
+**What gets wrapped:** Only `http.Get()` calls where `http` is imported from `"net/http"`
+
+**What does NOT get wrapped:**
+
+- `Get()` calls without the `http.` qualifier
+- `other.Get()` calls where `other` is a different package
+
+---
+
+#### Example 2: Third-Party Library with Custom Alias
+
+```yaml
+wrap_redis_get:
+  target: myapp/cache
+  function_call: github.com/redis/go-redis/v9.Get
+  template: "tracedRedisGet(ctx, {{ . }})"
+```
+
+In the `myapp/cache` package:
+
+```go
+import redis "github.com/redis/go-redis/v9"
+
+func getValue(ctx context.Context, key string) {
+    val, err := redis.Get(ctx, key)  // Original
+    // becomes:
+    val, err := tracedRedisGet(ctx, redis.Get(ctx, key))  // Wrapped
+}
+```
+
+**Note:** The `tracedRedisGet` function must be available in the target package.
+
+---
+
+#### Example 3: Using IIFE for Complex Wrapping with Deferred Cleanup
+
+This example demonstrates the power of the `text/template` system by using an IIFE (Immediately-Invoked Function Expression) to wrap a call with complex logic:
+
+```yaml
+wrap_with_unsafe:
+  target: client
+  function_call: myapp/utils.Helper
+  template: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
+```
+
+This uses an immediately-invoked function expression (IIFE) to inject logic after the call:
+
+```go
+package client
+
+import (
+    "unsafe"
+    utils "myapp/utils"
+)
+
+func process() {
+    result, err := utils.Helper("test", 42)
+    // becomes:
+    result, err := (func() (float32, error) {
+        r, e := utils.Helper("test", 42)
+        _ = unsafe.Sizeof(r)  // Additional logic
+        return r, e
+    })()
+}
+```
+
+**Note:** The `unsafe` package must be imported in the target file for this template to work.
+
+**Important Notes:**
+
+- The `{{ . }}` placeholder in the template represents the original function call.
+- The template must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
+- Template code can only reference packages and functions that are already imported or defined in the target file.
+- Call rules only affect call sites in the target package, not the function definition itself.
+- Multiple calls to the same function will all be wrapped independently.
+- Use the qualified format `package/path.FunctionName` for functions.
+
+### 5. File Addition Rule
 
 This rule adds a new Go source file to the target package.
 
