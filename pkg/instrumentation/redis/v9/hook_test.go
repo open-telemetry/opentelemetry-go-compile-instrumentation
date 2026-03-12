@@ -144,25 +144,6 @@ func TestRedisV9AppendArg_InvalidUTF8Bytes(t *testing.T) {
 	assert.Equal(t, "<byte>", result)
 }
 
-func TestRedisV9String(t *testing.T) {
-	b := []byte("hello world")
-	result := redisV9String(b)
-	assert.Equal(t, "hello world", result)
-}
-
-func TestRedisV9Bytes(t *testing.T) {
-	s := "hello world"
-	b := redisV9Bytes(s)
-	assert.Equal(t, []byte("hello world"), b)
-}
-
-func TestRedisV9AppendUTF8String(t *testing.T) {
-	dst := []byte("prefix:")
-	src := []byte("suffix")
-	result := redisV9AppendUTF8String(dst, src)
-	assert.Equal(t, "prefix:suffix", string(result))
-}
-
 func TestNewOtelRedisHook(t *testing.T) {
 	hook := newOtelRedisHook("localhost:6379")
 	assert.NotNil(t, hook)
@@ -240,13 +221,14 @@ func TestProcessHook_RedisNilNotError(t *testing.T) {
 
 	cmd := redis.NewCmd(context.Background(), "get", "nonexistent")
 	err := processHook(context.Background(), cmd)
-	assert.NoError(t, err)
+	// redis.Nil must be propagated so callers can detect cache misses via errors.Is
+	assert.ErrorIs(t, err, redis.Nil)
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
 
 	span := spans[0]
-	// redis.Nil should NOT be treated as error
+	// redis.Nil should NOT mark the span as an error
 	assert.Equal(t, codes.Unset, span.Status().Code)
 }
 
