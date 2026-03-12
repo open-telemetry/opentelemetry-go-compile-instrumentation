@@ -7,7 +7,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
-	"text/template"
+
+	"github.com/valyala/fasttemplate"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"gopkg.in/yaml.v3"
@@ -104,7 +105,7 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 	}
 
 	// Validate template syntax
-	if _, err := template.New("").Parse(r.Template); err != nil {
+	if _, err := fasttemplate.NewTemplate(r.Template, "{{", "}}"); err != nil {
 		return nil, ex.Wrapf(err, "invalid template syntax for rule %q", name)
 	}
 
