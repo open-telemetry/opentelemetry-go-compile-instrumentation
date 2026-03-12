@@ -1,8 +1,6 @@
 module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic
 
-go 1.24.0
-
-toolchain go1.24.2
+go 1.25.0
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../..
 
