@@ -194,7 +194,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		}
 		// Introduce additional hook code by generating otelc.runtime.go
 		if err = sp.addDeps(matched, pkgDir); err != nil {
-			return ex.Wrapf(err, "adding deps for package %s", pkgDir)
+			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 		moduleDirs[moduleDir] = true
 	}
@@ -202,7 +202,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	// Sync new dependencies to go.mod or vendor/modules.txt
 	for moduleDir := range moduleDirs {
 		if err = sp.syncDeps(ctx, matched, moduleDir); err != nil {
-			return ex.Wrapf(err, "syncing deps for module %s", moduleDir)
+			return ex.Wrapf(err, "syncing deps in module dir %s", moduleDir)
 		}
 	}
 
