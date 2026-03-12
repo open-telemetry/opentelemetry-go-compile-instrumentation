@@ -103,7 +103,7 @@ func buildOtelcRuntimeAst(decls []dst.Decl) *dst.File {
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
 func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) error {
-	rules := make([]*rule.InstFuncRule, 0)
+	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
 		funcRules := m.GetFuncRules()
 		rules = append(rules, funcRules...)
