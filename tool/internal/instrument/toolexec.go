@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/dave/dst"
@@ -76,10 +75,14 @@ func (ip *InstrumentPhase) keepForDebug(name string) {
 // stripCompleteFlag removes the -complete flag from args.
 // It allocates a new slice to avoid mutating the caller's backing array,
 // which would happen with append(args[:i], args[i+1:]...).
+// The returned slice is always non-nil.
 func stripCompleteFlag(args []string) []string {
 	for i, arg := range args {
 		if arg == "-complete" {
-			return slices.Concat(args[:i], args[i+1:])
+			result := make([]string, 0, len(args)-1)
+			result = append(result, args[:i]...)
+			result = append(result, args[i+1:]...)
+			return result
 		}
 	}
 	return args

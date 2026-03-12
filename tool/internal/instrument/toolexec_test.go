@@ -50,7 +50,7 @@ func TestStripCompleteFlag(t *testing.T) {
 		{
 			name:     "only complete flag",
 			args:     []string{"-complete"},
-			expected: nil, // slices.Concat returns nil for empty result; nil == empty slice in Go
+			expected: []string{},
 		},
 		{
 			name:     "complete as value not flag",
