@@ -245,13 +245,14 @@ check-golden-files: ## Verify golden test files are up to date
 check-golden-files: package
 	@echo "Checking golden files are up to date..."
 	set -euo pipefail
-	cd tool/internal/instrument && go test -v -timeout=5m -count=1 -update
+	cd tool/internal/instrument && go test -v -timeout=5m -count=1 ./... -args -update
 	cd "$(CURDIR)"
 	if ! git diff --exit-code tool/internal/instrument/testdata/golden/; then \
 		echo "Error: golden files are stale"; \
 		echo "Run 'make test-unit/update-golden' to regenerate"; \
 		exit 1; \
 	fi
+	git status --porcelain -- tool/internal/instrument/testdata/golden/ | grep -q . && (echo "Golden files have untracked changes"; exit 1) || true
 	echo "Golden files are up to date"
 
 ##@ Testing
@@ -269,7 +270,7 @@ test-unit/update-golden: ## Run unit tests and update golden files
 test-unit/update-golden: package
 	@echo "Running unit tests and updating golden files..."
 	set -euo pipefail
-	cd tool/internal/instrument && go test -v -timeout=5m -count=1 -update
+	cd tool/internal/instrument && go test -v -timeout=5m -count=1 ./... -args -update
 
 # - Does NOT use gotestfmt because v2.5.0 has a bug that causes panics when go test
 #   outputs build errors (JSON lines with ImportPath but no Package field).
