@@ -125,7 +125,11 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 
 // runMatch performs precise matching of rules against the dependency's source code.
 // It parses source files and matches rules by examining AST nodes
-func (sp *SetupPhase) runMatch(ctx context.Context, dep *Dependency, rulesByTarget map[string][]rule.InstRule) (*rule.InstRuleSet, error) {
+func (sp *SetupPhase) runMatch(
+	ctx context.Context,
+	dep *Dependency,
+	rulesByTarget map[string][]rule.InstRule,
+) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
 	if len(dep.CgoFiles) > 0 {
