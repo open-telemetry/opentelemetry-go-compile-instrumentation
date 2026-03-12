@@ -75,7 +75,7 @@ type InstCallRule struct {
 //   - "" (empty string)
 var funcNamePattern = regexp.MustCompile(`^(.+)\.([^\d\W]\w*)$`)
 
-// templatePlaceholderPattern matches Go text/template placeholder variants:
+// templatePlaceholderPattern matches template placeholder variants:
 // {{ . }}, {{.}}, {{- . -}}, {{ .  }}, etc.
 var templatePlaceholderPattern = regexp.MustCompile(`\{\{-?\s*\.\s*-?\}\}`)
 

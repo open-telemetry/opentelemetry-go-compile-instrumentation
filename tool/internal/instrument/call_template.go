@@ -64,7 +64,7 @@ func (t *callTemplate) compileExpression(node dst.Expr) (dst.Expr, error) {
 	// Execute the user's template with a fixed placeholder string.
 	// The TagFunc handles {{ . }}, {{.}}, and {{- . -}} variants by
 	// normalizing the tag content before matching.
-	userResult := t.template.ExecuteFuncString(func(w io.Writer, tag string) (int, error) {
+	userResult, err := t.template.ExecuteFuncStringWithErr(func(w io.Writer, tag string) (int, error) {
 		// Trim spaces and optional trim markers (e.g. {{- . -}})
 		cleaned := strings.TrimSpace(tag)
 		cleaned = strings.Trim(cleaned, "-")
@@ -72,9 +72,11 @@ func (t *callTemplate) compileExpression(node dst.Expr) (dst.Expr, error) {
 		if cleaned == "." {
 			return io.WriteString(w, "_.PLACEHOLDER_0")
 		}
-		// Unknown tag content: write back unchanged so Go parsing catches it.
-		return fmt.Fprintf(w, "{{%s}}", tag)
+		return 0, fmt.Errorf("unknown template tag %q; only {{ . }} is supported", tag)
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute template: %w", err)
+	}
 
 	// Wrap the result in a minimal function so we can parse it as Go code.
 	wrapped := "package _\nfunc _() {\n\t" + userResult + "\n}\n"
