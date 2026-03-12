@@ -15,6 +15,7 @@ func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRu
 	addRulesToMap(rset.FuncRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.RawRules, file2rules, rset.CgoFileMap, workDir)
+	addRulesToMap(rset.CallRules, file2rules, rset.CgoFileMap, workDir)
 	return file2rules
 }
 
@@ -35,6 +36,7 @@ func addRulesToMap[T rule.InstRule](
 	}
 }
 
+//nolint:gocognit
 func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
@@ -72,6 +74,11 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 					return err1
 				}
 				hasFuncRule = true
+			case *rule.InstCallRule:
+				err1 := ip.applyCallRule(rt, root)
+				if err1 != nil {
+					return err1
+				}
 			default:
 				util.ShouldNotReachHere()
 			}

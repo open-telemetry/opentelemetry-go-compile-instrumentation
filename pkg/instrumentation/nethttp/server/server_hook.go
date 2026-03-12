@@ -52,7 +52,10 @@ func moduleVersion() string {
 func initInstrumentation() {
 	initOnce.Do(func() {
 		version := moduleVersion()
-		if err := shared.SetupOTelSDK("go.opentelemetry.io/compile-instrumentation/nethttp/server", version); err != nil {
+		if err := shared.SetupOTelSDK(
+			"go.opentelemetry.io/compile-instrumentation/nethttp/server",
+			version,
+		); err != nil {
 			logger.Error("failed to setup OTel SDK", "error", err)
 		}
 		tracer = otel.GetTracerProvider().Tracer(

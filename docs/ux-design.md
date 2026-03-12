@@ -365,7 +365,7 @@ pointcut:
    all-of:
       - not: # Prevent injecting into the package itself
             import-path: fully.qualified.package.name
-      - function-call: fully.qualified.package.name.FunctionName
+      - function_call: fully.qualified.package.name.FunctionName
 advice:
    - before: qualified.instrumentation.package.BeforeFunctionName
    - after: qualified.instrumentation.package.AfterFunctionName

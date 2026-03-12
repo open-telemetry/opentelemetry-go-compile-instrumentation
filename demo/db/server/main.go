@@ -292,7 +292,11 @@ func makeHandleBulkCreate(db *sql.DB) http.HandlerFunc {
 			if err != nil {
 				tx.Rollback()
 				logger.Error("failed to insert user in transaction", "error", err, "name", users[i].Name)
-				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to insert user: " + err.Error()})
+				writeJSON(
+					w,
+					http.StatusInternalServerError,
+					ErrorResponse{Error: "failed to insert user: " + err.Error()},
+				)
 				return
 			}
 			id, _ := result.LastInsertId()
