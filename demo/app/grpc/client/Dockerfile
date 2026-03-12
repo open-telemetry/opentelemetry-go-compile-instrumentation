@@ -26,8 +26,8 @@ RUN apk add --no-cache git
 COPY --from=otelc-builder /otelc /usr/local/bin/otelc
 
 # Copy both client and server to maintain the go.mod replace directive structure
-COPY demo/grpc/server /server
-COPY demo/grpc/client /app
+COPY demo/app/grpc/server /server
+COPY demo/app/grpc/client /app
 
 # Download dependencies
 RUN go mod download

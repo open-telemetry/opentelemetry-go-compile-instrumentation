@@ -26,7 +26,7 @@ RUN apk add --no-cache git
 COPY --from=otelc-builder /otelc /usr/local/bin/otelc
 
 # Copy HTTP server source
-COPY demo/http/server /app
+COPY demo/app/http/server /app
 
 # Download dependencies
 RUN go mod download

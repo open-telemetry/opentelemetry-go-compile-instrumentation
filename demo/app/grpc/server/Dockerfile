@@ -30,7 +30,7 @@ RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.4 && \
 COPY --from=otelc-builder /otelc /usr/local/bin/otelc
 
 # Copy demo app source
-COPY demo/grpc/server /app
+COPY demo/app/grpc/server /app
 
 # Generate protobuf code
 RUN mkdir -p pb && \

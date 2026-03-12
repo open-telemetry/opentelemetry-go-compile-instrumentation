@@ -26,7 +26,7 @@ RUN apk add --no-cache git
 COPY --from=otelc-builder /otelc /usr/local/bin/otelc
 
 # Copy Redis client source
-COPY demo/redis/client /app
+COPY demo/app/redis/client /app
 
 # Download dependencies
 RUN go mod download

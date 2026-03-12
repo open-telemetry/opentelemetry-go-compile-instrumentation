@@ -19,4 +19,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server => ../server
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/server => ../server
