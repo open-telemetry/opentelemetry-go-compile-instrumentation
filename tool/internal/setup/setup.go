@@ -383,22 +383,22 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 		logger.DebugContext(ctx, "failed to back up files", "error", err)
 	}
 	defer func() {
-		var pkgs []*packages.Package
-		pkgs, err = getBuildPackages(ctx, cmd.Args().Slice())
-		if err != nil {
-			logger.DebugContext(ctx, "failed to get build packages", "error", err)
+		// Remove otelc.runtime.go from each instrumented package directory.
+		// This must happen before Cleanup() removes .otelc-build/.
+		pkgs, pkgErr := getBuildPackages(ctx, cmd.Args().Slice())
+		if pkgErr != nil {
+			logger.DebugContext(ctx, "failed to get build packages", "error", pkgErr)
 		}
 		for _, pkg := range pkgs {
-			if err = os.RemoveAll(filepath.Join(pkg.Dir, OtelcRuntimeFile)); err != nil {
+			path := filepath.Join(pkg.Dir, OtelcRuntimeFile)
+			if removeErr := os.RemoveAll(path); removeErr != nil {
 				logger.DebugContext(ctx, "failed to remove generated file from package",
-					"file", filepath.Join(pkg.Dir, OtelcRuntimeFile), "error", err)
+					"file", path, "error", removeErr)
 			}
 		}
-		if err = os.RemoveAll(unzippedPkgDir); err != nil {
-			logger.DebugContext(ctx, "failed to remove unzipped pkg", "error", err)
-		}
-		if err = util.RestoreFile(backupFiles); err != nil {
-			logger.DebugContext(ctx, "failed to restore files", "error", err)
+		// Delegate backup restore and temp dir removal to Cleanup.
+		if cleanErr := Cleanup(ctx); cleanErr != nil {
+			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()
 
