@@ -1,9 +1,9 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/client
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/client
 
 go 1.25.0
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server v0.0.0
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/server v0.0.0
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.78.0
 )

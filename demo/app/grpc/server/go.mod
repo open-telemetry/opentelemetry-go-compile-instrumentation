@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/server
 
 go 1.25.0
 

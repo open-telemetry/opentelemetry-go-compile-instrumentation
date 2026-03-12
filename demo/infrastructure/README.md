@@ -65,8 +65,8 @@ This infrastructure provides a production-like observability stack to demonstrat
 
 ### Demo Applications
 
-- **gRPC Server/Client**: Located in [demo/grpc/](../grpc/)
-- **HTTP Server/Client**: Located in [demo/http/](../http/) (when available)
+- **gRPC Server/Client**: Located in [demo/app/grpc/](../app/grpc/)
+- **HTTP Server/Client**: Located in [demo/app/http/](../app/http/) (when available)
 
 ### Load Testing
 

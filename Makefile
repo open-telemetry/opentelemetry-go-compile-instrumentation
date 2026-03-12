@@ -111,15 +111,15 @@ build-demo: build-demo-grpc build-demo-http
 
 build-demo-grpc: go-protobuf-plugins ## Build gRPC demo server and client
 	@echo "Building gRPC demo..."
-	@rm -f demo/grpc/server/otelc.runtime.go demo/grpc/client/otelc.runtime.go
-	@(cd demo/grpc/server && go generate && go build -a -o server .)
-	@(cd demo/grpc/client && go build -a -o client .)
+	@rm -f demo/app/grpc/server/otelc.runtime.go demo/app/grpc/client/otelc.runtime.go
+	@(cd demo/app/grpc/server && go generate && go build -a -o server .)
+	@(cd demo/app/grpc/client && go build -a -o client .)
 
 build-demo-http: ## Build HTTP demo server and client
 	@echo "Building HTTP demo..."
-	@rm -f demo/http/server/otelc.runtime.go demo/http/client/otelc.runtime.go
-	@(cd demo/http/server && go build -a -o server .)
-	@(cd demo/http/client && go build -a -o client .)
+	@rm -f demo/app/http/server/otelc.runtime.go demo/app/http/client/otelc.runtime.go
+	@(cd demo/app/http/server && go build -a -o server .)
+	@(cd demo/app/http/client && go build -a -o client .)
 
 ##@ Code Quality
 
@@ -168,7 +168,7 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	$$HADOLINT_CMD -c .config/hadolint.yaml demo/grpc/client/Dockerfile demo/grpc/server/Dockerfile demo/http/client/Dockerfile demo/http/server/Dockerfile
+	$$HADOLINT_CMD -c .config/hadolint.yaml demo/app/grpc/client/Dockerfile demo/app/grpc/server/Dockerfile demo/app/http/client/Dockerfile demo/app/http/server/Dockerfile
 
 lint/makefile: ## Lint Makefile
 lint/makefile: checkmake
@@ -428,12 +428,12 @@ clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
 	rm -rf dist
 	rm -f $(BINARY_NAME)$(EXT)
-	rm -f demo/basic/basic
-	rm -f demo/grpc/server/server
-	rm -rf demo/grpc/server/pb
-	rm -f demo/grpc/client/client
-	rm -f demo/http/server/server
-	rm -f demo/http/client/client
+	rm -f demo/app/basic/basic
+	rm -f demo/app/grpc/server/server
+	rm -rf demo/app/grpc/server/pb
+	rm -f demo/app/grpc/client/client
+	rm -f demo/app/http/server/server
+	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
 	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
