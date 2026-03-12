@@ -11,6 +11,7 @@ import (
 
 	"github.com/dave/dst"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
@@ -122,7 +123,7 @@ func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) e
 	otelcRuntimeFilePath := filepath.Join(packagePath, OtelcRuntimeFile)
 	err := ast.WriteFile(otelcRuntimeFilePath, root)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
 	sp.keepForDebug(otelcRuntimeFilePath)
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)

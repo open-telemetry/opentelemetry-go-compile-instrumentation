@@ -119,7 +119,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		// Okay, this package should be instrumented.
 		err = ip.instrument(matched)
 		if err != nil {
-			return nil, err
+			return nil, ex.Wrapf(err, "instrumenting package %s", matched.ModulePath)
 		}
 
 		// Strip -complete flag as we may insert some hook points that are
