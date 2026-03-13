@@ -131,16 +131,87 @@ func ListFuncDecls(root *dst.File) []*dst.FuncDecl {
 }
 
 func FindStructDecl(root *dst.File, structName string) *dst.GenDecl {
+	return FindTypeDecl(root, structName)
+}
+
+// FindVarDecl finds a package-level variable declaration by name.
+// Returns the enclosing GenDecl and the matching ValueSpec, or nil if not found.
+func FindVarDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
+	return findValueDecl(root, name, token.VAR)
+}
+
+// FindConstDecl finds a package-level constant declaration by name.
+// Returns the enclosing GenDecl and the matching ValueSpec, or nil if not found.
+func FindConstDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
+	return findValueDecl(root, name, token.CONST)
+}
+
+func findValueDecl(root *dst.File, name string, tok token.Token) (*dst.GenDecl, *dst.ValueSpec) {
 	for _, decl := range root.Decls {
-		if genDecl, ok := decl.(*dst.GenDecl); ok && genDecl.Tok == token.TYPE {
-			if typeSpec, ok1 := genDecl.Specs[0].(*dst.TypeSpec); ok1 {
-				if typeSpec.Name.Name == structName {
-					return genDecl
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != tok {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			valueSpec, ok1 := spec.(*dst.ValueSpec)
+			if !ok1 {
+				continue
+			}
+			for _, ident := range valueSpec.Names {
+				if ident.Name == name {
+					return genDecl, valueSpec
 				}
 			}
 		}
 	}
+	return nil, nil
+}
+
+// FindTypeDecl finds a package-level type declaration by name (any kind: struct, interface, alias, etc).
+func FindTypeDecl(root *dst.File, name string) *dst.GenDecl {
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			typeSpec, ok1 := spec.(*dst.TypeSpec)
+			if ok1 && typeSpec.Name.Name == name {
+				return genDecl
+			}
+		}
+	}
 	return nil
+}
+
+// FindNamedDecl finds a package-level declaration by name and optional kind.
+// kind may be "func", "var", "const", "type", or "" to match any.
+// Returns the matched AST node (FuncDecl, ValueSpec, or GenDecl) or nil.
+func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
+	switch kind {
+	case "func":
+		return FindFuncDeclWithoutRecv(root, name)
+	case "var":
+		_, spec := FindVarDecl(root, name)
+		return spec
+	case "const":
+		_, spec := FindConstDecl(root, name)
+		return spec
+	case "type":
+		return FindTypeDecl(root, name)
+	default:
+		// Try all kinds, return first match
+		if fn := FindFuncDeclWithoutRecv(root, name); fn != nil {
+			return fn
+		}
+		if _, spec := FindVarDecl(root, name); spec != nil {
+			return spec
+		}
+		if _, spec := FindConstDecl(root, name); spec != nil {
+			return spec
+		}
+		return FindTypeDecl(root, name)
+	}
 }
 
 func HasReceiver(fn *dst.FuncDecl) bool {
