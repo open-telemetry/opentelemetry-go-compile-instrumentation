@@ -124,8 +124,8 @@ func (irs *InstRuleSet) SetCgoFileMap(cgoFiles map[string]string) {
 	irs.CgoFileMap = cgoFiles
 }
 
-// GetFuncRules returns all function rules from the rule set.
-func (irs *InstRuleSet) GetFuncRules() []*InstFuncRule {
+// AllFuncRules returns all function rules from the rule set as a flat slice.
+func (irs *InstRuleSet) AllFuncRules() []*InstFuncRule {
 	n := 0
 	for _, rs := range irs.FuncRules {
 		n += len(rs)
@@ -137,8 +137,8 @@ func (irs *InstRuleSet) GetFuncRules() []*InstFuncRule {
 	return rules
 }
 
-// GetStructRules returns all struct rules from the rule set.
-func (irs *InstRuleSet) GetStructRules() []*InstStructRule {
+// AllStructRules returns all struct rules from the rule set as a flat slice.
+func (irs *InstRuleSet) AllStructRules() []*InstStructRule {
 	n := 0
 	for _, rs := range irs.StructRules {
 		n += len(rs)
