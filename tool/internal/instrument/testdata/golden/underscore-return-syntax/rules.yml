@@ -1,5 +1,5 @@
 hook_underscore_return:
   target: main
   func: UnderscoreReturnFunc
-  after: HUnderscoreReturnAfter
+  after: H12UnderscoreReturnAfter
   path: testdata

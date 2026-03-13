@@ -98,7 +98,7 @@ func (c *HookContextImpl552216505) GetPackageName() string { return c.packageNam
 func OtelAfterTrampoline_UnderscoreReturnFunc552216505(hookContext HookContext, arg0 *int, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
-			println("failed to exec After hook", "HUnderscoreReturnAfter")
+			println("failed to exec After hook", "H12UnderscoreReturnAfter")
 			if e, ok := err.(error); ok {
 				println(e.Error())
 			}
@@ -109,10 +109,10 @@ func OtelAfterTrampoline_UnderscoreReturnFunc552216505(hookContext HookContext, 
 		}
 	}()
 	hookContext.(*HookContextImpl552216505).returnVals = []interface{}{arg0, arg1}
-	if HUnderscoreReturnAfter != nil {
-		HUnderscoreReturnAfter(hookContext, *arg0, *arg1)
+	if H12UnderscoreReturnAfter != nil {
+		H12UnderscoreReturnAfter(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname HUnderscoreReturnAfter testdata.HUnderscoreReturnAfter
-func HUnderscoreReturnAfter(hookContext HookContext, arg0 int, arg1 error)
+//go:linkname H12UnderscoreReturnAfter testdata.H12UnderscoreReturnAfter
+func H12UnderscoreReturnAfter(hookContext HookContext, arg0 int, arg1 error)
