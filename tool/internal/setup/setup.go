@@ -150,6 +150,14 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
+	// Back up go.mod / go.sum / go.work / go.work.sum before modifying them.
+	// Cleanup() restores from this backup, so the backup must exist before any
+	// modification happens — including when otelc setup is run standalone.
+	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+	if err := util.BackupFile(backupFiles); err != nil {
+		logger.DebugContext(ctx, "failed to back up files", "error", err)
+	}
+
 	sp := &SetupPhase{
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
@@ -377,32 +385,27 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
 
-	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
-	err := util.BackupFile(backupFiles)
-	if err != nil {
-		logger.DebugContext(ctx, "failed to back up files", "error", err)
-	}
 	defer func() {
-		var pkgs []*packages.Package
-		pkgs, err = getBuildPackages(ctx, cmd.Args().Slice())
-		if err != nil {
-			logger.DebugContext(ctx, "failed to get build packages", "error", err)
+		// Remove otelc.runtime.go from each instrumented package directory.
+		// This must happen before Cleanup() removes .otelc-build/.
+		pkgs, pkgErr := getBuildPackages(ctx, cmd.Args().Slice())
+		if pkgErr != nil {
+			logger.DebugContext(ctx, "failed to get build packages", "error", pkgErr)
 		}
 		for _, pkg := range pkgs {
-			if err = os.RemoveAll(filepath.Join(pkg.Dir, OtelcRuntimeFile)); err != nil {
+			path := filepath.Join(pkg.Dir, OtelcRuntimeFile)
+			if removeErr := os.RemoveAll(path); removeErr != nil {
 				logger.DebugContext(ctx, "failed to remove generated file from package",
-					"file", filepath.Join(pkg.Dir, OtelcRuntimeFile), "error", err)
+					"file", path, "error", removeErr)
 			}
 		}
-		if err = os.RemoveAll(unzippedPkgDir); err != nil {
-			logger.DebugContext(ctx, "failed to remove unzipped pkg", "error", err)
-		}
-		if err = util.RestoreFile(backupFiles); err != nil {
-			logger.DebugContext(ctx, "failed to restore files", "error", err)
+		// Delegate backup restore and temp dir removal to Cleanup.
+		if cleanErr := Cleanup(ctx); cleanErr != nil {
+			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()
 
-	err = Setup(ctx, cmd)
+	err := Setup(ctx, cmd)
 	if err != nil {
 		return err
 	}
