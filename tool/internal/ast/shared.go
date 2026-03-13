@@ -190,15 +190,29 @@ func FindTypeDecl(root *dst.File, name string) *dst.GenDecl {
 func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 	switch kind {
 	case "func":
-		return FindFuncDeclWithoutRecv(root, name)
+		n := FindFuncDeclWithoutRecv(root, name)
+		if n == nil {
+			return nil
+		}
+		return n
 	case "var":
 		_, spec := FindVarDecl(root, name)
+		if spec == nil {
+			return nil
+		}
 		return spec
 	case "const":
 		_, spec := FindConstDecl(root, name)
+		if spec == nil {
+			return nil
+		}
 		return spec
 	case "type":
-		return FindTypeDecl(root, name)
+		n := FindTypeDecl(root, name)
+		if n == nil {
+			return nil
+		}
+		return n
 	default:
 		// Try all kinds, return first match
 		if fn := FindFuncDeclWithoutRecv(root, name); fn != nil {
@@ -210,7 +224,10 @@ func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 		if _, spec := FindConstDecl(root, name); spec != nil {
 			return spec
 		}
-		return FindTypeDecl(root, name)
+		if n := FindTypeDecl(root, name); n != nil {
+			return n
+		}
+		return nil
 	}
 }
 

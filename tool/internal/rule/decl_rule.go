@@ -51,7 +51,7 @@ func NewInstDeclRule(data []byte, name string) (*InstDeclRule, error) {
 	return &r, nil
 }
 
-var validDeclKinds = map[string]bool{
+var validDeclKinds = map[string]bool{ //nolint:gochecknoglobals // private lookup table
 	"":      true,
 	"func":  true,
 	"var":   true,
