@@ -70,10 +70,9 @@ func TestStripCompleteFlag(t *testing.T) {
 func TestUpdateImportConfig(t *testing.T) {
 	t.Run("no importcfg path", func(t *testing.T) {
 		ip := &InstrumentPhase{
-			ctx:              t.Context(),
 			importConfigPath: "",
 		}
-		err := ip.updateImportConfig(map[string]string{"fmt": "fmt"})
+		err := ip.updateImportConfig(t.Context(), map[string]string{"fmt": "fmt"})
 		require.NoError(t, err)
 	})
 
@@ -84,13 +83,12 @@ func TestUpdateImportConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		ip := &InstrumentPhase{
-			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
 			},
 		}
-		err = ip.updateImportConfig(map[string]string{})
+		err = ip.updateImportConfig(t.Context(), map[string]string{})
 		require.NoError(t, err)
 
 		// File should not be modified
@@ -106,13 +104,12 @@ func TestUpdateImportConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		ip := &InstrumentPhase{
-			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
 			},
 		}
-		err = ip.updateImportConfig(map[string]string{"unsafe": "unsafe"})
+		err = ip.updateImportConfig(t.Context(), map[string]string{"unsafe": "unsafe"})
 		require.NoError(t, err)
 
 		// File should not be modified since unsafe is skipped
@@ -128,13 +125,12 @@ func TestUpdateImportConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		ip := &InstrumentPhase{
-			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
 			},
 		}
-		err = ip.updateImportConfig(map[string]string{"C": "C"})
+		err = ip.updateImportConfig(t.Context(), map[string]string{"C": "C"})
 		require.NoError(t, err)
 
 		// File should not be modified since C is the cgo pseudo-package
@@ -150,13 +146,12 @@ func TestUpdateImportConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		ip := &InstrumentPhase{
-			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
 			},
 		}
-		err = ip.updateImportConfig(map[string]string{"fmt": "fmt"})
+		err = ip.updateImportConfig(t.Context(), map[string]string{"fmt": "fmt"})
 		require.NoError(t, err)
 
 		// File should not be modified since fmt already exists
@@ -173,7 +168,6 @@ func TestUpdateImportConfig(t *testing.T) {
 
 		ip := &InstrumentPhase{
 			logger:           slog.Default(),
-			ctx:              t.Context(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: nil, // Intentionally nil
@@ -181,7 +175,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		}
 
 		// Should not panic, even though we're trying to add imports
-		err = ip.updateImportConfig(map[string]string{"unsafe": "unsafe"})
+		err = ip.updateImportConfig(t.Context(), map[string]string{"unsafe": "unsafe"})
 		require.NoError(t, err)
 	})
 }

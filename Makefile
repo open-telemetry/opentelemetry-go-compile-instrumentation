@@ -11,7 +11,7 @@ SHELL := /bin/bash
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
-        registry-diff registry-check registry-resolve weaver-install
+        registry-diff registry-check registry-resolve weaver-install tidy/test-apps
 
 # Constant variables
 BINARY_NAME := otelc
@@ -437,6 +437,17 @@ clean: ## Clean build artifacts
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
 	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
+
+.ONESHELL:
+tidy/test-apps: ## Run go mod tidy in all test app modules
+	@echo "Running go mod tidy in test app modules..."
+	@set -euo pipefail
+	@TEST_APP_MODULES=$$(find test/apps -name "go.mod" -type f -exec dirname {} \;); \
+	for moddir in $$TEST_APP_MODULES; do \
+		echo "Tidying $$moddir..."; \
+		(cd "$$moddir" && go mod tidy); \
+	done
+	@echo "All test app modules tidied successfully"
 
 gotestfmt: ## Install gotestfmt if not present
 	@if ! command -v gotestfmt >/dev/null 2>&1; then \
