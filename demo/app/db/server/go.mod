@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/db/server
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/db/server
 
 go 1.25.0
 

@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/basic
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic
 
 go 1.25.0
 

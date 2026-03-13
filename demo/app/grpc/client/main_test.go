@@ -11,7 +11,7 @@ import (
 	"os"
 	"testing"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/grpc/server/pb"
+	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/server/pb"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"

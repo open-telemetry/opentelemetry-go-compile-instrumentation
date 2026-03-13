@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/redis/client
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/redis/client
 
 go 1.25.0
 
