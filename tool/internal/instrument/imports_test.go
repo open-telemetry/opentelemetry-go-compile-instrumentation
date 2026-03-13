@@ -211,11 +211,9 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a mock InstrumentPhase with no importcfg (to avoid actual file operations)
-			ip := &InstrumentPhase{
-				ctx: t.Context(),
-			}
+			ip := &InstrumentPhase{}
 
-			err := ip.addRuleImports(tt.root, tt.imports, "test-rule")
+			err := ip.addRuleImports(t.Context(), tt.root, tt.imports, "test-rule")
 			if tt.expectError {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorMsg)
@@ -231,19 +229,16 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 
 func TestUpdateImportConfigForFile(t *testing.T) {
 	t.Run("empty file has no imports to update", func(t *testing.T) {
-		ip := &InstrumentPhase{
-			ctx: t.Context(),
-		}
+		ip := &InstrumentPhase{}
 		root := &dst.File{}
 
 		// Should not error - no imports to process
-		err := ip.updateImportConfigForFile(root, "test-rule")
+		err := ip.updateImportConfigForFile(t.Context(), root, "test-rule")
 		require.NoError(t, err)
 	})
 
 	t.Run("file with imports attempts update", func(t *testing.T) {
 		ip := &InstrumentPhase{
-			ctx: t.Context(),
 			// No importcfg path, so updateImportConfig will return early
 			importConfigPath: "",
 		}
@@ -260,7 +255,7 @@ func TestUpdateImportConfigForFile(t *testing.T) {
 		}
 
 		// Should not error - updateImportConfig returns early when no importcfg path
-		err := ip.updateImportConfigForFile(root, "test-rule")
+		err := ip.updateImportConfigForFile(t.Context(), root, "test-rule")
 		require.NoError(t, err)
 	})
 }
