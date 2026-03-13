@@ -190,29 +190,21 @@ func FindTypeDecl(root *dst.File, name string) *dst.GenDecl {
 func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 	switch kind {
 	case "func":
-		n := FindFuncDeclWithoutRecv(root, name)
-		if n == nil {
-			return nil
+		if n := FindFuncDeclWithoutRecv(root, name); n != nil {
+			return n
 		}
-		return n
 	case "var":
-		_, spec := FindVarDecl(root, name)
-		if spec == nil {
-			return nil
+		if _, spec := FindVarDecl(root, name); spec != nil {
+			return spec
 		}
-		return spec
 	case "const":
-		_, spec := FindConstDecl(root, name)
-		if spec == nil {
-			return nil
+		if _, spec := FindConstDecl(root, name); spec != nil {
+			return spec
 		}
-		return spec
 	case "type":
-		n := FindTypeDecl(root, name)
-		if n == nil {
-			return nil
+		if n := FindTypeDecl(root, name); n != nil {
+			return n
 		}
-		return n
 	default:
 		// Try all kinds, return first match
 		if fn := FindFuncDeclWithoutRecv(root, name); fn != nil {
@@ -227,8 +219,8 @@ func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 		if n := FindTypeDecl(root, name); n != nil {
 			return n
 		}
-		return nil
 	}
+	return nil
 }
 
 func HasReceiver(fn *dst.FuncDecl) bool {
