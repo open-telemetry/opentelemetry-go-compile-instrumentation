@@ -58,9 +58,7 @@ func TestBeforeNewServer(t *testing.T) {
 		sdktrace.WithSyncer(exporter),
 	)
 	otel.SetTracerProvider(tp)
-	defer func() {
-		_ = tp.Shutdown(context.Background())
-	}()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	tests := []struct {
 		name          string
@@ -151,7 +149,7 @@ func TestAfterNewServer(t *testing.T) {
 
 			// Cleanup server if created
 			if tt.server != nil {
-				defer tt.server.Stop()
+				t.Cleanup(tt.server.Stop)
 			}
 
 			ictx := newMockHookContext()
@@ -177,13 +175,13 @@ func TestServerStatsHandler_TagRPC(t *testing.T) {
 	)
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer func() {
+	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
-	}()
+	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
 
 	handler := newServerStatsHandler()
 
@@ -207,7 +205,7 @@ func TestServerStatsHandler_TagRPC(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.incomingMD != nil {
 				ctx = metadata.NewIncomingContext(ctx, tt.incomingMD)
 			}
@@ -258,14 +256,14 @@ func TestServerStatsHandler_Integration(t *testing.T) {
 
 	// Verify hook behavior
 	server := grpc.NewServer(newOpts...)
-	defer server.Stop()
+	t.Cleanup(server.Stop)
 	assert.NotNil(t, server)
 }
 
 func TestServerStatsHandler_TagConn(t *testing.T) {
 	handler := newServerStatsHandler()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	info := &stats.ConnTagInfo{
 		LocalAddr: &net.TCPAddr{
 			IP:   net.ParseIP("127.0.0.1"),
@@ -280,7 +278,7 @@ func TestServerStatsHandler_TagConn(t *testing.T) {
 func TestServerStatsHandler_HandleConn(t *testing.T) {
 	handler := newServerStatsHandler()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	handler.HandleConn(ctx, &stats.ConnBegin{})
@@ -299,13 +297,13 @@ func TestServerStatsHandler_OTELExporterFiltering(t *testing.T) {
 	)
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer func() {
+	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
-	}()
+	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
 
 	handler := newServerStatsHandler()
 
@@ -338,7 +336,7 @@ func TestServerStatsHandler_OTELExporterFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			info := &stats.RPCTagInfo{
 				FullMethodName: tt.fullMethodName,
 			}

@@ -29,7 +29,7 @@ func TestServerContextExtraction(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(spanRecorder),
 	)
-	defer func() { _ = provider.Shutdown(context.Background()) }()
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 
 	// Set global tracer provider and propagator
 	otel.SetTracerProvider(provider)
@@ -112,7 +112,7 @@ func TestServerCreatesChildSpan(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(spanRecorder),
 	)
-	defer func() { _ = provider.Shutdown(context.Background()) }()
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 
 	otel.SetTracerProvider(provider)
 	prop := propagation.TraceContext{}
@@ -198,7 +198,7 @@ func TestServerNoContextCreatesRootSpan(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(spanRecorder),
 	)
-	defer func() { _ = provider.Shutdown(context.Background()) }()
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
@@ -251,7 +251,7 @@ func TestServerDistributedTracing(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(spanRecorder),
 	)
-	defer func() { _ = provider.Shutdown(context.Background()) }()
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 
 	otel.SetTracerProvider(provider)
 	prop := propagation.TraceContext{}
