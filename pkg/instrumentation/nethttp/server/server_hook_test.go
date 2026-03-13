@@ -123,11 +123,13 @@ func (m *mockHookContext) GetPackageName() string {
 	return m.packageName
 }
 
-func setupTestTracer() (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
+func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
+	t.Helper()
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	return sr, tp
 }
 
@@ -216,8 +218,7 @@ func TestBeforeServeHTTP(t *testing.T) {
 			initOnce = *new(sync.Once)
 
 			tt.setupEnv(t)
-			sr, tp := setupTestTracer()
-			defer tp.Shutdown(context.Background())
+			sr, _ := setupTestTracer(t)
 
 			req := tt.setupRequest()
 			w := httptest.NewRecorder()
@@ -454,8 +455,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			initOnce = *new(sync.Once)
 
 			tt.setupEnv(t)
-			sr, tp := setupTestTracer()
-			defer tp.Shutdown(context.Background())
+			sr, tp := setupTestTracer(t)
 
 			mockCtx := tt.setupContext(tp)
 

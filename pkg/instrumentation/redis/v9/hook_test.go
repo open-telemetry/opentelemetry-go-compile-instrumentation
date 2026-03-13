@@ -20,11 +20,13 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-func setupTestTracer() (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
+func setupTestTracer(t *testing.T) *tracetest.SpanRecorder {
+	t.Helper()
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	otel.SetTracerProvider(tp)
-	return sr, tp
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	return sr
 }
 
 func TestGetRedisV9Statement(t *testing.T) {
@@ -154,8 +156,7 @@ func TestProcessHook_CreatesSpan(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
 
-	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
 	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
@@ -186,8 +187,7 @@ func TestProcessHook_RecordsError(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
 
-	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
 	expectedErr := errors.New("connection refused")
@@ -211,8 +211,7 @@ func TestProcessHook_RedisNilNotError(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
 
-	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
 	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
@@ -236,8 +235,7 @@ func TestProcessHook_Disabled(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "redis")
 
-	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
 	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
@@ -256,8 +254,7 @@ func TestProcessPipelineHook_CreatesSpan(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
 
-	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
 	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
@@ -291,8 +288,7 @@ func TestProcessPipelineHook_TruncatesLongPipeline(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
 
-	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
 	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
@@ -315,8 +311,7 @@ func TestProcessPipelineHook_RecordsError(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
 
-	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
 	expectedErr := errors.New("pipeline error")
@@ -341,8 +336,7 @@ func TestProcessPipelineHook_Disabled(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "redis")
 
-	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
 	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {

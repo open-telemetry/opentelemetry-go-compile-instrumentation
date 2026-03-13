@@ -4,7 +4,6 @@
 package semconv
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +33,7 @@ func TestMetadataSupplier(t *testing.T) {
 
 func TestInject(t *testing.T) {
 	propagator := propagation.TraceContext{}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a context with trace info
 	// Note: In a real scenario, you'd have an active span
@@ -53,7 +52,7 @@ func TestExtract(t *testing.T) {
 	md := metadata.MD{
 		"traceparent": []string{"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0aa902b7-01"},
 	}
-	ctx := metadata.NewIncomingContext(context.Background(), md)
+	ctx := metadata.NewIncomingContext(t.Context(), md)
 
 	// Extract should work
 	extractedCtx := Extract(ctx, propagator)

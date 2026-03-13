@@ -4,6 +4,8 @@
 package instrument
 
 import (
+	"context"
+
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -13,14 +15,14 @@ import (
 // updateImportConfigForFile ensures all imports in the given file's AST are present in the importcfg.
 // This is used when adding a new file (e.g., via file rules) that has its own imports which may
 // not be in the target package's importcfg.
-func (ip *InstrumentPhase) updateImportConfigForFile(root *dst.File, ruleName string) error {
-	paths := imports.CollectPaths(ip.ctx, root)
+func (ip *InstrumentPhase) updateImportConfigForFile(ctx context.Context, root *dst.File, ruleName string) error {
+	paths := imports.CollectPaths(ctx, root)
 
 	if len(paths) == 0 {
 		return nil
 	}
 
-	if err := ip.updateImportConfig(paths); err != nil {
+	if err := ip.updateImportConfig(ctx, paths); err != nil {
 		return ex.Wrapf(err, "updating import config for file imports in %s", ruleName)
 	}
 
@@ -34,6 +36,7 @@ func (ip *InstrumentPhase) updateImportConfigForFile(root *dst.File, ruleName st
 // implicit), an error is returned. This prevents silent failures where injected code uses
 // an alias that doesn't exist in the file.
 func (ip *InstrumentPhase) addRuleImports(
+	ctx context.Context,
 	root *dst.File,
 	ruleImports map[string]string,
 	ruleName string,
@@ -42,7 +45,7 @@ func (ip *InstrumentPhase) addRuleImports(
 		return nil
 	}
 
-	resolution := imports.FindNew(ip.ctx, root, ruleImports)
+	resolution := imports.FindNew(ctx, root, ruleImports)
 
 	// Validate: check for alias mismatches that would break injected code
 	for ruleAlias, importPath := range ruleImports {
@@ -84,12 +87,12 @@ func (ip *InstrumentPhase) addRuleImports(
 	}
 
 	// Add import declarations to the AST
-	if err := imports.AddToFile(ip.ctx, root, resolution.NewImports); err != nil {
+	if err := imports.AddToFile(ctx, root, resolution.NewImports); err != nil {
 		return ex.Wrapf(err, "adding imports for %s", ruleName)
 	}
 
 	// Update importcfg for the build
-	if err := ip.updateImportConfig(resolution.NewImports); err != nil {
+	if err := ip.updateImportConfig(ctx, resolution.NewImports); err != nil {
 		return ex.Wrapf(err, "updating import config for %s", ruleName)
 	}
 
