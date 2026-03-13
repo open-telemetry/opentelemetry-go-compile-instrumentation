@@ -18,6 +18,7 @@ func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRu
 	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.RawRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.CallRules, file2rules, rset.CgoFileMap, workDir)
+	addRulesToMap(rset.DeclRules, file2rules, rset.CgoFileMap, workDir)
 	return file2rules
 }
 
@@ -69,6 +70,11 @@ func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 				err1 := ip.applyStructRule(ctx, rt, root)
 				if err1 != nil {
 					return ex.Wrapf(err1, "applying struct rule %s to %s", rt.Name, file)
+				}
+			case *rule.InstDeclRule:
+				err1 := ip.applyDeclRule(ctx, rt, root)
+				if err1 != nil {
+					return err1
 				}
 			case *rule.InstRawRule:
 				err1 := ip.applyRawRule(ctx, rt, root)

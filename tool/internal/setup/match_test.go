@@ -230,6 +230,17 @@ version: v1.0.0,v2.0.0
 			expectedType: "*rule.InstStructRule",
 		},
 		{
+			name: "decl rule creation",
+			yamlContent: `
+declaration_of: GlobalVar
+target: github.com/example/lib
+assign_value: "replaced"
+`,
+			ruleName:     "test-decl-rule",
+			expectError:  false,
+			expectedType: "*rule.InstDeclRule",
+		},
+		{
 			name: "invalid yaml syntax",
 			yamlContent: `
 struct: [
