@@ -46,7 +46,11 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	if r.AssignValue != "" {
 		spec, ok := node.(*dst.ValueSpec)
 		if !ok {
-			return ex.Newf("assign_value requires a var or const declaration, but %q matched a %T", r.DeclarationOf, node)
+			return ex.Newf(
+				"assign_value requires a var or const declaration, but %q matched a %T",
+				r.DeclarationOf,
+				node,
+			)
 		}
 		expr, err := parseValueExpr(r.AssignValue)
 		if err != nil {
