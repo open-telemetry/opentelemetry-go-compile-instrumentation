@@ -21,7 +21,8 @@ INST_PKG_GZIP = otelc-pkg.gz
 INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
-
+TOOLS_DIR = .tools
+GO_VERSION = 1.24
 # Dynamic variables
 GOOS ?= $(shell go env GOOS)
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -29,6 +30,7 @@ COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
 LDFLAGS := -X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)
 GO_BUILD_CMD := go build -trimpath -a -ldflags "$(LDFLAGS)"
+ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' -exec dirname {} \; | sort)
 EXT :=
 ifeq ($(GOOS),windows)
 	EXT = .exe
@@ -355,6 +357,45 @@ test-e2e/coverage: build build-demo gotestfmt
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
 	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ../gotest-e2e.log | gotestfmt
+
+##@ Multi-module Management
+
+TOOLS := $(CURDIR)/_tools
+
+# Tools built from tools module
+$(TOOLS):
+	@mkdir -p $@
+
+$(TOOLS)/%: $(TOOLS_DIR)/go.mod | $(TOOLS)
+	cd $(TOOLS_DIR) && \
+	go build -o $@ $(PACKAGE)
+
+CROSSLINK = $(TOOLS)/crosslink
+$(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
+
+.PHONY: crosslink
+crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
+	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
+	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
+	@echo "Updating intra-repository dependencies in all go modules" \
+		&& $(CROSSLINK) --root=$(CURDIR)
+
+.PHONY: go-work
+go-work: $(CROSSLINK) ## Generate go.work file for local development
+	@echo "Generating go.work file for local development..."
+	@$(CROSSLINK) work --root=$(CURDIR) --go=$(GO_VERSION)
+	@# Fix go version to include patch version (crosslink only supports major.minor)
+	@sed -i.bak 's/^go $(GO_VERSION)$$/go $(GO_VERSION).0/' go.work && rm -f go.work.bak
+	@echo "go.work file generated successfully"
+
+.PHONY: go-mod-tidy
+go-mod-tidy: $(ALL_GO_MOD_DIRS:%=go-mod-tidy/%) ## Run go mod tidy in all modules
+
+go-mod-tidy/%: DIR=$*
+go-mod-tidy/%: crosslink
+	@echo "Running go mod tidy in $(DIR)" \
+		&& cd $(DIR) \
+		&& go mod tidy
 
 ##@ Utilities
 
