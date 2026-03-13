@@ -4,39 +4,29 @@
 package instrument
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"go/format"
 	"go/parser"
 	"go/token"
-	"text/template"
+	"io"
+	"strings"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
 	"github.com/dave/dst/dstutil"
+	"github.com/valyala/fasttemplate"
 
 	toolast "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 )
 
 // callTemplate represents a code template that can be used to wrap or transform
-// Go expressions. It uses Go's text/template package for template execution
+// Go expressions. It uses fasttemplate for template execution
 // and supports placeholder substitution for AST nodes.
 type callTemplate struct {
-	template *template.Template
+	template *fasttemplate.Template
 	source   string
 }
-
-// wrapper is a template that wraps user templates in a minimal function
-// to allow them to be parsed as valid Go code.
-//
-//nolint:gochecknoglobals // Template constant
-var wrapper = template.Must(template.New("wrapper").Parse(
-	`package _
-func _() {
-	{{ . }}
-}
-`))
 
 // newCallTemplate creates a new callTemplate from the provided template text.
 // The template text should contain {{ . }} as a placeholder for the expression
@@ -46,8 +36,7 @@ func _() {
 //
 //	newCallTemplate("wrapper({{ . }})")
 func newCallTemplate(text string) (*callTemplate, error) {
-	tmpl := template.New("code")
-	tmpl, err := tmpl.Parse(text)
+	tmpl, err := fasttemplate.NewTemplate(text, "{{", "}}")
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse template: %w", err)
 	}
@@ -72,24 +61,32 @@ func (t *callTemplate) String() string {
 // 3. Extract the expression from the parsed function
 // 4. Replace the placeholder with the actual AST node
 func (t *callTemplate) compileExpression(node dst.Expr) (dst.Expr, error) {
-	// Execute the user's template with a fixed placeholder string
-	var userBuf bytes.Buffer
-	if err := t.template.Execute(&userBuf, "_.PLACEHOLDER_0"); err != nil {
+	// Execute the user's template with a fixed placeholder string.
+	// The TagFunc handles {{ . }}, {{.}}, and {{- . -}} variants by
+	// normalizing the tag content before matching.
+	userResult, err := t.template.ExecuteFuncStringWithErr(func(w io.Writer, tag string) (int, error) {
+		// Trim spaces and optional trim markers (e.g. {{- . -}})
+		cleaned := strings.TrimSpace(tag)
+		cleaned = strings.Trim(cleaned, "-")
+		cleaned = strings.TrimSpace(cleaned)
+		if cleaned == "." {
+			return io.WriteString(w, "_.PLACEHOLDER_0")
+		}
+		return 0, fmt.Errorf("unknown template tag %q; only {{ . }} is supported", tag)
+	})
+	if err != nil {
 		return nil, fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	// Wrap the result in a minimal function so we can parse it
-	var wrappedBuf bytes.Buffer
-	if err := wrapper.Execute(&wrappedBuf, userBuf.String()); err != nil {
-		return nil, fmt.Errorf("failed to wrap template result: %w", err)
-	}
+	// Wrap the result in a minimal function so we can parse it as Go code.
+	wrapped := "package _\nfunc _() {\n\t" + userResult + "\n}\n"
 
 	// Parse the wrapped code
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "", wrappedBuf.Bytes(), parser.ParseComments)
+	file, err := parser.ParseFile(fset, "", []byte(wrapped), parser.ParseComments)
 	if err != nil {
 		// Format the error with the generated code for debugging
-		formatted, _ := format.Source(wrappedBuf.Bytes())
+		formatted, _ := format.Source([]byte(wrapped))
 		return nil, fmt.Errorf("failed to parse generated code: %w\nGenerated code:\n%s", err, formatted)
 	}
 
