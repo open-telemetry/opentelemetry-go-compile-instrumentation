@@ -7,7 +7,7 @@ package imports
 import (
 	"context"
 	"go/token"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -181,7 +181,7 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 	for alias := range newImports {
 		aliases = append(aliases, alias)
 	}
-	sort.Strings(aliases)
+	slices.Sort(aliases)
 
 	importDecl := findFirstDecl(root)
 

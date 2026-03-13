@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -317,7 +317,7 @@ func extractBuildFlags(args []string) []string {
 		}
 	}
 	// Sort for deterministic output
-	sort.Strings(enabledBoolFlags)
+	slices.Sort(enabledBoolFlags)
 
 	// Combine: value flags first, then boolean flags
 	return append(valueFlags, enabledBoolFlags...)

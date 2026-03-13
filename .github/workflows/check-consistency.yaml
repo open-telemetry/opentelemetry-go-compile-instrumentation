@@ -1,0 +1,84 @@
+name: Check Consistency
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# Declare default permissions as read only.
+permissions: read-all
+
+jobs:
+  # This is a required workflow, so it must always run and report a status.
+  # We use dorny/paths-filter at the job level instead of workflow-level path filters
+  # to ensure the workflow runs and the "done" job reports success even when no relevant files change.
+  # This prevents PRs from being blocked by missing status checks.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**/*.go'
+              - '**/go.mod'
+              - 'pkg/inst/context.go'
+              - 'tool/internal/instrument/api.tmpl'
+              - 'tool/internal/instrument/testdata/**'
+              - '.github/workflows/check-consistency.yaml'
+
+  check-api-sync:
+    name: Check api.tmpl Sync
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - name: Verify api.tmpl matches pkg/inst/context.go
+        run: make check-api-sync
+
+  check-golden-files:
+    name: Check Golden Files Not Stale
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Check golden files are up to date
+        run: make check-golden-files
+
+  done:
+    name: Done (Check Consistency)
+    runs-on: ubuntu-latest
+    needs: [changes, check-api-sync, check-golden-files]
+    if: always()
+    steps:
+      - name: Check result
+        run: |
+          api_result="${{ needs.check-api-sync.result }}"
+          golden_result="${{ needs.check-golden-files.result }}"
+          echo "api-sync result: $api_result"
+          echo "golden-files result: $golden_result"
+          if [[ ("$api_result" == "success" || "$api_result" == "skipped") && \
+                ("$golden_result" == "success" || "$golden_result" == "skipped") ]]; then
+            echo "✅ Consistency checks passed or were skipped"
+            exit 0
+          else
+            echo "❌ Consistency checks failed"
+            exit 1
+          fi

@@ -7,7 +7,7 @@ SHELL := /bin/bash
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
-        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed \
+        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
@@ -21,7 +21,8 @@ INST_PKG_GZIP = otelc-pkg.gz
 INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
-
+TOOLS_DIR = .tools
+GO_VERSION = 1.24
 # Dynamic variables
 GOOS ?= $(shell go env GOOS)
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -29,6 +30,7 @@ COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
 LDFLAGS := -X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)
 GO_BUILD_CMD := go build -trimpath -a -ldflags "$(LDFLAGS)"
+ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' -exec dirname {} \; | sort)
 EXT :=
 ifeq ($(GOOS),windows)
 	EXT = .exe
@@ -230,6 +232,31 @@ check-embed: ## Verify that embedded files exist (required for tests)
 	fi
 	@echo "All embedded files present"
 
+check-api-sync: ## Verify api.tmpl is in sync with pkg/inst/context.go
+	@echo "Checking api.tmpl sync with $(API_SYNC_SOURCE)..."
+	@if ! diff -q $(API_SYNC_SOURCE) $(API_SYNC_TARGET) > /dev/null 2>&1; then \
+		echo "Error: $(API_SYNC_TARGET) is out of sync with $(API_SYNC_SOURCE)"; \
+		echo "Run 'make build' to sync, or: cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)"; \
+		diff $(API_SYNC_SOURCE) $(API_SYNC_TARGET) || true; \
+		exit 1; \
+	fi
+	@echo "api.tmpl is in sync with $(API_SYNC_SOURCE)"
+
+.ONESHELL:
+check-golden-files: ## Verify golden test files are up to date
+check-golden-files: package
+	@echo "Checking golden files are up to date..."
+	set -euo pipefail
+	cd tool/internal/instrument && go test -v -timeout=5m -count=1 ./... -args -update
+	cd "$(CURDIR)"
+	if ! git diff --exit-code tool/internal/instrument/testdata/golden/; then \
+		echo "Error: golden files are stale"; \
+		echo "Run 'make test-unit/update-golden' to regenerate"; \
+		exit 1; \
+	fi
+	git status --porcelain -- tool/internal/instrument/testdata/golden/ | grep -q . && (echo "Golden files have untracked changes"; exit 1) || true
+	echo "Golden files are up to date"
+
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
 # uses //go:embed to embed otelc-pkg.gz at compile time. If the file doesn't exist
@@ -245,7 +272,7 @@ test-unit/update-golden: ## Run unit tests and update golden files
 test-unit/update-golden: package
 	@echo "Running unit tests and updating golden files..."
 	set -euo pipefail
-	cd tool/internal/instrument && go test -v -timeout=5m -count=1 -update
+	cd tool/internal/instrument && go test -v -timeout=5m -count=1 ./... -args -update
 
 # - Does NOT use gotestfmt because v2.5.0 has a bug that causes panics when go test
 #   outputs build errors (JSON lines with ImportPath but no Package field).
@@ -355,6 +382,45 @@ test-e2e/coverage: build build-demo gotestfmt
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
 	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ../gotest-e2e.log | gotestfmt
+
+##@ Multi-module Management
+
+TOOLS := $(CURDIR)/_tools
+
+# Tools built from tools module
+$(TOOLS):
+	@mkdir -p $@
+
+$(TOOLS)/%: $(TOOLS_DIR)/go.mod | $(TOOLS)
+	cd $(TOOLS_DIR) && \
+	go build -o $@ $(PACKAGE)
+
+CROSSLINK = $(TOOLS)/crosslink
+$(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
+
+.PHONY: crosslink
+crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
+	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
+	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
+	@echo "Updating intra-repository dependencies in all go modules" \
+		&& $(CROSSLINK) --root=$(CURDIR)
+
+.PHONY: go-work
+go-work: $(CROSSLINK) ## Generate go.work file for local development
+	@echo "Generating go.work file for local development..."
+	@$(CROSSLINK) work --root=$(CURDIR) --go=$(GO_VERSION)
+	@# Fix go version to include patch version (crosslink only supports major.minor)
+	@sed -i.bak 's/^go $(GO_VERSION)$$/go $(GO_VERSION).0/' go.work && rm -f go.work.bak
+	@echo "go.work file generated successfully"
+
+.PHONY: go-mod-tidy
+go-mod-tidy: $(ALL_GO_MOD_DIRS:%=go-mod-tidy/%) ## Run go mod tidy in all modules
+
+go-mod-tidy/%: DIR=$*
+go-mod-tidy/%: crosslink
+	@echo "Running go mod tidy in $(DIR)" \
+		&& cd $(DIR) \
+		&& go mod tidy
 
 ##@ Utilities
 
