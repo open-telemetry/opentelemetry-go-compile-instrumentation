@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"go/parser"
@@ -331,7 +332,7 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 	return root, nil
 }
 
-func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, root *dst.File) error {
+func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
 	funcDecl := ast.FindFuncDecl(root, rule.Func, rule.Recv)
 	// No function found for the rule, skip
 	if funcDecl == nil {
@@ -339,7 +340,7 @@ func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, root *dst.File
 	}
 
 	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(root, rule.Imports, rule.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
 		return err
 	}
 

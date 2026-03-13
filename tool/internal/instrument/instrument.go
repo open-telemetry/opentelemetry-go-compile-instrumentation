@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"context"
 	"path/filepath"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -38,12 +39,12 @@ func addRulesToMap[T rule.InstRule](
 }
 
 //nolint:gocognit
-func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
+func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
 	// by other rules such as raw rules
 	for _, rule := range rset.FileRules {
-		err := ip.applyFileRule(rule, rset.PackageName)
+		err := ip.applyFileRule(ctx, rule, rset.PackageName)
 		if err != nil {
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
@@ -59,24 +60,24 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 		for _, r := range rules {
 			switch rt := r.(type) {
 			case *rule.InstFuncRule:
-				err1 := ip.applyFuncRule(rt, root)
+				err1 := ip.applyFuncRule(ctx, rt, root)
 				if err1 != nil {
 					return ex.Wrapf(err1, "applying func rule %s to %s", rt.Name, file)
 				}
 				hasFuncRule = true
 			case *rule.InstStructRule:
-				err1 := ip.applyStructRule(rt, root)
+				err1 := ip.applyStructRule(ctx, rt, root)
 				if err1 != nil {
 					return ex.Wrapf(err1, "applying struct rule %s to %s", rt.Name, file)
 				}
 			case *rule.InstRawRule:
-				err1 := ip.applyRawRule(rt, root)
+				err1 := ip.applyRawRule(ctx, rt, root)
 				if err1 != nil {
 					return ex.Wrapf(err1, "applying raw rule %s to %s", rt.Name, file)
 				}
 				hasFuncRule = true
 			case *rule.InstCallRule:
-				err1 := ip.applyCallRule(rt, root)
+				err1 := ip.applyCallRule(ctx, rt, root)
 				if err1 != nil {
 					return err1
 				}
