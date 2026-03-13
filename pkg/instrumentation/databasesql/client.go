@@ -532,7 +532,12 @@ func afterTxRollbackInstrumentation(ictx inst.HookContext, err error) {
 	instrumentEnd(ictx, err)
 }
 
-func beforeStmtExecContextInstrumentation(ictx inst.HookContext, stmt *sql.Stmt, ctx context.Context, args ...interface{}) {
+func beforeStmtExecContextInstrumentation(
+	ictx inst.HookContext,
+	stmt *sql.Stmt,
+	ctx context.Context,
+	args ...interface{},
+) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -553,7 +558,12 @@ func afterStmtExecContextInstrumentation(ictx inst.HookContext, result sql.Resul
 	instrumentEnd(ictx, err)
 }
 
-func beforeStmtQueryContextInstrumentation(ictx inst.HookContext, stmt *sql.Stmt, ctx context.Context, args ...interface{}) {
+func beforeStmtQueryContextInstrumentation(
+	ictx inst.HookContext,
+	stmt *sql.Stmt,
+	ctx context.Context,
+	args ...interface{},
+) {
 	if !clientEnabler.Enable() {
 		return
 	}
