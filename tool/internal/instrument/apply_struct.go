@@ -4,6 +4,8 @@
 package instrument
 
 import (
+	"context"
+
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -11,14 +13,14 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
-func (ip *InstrumentPhase) applyStructRule(rule *rule.InstStructRule, root *dst.File) error {
+func (ip *InstrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstStructRule, root *dst.File) error {
 	structDecl := ast.FindStructDecl(root, rule.Struct)
 	if structDecl == nil {
 		return ex.Newf("can not find struct %s", rule.Struct)
 	}
 
 	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(root, rule.Imports, rule.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
 		return err
 	}
 

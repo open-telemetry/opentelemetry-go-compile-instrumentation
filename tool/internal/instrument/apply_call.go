@@ -4,6 +4,8 @@
 package instrument
 
 import (
+	"context"
+
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -12,7 +14,7 @@ import (
 
 // applyCallRule transforms function calls at call sites by wrapping them with
 // instrumentation code according to the provided template.
-func (ip *InstrumentPhase) applyCallRule(r *rule.InstCallRule, root *dst.File) error {
+func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
 	modified := false
 	importAliases := collectImportAliases(root)
 
@@ -42,7 +44,7 @@ func (ip *InstrumentPhase) applyCallRule(r *rule.InstCallRule, root *dst.File) e
 	}
 
 	if modified {
-		if err := ip.addRuleImports(root, r.Imports, r.Name); err != nil {
+		if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
 			return err
 		}
 		ip.Info("Apply call rule", "rule", r)
