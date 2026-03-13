@@ -71,7 +71,7 @@ func addReplace(modfile *modfile.File, replace *replaceDirective) (bool, error) 
 }
 
 func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
-	rules := make([]*rule.InstFuncRule, 0)
+	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
 		funcRules := m.GetFuncRules()
 		rules = append(rules, funcRules...)
@@ -142,11 +142,11 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	if changed {
 		err = writeGoMod(goModFile, modfile)
 		if err != nil {
-			return err
+			return ex.Wrapf(err, "writing updated go.mod at %s", goModFile)
 		}
 		err = runModTidy(ctx, moduleDir)
 		if err != nil {
-			return err
+			return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
 		}
 		sp.keepForDebug(goModFile)
 	}

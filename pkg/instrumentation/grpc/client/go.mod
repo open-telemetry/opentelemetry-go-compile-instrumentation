@@ -1,6 +1,6 @@
 module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/client
 
-go 1.24.0
+go 1.25.0
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../..
 

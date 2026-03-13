@@ -126,7 +126,11 @@ func (irs *InstRuleSet) SetCgoFileMap(cgoFiles map[string]string) {
 
 // GetFuncRules returns all function rules from the rule set.
 func (irs *InstRuleSet) GetFuncRules() []*InstFuncRule {
-	rules := make([]*InstFuncRule, 0)
+	n := 0
+	for _, rs := range irs.FuncRules {
+		n += len(rs)
+	}
+	rules := make([]*InstFuncRule, 0, n)
 	for _, rs := range irs.FuncRules {
 		rules = append(rules, rs...)
 	}
@@ -135,7 +139,11 @@ func (irs *InstRuleSet) GetFuncRules() []*InstFuncRule {
 
 // GetStructRules returns all struct rules from the rule set.
 func (irs *InstRuleSet) GetStructRules() []*InstStructRule {
-	rules := make([]*InstStructRule, 0)
+	n := 0
+	for _, rs := range irs.StructRules {
+		n += len(rs)
+	}
+	rules := make([]*InstStructRule, 0, n)
 	for _, rs := range irs.StructRules {
 		rules = append(rules, rs...)
 	}

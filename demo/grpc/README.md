@@ -14,7 +14,7 @@ This directory contains a simple gRPC server and client implementation for demon
 
 ## Prerequisites
 
-- Go 1.23.0 or higher
+- Go 1.25.0 or higher
 - Protocol buffer compiler (protoc)
   - macOS: `brew install protobuf`
   - Linux: `apt-get install -y protobuf-compiler`

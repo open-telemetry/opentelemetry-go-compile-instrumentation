@@ -11,7 +11,7 @@ This directory contains a simple HTTP server and client implementation for demon
 
 ## Prerequisites
 
-- Go 1.23.0 or higher
+- Go 1.25.0 or higher
 
 ## Building
 
