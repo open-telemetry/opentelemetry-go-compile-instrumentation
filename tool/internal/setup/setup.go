@@ -150,6 +150,14 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
+	// Back up go.mod / go.sum / go.work / go.work.sum before modifying them.
+	// Cleanup() restores from this backup, so the backup must exist before any
+	// modification happens — including when otelc setup is run standalone.
+	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+	if err := util.BackupFile(backupFiles); err != nil {
+		logger.DebugContext(ctx, "failed to back up files", "error", err)
+	}
+
 	sp := &SetupPhase{
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
@@ -377,11 +385,6 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
 
-	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
-	err := util.BackupFile(backupFiles)
-	if err != nil {
-		logger.DebugContext(ctx, "failed to back up files", "error", err)
-	}
 	defer func() {
 		// Remove otelc.runtime.go from each instrumented package directory.
 		// This must happen before Cleanup() removes .otelc-build/.
@@ -402,7 +405,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 		}
 	}()
 
-	err = Setup(ctx, cmd)
+	err := Setup(ctx, cmd)
 	if err != nil {
 		return err
 	}
