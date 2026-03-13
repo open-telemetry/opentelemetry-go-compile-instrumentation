@@ -137,7 +137,7 @@ func beforeExecContextInstrumentation(
 	db *sql.DB,
 	ctx context.Context,
 	query string,
-	args ...any,
+	args ...interface{},
 ) {
 	if !clientEnabler.Enable() {
 		return
@@ -160,7 +160,7 @@ func beforeQueryContextInstrumentation(
 	db *sql.DB,
 	ctx context.Context,
 	query string,
-	args ...any,
+	args ...interface{},
 ) {
 	if !clientEnabler.Enable() {
 		return
@@ -312,7 +312,7 @@ func beforeConnExecContextInstrumentation(
 	conn *sql.Conn,
 	ctx context.Context,
 	query string,
-	args ...any,
+	args ...interface{},
 ) {
 	if !clientEnabler.Enable() {
 		return
@@ -335,7 +335,7 @@ func beforeConnQueryContextInstrumentation(
 	conn *sql.Conn,
 	ctx context.Context,
 	query string,
-	args ...any,
+	args ...interface{},
 ) {
 	if !clientEnabler.Enable() {
 		return
@@ -457,7 +457,7 @@ func beforeTxExecContextInstrumentation(
 	tx *sql.Tx,
 	ctx context.Context,
 	query string,
-	args ...any,
+	args ...interface{},
 ) {
 	if !clientEnabler.Enable() {
 		return
@@ -480,7 +480,7 @@ func beforeTxQueryContextInstrumentation(
 	tx *sql.Tx,
 	ctx context.Context,
 	query string,
-	args ...any,
+	args ...interface{},
 ) {
 	if !clientEnabler.Enable() {
 		return
@@ -532,7 +532,7 @@ func afterTxRollbackInstrumentation(ictx inst.HookContext, err error) {
 	instrumentEnd(ictx, err)
 }
 
-func beforeStmtExecContextInstrumentation(ictx inst.HookContext, stmt *sql.Stmt, ctx context.Context, args ...any) {
+func beforeStmtExecContextInstrumentation(ictx inst.HookContext, stmt *sql.Stmt, ctx context.Context, args ...interface{}) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -553,7 +553,7 @@ func afterStmtExecContextInstrumentation(ictx inst.HookContext, result sql.Resul
 	instrumentEnd(ictx, err)
 }
 
-func beforeStmtQueryContextInstrumentation(ictx inst.HookContext, stmt *sql.Stmt, ctx context.Context, args ...any) {
+func beforeStmtQueryContextInstrumentation(ictx inst.HookContext, stmt *sql.Stmt, ctx context.Context, args ...interface{}) {
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -578,7 +578,7 @@ func instrumentStart(
 	ictx inst.HookContext,
 	ctx context.Context,
 	spanName, query, endpoint, driverName, dsn, dbName string,
-	args ...any,
+	args ...interface{},
 ) {
 	if !clientEnabler.Enable() {
 		logger.Debug("Db client instrumentation disabled")
