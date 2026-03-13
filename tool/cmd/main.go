@@ -7,7 +7,9 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/urfave/cli/v3"
 
@@ -56,7 +58,10 @@ func main() {
 		Before: initLogger,
 	}
 
-	err := app.Run(context.Background(), os.Args)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	err := app.Run(ctx, os.Args)
 	if err != nil {
 		ex.Fatal(err)
 	}
