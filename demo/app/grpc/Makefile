@@ -3,7 +3,7 @@
 
 .PHONY: build generate test clean
 
-build: generate ## Build gRPC server and client
+build: ## Build gRPC server and client
 	@rm -f server/otelc.runtime.go client/otelc.runtime.go
 	(cd server && go build -a -o server .)
 	(cd client && go build -a -o client .)

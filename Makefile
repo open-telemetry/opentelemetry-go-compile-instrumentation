@@ -109,7 +109,7 @@ package: ## Package the instrumentation code into binary
 build-demo: ## Build all demos
 build-demo: build-demo-grpc build-demo-http
 
-build-demo-grpc: go-protobuf-plugins ## Build gRPC demo server and client
+build-demo-grpc: ## Build gRPC demo server and client
 	@$(MAKE) -C demo/app/grpc build
 
 build-demo-http: ## Build HTTP demo server and client
