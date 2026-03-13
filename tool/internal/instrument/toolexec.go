@@ -22,8 +22,6 @@ import (
 
 type InstrumentPhase struct {
 	logger *slog.Logger
-	// The context for this phase
-	ctx context.Context
 	// The working directory during compilation
 	workDir string
 	// The importcfg configuration
@@ -91,7 +89,6 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 
 	ip := &InstrumentPhase{
 		logger:           util.LoggerFromContext(ctx),
-		ctx:              ctx,
 		workDir:          filepath.Dir(target),
 		compileArgs:      args,
 		importConfigPath: importCfgPath,
@@ -117,7 +114,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	if !matched.IsEmpty() {
 		ip.Info("Instrument package", "rules", matched, "args", args)
 		// Okay, this package should be instrumented.
-		err = ip.instrument(matched)
+		err = ip.instrument(ctx, matched)
 		if err != nil {
 			return nil, ex.Wrapf(err, "instrumenting package %s", matched.ModulePath)
 		}
@@ -132,7 +129,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 }
 
 // updateImportConfig updates the importcfg file with new imports that were added during instrumentation.
-func (ip *InstrumentPhase) updateImportConfig(newImports map[string]string) error {
+func (ip *InstrumentPhase) updateImportConfig(ctx context.Context, newImports map[string]string) error {
 	if ip.importConfigPath == "" {
 		// No importcfg file, skip (shouldn't happen in normal builds)
 		return nil
@@ -157,7 +154,7 @@ func (ip *InstrumentPhase) updateImportConfig(newImports map[string]string) erro
 
 		// Resolve package archive location, passing build flags to match the current build context
 		buildFlags := util.GetBuildFlags()
-		archives, err := pkgload.ResolveExportFiles(ip.ctx, importPath, buildFlags...)
+		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
 		if err != nil {
 			return ex.Wrapf(err, "resolving %q", importPath)
 		}
