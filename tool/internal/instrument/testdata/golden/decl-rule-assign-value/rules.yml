@@ -1,0 +1,5 @@
+assign_global_var:
+  target: main
+  declaration_of: GlobalVar
+  decl_kind: var
+  assign_value: '"replaced"'
