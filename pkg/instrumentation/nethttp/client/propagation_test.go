@@ -39,7 +39,7 @@ func TestClientContextPropagation(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(spanRecorder),
 	)
-	defer func() { _ = provider.Shutdown(context.Background()) }()
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 
 	// Set global tracer provider and propagator
 	otel.SetTracerProvider(provider)
@@ -157,7 +157,7 @@ func TestSpanParentChildRelationship(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(spanRecorder),
 	)
-	defer func() { _ = provider.Shutdown(context.Background()) }()
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
