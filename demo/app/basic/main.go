@@ -80,7 +80,7 @@ func FunctionA(ctx context.Context) {
 func FunctionB(ctx context.Context) {}
 
 // AutoDetect is the target function for the hook_auto_detect rule.
-// Its hook (AutoDetectBefore) imports "encoding/hex", which this package does
+// Its hook (AutoDetectBefore) imports "github.com/google/uuid", which this package does
 // not import, so the import must be resolved via auto-detection.
 func AutoDetect() {}
 
