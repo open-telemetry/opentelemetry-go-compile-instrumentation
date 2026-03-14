@@ -79,6 +79,11 @@ func FunctionA(ctx context.Context) {
 // It receives a context as the first parameter, which will be instrumented.
 func FunctionB(ctx context.Context) {}
 
+// AutoDetect is the target function for the hook_auto_detect rule.
+// Its hook (AutoDetectBefore) imports "encoding/hex", which this package does
+// not import, so the import must be resolved via auto-detection.
+func AutoDetect() {}
+
 func main() {
 	ctx := &traceContext{
 		traceID: "123",
@@ -116,4 +121,6 @@ func main() {
 	Underscore(1, 2)
 
 	FunctionA(context.Background())
+
+	AutoDetect()
 }

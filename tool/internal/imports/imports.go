@@ -208,14 +208,48 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 	return nil
 }
 
-// CollectPaths returns a map of all unique import paths in the file.
-// The map uses import path as both key and value, ensuring that multiple blank (_) or
-// dot (.) imports don't collapse to a single entry.
+// CollectPaths returns all unique import paths from a file that belongs to the
+// package currently being instrumented.
+//
+// It's used for target/source files in the current module, where go/packages can resolve
+// imports in the active build context.
+//
+// The returned map uses import path as both key and value so callers can pass it directly
+// to importcfg update flows.
 func CollectPaths(ctx context.Context, root *dst.File, buildFlags ...string) map[string]string {
 	existing := parseFile(ctx, root, buildFlags...)
 	paths := make(map[string]string, len(existing.PathToAlias))
 	for importPath := range existing.PathToAlias {
 		paths[importPath] = importPath
+	}
+	return paths
+}
+
+// CollectImportPaths returns all unique import paths declared in the file by scanning
+// import specs directly from the AST.
+//
+// Use this when you only need raw import paths (for example, to populate importcfg)
+// and alias/package-name resolution is unnecessary.
+//
+// The returned map uses import path as both key and value so callers can pass it directly
+// to importcfg update flows.
+func CollectImportPaths(root *dst.File) map[string]string {
+	paths := make(map[string]string)
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			importSpec, ok := spec.(*dst.ImportSpec)
+			if !ok || importSpec.Path == nil {
+				continue
+			}
+			importPath := strings.Trim(importSpec.Path.Value, `"`)
+			if importPath != "" {
+				paths[importPath] = importPath
+			}
+		}
 	}
 	return paths
 }

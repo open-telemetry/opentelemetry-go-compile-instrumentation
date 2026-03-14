@@ -339,8 +339,8 @@ func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
-	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+	// Auto-detect imports from the hook file and ensure they are present in importcfg.
+	if err := ip.autoDetectHookImports(ctx, rule); err != nil {
 		return err
 	}
 

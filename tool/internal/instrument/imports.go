@@ -9,8 +9,35 @@ import (
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/imports"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
+
+// autoDetectHookImports parses the hook file referenced by a func rule and ensures
+// all of its imports are present in the importcfg. This eliminates the need to
+// manually specify the imports: field for packages that the hook code itself imports.
+func (ip *InstrumentPhase) autoDetectHookImports(ctx context.Context, r *rule.InstFuncRule) error {
+	if r.Path == "" {
+		return nil
+	}
+	file, err := findHookFile(r)
+	if err != nil {
+		return ex.Wrapf(err, "finding hook file for auto import detection in %s", r.Name)
+	}
+	root, err := ast.ParseFileFast(file)
+	if err != nil {
+		return ex.Wrapf(err, "parsing hook file %s for auto import detection", file)
+	}
+	paths := imports.CollectImportPaths(root)
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := ip.updateImportConfig(ctx, paths); err != nil {
+		return ex.Wrapf(err, "auto-detect hook imports for rule %s", r.Name)
+	}
+	return nil
+}
 
 // updateImportConfigForFile ensures all imports in the given file's AST are present in the importcfg.
 // This is used when adding a new file (e.g., via file rules) that has its own imports which may

@@ -10,6 +10,9 @@ import (
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 func TestHandleRuleImports_AliasMismatch(t *testing.T) {
@@ -257,5 +260,42 @@ func TestUpdateImportConfigForFile(t *testing.T) {
 		// Should not error - updateImportConfig returns early when no importcfg path
 		err := ip.updateImportConfigForFile(t.Context(), root, "test-rule")
 		require.NoError(t, err)
+	})
+}
+
+func TestAutoDetectHookImports(t *testing.T) {
+	t.Run("empty path skips detection", func(t *testing.T) {
+		ip := &InstrumentPhase{}
+		r := &rule.InstFuncRule{}
+		// Should not error - no path means nothing to detect
+		err := ip.autoDetectHookImports(t.Context(), r)
+		require.NoError(t, err)
+	})
+
+	t.Run("valid testdata hook file detects imports", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+		ip := &InstrumentPhase{
+			importConfigPath: "", // no importcfg path → updateImportConfig is a no-op
+		}
+		r := &rule.InstFuncRule{}
+		r.Name = "test-rule"
+		r.Before = "H1Before"
+		r.Path = "testdata"
+		// Should not error - the hook file exists and can be parsed; with no
+		// importcfg path, updateImportConfig returns early without writing
+		err := ip.autoDetectHookImports(t.Context(), r)
+		require.NoError(t, err)
+	})
+
+	t.Run("nonexistent path returns error", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+		ip := &InstrumentPhase{}
+		r := &rule.InstFuncRule{}
+		r.Name = "test-rule"
+		r.Before = "SomeHook"
+		r.Path = "testdata/nonexistent-path"
+		err := ip.autoDetectHookImports(t.Context(), r)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "finding hook file")
 	})
 }

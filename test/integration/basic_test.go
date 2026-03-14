@@ -44,6 +44,7 @@ func TestBasic(t *testing.T) {
 		"Ellipsis",
 		"Hello from stdio",
 		"Underscore",
+		"AutoDetect: 00000000-0000-0000-0000-000000000000",
 	}
 	for _, e := range expect {
 		require.Contains(t, output, e)
