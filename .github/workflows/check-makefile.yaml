@@ -6,12 +6,12 @@ on:
       - main
     paths:
       - "**/*Makefile*"
-      - ".config/checkmake"
+      - ".tools/checkmake"
       - ".github/workflows/checkmake.yaml"
   pull_request:
     paths:
       - "**/*Makefile*"
-      - ".config/checkmake"
+      - ".tools/checkmake"
       - ".github/workflows/checkmake.yaml"
 
 jobs:
@@ -24,4 +24,4 @@ jobs:
         with:
           go-version: "1.25"
       - run: go install github.com/checkmake/checkmake/cmd/checkmake@latest
-      - run: checkmake --config .config/checkmake Makefile
+      - run: checkmake --config .tools/checkmake Makefile
