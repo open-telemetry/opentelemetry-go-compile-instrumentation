@@ -9,7 +9,7 @@ Unlike traditional OpenAI instrumentation that requires manually wrapping API ca
 ### Key Features
 
 - ✅ **Zero Code Changes**: Automatic instrumentation without modifying application code
-- ✅ **Universal Coverage**: Instruments ALL OpenAI API calls (chat, embeddings, completions)
+- ✅ **Universal Coverage**: Instruments ALL OpenAI chat completion API calls
 - ✅ **Semantic Conventions**: Follows OpenTelemetry GenAI semantic conventions v1.39.0
 - ✅ **Full Trace Context**: Automatic context propagation through GenAI operations
 - ✅ **Token Usage Tracking**: Automatic recording of input/output token counts
@@ -35,8 +35,6 @@ The instrumentation is injected during the build process:
 │  3. Instrument Phase:                       │
 │     - Inject trampolines into:              │
 │       • client.Chat.Completions.New         │
-│       • client.Embeddings.New               │
-│       • client.Completions.New              │
 │                                             │
 │  4. Build with instrumentation baked in     │
 └─────────────────────────────────────────────┘
@@ -47,18 +45,6 @@ The instrumentation is injected during the build process:
 When your application runs, the injected hooks automatically:
 
 **For Chat Completions** (`client.Chat.Completions.New`):
-
-1. **Before**: Create span with operation name and model, store context
-2. **Execute**: Actual OpenAI API call
-3. **After**: End span, record response attributes, collect metrics (duration, token usage)
-
-**For Embeddings** (`client.Embeddings.New`):
-
-1. **Before**: Create span with operation name and model, store context
-2. **Execute**: Actual OpenAI API call
-3. **After**: End span, record response attributes, collect metrics (duration, token usage)
-
-**For Legacy Completions** (`client.Completions.New`):
 
 1. **Before**: Create span with operation name and model, store context
 2. **Execute**: Actual OpenAI API call
@@ -89,22 +75,6 @@ openai_chat_completion_new:
   recv: "*ChatCompletionService"
   before: beforeChatCompletionNew
   after: afterChatCompletionNew
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
-
-openai_embedding_new:
-  target: github.com/openai/openai-go
-  func: New
-  recv: "*EmbeddingService"
-  before: beforeEmbeddingNew
-  after: afterEmbeddingNew
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
-
-openai_completion_new:
-  target: github.com/openai/openai-go
-  func: New
-  recv: "*CompletionService"
-  before: beforeCompletionNew
-  after: afterCompletionNew
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
 ```
 
@@ -160,31 +130,12 @@ The instrumentation follows [OpenTelemetry GenAI Semantic Conventions v1.39.0](h
 | `gen_ai.usage.input_tokens` | `10` | Input token count |
 | `gen_ai.usage.output_tokens` | `20` | Output token count |
 
-### Embedding Response Attributes
-
-| Attribute | Example | Description |
-|-----------|---------|-------------|
-| `gen_ai.response.model` | `text-embedding-3-small` | Model used |
-| `gen_ai.usage.input_tokens` | `5` | Input token count |
-
-### Completion Response Attributes
-
-| Attribute | Example | Description |
-|-----------|---------|-------------|
-| `gen_ai.response.id` | `cmpl-xyz789` | Response ID |
-| `gen_ai.response.model` | `gpt-3.5-turbo-instruct` | Model used |
-| `gen_ai.response.finish_reasons` | `["length"]` | Finish reasons |
-| `gen_ai.usage.input_tokens` | `15` | Input token count |
-| `gen_ai.usage.output_tokens` | `30` | Output token count |
-
 ### Span Names
 
 Format: `<operation> <model>`
 
 Examples:
 - `chat gpt-4`
-- `embeddings text-embedding-3-small`
-- `text_completion gpt-3.5-turbo-instruct`
 
 ### Span Status
 
@@ -245,85 +196,7 @@ What happens automatically:
 4. Metrics collected: duration, input/output token usage
 5. Span ended after response received
 
-### Example 2: Embedding
-
-Your code (no changes):
-
-```go
-package main
-
-import (
-    "context"
-    "github.com/openai/openai-go"
-)
-
-func main() {
-    client := openai.NewClient()
-
-    resp, err := client.Embeddings.New(context.Background(), openai.EmbeddingNewParams{
-        Model: "text-embedding-3-small",
-        Input: openai.EmbeddingNewParamsInputUnion{
-            OfString: openai.String("Hello, world!"),
-        },
-    })
-    if err != nil {
-        panic(err)
-    }
-
-    // ... handle embedding vector
-    if len(resp.Data) > 0 {
-        println(len(resp.Data[0].Embedding))
-    }
-}
-```
-
-What happens automatically:
-
-1. Span created: `embeddings text-embedding-3-small`
-2. Attributes recorded: gen_ai.system, gen_ai.operation.name, gen_ai.request.model
-3. Response attributes captured: model, input token usage
-4. Metrics collected: duration, input token usage
-5. Span ended after response received
-
-### Example 3: Legacy Completion
-
-Your code (no changes):
-
-```go
-package main
-
-import (
-    "context"
-    "github.com/openai/openai-go"
-)
-
-func main() {
-    client := openai.NewClient()
-
-    completion, err := client.Completions.New(context.Background(), openai.CompletionNewParams{
-        Model: openai.F("gpt-3.5-turbo-instruct"),
-        Prompt: openai.F("Once upon a time"),
-    })
-    if err != nil {
-        panic(err)
-    }
-
-    // ... handle response
-    if len(completion.Choices) > 0 {
-        println(*completion.Choices[0].Text)
-    }
-}
-```
-
-What happens automatically:
-
-1. Span created: `text_completion gpt-3.5-turbo-instruct`
-2. Attributes recorded: gen_ai.system, gen_ai.operation.name, gen_ai.request.model
-3. Response attributes captured: response ID, model, finish reasons, token usage
-4. Metrics collected: duration, input/output token usage
-5. Span ended after response received
-
-### Example 4: Distributed Tracing
+### Example 2: Distributed Tracing
 
 **Service A (HTTP Handler)**:
 
@@ -350,7 +223,7 @@ Service A: POST /chat [HTTP SERVER]
 
 The trace context is automatically propagated from the HTTP handler to the OpenAI API call.
 
-### Example 5: Error Handling
+### Example 3: Error Handling
 
 ```go
 func handleOpenAIRequest(ctx context.Context) error {
@@ -385,86 +258,74 @@ What happens automatically:
 
 ### Hook Functions
 
+
+
 **Chat Completion Hooks**:
 
+
+
 ```go
+
 func beforeChatCompletionNew(
+
     ictx inst.HookContext,
+
     _ *openaisdk.ChatCompletionService,
+
     ctx context.Context,
+
     body openaisdk.ChatCompletionNewParams,
+
     opts ...option.RequestOption,
+
 ) {
+
     if !clientEnabler.Enable() {
+
         return
+
     }
+
+
+
     startSpan(ictx, ctx, semconv.OperationChat, string(body.Model))
+
 }
+
+
 
 func afterChatCompletionNew(ictx inst.HookContext, res *openaisdk.ChatCompletion, err error) {
+
     if !clientEnabler.Enable() {
+
         return
+
     }
+
     span := endSpanWithError(ictx, err)
+
     if span == nil {
+
         return
+
     }
+
     defer span.End()
 
+
+
     // Record metrics and response attributes
+
     recordDuration(ctx, ictx, err)
+
     if res != nil {
+
         // Record response attributes and token usage
-    }
-}
-```
 
-**Embedding Hooks**:
-
-```go
-func beforeEmbeddingNew(
-    ictx inst.HookContext,
-    _ *openaisdk.EmbeddingService,
-    ctx context.Context,
-    body openaisdk.EmbeddingNewParams,
-    opts ...option.RequestOption,
-) {
-    if !clientEnabler.Enable() {
-        return
     }
-    startSpan(ictx, ctx, semconv.OperationEmbeddings, string(body.Model))
+
 }
 
-func afterEmbeddingNew(ictx inst.HookContext, res *openaisdk.CreateEmbeddingResponse, err error) {
-    if !clientEnabler.Enable() {
-        return
-    }
-    // Similar to chat completion after hook
-}
-```
-
-**Completion Hooks**:
-
-```go
-func beforeCompletionNew(
-    ictx inst.HookContext,
-    _ *openaisdk.CompletionService,
-    ctx context.Context,
-    body openaisdk.CompletionNewParams,
-    opts ...option.RequestOption,
-) {
-    if !clientEnabler.Enable() {
-        return
-    }
-    startSpan(ictx, ctx, semconv.OperationTextCompletion, string(body.Model))
-}
-
-func afterCompletionNew(ictx inst.HookContext, res *openaisdk.Completion, err error) {
-    if !clientEnabler.Enable() {
-        return
-    }
-    // Similar to chat completion after hook
-}
 ```
 
 ### Shared Helpers

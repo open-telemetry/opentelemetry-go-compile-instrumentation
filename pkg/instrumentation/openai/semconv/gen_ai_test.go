@@ -36,26 +36,6 @@ func TestRequestTraceAttrs(t *testing.T) {
 				"gen_ai.request.model":  "gpt-4",
 			},
 		},
-		{
-			name:      "embeddings operation",
-			operation: OperationEmbeddings,
-			model:     "text-embedding-3-small",
-			expected: map[string]interface{}{
-				"gen_ai.system":         GenAISystemOpenAI,
-				"gen_ai.operation.name": OperationEmbeddings,
-				"gen_ai.request.model":  "text-embedding-3-small",
-			},
-		},
-		{
-			name:      "text_completion operation",
-			operation: OperationTextCompletion,
-			model:     "gpt-3.5-turbo-instruct",
-			expected: map[string]interface{}{
-				"gen_ai.system":         GenAISystemOpenAI,
-				"gen_ai.operation.name": OperationTextCompletion,
-				"gen_ai.request.model":  "gpt-3.5-turbo-instruct",
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -100,28 +80,4 @@ func TestChatCompletionResponseTraceAttrs_NoFinishReasons(t *testing.T) {
 	assert.Len(t, m, 4) // id, model, input_tokens, output_tokens
 }
 
-func TestCompletionResponseTraceAttrs(t *testing.T) {
-	attrs := CompletionResponseTraceAttrs(
-		"cmpl-xyz",
-		"gpt-3.5-turbo-instruct",
-		[]string{"length"},
-		100,
-		200,
-	)
-	m := attrsToMap(attrs)
 
-	assert.Equal(t, "cmpl-xyz", m["gen_ai.response.id"])
-	assert.Equal(t, "gpt-3.5-turbo-instruct", m["gen_ai.response.model"])
-	assert.Equal(t, int64(100), m["gen_ai.usage.input_tokens"])
-	assert.Equal(t, int64(200), m["gen_ai.usage.output_tokens"])
-	assert.Equal(t, []string{"length"}, m["gen_ai.response.finish_reasons"])
-}
-
-func TestEmbeddingResponseTraceAttrs(t *testing.T) {
-	attrs := EmbeddingResponseTraceAttrs("text-embedding-3-small", 42)
-	m := attrsToMap(attrs)
-
-	assert.Equal(t, "text-embedding-3-small", m["gen_ai.response.model"])
-	assert.Equal(t, int64(42), m["gen_ai.usage.input_tokens"])
-	assert.Len(t, m, 2)
-}
