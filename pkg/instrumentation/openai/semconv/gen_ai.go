@@ -25,9 +25,7 @@ const GenAISystemOpenAI = "openai"
 
 // GenAI operation names.
 const (
-	OperationChat           = "chat"
-	OperationEmbeddings     = "embeddings"
-	OperationTextCompletion = "text_completion"
+	OperationChat = "chat"
 )
 
 // RequestTraceAttrs returns common request attributes for any GenAI operation.
@@ -51,26 +49,4 @@ func ChatCompletionResponseTraceAttrs(id, model string, finishReasons []string, 
 		attrs = append(attrs, GenAIResponseFinishReasonsKey.StringSlice(finishReasons))
 	}
 	return attrs
-}
-
-// CompletionResponseTraceAttrs returns response attributes for legacy completions.
-func CompletionResponseTraceAttrs(id, model string, finishReasons []string, inputTokens, outputTokens int64) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{
-		GenAIResponseIDKey.String(id),
-		GenAIResponseModelKey.String(model),
-		GenAIUsageInputTokensKey.Int64(inputTokens),
-		GenAIUsageOutputTokensKey.Int64(outputTokens),
-	}
-	if len(finishReasons) > 0 {
-		attrs = append(attrs, GenAIResponseFinishReasonsKey.StringSlice(finishReasons))
-	}
-	return attrs
-}
-
-// EmbeddingResponseTraceAttrs returns response attributes for embeddings.
-func EmbeddingResponseTraceAttrs(model string, inputTokens int64) []attribute.KeyValue {
-	return []attribute.KeyValue{
-		GenAIResponseModelKey.String(model),
-		GenAIUsageInputTokensKey.Int64(inputTokens),
-	}
 }
