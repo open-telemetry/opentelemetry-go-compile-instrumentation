@@ -2,4 +2,4 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/b
 
 go 1.25.0
 
-require golang.org/x/time v0.14.0
+require golang.org/x/time v0.15.0
