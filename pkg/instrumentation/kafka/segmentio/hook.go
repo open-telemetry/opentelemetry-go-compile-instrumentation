@@ -15,14 +15,16 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 	"github.com/segmentio/kafka-go"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
 var (
-	logger   = shared.Logger()
-	tracer   trace.Tracer
-	initOnce sync.Once
+	logger     = shared.Logger()
+	tracer     trace.Tracer
+	propagator propagation.TextMapPropagator
+	initOnce   sync.Once
 )
 
 func moduleVersion() string {
@@ -49,6 +51,7 @@ func initInstrumentation() {
 			instrumentationName,
 			trace.WithInstrumentationVersion(version),
 		)
+		propagator = otel.GetTextMapPropagator()
 
 		// Start runtime metrics (respects OTEL_GO_ENABLED/DISABLED_INSTRUMENTATIONS)
 		if err := shared.StartRuntimeMetrics(); err != nil {
@@ -70,31 +73,81 @@ func BeforeReadMessage(ictx inst.HookContext, ctx context.Context, r *kafka.Read
 	}
 	initInstrumentation()
 
-	req := semconv.KafkaRequest{
-		EndPoint:        r.Config().Brokers[0],
-		Destination:     semconv.KafkaDestinationTopic,
-		Operation:       semconv.KafkaOperationReceive,
-		ConsumerGroupID: r.Config().GroupID,
-		Partition:       strconv.Itoa(r.Config().Partition),
+	endpoint := ""
+	if brokers := r.Config().Brokers; len(brokers) > 0 {
+		endpoint = brokers[0]
+	}
+	ictx.SetData(map[string]interface{}{
+		"endpoint":  endpoint,
+		"group_id":  r.Config().GroupID,
+		"partition": strconv.Itoa(r.Config().Partition),
+		"start":     time.Now(),
+	})
+}
+
+func AfterReadMessage(ictx inst.HookContext, ctx context.Context, msg kafka.Message, err error) {
+	if !kafkaEnabler.Enable() {
+		return
 	}
 
-	attrs := semconv.KafkaRequestTraceAttrs(req)
+	data, ok := ictx.GetData().(map[string]interface{})
+	if !ok {
+		return
+	}
 
-	spanName := r.Config().Topic + " " + "receive"
+	startTime, _ := data["start"].(time.Time)
 
-	prop := otel.GetTextMapPropagator()
-	carrier := propagation.HeaderCarrier{}
+	if err != nil {
+		_, span := tracer.Start(ctx, "kafka receive",
+			trace.WithSpanKind(trace.SpanKindConsumer),
+			trace.WithTimestamp(startTime),
+		)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		span.End()
+		return
+	}
 
-	extractCtx := prop.Extract(ctx, &carrier)
+	req := semconv.KafkaRequest{
+		EndPoint:        data["endpoint"].(string),
+		Destination:     semconv.KafkaDestination(msg.Topic),
+		Operation:       semconv.KafkaOperationReceive,
+		ConsumerGroupID: data["group_id"].(string),
+		Partition:       data["partition"].(string),
+	}
 
-	newctx, span := tracer.Start(extractCtx, spanName, trace.WithAttributes(attrs...), trace.WithSpanKind(trace.SpanKindConsumer))
+	carrier := KafkaHeaderCarrier{headers: &msg.Headers}
+	extractCtx := propagator.Extract(ctx, carrier)
 
-	ictx.SetData(map[string]interface{}{
-		"ctx":   newctx,
-		"span":  span,
-		"req":   req,
-		"start": time.Now(),
-	})
+	newCtx, span := tracer.Start(
+		extractCtx,
+		msg.Topic+" receive",
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(semconv.KafkaRequestTraceAttrs(req)...),
+		trace.WithTimestamp(startTime),
+	)
 
-	ictx.SetParam(1, newctx)
+	data["ctx"] = newCtx
+	data["span"] = span
+	logger.Debug("AfterReadMessage Called",
+		"duration_ms", time.Since(startTime).Milliseconds())
+}
+
+func AfterMessageProcessing(ictx inst.HookContext, err error) {
+	data, ok := ictx.GetData().(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	span, ok := data["span"].(trace.Span)
+	if !ok || span == nil {
+		return
+	}
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+
+	span.End()
 }

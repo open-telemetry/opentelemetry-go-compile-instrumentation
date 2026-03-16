@@ -1,3 +1,5 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
 package segmentio
 
 import (
@@ -19,3 +21,31 @@ func (g kafkaClientEnabler) Enable() bool {
 }
 
 var kafkaEnabler = kafkaClientEnabler{}
+
+type KafkaHeaderCarrier struct {
+	headers *[]kafka.Header
+}
+
+func (c KafkaHeaderCarrier) Get(key string) string {
+	for _, h := range *c.headers {
+		if h.Key == key {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+
+func (c KafkaHeaderCarrier) Set(key, value string) {
+	*c.headers = append(*c.headers, kafka.Header{
+		Key:   key,
+		Value: []byte(value),
+	})
+}
+
+func (c KafkaHeaderCarrier) Keys() []string {
+	keys := make([]string, 0, len(*c.headers))
+	for _, h := range *c.headers {
+		keys = append(keys, h.Key)
+	}
+	return keys
+}

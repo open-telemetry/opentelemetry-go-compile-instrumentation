@@ -4,6 +4,9 @@ package semconv
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestKafkaClientRequestTraceAttrs(t *testing.T) {
@@ -44,23 +47,6 @@ func TestKafkaClientRequestTraceAttrs(t *testing.T) {
 				"messaging.destination.name":  string(KafkaDestinationQueue),
 				"messaging.operation.name":    "process",
 				"messaging.kafka.message_key": "order-13",
-			},
-		},
-		{
-			name: "PROCESS operation",
-			req: KafkaRequest{
-				EndPoint:    "localhost:9092",
-				Destination: KafkaDestinationTopic,
-				Operation:   KafkaOperationProcess,
-				MessageKey:  "order-12",
-			},
-			expected: map[string]interface{}{
-				"messaging.system.name":       "kafka",
-				"server.address":              "localhost",
-				"server.port":                 int64(9092),
-				"messaging.destination.name":  string(KafkaDestinationTopic),
-				"messaging.operation.name":    "process",
-				"messaging.kafka.message_key": "order-12",
 			},
 		},
 		{
@@ -127,5 +113,24 @@ func TestKafkaClientRequestTraceAttrs(t *testing.T) {
 				"server.address":        "localhost",
 			},
 		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attrs := KafkaRequestTraceAttrs(tt.req)
+
+			attrMap := make(map[string]interface{})
+			for _, attr := range attrs {
+				attrMap[string(attr.Key)] = attr.Value.AsInterface()
+			}
+
+			require.Len(t, attrMap, len(tt.expected), "attribute count mismatch")
+
+			for key, expectedVal := range tt.expected {
+				actualVal, ok := attrMap[key]
+				require.True(t, ok, "expected attribute %s not found", key)
+				assert.Equal(t, expectedVal, actualVal, "attribute %s value mismatch", key)
+			}
+		})
 	}
 }

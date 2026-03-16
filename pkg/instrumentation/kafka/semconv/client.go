@@ -45,12 +45,20 @@ func KafkaRequestTraceAttrs(req KafkaRequest) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		semconv.MessagingSystemKafka,
 		semconv.ServerAddress(host),
-		semconv.MessagingDestinationPartitionID(req.Partition),
 		semconv.MessagingOperationName(string(req.Operation)),
 		semconv.MessagingDestinationName(string(req.Destination)),
-		semconv.MessagingKafkaOffset(req.Offset),
-		semconv.MessagingConsumerGroupName(req.ConsumerGroupID),
-		semconv.MessagingKafkaMessageKey(req.MessageKey),
+	}
+	if req.Partition != "" {
+		attrs = append(attrs, semconv.MessagingDestinationPartitionID(req.Partition))
+	}
+	if req.Offset != 0 {
+		attrs = append(attrs, semconv.MessagingKafkaOffset(req.Offset))
+	}
+	if req.ConsumerGroupID != "" {
+		attrs = append(attrs, semconv.MessagingConsumerGroupName(req.ConsumerGroupID))
+	}
+	if req.MessageKey != "" {
+		attrs = append(attrs, semconv.MessagingKafkaMessageKey(req.MessageKey))
 	}
 	if err == nil {
 		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
