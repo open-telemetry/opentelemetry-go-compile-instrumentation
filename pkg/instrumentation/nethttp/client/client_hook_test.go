@@ -21,108 +21,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
 )
-
-type mockHookContext struct {
-	params      map[int]interface{}
-	returnVals  map[int]interface{}
-	data        interface{}
-	funcName    string
-	packageName string
-	skipCall    bool
-}
-
-func newMockHookContext() *mockHookContext {
-	return &mockHookContext{
-		params:      make(map[int]interface{}),
-		returnVals:  make(map[int]interface{}),
-		funcName:    "mockFunc",
-		packageName: "mock",
-	}
-}
-
-func (m *mockHookContext) SetSkipCall(skip bool) {
-	m.skipCall = skip
-}
-
-func (m *mockHookContext) IsSkipCall() bool {
-	return m.skipCall
-}
-
-func (m *mockHookContext) SetParam(index int, value interface{}) {
-	m.params[index] = value
-}
-
-func (m *mockHookContext) GetParam(index int) interface{} {
-	return m.params[index]
-}
-
-func (m *mockHookContext) GetParamCount() int {
-	return len(m.params)
-}
-
-func (m *mockHookContext) SetReturnVal(index int, value interface{}) {
-	m.returnVals[index] = value
-}
-
-func (m *mockHookContext) GetReturnVal(index int) interface{} {
-	return m.returnVals[index]
-}
-
-func (m *mockHookContext) GetReturnValCount() int {
-	return len(m.returnVals)
-}
-
-func (m *mockHookContext) SetData(data interface{}) {
-	m.data = data
-}
-
-func (m *mockHookContext) GetData() interface{} {
-	return m.data
-}
-
-func (m *mockHookContext) GetKeyData(key string) interface{} {
-	if m.data == nil {
-		return nil
-	}
-	dataMap, ok := m.data.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return dataMap[key]
-}
-
-func (m *mockHookContext) SetKeyData(key string, val interface{}) {
-	if m.data == nil {
-		m.data = make(map[string]interface{})
-	}
-	dataMap, ok := m.data.(map[string]interface{})
-	if !ok {
-		m.data = make(map[string]interface{})
-		dataMap = m.data.(map[string]interface{})
-	}
-	dataMap[key] = val
-}
-
-func (m *mockHookContext) HasKeyData(key string) bool {
-	if m.data == nil {
-		return false
-	}
-	dataMap, ok := m.data.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	_, exists := dataMap[key]
-	return exists
-}
-
-func (m *mockHookContext) GetFuncName() string {
-	return m.funcName
-}
-
-func (m *mockHookContext) GetPackageName() string {
-	return m.packageName
-}
 
 func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
 	t.Helper()
@@ -218,7 +118,7 @@ func TestBeforeRoundTrip(t *testing.T) {
 			sr, _ := setupTestTracer(t)
 
 			req := tt.setupRequest()
-			mockCtx := newMockHookContext()
+			mockCtx := insttest.NewMockHookContext()
 			transport := &http.Transport{}
 
 			BeforeRoundTrip(mockCtx, transport, req)
@@ -277,7 +177,7 @@ func TestAfterRoundTrip(t *testing.T) {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
 				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
-				mockCtx := newMockHookContext()
+				mockCtx := insttest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
 					"ctx":  ctx,
 					"span": span,
@@ -306,7 +206,7 @@ func TestAfterRoundTrip(t *testing.T) {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
 				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
-				mockCtx := newMockHookContext()
+				mockCtx := insttest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
 					"ctx":  ctx,
 					"span": span,
@@ -338,7 +238,7 @@ func TestAfterRoundTrip(t *testing.T) {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
 				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
-				mockCtx := newMockHookContext()
+				mockCtx := insttest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
 					"ctx":  ctx,
 					"span": span,
@@ -368,7 +268,7 @@ func TestAfterRoundTrip(t *testing.T) {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
 				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
-				mockCtx := newMockHookContext()
+				mockCtx := insttest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
 					"ctx":  ctx,
 					"span": span,
@@ -393,7 +293,7 @@ func TestAfterRoundTrip(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) inst.HookContext {
-				return newMockHookContext()
+				return insttest.NewMockHookContext()
 			},
 			response: &http.Response{
 				StatusCode: 200,
@@ -415,7 +315,7 @@ func TestAfterRoundTrip(t *testing.T) {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
 				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
-				mockCtx := newMockHookContext()
+				mockCtx := insttest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
 					"ctx":  ctx,
 					"span": span,
