@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
@@ -128,6 +129,13 @@ func BeforeUnderscore(ictx inst.HookContext, _ int, _ float32) {
 
 func MyHookEllipsisBefore(ictx inst.HookContext, p1 ...string) {
 	println("Ellipsis")
+}
+
+// AutoDetectBefore is a hook that imports "github.com/google/uuid", which is
+// not imported by the demo/basic app. This verifies that auto-detection adds
+// the package to the build importcfg without requiring a manual imports: field.
+func AutoDetectBefore(ictx inst.HookContext) {
+	fmt.Printf("AutoDetect: %s\n", uuid.Nil.String())
 }
 
 func FunctionABefore(ictx inst.HookContext, ctx context.Context) {
