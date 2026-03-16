@@ -16,7 +16,7 @@ import (
 )
 
 func TestBasic(t *testing.T) {
-	appDir := filepath.Join("..", "..", "demo", "basic")
+	appDir := filepath.Join("..", "..", "demo", "app", "basic")
 
 	testutil.Build(t, appDir, "go", "build", "-a")
 	output := testutil.Run(t, appDir)

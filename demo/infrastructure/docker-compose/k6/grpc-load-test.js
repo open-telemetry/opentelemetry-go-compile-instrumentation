@@ -36,7 +36,7 @@ export const options = {
 // gRPC client
 const client = new grpc.Client();
 
-// Load proto file - mounted from demo/grpc/server/greeter.proto
+// Load proto file - mounted from demo/app/grpc/server/greeter.proto
 // This ensures k6 always uses the same proto definition as the server
 client.load(['/proto'], 'greeter.proto');
 
