@@ -48,3 +48,5 @@ func GenericFuncAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
 func GenericMethodBefore(ctx inst.HookContext, recv interface{}, p1 interface{}, p2 string) {}
 
 func GenericMethodAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
+
+func H12UnderscoreReturnAfter(ctx inst.HookContext, r1 int, r2 error) {}

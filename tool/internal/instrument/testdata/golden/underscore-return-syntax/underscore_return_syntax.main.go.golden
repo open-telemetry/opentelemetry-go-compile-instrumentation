@@ -1,0 +1,118 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import _ "unsafe"
+
+func UnderscoreReturnFunc() (_ignoredParam0 int, _ignoredParam1 error) {
+	//line <generated>:1
+	if false {
+	} else {
+		defer OtelAfterTrampoline_UnderscoreReturnFunc552216505(&HookContextImpl552216505{params: []interface{}{}, returnVals: []interface{}{&_ignoredParam0, &_ignoredParam1}}, &_ignoredParam0, &_ignoredParam1)
+	}
+	//line main.go:7:2
+	return 0, nil
+}
+
+func main() {}
+
+//line <generated>:1
+type HookContextImpl552216505 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl552216505) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl552216505) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl552216505) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl552216505) GetData() interface{}     { return c.data }
+func (c *HookContextImpl552216505) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl552216505) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl552216505) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl552216505) GetParam(idx int) interface{} {
+	switch idx {
+	}
+	return nil
+}
+
+func (c *HookContextImpl552216505) SetParam(idx int, val interface{}) {
+	if val == nil {
+		c.params[idx] = nil
+		return
+	}
+	switch idx {
+	}
+}
+
+func (c *HookContextImpl552216505) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*int))
+	case 1:
+		return *(c.returnVals[1].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl552216505) SetReturnVal(idx int, val interface{}) {
+	if val == nil {
+		c.returnVals[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.returnVals[0].(*int)) = val.(int)
+	case 1:
+		*(c.returnVals[1].(*error)) = val.(error)
+	}
+}
+func (c *HookContextImpl552216505) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl552216505) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl552216505) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl552216505) GetPackageName() string { return c.packageName }
+
+func OtelAfterTrampoline_UnderscoreReturnFunc552216505(hookContext HookContext, arg0 *int, arg1 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "H12UnderscoreReturnAfter")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl552216505).returnVals = []interface{}{arg0, arg1}
+	if H12UnderscoreReturnAfter != nil {
+		H12UnderscoreReturnAfter(hookContext, *arg0, *arg1)
+	}
+}
+
+//go:linkname H12UnderscoreReturnAfter testdata.H12UnderscoreReturnAfter
+func H12UnderscoreReturnAfter(hookContext HookContext, arg0 int, arg1 error)
