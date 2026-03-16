@@ -1,12 +1,8 @@
 # AGENTS.md
 
 This file provides guidelines for AI-assisted contributions to
-`opentelemetry-go-compile-instrumentation`. It ensures that AI-generated PRs are high-quality,
-valuable, and do not create excessive maintainer burden. It is inspired by the
-[OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector/blob/main/AGENTS.md),
-[Open Policy Agent](https://github.com/open-policy-agent/opa/blob/main/AGENTS.md), and
-[Fedora](https://discussion.fedoraproject.org/t/policy-on-the-use-of-ai-assistants-in-fedora/130110)
-projects policies.
+`opentelemetry-go-compile-instrumentation`. For the project's AI usage policy, see
+[AI_POLICY.md](AI_POLICY.md).
 
 ## General Rules and Guidelines
 
@@ -52,23 +48,6 @@ Additional documentation:
   suppressing the warning. Linter configuration lives in `.config/`.
 - All GitHub Actions references must be pinned to commit SHAs using ratchet. Never use mutable tags
   (e.g., `@v4`) in workflow files.
-
-## AI Disclosure
-
-We appreciate it if users disclose the use of AI tools when a significant part of a commit is taken
-from a tool without substantial modification. When making a commit, this should be disclosed through
-an `Assisted-by` commit message trailer.
-
-Examples:
-
-```
-Assisted-by: GitHub Copilot
-Assisted-by: Claude Opus 4
-Assisted-by: Cursor with Claude Sonnet 4
-```
-
-This helps maintainers set appropriate expectations during code review and ensures that
-AI-contributed code is easily identifiable.
 
 ## Things to Avoid
 
