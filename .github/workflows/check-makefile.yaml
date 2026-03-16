@@ -6,12 +6,12 @@ on:
       - main
     paths:
       - "**/*Makefile*"
-      - ".config/checkmake"
+      - ".tools/checkmake"
       - ".github/workflows/checkmake.yaml"
   pull_request:
     paths:
       - "**/*Makefile*"
-      - ".config/checkmake"
+      - ".tools/checkmake"
       - ".github/workflows/checkmake.yaml"
 
 jobs:
@@ -23,5 +23,5 @@ jobs:
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
           go-version: "1.25"
-      - run: go install github.com/checkmake/checkmake/cmd/checkmake@latest
-      - run: checkmake --config .config/checkmake Makefile
+      - run: mkdir -p .bin && cd .tools && go build -o ../.bin/checkmake github.com/checkmake/checkmake/cmd/checkmake
+      - run: .bin/checkmake --config .tools/checkmake Makefile
