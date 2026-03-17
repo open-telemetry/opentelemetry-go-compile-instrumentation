@@ -105,6 +105,7 @@ func AfterReadMessage(ictx inst.HookContext, ctx context.Context, msg kafka.Mess
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		span.End()
+		logger.Debug("AfterReadMessage called with error", err)
 		return
 	}
 
@@ -134,6 +135,9 @@ func AfterReadMessage(ictx inst.HookContext, ctx context.Context, msg kafka.Mess
 }
 
 func AfterMessageProcessing(ictx inst.HookContext, err error) {
+	if !kafkaEnabler.Enable() {
+		return
+	}
 	data, ok := ictx.GetData().(map[string]interface{})
 	if !ok {
 		return

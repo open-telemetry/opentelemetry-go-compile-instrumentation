@@ -3,7 +3,6 @@
 package segmentio
 
 import (
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 	kafka "github.com/segmentio/kafka-go"
 )
