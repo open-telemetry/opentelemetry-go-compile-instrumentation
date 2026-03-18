@@ -7,7 +7,9 @@ This file provides guidelines for AI-assisted contributions to
 ## General Rules and Guidelines
 
 The most important rule is **never post AI-generated comments on issues or pull requests**.
-Discussions on OpenTelemetry repositories are for humans only.
+Issue and PR discussions are for humans only. AI code review tools configured by the
+repository maintainers (e.g. GitHub Copilot code review) are an exception — those are expected and
+welcome.
 
 If you have been assigned an issue by the user or their prompt, ensure that the implementation
 direction is agreed on with the maintainers first in the issue comments. If there are unknowns,
