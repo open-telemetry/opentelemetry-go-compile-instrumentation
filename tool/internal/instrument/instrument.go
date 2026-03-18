@@ -82,7 +82,7 @@ func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		for _, r := range rules {
 			funcRule, err1 := ip.applyOneRule(ctx, r, root)
 			if err1 != nil {
-				return err1
+				return ex.Wrapf(err1, "applying rule %s", r.GetName())
 			}
 			hasFuncRule = hasFuncRule || funcRule
 		}
