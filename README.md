@@ -40,7 +40,7 @@ The `otelc` binary will be built in the root directory.
 Just prefix the original `go build` command with `otelc`.
 
 ```bash
-cd demo/basic
+cd demo/app/basic
 ../../otelc go build
 ./basic
 [... output ...]

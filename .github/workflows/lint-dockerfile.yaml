@@ -4,14 +4,14 @@ on:
   pull_request:
     paths:
       - '**/*Dockerfile*'
-      - '.config/hadolint.yaml'
+      - '.tools/hadolint.yaml'
       - '.github/workflows/lint-dockerfile.yaml'
   push:
     branches:
       - main
     paths:
       - '**/*Dockerfile*'
-      - '.config/hadolint.yaml'
+      - '.tools/hadolint.yaml'
       - '.github/workflows/lint-dockerfile.yaml'
 
 permissions:
@@ -25,6 +25,6 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
       - uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5  # v3.3.0
         with:
-          config: .config/hadolint.yaml
+          config: .tools/hadolint.yaml
           failure-threshold: warning
           recursive: true

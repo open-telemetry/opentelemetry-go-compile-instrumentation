@@ -16,7 +16,7 @@ import (
 )
 
 func TestBasic(t *testing.T) {
-	appDir := filepath.Join("..", "..", "demo", "basic")
+	appDir := filepath.Join("..", "..", "demo", "app", "basic")
 
 	testutil.Build(t, appDir, "go", "build", "-a")
 	output := testutil.Run(t, appDir)
@@ -44,6 +44,7 @@ func TestBasic(t *testing.T) {
 		"Ellipsis",
 		"Hello from stdio",
 		"Underscore",
+		"AutoDetect: 00000000-0000-0000-0000-000000000000",
 	}
 	for _, e := range expect {
 		require.Contains(t, output, e)
