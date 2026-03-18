@@ -27,34 +27,29 @@ import (
 //   - Get() without package qualifier (unqualified calls not supported)
 //   - other.Get() where other is from a different package
 func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map[string]string) bool {
-	// Use pre-parsed fields - no parsing needed!
-	importPath := r.ImportPath
-	funcName := r.FuncName
+	return matchesQualifiedSelector(call.Fun, r.ImportPath, r.FuncName, importAliases)
+}
 
-	// Only match qualified calls: pkg.Function()
-	sel, ok := call.Fun.(*dst.SelectorExpr)
+// matchesQualifiedSelector reports whether expr is a selector expression (pkg.Name)
+// where Name matches the given name and the package resolves to importPath.
+// Resolution uses ident.Path first, then the imports alias map.
+func matchesQualifiedSelector(expr dst.Expr, importPath, name string, imports map[string]string) bool {
+	sel, ok := expr.(*dst.SelectorExpr)
 	if !ok {
 		return false
 	}
-
-	// Check function name matches
-	if sel.Sel.Name != funcName {
+	if sel.Sel.Name != name {
 		return false
 	}
-
-	// Check that the package identifier is a simple identifier (not a chained selector)
 	ident, ok := sel.X.(*dst.Ident)
 	if !ok {
 		return false
 	}
-
-	// Check that the package's import path matches the rule's import path.
-	pkgPath := ident.Path
-	if pkgPath != "" {
-		return pkgPath == importPath
+	// dst may populate Path directly on the identifier when the import is known.
+	if ident.Path != "" {
+		return ident.Path == importPath
 	}
-
-	resolvedPath, ok := importAliases[ident.Name]
+	resolvedPath, ok := imports[ident.Name]
 	return ok && resolvedPath == importPath
 }
 

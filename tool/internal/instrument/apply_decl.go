@@ -35,7 +35,7 @@ func parseValueExpr(exprSource string) (dst.Expr, error) {
 func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRule, root *dst.File) error {
 	node := ast.FindNamedDecl(root, r.DeclarationOf, r.DeclKind)
 	if node == nil {
-		return ex.Newf("can not find declaration %q (kind: %q)", r.DeclarationOf, r.DeclKind)
+		return ex.Newf("cannot find declaration %q (kind: %q)", r.DeclarationOf, r.DeclKind)
 	}
 
 	// Handle imports if specified in the rule

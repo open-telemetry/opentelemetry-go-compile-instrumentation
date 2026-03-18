@@ -44,28 +44,30 @@ func (ibr *InstBaseRule) GetVersion() string { return ibr.Version }
 // This structure is essential for the instrumentation process, as it allows the
 // tool to efficiently locate and apply the correct rules to the source code.
 type InstRuleSet struct {
-	PackageName string                       `json:"package_name"`
-	ModulePath  string                       `json:"module_path"`
-	CgoFileMap  map[string]string            `json:"cgo_file_map,omitempty"` // go -> cgo
-	RawRules    map[string][]*InstRawRule    `json:"raw_rules"`
-	FuncRules   map[string][]*InstFuncRule   `json:"func_rules"`
-	StructRules map[string][]*InstStructRule `json:"struct_rules"`
-	CallRules   map[string][]*InstCallRule   `json:"call_rules"`
-	DeclRules   map[string][]*InstDeclRule   `json:"decl_rules"`
-	FileRules   []*InstFileRule              `json:"file_rules"`
+	PackageName    string                          `json:"package_name"`
+	ModulePath     string                          `json:"module_path"`
+	CgoFileMap     map[string]string               `json:"cgo_file_map,omitempty"` // go -> cgo
+	RawRules       map[string][]*InstRawRule       `json:"raw_rules"`
+	FuncRules      map[string][]*InstFuncRule      `json:"func_rules"`
+	StructRules    map[string][]*InstStructRule    `json:"struct_rules"`
+	CallRules      map[string][]*InstCallRule      `json:"call_rules"`
+	DeclRules      map[string][]*InstDeclRule      `json:"decl_rules"`
+	ValueDeclRules map[string][]*InstValueDeclRule `json:"value_decl_rules"`
+	FileRules      []*InstFileRule                 `json:"file_rules"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
 	return &InstRuleSet{
-		PackageName: "",
-		ModulePath:  importPath,
-		CgoFileMap:  make(map[string]string),
-		RawRules:    make(map[string][]*InstRawRule),
-		FuncRules:   make(map[string][]*InstFuncRule),
-		StructRules: make(map[string][]*InstStructRule),
-		CallRules:   make(map[string][]*InstCallRule),
-		DeclRules:   make(map[string][]*InstDeclRule),
-		FileRules:   make([]*InstFileRule, 0),
+		PackageName:    "",
+		ModulePath:     importPath,
+		CgoFileMap:     make(map[string]string),
+		RawRules:       make(map[string][]*InstRawRule),
+		FuncRules:      make(map[string][]*InstFuncRule),
+		StructRules:    make(map[string][]*InstStructRule),
+		CallRules:      make(map[string][]*InstCallRule),
+		DeclRules:      make(map[string][]*InstDeclRule),
+		ValueDeclRules: make(map[string][]*InstValueDeclRule),
+		FileRules:      make([]*InstFileRule, 0),
 	}
 }
 
@@ -76,6 +78,7 @@ func (irs *InstRuleSet) String() string {
 		fmt.Sprintf("struct=%v", irs.StructRules),
 		fmt.Sprintf("call=%v", irs.CallRules),
 		fmt.Sprintf("decl=%v", irs.DeclRules),
+		fmt.Sprintf("value_decl=%v", irs.ValueDeclRules),
 		fmt.Sprintf("file=%v", irs.FileRules),
 	}
 	return fmt.Sprintf("{%s: %s}", irs.ModulePath, strings.Join(parts, ", "))
@@ -88,6 +91,7 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.RawRules) == 0 &&
 			len(irs.CallRules) == 0 &&
 			len(irs.DeclRules) == 0 &&
+			len(irs.ValueDeclRules) == 0 &&
 			len(irs.FileRules) == 0)
 }
 
@@ -116,6 +120,10 @@ func (irs *InstRuleSet) AddCallRule(file string, rule *InstCallRule) {
 
 func (irs *InstRuleSet) AddDeclRule(file string, rule *InstDeclRule) {
 	addRule(file, rule, irs.DeclRules)
+}
+
+func (irs *InstRuleSet) AddValueDeclRule(file string, rule *InstValueDeclRule) {
+	addRule(file, rule, irs.ValueDeclRules)
 }
 
 func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
