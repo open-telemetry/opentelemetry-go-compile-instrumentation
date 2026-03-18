@@ -64,10 +64,6 @@ This helps maintainers calibrate their review and set appropriate expectations. 
 AI-assisted code that has been substantially reviewed, reworked, and understood by the author,
 disclosure is appreciated but not required — the human author owns the result either way.
 
-Do not use `Co-Authored-By` lines for AI tools. As the Go project notes, AI tools cannot be
-co-authors for copyright purposes, and such lines carry almost no information about the actual
-degree of AI involvement.
-
 ## Interactions on GitHub
 
 Discussions on OpenTelemetry repositories — issue comments, pull request reviews, and any other
