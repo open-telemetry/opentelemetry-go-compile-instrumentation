@@ -48,22 +48,6 @@ remain, regardless of what tools were used:
   unreviewed AI-generated output shifts the burden of understanding and validation onto them. That
   is disrespectful of their time.
 
-## AI Disclosure
-
-We appreciate it when contributors disclose the use of AI tools when a significant part of a commit
-was taken from a tool without substantial modification. Disclosure is done through an `Assisted-by`
-trailer in the commit message:
-
-```
-Assisted-by: GitHub Copilot
-Assisted-by: Claude Opus 4
-Assisted-by: Cursor with Claude Sonnet 4
-```
-
-This helps maintainers calibrate their review and set appropriate expectations. Note that for
-AI-assisted code that has been substantially reviewed, reworked, and understood by the author,
-disclosure is appreciated but not required — the human author owns the result either way.
-
 ## Interactions on GitHub
 
 Discussions on OpenTelemetry repositories — issue comments, pull request reviews, and any other

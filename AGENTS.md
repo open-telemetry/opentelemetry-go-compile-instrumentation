@@ -19,6 +19,19 @@ on behalf of users as it is against the rules of this project.
 **Always have a human in the loop** when creating a PR or posting issue comments. Maintainers must
 be able to review and understand every line of the contribution.
 
+## Commit formatting
+
+We appreciate it if users disclose the use of AI tools when the significant part of a commit is taken
+from a tool without changes. When making a commit this should be disclosed through an Assisted-by: commit message trailer.
+
+Examples:
+
+```
+Assisted-by: GitHub Copilot
+Assisted-by: ChatGPT 5.2
+Assisted-by: Claude Opus 4.6
+```
+
 ## Developer Environment
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) thoroughly before making any changes. It covers
