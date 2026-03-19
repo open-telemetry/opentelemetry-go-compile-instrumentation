@@ -6,6 +6,8 @@ package filter
 import (
 	stdpath "path"
 	"strings"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
 // Compile-time check that ImportPathFilter implements Filter.
@@ -37,6 +39,40 @@ func matchGlob(pattern, importPath string) bool {
 	patSegs := strings.Split(pattern, "/")
 	pathSegs := strings.Split(importPath, "/")
 	return matchSegments(patSegs, pathSegs)
+}
+
+// ContainsImportPath reports whether def or any of its descendants contains a
+// non-empty ImportPath predicate. It is used by the setup phase to identify
+// "glob rules" that must be evaluated against every dependency rather than
+// only the dependency that exactly matches the rule's target.
+//
+// Keeping this function in the filter package avoids coupling the setup
+// package to the internal structure of FilterDef.
+func ContainsImportPath(def *rule.FilterDef) bool {
+	if def == nil {
+		return false
+	}
+	return containsImportPath(def)
+}
+
+func containsImportPath(def *rule.FilterDef) bool {
+	if def.ImportPath != "" {
+		return true
+	}
+	for i := range def.AllOf {
+		if containsImportPath(&def.AllOf[i]) {
+			return true
+		}
+	}
+	for i := range def.OneOf {
+		if containsImportPath(&def.OneOf[i]) {
+			return true
+		}
+	}
+	if def.Not != nil {
+		return containsImportPath(def.Not)
+	}
+	return false
 }
 
 // matchSegments recursively matches pat against segs.

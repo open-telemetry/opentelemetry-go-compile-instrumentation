@@ -169,40 +169,6 @@ func (sp *SetupPhase) runMatch(
 	return sp.preciseMatching(ctx, dep, preciseRules, set)
 }
 
-// hasImportPathFilter reports whether r's Where clause contains an ImportPath
-// predicate at any depth in the filter tree. Rules that have an ImportPath
-// filter are routed through the globRules slice in matchDeps so they are
-// evaluated against every dependency rather than only the exact target match.
-func hasImportPathFilter(r rule.InstRule) bool {
-	where := r.GetWhere()
-	if where == nil {
-		return false
-	}
-	return hasImportPathInDef(where)
-}
-
-// hasImportPathInDef recursively checks whether def or any of its children
-// contains a non-empty ImportPath predicate.
-func hasImportPathInDef(def *rule.FilterDef) bool {
-	if def.ImportPath != "" {
-		return true
-	}
-	for i := range def.AllOf {
-		if hasImportPathInDef(&def.AllOf[i]) {
-			return true
-		}
-	}
-	for i := range def.OneOf {
-		if hasImportPathInDef(&def.OneOf[i]) {
-			return true
-		}
-	}
-	if def.Not != nil {
-		return hasImportPathInDef(def.Not)
-	}
-	return false
-}
-
 // ruleFilter pairs a rule with its pre-compiled Where filter (if any).
 // Using a struct instead of parallel slices prevents index-desync bugs if
 // the rules slice is ever sorted or deduplicated before this point.
@@ -442,7 +408,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 	exactRules := make(map[string][]rule.InstRule)
 	var globRules []rule.InstRule
 	for _, r := range allRules {
-		if hasImportPathFilter(r) {
+		if filter.ContainsImportPath(r.GetWhere()) {
 			globRules = append(globRules, r)
 		} else {
 			target := r.GetTarget()
