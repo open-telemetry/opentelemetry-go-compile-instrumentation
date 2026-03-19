@@ -55,6 +55,11 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 		return nil, ex.Newf("not combinator is not yet supported")
 	}
 
+	return buildLeaf(def)
+}
+
+// buildLeaf constructs a Filter from a leaf FilterDef (no combinators).
+func buildLeaf(def *rule.FilterDef) (Filter, error) {
 	// Recv without Func is a misconfiguration — catch it early.
 	if def.Recv != "" && def.Func == "" {
 		return nil, ex.Newf("recv requires func to be set in filter definition")
