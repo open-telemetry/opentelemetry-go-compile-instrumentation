@@ -1,0 +1,3 @@
+span_directive:
+  target: main
+  directive: "otelc:span"
