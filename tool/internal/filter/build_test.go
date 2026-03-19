@@ -148,10 +148,6 @@ func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 			name: "package_name",
 			def:  &rule.FilterDef{PackageName: "main"},
 		},
-		{
-			name: "test_main",
-			def:  &rule.FilterDef{TestMain: boolPtr(true)},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,6 +157,37 @@ func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuild_TestMain(t *testing.T) {
+	t.Run("true matches test packages", func(t *testing.T) {
+		def := &rule.FilterDef{TestMain: boolPtr(true)}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		tmf, ok := f.(*filter.TestMainFilter)
+		if !ok {
+			t.Fatalf("Build(TestMain=true) returned %T, want *filter.TestMainFilter", f)
+		}
+		if !tmf.ShouldMatch {
+			t.Error("TestMainFilter.ShouldMatch = false, want true")
+		}
+	})
+	t.Run("false matches non-test packages", func(t *testing.T) {
+		def := &rule.FilterDef{TestMain: boolPtr(false)}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		tmf, ok := f.(*filter.TestMainFilter)
+		if !ok {
+			t.Fatalf("Build(TestMain=false) returned %T, want *filter.TestMainFilter", f)
+		}
+		if tmf.ShouldMatch {
+			t.Error("TestMainFilter.ShouldMatch = true, want false")
+		}
+	})
 }
 
 // boolPtr returns a pointer to the given bool value. Used to construct
