@@ -163,15 +163,59 @@ func TestBuild_AllOf(t *testing.T) {
 	})
 }
 
+func TestBuild_OneOf(t *testing.T) {
+	t.Run("single func child", func(t *testing.T) {
+		def := &rule.FilterDef{OneOf: []rule.FilterDef{{Func: "Foo"}}}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		if _, ok := f.(filter.OneOf); !ok {
+			t.Errorf("Build(OneOf) returned %T, want filter.OneOf", f)
+		}
+	})
+	t.Run("multiple children", func(t *testing.T) {
+		def := &rule.FilterDef{OneOf: []rule.FilterDef{{Func: "Foo"}, {Struct: "Bar"}}}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		of, ok := f.(filter.OneOf)
+		if !ok {
+			t.Fatalf("Build(OneOf) returned %T, want filter.OneOf", f)
+		}
+		if len(of) != 2 {
+			t.Errorf("OneOf len = %d, want 2", len(of))
+		}
+	})
+	t.Run("invalid child returns error", func(t *testing.T) {
+		def := &rule.FilterDef{OneOf: []rule.FilterDef{{}}}
+		_, err := filter.Build(def)
+		if err == nil {
+			t.Fatal("Build(OneOf with empty child) error = nil, want error")
+		}
+	})
+	t.Run("oneof inside allof", func(t *testing.T) {
+		def := &rule.FilterDef{
+			AllOf: []rule.FilterDef{
+				{OneOf: []rule.FilterDef{{Func: "Foo"}, {Struct: "Bar"}}},
+			},
+		}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(AllOf{OneOf{...}}) error = %v, want nil", err)
+		}
+		if _, ok := f.(filter.AllOf); !ok {
+			t.Errorf("Build(AllOf{OneOf{...}}) returned %T, want filter.AllOf", f)
+		}
+	})
+}
+
 func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 	tests := []struct {
 		name string
 		def  *rule.FilterDef
 	}{
-		{
-			name: "one-of",
-			def:  &rule.FilterDef{OneOf: []rule.FilterDef{{Func: "Foo"}}},
-		},
 		{
 			name: "not",
 			def:  &rule.FilterDef{Not: &rule.FilterDef{Func: "Foo"}},
