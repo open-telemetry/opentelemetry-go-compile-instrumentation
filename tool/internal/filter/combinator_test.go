@@ -166,3 +166,45 @@ func TestOneOf_Nested(t *testing.T) {
 		t.Error("AllOf{OneOf{false, true}, true}.Match() = false, want true")
 	}
 }
+
+func TestNot(t *testing.T) {
+	tests := []struct {
+		name  string
+		inner filter.Filter
+		want  bool
+	}{
+		{
+			name:  "negates true to false",
+			inner: alwaysMatch(true),
+			want:  false,
+		},
+		{
+			name:  "negates false to true",
+			inner: alwaysMatch(false),
+			want:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &filter.Not{Inner: tt.inner}
+			if got := f.Match(minimalCtx()); got != tt.want {
+				t.Errorf("Not.Match() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNot_DoubleNegation(t *testing.T) {
+	f := &filter.Not{Inner: &filter.Not{Inner: alwaysMatch(true)}}
+	if !f.Match(minimalCtx()) {
+		t.Error("Not{Not{true}}.Match() = false, want true")
+	}
+}
+
+func TestNot_InsideAllOf(t *testing.T) {
+	// AllOf{true, Not{false}} → true AND true → true
+	f := filter.AllOf{alwaysMatch(true), &filter.Not{Inner: alwaysMatch(false)}}
+	if !f.Match(minimalCtx()) {
+		t.Error("AllOf{true, Not{false}}.Match() = false, want true")
+	}
+}

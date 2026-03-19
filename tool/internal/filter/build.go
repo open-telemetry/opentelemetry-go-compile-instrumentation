@@ -51,8 +51,13 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 		}
 		return children, nil
 	}
+	// Not combinator: match when the inner filter does not match.
 	if def.Not != nil {
-		return nil, ex.Newf("not combinator is not yet supported")
+		inner, err := buildDef(def.Not)
+		if err != nil {
+			return nil, ex.Wrapf(err, "not")
+		}
+		return &Not{Inner: inner}, nil
 	}
 
 	return buildLeaf(def)
