@@ -49,7 +49,7 @@ type FilterDef struct {
 	Struct    string `json:"struct,omitempty"    yaml:"struct,omitempty"`
 	Directive string `json:"directive,omitempty" yaml:"directive,omitempty"` // not yet implemented
 
-	// Import path glob filter — not yet implemented.
+	// Import path glob filter — matched by ImportPathFilter.
 	ImportPath string `json:"import_path,omitempty" yaml:"import_path,omitempty"`
 	// Package name filter — not yet implemented.
 	PackageName string `json:"package_name,omitempty" yaml:"package_name,omitempty"`

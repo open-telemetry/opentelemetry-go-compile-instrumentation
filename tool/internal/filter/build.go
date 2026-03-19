@@ -4,6 +4,8 @@
 package filter
 
 import (
+	"path"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
@@ -80,6 +82,12 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 	case def.Directive != "":
 		return nil, ex.Newf("directive filter requires directive support (not yet available)")
 	case def.ImportPath != "":
+		// Validate the pattern at build time: path.Match returns ErrBadPattern
+		// for malformed bracket expressions (e.g. "[z-a]") that would otherwise
+		// silently produce a non-match on every evaluation.
+		if _, err := path.Match(def.ImportPath, ""); err != nil {
+			return nil, ex.Wrapf(err, "import_path pattern %q is invalid", def.ImportPath)
+		}
 		return &ImportPathFilter{Pattern: def.ImportPath}, nil
 	case def.PackageName != "":
 		return nil, ex.Newf("package_name filter is not yet supported")

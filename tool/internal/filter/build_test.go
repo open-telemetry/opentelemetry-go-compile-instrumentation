@@ -146,6 +146,17 @@ func TestBuild_ImportPath(t *testing.T) {
 	})
 }
 
+func TestBuild_ImportPath_InvalidPattern(t *testing.T) {
+	// Build must reject malformed bracket expressions at construction time so
+	// that bad YAML rules fail fast rather than silently producing non-matches.
+	// path.Match returns ErrBadPattern for unclosed bracket expressions.
+	def := &rule.FilterDef{ImportPath: "github.com/foo/["}
+	_, err := filter.Build(def)
+	if err == nil {
+		t.Fatal("Build(ImportPath with unclosed bracket) error = nil, want error")
+	}
+}
+
 func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 	tests := []struct {
 		name string

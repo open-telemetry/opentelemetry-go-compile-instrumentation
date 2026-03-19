@@ -4,7 +4,7 @@
 package filter
 
 import (
-	stdpath "path"
+	"path"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -42,9 +42,11 @@ func matchGlob(pattern, importPath string) bool {
 }
 
 // ContainsImportPath reports whether def or any of its descendants contains a
-// non-empty ImportPath predicate. It is used by the setup phase to identify
-// "glob rules" that must be evaluated against every dependency rather than
-// only the dependency that exactly matches the rule's target.
+// non-empty ImportPath predicate. Returns false when def is nil.
+//
+// It is used by the setup phase to identify "glob rules" that must be
+// evaluated against every dependency rather than only the dependency that
+// exactly matches the rule's target.
 //
 // Keeping this function in the filter package avoids coupling the setup
 // package to the internal structure of FilterDef.
@@ -52,25 +54,21 @@ func ContainsImportPath(def *rule.FilterDef) bool {
 	if def == nil {
 		return false
 	}
-	return containsImportPath(def)
-}
-
-func containsImportPath(def *rule.FilterDef) bool {
 	if def.ImportPath != "" {
 		return true
 	}
 	for i := range def.AllOf {
-		if containsImportPath(&def.AllOf[i]) {
+		if ContainsImportPath(&def.AllOf[i]) {
 			return true
 		}
 	}
 	for i := range def.OneOf {
-		if containsImportPath(&def.OneOf[i]) {
+		if ContainsImportPath(&def.OneOf[i]) {
 			return true
 		}
 	}
 	if def.Not != nil {
-		return containsImportPath(def.Not)
+		return ContainsImportPath(def.Not)
 	}
 	return false
 }
@@ -94,8 +92,8 @@ func matchSegments(pat, segs []string) bool {
 		if len(segs) == 0 {
 			return false
 		}
-		// Single-segment match: supports *, ?, [...] via path.Match.
-		ok, err := stdpath.Match(pat[0], segs[0])
+		// Single-segment match: delegates to path.Match which supports *, ?, [...].
+		ok, err := path.Match(pat[0], segs[0])
 		if err != nil || !ok {
 			return false
 		}

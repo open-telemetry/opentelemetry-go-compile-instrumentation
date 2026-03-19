@@ -9,6 +9,7 @@ import (
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/filter"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
 func TestMatchGlob(t *testing.T) {
@@ -74,7 +75,6 @@ func TestMatchGlob(t *testing.T) {
 }
 
 func TestImportPathFilter_Build(t *testing.T) {
-	// Verify that build_test covers this; here we test direct construction.
 	f := &filter.ImportPathFilter{Pattern: "github.com/foo/**"}
 	ctx := &filter.MatchContext{
 		ImportPath: "github.com/foo/bar",
@@ -83,5 +83,72 @@ func TestImportPathFilter_Build(t *testing.T) {
 	}
 	if !f.Match(ctx) {
 		t.Error("ImportPathFilter{github.com/foo/**}.Match(github.com/foo/bar) = false, want true")
+	}
+}
+
+func TestContainsImportPath(t *testing.T) {
+	tests := []struct {
+		name string
+		def  *rule.FilterDef
+		want bool
+	}{
+		{
+			name: "nil def returns false",
+			def:  nil,
+			want: false,
+		},
+		{
+			name: "direct ImportPath returns true",
+			def:  &rule.FilterDef{ImportPath: "github.com/foo/**"},
+			want: true,
+		},
+		{
+			name: "no ImportPath predicate returns false",
+			def:  &rule.FilterDef{Func: "Foo"},
+			want: false,
+		},
+		{
+			name: "ImportPath nested in AllOf returns true",
+			def: &rule.FilterDef{
+				AllOf: []rule.FilterDef{{ImportPath: "github.com/foo/**"}},
+			},
+			want: true,
+		},
+		{
+			name: "ImportPath nested in OneOf returns true",
+			def: &rule.FilterDef{
+				OneOf: []rule.FilterDef{{Func: "Bar"}, {ImportPath: "github.com/foo/**"}},
+			},
+			want: true,
+		},
+		{
+			name: "ImportPath nested under Not returns true",
+			def: &rule.FilterDef{
+				Not: &rule.FilterDef{ImportPath: "github.com/foo/**"},
+			},
+			want: true,
+		},
+		{
+			name: "deeply nested ImportPath returns true",
+			def: &rule.FilterDef{
+				AllOf: []rule.FilterDef{
+					{OneOf: []rule.FilterDef{{Func: "Foo"}, {ImportPath: "example.com/**"}}},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "def with only non-ImportPath predicates returns false",
+			def:  &rule.FilterDef{Struct: "Bar"},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filter.ContainsImportPath(tt.def)
+			if got != tt.want {
+				t.Errorf("ContainsImportPath(%+v) = %v, want %v", tt.def, got, tt.want)
+			}
+		})
 	}
 }
