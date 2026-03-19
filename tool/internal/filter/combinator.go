@@ -3,8 +3,11 @@
 
 package filter
 
-// Compile-time check that AllOf implements Filter.
-var _ Filter = (AllOf)(nil)
+// Compile-time checks that combinators implement Filter.
+var (
+	_ Filter = (AllOf)(nil)
+	_ Filter = (OneOf)(nil)
+)
 
 // AllOf is a Filter combinator that matches when all child filters match.
 // An empty AllOf returns true (vacuous truth: all conditions in an empty set
@@ -20,4 +23,19 @@ func (a AllOf) Match(ctx *MatchContext) bool {
 		}
 	}
 	return true
+}
+
+// OneOf is a Filter combinator that matches when at least one child filter
+// matches. An empty OneOf returns false (no condition can be satisfied).
+type OneOf []Filter
+
+// Match reports whether any child filter matches ctx.
+// It short-circuits on the first matching child.
+func (o OneOf) Match(ctx *MatchContext) bool {
+	for _, f := range o {
+		if f.Match(ctx) {
+			return true
+		}
+	}
+	return false
 }
