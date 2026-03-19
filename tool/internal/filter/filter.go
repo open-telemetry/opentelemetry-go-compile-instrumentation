@@ -12,7 +12,7 @@
 // The filter tree maps directly onto the YAML where clause:
 //
 //	where:
-//	  all-of:           # AllOf combinator (not yet implemented)
+//	  all-of:           # AllOf combinator
 //	    - func: Foo     # FuncFilter leaf
 //	    - struct: Bar   # StructFilter leaf
 package filter
