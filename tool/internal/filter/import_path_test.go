@@ -34,7 +34,7 @@ func TestMatchGlob(t *testing.T) {
 		{"github.com/*/bar", "github.com/foo/baz", false},
 
 		// Multi-segment wildcard (**)
-		{"github.com/foo/**", "github.com/foo", true},    // ** matches 0 segs
+		{"github.com/foo/**", "github.com/foo", true},     // ** matches 0 segs
 		{"github.com/foo/**", "github.com/foo/bar", true}, // ** matches 1 seg
 		{"github.com/foo/**", "github.com/foo/bar/baz", true},
 		{"github.com/foo/**", "github.com/other/bar", false},
@@ -42,9 +42,9 @@ func TestMatchGlob(t *testing.T) {
 		{"**", "", true},
 
 		// ** in the middle
-		{"github.com/**/bar", "github.com/bar", true},           // ** matches 0
-		{"github.com/**/bar", "github.com/foo/bar", true},       // ** matches 1
-		{"github.com/**/bar", "github.com/a/b/c/bar", true},     // ** matches 3
+		{"github.com/**/bar", "github.com/bar", true},       // ** matches 0
+		{"github.com/**/bar", "github.com/foo/bar", true},   // ** matches 1
+		{"github.com/**/bar", "github.com/a/b/c/bar", true}, // ** matches 3
 		{"github.com/**/bar", "github.com/foo/baz", false},
 
 		// No wildcard, single segment
