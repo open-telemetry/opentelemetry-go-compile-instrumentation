@@ -82,7 +82,7 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 	case def.ImportPath != "":
 		return nil, ex.Newf("import_path filter is not yet supported")
 	case def.PackageName != "":
-		return nil, ex.Newf("package_name filter is not yet supported")
+		return &PackageNameFilter{Name: def.PackageName}, nil
 	case def.TestMain != nil:
 		return nil, ex.Newf("test_main filter is not yet supported")
 	default:
