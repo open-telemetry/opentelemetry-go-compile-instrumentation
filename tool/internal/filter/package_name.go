@@ -8,8 +8,8 @@ var _ Filter = (*PackageNameFilter)(nil)
 
 // PackageNameFilter matches source files whose declared package name equals
 // the configured name. The declared package name is read from the AST
-// (ctx.AST.Name.Name) — it is always present and is the same for every file
-// in a Go package, so there is no need to store it separately on MatchContext.
+// (ctx.AST.Name.Name). Non-test files in a package share the same name;
+// external test files may declare a different name (e.g. "foo_test").
 type PackageNameFilter struct {
 	Name string
 }
