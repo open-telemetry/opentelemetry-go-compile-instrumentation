@@ -80,7 +80,7 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 	case def.Directive != "":
 		return nil, ex.Newf("directive filter requires directive support (not yet available)")
 	case def.ImportPath != "":
-		return nil, ex.Newf("import_path filter is not yet supported")
+		return &ImportPathFilter{Pattern: def.ImportPath}, nil
 	case def.PackageName != "":
 		return nil, ex.Newf("package_name filter is not yet supported")
 	case def.TestMain != nil:
