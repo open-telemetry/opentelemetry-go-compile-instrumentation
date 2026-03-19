@@ -211,15 +211,43 @@ func TestBuild_OneOf(t *testing.T) {
 	})
 }
 
+func TestBuild_Not(t *testing.T) {
+	t.Run("negates func filter", func(t *testing.T) {
+		def := &rule.FilterDef{Not: &rule.FilterDef{Func: "Foo"}}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		if _, ok := f.(*filter.Not); !ok {
+			t.Errorf("Build(Not) returned %T, want *filter.Not", f)
+		}
+	})
+	t.Run("invalid inner returns error", func(t *testing.T) {
+		def := &rule.FilterDef{Not: &rule.FilterDef{}} // empty inner is invalid
+		_, err := filter.Build(def)
+		if err == nil {
+			t.Fatal("Build(Not with empty inner) error = nil, want error")
+		}
+	})
+	t.Run("not wrapping allof", func(t *testing.T) {
+		def := &rule.FilterDef{
+			Not: &rule.FilterDef{AllOf: []rule.FilterDef{{Func: "Foo"}}},
+		}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(Not{AllOf{...}}) error = %v, want nil", err)
+		}
+		if _, ok := f.(*filter.Not); !ok {
+			t.Errorf("Build(Not{AllOf{...}}) returned %T, want *filter.Not", f)
+		}
+	})
+}
+
 func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 	tests := []struct {
 		name string
 		def  *rule.FilterDef
 	}{
-		{
-			name: "not",
-			def:  &rule.FilterDef{Not: &rule.FilterDef{Func: "Foo"}},
-		},
 		{
 			name: "directive",
 			def:  &rule.FilterDef{Directive: "otelc:span"},

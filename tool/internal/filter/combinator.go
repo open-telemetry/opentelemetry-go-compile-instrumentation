@@ -7,6 +7,7 @@ package filter
 var (
 	_ Filter = (AllOf)(nil)
 	_ Filter = (OneOf)(nil)
+	_ Filter = (*Not)(nil)
 )
 
 // AllOf is a Filter combinator that matches when all child filters match.
@@ -38,4 +39,12 @@ func (o OneOf) Match(ctx *MatchContext) bool {
 		}
 	}
 	return false
+}
+
+// Not is a Filter combinator that negates its inner filter.
+type Not struct{ Inner Filter }
+
+// Match reports whether the inner filter does not match ctx.
+func (n *Not) Match(ctx *MatchContext) bool {
+	return !n.Inner.Match(ctx)
 }
