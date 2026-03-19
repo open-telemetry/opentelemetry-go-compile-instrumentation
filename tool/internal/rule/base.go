@@ -19,10 +19,42 @@ import (
 // bound is exclusive. For example, "v1.0.0,v2.0.0" means the rule is applicable
 // to the target module version range [v1.0.0, v2.0.0).
 type InstRule interface {
-	String() string     // The string representation of the rule
-	GetName() string    // The unique name of the rule
-	GetTarget() string  // The target module path where the rule is applied
-	GetVersion() string // The version range of target module if available, e.g "v1.0.0,v2.0.0"
+	String() string       // The string representation of the rule
+	GetName() string      // The unique name of the rule
+	GetTarget() string    // The target module path where the rule is applied
+	GetVersion() string   // The version range of target module if available, e.g "v1.0.0,v2.0.0"
+	GetWhere() *FilterDef // The optional join point filter; nil means no additional filtering
+}
+
+// FilterDef describes a filter predicate tree for a join point. It is the YAML
+// representation of a filter and is evaluated during the setup phase to decide
+// whether a rule applies to a given source file.
+//
+// A FilterDef is either a leaf (exactly one of Func/Recv, Struct, Directive,
+// ImportPath, PackageName, TestMain) or a combinator (AllOf, OneOf, Not).
+// Combinators contain nested FilterDef instances. Setting multiple active
+// predicates in a single FilterDef is an error; use AllOf to combine them.
+//
+// Recv is only meaningful alongside Func; it narrows the function match to a
+// specific receiver type.
+type FilterDef struct {
+	// Combinators — not yet implemented; return an error from Build.
+	AllOf []FilterDef `json:"all-of,omitempty" yaml:"all-of,omitempty"`
+	OneOf []FilterDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
+	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`
+
+	// Leaf filters — supported by Build.
+	Func      string `json:"func,omitempty"      yaml:"func,omitempty"`
+	Recv      string `json:"recv,omitempty"      yaml:"recv,omitempty"` // optional, requires Func
+	Struct    string `json:"struct,omitempty"    yaml:"struct,omitempty"`
+	Directive string `json:"directive,omitempty" yaml:"directive,omitempty"` // not yet implemented
+
+	// Import path glob filter — not yet implemented.
+	ImportPath string `json:"import_path,omitempty" yaml:"import_path,omitempty"`
+	// Package name filter — not yet implemented.
+	PackageName string `json:"package_name,omitempty" yaml:"package_name,omitempty"`
+	// TestMain filter — not yet implemented.
+	TestMain *bool `json:"test_main,omitempty" yaml:"test_main,omitempty"`
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
@@ -31,12 +63,14 @@ type InstBaseRule struct {
 	Target  string            `json:"target"            yaml:"target"`
 	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
 	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"` // map[alias]path
+	Where   *FilterDef        `json:"where,omitempty"   yaml:"where,omitempty"`
 }
 
-func (ibr *InstBaseRule) String() string     { return ibr.Name }
-func (ibr *InstBaseRule) GetName() string    { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string  { return ibr.Target }
-func (ibr *InstBaseRule) GetVersion() string { return ibr.Version }
+func (ibr *InstBaseRule) String() string       { return ibr.Name }
+func (ibr *InstBaseRule) GetName() string      { return ibr.Name }
+func (ibr *InstBaseRule) GetTarget() string    { return ibr.Target }
+func (ibr *InstBaseRule) GetVersion() string   { return ibr.Version }
+func (ibr *InstBaseRule) GetWhere() *FilterDef { return ibr.Where }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,

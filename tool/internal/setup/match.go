@@ -14,12 +14,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dave/dst"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/filter"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -102,27 +104,19 @@ func loadDefaultRules() ([]rule.InstRule, error) {
 }
 
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
-	// No version specified, so it's always applicable
-	if rule.GetVersion() == "" {
+	v := rule.GetVersion()
+	// No version specified, so it's always applicable.
+	if v == "" {
 		return true
 	}
 
-	// Version range? i.e. "v0.11.0,v0.12.0"
-	ruleVersion := rule.GetVersion()
-	if strings.Contains(ruleVersion, ",") {
-		commaIndex := strings.Index(ruleVersion, ",")
-		//nolint:gocritic // commaIndex is always valid
-		startInclusive := ruleVersion[:commaIndex]
-		endExclusive := ruleVersion[commaIndex+1:]
-		// Version is in the "inclusive,exclusive" range
-		if semver.Compare(dependency.Version, startInclusive) >= 0 &&
-			semver.Compare(dependency.Version, endExclusive) < 0 {
-			return true
-		}
-		return false
+	// Version range? i.e. "v0.11.0,v0.12.0" (inclusive start, exclusive end).
+	if startInclusive, endExclusive, ok := strings.Cut(v, ","); ok {
+		return semver.Compare(dependency.Version, startInclusive) >= 0 &&
+			semver.Compare(dependency.Version, endExclusive) < 0
 	}
 	// Minimal version only? i.e. "v0.11.0"
-	return semver.Compare(dependency.Version, ruleVersion) >= 0
+	return semver.Compare(dependency.Version, v) >= 0
 }
 
 // runMatch performs precise matching of rules against the dependency's source code.
@@ -146,7 +140,7 @@ func (sp *SetupPhase) runMatch(
 	}
 
 	// Filter rules by version
-	filteredRules := make([]rule.InstRule, 0)
+	filteredRules := make([]rule.InstRule, 0, len(relevantRules))
 	for _, r := range relevantRules {
 		if !matchVersion(dep, r) {
 			continue
@@ -155,7 +149,7 @@ func (sp *SetupPhase) runMatch(
 	}
 
 	// Separate file rules from rules that need precise matching
-	preciseRules := make([]rule.InstRule, 0)
+	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
 	for _, r := range filteredRules {
 		// If the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
@@ -175,14 +169,46 @@ func (sp *SetupPhase) runMatch(
 	return sp.preciseMatching(ctx, dep, preciseRules, set)
 }
 
+// ruleFilter pairs a rule with its pre-compiled Where filter (if any).
+// Using a struct instead of parallel slices prevents index-desync bugs if
+// the rules slice is ever sorted or deduplicated before this point.
+type ruleFilter struct {
+	rule   rule.InstRule
+	filter filter.Filter // nil means no Where clause — apply unconditionally
+}
+
 // preciseMatching performs AST-based matching of instrumentation rules against
 // the dependency's source files. It returns the rule set with the matched rules.
+//
+// If a rule carries a Where clause, the compiled Filter is evaluated against
+// each source file before the standard AST match. Only files for which the
+// filter passes proceed to the type-specific matching step.
 func (sp *SetupPhase) preciseMatching(
 	ctx context.Context,
 	dep *Dependency,
 	rules []rule.InstRule,
 	set *rule.InstRuleSet,
 ) (*rule.InstRuleSet, error) {
+	if len(dep.Sources) == 0 {
+		return set, nil
+	}
+
+	// Pre-build filter trees for rules that carry a Where clause.
+	// Filters are built once per rule and evaluated once per source file,
+	// avoiding repeated construction inside the nested loops.
+	ruleFilters := make([]ruleFilter, 0, len(rules))
+	for _, r := range rules {
+		var f filter.Filter
+		if where := r.GetWhere(); where != nil {
+			var err error
+			f, err = filter.Build(where)
+			if err != nil {
+				return nil, ex.Wrapf(err, "build filter for rule %q", r.GetName())
+			}
+		}
+		ruleFilters = append(ruleFilters, ruleFilter{rule: r, filter: f})
+	}
+
 	for _, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -193,55 +219,78 @@ func (sp *SetupPhase) preciseMatching(
 		if err != nil {
 			return nil, err
 		}
-		if tree == nil {
-			return nil, ex.Newf("failed to parse file %s", source)
-		}
+		// All files in a Go package share the same declared package name, so
+		// this is idempotent across iterations; SetPackageName asserts non-empty.
 		set.SetPackageName(tree.Name.Name)
 
-		for _, r := range rules {
-			// Let's match with the rule precisely
-			switch rt := r.(type) {
-			case *rule.InstFuncRule:
-				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
-				if funcDecl != nil {
-					set.AddFuncRule(source, rt)
-					sp.Info("Match func rule", "rule", rt, "dep", dep)
-				}
-			case *rule.InstStructRule:
-				structDecl := ast.FindStructDecl(tree, rt.Struct)
-				if structDecl != nil {
-					set.AddStructRule(source, rt)
-					sp.Info("Match struct rule", "rule", rt, "dep", dep)
-				}
-			case *rule.InstRawRule:
-				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
-				if funcDecl != nil {
-					set.AddRawRule(source, rt)
-					sp.Info("Match raw rule", "rule", rt, "dep", dep)
-				}
-			case *rule.InstCallRule:
-				// Call rules are added unconditionally to all source files in the
-				// target package. Unlike func/struct/raw rules, there is no cheap
-				// AST predicate to pre-filter files (the matching requires import
-				// alias resolution which happens during the instrument phase).
-				// Files without matching calls are a no-op in applyCallRule.
-				set.AddCallRule(source, rt)
-				sp.Info("Match call rule", "rule", rt, "dep", dep)
-			case *rule.InstDirectiveRule:
-				if !ast.FileHasDirective(tree, rt.Directive) {
-					continue
-				}
-				set.AddDirectiveRule(source, rt)
-				sp.Info("Match directive rule", "rule", rt, "dep", dep)
-			case *rule.InstFileRule:
-				// Skip as it's already processed
+		// mctx is allocated once per source file and reused across all rules
+		// evaluated against that file. All fields are constant for a given
+		// source file, so no updates are needed inside the inner loop.
+		mctx := filter.MatchContext{
+			ImportPath: dep.ImportPath,
+			SourceFile: source,
+			AST:        tree,
+		}
+
+		for _, rf := range ruleFilters {
+			// Evaluate the Where filter if one is defined for this rule.
+			// A nil filter means the rule applies to all files unconditionally.
+			if rf.filter != nil && !rf.filter.Match(&mctx) {
 				continue
-			default:
-				util.ShouldNotReachHere()
 			}
+			sp.matchRule(rf.rule, source, tree, set, dep)
 		}
 	}
 	return set, nil
+}
+
+// matchRule performs AST-based matching for a single rule against a single
+// source file, adding the rule to set if it matches.
+func (sp *SetupPhase) matchRule(
+	r rule.InstRule,
+	source string,
+	tree *dst.File,
+	set *rule.InstRuleSet,
+	dep *Dependency,
+) {
+	// Each rule type uses a different AST query; dispatch to the correct handler.
+	switch rt := r.(type) {
+	case *rule.InstFuncRule:
+		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
+		if funcDecl != nil {
+			set.AddFuncRule(source, rt)
+			sp.Info("Match func rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstStructRule:
+		structDecl := ast.FindStructDecl(tree, rt.Struct)
+		if structDecl != nil {
+			set.AddStructRule(source, rt)
+			sp.Info("Match struct rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstRawRule:
+		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
+		if funcDecl != nil {
+			set.AddRawRule(source, rt)
+			sp.Info("Match raw rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstCallRule:
+		// Call rules are added unconditionally to all source files in the
+		// target package. Unlike func/struct/raw rules, there is no cheap
+		// AST predicate to pre-filter files (the matching requires import
+		// alias resolution which happens during the instrument phase).
+		// Files without matching calls are a no-op in applyCallRule.
+		set.AddCallRule(source, rt)
+		sp.Info("Match call rule", "rule", rt, "dep", dep)
+	case *rule.InstDirectiveRule:
+		if ast.FileHasDirective(tree, rt.Directive) {
+			set.AddDirectiveRule(source, rt)
+			sp.Info("Match directive rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstFileRule:
+		// Already dispatched in runMatch before preciseMatching is called.
+	default:
+		util.ShouldNotReachHere()
+	}
 }
 
 func ruleFromDir(path string) ([]string, error) {
