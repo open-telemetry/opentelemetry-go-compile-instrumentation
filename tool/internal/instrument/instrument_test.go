@@ -344,7 +344,7 @@ func TestGroupRules(t *testing.T) {
 				RawRules:    make(map[string][]*rule.InstRawRule),
 				DeclRules: map[string][]*rule.InstDeclRule{
 					"file1.go": {
-						{InstBaseRule: rule.InstBaseRule{Name: "decl1"}, DeclarationOf: "GlobalVar"},
+						{InstBaseRule: rule.InstBaseRule{Name: "decl1"}, Declaration: "GlobalVar"},
 					},
 				},
 			},
