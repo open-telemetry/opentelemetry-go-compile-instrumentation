@@ -1,0 +1,8 @@
+hook_package_name:
+  target: main
+  func: Func1
+  before: H1Before
+  after: H1After
+  path: testdata
+  where:
+    package_name: "lib"
