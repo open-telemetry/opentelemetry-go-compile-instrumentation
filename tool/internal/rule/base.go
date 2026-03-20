@@ -38,7 +38,7 @@ type InstRule interface {
 // Recv is only meaningful alongside Func; it narrows the function match to a
 // specific receiver type.
 type FilterDef struct {
-	// Combinators — not yet implemented; return an error from Build.
+	// Combinators — implemented in AllOf, OneOf, Not.
 	AllOf []FilterDef `json:"all-of,omitempty" yaml:"all-of,omitempty"`
 	OneOf []FilterDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
 	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`
