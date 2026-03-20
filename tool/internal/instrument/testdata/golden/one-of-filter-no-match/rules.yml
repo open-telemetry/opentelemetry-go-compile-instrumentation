@@ -1,0 +1,10 @@
+hook_one_of:
+  target: main
+  func: Func1
+  before: H1Before
+  after: H1After
+  path: testdata
+  where:
+    one-of:
+      - func: MissingFunc
+      - struct: MissingStruct
