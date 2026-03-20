@@ -96,12 +96,19 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 		}
 	}
 	for _, field := range funcDecl.Type.Params.List {
-		for _, name := range field.Names {
-			if name.Name == ast.IdentIgnore {
-				name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
-				idx++
+		if len(field.Names) == 0 {
+			name := fmt.Sprintf("%s%d", ignoredParam, idx)
+			idx++
+			field.Names = []*dst.Ident{ast.Ident(name)}
+			args = append(args, name)
+		} else {
+			for _, name := range field.Names {
+				if name.Name == ast.IdentIgnore {
+					name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
+					idx++
+				}
+				args = append(args, name.Name)
 			}
-			args = append(args, name.Name)
 		}
 	}
 	return args
