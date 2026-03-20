@@ -6,8 +6,9 @@
 package trace
 
 import (
-	trace "go.opentelemetry.io/otel/trace"
 	"runtime"
+
+	trace "go.opentelemetry.io/otel/trace"
 )
 
 const maxSpans = 300

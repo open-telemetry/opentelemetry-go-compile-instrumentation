@@ -5,5 +5,7 @@
 
 package trace
 
-var GetTestSpans func() interface{}
-var ResetTestSpans func()
+var (
+	GetTestSpans   func() interface{}
+	ResetTestSpans func()
+)

@@ -433,7 +433,6 @@ func findTargetParamType(targetFunc *dst.FuncDecl) *dst.FieldList {
 		recvField := util.AssertType[*dst.Field](dst.Clone(splitRecv.List[0]))
 		if len(recvField.Names) == 0 {
 			recvField.Names = []*dst.Ident{{Name: fmt.Sprintf("recv%d", idx)}}
-			idx++
 		} else {
 			for _, names := range recvField.Names {
 				names.Name = fmt.Sprintf("%s%d", "recv", idx)

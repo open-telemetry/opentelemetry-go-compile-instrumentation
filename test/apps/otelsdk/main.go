@@ -66,5 +66,4 @@ func main() {
 
 	// Give time for span export
 	time.Sleep(1 * time.Second)
-
 }
