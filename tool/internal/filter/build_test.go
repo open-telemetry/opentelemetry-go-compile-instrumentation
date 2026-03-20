@@ -119,15 +119,55 @@ func TestBuild_Error_MultipleActiveLeaves(t *testing.T) {
 	}
 }
 
+func TestBuild_AllOf(t *testing.T) {
+	t.Run("single func child", func(t *testing.T) {
+		def := &rule.FilterDef{AllOf: []rule.FilterDef{{Func: "Foo"}}}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		if _, ok := f.(filter.AllOf); !ok {
+			t.Errorf("Build(AllOf) returned %T, want filter.AllOf", f)
+		}
+	})
+	t.Run("multiple children", func(t *testing.T) {
+		def := &rule.FilterDef{AllOf: []rule.FilterDef{{Func: "Foo"}, {Struct: "Bar"}}}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		af, ok := f.(filter.AllOf)
+		if !ok {
+			t.Fatalf("Build(AllOf) returned %T, want filter.AllOf", f)
+		}
+		if len(af) != 2 {
+			t.Errorf("AllOf len = %d, want 2", len(af))
+		}
+	})
+	t.Run("invalid child returns error", func(t *testing.T) {
+		def := &rule.FilterDef{AllOf: []rule.FilterDef{{}}} // empty child is invalid
+		_, err := filter.Build(def)
+		if err == nil {
+			t.Fatal("Build(AllOf with empty child) error = nil, want error")
+		}
+	})
+	t.Run("nested allof", func(t *testing.T) {
+		def := &rule.FilterDef{AllOf: []rule.FilterDef{{AllOf: []rule.FilterDef{{Func: "Foo"}}}}}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(nested AllOf) error = %v, want nil", err)
+		}
+		if _, ok := f.(filter.AllOf); !ok {
+			t.Errorf("Build(nested AllOf) returned %T, want filter.AllOf", f)
+		}
+	})
+}
+
 func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 	tests := []struct {
 		name string
 		def  *rule.FilterDef
 	}{
-		{
-			name: "all-of",
-			def:  &rule.FilterDef{AllOf: []rule.FilterDef{{Func: "Foo"}}},
-		},
 		{
 			name: "one-of",
 			def:  &rule.FilterDef{OneOf: []rule.FilterDef{{Func: "Foo"}}},

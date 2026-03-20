@@ -27,9 +27,17 @@ func Build(def *rule.FilterDef) (Filter, error) {
 }
 
 func buildDef(def *rule.FilterDef) (Filter, error) {
-	// Combinators are not yet implemented; return a clear error.
+	// AllOf combinator: match when all children match.
 	if len(def.AllOf) > 0 {
-		return nil, ex.Newf("all-of combinator is not yet supported")
+		children := make(AllOf, 0, len(def.AllOf))
+		for i := range def.AllOf {
+			child, err := buildDef(&def.AllOf[i])
+			if err != nil {
+				return nil, ex.Wrapf(err, "all-of[%d]", i)
+			}
+			children = append(children, child)
+		}
+		return children, nil
 	}
 	if len(def.OneOf) > 0 {
 		return nil, ex.Newf("one-of combinator is not yet supported")

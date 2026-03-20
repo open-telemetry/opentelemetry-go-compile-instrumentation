@@ -1,0 +1,10 @@
+hook_all_of:
+  target: main
+  func: Func1
+  before: H1Before
+  after: H1After
+  path: testdata
+  where:
+    all-of:
+      - func: Func1
+      - struct: T
