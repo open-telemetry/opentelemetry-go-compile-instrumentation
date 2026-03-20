@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	pkgast "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/filter"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
@@ -124,6 +126,28 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		props := rawRules[name]
 		props["name"] = name
 		ruleData, _ := yaml.Marshal(props)
+
+		// Evaluate the 'where' filter if present, mirroring preciseMatching.
+		if whereRaw, ok := props["where"]; ok {
+			whereBytes, _ := yaml.Marshal(whereRaw)
+			var filterDef rule.FilterDef
+			if unmarshalErr := yaml.Unmarshal(whereBytes, &filterDef); unmarshalErr == nil {
+				f, buildErr := filter.Build(&filterDef)
+				if buildErr == nil && f != nil {
+					tree, parseErr := pkgast.ParseFileFast(sourceFile)
+					if parseErr == nil {
+						ctx := &filter.MatchContext{
+							ImportPath: mainPackage,
+							SourceFile: sourceFile,
+							AST:        tree,
+						}
+						if !f.Match(ctx) {
+							continue // filter does not match; skip this rule
+						}
+					}
+				}
+			}
+		}
 
 		switch {
 		case props["struct"] != nil:
