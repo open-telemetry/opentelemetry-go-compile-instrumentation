@@ -339,3 +339,44 @@ add_file_with_extra_imports:
   imports:
     log: "log"  # Add extra import to the copied file
 ```
+
+### 6. Named Declaration Rule
+
+This rule targets a named package-level symbol (variable, constant, function, or type) and replaces its initializer with a new expression. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing a default HTTP transport with an instrumented one to enable distributed tracing.
+
+**Use Cases:**
+
+- Replacing a package-level `var` with an instrumented implementation (e.g., `http.DefaultTransport`).
+- Toggling a package-level flag or sentinel value for observability purposes.
+- Substituting a registered implementation at compile time.
+
+**Fields:**
+
+- `declaration_of` (string, required): The name of the top-level symbol to match.
+- `decl_kind` (string, optional): Constrains the kind of symbol to match. Valid values: `func`, `var`, `const`, `type`, or omitted/empty to match any kind.
+- `assign_value` (string, optional): A Go expression to assign as the new value of the matched `var` or `const`. Not valid when `decl_kind` is `func` or `type`.
+- `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
+
+**Example:**
+
+```yaml
+assign_default_transport:
+  target: net/http
+  declaration_of: DefaultTransport
+  decl_kind: var
+  assign_value: |
+    &http.Transport{
+      MaxIdleConns:    100,
+      MaxConnsPerHost: 100,
+    }
+  imports:
+    http: "net/http"
+```
+
+This rule replaces `http.DefaultTransport` in the `net/http` package with a custom `*http.Transport` at compile time, enabling all outbound HTTP calls to use the configured transport — a common pattern for injecting tracing or connection-pool tuning without modifying the standard library source.
+
+**Notes:**
+
+- `assign_value` must be a valid Go expression (not a statement).
+- If the matched symbol has multiple names in a single declaration (e.g., `var a, b = ...`), the expression is cloned and assigned to each name.
+- Omitting `decl_kind` matches the first symbol with the given name regardless of kind.

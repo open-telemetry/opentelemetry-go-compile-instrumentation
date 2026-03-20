@@ -46,6 +46,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstFuncRule(raw, name)
 	case fields["function_call"] != nil:
 		return rule.NewInstCallRule(raw, name)
+	case fields["declaration_of"] != nil:
+		return rule.NewInstDeclRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
@@ -225,6 +227,12 @@ func (sp *SetupPhase) preciseMatching(
 				// Files without matching calls are a no-op in applyCallRule.
 				set.AddCallRule(source, rt)
 				sp.Info("Match call rule", "rule", rt, "dep", dep)
+			case *rule.InstDeclRule:
+				node := ast.FindNamedDecl(tree, rt.Declaration, rt.Kind)
+				if node != nil {
+					set.AddDeclRule(source, rt)
+					sp.Info("Match decl rule", "rule", rt, "dep", dep)
+				}
 			case *rule.InstFileRule:
 				// Skip as it's already processed
 				continue

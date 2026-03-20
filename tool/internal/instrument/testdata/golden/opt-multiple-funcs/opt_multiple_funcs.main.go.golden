@@ -5,6 +5,8 @@ package main
 
 import _ "unsafe"
 
+var GlobalVar = "original"
+
 type T struct{}
 
 func (t *T) Func1(p1 string, p2 int) (float32, error) {
@@ -25,7 +27,7 @@ func OptGood() {
 	if OtelBeforeTrampoline_OptGood3887151894(); false {
 	} else {
 	}
-	//line main.go:21:16
+	//line main.go:23:16
 }
 func OptBad() {
 	//line <generated>:1
@@ -34,7 +36,7 @@ func OptBad() {
 		return
 	} else {
 	}
-	//line main.go:22:16
+	//line main.go:24:16
 }
 func OptBad2() {
 	//line <generated>:1
@@ -44,7 +46,7 @@ func OptBad2() {
 	} else {
 		defer OtelAfterTrampoline_OptBad23138243364(hookContext3138243364)
 	}
-	//line main.go:23:16
+	//line main.go:25:16
 }
 
 func GenericFunc[T any](p1 T, p2 int) (T, error) {

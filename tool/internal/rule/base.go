@@ -51,6 +51,7 @@ type InstRuleSet struct {
 	FuncRules   map[string][]*InstFuncRule   `json:"func_rules"`
 	StructRules map[string][]*InstStructRule `json:"struct_rules"`
 	CallRules   map[string][]*InstCallRule   `json:"call_rules"`
+	DeclRules   map[string][]*InstDeclRule   `json:"decl_rules"`
 	FileRules   []*InstFileRule              `json:"file_rules"`
 }
 
@@ -63,6 +64,7 @@ func NewInstRuleSet(importPath string) *InstRuleSet {
 		FuncRules:   make(map[string][]*InstFuncRule),
 		StructRules: make(map[string][]*InstStructRule),
 		CallRules:   make(map[string][]*InstCallRule),
+		DeclRules:   make(map[string][]*InstDeclRule),
 		FileRules:   make([]*InstFileRule, 0),
 	}
 }
@@ -73,6 +75,7 @@ func (irs *InstRuleSet) String() string {
 		fmt.Sprintf("func=%v", irs.FuncRules),
 		fmt.Sprintf("struct=%v", irs.StructRules),
 		fmt.Sprintf("call=%v", irs.CallRules),
+		fmt.Sprintf("decl=%v", irs.DeclRules),
 		fmt.Sprintf("file=%v", irs.FileRules),
 	}
 	return fmt.Sprintf("{%s: %s}", irs.ModulePath, strings.Join(parts, ", "))
@@ -84,6 +87,7 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.StructRules) == 0 &&
 			len(irs.RawRules) == 0 &&
 			len(irs.CallRules) == 0 &&
+			len(irs.DeclRules) == 0 &&
 			len(irs.FileRules) == 0)
 }
 
@@ -108,6 +112,10 @@ func (irs *InstRuleSet) AddStructRule(file string, rule *InstStructRule) {
 
 func (irs *InstRuleSet) AddCallRule(file string, rule *InstCallRule) {
 	addRule(file, rule, irs.CallRules)
+}
+
+func (irs *InstRuleSet) AddDeclRule(file string, rule *InstDeclRule) {
+	addRule(file, rule, irs.DeclRules)
 }
 
 func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
