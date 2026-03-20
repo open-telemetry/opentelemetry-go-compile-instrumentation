@@ -15,7 +15,6 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
 type mockInstRule struct {
@@ -543,6 +542,6 @@ target: example.com/mypkg
 	require.NotNil(t, set)
 
 	// No sources means package name is not set
-	assert.Equal(t, "", set.PackageName)
+	assert.Empty(t, set.PackageName)
 	assert.False(t, set.IsEmpty())
 }
