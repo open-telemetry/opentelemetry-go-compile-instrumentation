@@ -1,0 +1,75 @@
+trace_context:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.39.0"
+  file: otel_trace_context.go
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/sdk/trace"
+
+trace_test_func_holder:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.39.0"
+  file: otel_trace_test_func_holder.go
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/sdk/trace"
+
+# Function hooks for go.opentelemetry.io/otel/sdk/trace
+hook_non_recording_span_end:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.39.0"
+  func: End
+  recv: nonRecordingSpan
+  before: nonRecordingSpanEndOnEnter
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/hook"
+
+hook_recording_span_end:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.39.0"
+  func: End
+  recv: "*recordingSpan"
+  before: recordingSpanEndOnEnter
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/hook"
+
+hook_new_recording_span:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.39.0"
+  func: newRecordingSpan
+  recv: "*tracer"
+  after: newRecordingSpanOnExit
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/hook"
+
+hook_new_non_recording_span:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.39.0"
+  func: newNonRecordingSpan
+  recv: "*tracer"
+  after: newNonRecordingSpanOnExit
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/hook"
+
+# File injection for go.opentelemetry.io/otel/sdk/metric
+metric_test_func_holder:
+  target: go.opentelemetry.io/otel/sdk/metric
+  file: otel_metric_test_func_holder.go
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/sdk/metric"
+
+# Function hook for go.opentelemetry.io/otel/trace
+hook_span_from_context:
+  target: go.opentelemetry.io/otel/trace
+  func: SpanFromContext
+  after: spanFromContextOnExit
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/hook"
+
+# File injection for go.opentelemetry.io/otel
+trace_init:
+  target: go.opentelemetry.io/otel
+  file: trace_init.go
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/provider/trace"
+
+# Function hook for go.opentelemetry.io/otel
+hook_set_tracer_provider:
+  target: go.opentelemetry.io/otel
+  func: SetTracerProvider
+  before: setTracerProviderOnEnter
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/hook"
+
+baggage_util:
+  target: go.opentelemetry.io/otel/baggage
+  file: otel_baggage_util.go
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/sdk/baggage"
