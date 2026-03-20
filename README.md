@@ -40,7 +40,7 @@ The `otelc` binary will be built in the root directory.
 Just prefix the original `go build` command with `otelc`.
 
 ```bash
-cd demo/basic
+cd demo/app/basic
 ../../otelc go build
 ./basic
 [... output ...]
@@ -80,3 +80,4 @@ make test
 We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [development docs](./docs/).
 
 This project follows the [OpenTelemetry Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md).
+Please also review our [AI usage policy](AI_POLICY.md) if you use AI tools in your workflow.

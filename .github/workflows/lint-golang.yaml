@@ -31,7 +31,7 @@ jobs:
           filters: |
             code:
               - '**/*.go'
-              - '.config/golangci.yml'
+              - '.tools/golangci.yml'
               - '.github/workflows/lint-golang.yaml'
 
   golangci-lint:
@@ -47,7 +47,7 @@ jobs:
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20  # v9.2.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-          args: --config .config/golangci.yml
+          args: --config .tools/golangci.yml
 
   done:
     name: Done (Check Go Code)

@@ -141,6 +141,12 @@ The following development tools are used and will be automatically installed on 
 - **[ratchet](https://github.com/sethvargo/ratchet)** - GitHub Actions security pinning
 - **[embedmd](https://github.com/campoy/embedmd)** - Embed code in markdown files
 
+## AI Usage
+
+This project welcomes the use of AI tools. Please read the [AI Usage Policy](AI_POLICY.md) before
+contributing. The critical rule is: **you must understand every line of code you submit.**
+Contributors using AI tools are held to the same quality standards as any other contribution.
+
 ## Pull Requests
 
 ### Conventional Commits
