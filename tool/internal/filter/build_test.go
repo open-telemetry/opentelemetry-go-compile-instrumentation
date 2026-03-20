@@ -119,6 +119,44 @@ func TestBuild_Error_MultipleActiveLeaves(t *testing.T) {
 	}
 }
 
+func TestBuild_ImportPath(t *testing.T) {
+	t.Run("exact path builds successfully", func(t *testing.T) {
+		def := &rule.FilterDef{ImportPath: "github.com/foo/bar"}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		if _, ok := f.(*filter.ImportPathFilter); !ok {
+			t.Errorf("Build(ImportPath) returned %T, want *filter.ImportPathFilter", f)
+		}
+	})
+	t.Run("glob pattern builds successfully", func(t *testing.T) {
+		def := &rule.FilterDef{ImportPath: "github.com/foo/**"}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		ipf, ok := f.(*filter.ImportPathFilter)
+		if !ok {
+			t.Fatalf("Build(ImportPath) returned %T, want *filter.ImportPathFilter", f)
+		}
+		if ipf.Pattern != "github.com/foo/**" {
+			t.Errorf("ImportPathFilter.Pattern = %q, want %q", ipf.Pattern, "github.com/foo/**")
+		}
+	})
+}
+
+func TestBuild_ImportPath_InvalidPattern(t *testing.T) {
+	// Build must reject malformed bracket expressions at construction time so
+	// that bad YAML rules fail fast rather than silently producing non-matches.
+	// path.Match returns ErrBadPattern for unclosed bracket expressions.
+	def := &rule.FilterDef{ImportPath: "github.com/foo/["}
+	_, err := filter.Build(def)
+	if err == nil {
+		t.Fatal("Build(ImportPath with unclosed bracket) error = nil, want error")
+	}
+}
+
 func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 	tests := []struct {
 		name string
@@ -139,10 +177,6 @@ func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 		{
 			name: "directive",
 			def:  &rule.FilterDef{Directive: "otelc:span"},
-		},
-		{
-			name: "import_path",
-			def:  &rule.FilterDef{ImportPath: "example.com/**"},
 		},
 		{
 			name: "package_name",

@@ -118,11 +118,15 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 }
 
 // runMatch performs precise matching of rules against the dependency's source code.
-// It parses source files and matches rules by examining AST nodes
+// It parses source files and matches rules by examining AST nodes.
+//
+// rules is a pre-merged slice containing exact-target rules for this dependency
+// and any glob rules (those carrying an ImportPath filter) that must be evaluated
+// against every dependency.
 func (sp *SetupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
-	rulesByTarget map[string][]rule.InstRule,
+	rules []rule.InstRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
@@ -131,15 +135,13 @@ func (sp *SetupPhase) runMatch(
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
 	}
 
-	// Filter rules by target
-	relevantRules := rulesByTarget[dep.ImportPath]
-	if len(relevantRules) == 0 {
+	if len(rules) == 0 {
 		return set, nil
 	}
 
 	// Filter rules by version
-	filteredRules := make([]rule.InstRule, 0, len(relevantRules))
-	for _, r := range relevantRules {
+	filteredRules := make([]rule.InstRule, 0, len(rules))
+	for _, r := range rules {
 		if !matchVersion(dep, r) {
 			continue
 		}
@@ -401,11 +403,17 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, nil
 	}
 
-	// Pre-index rules by target
-	rulesByTarget := make(map[string][]rule.InstRule)
+	// Split rules into exact-target rules (fast map lookup) and glob rules
+	// (evaluated against every dependency via their ImportPath filter).
+	exactRules := make(map[string][]rule.InstRule)
+	var globRules []rule.InstRule
 	for _, r := range allRules {
-		target := r.GetTarget()
-		rulesByTarget[target] = append(rulesByTarget[target], r)
+		if filter.ContainsImportPath(r.GetWhere()) {
+			globRules = append(globRules, r)
+		} else {
+			target := r.GetTarget()
+			exactRules[target] = append(exactRules[target], r)
+		}
 	}
 
 	// Match the default rules with the found dependencies
@@ -416,7 +424,12 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			m, err1 := sp.runMatch(gCtx, dep, rulesByTarget)
+			// Merge exact rules for this dep with glob rules that must be
+			// evaluated against every dependency.
+			rules := make([]rule.InstRule, 0, len(exactRules[dep.ImportPath])+len(globRules))
+			rules = append(rules, exactRules[dep.ImportPath]...)
+			rules = append(rules, globRules...)
+			m, err1 := sp.runMatch(gCtx, dep, rules)
 			if err1 != nil {
 				return err1
 			}
