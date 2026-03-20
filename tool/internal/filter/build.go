@@ -14,9 +14,8 @@ import (
 // applied and the rule matches all eligible source files.
 //
 // Returns an error when def contains an invalid or not-yet-implemented
-// configuration. Unsupported combinators (all-of, one-of, not) and
-// not-yet-implemented leaf types (directive, import_path, package_name,
-// test_main) return descriptive errors.
+// configuration. Not-yet-implemented leaf types (directive, import_path,
+// package_name, test_main) return descriptive errors.
 //
 //nolint:nilnil // nil Filter is a valid return: it means "no filtering required"
 func Build(def *rule.FilterDef) (Filter, error) {
@@ -51,8 +50,13 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 		}
 		return children, nil
 	}
+	// Not combinator: match when the inner filter does not match.
 	if def.Not != nil {
-		return nil, ex.Newf("not combinator is not yet supported")
+		inner, err := buildDef(def.Not)
+		if err != nil {
+			return nil, ex.Wrapf(err, "not")
+		}
+		return &Not{Inner: inner}, nil
 	}
 
 	return buildLeaf(def)
