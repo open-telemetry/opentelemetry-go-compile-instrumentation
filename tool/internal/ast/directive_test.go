@@ -67,7 +67,7 @@ func TestMatchDirective(t *testing.T) {
 		},
 		{
 			name:      "different directive",
-			dec:       "//otelc:span",
+			dec:       "//otelc:trace",
 			directive: "otelc:span",
 			expected:  false,
 		},
