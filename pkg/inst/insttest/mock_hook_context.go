@@ -59,6 +59,7 @@ func (m *MockHookContext) GetParam(idx int) interface{} {
 	}
 	return m.Params[idx]
 }
+
 func (m *MockHookContext) SetParam(idx int, val interface{}) {
 	for len(m.Params) <= idx {
 		m.Params = append(m.Params, nil)
@@ -73,6 +74,7 @@ func (m *MockHookContext) GetReturnVal(idx int) interface{} {
 	}
 	return m.ReturnVals[idx]
 }
+
 func (m *MockHookContext) SetReturnVal(idx int, val interface{}) {
 	for len(m.ReturnVals) <= idx {
 		m.ReturnVals = append(m.ReturnVals, nil)
