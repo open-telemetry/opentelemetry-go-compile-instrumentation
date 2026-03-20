@@ -3,6 +3,8 @@
 
 package main
 
+var GlobalVar = "original"
+
 type T struct{}
 
 func (t *T) Func1(p1 string, p2 int) (float32, error) {
