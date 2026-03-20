@@ -22,7 +22,7 @@ func parseValueExpr(exprSource string) (dst.Expr, error) {
 	snippet := "package main\nvar _ = " + exprSource
 	file, err := p.ParseSource(snippet)
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to parse assign_value expression: %s", exprSource)
+		return nil, err
 	}
 	genDecl := util.AssertType[*dst.GenDecl](file.Decls[0])
 	valueSpec := util.AssertType[*dst.ValueSpec](genDecl.Specs[0])
@@ -33,9 +33,13 @@ func parseValueExpr(exprSource string) (dst.Expr, error) {
 // applyDeclRule applies a declaration rule to the target file, modifying the
 // matched named declaration (e.g., assigning a new value to a var or const).
 func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRule, root *dst.File) error {
-	node := ast.FindNamedDecl(root, r.DeclarationOf, r.DeclKind)
+	if r.Value == "" {
+		return nil
+	}
+
+	node := ast.FindNamedDecl(root, r.Declaration, r.Kind)
 	if node == nil {
-		return ex.Newf("cannot find declaration %q (kind: %q)", r.DeclarationOf, r.DeclKind)
+		return ex.Newf("cannot find declaration %q (kind: %q)", r.Declaration, r.Kind)
 	}
 
 	// Handle imports if specified in the rule
@@ -43,25 +47,15 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 		return err
 	}
 
-	if r.AssignValue != "" {
-		spec, ok := node.(*dst.ValueSpec)
-		if !ok {
-			return ex.Newf(
-				"assign_value requires a var or const declaration, but %q matched a %T",
-				r.DeclarationOf,
-				node,
-			)
-		}
-		expr, err := parseValueExpr(r.AssignValue)
-		if err != nil {
-			return err
-		}
-		// Assign the expression to all names in the spec (following Orchestrion's
-		// assign-value pattern: clone the expression for each declared name).
-		spec.Values = make([]dst.Expr, len(spec.Names))
-		for i := range spec.Values {
-			spec.Values[i] = util.AssertType[dst.Expr](dst.Clone(expr))
-		}
+	spec := util.AssertType[*dst.ValueSpec](node)
+	expr, err := parseValueExpr(r.Value)
+	if err != nil {
+		return err
+	}
+	// Assign the expression to all names in the spec.
+	spec.Values = make([]dst.Expr, len(spec.Names))
+	for i := range spec.Values {
+		spec.Values[i] = util.AssertType[dst.Expr](dst.Clone(expr))
 	}
 
 	ip.Info("Apply decl rule", "rule", r)

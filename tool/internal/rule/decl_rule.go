@@ -24,16 +24,17 @@ import (
 type InstDeclRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	// DeclarationOf is the name of the top-level declaration to match.
-	DeclarationOf string `json:"declaration_of" yaml:"declaration_of"`
+	// Declaration is the name of the top-level declaration to match.
+	Declaration string `json:"declaration_of" yaml:"declaration_of"`
 
-	// DeclKind optionally constrains the kind of declaration to match.
+	// Kind optionally constrains the kind of declaration to match.
 	// Valid values: "func", "var", "const", "type", or "" (match any).
-	DeclKind string `json:"decl_kind" yaml:"decl_kind"`
+	// When assign_value is set, Kind must be "var" or "const".
+	Kind string `json:"decl_kind" yaml:"decl_kind"`
 
-	// AssignValue is a Go expression to assign as the value of the matched
+	// Value is a Go expression to assign as the value of the matched
 	// var or const declaration.
-	AssignValue string `json:"assign_value" yaml:"assign_value"`
+	Value string `json:"assign_value" yaml:"assign_value"`
 }
 
 // NewInstDeclRule loads and validates an InstDeclRule from YAML data.
@@ -51,8 +52,10 @@ func NewInstDeclRule(data []byte, name string) (*InstDeclRule, error) {
 	return &r, nil
 }
 
+// validDeclKinds lists accepted values for the decl_kind field.
+// An empty string ("") means match any kind.
 var validDeclKinds = map[string]bool{ //nolint:gochecknoglobals // private lookup table
-	"":      true,
+	"":      true, // match any
 	"func":  true,
 	"var":   true,
 	"const": true,
@@ -60,14 +63,14 @@ var validDeclKinds = map[string]bool{ //nolint:gochecknoglobals // private looku
 }
 
 func (r *InstDeclRule) validate() error {
-	if strings.TrimSpace(r.DeclarationOf) == "" {
+	if strings.TrimSpace(r.Declaration) == "" {
 		return ex.Newf("declaration_of cannot be empty")
 	}
-	if !validDeclKinds[r.DeclKind] {
-		return ex.Newf("decl_kind %q is invalid; must be one of: func, var, const, type, or empty", r.DeclKind)
+	if !validDeclKinds[r.Kind] {
+		return ex.Newf("decl_kind %q is invalid; must be one of: func, var, const, type, or empty", r.Kind)
 	}
-	if r.AssignValue != "" && (r.DeclKind == "func" || r.DeclKind == "type") {
-		return ex.Newf("assign_value is not valid when decl_kind is %q", r.DeclKind)
+	if r.Value != "" && r.Kind != "var" && r.Kind != "const" {
+		return ex.Newf("assign_value requires decl_kind %q or %q (got %q)", "var", "const", r.Kind)
 	}
 	return nil
 }

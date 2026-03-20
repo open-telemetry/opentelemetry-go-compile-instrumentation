@@ -80,8 +80,8 @@ decl_kind: type
 			require.NoError(t, err)
 			require.NotNil(t, r)
 			assert.Equal(t, "test-rule", r.GetName())
-			assert.Equal(t, tt.wantDecl, r.DeclarationOf)
-			assert.Equal(t, tt.wantKind, r.DeclKind)
+			assert.Equal(t, tt.wantDecl, r.Declaration)
+			assert.Equal(t, tt.wantKind, r.Kind)
 		})
 	}
 }
@@ -117,7 +117,7 @@ declaration_of: MyFunc
 decl_kind: func
 assign_value: "42"
 `,
-			wantErr: "assign_value is not valid when decl_kind",
+			wantErr: "assign_value requires decl_kind",
 		},
 		{
 			name: "assign_value with decl_kind type",
@@ -127,7 +127,16 @@ declaration_of: MyType
 decl_kind: type
 assign_value: "42"
 `,
-			wantErr: "assign_value is not valid when decl_kind",
+			wantErr: "assign_value requires decl_kind",
+		},
+		{
+			name: "assign_value with empty decl_kind",
+			yaml: `
+target: mypkg
+declaration_of: AnyDecl
+assign_value: "42"
+`,
+			wantErr: "assign_value requires decl_kind",
 		},
 	}
 

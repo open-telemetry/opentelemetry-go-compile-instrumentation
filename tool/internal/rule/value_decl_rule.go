@@ -72,6 +72,11 @@ func (r *InstValueDeclRule) parseAndValidate() error {
 	if strings.TrimSpace(r.AssignValue) == "" {
 		return ex.Newf("assign_value cannot be empty")
 	}
+	return r.parseTypeDeclaration()
+}
+
+// parseTypeDeclaration parses ValueDeclaration and populates the derived type fields.
+func (r *InstValueDeclRule) parseTypeDeclaration() error {
 	matches := valueDeclTypePattern.FindStringSubmatch(r.ValueDeclaration)
 	if matches == nil {
 		return ex.Newf("invalid value_declaration format: %q", r.ValueDeclaration)
@@ -93,13 +98,7 @@ func (r *InstValueDeclRule) UnmarshalJSON(data []byte) error {
 	}
 	// Repopulate derived fields if they were not persisted.
 	if r.TypeIdent == "" && r.ValueDeclaration != "" {
-		matches := valueDeclTypePattern.FindStringSubmatch(r.ValueDeclaration)
-		if matches == nil {
-			return ex.Newf("invalid value_declaration format: %q", r.ValueDeclaration)
-		}
-		r.TypePointer = matches[1] == "*"
-		r.TypeImportPath = matches[2]
-		r.TypeIdent = matches[3]
+		return r.parseTypeDeclaration()
 	}
 	return nil
 }

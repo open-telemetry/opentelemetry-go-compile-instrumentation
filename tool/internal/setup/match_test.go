@@ -233,6 +233,7 @@ version: v1.0.0,v2.0.0
 			name: "decl rule creation",
 			yamlContent: `
 declaration_of: GlobalVar
+decl_kind: var
 target: github.com/example/lib
 assign_value: "replaced"
 `,

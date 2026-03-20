@@ -38,7 +38,6 @@ func TestParseValueExpr_StringLiteral(t *testing.T) {
 func TestParseValueExpr_InvalidSyntax(t *testing.T) {
 	_, err := parseValueExpr("func(")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse assign_value expression")
 }
 
 // varFile returns a minimal *dst.File containing a single var declaration.
@@ -61,10 +60,10 @@ func TestApplyDeclRule_VarAssignValue(t *testing.T) {
 	spec := file.Decls[0].(*dst.GenDecl).Specs[0].(*dst.ValueSpec)
 
 	r := &rule.InstDeclRule{
-		InstBaseRule:  rule.InstBaseRule{Name: "test"},
-		DeclarationOf: "GlobalVar",
-		DeclKind:      "var",
-		AssignValue:   `"replaced"`,
+		InstBaseRule: rule.InstBaseRule{Name: "test"},
+		Declaration:  "GlobalVar",
+		Kind:         "var",
+		Value:        `"replaced"`,
 	}
 	require.NoError(t, newTestPhase().applyDeclRule(context.Background(), r, file))
 
@@ -87,10 +86,10 @@ func TestApplyDeclRule_MultiNameVarAssignsAll(t *testing.T) {
 	}
 
 	r := &rule.InstDeclRule{
-		InstBaseRule:  rule.InstBaseRule{Name: "test"},
-		DeclarationOf: "a",
-		DeclKind:      "var",
-		AssignValue:   `"x"`,
+		InstBaseRule: rule.InstBaseRule{Name: "test"},
+		Declaration:  "a",
+		Kind:         "var",
+		Value:        `"x"`,
 	}
 	require.NoError(t, newTestPhase().applyDeclRule(context.Background(), r, file))
 
@@ -103,14 +102,14 @@ func TestApplyDeclRule_MultiNameVarAssignsAll(t *testing.T) {
 }
 
 func TestApplyDeclRule_NoAssignValue_NoOp(t *testing.T) {
-	// When AssignValue is empty, the rule is a no-op on the value.
+	// When Value is empty, the rule is a no-op on the value.
 	file := varFile("GlobalVar", &dst.BasicLit{Kind: token.STRING, Value: `"original"`})
 	spec := file.Decls[0].(*dst.GenDecl).Specs[0].(*dst.ValueSpec)
 
 	r := &rule.InstDeclRule{
-		InstBaseRule:  rule.InstBaseRule{Name: "test"},
-		DeclarationOf: "GlobalVar",
-		DeclKind:      "var",
+		InstBaseRule: rule.InstBaseRule{Name: "test"},
+		Declaration:  "GlobalVar",
+		Kind:         "var",
 	}
 	require.NoError(t, newTestPhase().applyDeclRule(context.Background(), r, file))
 
@@ -125,33 +124,12 @@ func TestApplyDeclRule_NotFound(t *testing.T) {
 	file := varFile("OtherVar", nil)
 
 	r := &rule.InstDeclRule{
-		InstBaseRule:  rule.InstBaseRule{Name: "test"},
-		DeclarationOf: "MissingVar",
-		DeclKind:      "var",
+		InstBaseRule: rule.InstBaseRule{Name: "test"},
+		Declaration:  "MissingVar",
+		Kind:         "var",
+		Value:        `"x"`,
 	}
 	err := newTestPhase().applyDeclRule(context.Background(), r, file)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot find declaration")
-}
-
-func TestApplyDeclRule_AssignValueOnFuncErrors(t *testing.T) {
-	// assign_value is not valid for func declarations; the apply layer rejects it.
-	file := &dst.File{
-		Decls: []dst.Decl{
-			&dst.FuncDecl{
-				Name: &dst.Ident{Name: "MyFunc"},
-				Type: &dst.FuncType{},
-				Body: &dst.BlockStmt{},
-			},
-		},
-	}
-	r := &rule.InstDeclRule{
-		InstBaseRule:  rule.InstBaseRule{Name: "test"},
-		DeclarationOf: "MyFunc",
-		DeclKind:      "func",
-		AssignValue:   "42",
-	}
-	err := newTestPhase().applyDeclRule(context.Background(), r, file)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "assign_value requires a var or const declaration")
 }

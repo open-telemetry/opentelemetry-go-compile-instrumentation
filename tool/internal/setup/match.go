@@ -230,7 +230,7 @@ func (sp *SetupPhase) preciseMatching(
 				set.AddCallRule(source, rt)
 				sp.Info("Match call rule", "rule", rt, "dep", dep)
 			case *rule.InstDeclRule:
-				node := ast.FindNamedDecl(tree, rt.DeclarationOf, rt.DeclKind)
+				node := ast.FindNamedDecl(tree, rt.Declaration, rt.Kind)
 				if node != nil {
 					set.AddDeclRule(source, rt)
 					sp.Info("Match decl rule", "rule", rt, "dep", dep)
