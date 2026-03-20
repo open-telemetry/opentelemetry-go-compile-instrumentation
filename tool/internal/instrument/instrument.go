@@ -18,6 +18,9 @@ func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRu
 	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.RawRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.CallRules, file2rules, rset.CgoFileMap, workDir)
+	// DirectiveRules are intentionally excluded: they are a pure filter with
+	// no advice, so there is no AST transformation to apply. Including them
+	// would cause a wasted parse+write cycle for directive-only files.
 	return file2rules
 }
 

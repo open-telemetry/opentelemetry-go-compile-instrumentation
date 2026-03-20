@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"io/fs"
 	"maps"
@@ -46,6 +47,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstFuncRule(raw, name)
 	case fields["function_call"] != nil:
 		return rule.NewInstCallRule(raw, name)
+	case fields["directive"] != nil:
+		return rule.NewInstDirectiveRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
@@ -175,6 +178,8 @@ func (sp *SetupPhase) runMatch(
 
 // preciseMatching performs AST-based matching of instrumentation rules against
 // the dependency's source files. It returns the rule set with the matched rules.
+//
+//nolint:gocognit // type switch over rule types is inherently branchy
 func (sp *SetupPhase) preciseMatching(
 	ctx context.Context,
 	dep *Dependency,
@@ -195,6 +200,8 @@ func (sp *SetupPhase) preciseMatching(
 			return nil, ex.Newf("failed to parse file %s", source)
 		}
 		set.SetPackageName(tree.Name.Name)
+
+		var rawBytes []byte // lazy-loaded for directive pre-filtering
 
 		for _, r := range rules {
 			// Let's match with the rule precisely
@@ -225,6 +232,20 @@ func (sp *SetupPhase) preciseMatching(
 				// Files without matching calls are a no-op in applyCallRule.
 				set.AddCallRule(source, rt)
 				sp.Info("Match call rule", "rule", rt, "dep", dep)
+			case *rule.InstDirectiveRule:
+				// Lazy-read raw bytes on first directive rule (read once per source file).
+				// ParseFileFast skips comments, so we need the raw bytes to check
+				// for directives.
+				if rawBytes == nil {
+					rawBytes, err = os.ReadFile(source)
+					if err != nil {
+						return nil, ex.Wrapf(err, "reading file %s for directive check", source)
+					}
+				}
+				if bytes.Contains(rawBytes, []byte("//"+rt.Directive)) {
+					set.AddDirectiveRule(source, rt)
+					sp.Info("Match directive rule", "rule", rt, "dep", dep)
+				}
 			case *rule.InstFileRule:
 				// Skip as it's already processed
 				continue
