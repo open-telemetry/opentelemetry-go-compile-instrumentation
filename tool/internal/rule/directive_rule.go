@@ -11,7 +11,7 @@ import (
 )
 
 // InstDirectiveRule represents a rule that matches AST nodes annotated with
-// magic comments (e.g., //dd:span). This is a pure filter with no advice —
+// magic comments (e.g., //otelc:span). This is a pure filter with no advice —
 // it becomes useful when combinators like all-of land.
 type InstDirectiveRule struct {
 	InstBaseRule `yaml:",inline"`

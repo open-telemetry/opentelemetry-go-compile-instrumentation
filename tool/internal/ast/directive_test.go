@@ -19,62 +19,62 @@ func TestMatchDirective(t *testing.T) {
 	}{
 		{
 			name:      "exact match",
-			dec:       "//dd:span",
-			directive: "dd:span",
+			dec:       "//otelc:span",
+			directive: "otelc:span",
 			expected:  true,
 		},
 		{
 			name:      "leading whitespace",
-			dec:       "\t//dd:span",
-			directive: "dd:span",
+			dec:       "\t//otelc:span",
+			directive: "otelc:span",
 			expected:  true,
 		},
 		{
 			name:      "with args",
-			dec:       "//dd:span key:val",
-			directive: "dd:span",
+			dec:       "//otelc:span key:val",
+			directive: "otelc:span",
 			expected:  true,
 		},
 		{
 			name:      "space after slashes",
-			dec:       "// dd:span",
-			directive: "dd:span",
+			dec:       "// otelc:span",
+			directive: "otelc:span",
 			expected:  false,
 		},
 		{
 			name:      "prefix match rejected",
-			dec:       "//dd:span2",
-			directive: "dd:span",
+			dec:       "//otelc:span2",
+			directive: "otelc:span",
 			expected:  false,
 		},
 		{
 			name:      "block comment",
-			dec:       "/*dd:span*/",
-			directive: "dd:span",
+			dec:       "/*otelc:span*/",
+			directive: "otelc:span",
 			expected:  false,
 		},
 		{
 			name:      "empty decoration",
 			dec:       "",
-			directive: "dd:span",
+			directive: "otelc:span",
 			expected:  false,
 		},
 		{
 			name:      "just slashes",
 			dec:       "//",
-			directive: "dd:span",
+			directive: "otelc:span",
 			expected:  false,
 		},
 		{
 			name:      "different directive",
 			dec:       "//otelc:span",
-			directive: "dd:span",
+			directive: "otelc:span",
 			expected:  false,
 		},
 		{
 			name:      "tab after directive",
-			dec:       "//dd:span\tkey:val",
-			directive: "dd:span",
+			dec:       "//otelc:span\tkey:val",
+			directive: "otelc:span",
 			expected:  true,
 		},
 	}
@@ -174,8 +174,8 @@ func TestParseDirectiveArgs(t *testing.T) {
 	}{
 		{
 			name:      "directive with args",
-			dec:       `//dd:span span.name:"my op" tag:foo`,
-			directive: "dd:span",
+			dec:       `//otelc:span span.name:"my op" tag:foo`,
+			directive: "otelc:span",
 			expected: []DirectiveArg{
 				{Key: "span.name", Value: "my op"},
 				{Key: "tag", Value: "foo"},
@@ -183,14 +183,14 @@ func TestParseDirectiveArgs(t *testing.T) {
 		},
 		{
 			name:      "directive without args",
-			dec:       "//dd:span",
-			directive: "dd:span",
+			dec:       "//otelc:span",
+			directive: "otelc:span",
 			expected:  nil,
 		},
 		{
 			name:      "non-matching decoration",
 			dec:       "// regular comment",
-			directive: "dd:span",
+			directive: "otelc:span",
 			hasError:  true,
 		},
 	}

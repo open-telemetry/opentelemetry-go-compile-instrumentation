@@ -30,7 +30,7 @@ target: main
 		{
 			name: "with version",
 			yamlContent: `
-directive: "dd:span"
+directive: "otelc:span"
 target: github.com/example/lib
 version: "v1.0.0,v2.0.0"
 `,
@@ -58,7 +58,7 @@ target: main
 		{
 			name: "slash prefix in directive",
 			yamlContent: `
-directive: "//dd:span"
+directive: "//otelc:span"
 target: main
 `,
 			ruleName:    "prefix-directive",
