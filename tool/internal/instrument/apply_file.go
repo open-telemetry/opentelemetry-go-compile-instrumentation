@@ -32,11 +32,12 @@ func listRuleFiles(path string) ([]string, error) {
 
 // read the file and strip out all comment "//go:build ignore"
 func stripComments(file string) error {
-	data, _ := os.ReadFile(file)
-	content := string(data)
-	content = strings.ReplaceAll(content, "//go:build ignore", "")
-	err := util.WriteFile(file, content)
-	return err
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	content := strings.ReplaceAll(string(data), "//go:build ignore", "")
+	return util.WriteFile(file, content)
 }
 
 // applyFileRule introduces the new file to the target package at compile time.

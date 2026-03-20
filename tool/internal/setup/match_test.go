@@ -516,6 +516,36 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	assert.True(t, set.IsEmpty())
 }
 
+func TestRunMatch_FileRuleInvalidSource(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "bad.go")
+	err := os.WriteFile(srcFile, []byte("not valid go source {{{"), 0o644)
+	require.NoError(t, err)
+
+	const importPath = "example.com/mypkg"
+
+	yamlContent := []byte(`
+file: hook.go
+target: example.com/mypkg
+`)
+	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
+	require.NoError(t, err)
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
+
+	sp := newTestSetupPhase()
+	_, err = sp.runMatch(context.Background(), dep, rulesByTarget)
+	assert.Error(t, err, "should fail when source file cannot be parsed")
+}
+
 func TestRunMatch_FileRuleNoSources(t *testing.T) {
 	const importPath = "example.com/mypkg"
 
