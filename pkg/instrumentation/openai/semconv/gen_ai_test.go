@@ -79,5 +79,3 @@ func TestChatCompletionResponseTraceAttrs_NoFinishReasons(t *testing.T) {
 	assert.False(t, hasFinishReasons, "should not include finish_reasons when empty")
 	assert.Len(t, m, 4) // id, model, input_tokens, output_tokens
 }
-
-

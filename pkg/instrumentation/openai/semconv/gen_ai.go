@@ -38,7 +38,11 @@ func RequestTraceAttrs(operation, model string) []attribute.KeyValue {
 }
 
 // ChatCompletionResponseTraceAttrs returns response attributes for chat completions.
-func ChatCompletionResponseTraceAttrs(id, model string, finishReasons []string, inputTokens, outputTokens int64) []attribute.KeyValue {
+func ChatCompletionResponseTraceAttrs(
+	id, model string,
+	finishReasons []string,
+	inputTokens, outputTokens int64,
+) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		GenAIResponseIDKey.String(id),
 		GenAIResponseModelKey.String(model),
