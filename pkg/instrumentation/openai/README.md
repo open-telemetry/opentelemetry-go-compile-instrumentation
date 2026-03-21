@@ -4,12 +4,12 @@ This package provides automatic OpenTelemetry instrumentation for `github.com/op
 
 ## Overview
 
-Unlike traditional OpenAI instrumentation that requires manually wrapping API calls, this package automatically instruments **all** OpenAI API interactions in your application at compile-time. Zero code changes required!
+Unlike traditional OpenAI instrumentation that requires manually wrapping API calls, this package automatically instruments OpenAI **chat completion** interactions (via the official Go SDK) in your application at compile-time. Zero code changes required! Support for additional OpenAI API endpoints may be added in future versions.
 
 ### Key Features
 
 - ✅ **Zero Code Changes**: Automatic instrumentation without modifying application code
-- ✅ **Universal Coverage**: Instruments ALL OpenAI chat completion API calls
+- ✅ **Chat Coverage**: Instruments OpenAI chat completion API calls made via `client.Chat.Completions.New`
 - ✅ **Semantic Conventions**: Follows OpenTelemetry GenAI semantic conventions v1.37.0
 - ✅ **Full Trace Context**: Automatic context propagation through GenAI operations
 - ✅ **Token Usage Tracking**: Automatic recording of input/output token counts
@@ -351,10 +351,10 @@ go test -v ./...
 ### Integration Tests
 
 ```bash
-# Run integration tests (requires OpenAI API key)
+# Run integration tests (default: uses local base URL and expects connection failure; no OpenAI API key required)
 go test -v -tags=integration ./test/integration/openai_*
 
-# Run with specific API key
+# If you configure the integration tests to call the real OpenAI API, you'll need to provide an API key
 OPENAI_API_KEY=sk-... go test -v -tags=integration ./test/integration/openai_*
 ```
 
