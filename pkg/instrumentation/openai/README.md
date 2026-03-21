@@ -10,7 +10,7 @@ Unlike traditional OpenAI instrumentation that requires manually wrapping API ca
 
 - ✅ **Zero Code Changes**: Automatic instrumentation without modifying application code
 - ✅ **Universal Coverage**: Instruments ALL OpenAI chat completion API calls
-- ✅ **Semantic Conventions**: Follows OpenTelemetry GenAI semantic conventions v1.39.0
+- ✅ **Semantic Conventions**: Follows OpenTelemetry GenAI semantic conventions v1.37.0
 - ✅ **Full Trace Context**: Automatic context propagation through GenAI operations
 - ✅ **Token Usage Tracking**: Automatic recording of input/output token counts
 - ✅ **Duration Metrics**: Operation duration measurement for performance monitoring
@@ -110,7 +110,7 @@ pkg/instrumentation/openai/
 
 ## Semantic Conventions
 
-The instrumentation follows [OpenTelemetry GenAI Semantic Conventions v1.39.0](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/).
+The instrumentation follows [OpenTelemetry GenAI Semantic Conventions v1.37.0](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/).
 
 ### Common Request Attributes
 
@@ -139,7 +139,7 @@ Examples:
 
 ### Span Status
 
-- **OK**: Successful API response
+- **UNSET**: Successful API response
 - **ERROR**: API errors, network failures, timeouts
 
 ### Metrics
@@ -434,7 +434,7 @@ curl http://localhost:4318/v1/traces
 
 ### No Metrics Being Recorded
 
-Metrics use the `genaiconv` package from OTel semconv v1.39.0. Ensure your metrics pipeline is configured:
+Metrics use the `genaiconv` package from OTel semconv v1.37.0. Ensure your metrics pipeline is configured:
 
 ```bash
 export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://localhost:4317
