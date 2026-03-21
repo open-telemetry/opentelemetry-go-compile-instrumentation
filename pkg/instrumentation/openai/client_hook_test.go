@@ -37,9 +37,9 @@ func newMockHookContext() *mockHookContext {
 	}
 }
 
-func (m *mockHookContext) SetSkipCall(bool)    {}
-func (m *mockHookContext) IsSkipCall() bool     { return false }
-func (m *mockHookContext) GetFuncName() string  { return "test" }
+func (m *mockHookContext) SetSkipCall(bool)       {}
+func (m *mockHookContext) IsSkipCall() bool       { return false }
+func (m *mockHookContext) GetFuncName() string    { return "test" }
 func (m *mockHookContext) GetPackageName() string { return "test" }
 func (m *mockHookContext) SetData(d interface{}) {
 	m.data = d
@@ -49,16 +49,16 @@ func (m *mockHookContext) SetData(d interface{}) {
 		}
 	}
 }
-func (m *mockHookContext) GetData() interface{}                  { return m.data }
-func (m *mockHookContext) GetKeyData(key string) interface{}     { return m.keyData[key] }
+func (m *mockHookContext) GetData() interface{}                   { return m.data }
+func (m *mockHookContext) GetKeyData(key string) interface{}      { return m.keyData[key] }
 func (m *mockHookContext) SetKeyData(key string, val interface{}) { m.keyData[key] = val }
-func (m *mockHookContext) HasKeyData(key string) bool            { _, ok := m.keyData[key]; return ok }
-func (m *mockHookContext) GetParamCount() int                    { return len(m.params) }
-func (m *mockHookContext) GetParam(idx int) interface{}          { return m.params[idx] }
-func (m *mockHookContext) SetParam(idx int, val interface{})     { m.params[idx] = val }
-func (m *mockHookContext) GetReturnValCount() int                { return len(m.returns) }
-func (m *mockHookContext) GetReturnVal(idx int) interface{}      { return m.returns[idx] }
-func (m *mockHookContext) SetReturnVal(idx int, val interface{}) { m.returns[idx] = val }
+func (m *mockHookContext) HasKeyData(key string) bool             { _, ok := m.keyData[key]; return ok }
+func (m *mockHookContext) GetParamCount() int                     { return len(m.params) }
+func (m *mockHookContext) GetParam(idx int) interface{}           { return m.params[idx] }
+func (m *mockHookContext) SetParam(idx int, val interface{})      { m.params[idx] = val }
+func (m *mockHookContext) GetReturnValCount() int                 { return len(m.returns) }
+func (m *mockHookContext) GetReturnVal(idx int) interface{}       { return m.returns[idx] }
+func (m *mockHookContext) SetReturnVal(idx int, val interface{})  { m.returns[idx] = val }
 
 func setupTestTracer() (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
 	sr := tracetest.NewSpanRecorder()
@@ -171,6 +171,3 @@ func TestChatCompletionNew_Disabled(t *testing.T) {
 
 	assert.Len(t, sr.Ended(), 0, "no spans when disabled")
 }
-
-
-
