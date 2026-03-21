@@ -1,0 +1,7 @@
+openai_chat_completion_new:
+  target: github.com/openai/openai-go
+  func: New
+  recv: "*ChatCompletionService"
+  before: beforeChatCompletionNew
+  after: afterChatCompletionNew
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai"
