@@ -258,7 +258,7 @@ services:
   openai-client:
     build:
       context: ../../..
-      dockerfile: demo/openai/client/Dockerfile
+      dockerfile: demo/app/openai/client/Dockerfile
     container_name: openai-client
     command: ["-count", "10000"]
     environment:

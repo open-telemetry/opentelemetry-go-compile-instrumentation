@@ -26,7 +26,7 @@ RUN apk add --no-cache git
 COPY --from=otel-builder /otelc /usr/local/bin/otelc
 
 # Copy OpenAI client source
-COPY demo/openai/client /app
+COPY demo/app/openai/client /app
 
 # Download dependencies
 RUN go mod download
