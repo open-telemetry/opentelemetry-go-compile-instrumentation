@@ -9,7 +9,7 @@ import (
 
 // GenAI semantic convention attribute keys.
 // See: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
-var (
+const (
 	GenAISystemKey                = attribute.Key("gen_ai.system")
 	GenAIOperationNameKey         = attribute.Key("gen_ai.operation.name")
 	GenAIRequestModelKey          = attribute.Key("gen_ai.request.model")
