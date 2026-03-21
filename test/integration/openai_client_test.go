@@ -27,7 +27,7 @@ func TestOpenAIClient(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 
 			// The OpenAI client will fail to connect (no mock server),
-			// but the instrumentation should still create a span with an error status.
+			// but the instrumentation should still create a span with the expected attributes.
 			_ = f.BuildAndRun("openaiclient")
 
 			spans := testutil.AllSpans(f.Traces())

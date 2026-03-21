@@ -17,48 +17,18 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
 )
 
-// mockHookContext implements inst.HookContext for testing.
-type mockHookContext struct {
-	data    interface{}
-	keyData map[string]interface{}
-	params  map[int]interface{}
-	returns map[int]interface{}
-}
+// mockHookContext is a type alias for the shared MockHookContext from insttest package.
+type mockHookContext = insttest.MockHookContext
 
 var _ inst.HookContext = (*mockHookContext)(nil)
 
+// newMockHookContext creates a new MockHookContext using the shared implementation.
 func newMockHookContext() *mockHookContext {
-	return &mockHookContext{
-		keyData: make(map[string]interface{}),
-		params:  make(map[int]interface{}),
-		returns: make(map[int]interface{}),
-	}
+	return insttest.NewMockHookContext()
 }
-
-func (m *mockHookContext) SetSkipCall(bool)       {}
-func (m *mockHookContext) IsSkipCall() bool       { return false }
-func (m *mockHookContext) GetFuncName() string    { return "test" }
-func (m *mockHookContext) GetPackageName() string { return "test" }
-func (m *mockHookContext) SetData(d interface{}) {
-	m.data = d
-	if dm, ok := d.(map[string]interface{}); ok {
-		for k, v := range dm {
-			m.keyData[k] = v
-		}
-	}
-}
-func (m *mockHookContext) GetData() interface{}                   { return m.data }
-func (m *mockHookContext) GetKeyData(key string) interface{}      { return m.keyData[key] }
-func (m *mockHookContext) SetKeyData(key string, val interface{}) { m.keyData[key] = val }
-func (m *mockHookContext) HasKeyData(key string) bool             { _, ok := m.keyData[key]; return ok }
-func (m *mockHookContext) GetParamCount() int                     { return len(m.params) }
-func (m *mockHookContext) GetParam(idx int) interface{}           { return m.params[idx] }
-func (m *mockHookContext) SetParam(idx int, val interface{})      { m.params[idx] = val }
-func (m *mockHookContext) GetReturnValCount() int                 { return len(m.returns) }
-func (m *mockHookContext) GetReturnVal(idx int) interface{}       { return m.returns[idx] }
-func (m *mockHookContext) SetReturnVal(idx int, val interface{})  { m.returns[idx] = val }
 
 func setupTestTracer() (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
 	sr := tracetest.NewSpanRecorder()
@@ -91,7 +61,7 @@ func TestBeforeAfterChatCompletionNew(t *testing.T) {
 	beforeChatCompletionNew(ictx, &openaisdk.ChatCompletionService{}, ctx, params)
 
 	// Verify context was updated
-	newCtx, ok := ictx.params[ctxParamIndex].(context.Context)
+	newCtx, ok := ictx.GetParam(ctxParamIndex).(context.Context)
 	require.True(t, ok, "context should be set via SetParam")
 	require.NotEqual(t, ctx, newCtx, "context should be different (has span)")
 
