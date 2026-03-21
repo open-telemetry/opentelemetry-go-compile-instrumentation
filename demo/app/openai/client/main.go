@@ -60,31 +60,6 @@ func runChatCompletion(ctx context.Context, client *openai.Client, iteration int
 	return nil
 }
 
-func runEmbedding(ctx context.Context, client *openai.Client, iteration int) error {
-	input := fmt.Sprintf("OpenTelemetry compile-time instrumentation demo #%d", iteration)
-
-	logger.Info("sending embedding request", "iteration", iteration)
-
-	resp, err := client.Embeddings.New(ctx, openai.EmbeddingNewParams{
-		Model: "text-embedding-3-small",
-		Input: openai.EmbeddingNewParamsInputUnion{
-			OfString: openai.String(input),
-		},
-	})
-	if err != nil {
-		logger.Error("embedding failed", "error", err)
-		return err
-	}
-
-	logger.Info("embedding response",
-		"model", resp.Model,
-		"dimensions", len(resp.Data[0].Embedding),
-		"input_tokens", resp.Usage.PromptTokens,
-	)
-
-	return nil
-}
-
 func main() {
 	defer func() {
 		// Wait for OpenTelemetry SDK to flush spans before exit
@@ -149,12 +124,6 @@ func main() {
 
 		// Run chat completion
 		if err := runChatCompletion(ctx, &client, i); err != nil {
-			failureCount++
-			continue
-		}
-
-		// Run embedding
-		if err := runEmbedding(ctx, &client, i); err != nil {
 			failureCount++
 			continue
 		}

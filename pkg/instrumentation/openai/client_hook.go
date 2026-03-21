@@ -176,12 +176,12 @@ func beforeChatCompletionNew(
 	_ *openaisdk.ChatCompletionService,
 	ctx context.Context,
 	body openaisdk.ChatCompletionNewParams,
-	opts ...option.RequestOption,
+	_ ...option.RequestOption,
 ) {
 	if !clientEnabler.Enable() {
 		return
 	}
-	startSpan(ictx, ctx, semconv.OperationChat, string(body.Model))
+	startSpan(ictx, ctx, semconv.OperationChat, body.Model)
 }
 
 func afterChatCompletionNew(ictx inst.HookContext, res *openaisdk.ChatCompletion, err error) {
@@ -203,7 +203,7 @@ func afterChatCompletionNew(ictx inst.HookContext, res *openaisdk.ChatCompletion
 	if res != nil {
 		finishReasons := make([]string, 0, len(res.Choices))
 		for _, choice := range res.Choices {
-			finishReasons = append(finishReasons, string(choice.FinishReason))
+			finishReasons = append(finishReasons, choice.FinishReason)
 		}
 		attrs := semconv.ChatCompletionResponseTraceAttrs(
 			res.ID,

@@ -362,7 +362,7 @@ OPENAI_API_KEY=sk-... go test -v -tags=integration ./test/integration/openai_*
 
 ```bash
 # Build and run the demo
-cd demo/openai/client
+cd demo/app/openai/client
 OPENAI_API_KEY=sk-... /path/to/otelc go run main.go
 
 # Run with multiple iterations
