@@ -177,8 +177,6 @@ func (sp *SetupPhase) runMatch(
 
 // preciseMatching performs AST-based matching of instrumentation rules against
 // the dependency's source files. It returns the rule set with the matched rules.
-//
-//nolint:gocognit // type switch over rule types is inherently branchy
 func (sp *SetupPhase) preciseMatching(
 	ctx context.Context,
 	dep *Dependency,
