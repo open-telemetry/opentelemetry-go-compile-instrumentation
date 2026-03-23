@@ -11,7 +11,8 @@ SHELL := /bin/bash
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
-        registry-diff registry-check registry-resolve weaver-install tidy/test-apps
+        registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
+        adr-tools adr-new adr-list
 
 # Constant variables
 BINARY_NAME := otelc
@@ -261,6 +262,53 @@ tmp/make-help.txt: ## Generate make help output for embedding in documentation
 tmp/make-help.txt: $(MAKEFILE_LIST)
 	@mkdir -p tmp
 	@$(MAKE) --no-print-directory help > tmp/make-help.txt
+
+##@ Architecture Decision Records
+
+adr-tools: ## Install adr-tools if not present
+	@if command -v adr >/dev/null 2>&1; then \
+		echo "adr-tools is already installed at $$(command -v adr)"; \
+	else \
+		echo "Installing adr-tools..."; \
+		if [ "$$(uname -s)" = "Darwin" ]; then \
+			if command -v brew >/dev/null 2>&1; then \
+				brew install adr-tools; \
+			else \
+				echo "Error: Homebrew not found. Install Homebrew from https://brew.sh/ and try again."; \
+				exit 1; \
+			fi; \
+		elif [ "$$(uname -s)" = "Linux" ]; then \
+			TMPDIR=$$(mktemp -d); \
+			git clone --depth 1 https://github.com/npryce/adr-tools.git "$$TMPDIR/adr-tools"; \
+			mkdir -p "$$(go env GOPATH)/bin"; \
+			cp "$$TMPDIR/adr-tools/src/"adr-* "$$(go env GOPATH)/bin/"; \
+			chmod +x "$$(go env GOPATH)/bin/adr-"*; \
+			rm -rf "$$TMPDIR"; \
+			echo "Installed adr-tools to $$(go env GOPATH)/bin/"; \
+		else \
+			echo "Error: Unsupported platform $$(uname -s)"; \
+			echo "Please install adr-tools manually from https://github.com/npryce/adr-tools"; \
+			exit 1; \
+		fi; \
+	fi
+
+adr-new: ## Create a new ADR: make adr-new TITLE="Short decision title"
+	@if ! command -v adr >/dev/null 2>&1; then \
+		echo "adr-tools not found. Run 'make adr-tools' to install."; \
+		exit 1; \
+	fi
+	@if [ -z "$(TITLE)" ]; then \
+		echo "Usage: make adr-new TITLE=\"Short decision title\""; \
+		exit 1; \
+	fi
+	adr new -c docs/adr "$(TITLE)"
+
+adr-list: ## List all ADRs
+	@if ! command -v adr >/dev/null 2>&1; then \
+		echo "adr-tools not found. Run 'make adr-tools' to install."; \
+		exit 1; \
+	fi
+	adr list -c docs/adr
 
 ##@ Validation
 
