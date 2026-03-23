@@ -1,0 +1,8 @@
+hook_import_path:
+  target: main
+  func: Func1
+  before: H1Before
+  after: H1After
+  path: testdata
+  where:
+    import_path: "github.com/example/**"
