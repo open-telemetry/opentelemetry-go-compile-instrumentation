@@ -72,7 +72,7 @@ func (r *InstDirectiveRule) Render(data DirectiveTemplateData) (string, error) {
 		return "", ex.Wrap(err)
 	}
 	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err = tmpl.Execute(&buf, data); err != nil {
 		return "", ex.Wrap(err)
 	}
 	return buf.String(), nil
