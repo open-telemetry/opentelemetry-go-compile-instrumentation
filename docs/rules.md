@@ -63,7 +63,7 @@ The tool automatically reads the hook source file and ensures all of its imports
 By default the rule matches any function with the given name (and optional receiver). Five optional sub-filters can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
 
 | Field | Type | Semantics |
-|---|---|---|
+| --- | --- | --- |
 | `signature` | object | Exact match — the parameter list and result list must match the given type sequences in order |
 | `signature_contains` | object | Partial match — at least one of the listed arg types appears anywhere in the parameter list **or** at least one of the listed return types appears anywhere in the result list |
 | `result_implements` | string | Any return type matches the named type |
