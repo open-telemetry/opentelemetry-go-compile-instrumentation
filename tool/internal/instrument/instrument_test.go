@@ -380,7 +380,11 @@ func TestGroupRules(t *testing.T) {
 				CallRules:   make(map[string][]*rule.InstCallRule),
 				DirectiveRules: map[string][]*rule.InstDirectiveRule{
 					"file1.go": {
-						{InstBaseRule: rule.InstBaseRule{Name: "directive1"}, Directive: "otelc:span", Template: "_ = 0"},
+						{
+							InstBaseRule: rule.InstBaseRule{Name: "directive1"},
+							Directive:    "otelc:span",
+							Template:     "_ = 0",
+						},
 					},
 				},
 			},
