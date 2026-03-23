@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/dave/dst"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
@@ -102,6 +103,36 @@ func scanArgs(input string) ([]DirectiveArg, error) {
 		args = append(args, DirectiveArg{Key: key, Value: value})
 	}
 	return args, nil
+}
+
+// FileHasDirective reports whether any node decoration in the file matches the
+// given directive. The file must have been parsed with ParseFileFast
+// or ParseFile so that comment decorations are available.
+func FileHasDirective(file *dst.File, directive string) bool {
+	found := false
+	dst.Inspect(file, func(n dst.Node) bool {
+		if found || n == nil {
+			return false
+		}
+		decs := n.Decorations()
+		if decs == nil {
+			return true
+		}
+		for _, dec := range decs.Start {
+			if MatchDirective(dec, directive) {
+				found = true
+				return false
+			}
+		}
+		for _, dec := range decs.End {
+			if MatchDirective(dec, directive) {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // tokenize splits input on whitespace, respecting double-quoted strings.

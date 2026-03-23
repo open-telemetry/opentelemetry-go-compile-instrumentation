@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"bytes"
 	"context"
 	"io/fs"
 	"maps"
@@ -201,8 +200,6 @@ func (sp *SetupPhase) preciseMatching(
 		}
 		set.SetPackageName(tree.Name.Name)
 
-		var rawBytes []byte // lazy-loaded for directive pre-filtering
-
 		for _, r := range rules {
 			// Let's match with the rule precisely
 			switch rt := r.(type) {
@@ -233,19 +230,11 @@ func (sp *SetupPhase) preciseMatching(
 				set.AddCallRule(source, rt)
 				sp.Info("Match call rule", "rule", rt, "dep", dep)
 			case *rule.InstDirectiveRule:
-				// Lazy-read raw bytes on first directive rule (read once per source file).
-				// ParseFileFast skips comments, so we need the raw bytes to check
-				// for directives.
-				if rawBytes == nil {
-					rawBytes, err = os.ReadFile(source)
-					if err != nil {
-						return nil, ex.Wrapf(err, "reading file %s for directive check", source)
-					}
+				if ast.FileHasDirective(tree, rt.Directive) {
+					continue
 				}
-				if bytes.Contains(rawBytes, []byte("//"+rt.Directive)) {
-					set.AddDirectiveRule(source, rt)
-					sp.Info("Match directive rule", "rule", rt, "dep", dep)
-				}
+				set.AddDirectiveRule(source, rt)
+				sp.Info("Match directive rule", "rule", rt, "dep", dep)
 			case *rule.InstFileRule:
 				// Skip as it's already processed
 				continue

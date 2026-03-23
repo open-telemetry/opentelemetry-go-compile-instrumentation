@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -204,6 +205,99 @@ func TestParseDirectiveArgs(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func writeGoTempFile(t *testing.T, src string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "*.go")
+	require.NoError(t, err)
+	_, err = f.WriteString(src)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	return f.Name()
+}
+
+func TestFileHasDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		directive string
+		expected  bool
+	}{
+		{
+			name: "directive on function",
+			src: `package p
+//otelc:span
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  true,
+		},
+		{
+			name: "directive with args",
+			src: `package p
+//otelc:span span.name:"op"
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  true,
+		},
+		{
+			name: "no directive",
+			src: `package p
+// just a regular comment
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  false,
+		},
+		{
+			name: "different directive",
+			src: `package p
+//otelc:trace
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  false,
+		},
+		{
+			name: "prefix match rejected",
+			src: `package p
+//otelc:span2
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  false,
+		},
+		{
+			name: "space after slashes rejected",
+			src: `package p
+// otelc:span
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  false,
+		},
+		{
+			name: "directive on method",
+			src: `package p
+type T struct{}
+//otelc:span
+func (T) Bar() {}
+`,
+			directive: "otelc:span",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, FileHasDirective(tree, tt.directive))
 		})
 	}
 }
