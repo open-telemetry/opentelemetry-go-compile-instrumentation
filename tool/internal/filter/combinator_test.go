@@ -101,3 +101,68 @@ func TestAllOf_Nested(t *testing.T) {
 		t.Error("AllOf{AllOf{true, true}, true}.Match() = false, want true")
 	}
 }
+
+func TestOneOf(t *testing.T) {
+	tests := []struct {
+		name    string
+		filters []filter.Filter
+		want    bool
+	}{
+		{
+			name:    "empty OneOf is false",
+			filters: nil,
+			want:    false,
+		},
+		{
+			name:    "single true child",
+			filters: []filter.Filter{alwaysMatch(true)},
+			want:    true,
+		},
+		{
+			name:    "single false child",
+			filters: []filter.Filter{alwaysMatch(false)},
+			want:    false,
+		},
+		{
+			name:    "all false",
+			filters: []filter.Filter{alwaysMatch(false), alwaysMatch(false), alwaysMatch(false)},
+			want:    false,
+		},
+		{
+			name:    "first true short-circuits",
+			filters: []filter.Filter{alwaysMatch(true), alwaysMatch(false), alwaysMatch(false)},
+			want:    true,
+		},
+		{
+			name:    "last child true",
+			filters: []filter.Filter{alwaysMatch(false), alwaysMatch(false), alwaysMatch(true)},
+			want:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := filter.OneOf(tt.filters)
+			if got := f.Match(minimalCtx()); got != tt.want {
+				t.Errorf("OneOf.Match() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOneOf_ShortCircuit(t *testing.T) {
+	called := false
+	spy := callSpy{result: false, called: &called}
+	f := filter.OneOf{alwaysMatch(true), spy}
+	f.Match(minimalCtx())
+	if called {
+		t.Error("OneOf short-circuit failed: second filter called after first returned true")
+	}
+}
+
+func TestOneOf_Nested(t *testing.T) {
+	inner := filter.OneOf{alwaysMatch(false), alwaysMatch(true)}
+	outer := filter.AllOf{inner, alwaysMatch(true)}
+	if !outer.Match(minimalCtx()) {
+		t.Error("AllOf{OneOf{false, true}, true}.Match() = false, want true")
+	}
+}

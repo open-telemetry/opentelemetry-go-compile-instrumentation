@@ -39,13 +39,27 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 		}
 		return children, nil
 	}
+	// OneOf combinator: match when any child matches.
 	if len(def.OneOf) > 0 {
-		return nil, ex.Newf("one-of combinator is not yet supported")
+		children := make(OneOf, 0, len(def.OneOf))
+		for i := range def.OneOf {
+			child, err := buildDef(&def.OneOf[i])
+			if err != nil {
+				return nil, ex.Wrapf(err, "one-of[%d]", i)
+			}
+			children = append(children, child)
+		}
+		return children, nil
 	}
 	if def.Not != nil {
 		return nil, ex.Newf("not combinator is not yet supported")
 	}
 
+	return buildLeaf(def)
+}
+
+// buildLeaf constructs a Filter from a leaf FilterDef (no combinators).
+func buildLeaf(def *rule.FilterDef) (Filter, error) {
 	// Recv without Func is a misconfiguration — catch it early.
 	if def.Recv != "" && def.Func == "" {
 		return nil, ex.Newf("recv requires func to be set in filter definition")
