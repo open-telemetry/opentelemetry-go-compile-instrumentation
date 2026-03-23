@@ -119,6 +119,23 @@ func TestBuild_Error_MultipleActiveLeaves(t *testing.T) {
 	}
 }
 
+func TestBuild_PackageName(t *testing.T) {
+	t.Run("builds successfully", func(t *testing.T) {
+		def := &rule.FilterDef{PackageName: "main"}
+		f, err := filter.Build(def)
+		if err != nil {
+			t.Fatalf("Build(%+v) error = %v, want nil", def, err)
+		}
+		pnf, ok := f.(*filter.PackageNameFilter)
+		if !ok {
+			t.Fatalf("Build(PackageName) returned %T, want *filter.PackageNameFilter", f)
+		}
+		if pnf.Name != "main" {
+			t.Errorf("PackageNameFilter.Name = %q, want %q", pnf.Name, "main")
+		}
+	})
+}
+
 func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 	tests := []struct {
 		name string
@@ -143,10 +160,6 @@ func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 		{
 			name: "import_path",
 			def:  &rule.FilterDef{ImportPath: "example.com/**"},
-		},
-		{
-			name: "package_name",
-			def:  &rule.FilterDef{PackageName: "main"},
 		},
 		{
 			name: "test_main",
