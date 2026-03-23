@@ -84,7 +84,7 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 	case def.PackageName != "":
 		return nil, ex.Newf("package_name filter is not yet supported")
 	case def.TestMain != nil:
-		return nil, ex.Newf("test_main filter is not yet supported")
+		return &TestMainFilter{ShouldMatch: *def.TestMain}, nil
 	default:
 		// Unreachable: active == 1 guarantees one of the cases above matched.
 		// If this fires, a new FilterDef field was added without a matching case.

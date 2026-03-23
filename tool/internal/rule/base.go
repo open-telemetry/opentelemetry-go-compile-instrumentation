@@ -53,7 +53,7 @@ type FilterDef struct {
 	ImportPath string `json:"import_path,omitempty" yaml:"import_path,omitempty"`
 	// Package name filter — not yet implemented.
 	PackageName string `json:"package_name,omitempty" yaml:"package_name,omitempty"`
-	// TestMain filter — not yet implemented.
+	// TestMain filter — matched by TestMainFilter.
 	TestMain *bool `json:"test_main,omitempty" yaml:"test_main,omitempty"`
 }
 

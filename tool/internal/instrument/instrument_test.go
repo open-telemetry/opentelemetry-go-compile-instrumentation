@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	pkgast "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/filter"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
@@ -125,6 +127,10 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		props["name"] = name
 		ruleData, _ := yaml.Marshal(props)
 
+		if !whereFilterMatches(props, sourceFile) {
+			continue
+		}
+
 		switch {
 		case props["struct"] != nil:
 			r, _ := rule.NewInstStructRule(ruleData, name)
@@ -145,6 +151,38 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	}
 
 	return ruleSet
+}
+
+// whereFilterMatches evaluates the optional 'where' filter for a rule.
+// Returns true if the rule should be applied, false if it should be skipped.
+// On any parse or build error the rule is included (fail-open).
+func whereFilterMatches(props map[string]any, sourceFile string) bool {
+	whereRaw, ok := props["where"]
+	if !ok {
+		return true
+	}
+	whereBytes, err := yaml.Marshal(whereRaw)
+	if err != nil {
+		return true
+	}
+	var filterDef rule.FilterDef
+	if err = yaml.Unmarshal(whereBytes, &filterDef); err != nil {
+		return true
+	}
+	f, err := filter.Build(&filterDef)
+	if err != nil || f == nil {
+		return true
+	}
+	tree, err := pkgast.ParseFileFast(sourceFile)
+	if err != nil {
+		return true
+	}
+	ctx := &filter.MatchContext{
+		ImportPath: mainPackage,
+		SourceFile: sourceFile,
+		AST:        tree,
+	}
+	return f.Match(ctx)
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
