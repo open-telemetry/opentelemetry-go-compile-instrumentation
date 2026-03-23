@@ -135,6 +135,25 @@ func FileHasDirective(file *dst.File, directive string) bool {
 	return found
 }
 
+// FindFuncsByDirective returns all top-level function declarations whose
+// leading decorations contain the specified directive comment.
+func FindFuncsByDirective(file *dst.File, directive string) []*dst.FuncDecl {
+	var funcs []*dst.FuncDecl
+	for _, decl := range file.Decls {
+		funcDecl, ok := decl.(*dst.FuncDecl)
+		if !ok {
+			continue
+		}
+		for _, dec := range funcDecl.Decs.Start {
+			if MatchDirective(dec, directive) {
+				funcs = append(funcs, funcDecl)
+				break
+			}
+		}
+	}
+	return funcs
+}
+
 // tokenize splits input on whitespace, respecting double-quoted strings.
 func tokenize(input string) ([]string, error) {
 	var tokens []string

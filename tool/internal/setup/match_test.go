@@ -234,6 +234,7 @@ version: v1.0.0,v2.0.0
 			yamlContent: `
 directive: "otelc:span"
 target: github.com/example/lib
+template: "_ = 0"
 `,
 			ruleName:     "test-directive-rule",
 			expectError:  false,

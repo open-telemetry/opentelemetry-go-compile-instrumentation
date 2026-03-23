@@ -1,3 +1,6 @@
 span_directive:
   target: main
   directive: "otelc:span"
+  template: |-
+    println("span start: {{.FuncName}}")
+    defer println("span end: {{.FuncName}}")

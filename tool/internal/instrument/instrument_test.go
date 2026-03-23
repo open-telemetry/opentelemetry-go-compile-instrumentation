@@ -133,6 +133,9 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		case props["file"] != nil:
 			r, _ := rule.NewInstFileRule(ruleData, name)
 			ruleSet.FileRules = append(ruleSet.FileRules, r)
+		case props["directive"] != nil:
+			r, _ := rule.NewInstDirectiveRule(ruleData, name)
+			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
 		case props["raw"] != nil:
 			r, _ := rule.NewInstRawRule(ruleData, name)
 			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
@@ -142,9 +145,6 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		case props["function_call"] != nil:
 			r, _ := rule.NewInstCallRule(ruleData, name)
 			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
-		case props["directive"] != nil:
-			r, _ := rule.NewInstDirectiveRule(ruleData, name)
-			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
 		}
 	}
 
@@ -372,7 +372,7 @@ func TestGroupRules(t *testing.T) {
 			},
 		},
 		{
-			name: "directive rules excluded from grouping",
+			name: "directive rules included in grouping",
 			ruleSet: &rule.InstRuleSet{
 				FuncRules:   make(map[string][]*rule.InstFuncRule),
 				StructRules: make(map[string][]*rule.InstStructRule),
@@ -380,11 +380,11 @@ func TestGroupRules(t *testing.T) {
 				CallRules:   make(map[string][]*rule.InstCallRule),
 				DirectiveRules: map[string][]*rule.InstDirectiveRule{
 					"file1.go": {
-						{InstBaseRule: rule.InstBaseRule{Name: "directive1"}, Directive: "otelc:span"},
+						{InstBaseRule: rule.InstBaseRule{Name: "directive1"}, Directive: "otelc:span", Template: "_ = 0"},
 					},
 				},
 			},
-			expectedFiles: []string{},
+			expectedFiles: []string{"file1.go"},
 		},
 	}
 

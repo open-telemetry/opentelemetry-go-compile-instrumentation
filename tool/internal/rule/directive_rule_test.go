@@ -23,6 +23,7 @@ func TestNewInstDirectiveRule(t *testing.T) {
 			yamlContent: `
 directive: "otelc:span"
 target: main
+template: "_ = 0"
 `,
 			ruleName:    "test-directive",
 			expectError: false,
@@ -33,9 +34,29 @@ target: main
 directive: "otelc:span"
 target: github.com/example/lib
 version: "v1.0.0,v2.0.0"
+template: "_ = 0"
 `,
 			ruleName:    "versioned-directive",
 			expectError: false,
+		},
+		{
+			name: "missing template",
+			yamlContent: `
+directive: "otelc:span"
+target: main
+`,
+			ruleName:    "no-template",
+			expectError: true,
+		},
+		{
+			name: "invalid template syntax",
+			yamlContent: `
+directive: "otelc:span"
+target: main
+template: "{{.Unclosed"
+`,
+			ruleName:    "bad-template",
+			expectError: true,
 		},
 		{
 			name: "empty directive",
