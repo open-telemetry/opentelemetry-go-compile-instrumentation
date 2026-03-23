@@ -10,6 +10,7 @@ import (
 
 	"github.com/dave/dst"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -268,6 +269,98 @@ func AddStructField(decl dst.Decl, name, t string) {
 	ty := util.AssertType[*dst.TypeSpec](gen.Specs[0])
 	st := util.AssertType[*dst.StructType](ty.Type)
 	st.Fields.List = append(st.Fields.List, fd)
+}
+
+// FuncDeclMatchesFilters reports whether funcDecl satisfies all signature
+// sub-filters in r.  Returns true when no sub-filters are set.
+//
+// Matching uses structural comparison of dst.Expr nodes (no type checker).
+// For the *_implements filters this means an exact type-name match rather than
+// full interface-satisfaction checking.
+func FuncDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) bool {
+	ft := funcDecl.Type
+
+	if r.Signature != nil {
+		if !matchesExactSignature(ft, r.Signature) {
+			return false
+		}
+	}
+	if r.SignatureContains != nil {
+		if !matchesSignatureContains(ft, r.SignatureContains) {
+			return false
+		}
+	}
+	if r.ResultImplements != "" {
+		if !fieldListContainsType(ft.Results, r.ResultImplements) {
+			return false
+		}
+	}
+	if r.FinalResultImplements != "" {
+		if !matchesFinalResult(ft.Results, r.FinalResultImplements) {
+			return false
+		}
+	}
+	if r.ArgumentImplements != "" {
+		if !fieldListContainsType(ft.Params, r.ArgumentImplements) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchesExactSignature returns true when funcType has exactly the parameter
+// and result types listed in sig, compared field-by-field in order.
+func matchesExactSignature(ft *dst.FuncType, sig *rule.FuncSignature) bool {
+	return matchesFieldList(sig.Args, ft.Params) &&
+		matchesFieldList(sig.Returns, ft.Results)
+}
+
+// matchesFieldList returns true when expected type strings match the types in
+// fields exactly (same count, same order).
+func matchesFieldList(expected []string, fields *dst.FieldList) bool {
+	count := 0
+	if fields != nil {
+		count = len(fields.List)
+	}
+	if len(expected) != count {
+		return false
+	}
+	for i, typeStr := range expected {
+		tn, err := parseTypeName(typeStr)
+		if err != nil || !tn.matches(fields.List[i].Type) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchesSignatureContains returns true when funcType contains any of the
+// expected argument types among its parameters OR any of the expected return
+// types among its results.
+func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature) bool {
+	for _, expected := range sig.Args {
+		if fieldListContainsType(ft.Params, expected) {
+			return true
+		}
+	}
+	for _, expected := range sig.Returns {
+		if fieldListContainsType(ft.Results, expected) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesFinalResult returns true when the last entry in fields matches typeStr.
+func matchesFinalResult(fields *dst.FieldList, typeStr string) bool {
+	if fields == nil || len(fields.List) == 0 {
+		return false
+	}
+	tn, err := parseTypeName(typeStr)
+	if err != nil {
+		return false
+	}
+	return tn.matches(fields.List[len(fields.List)-1].Type)
 }
 
 // SplitMultiNameFields splits fields that have multiple names into separate fields.
