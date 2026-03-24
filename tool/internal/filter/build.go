@@ -6,6 +6,7 @@ package filter
 import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 // Build constructs a runtime Filter from a FilterDef.
@@ -91,6 +92,7 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 	default:
 		// Unreachable: active == 1 guarantees one of the cases above matched.
 		// If this fires, a new FilterDef field was added without a matching case.
-		return nil, ex.Newf("internal error: unhandled active predicate in buildDef")
+		util.ShouldNotReachHere()
+		return nil, nil //nolint:nilnil // unreachable; satisfies compiler
 	}
 }

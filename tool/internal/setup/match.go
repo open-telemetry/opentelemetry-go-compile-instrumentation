@@ -173,8 +173,8 @@ func (sp *SetupPhase) runMatch(
 // Using a struct instead of parallel slices prevents index-desync bugs if
 // the rules slice is ever sorted or deduplicated before this point.
 type ruleFilter struct {
-	rule   rule.InstRule
-	filter filter.Filter // nil means no Where clause — apply unconditionally
+	rule  rule.InstRule
+	where filter.Filter // nil means no Where clause — apply unconditionally
 }
 
 // preciseMatching performs AST-based matching of instrumentation rules against
@@ -209,7 +209,7 @@ func (sp *SetupPhase) preciseMatching(
 				return nil, ex.Wrapf(err, "build filter for rule %q", r.GetName())
 			}
 		}
-		ruleFilters = append(ruleFilters, ruleFilter{rule: r, filter: f})
+		ruleFilters = append(ruleFilters, ruleFilter{rule: r, where: f})
 	}
 
 	for _, source := range dep.Sources {
@@ -238,7 +238,7 @@ func (sp *SetupPhase) preciseMatching(
 		for _, rf := range ruleFilters {
 			// Evaluate the Where filter if one is defined for this rule.
 			// A nil filter means the rule applies to all files unconditionally.
-			if rf.filter != nil && !rf.filter.Match(&mctx) {
+			if rf.where != nil && !rf.where.Match(&mctx) {
 				continue
 			}
 			sp.matchRule(rf.rule, source, tree, set, dep)

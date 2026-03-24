@@ -5,8 +5,8 @@
 // filtering during the compile instrumentation setup phase.
 //
 // Filters are constructed once per rule from a [rule.FilterDef] (the YAML
-// representation) via [Build], then evaluated once per source file during
-// preciseMatching. A nil Filter value is valid and means "no filtering" —
+// representation) via [Build], then evaluated against source files during
+// the setup phase. A nil Filter value is valid and means "no filtering" —
 // the rule applies unconditionally to any matching source file.
 //
 // The filter tree maps directly onto the YAML where clause:

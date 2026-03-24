@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -323,7 +324,24 @@ func validateCreatedRule(t *testing.T, createdRule rule.InstRule, ruleName strin
 	}
 }
 
+// writeCustomRules writes YAML rule content to a temporary file and returns
+// its path. The filename must end in .yaml or .yml.
 func writeCustomRules(t *testing.T, name, content string) string {
+	t.Helper()
+	require.True(t, strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml"),
+		"writeCustomRules: filename %q must end in .yaml or .yml", name)
+	path := filepath.Join(t.TempDir(), name)
+	err := os.WriteFile(path, []byte(content), 0o644)
+	require.NoError(t, err)
+	return path
+}
+
+// writeGoSource writes Go source content to a temporary file and returns its
+// path. The filename must end in .go.
+func writeGoSource(t *testing.T, name, content string) string {
+	t.Helper()
+	require.True(t, strings.HasSuffix(name, ".go"),
+		"writeGoSource: filename %q must end in .go", name)
 	path := filepath.Join(t.TempDir(), name)
 	err := os.WriteFile(path, []byte(content), 0o644)
 	require.NoError(t, err)
@@ -458,8 +476,8 @@ func TestLoadDefaultRules(t *testing.T) {
 }
 
 func TestPreciseMatching_WhereFilter(t *testing.T) {
-	matchFile := writeCustomRules(t, "match.go", "package main\n\ntype Server struct{}\n\nfunc Handler() {}\n")
-	noMatchFile := writeCustomRules(t, "nomatch.go", "package main\n\nfunc Handler() {}\n")
+	matchFile := writeGoSource(t, "match.go", "package main\n\ntype Server struct{}\n\nfunc Handler() {}\n")
+	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\nfunc Handler() {}\n")
 
 	dep := &Dependency{
 		ImportPath: "example.com/svc",
@@ -489,7 +507,7 @@ func TestPreciseMatching_WhereFilter(t *testing.T) {
 }
 
 func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
-	srcFile := writeCustomRules(t, "src.go", "package main\n\nfunc Foo() {}\n")
+	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
 
 	dep := &Dependency{
 		ImportPath: "example.com/svc",

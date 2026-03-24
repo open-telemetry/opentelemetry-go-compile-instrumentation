@@ -6,7 +6,7 @@ package filter_test
 import (
 	"testing"
 
-	pkgast "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/filter"
 )
 
@@ -15,7 +15,7 @@ import (
 // used by production code.
 func parseSource(t *testing.T, src string) *filter.MatchContext {
 	t.Helper()
-	parser := pkgast.NewAstParser()
+	parser := ast.NewAstParser()
 	tree, err := parser.ParseSource(src)
 	if err != nil {
 		t.Fatalf("parseSource: %v", err)
