@@ -22,7 +22,7 @@ func parseSource(t *testing.T, src string) *filter.MatchContext {
 	}
 	return &filter.MatchContext{
 		ImportPath: "example.com/pkg",
-		SourceFile: "source.go",
+		SourceFile: "/tmp/source.go",
 		AST:        tree,
 	}
 }
