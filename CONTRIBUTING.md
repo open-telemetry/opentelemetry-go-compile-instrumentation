@@ -141,6 +141,36 @@ The following development tools are used and will be automatically installed on 
 - **[ratchet](https://github.com/sethvargo/ratchet)** - GitHub Actions security pinning
 - **[embedmd](https://github.com/campoy/embedmd)** - Embed code in markdown files
 
+### Architecture Decision Records
+
+Significant architectural decisions are documented as Architecture Decision Records (ADRs) in [`docs/adr/`](docs/adr/). Read them to understand *why* the project is structured the way it is.
+
+Create a new ADR when proposing:
+
+- Changes to the instrumentation API or hook model
+- New external dependencies or replacements
+- Changes to the two-phase build process
+- Any decision the SIG discusses and reaches consensus on
+
+To create a new ADR:
+
+```sh
+make adr-new TITLE="Title of Your Decision"
+```
+
+This requires `adr-tools` (`npryce/adr-tools`). Run `make adr-tools` to install it. To list existing ADRs:
+
+```sh
+make adr-list
+```
+
+## AI Usage
+
+This project welcomes the use of AI tools. Please read the [AI Usage Policy](AI_POLICY.md) before
+contributing. The critical rule is: **you must understand every line of code you submit.**
+Contributors using AI tools are held to the same quality standards as any other contribution.
+
+
 ## Pull Requests
 
 ### Conventional Commits
