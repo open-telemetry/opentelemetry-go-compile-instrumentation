@@ -45,7 +45,13 @@ share the same name, so `Where()` would collide with the `Where *FilterDef` stru
 
 - Combinators (`all-of`, `one-of`, `not`) and additional leaf types (`import_path`,
   `package_name`, `test_main`, `directive`) are stubbed and return descriptive errors until
-  their respective follow-on branches land.
+  their respective follow-on PRs land:
+  - `all-of`: [#381](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/381)
+  - `one-of`: [#385](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/385)
+  - `not`: [#386](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/386)
+  - `import_path`: [#382](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/382)
+  - `package_name`: [#383](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/383)
+  - `test_main`: [#384](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/384)
 - `Filter` implementations must be safe for concurrent use; they are evaluated from parallel
   goroutines in `matchDeps`.
-- Branch 4 (`import_path` glob) requires a change to `matchDeps` indexing — see ADR-0004.
+- [#382](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/382) (`import_path` glob) requires a change to `matchDeps` indexing — see ADR-0004.

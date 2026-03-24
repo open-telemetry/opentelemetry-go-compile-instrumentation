@@ -4,7 +4,7 @@ Date: 2026-03-19
 
 ## Status
 
-Accepted (implementation deferred to OP4 branch 4)
+Accepted (implementation deferred to [#382](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/382))
 
 ## Context
 
@@ -35,7 +35,8 @@ them through the glob path.
 ## Consequences
 
 - A rule with both `target` and `where: {import_path: ...}` is an error; the predicates are
-  redundant and should be rejected at rule-load time. (Validation is added in branch 4.)
-- Branch 4 adds a package-level import-path check before `ast.ParseFileFast`, recovering the
+  redundant and should be rejected at rule-load time. (Validation is added in
+  [#382](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/382).)
+- [#382](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/382) adds a package-level import-path check before `ast.ParseFileFast`, recovering the
   Orchestrion-equivalent `PackageMayMatch` short-circuit for glob rules.
 - Benchmarks should verify that the glob scan overhead is negligible for typical rule counts.
