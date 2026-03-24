@@ -296,7 +296,68 @@ func process() {
 - Multiple calls to the same function will all be wrapped independently.
 - Use the qualified format `package/path.FunctionName` for functions.
 
-### 5. File Addition Rule
+### 5. Directive Rule
+
+This rule instruments functions annotated with a magic comment (a "directive") by prepending templated Go code into their bodies. The template is rendered once per annotated function, and the resulting statements are inserted at the top of the function body.
+
+**Use Cases:**
+
+- Automatically injecting tracing spans into functions the author has opted into with a comment.
+- Adding logging or metrics boilerplate that developers annotate functions with.
+- Any "opt-in" instrumentation where the annotation lives in source code rather than a rule file.
+
+**Fields:**
+
+- `directive` (string, required): The directive name to match, without the leading `//`. Must not contain spaces. For example, `otelc:span` matches the comment `//otelc:span`. Note that a space after `//` (e.g., `// otelc:span`) does **not** match — the directive must immediately follow `//`.
+- `template` (string, required): Go statements to prepend to each matching function body. Rendered with [fasttemplate](https://github.com/valyala/fasttemplate) using `{{` / `}}` delimiters. The only supported placeholder is `{{FuncName}}`, which is replaced with the name of the annotated function.
+- `imports` (map[string]string, optional): Additional imports needed by the injected code. Same format as [Common Fields](#common-fields).
+
+**Template Placeholders:**
+
+| Placeholder | Replaced with |
+| --- | --- |
+| `{{FuncName}}` | The name of the annotated function |
+
+**Example:**
+
+```yaml
+span_directive:
+  target: main
+  directive: "otelc:span"
+  template: |-
+    println("span start: {{FuncName}}")
+    defer println("span end: {{FuncName}}")
+```
+
+Given this source file:
+
+```go
+//otelc:span
+func foo() {
+    println("hello")
+}
+```
+
+The instrumented output becomes:
+
+```go
+//otelc:span
+func foo() {
+    println("span start: foo")
+    defer println("span end: foo")
+    println("hello")
+}
+```
+
+**Important Notes:**
+
+- The directive comment must be placed immediately before the function declaration.
+- The `//` must not be followed by a space (i.e., `//otelc:span`, not `// otelc:span`).
+- The `directive` field must not include the leading `//`.
+- Functions without the directive comment are not affected.
+- Multiple functions in the same file can carry the directive; each gets the template applied independently with its own `{{FuncName}}`.
+
+### 6. File Addition Rule
 
 This rule adds a new Go source file to the target package.
 
