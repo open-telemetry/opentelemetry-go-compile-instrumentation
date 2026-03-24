@@ -1,0 +1,8 @@
+func_sig_contains_hook:
+  target: main
+  func: Func1
+  signature_contains:
+    returns: [error]
+  before: H1Before
+  after: H1After
+  path: testdata

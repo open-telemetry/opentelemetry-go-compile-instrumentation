@@ -274,6 +274,10 @@ func AddStructField(decl dst.Decl, name, t string) {
 // FuncDeclMatchesFilters reports whether funcDecl satisfies all signature
 // sub-filters in r.  Returns true when no sub-filters are set.
 //
+// All non-nil filters are evaluated and must match (AND semantics).  Any
+// combination of sub-filters is valid; they are checked in declaration order
+// and evaluation stops at the first failure.
+//
 // Matching uses structural comparison of dst.Expr nodes (no type checker).
 // For the *_implements filters this means an exact type-name match rather than
 // full interface-satisfaction checking.
@@ -290,18 +294,18 @@ func FuncDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) bool {
 			return false
 		}
 	}
-	if r.ResultImplements != "" {
-		if !fieldListContainsType(ft.Results, r.ResultImplements) {
+	if r.ResultImplements != nil {
+		if !fieldListContainsType(ft.Results, *r.ResultImplements) {
 			return false
 		}
 	}
-	if r.FinalResultImplements != "" {
-		if !matchesFinalResult(ft.Results, r.FinalResultImplements) {
+	if r.FinalResultImplements != nil {
+		if !matchesFinalResult(ft.Results, *r.FinalResultImplements) {
 			return false
 		}
 	}
-	if r.ArgumentImplements != "" {
-		if !fieldListContainsType(ft.Params, r.ArgumentImplements) {
+	if r.ArgumentImplements != nil {
+		if !fieldListContainsType(ft.Params, *r.ArgumentImplements) {
 			return false
 		}
 	}

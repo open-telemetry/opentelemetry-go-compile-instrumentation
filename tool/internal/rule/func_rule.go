@@ -51,12 +51,13 @@ type InstFuncRule struct {
 	After  string `json:"after"  yaml:"after"`  // The function we inject at the target function exit
 	Path   string `json:"path"   yaml:"path"`   // The module path where hook code is located
 
-	// Optional signature sub-filters (all non-nil/non-empty filters must match).
+	// Optional signature sub-filters (all non-nil filters must match; they are
+	// ANDed together so any combination is allowed).
 	Signature             *FuncSignature `json:"signature,omitempty"               yaml:"signature"`
 	SignatureContains     *FuncSignature `json:"signature_contains,omitempty"      yaml:"signature_contains"`
-	ResultImplements      string         `json:"result_implements,omitempty"       yaml:"result_implements"`
-	FinalResultImplements string         `json:"final_result_implements,omitempty" yaml:"final_result_implements"`
-	ArgumentImplements    string         `json:"argument_implements,omitempty"     yaml:"argument_implements"`
+	ResultImplements      *string        `json:"result_implements,omitempty"       yaml:"result_implements"`
+	FinalResultImplements *string        `json:"final_result_implements,omitempty" yaml:"final_result_implements"`
+	ArgumentImplements    *string        `json:"argument_implements,omitempty"     yaml:"argument_implements"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
