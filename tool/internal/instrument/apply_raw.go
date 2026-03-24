@@ -49,31 +49,6 @@ func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl) error {
 	return nil
 }
 
-// applyDirectiveRule finds all functions annotated with the directive, renders
-// the template for each, and prepends the resulting Go statements into the
-// function body — mirroring Orchestrion's prepend-statements approach.
-func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstDirectiveRule, root *dst.File) error {
-	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
-		return err
-	}
-	funcs := ast.FindFuncsByDirective(root, r.Directive)
-	for _, funcDecl := range funcs {
-		snippet, err := r.Render(rule.DirectiveTemplateData{FuncName: funcDecl.Name.Name})
-		if err != nil {
-			return ex.Wrapf(err, "rendering template for func %s", funcDecl.Name.Name)
-		}
-		p := ast.NewAstParser()
-		stmts, err := p.ParseSnippet(snippet)
-		if err != nil {
-			return ex.Wrapf(err, "parsing rendered template for func %s", funcDecl.Name.Name)
-		}
-		renameReturnValues(funcDecl)
-		funcDecl.Body.List = append(stmts, funcDecl.Body.List...)
-		ip.Info("Apply directive rule", "rule", r, "func", funcDecl.Name.Name)
-	}
-	return nil
-}
-
 // applyRawRule injects the raw code into the target function at the beginning
 // of the function.
 func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
