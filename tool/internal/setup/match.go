@@ -194,8 +194,11 @@ func (sp *SetupPhase) preciseMatching(
 	}
 
 	// Pre-build filter trees for rules that carry a Where clause.
-	// Filters are built once per rule and evaluated once per source file,
-	// avoiding repeated construction inside the nested loops.
+	// Filters are compiled once per rule here, not per source file.
+	// In practice each rule targets exactly one import path, so each
+	// filter is built once across the entire matchDeps run. If needed,
+	// compilation can be hoisted to matchDeps for true one-time-per-rule
+	// semantics in a follow-up.
 	ruleFilters := make([]ruleFilter, 0, len(rules))
 	for _, r := range rules {
 		var f filter.Filter

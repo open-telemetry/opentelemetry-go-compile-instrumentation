@@ -457,6 +457,74 @@ func TestLoadDefaultRules(t *testing.T) {
 	require.Greater(t, len(rules), 1, "default rules should be more than 1")
 }
 
+func TestPreciseMatching_WhereFilter(t *testing.T) {
+	dir := t.TempDir()
+
+	// File with both Server struct and Handler func — Where filter passes.
+	matchFile := filepath.Join(dir, "match.go")
+	err := os.WriteFile(matchFile, []byte("package main\n\ntype Server struct{}\n\nfunc Handler() {}\n"), 0o644)
+	require.NoError(t, err)
+
+	// File with Handler func but no Server struct — Where filter rejects.
+	noMatchFile := filepath.Join(dir, "nomatch.go")
+	err = os.WriteFile(noMatchFile, []byte("package main\n\nfunc Handler() {}\n"), 0o644)
+	require.NoError(t, err)
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-where",
+			Target: "example.com/svc",
+			Where:  &rule.FilterDef{Struct: "Server"},
+		},
+		Func:   "Handler",
+		Before: "BeforeHandler",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+
+	// Handler should be matched only in the file where Server struct exists.
+	require.Len(t, result.FuncRules, 1, "expected func rules for exactly one file")
+	require.Contains(t, result.FuncRules, matchFile, "expected rule in file with Server struct")
+}
+
+func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "src.go")
+	err := os.WriteFile(srcFile, []byte("package main\n\nfunc Foo() {}\n"), 0o644)
+	require.NoError(t, err)
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{srcFile},
+	}
+
+	// Where has multiple active predicates — filter.Build returns an error.
+	badRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "bad-where",
+			Target: "example.com/svc",
+			Where:  &rule.FilterDef{Func: "Foo", Struct: "Bar"},
+		},
+		Func: "Foo",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	_, err = sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
+	require.Error(t, err, "expected error for invalid where clause")
+}
+
 // Helper functions for constructing test data
 
 func newTestSetupPhase() *SetupPhase {

@@ -32,8 +32,10 @@ type InstRule interface {
 //
 // A FilterDef is either a leaf (exactly one of Func/Recv, Struct, Directive,
 // ImportPath, PackageName, TestMain) or a combinator (AllOf, OneOf, Not).
-// Combinators contain nested FilterDef instances. Setting multiple active
-// predicates in a single FilterDef is an error; use AllOf to combine them.
+// Combinators contain nested FilterDef instances. In this branch, only a
+// single leaf predicate should be set on any given FilterDef. Combinators
+// are defined in the schema but not yet implemented; they return an error
+// from filter.Build.
 //
 // Recv is only meaningful alongside Func; it narrows the function match to a
 // specific receiver type.

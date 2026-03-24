@@ -69,7 +69,10 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 		return nil, ex.Newf("filter definition has no active predicate")
 	}
 	if active > 1 {
-		return nil, ex.Newf("filter definition has multiple active predicates; use all-of to combine them")
+		return nil, ex.Newf(
+			"filter definition has multiple active predicates;" +
+				" combining predicates is not yet supported (use all-of once available)",
+		)
 	}
 
 	switch {

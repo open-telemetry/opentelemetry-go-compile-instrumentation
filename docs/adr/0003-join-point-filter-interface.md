@@ -20,8 +20,8 @@ two phases allow cheap early-exit before source files are parsed.
 ## Decision
 
 Introduce an optional `where` clause to rules. The clause holds a `FilterDef` (YAML) that
-is compiled into a `Filter` interface at rule-load time and evaluated per source file during
-`preciseMatching`.
+is compiled into a `Filter` interface once per rule before source-file iteration in
+`preciseMatching`, and evaluated per source file.
 
 ```go
 type Filter interface {
