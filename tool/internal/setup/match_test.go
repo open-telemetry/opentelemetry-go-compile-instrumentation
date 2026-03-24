@@ -458,17 +458,8 @@ func TestLoadDefaultRules(t *testing.T) {
 }
 
 func TestPreciseMatching_WhereFilter(t *testing.T) {
-	dir := t.TempDir()
-
-	// File with both Server struct and Handler func — Where filter passes.
-	matchFile := filepath.Join(dir, "match.go")
-	err := os.WriteFile(matchFile, []byte("package main\n\ntype Server struct{}\n\nfunc Handler() {}\n"), 0o644)
-	require.NoError(t, err)
-
-	// File with Handler func but no Server struct — Where filter rejects.
-	noMatchFile := filepath.Join(dir, "nomatch.go")
-	err = os.WriteFile(noMatchFile, []byte("package main\n\nfunc Handler() {}\n"), 0o644)
-	require.NoError(t, err)
+	matchFile := writeCustomRules(t, "match.go", "package main\n\ntype Server struct{}\n\nfunc Handler() {}\n")
+	noMatchFile := writeCustomRules(t, "nomatch.go", "package main\n\nfunc Handler() {}\n")
 
 	dep := &Dependency{
 		ImportPath: "example.com/svc",
@@ -498,17 +489,13 @@ func TestPreciseMatching_WhereFilter(t *testing.T) {
 }
 
 func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
-	dir := t.TempDir()
-	srcFile := filepath.Join(dir, "src.go")
-	err := os.WriteFile(srcFile, []byte("package main\n\nfunc Foo() {}\n"), 0o644)
-	require.NoError(t, err)
+	srcFile := writeCustomRules(t, "src.go", "package main\n\nfunc Foo() {}\n")
 
 	dep := &Dependency{
 		ImportPath: "example.com/svc",
 		Sources:    []string{srcFile},
 	}
 
-	// Where has multiple active predicates — filter.Build returns an error.
 	badRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "bad-where",
@@ -521,7 +508,7 @@ func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
 	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
-	_, err = sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
+	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
 	require.Error(t, err, "expected error for invalid where clause")
 }
 
