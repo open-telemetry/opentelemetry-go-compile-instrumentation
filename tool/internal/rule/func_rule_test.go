@@ -71,7 +71,8 @@ before: MyBefore
 result_implements: error
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				assert.Equal(t, "error", r.ResultImplements)
+				require.NotNil(t, r.ResultImplements)
+				assert.Equal(t, "error", *r.ResultImplements)
 			},
 		},
 		{
@@ -83,7 +84,8 @@ before: MyBefore
 final_result_implements: error
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				assert.Equal(t, "error", r.FinalResultImplements)
+				require.NotNil(t, r.FinalResultImplements)
+				assert.Equal(t, "error", *r.FinalResultImplements)
 			},
 		},
 		{
@@ -95,7 +97,8 @@ before: MyBefore
 argument_implements: context.Context
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				assert.Equal(t, "context.Context", r.ArgumentImplements)
+				require.NotNil(t, r.ArgumentImplements)
+				assert.Equal(t, "context.Context", *r.ArgumentImplements)
 			},
 		},
 		{
@@ -116,9 +119,12 @@ argument_implements: string
 			check: func(t *testing.T, r *InstFuncRule) {
 				require.NotNil(t, r.Signature)
 				require.NotNil(t, r.SignatureContains)
-				assert.Equal(t, "error", r.ResultImplements)
-				assert.Equal(t, "error", r.FinalResultImplements)
-				assert.Equal(t, "string", r.ArgumentImplements)
+				require.NotNil(t, r.ResultImplements)
+				require.NotNil(t, r.FinalResultImplements)
+				require.NotNil(t, r.ArgumentImplements)
+				assert.Equal(t, "error", *r.ResultImplements)
+				assert.Equal(t, "error", *r.FinalResultImplements)
+				assert.Equal(t, "string", *r.ArgumentImplements)
 			},
 		},
 		{

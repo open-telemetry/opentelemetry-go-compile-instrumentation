@@ -1,0 +1,7 @@
+func_sig_final_result_hook:
+  target: main
+  func: Func1
+  final_result_implements: error
+  before: H1Before
+  after: H1After
+  path: testdata
