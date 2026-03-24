@@ -33,7 +33,7 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 	for _, funcDecl := range funcs {
 		var (
 			snippet string
-			stmts   []dst.Stmt
+			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
 		)
 		snippet, err = renderDirective(tmpl, directiveTemplateData{FuncName: funcDecl.Name.Name})
 		if err != nil {
