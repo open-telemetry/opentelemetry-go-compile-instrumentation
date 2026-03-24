@@ -31,12 +31,16 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 	}
 	funcs := ast.FindFuncsByDirective(root, r.Directive)
 	for _, funcDecl := range funcs {
-		snippet, err := renderDirective(tmpl, directiveTemplateData{FuncName: funcDecl.Name.Name})
+		var (
+			snippet string
+			stmts   []dst.Stmt
+		)
+		snippet, err = renderDirective(tmpl, directiveTemplateData{FuncName: funcDecl.Name.Name})
 		if err != nil {
 			return ex.Wrapf(err, "rendering template for func %s", funcDecl.Name.Name)
 		}
 		p := ast.NewAstParser()
-		stmts, err := p.ParseSnippet(snippet)
+		stmts, err = p.ParseSnippet(snippet)
 		if err != nil {
 			return ex.Wrapf(err, "parsing rendered template for func %s", funcDecl.Name.Name)
 		}
