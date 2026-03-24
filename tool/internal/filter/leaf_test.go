@@ -79,6 +79,11 @@ func (m MyType) ValueMethod() {}
 			f:    &filter.FuncFilter{Func: "Foo", Recv: "*MyType"},
 			want: false,
 		},
+		{
+			name: "no match: method when receiver not specified",
+			f:    &filter.FuncFilter{Func: "Method"}, // empty Recv → free functions only
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {

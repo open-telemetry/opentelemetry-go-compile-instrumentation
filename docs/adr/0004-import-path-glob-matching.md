@@ -35,7 +35,7 @@ them through the glob path.
 ## Consequences
 
 - A rule with both `target` and `where: {import_path: ...}` is an error; the predicates are
-  redundant and should be rejected at rule-load time.
+  redundant and should be rejected at rule-load time. (Validation is added in branch 4.)
 - Branch 4 adds a package-level import-path check before `ast.ParseFileFast`, recovering the
   Orchestrion-equivalent `PackageMayMatch` short-circuit for glob rules.
 - Benchmarks should verify that the glob scan overhead is negligible for typical rule counts.
