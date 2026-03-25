@@ -5,7 +5,6 @@ package ast
 
 import (
 	"fmt"
-	"log/slog"
 	"regexp"
 
 	"github.com/dave/dst"
@@ -66,12 +65,7 @@ func (t parsedTypeName) matches(node dst.Expr) bool {
 
 	default:
 		// Unsupported AST node types (chan, func, map, slice, array, interface
-		// literals) cannot be matched by type-name filters.  Log a warning so
-		// the user knows the filter will never fire for this parameter/result.
-		slog.Warn("signature filter: unsupported type node; filter will not match",
-			"node_type", fmt.Sprintf("%T", node),
-			"filter", t.importPath+"."+t.name,
-		)
+		// literals) cannot be matched by type-name filters.
 		return false
 	}
 }

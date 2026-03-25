@@ -53,11 +53,11 @@ type InstFuncRule struct {
 
 	// Optional signature sub-filters (all non-nil filters must match; combined
 	// with AND logic so any combination is allowed).
-	Signature         *FuncSignature `json:"signature,omitempty"            yaml:"signature"`
-	SignatureContains *FuncSignature `json:"signature_contains,omitempty"   yaml:"signature_contains"`
-	ResultType        *string        `json:"result_type,omitempty"          yaml:"result_type"`
-	LastResultType    *string        `json:"last_result_type,omitempty"    yaml:"last_result_type"`
-	ArgumentType      *string        `json:"argument_type,omitempty"        yaml:"argument_type"`
+	Signature         *FuncSignature `json:"signature,omitempty"          yaml:"signature"`
+	SignatureContains *FuncSignature `json:"signature_contains,omitempty" yaml:"signature_contains"`
+	ResultType        *string        `json:"result_type,omitempty"        yaml:"result_type"`
+	LastResultType    *string        `json:"last_result_type,omitempty"   yaml:"last_result_type"`
+	ArgumentType      *string        `json:"argument_type,omitempty"      yaml:"argument_type"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
