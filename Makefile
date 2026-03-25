@@ -11,7 +11,8 @@ SHELL := /bin/bash
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
-        registry-diff registry-check registry-resolve weaver-install tidy/test-apps
+        registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
+        adr-tools adr-new adr-list
 
 # Constant variables
 BINARY_NAME := otelc
@@ -23,6 +24,53 @@ API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
 GO_VERSION = 1.24
+
+##@ Tooling
+
+TOOLS := $(CURDIR)/.bin
+
+# Tools built from .tools module
+$(TOOLS):
+	@mkdir -p $@
+
+$(TOOLS)/%: $(TOOLS_DIR)/go.mod | $(TOOLS)
+	cd $(TOOLS_DIR) && \
+	go build -o $@ $(PACKAGE)
+
+CROSSLINK = $(TOOLS)/crosslink
+$(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
+
+# Go tools built from .tools module (pinned versions in .tools/go.mod)
+GOTESTFMT = $(TOOLS)/gotestfmt
+$(GOTESTFMT): PACKAGE=github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt
+
+GOLANGCI_LINT = $(TOOLS)/golangci-lint
+$(GOLANGCI_LINT): PACKAGE=github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+
+ACTIONLINT = $(TOOLS)/actionlint
+$(ACTIONLINT): PACKAGE=github.com/rhysd/actionlint/cmd/actionlint
+
+YAMLFMT = $(TOOLS)/yamlfmt
+$(YAMLFMT): PACKAGE=github.com/google/yamlfmt/cmd/yamlfmt
+
+RATCHET = $(TOOLS)/ratchet
+$(RATCHET): PACKAGE=github.com/sethvargo/ratchet
+
+EMBEDMD = $(TOOLS)/embedmd
+$(EMBEDMD): PACKAGE=github.com/campoy/embedmd
+
+CHECKMAKE = $(TOOLS)/checkmake
+$(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
+
+# Phony targets to build tools from .tools module (no go install; binaries in .bin/)
+gotestfmt: $(GOTESTFMT) ## Build gotestfmt from .tools
+golangci-lint: $(GOLANGCI_LINT) ## Build golangci-lint from .tools
+actionlint: $(ACTIONLINT) ## Build actionlint from .tools
+yamlfmt: $(YAMLFMT) ## Build yamlfmt from .tools
+ratchet: $(RATCHET) ## Build ratchet from .tools
+embedmd: $(EMBEDMD) ## Build embedmd from .tools
+checkmake: $(CHECKMAKE) ## Build checkmake from .tools
+
 # Dynamic variables
 GOOS ?= $(shell go env GOOS)
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -109,17 +157,11 @@ package: ## Package the instrumentation code into binary
 build-demo: ## Build all demos
 build-demo: build-demo-grpc build-demo-http
 
-build-demo-grpc: go-protobuf-plugins ## Build gRPC demo server and client
-	@echo "Building gRPC demo..."
-	@rm -f demo/grpc/server/otelc.runtime.go demo/grpc/client/otelc.runtime.go
-	@(cd demo/grpc/server && go generate && go build -a -o server .)
-	@(cd demo/grpc/client && go build -a -o client .)
+build-demo-grpc: ## Build gRPC demo server and client
+	@$(MAKE) -C demo/app/grpc build
 
 build-demo-http: ## Build HTTP demo server and client
-	@echo "Building HTTP demo..."
-	@rm -f demo/http/server/otelc.runtime.go demo/http/client/otelc.runtime.go
-	@(cd demo/http/server && go build -a -o server .)
-	@(cd demo/http/client && go build -a -o client .)
+	@$(MAKE) -C demo/app/http build
 
 ##@ Code Quality
 
@@ -127,37 +169,37 @@ format: ## Format Go code and YAML files
 format: format/go format/yaml lint/license-header/fix
 
 format/go: ## Format Go code only
-format/go: golangci-lint
+format/go: $(GOLANGCI_LINT)
 	@echo "Formatting Go code..."
-	golangci-lint fmt --config .config/golangci.yml
+	$(GOLANGCI_LINT) fmt --config .tools/golangci.yml
 
 format/yaml: ## Format YAML files only (excludes testdata)
-format/yaml: yamlfmt
+format/yaml: $(YAMLFMT)
 	@echo "Formatting YAML files..."
-	yamlfmt -conf .config/yamlfmt -dstar '**/*.yml' '**/*.yaml'
+	$(YAMLFMT) -conf .tools/yamlfmt -dstar '**/*.yml' '**/*.yaml'
 
 lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile)
 lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile
 
 lint/action: ## Lint GitHub Actions workflows
-lint/action: actionlint ratchet/check
+lint/action: $(ACTIONLINT) ratchet/check
 	@echo "Linting GitHub Actions workflows..."
-	actionlint
+	$(ACTIONLINT)
 
 lint/go: ## Run golangci-lint on Go code
-lint/go: golangci-lint
+lint/go: $(GOLANGCI_LINT)
 	@echo "Linting Go code..."
-	golangci-lint run --config .config/golangci.yml
+	$(GOLANGCI_LINT) run --config .tools/golangci.yml
 
 lint/go/fix: ## Run golangci-lint on Go code and fix the issues
-lint/go/fix: golangci-lint
+lint/go/fix: $(GOLANGCI_LINT)
 	@echo "Linting Go code..."
-	golangci-lint run --config .config/golangci.yml --fix
+	$(GOLANGCI_LINT) run --config .tools/golangci.yml --fix
 
 lint/yaml: ## Lint YAML formatting
-lint/yaml: yamlfmt
+lint/yaml: $(YAMLFMT)
 	@echo "Linting YAML files..."
-	yamlfmt -conf .config/yamlfmt -lint -dstar '**/*.yml' '**/*.yaml'
+	$(YAMLFMT) -conf .tools/yamlfmt -lint -dstar '**/*.yml' '**/*.yaml'
 
 lint/dockerfile: ## Lint Dockerfiles
 lint/dockerfile: hadolint
@@ -168,12 +210,12 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	$$HADOLINT_CMD -c .config/hadolint.yaml demo/grpc/client/Dockerfile demo/grpc/server/Dockerfile demo/http/client/Dockerfile demo/http/server/Dockerfile
+	$$HADOLINT_CMD -c .tools/hadolint.yaml demo/app/grpc/client/Dockerfile demo/app/grpc/server/Dockerfile demo/app/http/client/Dockerfile demo/app/http/server/Dockerfile
 
 lint/makefile: ## Lint Makefile
-lint/makefile: checkmake
+lint/makefile: $(CHECKMAKE)
 	@echo "Linting Makefile..."
-	checkmake --config .config/checkmake Makefile
+	$(CHECKMAKE) --config .tools/checkmake Makefile
 
 lint/license-header: ## Check license headers in source files
 	@.github/scripts/license-check.sh
@@ -186,40 +228,87 @@ lint/license-header/fix: ## Add missing license headers to source files
 
 .PHONY: lint/markdown
 lint/markdown: ## Lint Check the markdown files.
-	npx markdownlint-cli -c .config/markdownlint.yaml **/*.md
+	npx markdownlint-cli -c .tools/markdownlint.yaml **/*.md
 
 .PHONY: lint/markdown/fix
 lint/markdown/fix: ## Lint Check the markdown files and fix them.
-	npx markdownlint-cli -c .config/markdownlint.yaml --fix **/*.md
+	npx markdownlint-cli -c .tools/markdownlint.yaml --fix **/*.md
 
 # Ratchet targets for GitHub Actions pinning
 
 ratchet/pin: ## Pin GitHub Actions to commit SHAs
-ratchet/pin: ratchet
+ratchet/pin: $(RATCHET)
 	@echo "Pinning GitHub Actions to commit SHAs..."
-	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs ratchet pin
+	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs $(RATCHET) pin
 
 ratchet/update: ## Update pinned GitHub Actions to latest versions
-ratchet/update: ratchet
+ratchet/update: $(RATCHET)
 	@echo "Updating pinned GitHub Actions to latest versions..."
-	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs ratchet update
+	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs $(RATCHET) update
 
 ratchet/check: ## Verify all GitHub Actions are pinned
-ratchet/check: ratchet
+ratchet/check: $(RATCHET)
 	@echo "Checking GitHub Actions are pinned..."
-	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs ratchet lint
+	@find .github/workflows -name '*.yml' -o -name '*.yaml' | xargs $(RATCHET) lint
 
 ##@ Documentation
 
 docs: ## Update embedded documentation in markdown files
-docs: embedmd tmp/make-help.txt
+docs: $(EMBEDMD) tmp/make-help.txt
 	@echo "Updating embedded documentation..."
-	embedmd -w CONTRIBUTING.md README.md
+	$(EMBEDMD) -w CONTRIBUTING.md README.md
 
 tmp/make-help.txt: ## Generate make help output for embedding in documentation
 tmp/make-help.txt: $(MAKEFILE_LIST)
 	@mkdir -p tmp
 	@$(MAKE) --no-print-directory help > tmp/make-help.txt
+
+##@ Architecture Decision Records
+
+adr-tools: ## Install adr-tools if not present
+	@if command -v adr >/dev/null 2>&1; then \
+		echo "adr-tools is already installed at $$(command -v adr)"; \
+	else \
+		echo "Installing adr-tools..."; \
+		if [ "$$(uname -s)" = "Darwin" ]; then \
+			if command -v brew >/dev/null 2>&1; then \
+				brew install adr-tools; \
+			else \
+				echo "Error: Homebrew not found. Install Homebrew from https://brew.sh/ and try again."; \
+				exit 1; \
+			fi; \
+		elif [ "$$(uname -s)" = "Linux" ]; then \
+			TMPDIR=$$(mktemp -d); \
+			git clone --depth 1 https://github.com/npryce/adr-tools.git "$$TMPDIR/adr-tools"; \
+			mkdir -p "$$(go env GOPATH)/bin"; \
+			cp "$$TMPDIR/adr-tools/src/"adr-* "$$(go env GOPATH)/bin/"; \
+			chmod +x "$$(go env GOPATH)/bin/adr-"*; \
+			rm -rf "$$TMPDIR"; \
+			echo "Installed adr-tools to $$(go env GOPATH)/bin/"; \
+		else \
+			echo "Error: Unsupported platform $$(uname -s)"; \
+			echo "Please install adr-tools manually from https://github.com/npryce/adr-tools"; \
+			exit 1; \
+		fi; \
+	fi
+
+adr-new: ## Create a new ADR: make adr-new TITLE="Short decision title"
+	@if ! command -v adr >/dev/null 2>&1; then \
+		echo "adr-tools not found. Run 'make adr-tools' to install."; \
+		exit 1; \
+	fi
+	@if [ -z "$(TITLE)" ]; then \
+		echo "Usage: make adr-new TITLE=\"Short decision title\""; \
+		exit 1; \
+	fi
+	adr new -c docs/adr "$(TITLE)"
+
+adr-list: ## List all ADRs
+	@if ! command -v adr >/dev/null 2>&1; then \
+		echo "adr-tools not found. Run 'make adr-tools' to install."; \
+		exit 1; \
+	fi
+	adr list -c docs/adr
 
 ##@ Validation
 
@@ -278,7 +367,7 @@ test-unit/update-golden: package
 #   outputs build errors (JSON lines with ImportPath but no Package field).
 
 .ONESHELL:
-test-unit/tool: build package gotestfmt ## Run unit tests for tool modules only
+test-unit/tool: build package $(GOTESTFMT) ## Run unit tests for tool modules only
 	@echo "Running tool unit tests..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
@@ -328,10 +417,10 @@ test-unit/demo: ## Run unit tests for demo applications
 test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage ## Run all unit tests with coverage
 
 .ONESHELL:
-test-unit/tool/coverage: package gotestfmt ## Run unit tests with coverage for tool modules only
+test-unit/tool/coverage: package $(GOTESTFMT) ## Run unit tests with coverage for tool modules only
 	@echo "Running tool unit tests with coverage..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log | gotestfmt
+	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log | $(GOTESTFMT)
 
 # Same implementation as test-unit/pkg but with coverage flags.
 # Coverage files from each module are merged into a single coverage-pkg.txt file.
@@ -357,46 +446,31 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
-test-integration: build build-demo gotestfmt
+test-integration: build build-demo $(GOTESTFMT)
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log | gotestfmt
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log | $(GOTESTFMT)
 
 .ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
-test-integration/coverage: build build-demo gotestfmt
+test-integration/coverage: build build-demo $(GOTESTFMT)
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ../gotest-integration.log | gotestfmt
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ../gotest-integration.log | $(GOTESTFMT)
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
-test-e2e: build build-demo gotestfmt
+test-e2e: build build-demo $(GOTESTFMT)
 	@echo "Running e2e tests..."
 	set -euo pipefail
-	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ../gotest-e2e.log | gotestfmt
+	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ../gotest-e2e.log | $(GOTESTFMT)
 
 .ONESHELL:
 test-e2e/coverage: ## Run e2e tests with coverage report
-test-e2e/coverage: build build-demo gotestfmt
+test-e2e/coverage: build build-demo $(GOTESTFMT)
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
-	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ../gotest-e2e.log | gotestfmt
-
-##@ Multi-module Management
-
-TOOLS := $(CURDIR)/_tools
-
-# Tools built from tools module
-$(TOOLS):
-	@mkdir -p $@
-
-$(TOOLS)/%: $(TOOLS_DIR)/go.mod | $(TOOLS)
-	cd $(TOOLS_DIR) && \
-	go build -o $@ $(PACKAGE)
-
-CROSSLINK = $(TOOLS)/crosslink
-$(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
+	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ../gotest-e2e.log | $(GOTESTFMT)
 
 .PHONY: crosslink
 crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
@@ -426,14 +500,14 @@ go-mod-tidy/%: crosslink
 
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
-	rm -rf dist
+	rm -rf dist .bin
 	rm -f $(BINARY_NAME)$(EXT)
-	rm -f demo/basic/basic
-	rm -f demo/grpc/server/server
-	rm -rf demo/grpc/server/pb
-	rm -f demo/grpc/client/client
-	rm -f demo/http/server/server
-	rm -f demo/http/client/client
+	rm -f demo/app/basic/basic
+	rm -f demo/app/grpc/server/server
+	rm -rf demo/app/grpc/server/pb
+	rm -f demo/app/grpc/client/client
+	rm -f demo/app/http/server/server
+	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
 	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
@@ -448,48 +522,6 @@ tidy/test-apps: ## Run go mod tidy in all test app modules
 		(cd "$$moddir" && go mod tidy); \
 	done
 	@echo "All test app modules tidied successfully"
-
-gotestfmt: ## Install gotestfmt if not present
-	@if ! command -v gotestfmt >/dev/null 2>&1; then \
-		echo "Installing gotestfmt..."; \
-		go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest; \
-	fi
-
-golangci-lint: ## Install golangci-lint if not present
-	@if ! command -v golangci-lint >/dev/null 2>&1; then \
-		echo "Installing golangci-lint..."; \
-		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
-	fi
-
-actionlint: ## Install actionlint if not present
-	@if ! command -v actionlint >/dev/null 2>&1; then \
-		echo "Installing actionlint..."; \
-		go install github.com/rhysd/actionlint/cmd/actionlint@latest; \
-	fi
-
-yamlfmt: ## Install yamlfmt if not present
-	@if ! command -v yamlfmt >/dev/null 2>&1; then \
-		echo "Installing yamlfmt..."; \
-		go install github.com/google/yamlfmt/cmd/yamlfmt@latest; \
-	fi
-
-ratchet: ## Install ratchet if not present
-	@if ! command -v ratchet >/dev/null 2>&1; then \
-		echo "Installing ratchet..."; \
-		go install github.com/sethvargo/ratchet@latest; \
-	fi
-
-embedmd: ## Install embedmd if not present
-	@if ! command -v embedmd >/dev/null 2>&1; then \
-		echo "Installing embedmd..."; \
-		go install github.com/campoy/embedmd@latest; \
-	fi
-
-checkmake: ## Install checkmake if not present
-	@if ! command -v checkmake >/dev/null 2>&1; then \
-		echo "Installing checkmake..."; \
-		go install github.com/checkmake/checkmake/cmd/checkmake@latest; \
-	fi
 
 go-protobuf-plugins: ## Install Go protobuf plugins if not present
 	@if ! command -v protoc-gen-go >/dev/null 2>&1; then \

@@ -114,3 +114,9 @@ hook_function_b:
   func: FunctionB
   before: FunctionBBefore
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+
+hook_auto_detect:
+  target: main
+  func: AutoDetect
+  before: AutoDetectBefore
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"

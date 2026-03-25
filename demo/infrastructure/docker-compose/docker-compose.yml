@@ -106,7 +106,7 @@ services:
   grpc-server:
     build:
       context: ../../..
-      dockerfile: demo/grpc/server/Dockerfile
+      dockerfile: demo/app/grpc/server/Dockerfile
     container_name: grpc-server
     ports:
       - "50051:50051"
@@ -126,7 +126,7 @@ services:
   grpc-client:
     build:
       context: ../../..
-      dockerfile: demo/grpc/client/Dockerfile
+      dockerfile: demo/app/grpc/client/Dockerfile
     container_name: grpc-client
     command: ["-addr", "grpc-server:50051", "-name", "demo-client", "-count", "10000"]
     environment:
@@ -146,7 +146,7 @@ services:
   http-server:
     build:
       context: ../../..
-      dockerfile: demo/http/server/Dockerfile
+      dockerfile: demo/app/http/server/Dockerfile
     container_name: http-server
     ports:
       - "8080:8080"
@@ -166,7 +166,7 @@ services:
   http-client:
     build:
       context: ../../..
-      dockerfile: demo/http/client/Dockerfile
+      dockerfile: demo/app/http/client/Dockerfile
     container_name: http-client
     command: ["-addr", "http://http-server:8080", "-count", "10000", "-method", "GET"]
     environment:
@@ -208,7 +208,7 @@ services:
   db-server:
     build:
       context: ../../..
-      dockerfile: demo/db/server/Dockerfile
+      dockerfile: demo/app/db/server/Dockerfile
     container_name: db-server
     ports:
       - "8081:8081"
@@ -235,7 +235,7 @@ services:
   redis-client:
     build:
       context: ../../..
-      dockerfile: demo/redis/client/Dockerfile
+      dockerfile: demo/app/redis/client/Dockerfile
     container_name: redis-client
     command: ["-addr", "redis:6379", "-count", "10000"]
     environment:
@@ -258,7 +258,7 @@ services:
   db-client:
     build:
       context: ../../..
-      dockerfile: demo/db/client/Dockerfile
+      dockerfile: demo/app/db/client/Dockerfile
     container_name: db-client
     command: ["-addr", "http://db-server:8081", "-count", "10000"]
     environment:
