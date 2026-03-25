@@ -217,7 +217,11 @@ func (sp *SetupPhase) preciseMatching(
 			return nil, err
 		}
 		// Parse the source code. Since the only purpose here is to match,
-		// no node updates, we can use fast variant.
+		// no node updates, we can use the fast variant.
+		// Contract: ParseFileFast returns (non-nil, nil) on success and
+		// (nil, non-nil error) on failure. A (nil, nil) return is not
+		// possible per the Go stdlib parser.ParseFile and dave/dst
+		// DecorateFile contracts.
 		tree, err := ast.ParseFileFast(source)
 		if err != nil {
 			return nil, err
