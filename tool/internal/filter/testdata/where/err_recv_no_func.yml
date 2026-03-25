@@ -1,0 +1,2 @@
+# Error: has_recv requires has_func to be set
+has_recv: "*Server"
