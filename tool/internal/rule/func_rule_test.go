@@ -63,42 +63,42 @@ signature_contains:
 			},
 		},
 		{
-			name: "rule with result_implements",
+			name: "rule with result_type",
 			yaml: `
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
-result_implements: error
+result_type: error
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				require.NotNil(t, r.ResultImplements)
-				assert.Equal(t, "error", *r.ResultImplements)
+				require.NotNil(t, r.ResultType)
+				assert.Equal(t, "error", *r.ResultType)
 			},
 		},
 		{
-			name: "rule with final_result_implements",
+			name: "rule with last_result_type",
 			yaml: `
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
-final_result_implements: error
+last_result_type: error
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				require.NotNil(t, r.FinalResultImplements)
-				assert.Equal(t, "error", *r.FinalResultImplements)
+				require.NotNil(t, r.LastResultType)
+				assert.Equal(t, "error", *r.LastResultType)
 			},
 		},
 		{
-			name: "rule with argument_implements",
+			name: "rule with argument_type",
 			yaml: `
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
-argument_implements: context.Context
+argument_type: context.Context
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				require.NotNil(t, r.ArgumentImplements)
-				assert.Equal(t, "context.Context", *r.ArgumentImplements)
+				require.NotNil(t, r.ArgumentType)
+				assert.Equal(t, "context.Context", *r.ArgumentType)
 			},
 		},
 		{
@@ -112,19 +112,19 @@ signature:
   returns: [error]
 signature_contains:
   returns: [error]
-result_implements: error
-final_result_implements: error
-argument_implements: string
+result_type: error
+last_result_type: error
+argument_type: string
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
 				require.NotNil(t, r.Signature)
 				require.NotNil(t, r.SignatureContains)
-				require.NotNil(t, r.ResultImplements)
-				require.NotNil(t, r.FinalResultImplements)
-				require.NotNil(t, r.ArgumentImplements)
-				assert.Equal(t, "error", *r.ResultImplements)
-				assert.Equal(t, "error", *r.FinalResultImplements)
-				assert.Equal(t, "string", *r.ArgumentImplements)
+				require.NotNil(t, r.ResultType)
+				require.NotNil(t, r.LastResultType)
+				require.NotNil(t, r.ArgumentType)
+				assert.Equal(t, "error", *r.ResultType)
+				assert.Equal(t, "error", *r.LastResultType)
+				assert.Equal(t, "string", *r.ArgumentType)
 			},
 		},
 		{
