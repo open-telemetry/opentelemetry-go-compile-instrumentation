@@ -1,0 +1,3 @@
+# Error: multiple active predicates are not yet supported (use all-of once available)
+has_func: init
+has_struct: Server

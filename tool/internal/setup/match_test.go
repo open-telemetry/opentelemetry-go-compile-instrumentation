@@ -4,10 +4,12 @@
 package setup
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -323,7 +325,24 @@ func validateCreatedRule(t *testing.T, createdRule rule.InstRule, ruleName strin
 	}
 }
 
+// writeCustomRules writes YAML rule content to a temporary file and returns
+// its path. The filename must end in .yaml or .yml.
 func writeCustomRules(t *testing.T, name, content string) string {
+	t.Helper()
+	require.True(t, strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml"),
+		"writeCustomRules: filename %q must end in .yaml or .yml", name)
+	path := filepath.Join(t.TempDir(), name)
+	err := os.WriteFile(path, []byte(content), 0o644)
+	require.NoError(t, err)
+	return path
+}
+
+// writeGoSource writes Go source content to a temporary file and returns its
+// path. The filename must end in .go.
+func writeGoSource(t *testing.T, name, content string) string {
+	t.Helper()
+	require.True(t, strings.HasSuffix(name, ".go"),
+		"writeGoSource: filename %q must end in .go", name)
 	path := filepath.Join(t.TempDir(), name)
 	err := os.WriteFile(path, []byte(content), 0o644)
 	require.NoError(t, err)
@@ -457,6 +476,61 @@ func TestLoadDefaultRules(t *testing.T) {
 	require.Greater(t, len(rules), 1, "default rules should be more than 1")
 }
 
+func TestPreciseMatching_WhereFilter(t *testing.T) {
+	matchFile := writeGoSource(t, "match.go", "package main\n\ntype Server struct{}\n\nfunc Handler() {}\n")
+	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\nfunc Handler() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-where",
+			Target: "example.com/svc",
+			Where:  &rule.FilterDef{HasStruct: "Server"},
+		},
+		Func:   "Handler",
+		Before: "BeforeHandler",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+
+	// Handler should be matched only in the file where Server struct exists.
+	require.Len(t, result.FuncRules, 1, "expected func rules for exactly one file")
+	require.Contains(t, result.FuncRules, matchFile, "expected rule in file with Server struct")
+}
+
+func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
+	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{srcFile},
+	}
+
+	badRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "bad-where",
+			Target: "example.com/svc",
+			Where:  &rule.FilterDef{HasFunc: "Foo", HasStruct: "Bar"},
+		},
+		Func: "Foo",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
+	require.Error(t, err, "expected error for invalid where clause")
+}
+
 // Helper functions for constructing test data
 
 func newTestSetupPhase() *SetupPhase {
@@ -481,4 +555,83 @@ func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.In
 		rs.AddFuncRule(fakeFilePath, fr)
 	}
 	return rs
+}
+
+// goldenWhereExpected describes the expected outcome of a where-clause golden test case.
+type goldenWhereExpected struct {
+	MatchedFiles []string `json:"matched_files"`
+}
+
+// TestPreciseMatching_WhereGolden auto-discovers subdirectories under
+// testdata/where/, loading rules.yml and Go source files from each directory.
+// It calls preciseMatching with the loaded rules and verifies that the matched
+// files match the basenames listed in expected.json.
+//
+// Each subdirectory must contain:
+//   - rules.yml     — one or more rule definitions targeting "example.com/svc"
+//   - *.go files    — Go source files to match against
+//   - expected.json — {"matched_files": ["file.go", ...]}
+func TestPreciseMatching_WhereGolden(t *testing.T) {
+	const dir = "testdata/where"
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		t.Run(entry.Name(), func(t *testing.T) {
+			subdir := filepath.Join(dir, entry.Name())
+
+			// 1. Load and parse rules.yml.
+			rulesContent, err := os.ReadFile(filepath.Join(subdir, "rules.yml"))
+			require.NoError(t, err)
+			rules, err := parseRuleFromYaml(rulesContent)
+			require.NoError(t, err)
+			require.NotEmpty(t, rules)
+
+			// 2. Copy *.go files to a shared temporary directory.
+			//    preciseMatching requires absolute paths; copying ensures that
+			//    paths are stable and not embedded in the source tree.
+			tmpDir := t.TempDir()
+			goFiles, err := filepath.Glob(filepath.Join(subdir, "*.go"))
+			require.NoError(t, err)
+			require.NotEmpty(t, goFiles, "each golden test case must have at least one .go file")
+			sources := make([]string, 0, len(goFiles))
+			for _, src := range goFiles {
+				content, err := os.ReadFile(src)
+				require.NoError(t, err)
+				dst := filepath.Join(tmpDir, filepath.Base(src))
+				require.NoError(t, os.WriteFile(dst, content, 0o644))
+				sources = append(sources, dst)
+			}
+
+			// 3. Build Dependency and call preciseMatching.
+			dep := &Dependency{
+				ImportPath: "example.com/svc",
+				Sources:    sources,
+			}
+			sp := newTestSetupPhase()
+			set := rule.NewInstRuleSet(dep.ImportPath)
+			result, err := sp.preciseMatching(t.Context(), dep, rules, set)
+			require.NoError(t, err)
+
+			// 4. Load expected.json and compare matched file basenames.
+			expectedContent, err := os.ReadFile(filepath.Join(subdir, "expected.json"))
+			require.NoError(t, err)
+			var want goldenWhereExpected
+			require.NoError(t, json.Unmarshal(expectedContent, &want))
+
+			got := make(map[string]bool, len(result.FuncRules))
+			for path := range result.FuncRules {
+				got[filepath.Base(path)] = true
+			}
+			require.Len(t, got, len(want.MatchedFiles),
+				"matched file count: got %v, want %v", got, want.MatchedFiles)
+			for _, wantFile := range want.MatchedFiles {
+				require.True(t, got[wantFile],
+					"expected %q to be matched, got %v", wantFile, got)
+			}
+		})
+	}
 }

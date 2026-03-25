@@ -1,0 +1,2 @@
+# Tier 2 file predicate: file must contain struct named Server
+has_struct: Server

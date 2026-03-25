@@ -1,0 +1,5 @@
+instrument-all:
+  target: example.com/svc
+  func: Handler
+  before: BeforeHandler
+  path: example.com/hooks

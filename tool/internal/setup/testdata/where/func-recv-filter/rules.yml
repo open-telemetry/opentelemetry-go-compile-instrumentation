@@ -1,0 +1,8 @@
+instrument-open:
+  target: example.com/svc
+  func: Open
+  before: BeforeOpen
+  path: example.com/hooks
+  where:
+    has_func: Handle
+    has_recv: "*Server"
