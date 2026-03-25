@@ -573,8 +573,8 @@ type goldenWhereExpected struct {
 //   - expected.json — {"matched_files": ["file.go", ...]}
 func TestPreciseMatching_WhereGolden(t *testing.T) {
 	const dir = "testdata/where"
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
+	entries, dirErr := os.ReadDir(dir)
+	require.NoError(t, dirErr)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -599,8 +599,8 @@ func TestPreciseMatching_WhereGolden(t *testing.T) {
 			require.NotEmpty(t, goFiles, "each golden test case must have at least one .go file")
 			sources := make([]string, 0, len(goFiles))
 			for _, src := range goFiles {
-				content, err := os.ReadFile(src)
-				require.NoError(t, err)
+				content, readErr := os.ReadFile(src)
+				require.NoError(t, readErr)
 				dst := filepath.Join(tmpDir, filepath.Base(src))
 				require.NoError(t, os.WriteFile(dst, content, 0o644))
 				sources = append(sources, dst)

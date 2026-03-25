@@ -160,6 +160,35 @@ func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 // *bool fields in FilterDef table entries without a named local variable.
 func boolPtr(b bool) *bool { return &b }
 
+// checkFilterResult verifies that the Filter built from a YAML fixture matches
+// the expected descriptor. Failures are attributed to the caller via t.Helper.
+func checkFilterResult(t *testing.T, name string, f filter.Filter, want filterExpected) {
+	t.Helper()
+	switch want.Type {
+	case "FuncFilter":
+		ff, ok := f.(*filter.FuncFilter)
+		if !ok {
+			t.Fatalf("Build(%q) = %T, want *filter.FuncFilter", name, f)
+		}
+		if ff.Func != want.Func {
+			t.Errorf("Build(%q) FuncFilter.Func = %q, want %q", name, ff.Func, want.Func)
+		}
+		if ff.Recv != want.Recv {
+			t.Errorf("Build(%q) FuncFilter.Recv = %q, want %q", name, ff.Recv, want.Recv)
+		}
+	case "StructFilter":
+		sf, ok := f.(*filter.StructFilter)
+		if !ok {
+			t.Fatalf("Build(%q) = %T, want *filter.StructFilter", name, f)
+		}
+		if sf.Struct != want.Struct {
+			t.Errorf("Build(%q) StructFilter.Struct = %q, want %q", name, sf.Struct, want.Struct)
+		}
+	default:
+		t.Fatalf("unexpected filter type in %q: %q", name+".expected", want.Type)
+	}
+}
+
 // filterExpected is the decoded form of a .expected companion file.
 // It describes the expected type and fields of the Filter returned by Build.
 type filterExpected struct {
@@ -178,9 +207,9 @@ type filterExpected struct {
 //   - err_*.yml — Build must return an error.
 func TestBuild_YAMLRoundTrip(t *testing.T) {
 	const dir = "testdata/where"
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("ReadDir(%q) error = %v", dir, err)
+	entries, dirErr := os.ReadDir(dir)
+	if dirErr != nil {
+		t.Fatalf("ReadDir(%q) error = %v", dir, dirErr)
 	}
 	for _, entry := range entries {
 		name := entry.Name()
@@ -193,8 +222,8 @@ func TestBuild_YAMLRoundTrip(t *testing.T) {
 				t.Fatalf("ReadFile(%q) error = %v", name, err)
 			}
 			var def rule.FilterDef
-			if err := yaml.Unmarshal(content, &def); err != nil {
-				t.Fatalf("yaml.Unmarshal(%q) error = %v", name, err)
+			if unmarshalErr := yaml.Unmarshal(content, &def); unmarshalErr != nil {
+				t.Fatalf("yaml.Unmarshal(%q) error = %v", name, unmarshalErr)
 			}
 
 			f, buildErr := filter.Build(&def)
@@ -216,33 +245,10 @@ func TestBuild_YAMLRoundTrip(t *testing.T) {
 				t.Fatalf("ReadFile(%q) error = %v", expectedFile, err)
 			}
 			var want filterExpected
-			if err := yaml.Unmarshal(expectedContent, &want); err != nil {
-				t.Fatalf("yaml.Unmarshal(%q) error = %v", expectedFile, err)
+			if unmarshalErr := yaml.Unmarshal(expectedContent, &want); unmarshalErr != nil {
+				t.Fatalf("yaml.Unmarshal(%q) error = %v", expectedFile, unmarshalErr)
 			}
-
-			switch want.Type {
-			case "FuncFilter":
-				ff, ok := f.(*filter.FuncFilter)
-				if !ok {
-					t.Fatalf("Build(%q) = %T, want *filter.FuncFilter", name, f)
-				}
-				if ff.Func != want.Func {
-					t.Errorf("Build(%q) FuncFilter.Func = %q, want %q", name, ff.Func, want.Func)
-				}
-				if ff.Recv != want.Recv {
-					t.Errorf("Build(%q) FuncFilter.Recv = %q, want %q", name, ff.Recv, want.Recv)
-				}
-			case "StructFilter":
-				sf, ok := f.(*filter.StructFilter)
-				if !ok {
-					t.Fatalf("Build(%q) = %T, want *filter.StructFilter", name, f)
-				}
-				if sf.Struct != want.Struct {
-					t.Errorf("Build(%q) StructFilter.Struct = %q, want %q", name, sf.Struct, want.Struct)
-				}
-			default:
-				t.Fatalf("unexpected filter type in %q: %q", expectedFile, want.Type)
-			}
+			checkFilterResult(t, name, f, want)
 		})
 	}
 }

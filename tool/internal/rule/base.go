@@ -55,11 +55,11 @@ type FilterDef struct {
 	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`
 
 	// Leaf file predicates — supported by Build.
-	HasFunc      string `json:"has_func,omitempty"       yaml:"has_func,omitempty"`
-	HasRecv      string `json:"has_recv,omitempty"       yaml:"has_recv,omitempty"` // optional, requires HasFunc
-	HasStruct    string `json:"has_struct,omitempty"     yaml:"has_struct,omitempty"`
-	HasDirective string `json:"has_directive,omitempty"  yaml:"has_directive,omitempty"` // not yet implemented
-	IncludeTest  *bool  `json:"include_test,omitempty"   yaml:"include_test,omitempty"`  // not yet implemented
+	HasFunc      string `json:"has_func,omitempty"      yaml:"has_func,omitempty"`
+	HasRecv      string `json:"has_recv,omitempty"      yaml:"has_recv,omitempty"` // optional, requires HasFunc
+	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`
+	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"` // not yet implemented
+	IncludeTest  *bool  `json:"include_test,omitempty"  yaml:"include_test,omitempty"`  // not yet implemented
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
