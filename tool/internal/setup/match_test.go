@@ -250,6 +250,17 @@ target: github.com/example/lib
 			expectError: true,
 		},
 		{
+			name: "decl rule creation",
+			yamlContent: `
+target: github.com/example/lib
+identifier: GlobalVar
+value: "replaced"
+`,
+			ruleName:     "test-decl-rule",
+			expectError:  false,
+			expectedType: "*rule.InstDeclRule",
+		},
+		{
 			name: "invalid yaml syntax",
 			yamlContent: `
 struct: [

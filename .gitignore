@@ -25,4 +25,6 @@ dist
 test/apps/*/app
 test/apps/*/app.exe
 
+_tools
+coverage.out
 .bin

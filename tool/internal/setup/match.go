@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dave/dst"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
@@ -48,6 +49,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstFuncRule(raw, name)
 	case fields["function_call"] != nil:
 		return rule.NewInstCallRule(raw, name)
+	case fields["identifier"] != nil:
+		return rule.NewInstDeclRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
@@ -199,49 +202,63 @@ func (sp *SetupPhase) preciseMatching(
 		set.SetPackageName(tree.Name.Name)
 
 		for _, r := range rules {
-			// Let's match with the rule precisely
-			switch rt := r.(type) {
-			case *rule.InstFuncRule:
-				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
-				if funcDecl != nil {
-					set.AddFuncRule(source, rt)
-					sp.Info("Match func rule", "rule", rt, "dep", dep)
-				}
-			case *rule.InstStructRule:
-				structDecl := ast.FindStructDecl(tree, rt.Struct)
-				if structDecl != nil {
-					set.AddStructRule(source, rt)
-					sp.Info("Match struct rule", "rule", rt, "dep", dep)
-				}
-			case *rule.InstRawRule:
-				funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
-				if funcDecl != nil {
-					set.AddRawRule(source, rt)
-					sp.Info("Match raw rule", "rule", rt, "dep", dep)
-				}
-			case *rule.InstCallRule:
-				// Call rules are added unconditionally to all source files in the
-				// target package. Unlike func/struct/raw rules, there is no cheap
-				// AST predicate to pre-filter files (the matching requires import
-				// alias resolution which happens during the instrument phase).
-				// Files without matching calls are a no-op in applyCallRule.
-				set.AddCallRule(source, rt)
-				sp.Info("Match call rule", "rule", rt, "dep", dep)
-			case *rule.InstDirectiveRule:
-				if !ast.FileHasDirective(tree, rt.Directive) {
-					continue
-				}
-				set.AddDirectiveRule(source, rt)
-				sp.Info("Match directive rule", "rule", rt, "dep", dep)
-			case *rule.InstFileRule:
-				// Skip as it's already processed
-				continue
-			default:
-				util.ShouldNotReachHere()
-			}
+			sp.matchOneRule(tree, source, r, set, dep)
 		}
 	}
 	return set, nil
+}
+
+// matchOneRule performs precise AST matching for a single rule against a parsed
+// source file, adding the rule to the set if it matches.
+func (sp *SetupPhase) matchOneRule(
+	tree *dst.File,
+	source string,
+	r rule.InstRule,
+	set *rule.InstRuleSet,
+	dep *Dependency,
+) {
+	switch rt := r.(type) {
+	case *rule.InstFuncRule:
+		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
+		if funcDecl != nil && ast.FuncDeclMatchesFilters(funcDecl, rt) {
+			set.AddFuncRule(source, rt)
+			sp.Info("Match func rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstStructRule:
+		structDecl := ast.FindStructDecl(tree, rt.Struct)
+		if structDecl != nil {
+			set.AddStructRule(source, rt)
+			sp.Info("Match struct rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstRawRule:
+		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
+		if funcDecl != nil {
+			set.AddRawRule(source, rt)
+			sp.Info("Match raw rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstCallRule:
+		// Call rules are added unconditionally to all source files in the
+		// target package. Unlike func/struct/raw rules, there is no cheap
+		// AST predicate to pre-filter files (the matching requires import
+		// alias resolution which happens during the instrument phase).
+		// Files without matching calls are a no-op in applyCallRule.
+		set.AddCallRule(source, rt)
+		sp.Info("Match call rule", "rule", rt, "dep", dep)
+	case *rule.InstDirectiveRule:
+		if ast.FileHasDirective(tree, rt.Directive) {
+			set.AddDirectiveRule(source, rt)
+			sp.Info("Match directive rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstDeclRule:
+		if ast.FindNamedDecl(tree, rt.Identifier, rt.Kind) != nil {
+			set.AddDeclRule(source, rt)
+			sp.Info("Match decl rule", "rule", rt, "dep", dep)
+		}
+	case *rule.InstFileRule:
+		// Skip as it's already processed
+	default:
+		util.ShouldNotReachHere()
+	}
 }
 
 func ruleFromDir(path string) ([]string, error) {
