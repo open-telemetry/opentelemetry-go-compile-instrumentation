@@ -145,20 +145,20 @@ func TestFuncDeclMatchesFilters_SignatureContains(t *testing.T) {
 	}
 }
 
-func TestFuncDeclMatchesFilters_ResultImplements(t *testing.T) {
+func TestFuncDeclMatchesFilters_ResultType(t *testing.T) {
 	// func() (io.Reader, error)
 	decl := makeFuncDecl(
 		nil,
 		[]*dst.Field{field(selector("io", "Reader")), field(ident("error"))},
 	)
 
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultImplements: strPtr("error")}))
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultImplements: strPtr("io.Reader")}))
-	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultImplements: strPtr("io.Writer")}))
-	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultImplements: strPtr("string")}))
+	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultType: strPtr("error")}))
+	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultType: strPtr("io.Reader")}))
+	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultType: strPtr("io.Writer")}))
+	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultType: strPtr("string")}))
 }
 
-func TestFuncDeclMatchesFilters_FinalResultImplements(t *testing.T) {
+func TestFuncDeclMatchesFilters_LastResultType(t *testing.T) {
 	// func() (io.Reader, error)
 	decl := makeFuncDecl(
 		nil,
@@ -166,21 +166,21 @@ func TestFuncDeclMatchesFilters_FinalResultImplements(t *testing.T) {
 	)
 
 	// error is the final result
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{FinalResultImplements: strPtr("error")}))
+	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{LastResultType: strPtr("error")}))
 	// io.Reader is NOT the final result
-	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{FinalResultImplements: strPtr("io.Reader")}))
+	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{LastResultType: strPtr("io.Reader")}))
 }
 
-func TestFuncDeclMatchesFilters_ArgumentImplements(t *testing.T) {
+func TestFuncDeclMatchesFilters_ArgumentType(t *testing.T) {
 	// func(context.Context, string) error
 	decl := makeFuncDecl(
 		[]*dst.Field{field(selector("context", "Context")), field(ident("string"))},
 		[]*dst.Field{field(ident("error"))},
 	)
 
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentImplements: strPtr("context.Context")}))
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentImplements: strPtr("string")}))
-	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentImplements: strPtr("int")}))
+	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentType: strPtr("context.Context")}))
+	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentType: strPtr("string")}))
+	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentType: strPtr("int")}))
 }
 
 func TestFuncDeclMatchesFilters_CombinedFilters(t *testing.T) {
@@ -193,17 +193,17 @@ func TestFuncDeclMatchesFilters_CombinedFilters(t *testing.T) {
 	// All filters match → true
 	sig := rule.FuncSignature{Args: []string{"context.Context", "string"}, Returns: []string{"io.Reader", "error"}}
 	r := &rule.InstFuncRule{
-		Signature:             &sig,
-		ResultImplements:      strPtr("error"),
-		FinalResultImplements: strPtr("error"),
-		ArgumentImplements:    strPtr("context.Context"),
+		Signature:      &sig,
+		ResultType:     strPtr("error"),
+		LastResultType: strPtr("error"),
+		ArgumentType:   strPtr("context.Context"),
 	}
 	assert.True(t, FuncDeclMatchesFilters(decl, r))
 
-	// Signature matches but ArgumentImplements doesn't → false
+	// Signature matches but ArgumentType doesn't → false
 	r2 := &rule.InstFuncRule{
-		Signature:          &sig,
-		ArgumentImplements: strPtr("int"),
+		Signature:    &sig,
+		ArgumentType: strPtr("int"),
 	}
 	assert.False(t, FuncDeclMatchesFilters(decl, r2))
 }

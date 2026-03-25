@@ -66,9 +66,9 @@ By default the rule matches any function with the given name (and optional recei
 | --- | --- | --- |
 | `signature` | object | Exact match — the parameter list and result list must match the given type sequences in order |
 | `signature_contains` | object | Partial match — at least one of the listed arg types appears anywhere in the parameter list **or** at least one of the listed return types appears anywhere in the result list |
-| `result_implements` | string | Any return type matches the named type |
-| `final_result_implements` | string | The last return type matches the named type |
-| `argument_implements` | string | Any parameter type matches the named type |
+| `result_type` | string | Any return type matches the named type |
+| `last_result_type` | string | The last return type matches the named type |
+| `argument_type` | string | Any parameter type matches the named type |
 
 `signature` and `signature_contains` each take an object with two optional lists:
 
@@ -77,7 +77,9 @@ By default the rule matches any function with the given name (and optional recei
 
 Type names follow the form `[*][pkg.]Name`, for example `error`, `context.Context`, `*http.Request`. Matching is structural (AST-level) rather than type-checker-based, so the package qualifier must match the local identifier used in the source file (typically the last path component, e.g. `http` for `"net/http"`).
 
-> **Note on `*_implements` semantics:** Because there is no type checker at instrumentation time, `result_implements`, `final_result_implements`, and `argument_implements` perform an exact type-name match rather than full interface-satisfaction checking. For example, `result_implements: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`.
+> **Note on `*_type` semantics:** Because there is no type checker at instrumentation time, `result_type`, `last_result_type`, and `argument_type` perform an exact type-name match. For example, `result_type: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`.
+
+> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it and a warning will be logged at instrumentation time.
 
 **Example — match only functions with a specific signature:**
 
@@ -112,7 +114,7 @@ hook_ctx_funcs:
 hook_fallible:
   target: example.com/db
   func: Query
-  final_result_implements: error
+  last_result_type: error
   before: OnQuery
   path: example.com/hooks/db
 ```

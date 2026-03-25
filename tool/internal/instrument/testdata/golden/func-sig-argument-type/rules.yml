@@ -1,7 +1,7 @@
-func_sig_result_hook:
+func_sig_argument_hook:
   target: main
   func: Func1
-  result_implements: error
+  argument_type: string
   before: H1Before
   after: H1After
   path: testdata

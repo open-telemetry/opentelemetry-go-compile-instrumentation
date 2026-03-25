@@ -279,7 +279,7 @@ func AddStructField(decl dst.Decl, name, t string) {
 // and evaluation stops at the first failure.
 //
 // Matching uses structural comparison of dst.Expr nodes (no type checker).
-// For the *_implements filters this means an exact type-name match rather than
+// For the *_type filters this means an exact type-name match rather than
 // full interface-satisfaction checking.
 func FuncDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) bool {
 	ft := funcDecl.Type
@@ -294,18 +294,18 @@ func FuncDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) bool {
 			return false
 		}
 	}
-	if r.ResultImplements != nil {
-		if !fieldListContainsType(ft.Results, *r.ResultImplements) {
+	if r.ResultType != nil {
+		if !fieldListContainsType(ft.Results, *r.ResultType) {
 			return false
 		}
 	}
-	if r.FinalResultImplements != nil {
-		if !matchesFinalResult(ft.Results, *r.FinalResultImplements) {
+	if r.LastResultType != nil {
+		if !matchesLastResult(ft.Results, *r.LastResultType) {
 			return false
 		}
 	}
-	if r.ArgumentImplements != nil {
-		if !fieldListContainsType(ft.Params, *r.ArgumentImplements) {
+	if r.ArgumentType != nil {
+		if !fieldListContainsType(ft.Params, *r.ArgumentType) {
 			return false
 		}
 	}
@@ -321,17 +321,20 @@ func matchesExactSignature(ft *dst.FuncType, sig *rule.FuncSignature) bool {
 
 // matchesFieldList returns true when expected type strings match the types in
 // fields exactly (same count, same order).
+// Multi-name fields (e.g. "a, b int") are split before comparison so that
+// each name maps to exactly one type entry.
 func matchesFieldList(expected []string, fields *dst.FieldList) bool {
+	split := SplitMultiNameFields(fields)
 	count := 0
-	if fields != nil {
-		count = len(fields.List)
+	if split != nil {
+		count = len(split.List)
 	}
 	if len(expected) != count {
 		return false
 	}
 	for i, typeStr := range expected {
 		tn, err := parseTypeName(typeStr)
-		if err != nil || !tn.matches(fields.List[i].Type) {
+		if err != nil || !tn.matches(split.List[i].Type) {
 			return false
 		}
 	}
@@ -355,8 +358,8 @@ func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature) bool {
 	return false
 }
 
-// matchesFinalResult returns true when the last entry in fields matches typeStr.
-func matchesFinalResult(fields *dst.FieldList, typeStr string) bool {
+// matchesLastResult returns true when the last entry in fields matches typeStr.
+func matchesLastResult(fields *dst.FieldList, typeStr string) bool {
 	if fields == nil || len(fields.List) == 0 {
 		return false
 	}

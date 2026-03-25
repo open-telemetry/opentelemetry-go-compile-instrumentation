@@ -39,9 +39,9 @@ type FuncSignature struct {
 //	  returns: [error]
 //	signature_contains:
 //	  args: [context.Context]
-//	result_implements: error
-//	final_result_implements: error
-//	argument_implements: context.Context
+//	result_type: error
+//	last_result_type: error
+//	argument_type: context.Context
 type InstFuncRule struct {
 	InstBaseRule `yaml:",inline"`
 
@@ -53,11 +53,11 @@ type InstFuncRule struct {
 
 	// Optional signature sub-filters (all non-nil filters must match; combined
 	// with AND logic so any combination is allowed).
-	Signature             *FuncSignature `json:"signature,omitempty"               yaml:"signature"`
-	SignatureContains     *FuncSignature `json:"signature_contains,omitempty"      yaml:"signature_contains"`
-	ResultImplements      *string        `json:"result_implements,omitempty"       yaml:"result_implements"`
-	FinalResultImplements *string        `json:"final_result_implements,omitempty" yaml:"final_result_implements"`
-	ArgumentImplements    *string        `json:"argument_implements,omitempty"     yaml:"argument_implements"`
+	Signature         *FuncSignature `json:"signature,omitempty"            yaml:"signature"`
+	SignatureContains *FuncSignature `json:"signature_contains,omitempty"   yaml:"signature_contains"`
+	ResultType        *string        `json:"result_type,omitempty"          yaml:"result_type"`
+	LastResultType    *string        `json:"last_result_type,omitempty"    yaml:"last_result_type"`
+	ArgumentType      *string        `json:"argument_type,omitempty"        yaml:"argument_type"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
