@@ -244,8 +244,14 @@ func TestStartCreatesDirectory(t *testing.T) {
 }
 
 func TestStartInvalidDir(t *testing.T) {
-	// /dev/null is a file, not a directory — MkdirAll will fail.
-	_, err := Start("/dev/null/nope", []Type{Heap})
+	// Create a regular file, then try to use it as a directory — MkdirAll fails on all platforms.
+	f, createErr := os.CreateTemp(t.TempDir(), "not-a-dir")
+	if createErr != nil {
+		t.Fatalf("create temp file: %v", createErr)
+	}
+	_ = f.Close()
+
+	_, err := Start(filepath.Join(f.Name(), "subdir"), []Type{Heap})
 	if err == nil {
 		t.Fatal("Start() with invalid dir returned nil error, want error")
 	}
