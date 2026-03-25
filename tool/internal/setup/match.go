@@ -40,6 +40,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstStructRule(raw, name)
 	case fields["file"] != nil:
 		return rule.NewInstFileRule(raw, name)
+	case fields["directive"] != nil:
+		return rule.NewInstDirectiveRule(raw, name)
 	case fields["raw"] != nil:
 		return rule.NewInstRawRule(raw, name)
 	case fields["func"] != nil:
@@ -225,6 +227,12 @@ func (sp *SetupPhase) preciseMatching(
 				// Files without matching calls are a no-op in applyCallRule.
 				set.AddCallRule(source, rt)
 				sp.Info("Match call rule", "rule", rt, "dep", dep)
+			case *rule.InstDirectiveRule:
+				if !ast.FileHasDirective(tree, rt.Directive) {
+					continue
+				}
+				set.AddDirectiveRule(source, rt)
+				sp.Info("Match directive rule", "rule", rt, "dep", dep)
 			case *rule.InstFileRule:
 				// Skip as it's already processed
 				continue

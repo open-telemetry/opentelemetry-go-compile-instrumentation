@@ -230,6 +230,26 @@ version: v1.0.0,v2.0.0
 			expectedType: "*rule.InstStructRule",
 		},
 		{
+			name: "directive rule creation",
+			yamlContent: `
+directive: "otelc:span"
+target: github.com/example/lib
+template: "_ = 0"
+`,
+			ruleName:     "test-directive-rule",
+			expectError:  false,
+			expectedType: "*rule.InstDirectiveRule",
+		},
+		{
+			name: "directive rule missing field",
+			yamlContent: `
+directive: ""
+target: github.com/example/lib
+`,
+			ruleName:    "test-invalid-directive-rule",
+			expectError: true,
+		},
+		{
 			name: "invalid yaml syntax",
 			yamlContent: `
 struct: [
