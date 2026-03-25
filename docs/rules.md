@@ -78,8 +78,8 @@ By default the rule matches any function with the given name (and optional recei
 Type names follow the form `[*][pkg.]Name`, for example `error`, `context.Context`, `*http.Request`. Matching is structural (AST-level) rather than type-checker-based, so the package qualifier must match the local identifier used in the source file (typically the last path component, e.g. `http` for `"net/http"`).
 
 > **Note on `*_type` semantics:** Because there is no type checker at instrumentation time, `result_type`, `last_result_type`, and `argument_type` perform an exact type-name match. For example, `result_type: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`.
-
-> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it and a warning will be logged at instrumentation time.
+>
+> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it.
 
 **Example — match only functions with a specific signature:**
 
