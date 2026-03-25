@@ -12,9 +12,9 @@
 // The filter tree maps directly onto the YAML where clause:
 //
 //	where:
-//	  all-of:           # AllOf combinator (not yet implemented)
-//	    - func: Foo     # FuncFilter leaf
-//	    - struct: Bar   # StructFilter leaf
+//	  all-of:               # AllOf combinator (not yet implemented)
+//	    - has_func: Foo     # FuncFilter leaf
+//	    - has_struct: Bar   # StructFilter leaf
 package filter
 
 import "github.com/dave/dst"

@@ -26,37 +26,40 @@ type InstRule interface {
 	GetWhere() *FilterDef // The optional join point filter; nil means no additional filtering
 }
 
-// FilterDef describes a filter predicate tree for a join point. It is the YAML
-// representation of a filter and is evaluated during the setup phase to decide
-// whether a rule applies to a given source file.
+// FilterDef describes a file-level predicate for a join point rule. It is the
+// YAML representation of a where clause and is evaluated during the setup phase
+// to decide whether a rule applies to a given source file.
 //
-// A FilterDef is either a leaf (exactly one of Func/Recv, Struct, Directive,
-// ImportPath, PackageName, TestMain) or a combinator (AllOf, OneOf, Not).
-// Combinators contain nested FilterDef instances. In this branch, exactly
-// one leaf predicate must be set on any given FilterDef. Combinators are
-// defined in the schema but not yet implemented; they return an error from
-// filter.Build.
+// FilterDef sits at Tier 2 of the 3-tier instrumentation model:
 //
-// Recv is only meaningful alongside Func; it narrows the function match to a
-// specific receiver type.
+//	Tier 1 — Package Scope: target (exact or glob) + version
+//	Tier 2 — File Predicate: where clause (this type)
+//	Tier 3 — Point Selector: rule-type fields (func, struct, directive, …)
+//
+// A FilterDef is either a leaf (exactly one of HasFunc/Recv, HasStruct,
+// HasDirective, IncludeTest) or a combinator (AllOf, OneOf, Not). Combinators
+// contain nested FilterDef instances. Exactly one leaf predicate must be set
+// on any given FilterDef. Combinators are defined in the schema but not yet
+// implemented; they return an error from filter.Build.
+//
+// The has_ prefix on leaf fields distinguishes file predicates from Tier 3
+// point selectors: "func: Handler" at rule level means "instrument Handler",
+// while "has_func: init" in where means "only in files that contain init()".
+//
+// HasRecv is only meaningful alongside HasFunc; it narrows the function match to
+// a specific receiver type.
 type FilterDef struct {
 	// Combinators — not yet implemented; return an error from Build.
 	AllOf []FilterDef `json:"all-of,omitempty" yaml:"all-of,omitempty"`
 	OneOf []FilterDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
 	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`
 
-	// Leaf filters — supported by Build.
-	Func      string `json:"func,omitempty"      yaml:"func,omitempty"`
-	Recv      string `json:"recv,omitempty"      yaml:"recv,omitempty"` // optional, requires Func
-	Struct    string `json:"struct,omitempty"    yaml:"struct,omitempty"`
-	Directive string `json:"directive,omitempty" yaml:"directive,omitempty"` // not yet implemented
-
-	// Import path glob filter — not yet implemented.
-	ImportPath string `json:"import_path,omitempty" yaml:"import_path,omitempty"`
-	// Package name filter — not yet implemented.
-	PackageName string `json:"package_name,omitempty" yaml:"package_name,omitempty"`
-	// TestMain filter — not yet implemented.
-	TestMain *bool `json:"test_main,omitempty" yaml:"test_main,omitempty"`
+	// Leaf file predicates — supported by Build.
+	HasFunc      string `json:"has_func,omitempty"       yaml:"has_func,omitempty"`
+	HasRecv      string `json:"has_recv,omitempty"       yaml:"has_recv,omitempty"` // optional, requires HasFunc
+	HasStruct    string `json:"has_struct,omitempty"     yaml:"has_struct,omitempty"`
+	HasDirective string `json:"has_directive,omitempty"  yaml:"has_directive,omitempty"` // not yet implemented
+	IncludeTest  *bool  `json:"include_test,omitempty"   yaml:"include_test,omitempty"`  // not yet implemented
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.

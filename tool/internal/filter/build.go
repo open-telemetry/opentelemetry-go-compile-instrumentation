@@ -16,8 +16,8 @@ import (
 //
 // Returns an error when def contains an invalid or not-yet-implemented
 // configuration. Unsupported combinators (all-of, one-of, not) and
-// not-yet-implemented leaf types (directive, import_path, package_name,
-// test_main) return descriptive errors.
+// not-yet-implemented leaf types (has_directive, include_test) return
+// descriptive errors.
 //
 //nolint:nilnil // nil Filter is a valid return: it means "no filtering required"
 func Build(def *rule.FilterDef) (Filter, error) {
@@ -39,30 +39,24 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 		return nil, ex.Newf("not combinator is not yet supported")
 	}
 
-	// Recv without Func is a misconfiguration — catch it early.
-	if def.Recv != "" && def.Func == "" {
-		return nil, ex.Newf("recv requires func to be set in filter definition")
+	// HasRecv without HasFunc is a misconfiguration — catch it early.
+	if def.HasRecv != "" && def.HasFunc == "" {
+		return nil, ex.Newf("has_recv requires has_func to be set in filter definition")
 	}
 
-	// Count active leaf predicates (Recv is part of Func, not independent).
+	// Count active leaf predicates (Recv is part of HasFunc, not independent).
 	// Keep this block in sync with the FilterDef predicate fields.
 	active := 0
-	if def.Func != "" {
+	if def.HasFunc != "" {
 		active++
 	}
-	if def.Struct != "" {
+	if def.HasStruct != "" {
 		active++
 	}
-	if def.Directive != "" {
+	if def.HasDirective != "" {
 		active++
 	}
-	if def.ImportPath != "" {
-		active++
-	}
-	if def.PackageName != "" {
-		active++
-	}
-	if def.TestMain != nil {
+	if def.IncludeTest != nil {
 		active++
 	}
 
@@ -77,18 +71,14 @@ func buildDef(def *rule.FilterDef) (Filter, error) {
 	}
 
 	switch {
-	case def.Func != "":
-		return &FuncFilter{Func: def.Func, Recv: def.Recv}, nil
-	case def.Struct != "":
-		return &StructFilter{Struct: def.Struct}, nil
-	case def.Directive != "":
-		return nil, ex.Newf("directive filter requires directive support (not yet available)")
-	case def.ImportPath != "":
-		return nil, ex.Newf("import_path filter is not yet supported")
-	case def.PackageName != "":
-		return nil, ex.Newf("package_name filter is not yet supported")
-	case def.TestMain != nil:
-		return nil, ex.Newf("test_main filter is not yet supported")
+	case def.HasFunc != "":
+		return &FuncFilter{Func: def.HasFunc, Recv: def.HasRecv}, nil
+	case def.HasStruct != "":
+		return &StructFilter{Struct: def.HasStruct}, nil
+	case def.HasDirective != "":
+		return nil, ex.Newf("has_directive filter requires directive support (not yet available)")
+	case def.IncludeTest != nil:
+		return nil, ex.Newf("include_test filter is not yet supported")
 	default:
 		// Unreachable: active == 1 guarantees one of the cases above matched.
 		// If this fires, a new FilterDef field was added without a matching case.

@@ -4,7 +4,12 @@
 package filter_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/filter"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -21,7 +26,7 @@ func TestBuild_NilDef(t *testing.T) {
 }
 
 func TestBuild_FuncFilter(t *testing.T) {
-	def := &rule.FilterDef{Func: "ServeHTTP", Recv: "*serverHandler"}
+	def := &rule.FilterDef{HasFunc: "ServeHTTP", HasRecv: "*serverHandler"}
 	f, err := filter.Build(def)
 	if err != nil {
 		t.Fatalf("Build(%+v) error = %v, want nil", def, err)
@@ -39,7 +44,7 @@ func TestBuild_FuncFilter(t *testing.T) {
 }
 
 func TestBuild_FuncFilter_NoRecv(t *testing.T) {
-	def := &rule.FilterDef{Func: "MyFunc"}
+	def := &rule.FilterDef{HasFunc: "MyFunc"}
 	f, err := filter.Build(def)
 	if err != nil {
 		t.Fatalf("Build(%+v) error = %v, want nil", def, err)
@@ -57,7 +62,7 @@ func TestBuild_FuncFilter_NoRecv(t *testing.T) {
 }
 
 func TestBuild_StructFilter(t *testing.T) {
-	def := &rule.FilterDef{Struct: "MyStruct"}
+	def := &rule.FilterDef{HasStruct: "MyStruct"}
 	f, err := filter.Build(def)
 	if err != nil {
 		t.Fatalf("Build(%+v) error = %v, want nil", def, err)
@@ -81,8 +86,8 @@ func TestBuild_Error_EmptyFilterDef(t *testing.T) {
 	}
 }
 
-func TestBuild_Error_RecvWithoutFunc(t *testing.T) {
-	f, err := filter.Build(&rule.FilterDef{Recv: "*serverHandler"})
+func TestBuild_Error_HasRecvWithoutFunc(t *testing.T) {
+	f, err := filter.Build(&rule.FilterDef{HasRecv: "*serverHandler"})
 	if err == nil {
 		t.Fatal("Build({Recv only}) error = nil, want error")
 	}
@@ -97,16 +102,12 @@ func TestBuild_Error_MultipleActiveLeaves(t *testing.T) {
 		def  *rule.FilterDef
 	}{
 		{
-			name: "func and struct",
-			def:  &rule.FilterDef{Func: "Foo", Struct: "Bar"},
+			name: "has_func and has_struct",
+			def:  &rule.FilterDef{HasFunc: "Foo", HasStruct: "Bar"},
 		},
 		{
-			name: "func and import_path",
-			def:  &rule.FilterDef{Func: "Foo", ImportPath: "example.com/**"},
-		},
-		{
-			name: "struct and package_name",
-			def:  &rule.FilterDef{Struct: "Bar", PackageName: "main"},
+			name: "has_func and has_directive",
+			def:  &rule.FilterDef{HasFunc: "Foo", HasDirective: "otelc:span"},
 		},
 	}
 	for _, tt := range tests {
@@ -126,31 +127,23 @@ func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 	}{
 		{
 			name: "all-of",
-			def:  &rule.FilterDef{AllOf: []rule.FilterDef{{Func: "Foo"}}},
+			def:  &rule.FilterDef{AllOf: []rule.FilterDef{{HasFunc: "Foo"}}},
 		},
 		{
 			name: "one-of",
-			def:  &rule.FilterDef{OneOf: []rule.FilterDef{{Func: "Foo"}}},
+			def:  &rule.FilterDef{OneOf: []rule.FilterDef{{HasFunc: "Foo"}}},
 		},
 		{
 			name: "not",
-			def:  &rule.FilterDef{Not: &rule.FilterDef{Func: "Foo"}},
+			def:  &rule.FilterDef{Not: &rule.FilterDef{HasFunc: "Foo"}},
 		},
 		{
-			name: "directive",
-			def:  &rule.FilterDef{Directive: "otelc:span"},
+			name: "has_directive",
+			def:  &rule.FilterDef{HasDirective: "otelc:span"},
 		},
 		{
-			name: "import_path",
-			def:  &rule.FilterDef{ImportPath: "example.com/**"},
-		},
-		{
-			name: "package_name",
-			def:  &rule.FilterDef{PackageName: "main"},
-		},
-		{
-			name: "test_main",
-			def:  &rule.FilterDef{TestMain: boolPtr(true)},
+			name: "include_test",
+			def:  &rule.FilterDef{IncludeTest: boolPtr(true)},
 		},
 	}
 	for _, tt := range tests {
@@ -166,3 +159,90 @@ func TestBuild_Error_UnsupportedCombinators(t *testing.T) {
 // boolPtr returns a pointer to the given bool value. Used to construct
 // *bool fields in FilterDef table entries without a named local variable.
 func boolPtr(b bool) *bool { return &b }
+
+// filterExpected is the decoded form of a .expected companion file.
+// It describes the expected type and fields of the Filter returned by Build.
+type filterExpected struct {
+	Type   string `yaml:"type"`
+	Func   string `yaml:"func"`
+	Recv   string `yaml:"recv"`
+	Struct string `yaml:"struct"`
+}
+
+// TestBuild_YAMLRoundTrip auto-discovers .yml files under testdata/where/ and
+// verifies that each FilterDef YAML round-trips correctly through filter.Build.
+//
+// Naming convention:
+//   - ok_*.yml — Build must succeed; a companion .expected file describes the
+//     expected Filter type and field values.
+//   - err_*.yml — Build must return an error.
+func TestBuild_YAMLRoundTrip(t *testing.T) {
+	const dir = "testdata/where"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q) error = %v", dir, err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".yml") {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			content, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatalf("ReadFile(%q) error = %v", name, err)
+			}
+			var def rule.FilterDef
+			if err := yaml.Unmarshal(content, &def); err != nil {
+				t.Fatalf("yaml.Unmarshal(%q) error = %v", name, err)
+			}
+
+			f, buildErr := filter.Build(&def)
+
+			if strings.HasPrefix(name, "err_") {
+				if buildErr == nil {
+					t.Fatalf("Build(%q) error = nil, want error", name)
+				}
+				return
+			}
+
+			// ok_* case: Build must succeed and match the .expected file.
+			if buildErr != nil {
+				t.Fatalf("Build(%q) error = %v, want nil", name, buildErr)
+			}
+			expectedFile := filepath.Join(dir, strings.TrimSuffix(name, ".yml")+".expected")
+			expectedContent, err := os.ReadFile(expectedFile)
+			if err != nil {
+				t.Fatalf("ReadFile(%q) error = %v", expectedFile, err)
+			}
+			var want filterExpected
+			if err := yaml.Unmarshal(expectedContent, &want); err != nil {
+				t.Fatalf("yaml.Unmarshal(%q) error = %v", expectedFile, err)
+			}
+
+			switch want.Type {
+			case "FuncFilter":
+				ff, ok := f.(*filter.FuncFilter)
+				if !ok {
+					t.Fatalf("Build(%q) = %T, want *filter.FuncFilter", name, f)
+				}
+				if ff.Func != want.Func {
+					t.Errorf("Build(%q) FuncFilter.Func = %q, want %q", name, ff.Func, want.Func)
+				}
+				if ff.Recv != want.Recv {
+					t.Errorf("Build(%q) FuncFilter.Recv = %q, want %q", name, ff.Recv, want.Recv)
+				}
+			case "StructFilter":
+				sf, ok := f.(*filter.StructFilter)
+				if !ok {
+					t.Fatalf("Build(%q) = %T, want *filter.StructFilter", name, f)
+				}
+				if sf.Struct != want.Struct {
+					t.Errorf("Build(%q) StructFilter.Struct = %q, want %q", name, sf.Struct, want.Struct)
+				}
+			default:
+				t.Fatalf("unexpected filter type in %q: %q", expectedFile, want.Type)
+			}
+		})
+	}
+}

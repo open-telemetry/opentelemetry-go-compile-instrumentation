@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -488,7 +489,7 @@ func TestPreciseMatching_WhereFilter(t *testing.T) {
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "test-where",
 			Target: "example.com/svc",
-			Where:  &rule.FilterDef{Struct: "Server"},
+			Where:  &rule.FilterDef{HasStruct: "Server"},
 		},
 		Func:   "Handler",
 		Before: "BeforeHandler",
@@ -518,7 +519,7 @@ func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "bad-where",
 			Target: "example.com/svc",
-			Where:  &rule.FilterDef{Func: "Foo", Struct: "Bar"},
+			Where:  &rule.FilterDef{HasFunc: "Foo", HasStruct: "Bar"},
 		},
 		Func: "Foo",
 	}
@@ -554,4 +555,83 @@ func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.In
 		rs.AddFuncRule(fakeFilePath, fr)
 	}
 	return rs
+}
+
+// goldenWhereExpected describes the expected outcome of a where-clause golden test case.
+type goldenWhereExpected struct {
+	MatchedFiles []string `json:"matched_files"`
+}
+
+// TestPreciseMatching_WhereGolden auto-discovers subdirectories under
+// testdata/where/, loading rules.yml and Go source files from each directory.
+// It calls preciseMatching with the loaded rules and verifies that the matched
+// files match the basenames listed in expected.json.
+//
+// Each subdirectory must contain:
+//   - rules.yml     — one or more rule definitions targeting "example.com/svc"
+//   - *.go files    — Go source files to match against
+//   - expected.json — {"matched_files": ["file.go", ...]}
+func TestPreciseMatching_WhereGolden(t *testing.T) {
+	const dir = "testdata/where"
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		t.Run(entry.Name(), func(t *testing.T) {
+			subdir := filepath.Join(dir, entry.Name())
+
+			// 1. Load and parse rules.yml.
+			rulesContent, err := os.ReadFile(filepath.Join(subdir, "rules.yml"))
+			require.NoError(t, err)
+			rules, err := parseRuleFromYaml(rulesContent)
+			require.NoError(t, err)
+			require.NotEmpty(t, rules)
+
+			// 2. Copy *.go files to a shared temporary directory.
+			//    preciseMatching requires absolute paths; copying ensures that
+			//    paths are stable and not embedded in the source tree.
+			tmpDir := t.TempDir()
+			goFiles, err := filepath.Glob(filepath.Join(subdir, "*.go"))
+			require.NoError(t, err)
+			require.NotEmpty(t, goFiles, "each golden test case must have at least one .go file")
+			sources := make([]string, 0, len(goFiles))
+			for _, src := range goFiles {
+				content, err := os.ReadFile(src)
+				require.NoError(t, err)
+				dst := filepath.Join(tmpDir, filepath.Base(src))
+				require.NoError(t, os.WriteFile(dst, content, 0o644))
+				sources = append(sources, dst)
+			}
+
+			// 3. Build Dependency and call preciseMatching.
+			dep := &Dependency{
+				ImportPath: "example.com/svc",
+				Sources:    sources,
+			}
+			sp := newTestSetupPhase()
+			set := rule.NewInstRuleSet(dep.ImportPath)
+			result, err := sp.preciseMatching(t.Context(), dep, rules, set)
+			require.NoError(t, err)
+
+			// 4. Load expected.json and compare matched file basenames.
+			expectedContent, err := os.ReadFile(filepath.Join(subdir, "expected.json"))
+			require.NoError(t, err)
+			var want goldenWhereExpected
+			require.NoError(t, json.Unmarshal(expectedContent, &want))
+
+			got := make(map[string]bool, len(result.FuncRules))
+			for path := range result.FuncRules {
+				got[filepath.Base(path)] = true
+			}
+			require.Len(t, got, len(want.MatchedFiles),
+				"matched file count: got %v, want %v", got, want.MatchedFiles)
+			for _, wantFile := range want.MatchedFiles {
+				require.True(t, got[wantFile],
+					"expected %q to be matched, got %v", wantFile, got)
+			}
+		})
+	}
 }
