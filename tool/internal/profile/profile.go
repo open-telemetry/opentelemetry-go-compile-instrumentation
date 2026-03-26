@@ -73,7 +73,6 @@ func ParseTypes(s string) ([]Type, error) {
 // Each profile file is stamped with the current process PID so parallel
 // sub-processes never collide.
 func Start(dir string, types []Type) (*Session, error) {
-	//nolint:gosec // G703: dir is validated and resolved to an absolute path by the caller (initProfiling)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create profile directory %q: %w", dir, err)
 	}
