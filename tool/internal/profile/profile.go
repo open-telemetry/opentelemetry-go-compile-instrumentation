@@ -153,26 +153,6 @@ func (s *Session) Stop() error {
 	return errors.Join(errs...)
 }
 
-// StartFromEnv reads EnvProfilePath and EnvEnabledProfiles from the environment
-// and starts profiling if both are set. Returns (nil, nil) if profiling is not configured.
-func StartFromEnv() (*Session, error) {
-	dir := os.Getenv(EnvProfilePath)
-	raw := os.Getenv(EnvEnabledProfiles)
-	if dir == "" || raw == "" {
-		return nil, nil //nolint:nilnil // nil session + nil error is the API contract for "not configured"
-	}
-
-	types, err := ParseTypes(raw)
-	if err != nil {
-		return nil, err
-	}
-	if len(types) == 0 {
-		return nil, nil //nolint:nilnil // nil session + nil error is the API contract for "not configured"
-	}
-
-	return Start(dir, types)
-}
-
 // Merge merges all PID-stamped profile files in dir into a single file per type.
 // The individual PID-stamped files are removed after a successful merge.
 //

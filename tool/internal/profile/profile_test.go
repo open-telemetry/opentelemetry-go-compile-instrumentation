@@ -167,56 +167,6 @@ func TestStartStopAll(t *testing.T) {
 	assertFileExists(t, filepath.Join(dir, fmt.Sprintf("otelc-%d.trace", pid)))
 }
 
-func TestStartFromEnv(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv(EnvProfilePath, dir)
-	t.Setenv(EnvEnabledProfiles, "cpu,heap")
-
-	s, err := StartFromEnv()
-	if err != nil {
-		t.Fatalf("StartFromEnv() error: %v", err)
-	}
-	if s == nil {
-		t.Fatal("StartFromEnv() returned nil session, want non-nil")
-	}
-
-	if stopErr := s.Stop(); stopErr != nil {
-		t.Fatalf("Stop() error: %v", stopErr)
-	}
-
-	pid := os.Getpid()
-	assertFileExists(t, filepath.Join(dir, fmt.Sprintf("otelc-cpu-%d.pprof", pid)))
-	assertFileExists(t, filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", pid)))
-}
-
-func TestStartFromEnvDisabled(t *testing.T) {
-	// Neither env var set — profiling should be disabled.
-	t.Setenv(EnvProfilePath, "")
-	t.Setenv(EnvEnabledProfiles, "")
-
-	s, err := StartFromEnv()
-	if err != nil {
-		t.Fatalf("StartFromEnv() unexpected error: %v", err)
-	}
-	if s != nil {
-		t.Errorf("StartFromEnv() = non-nil session, want nil when env vars are unset")
-	}
-}
-
-func TestStartFromEnvPathOnlyNoProfiles(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv(EnvProfilePath, dir)
-	t.Setenv(EnvEnabledProfiles, "")
-
-	s, err := StartFromEnv()
-	if err != nil {
-		t.Fatalf("StartFromEnv() unexpected error: %v", err)
-	}
-	if s != nil {
-		t.Errorf("StartFromEnv() = non-nil session, want nil when no profiles specified")
-	}
-}
-
 func TestStopNilSession(t *testing.T) {
 	var s *Session
 	if err := s.Stop(); err != nil {

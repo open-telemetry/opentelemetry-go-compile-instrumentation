@@ -5,14 +5,13 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/profile"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -35,20 +34,20 @@ func initProfiling(ctx context.Context, cmd *cli.Command) (context.Context, erro
 
 	// --profile requires --profile-path.
 	if profilePath == "" {
-		return ctx, errors.New("--profile-path is required when --profile is set")
+		return ctx, ex.Newf("--profile-path is required when --profile is set")
 	}
 
 	// Resolve to absolute path so child processes with a different CWD can find it.
 	var err error
 	profilePath, err = filepath.Abs(profilePath)
 	if err != nil {
-		return ctx, fmt.Errorf("resolve profile path: %w", err)
+		return ctx, ex.Wrapf(err, "resolve profile path")
 	}
 
 	// Guard against placing profiles inside .otelc-build/ which Cleanup removes.
 	buildTemp := util.GetBuildTempDir()
 	if strings.HasPrefix(profilePath, buildTemp) {
-		return ctx, fmt.Errorf(
+		return ctx, ex.Newf(
 			"profile-path %q must not be inside the build temp directory %q",
 			profilePath, buildTemp,
 		)
@@ -64,10 +63,10 @@ func initProfiling(ctx context.Context, cmd *cli.Command) (context.Context, erro
 	// Set env vars BEFORE starting profiling so that os.Environ() in
 	// BuildWithToolexec (setup.go) propagates them to child processes.
 	if setErr := os.Setenv(profile.EnvProfilePath, profilePath); setErr != nil {
-		return ctx, fmt.Errorf("set %s: %w", profile.EnvProfilePath, setErr)
+		return ctx, ex.Wrapf(setErr, "set %s", profile.EnvProfilePath)
 	}
 	if setErr := os.Setenv(profile.EnvEnabledProfiles, joined); setErr != nil {
-		return ctx, fmt.Errorf("set %s: %w", profile.EnvEnabledProfiles, setErr)
+		return ctx, ex.Wrapf(setErr, "set %s", profile.EnvEnabledProfiles)
 	}
 
 	session, err := profile.Start(profilePath, types)
@@ -111,10 +110,10 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 	rawTypes := os.Getenv(profile.EnvEnabledProfiles)
 	types, parseErr := profile.ParseTypes(rawTypes)
 	if parseErr != nil || len(types) == 0 {
-		return errors.Join(stopErr, parseErr)
+		return ex.Join(stopErr, parseErr)
 	}
 
 	logger.InfoContext(ctx, "merging profile files", "dir", profileDir)
 	mergeErr := profile.Merge(ctx, profileDir, types)
-	return errors.Join(stopErr, mergeErr)
+	return ex.Join(stopErr, mergeErr)
 }
