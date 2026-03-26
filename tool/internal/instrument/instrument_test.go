@@ -104,13 +104,15 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	yaml.Unmarshal(data, &rawRules)
 
 	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackage,
-		ModulePath:  mainPackage,
-		FuncRules:   make(map[string][]*rule.InstFuncRule),
-		StructRules: make(map[string][]*rule.InstStructRule),
-		RawRules:    make(map[string][]*rule.InstRawRule),
-		CallRules:   make(map[string][]*rule.InstCallRule),
-		FileRules:   make([]*rule.InstFileRule, 0),
+		PackageName:    mainPackage,
+		ModulePath:     mainPackage,
+		FuncRules:      make(map[string][]*rule.InstFuncRule),
+		StructRules:    make(map[string][]*rule.InstStructRule),
+		RawRules:       make(map[string][]*rule.InstRawRule),
+		CallRules:      make(map[string][]*rule.InstCallRule),
+		DirectiveRules: make(map[string][]*rule.InstDirectiveRule),
+		DeclRules:      make(map[string][]*rule.InstDeclRule),
+		FileRules:      make([]*rule.InstFileRule, 0),
 	}
 
 	// Sort rule names to ensure deterministic order in tests
@@ -132,6 +134,9 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		case props["file"] != nil:
 			r, _ := rule.NewInstFileRule(ruleData, name)
 			ruleSet.FileRules = append(ruleSet.FileRules, r)
+		case props["directive"] != nil:
+			r, _ := rule.NewInstDirectiveRule(ruleData, name)
+			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
 		case props["raw"] != nil:
 			r, _ := rule.NewInstRawRule(ruleData, name)
 			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
@@ -141,6 +146,9 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		case props["function_call"] != nil:
 			r, _ := rule.NewInstCallRule(ruleData, name)
 			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
+		case props["identifier"] != nil:
+			r, _ := rule.NewInstDeclRule(ruleData, name)
+			ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
 		}
 	}
 
@@ -333,6 +341,23 @@ func TestGroupRules(t *testing.T) {
 			},
 		},
 		{
+			name: "decl rules only",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				DeclRules: map[string][]*rule.InstDeclRule{
+					"file1.go": {
+						{InstBaseRule: rule.InstBaseRule{Name: "decl1"}, Identifier: "GlobalVar"},
+					},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
+			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
+				assert.Len(t, grouped["file1.go"], 1)
+			},
+		},
+		{
 			name: "multiple rules of same type in same file",
 			ruleSet: &rule.InstRuleSet{
 				FuncRules: map[string][]*rule.InstFuncRule{
@@ -366,6 +391,25 @@ func TestGroupRules(t *testing.T) {
 			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
 				assert.Len(t, grouped["file1.go"], 1)
 			},
+		},
+		{
+			name: "directive rules included in grouping",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				CallRules:   make(map[string][]*rule.InstCallRule),
+				DirectiveRules: map[string][]*rule.InstDirectiveRule{
+					"file1.go": {
+						{
+							InstBaseRule: rule.InstBaseRule{Name: "directive1"},
+							Directive:    "otelc:span",
+							Template:     "_ = 0",
+						},
+					},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
 		},
 	}
 

@@ -3,6 +3,8 @@
 
 package main
 
+var GlobalVar = "original"
+
 type T struct {
 	Field1 string
 	Field2 int
