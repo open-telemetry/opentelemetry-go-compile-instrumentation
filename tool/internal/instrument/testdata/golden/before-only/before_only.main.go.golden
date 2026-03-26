@@ -5,6 +5,8 @@ package main
 
 import _ "unsafe"
 
+var GlobalVar = "original"
+
 type T struct{}
 
 func (t *T) Func1(p1 string, p2 int) (float32, error) {
@@ -16,9 +18,9 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	if OtelBeforeTrampoline_Func12350319093(&p1, &p2); false {
 	} else {
 	}
-	//line main.go:13:2
+	//line main.go:15:2
 	println("Hello, World!")
-	//line main.go:14:2
+	//line main.go:16:2
 	return 0.0, nil
 }
 
