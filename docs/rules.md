@@ -2,12 +2,32 @@
 
 This document explains the different types of instrumentation rules used by the Go compile-time instrumentation tool. These rules, defined in YAML files, allow for the injection of code into target Go packages.
 
+## Rule Structure
+
+Every rule uses a structured `where`/`do` format:
+
+```yaml
+rule_name:
+  where:          # selector fields — which code to target
+    target: ...
+    # type-specific selector fields
+  do:             # exactly one modifier action
+    modifier_name:
+      # modifier-specific fields
+  imports:        # optional; stays at top level
+    alias: "import/path"
+```
+
+- `where` — groups all selector/matcher fields (`target`, `version`, `func`, `recv`, `struct`, etc.)
+- `do` — contains exactly one named modifier action that determines the rule type
+- `imports` — optional map of import alias → import path; stays at the rule top level
+
 ## Common Fields
 
-All rules share a set of common fields that define the target of the instrumentation.
+The following fields appear in the `where` block and are shared across all rule types.
 
-- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package.
-- `version` (string, optional): Specifies a version range for the target package. The rule will only be applied if the package's version falls within this range. The format is `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` means the rule applies to versions greater than or equal to `v0.11.0` and less than `v0.12.0`. If omitted, the rule applies to all versions.
+- `where.target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package.
+- `where.version` (string, optional): Specifies a version range for the target package. The rule will only be applied if the package's version falls within this range. The format is `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` means the rule applies to versions greater than or equal to `v0.11.0` and less than `v0.12.0`. If omitted, the rule applies to all versions.
 - `imports` (map[string]string, optional): A map of imports to inject into the instrumented file. The key is the import alias and the value is the import path. For standard imports without an alias, use the package name as both key and value. For blank imports, use `_` as the key. This field is used by raw, struct, and call rules. Function hook rules do not require it — their imports are detected automatically from the hook source file.
 
   Examples:
@@ -35,10 +55,13 @@ This is the most common rule type. It injects function calls at the beginning (`
 - Adding logging statements to function entries and exits.
 - Recording metrics about function calls.
 
-**Fields:**
+**Selector fields (in `where`):**
 
 - `func` (string, required): The name of the target function to be instrumented.
 - `recv` (string, optional): The receiver type for a method. For a standalone function, this field should be omitted. For a pointer receiver, it should be prefixed with `*`, e.g., `*MyStruct`.
+
+**Modifier fields (in `do > inject_hooks`):**
+
 - `before` (string, optional): The name of the function to be called at the entry of the target function.
 - `after` (string, optional): The name of the function to be called just before the target function returns.
 - `path` (string, required): The import path for the package containing the `before` and `after` hook functions.
@@ -47,11 +70,14 @@ This is the most common rule type. It injects function calls at the beginning (`
 
 ```yaml
 hook_helloworld:
-  target: main
-  func: Example
-  before: MyHookBefore
-  after: MyHookAfter
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+  where:
+    target: main
+    func: Example
+  do:
+    inject_hooks:
+      before: MyHookBefore
+      after: MyHookAfter
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
 ```
 
 This rule will inject `MyHookBefore` at the start of the `Example` function in the `main` package, and `MyHookAfter` at the end. The hook functions are located in the specified `path`.
@@ -67,9 +93,12 @@ This rule adds one or more new fields to a specified struct type.
 - Adding a context field to a struct to enable tracing through its methods.
 - Extending existing data structures with new information without modifying the original source code.
 
-**Fields:**
+**Selector fields (in `where`):**
 
 - `struct` (string, required): The name of the target struct.
+
+**Modifier fields (in `do > add_struct_fields`):**
+
 - `new_field` (list of objects, required): A list of new fields to add to the struct. Each object in the list must contain:
   - `name` (string, required): The name of the new field.
   - `type` (string, required): The Go type of the new field.
@@ -78,11 +107,14 @@ This rule adds one or more new fields to a specified struct type.
 
 ```yaml
 add_new_field:
-  target: main
-  struct: MyStruct
-  new_field:
-    - name: NewField
-      type: string
+  where:
+    target: main
+    struct: MyStruct
+  do:
+    add_struct_fields:
+      new_field:
+        - name: NewField
+          type: string
 ```
 
 This rule adds a new field named `NewField` of type `string` to the `MyStruct` struct in the `main` package.
@@ -95,11 +127,14 @@ Example:
 
 ```yaml
 add_context_field:
-  target: main
-  struct: MyStruct
-  new_field:
-    - name: ctx
-      type: context.Context
+  where:
+    target: main
+    struct: MyStruct
+  do:
+    add_struct_fields:
+      new_field:
+        - name: ctx
+          type: context.Context
   imports:
     context: "context"
 ```
@@ -115,20 +150,29 @@ This rule injects a string of raw Go code at the beginning of a target function.
 - Prototyping new instrumentation strategies.
 - Custom instrumentation for traces and metrics.
 
-**Fields:**
+**Selector fields (in `where`):**
 
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
+
+**Modifier fields (in `do > inject_code`):**
+
 - `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function.
+
+**Top-level fields:**
+
 - `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Common Fields](#common-fields).
 
 **Example:**
 
 ```yaml
 raw_helloworld:
-  target: main
-  func: Example
-  raw: "go func(){ println(\"RawCode\") }()"
+  where:
+    target: main
+    func: Example
+  do:
+    inject_code:
+      raw: "go func(){ println(\"RawCode\") }()"
 ```
 
 This rule injects a new goroutine that prints "RawCode" at the start of the `Example` function in the `main` package.
@@ -139,14 +183,17 @@ Raw code frequently references packages that the target file does not already im
 
 ```yaml
 raw_with_hash:
-  target: main
-  func: Example
-  raw: |
-    go func(){
-      h := sha256.New()
-      h.Write([]byte("RawCode"))
-      fmt.Printf("RawCode: %x\n", h.Sum(nil))
-    }()
+  where:
+    target: main
+    func: Example
+  do:
+    inject_code:
+      raw: |
+        go func(){
+          h := sha256.New()
+          h.Write([]byte("RawCode"))
+          fmt.Printf("RawCode: %x\n", h.Sum(nil))
+        }()
   imports:
     fmt: "fmt"
     sha256: "crypto/sha256"
@@ -163,10 +210,16 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 - Monitoring third-party library calls without modifying the library.
 - Call-site specific instrumentation (different behavior per call location).
 
-**Fields:**
+**Selector fields (in `where`):**
 
 - `function_call` (string, required): Qualified function name in format `package/path.FunctionName`. Matches calls to functions from a specific import path.
+
+**Modifier fields (in `do > wrap_call`):**
+
 - `template` (string, required): Wrapper template using Go's `text/template` syntax with `{{ . }}` placeholder for the original call. The template must be a valid Go expression that produces a call expression (current limitation).
+
+**Top-level fields:**
+
 - `imports` (map, optional): Additional imports needed for wrapper code (alias: path).
 
 **Template System:**
@@ -204,9 +257,12 @@ Examples:
 
 ```yaml
 wrap_http_get:
-  target: myapp/server
-  function_call: net/http.Get
-  template: "tracedGet({{ . }})"
+  where:
+    target: myapp/server
+    function_call: net/http.Get
+  do:
+    wrap_call:
+      template: "tracedGet({{ . }})"
 ```
 
 In the `myapp/server` package, this transforms:
@@ -236,9 +292,12 @@ func fetchData(url string) {
 
 ```yaml
 wrap_redis_get:
-  target: myapp/cache
-  function_call: github.com/redis/go-redis/v9.Get
-  template: "tracedRedisGet(ctx, {{ . }})"
+  where:
+    target: myapp/cache
+    function_call: github.com/redis/go-redis/v9.Get
+  do:
+    wrap_call:
+      template: "tracedRedisGet(ctx, {{ . }})"
 ```
 
 In the `myapp/cache` package:
@@ -263,9 +322,12 @@ This example demonstrates the power of the `text/template` system by using an II
 
 ```yaml
 wrap_with_unsafe:
-  target: client
-  function_call: myapp/utils.Helper
-  template: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
+  where:
+    target: client
+    function_call: myapp/utils.Helper
+  do:
+    wrap_call:
+      template: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
 ```
 
 This uses an immediately-invoked function expression (IIFE) to inject logic after the call:
@@ -310,10 +372,16 @@ This rule instruments functions annotated with a magic comment (a "directive") b
 - Adding logging or metrics boilerplate that developers annotate functions with.
 - Any "opt-in" instrumentation where the annotation lives in source code rather than a rule file.
 
-**Fields:**
+**Selector fields (in `where`):**
 
 - `directive` (string, required): The directive name to match, without the leading `//`. Must not contain spaces. For example, `otelc:span` matches the comment `//otelc:span`. Note that a space after `//` (e.g., `// otelc:span`) does **not** match — the directive must immediately follow `//`.
+
+**Modifier fields (in `do > expand_directive`):**
+
 - `template` (string, required): Go statements to prepend to each matching function body. Rendered with [fasttemplate](https://github.com/valyala/fasttemplate) using `{{` / `}}` delimiters. The only supported placeholder is `{{FuncName}}`, which is replaced with the name of the annotated function.
+
+**Top-level fields:**
+
 - `imports` (map[string]string, optional): Additional imports needed by the injected code. Same format as [Common Fields](#common-fields).
 
 **Template Placeholders:**
@@ -326,11 +394,14 @@ This rule instruments functions annotated with a magic comment (a "directive") b
 
 ```yaml
 span_directive:
-  target: main
-  directive: "otelc:span"
-  template: |-
-    println("span start: {{FuncName}}")
-    defer println("span end: {{FuncName}}")
+  where:
+    target: main
+    directive: "otelc:span"
+  do:
+    expand_directive:
+      template: |-
+        println("span start: {{FuncName}}")
+        defer println("span end: {{FuncName}}")
 ```
 
 Given this source file:
@@ -370,7 +441,7 @@ This rule adds a new Go source file to the target package.
 - Adding new helper functions required by other hooks.
 - Introducing new functionalities or APIs to an existing package.
 
-**Fields:**
+**Modifier fields (in `do > add_file`):**
 
 - `file` (string, required): The name of the new file to be added (e.g., `newfile.go`).
 - `path` (string, required): The import path of the package where the content of the new file is located. The instrumentation tool will find the file within this package.
@@ -379,9 +450,12 @@ This rule adds a new Go source file to the target package.
 
 ```yaml
 add_new_file:
-  target: main
-  file: "new_helpers.go"
-  path: "github.com/my-org/my-repo/instrumentation/helpers"
+  where:
+    target: main
+  do:
+    add_file:
+      file: "new_helpers.go"
+      path: "github.com/my-org/my-repo/instrumentation/helpers"
 ```
 
 This rule would take the file `new_helpers.go` from the `github.com/my-org/my-repo/instrumentation/helpers` package and add it to the `main` package during compilation.
@@ -394,9 +468,12 @@ Example:
 
 ```yaml
 add_file_with_extra_imports:
-  target: main
-  file: "helpers.go"
-  path: "github.com/my-org/my-repo/instrumentation/helpers"
+  where:
+    target: main
+  do:
+    add_file:
+      file: "helpers.go"
+      path: "github.com/my-org/my-repo/instrumentation/helpers"
   imports:
     log: "log"  # Add extra import to the copied file
 ```
@@ -411,25 +488,34 @@ This rule targets a named package-level symbol (variable, constant, function, or
 - Toggling a package-level flag or sentinel value for observability purposes.
 - Substituting a registered implementation at compile time.
 
-**Fields:**
+**Selector fields (in `where`):**
 
 - `kind` (string, optional): Constrains the kind of symbol to match. Valid values: `var`, `const`, or omitted/empty to match any kind. (`func` and `type` are recognized but not currently supported — no action can be applied to them.)
 - `identifier` (string, required): The name of the top-level symbol to match.
+
+**Modifier fields (in `do > assign_value`):**
+
 - `value` (string, required): A Go expression to assign as the new value of the matched `var` or `const`. Not valid when `kind` is `func` or `type`.
+
+**Top-level fields:**
+
 - `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
 
 **Example:**
 
 ```yaml
 assign_default_transport:
-  target: net/http
-  kind: var
-  identifier: DefaultTransport
-  value: |
-    &http.Transport{
-      MaxIdleConns:    100,
-      MaxConnsPerHost: 100,
-    }
+  where:
+    target: net/http
+    kind: var
+    identifier: DefaultTransport
+  do:
+    assign_value:
+      value: |
+        &http.Transport{
+          MaxIdleConns:    100,
+          MaxConnsPerHost: 100,
+        }
   imports:
     http: "net/http"
 ```
