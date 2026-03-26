@@ -39,7 +39,7 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 
 	node := ast.FindNamedDecl(root, r.Identifier, r.Kind)
 	if node == nil {
-		return ex.Newf("can not find declaration %q (kind: %q)", r.Identifier, r.Kind)
+		return ex.Newf("cannot find declaration %q (kind: %q)", r.Identifier, r.Kind)
 	}
 
 	// Handle imports if specified in the rule

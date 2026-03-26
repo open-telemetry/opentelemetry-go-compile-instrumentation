@@ -1,0 +1,6 @@
+replace_writer:
+  target: main
+  value_declaration: "io.Writer"
+  assign_value: "os.Stdout"
+  imports:
+    os: "os"

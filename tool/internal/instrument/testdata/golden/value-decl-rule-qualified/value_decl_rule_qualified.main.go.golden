@@ -1,0 +1,16 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"io"
+
+	"os"
+)
+
+var w io.Writer = os.Stdout
+
+var count int = 0
+
+func main() {}

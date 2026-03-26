@@ -22,6 +22,7 @@ func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRu
 	addRulesToMap(rset.CallRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DirectiveRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DeclRules, file2rules, rset.CgoFileMap, workDir)
+	addRulesToMap(rset.ValueDeclRules, file2rules, rset.CgoFileMap, workDir)
 	return file2rules
 }
 
@@ -52,6 +53,8 @@ func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 		return false, ip.applyStructRule(ctx, rt, root)
 	case *rule.InstDeclRule:
 		return false, ip.applyDeclRule(ctx, rt, root)
+	case *rule.InstValueDeclRule:
+		return false, ip.applyValueDeclRule(ctx, rt, root)
 	case *rule.InstRawRule:
 		return true, ip.applyRawRule(ctx, rt, root)
 	case *rule.InstCallRule:
