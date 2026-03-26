@@ -401,7 +401,7 @@ add_file_with_extra_imports:
     log: "log"  # Add extra import to the copied file
 ```
 
-### 6. Named Declaration Rule
+### 7. Named Declaration Rule
 
 This rule targets a named package-level symbol (variable, constant, function, or type) and replaces its initializer with a new expression. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing a default HTTP transport with an instrumented one to enable distributed tracing.
 
@@ -441,3 +441,38 @@ This rule replaces `http.DefaultTransport` in the `net/http` package with a cust
 - `value` must be a valid Go expression (not a statement).
 - If the matched symbol has multiple names in a single declaration (e.g., `var a, b = ...`), the expression is cloned and assigned to each name.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.
+
+### 8. Value Declaration Rule
+
+This rule targets package-level `var` or `const` declarations by their **declared type** rather than by name. Every declaration in the target package whose type matches the rule is replaced with the new value. Only declarations with an explicit type annotation are matched — untyped declarations (e.g., `const x = true`) are skipped.
+
+**Use Cases:**
+
+- Replacing all `var` declarations of a specific interface type with an instrumented implementation.
+- Overriding all feature flags of a given type across a package.
+
+**Fields:**
+
+- `value_declaration` (string, required): The type to match. Supported formats:
+  - Built-in types: `bool`, `string`, `int`, etc.
+  - Qualified types: `net/http.Client` (full import path + type name)
+  - Pointer types: `*net/http.Client`
+- `assign_value` (string, required): A Go expression to assign as the new value for every matched declaration.
+- `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
+
+**Example:**
+
+```yaml
+replace_feature_flag:
+  target: mypackage
+  value_declaration: bool
+  assign_value: "true"
+```
+
+This rule replaces the initializer of every explicitly-typed `var x bool` or `const x bool` declaration in `mypackage` with `true` at compile time.
+
+**Notes:**
+
+- `assign_value` must be a valid Go expression (not a statement).
+- Untyped declarations (e.g., `const x = false`) are not matched.
+- All matched declarations in the file receive the same expression (cloned per declaration).
