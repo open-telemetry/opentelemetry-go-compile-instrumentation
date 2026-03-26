@@ -118,16 +118,16 @@ func normalizeRuleFields(fields map[string]any) map[string]any {
 
 	// Merge selector fields from the where block.
 	if whereRaw, ok := fields["where"]; ok {
-		if whereMap, ok := whereRaw.(map[string]any); ok {
+		if whereMap, isMap := whereRaw.(map[string]any); isMap {
 			maps.Copy(flat, whereMap)
 		}
 	}
 
 	// Merge modifier fields from the do block (exactly one modifier key).
 	if doRaw, ok := fields["do"]; ok {
-		if doMap, ok := doRaw.(map[string]any); ok {
+		if doMap, isMap := doRaw.(map[string]any); isMap {
 			for _, modifierVal := range doMap {
-				if modFields, ok := modifierVal.(map[string]any); ok {
+				if modFields, isModMap := modifierVal.(map[string]any); isModMap {
 					maps.Copy(flat, modFields)
 				}
 			}
