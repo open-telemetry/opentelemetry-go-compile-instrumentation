@@ -1,13 +1,18 @@
 hook_after_only:
-  target: main
-  func: Func1
-  after: H1After
-  path: testdata
+  where:
+    target: main
+    func: Func1
+  do:
+    inject_hooks:
+      after: H1After
+      path: testdata
 
 hook_with_receiver_after_only:
-  target: main
-  func: Func1
-  recv: "*T"
-  after: H8After
-  path: testdata
-
+  where:
+    target: main
+    func: Func1
+    recv: "*T"
+  do:
+    inject_hooks:
+      after: H8After
+      path: testdata

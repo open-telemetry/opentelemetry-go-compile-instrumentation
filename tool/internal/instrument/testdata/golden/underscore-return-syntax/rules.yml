@@ -1,5 +1,8 @@
 hook_underscore_return:
-  target: main
-  func: UnderscoreReturnFunc
-  after: H12UnderscoreReturnAfter
-  path: testdata
+  where:
+    target: main
+    func: UnderscoreReturnFunc
+  do:
+    inject_hooks:
+      after: H12UnderscoreReturnAfter
+      path: testdata

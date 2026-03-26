@@ -33,6 +33,70 @@ const (
 	matchDepsConcurrencyMultiplier = 2
 )
 
+// normalizeRule detects the new where/do format and flattens it to the
+// internal flat format expected by rule constructors. If the fields map
+// contains neither "where" nor "do", it is returned unchanged.
+//
+// New format:
+//
+//	rule_name:
+//	  where:
+//	    target: pkg
+//	    func: Fn
+//	  do:
+//	    inject_hooks:
+//	      before: HookBefore
+//	      path: "github.com/..."
+//	  imports:
+//	    fmt: "fmt"
+//
+// Flat (internal) format that constructors expect:
+//
+//	target: pkg
+//	func: Fn
+//	before: HookBefore
+//	path: "github.com/..."
+//	imports:
+//	  fmt: "fmt"
+func normalizeRule(fields map[string]any) map[string]any {
+	_, hasWhere := fields["where"]
+	_, hasDo := fields["do"]
+	if !hasWhere && !hasDo {
+		return fields
+	}
+
+	flat := make(map[string]any)
+
+	// Copy top-level fields (e.g. imports, name) that sit outside where/do.
+	for k, v := range fields {
+		if k != "where" && k != "do" {
+			flat[k] = v
+		}
+	}
+
+	// Merge selector fields from the where block.
+	if whereRaw, ok := fields["where"]; ok {
+		if whereMap, ok := whereRaw.(map[string]any); ok {
+			maps.Copy(flat, whereMap)
+		}
+	}
+
+	// Merge modifier fields from the do block.
+	// The do block has exactly one key (the modifier name); its value is a
+	// map of modifier-specific fields.
+	if doRaw, ok := fields["do"]; ok {
+		if doMap, ok := doRaw.(map[string]any); ok {
+			for _, modifierVal := range doMap {
+				if modFields, ok := modifierVal.(map[string]any); ok {
+					maps.Copy(flat, modFields)
+				}
+			}
+		}
+	}
+
+	return flat
+}
+
 // createRuleFromFields creates a rule instance based on the field type present in the YAML
 //
 //nolint:nilnil // factory function
@@ -66,12 +130,15 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 	}
 	rules := make([]rule.InstRule, 0)
 	for name, fields := range h {
-		raw, err1 := yaml.Marshal(fields)
+		// Translate where/do format to the flat format expected by constructors.
+		flatFields := normalizeRule(fields)
+
+		raw, err1 := yaml.Marshal(flatFields)
 		if err1 != nil {
 			return nil, ex.Wrap(err1)
 		}
 
-		r, err2 := createRuleFromFields(raw, name, fields)
+		r, err2 := createRuleFromFields(raw, name, flatFields)
 		if err2 != nil {
 			return nil, err2
 		}
