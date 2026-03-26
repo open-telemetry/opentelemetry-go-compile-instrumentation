@@ -1,122 +1,170 @@
 hook_helloworld:
-  target: main
-  func: Example
-  before: MyHookBefore
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: Example
+  do:
+    inject_hooks:
+      before: MyHookBefore
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 add_new_field:
-  target: main
-  struct: MyStruct
-  new_field:
-    - name: NewField
-      type: string
-    - name: ctx
-      type: context.Context
+  where:
+    target: main
+    struct: MyStruct
+  do:
+    add_struct_fields:
+      new_field:
+        - name: NewField
+          type: string
+        - name: ctx
+          type: context.Context
   imports:
     context: "context"
 
 raw_helloworld:
-  target: main
-  func: Example
-  raw: |
-    go func(){
-      h := sha256.New()
-      h.Write([]byte("RawCode"))
-      fmt.Printf("RawCode: %x\n", h.Sum(nil))
-    }()
+  where:
+    target: main
+    func: Example
+  do:
+    inject_code:
+      raw: |
+        go func(){
+          h := sha256.New()
+          h.Write([]byte("RawCode"))
+          fmt.Printf("RawCode: %x\n", h.Sum(nil))
+        }()
   imports:
     fmt: "fmt"
     sha256: "crypto/sha256"
 
 hook_recv:
-  target: main
-  func: Example
-  recv: "*MyStruct"
-  before: MyHook1Before
-  after: MyHook1After
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: Example
+    recv: "*MyStruct"
+  do:
+    inject_hooks:
+      before: MyHook1Before
+      after: MyHook1After
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 hook_no_recv:
-  target: main
-  func: Example2
-  recv: "MyStruct"
-  before: MyHook2Before
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: Example2
+    recv: "MyStruct"
+  do:
+    inject_hooks:
+      before: MyHook2Before
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 version_range:
-  target: golang.org/x/time/rate
-  version: "v0.14.0,v0.15.0"
-  func: Every
-  raw: |
-    fmt.Println("Every1 from fmt")
+  where:
+    target: golang.org/x/time/rate
+    version: "v0.14.0,v0.15.0"
+    func: Every
+  do:
+    inject_code:
+      raw: |
+        fmt.Println("Every1 from fmt")
   imports:
     fmt: "fmt"
 
 version_min_bad:
-  target: golang.org/x/time/rate
-  version: "v0.15.0"
-  func: Every
-  raw: |
-    fmt.Println("Every2 from fmt")
+  where:
+    target: golang.org/x/time/rate
+    version: "v0.15.0"
+    func: Every
+  do:
+    inject_code:
+      raw: |
+        fmt.Println("Every2 from fmt")
   imports:
     fmt: "fmt"
 
 version_min_good:
-  target: golang.org/x/time/rate
-  version: "v0.11.0"
-  func: Every
-  raw: |
-    fmt.Println("Every3 from fmt")
+  where:
+    target: golang.org/x/time/rate
+    version: "v0.11.0"
+    func: Every
+  do:
+    inject_code:
+      raw: |
+        fmt.Println("Every3 from fmt")
   imports:
     fmt: "fmt"
 
 only_after:
-  target: main
-  func: Example
-  after: MyHookAfter
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: Example
+  do:
+    inject_hooks:
+      after: MyHookAfter
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 underscore_param:
-  target: main
-  func: Underscore
-  before: BeforeUnderscore
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: Underscore
+  do:
+    inject_hooks:
+      before: BeforeUnderscore
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 hook_generic:
-  target: main
-  func: GenericExample
-  before: MyHookGenericBefore
-  after: MyHookGenericAfter
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: GenericExample
+  do:
+    inject_hooks:
+      before: MyHookGenericBefore
+      after: MyHookGenericAfter
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 hook_generic_recv:
-  target: main
-  func: GenericRecvExample
-  recv: "*GenStruct"
-  before: MyHookRecvBefore
-  after: MyHookRecvAfter
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: GenericRecvExample
+    recv: "*GenStruct"
+  do:
+    inject_hooks:
+      before: MyHookRecvBefore
+      after: MyHookRecvAfter
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 hook_ellipsis:
-  target: main
-  func: Ellipsis
-  before: MyHookEllipsisBefore
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: Ellipsis
+  do:
+    inject_hooks:
+      before: MyHookEllipsisBefore
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 hook_function_a:
-  target: main
-  func: FunctionA
-  before: FunctionABefore
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: FunctionA
+  do:
+    inject_hooks:
+      before: FunctionABefore
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 hook_function_b:
-  target: main
-  func: FunctionB
-  before: FunctionBBefore
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: FunctionB
+  do:
+    inject_hooks:
+      before: FunctionBBefore
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
 
 hook_auto_detect:
-  target: main
-  func: AutoDetect
-  before: AutoDetectBefore
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"
+  where:
+    target: main
+    func: AutoDetect
+  do:
+    inject_hooks:
+      before: AutoDetectBefore
+      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/basic"

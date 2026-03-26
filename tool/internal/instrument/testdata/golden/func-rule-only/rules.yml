@@ -1,7 +1,9 @@
 hook_func:
-  target: main
-  func: Func1
-  before: H1Before
-  after: H1After
-  path: testdata
-
+  where:
+    target: main
+    func: Func1
+  do:
+    inject_hooks:
+      before: H1Before
+      after: H1After
+      path: testdata
