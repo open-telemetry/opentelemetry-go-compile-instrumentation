@@ -4,15 +4,12 @@
 package instrument
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestStripComments(t *testing.T) {
+func TestStripBuildIgnoreTag(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -66,23 +63,7 @@ func main() {}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			file := filepath.Join(dir, "test.go")
-			err := os.WriteFile(file, []byte(tt.input), 0o644)
-			require.NoError(t, err)
-
-			err = stripComments(file)
-			require.NoError(t, err)
-
-			data, err := os.ReadFile(file)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, string(data))
+			assert.Equal(t, tt.expected, stripBuildIgnoreTag(tt.input))
 		})
 	}
-}
-
-func TestStripComments_NonexistentFile(t *testing.T) {
-	// WriteFile will fail when the directory does not exist.
-	err := stripComments("/nonexistent/path/file.go")
-	assert.Error(t, err)
 }

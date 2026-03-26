@@ -23,8 +23,13 @@ import (
 func TestOtelSDKSpanFromContext(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	output := f.BuildAndRun("otelsdk")
-	println(output)
+	var output string
+	defer func() {
+		if t.Failed() {
+			t.Logf("otelsdk output:\n%s", output)
+		}
+	}()
+	output = f.BuildAndRun("otelsdk")
 	require.Contains(t, output, "OTEL_SDK_TEST: span valid",
 		"SpanFromContext(context.Background()) should return a valid span from GLS")
 	require.Contains(t, output, "traceID=")

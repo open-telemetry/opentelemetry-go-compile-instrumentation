@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-//go:linkname spanFromGLS go.opentelemetry.io/otel/sdk/trace.SpanFromGLS
+//go:linkname spanFromGLS go.opentelemetry.io/otel/sdk/trace.spanFromGLS
 func spanFromGLS() trace.Span
 
 func spanFromContextOnExit(ictx inst.HookContext, span trace.Span) {

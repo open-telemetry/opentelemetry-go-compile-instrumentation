@@ -95,7 +95,7 @@ func (tc *traceContext) Clone() interface{} {
 	return &traceContext{sw, 1, nil}
 }
 
-func GetTraceContext() trace.SpanContext {
+func getTraceContext() trace.SpanContext {
 	t := getOrInitTraceContext()
 	if t.size() != 0 {
 		return t.tail().SpanContext()
@@ -118,16 +118,14 @@ func setTraceContext(tc *traceContext) {
 	runtime.SetTraceContextToGLS(tc)
 }
 
-func TraceContextAddSpan(span trace.Span) {
+func traceContextAddSpan(span trace.Span) {
 	tc := getOrInitTraceContext()
-	if !tc.add(span) {
-		println("Failed to add span to TraceContext")
-	} else {
+	if tc.add(span) {
 		setTraceContext(tc)
 	}
 }
 
-func GetTraceAndSpanId() (string, string) {
+func getTraceAndSpanId() (string, string) {
 	tc := runtime.GetTraceContextFromGLS()
 	if tc == nil || tc.(*traceContext).tail() == nil {
 		return "", ""
@@ -136,7 +134,7 @@ func GetTraceAndSpanId() (string, string) {
 	return ctx.TraceID().String(), ctx.SpanID().String()
 }
 
-func TraceContextDelSpan(span trace.Span) {
+func traceContextDelSpan(span trace.Span) {
 	ctx := getOrInitTraceContext()
 	ctx.del(span)
 }
@@ -145,7 +143,7 @@ func clearTraceContext() {
 	getOrInitTraceContext().clear()
 }
 
-func SpanFromGLS() trace.Span {
+func spanFromGLS() trace.Span {
 	gls := runtime.GetTraceContextFromGLS()
 	if gls == nil {
 		return nil
@@ -153,7 +151,7 @@ func SpanFromGLS() trace.Span {
 	return gls.(*traceContext).tail()
 }
 
-func LocalRootSpanFromGLS() trace.Span {
+func localRootSpanFromGLS() trace.Span {
 	gls := runtime.GetTraceContextFromGLS()
 	if gls == nil {
 		return nil

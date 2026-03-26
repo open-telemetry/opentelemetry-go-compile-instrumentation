@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-//go:linkname traceContextAddSpan go.opentelemetry.io/otel/sdk/trace.TraceContextAddSpan
+//go:linkname traceContextAddSpan go.opentelemetry.io/otel/sdk/trace.traceContextAddSpan
 func traceContextAddSpan(span trace.Span)
 
 func newRecordingSpanOnExit(ictx inst.HookContext, span interface{}) {
@@ -24,6 +24,8 @@ func newRecordingSpanOnExit(ictx inst.HookContext, span interface{}) {
 
 func newNonRecordingSpanOnExit(ictx inst.HookContext, span interface{}) {
 	if span != nil {
-		traceContextAddSpan(span.(trace.Span))
+		if s, ok := span.(trace.Span); ok {
+			traceContextAddSpan(s)
+		}
 	}
 }

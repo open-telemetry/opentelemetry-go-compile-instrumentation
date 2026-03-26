@@ -5,4 +5,4 @@
 
 package otel
 
-var SetGlobalProviderEnable bool
+var setGlobalProviderEnable bool
