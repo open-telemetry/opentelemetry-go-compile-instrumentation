@@ -175,3 +175,18 @@ func TestInstValueDeclRule_UnmarshalJSON_RepopulatesDerivedFields(t *testing.T) 
 	assert.Equal(t, "Request", r.TypeIdent)
 	assert.True(t, r.TypePointer)
 }
+
+func TestNewInstValueDeclRule_YAMLUnmarshalError(t *testing.T) {
+	// Pass data that fails yaml.Unmarshal into InstValueDeclRule (imports expects a map).
+	data := []byte("imports: scalar_not_a_map\nvalue_declaration: bool\nassign_value: true\n")
+	_, err := NewInstValueDeclRule(data, "bad-rule")
+	require.Error(t, err)
+}
+
+func TestInstValueDeclRule_UnmarshalJSON_Error(t *testing.T) {
+	// Valid JSON but wrong type for "imports" (expects map, gets array) causes
+	// json.Unmarshal inside UnmarshalJSON to return an error.
+	var r InstValueDeclRule
+	err := json.Unmarshal([]byte(`{"imports": [1, 2, 3]}`), &r)
+	require.Error(t, err)
+}

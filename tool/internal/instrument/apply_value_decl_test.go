@@ -90,6 +90,15 @@ func TestMatchesType_NonPointerRule_PointerExpr(t *testing.T) {
 	assert.False(t, matchesType(expr, "", "bool", false, nil))
 }
 
+func TestMatchesType_BuiltIn_NonIdentExpr(t *testing.T) {
+	// importPath is empty but expr is a SelectorExpr (not an Ident) — must not match
+	expr := &dst.SelectorExpr{
+		X:   &dst.Ident{Name: "pkg"},
+		Sel: &dst.Ident{Name: "bool"},
+	}
+	assert.False(t, matchesType(expr, "", "bool", false, nil))
+}
+
 func TestMatchesType_Pointer_Qualified(t *testing.T) {
 	expr := &dst.StarExpr{
 		X: &dst.SelectorExpr{
