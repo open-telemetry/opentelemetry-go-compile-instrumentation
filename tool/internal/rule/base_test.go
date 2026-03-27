@@ -4,7 +4,6 @@
 package rule
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -47,7 +46,7 @@ func TestInstRuleSet_IsEmpty(t *testing.T) {
 }
 
 func TestInstRuleSet_IsEmpty_AfterAddingRule(t *testing.T) {
-	file := filepath.Join(os.TempDir(), "file.go")
+	file := filepath.Join(t.TempDir(), "file.go")
 
 	t.Run("func rule", func(t *testing.T) {
 		rs := NewInstRuleSet("example.com/pkg")
@@ -75,7 +74,7 @@ func TestInstRuleSet_String(t *testing.T) {
 
 func TestInstRuleSet_AddRules(t *testing.T) {
 	rs := NewInstRuleSet("example.com/pkg")
-	file := filepath.Join(os.TempDir(), "file.go")
+	file := filepath.Join(t.TempDir(), "file.go")
 
 	rs.AddRawRule(file, &InstRawRule{InstBaseRule: InstBaseRule{Name: "raw"}})
 	assert.Len(t, rs.RawRules[file], 1)
@@ -117,8 +116,9 @@ func TestInstRuleSet_SetCgoFileMap(t *testing.T) {
 
 func TestInstRuleSet_AllFuncRules(t *testing.T) {
 	rs := NewInstRuleSet("example.com/pkg")
-	f1 := filepath.Join(os.TempDir(), "f1.go")
-	f2 := filepath.Join(os.TempDir(), "f2.go")
+	dir := t.TempDir()
+	f1 := filepath.Join(dir, "f1.go")
+	f2 := filepath.Join(dir, "f2.go")
 
 	r1 := &InstFuncRule{InstBaseRule: InstBaseRule{Name: "r1"}}
 	r2 := &InstFuncRule{InstBaseRule: InstBaseRule{Name: "r2"}}
@@ -131,8 +131,9 @@ func TestInstRuleSet_AllFuncRules(t *testing.T) {
 
 func TestInstRuleSet_AllStructRules(t *testing.T) {
 	rs := NewInstRuleSet("example.com/pkg")
-	f1 := filepath.Join(os.TempDir(), "f1.go")
-	f2 := filepath.Join(os.TempDir(), "f2.go")
+	dir := t.TempDir()
+	f1 := filepath.Join(dir, "f1.go")
+	f2 := filepath.Join(dir, "f2.go")
 
 	r1 := &InstStructRule{InstBaseRule: InstBaseRule{Name: "s1"}}
 	r2 := &InstStructRule{InstBaseRule: InstBaseRule{Name: "s2"}}
