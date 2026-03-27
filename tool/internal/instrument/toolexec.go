@@ -379,7 +379,6 @@ func Toolexec(ctx context.Context, args []string) error {
 		"tool", tool,
 		"package", pkg,
 		"duration", elapsed,
-		"duration_ms", elapsed.Milliseconds(),
 	)
 	return err
 }
