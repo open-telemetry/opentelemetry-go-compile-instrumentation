@@ -510,10 +510,11 @@ func TestMatchOneRule_ValueDeclRule(t *testing.T) {
 		AssignValue:      "true",
 		TypeIdent:        "bool",
 	}
-	sp.matchOneRule(tree, "/fake/file.go", r, set, dep)
+	fakeFile := filepath.Join(os.TempDir(), "fake_file.go")
+	sp.matchOneRule(tree, fakeFile, r, set, dep)
 
-	assert.Len(t, set.ValueDeclRules["/fake/file.go"], 1)
-	assert.Equal(t, r, set.ValueDeclRules["/fake/file.go"][0])
+	assert.Len(t, set.ValueDeclRules[fakeFile], 1)
+	assert.Equal(t, r, set.ValueDeclRules[fakeFile][0])
 }
 
 func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.InstRuleSet {
