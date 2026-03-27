@@ -468,7 +468,7 @@ This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTra
 `wrap_expression` is a composable advice type. Its fields:
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `template` | string | yes | Go expression template. `{{ . }}` is substituted with the original expression. Must produce exactly one expression statement. |
 
 The `imports` field on the parent rule provides any packages needed by the template.
