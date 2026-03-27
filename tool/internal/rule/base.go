@@ -25,6 +25,23 @@ type InstRule interface {
 	GetVersion() string // The version range of target module if available, e.g "v1.0.0,v2.0.0"
 }
 
+// WrapExpressionAdvice is a composable advice that wraps the expression
+// selected by a rule's join point using a Go template. {{ . }} is substituted
+// with the original expression. Attach to any rule whose join point selects a
+// single expression node.
+//
+// Mutually exclusive with the rule's static-replacement advice field (e.g.,
+// Value, AssignValue).
+type WrapExpressionAdvice struct {
+	// Template is a Go expression template that must contain {{ . }} as a
+	// placeholder for the original expression. The template must produce
+	// exactly one expression statement. Variants {{.}}, {{- . -}}, etc. are
+	// also accepted.
+	//
+	// Example: "otelhttp.NewTransport({{ . }})"
+	Template string `json:"template" yaml:"template"`
+}
+
 // InstBaseRule is the base rule for all instrumentation rules.
 type InstBaseRule struct {
 	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`
