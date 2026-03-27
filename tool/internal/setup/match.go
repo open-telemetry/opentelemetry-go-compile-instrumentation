@@ -51,6 +51,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstCallRule(raw, name)
 	case fields["identifier"] != nil:
 		return rule.NewInstDeclRule(raw, name)
+	case fields["value_declaration"] != nil:
+		return rule.NewInstValueDeclRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
@@ -254,6 +256,13 @@ func (sp *SetupPhase) matchOneRule(
 			set.AddDeclRule(source, rt)
 			sp.Info("Match decl rule", "rule", rt, "dep", dep)
 		}
+	case *rule.InstValueDeclRule:
+		// Value decl rules are added unconditionally to all source files,
+		// like call rules. Precise type matching (requiring import alias
+		// resolution) happens during instrumentation. Files with no matching
+		// declarations are a silent no-op in applyValueDeclRule.
+		set.AddValueDeclRule(source, rt)
+		sp.Info("Match value decl rule", "rule", rt, "dep", dep)
 	case *rule.InstFileRule:
 		// Skip as it's already processed
 	default:
