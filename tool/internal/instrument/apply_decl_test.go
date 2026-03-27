@@ -133,3 +133,17 @@ func TestApplyDeclRule_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot find declaration")
 }
+
+func TestApplyDeclRule_InvalidValue_Error(t *testing.T) {
+	// Declaration exists but r.Value is not valid Go syntax.
+	file := varFile("GlobalVar", &dst.BasicLit{Kind: token.STRING, Value: `"original"`})
+
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "test"},
+		Identifier:   "GlobalVar",
+		Kind:         "var",
+		Value:        "func(", // invalid Go expression
+	}
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+	require.Error(t, err)
+}

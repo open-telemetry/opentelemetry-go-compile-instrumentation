@@ -230,6 +230,35 @@ func TestApplyValueDeclRule_InvalidAssignValue_Error(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestMatchesQualifiedSelector_ChainedX(t *testing.T) {
+	// sel.X is a SelectorExpr (chained call like a.b.Func), not a simple Ident — must not match.
+	expr := &dst.SelectorExpr{
+		X: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "a"},
+			Sel: &dst.Ident{Name: "b"},
+		},
+		Sel: &dst.Ident{Name: "Client"},
+	}
+	assert.False(t, matchesQualifiedSelector(expr, "net/http", "Client", nil))
+}
+
+func TestApplyValueDeclRule_SkipsNonValueSpec(t *testing.T) {
+	// A GenDecl with token.VAR that somehow contains a non-ValueSpec should be skipped.
+	file := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{Tok: token.VAR, Specs: []dst.Spec{&dst.TypeSpec{Name: &dst.Ident{Name: "T"}}}},
+		},
+	}
+	r := &rule.InstValueDeclRule{
+		InstBaseRule:     rule.InstBaseRule{Name: "test"},
+		ValueDeclaration: "bool",
+		AssignValue:      "true",
+		TypeIdent:        "bool",
+	}
+	// Should be a no-op (no match), no error.
+	require.NoError(t, newTestPhase().applyValueDeclRule(context.Background(), r, file))
+}
+
 // collectImportAliases helpers already tested via TestMatchesCallRule_* in apply_call_test.go.
 // The following tests confirm matchesType works end-to-end with a real file's import aliases.
 func TestMatchesType_WithCollectedAliases(t *testing.T) {

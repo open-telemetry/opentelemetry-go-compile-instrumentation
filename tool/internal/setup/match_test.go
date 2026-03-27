@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dave/dst"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
@@ -494,6 +496,24 @@ func newTestFuncRule(path, target string) *rule.InstFuncRule {
 		},
 		Path: path,
 	}
+}
+
+func TestMatchOneRule_ValueDeclRule(t *testing.T) {
+	sp := &SetupPhase{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	tree := &dst.File{Name: &dst.Ident{Name: "main"}}
+	set := rule.NewInstRuleSet("example.com/pkg")
+	dep := &Dependency{ImportPath: "example.com/pkg"}
+
+	r := &rule.InstValueDeclRule{
+		InstBaseRule:     rule.InstBaseRule{Name: "replace-bool", Target: "example.com/pkg"},
+		ValueDeclaration: "bool",
+		AssignValue:      "true",
+		TypeIdent:        "bool",
+	}
+	sp.matchOneRule(tree, "/fake/file.go", r, set, dep)
+
+	assert.Len(t, set.ValueDeclRules["/fake/file.go"], 1)
+	assert.Equal(t, r, set.ValueDeclRules["/fake/file.go"][0])
 }
 
 func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.InstRuleSet {
