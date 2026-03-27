@@ -30,3 +30,4 @@ coverage.out
 .bin
 
 profiles
+.pprof
