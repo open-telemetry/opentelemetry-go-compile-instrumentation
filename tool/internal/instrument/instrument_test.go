@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,6 +97,46 @@ func runTest(t *testing.T, testName string) {
 	verifyGoldenFiles(t, tempDir, testName)
 }
 
+// normalizeRuleFields translates the structured where/do format to the flat
+// format expected by rule constructors. Fields not using the new format are
+// returned unchanged.
+func normalizeRuleFields(fields map[string]any) map[string]any {
+	_, hasWhere := fields["where"]
+	_, hasDo := fields["do"]
+	if !hasWhere && !hasDo {
+		return fields
+	}
+
+	flat := make(map[string]any)
+
+	// Copy top-level fields (e.g. imports, name) excluding where/do.
+	for k, v := range fields {
+		if k != "where" && k != "do" {
+			flat[k] = v
+		}
+	}
+
+	// Merge selector fields from the where block.
+	if whereRaw, ok := fields["where"]; ok {
+		if whereMap, isMap := whereRaw.(map[string]any); isMap {
+			maps.Copy(flat, whereMap)
+		}
+	}
+
+	// Merge modifier fields from the do block (exactly one modifier key).
+	if doRaw, ok := fields["do"]; ok {
+		if doMap, isMap := doRaw.(map[string]any); isMap {
+			for _, modifierVal := range doMap {
+				if modFields, isModMap := modifierVal.(map[string]any); isModMap {
+					maps.Copy(flat, modFields)
+				}
+			}
+		}
+	}
+
+	return flat
+}
+
 func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet {
 	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
 	require.NoError(t, err)
@@ -123,7 +164,8 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	slices.Sort(ruleNames)
 
 	for _, name := range ruleNames {
-		props := rawRules[name]
+		// Translate where/do format to the flat format expected by constructors.
+		props := normalizeRuleFields(rawRules[name])
 		props["name"] = name
 		ruleData, _ := yaml.Marshal(props)
 
