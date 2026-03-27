@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"go/token"
 	"io"
 	"log/slog"
 	"os"
@@ -263,6 +264,17 @@ value: "replaced"
 			expectedType: "*rule.InstDeclRule",
 		},
 		{
+			name: "function_call rule creation",
+			yamlContent: `
+function_call: "net/http.Get"
+target: github.com/example/lib
+template: "{{ . }}"
+`,
+			ruleName:     "test-call-rule",
+			expectError:  false,
+			expectedType: "*rule.InstCallRule",
+		},
+		{
 			name: "value_declaration rule creation",
 			yamlContent: `
 value_declaration: "bool"
@@ -498,11 +510,18 @@ func newTestFuncRule(path, target string) *rule.InstFuncRule {
 	}
 }
 
-func TestMatchOneRule_ValueDeclRule(t *testing.T) {
+// newMatchOneRuleFixture returns shared setup for matchOneRule tests.
+func newMatchOneRuleFixture() (*SetupPhase, string, *rule.InstRuleSet, *Dependency) {
 	sp := &SetupPhase{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	tree := &dst.File{Name: &dst.Ident{Name: "main"}}
+	fakeFile := filepath.Join(os.TempDir(), "fake_file.go")
 	set := rule.NewInstRuleSet("example.com/pkg")
 	dep := &Dependency{ImportPath: "example.com/pkg"}
+	return sp, fakeFile, set, dep
+}
+
+func TestMatchOneRule_ValueDeclRule(t *testing.T) {
+	sp, fakeFile, set, dep := newMatchOneRuleFixture()
+	tree := &dst.File{Name: &dst.Ident{Name: "main"}}
 
 	r := &rule.InstValueDeclRule{
 		InstBaseRule:     rule.InstBaseRule{Name: "replace-bool", Target: "example.com/pkg"},
@@ -510,11 +529,105 @@ func TestMatchOneRule_ValueDeclRule(t *testing.T) {
 		AssignValue:      "true",
 		TypeIdent:        "bool",
 	}
-	fakeFile := filepath.Join(os.TempDir(), "fake_file.go")
 	sp.matchOneRule(tree, fakeFile, r, set, dep)
 
 	assert.Len(t, set.ValueDeclRules[fakeFile], 1)
 	assert.Equal(t, r, set.ValueDeclRules[fakeFile][0])
+}
+
+func TestMatchOneRule_CallRule(t *testing.T) {
+	// Call rules are added unconditionally to all source files.
+	sp, fakeFile, set, dep := newMatchOneRuleFixture()
+	tree := &dst.File{Name: &dst.Ident{Name: "main"}}
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "my-call", Target: "example.com/pkg"},
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+	}
+	sp.matchOneRule(tree, fakeFile, r, set, dep)
+
+	assert.Len(t, set.CallRules[fakeFile], 1)
+}
+
+func TestMatchOneRule_FuncRule_Match(t *testing.T) {
+	sp, fakeFile, set, dep := newMatchOneRuleFixture()
+	tree := &dst.File{
+		Name: &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{
+			&dst.FuncDecl{Name: &dst.Ident{Name: "MyFunc"}, Type: &dst.FuncType{}},
+		},
+	}
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "my-func", Target: "example.com/pkg"},
+		Func:         "MyFunc",
+	}
+	sp.matchOneRule(tree, fakeFile, r, set, dep)
+
+	assert.Len(t, set.FuncRules[fakeFile], 1)
+}
+
+func TestMatchOneRule_FuncRule_NoMatch(t *testing.T) {
+	sp, fakeFile, set, dep := newMatchOneRuleFixture()
+	tree := &dst.File{Name: &dst.Ident{Name: "main"}}
+
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "my-func", Target: "example.com/pkg"},
+		Func:         "MissingFunc",
+	}
+	sp.matchOneRule(tree, fakeFile, r, set, dep)
+
+	assert.Empty(t, set.FuncRules)
+}
+
+func TestMatchOneRule_DeclRule_Match(t *testing.T) {
+	sp, fakeFile, set, dep := newMatchOneRuleFixture()
+	tree := &dst.File{
+		Name: &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.VAR,
+				Specs: []dst.Spec{
+					&dst.ValueSpec{Names: []*dst.Ident{{Name: "GlobalVar"}}},
+				},
+			},
+		},
+	}
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "my-decl", Target: "example.com/pkg"},
+		Identifier:   "GlobalVar",
+		Kind:         "var",
+	}
+	sp.matchOneRule(tree, fakeFile, r, set, dep)
+
+	assert.Len(t, set.DeclRules[fakeFile], 1)
+}
+
+func TestMatchOneRule_DeclRule_NoMatch(t *testing.T) {
+	sp, fakeFile, set, dep := newMatchOneRuleFixture()
+	tree := &dst.File{Name: &dst.Ident{Name: "main"}}
+
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "my-decl", Target: "example.com/pkg"},
+		Identifier:   "MissingVar",
+		Kind:         "var",
+	}
+	sp.matchOneRule(tree, fakeFile, r, set, dep)
+
+	assert.Empty(t, set.DeclRules)
+}
+
+func TestMatchOneRule_FileRule_Skipped(t *testing.T) {
+	// File rules are pre-processed by runMatch; matchOneRule skips them.
+	sp, fakeFile, set, dep := newMatchOneRuleFixture()
+	tree := &dst.File{Name: &dst.Ident{Name: "main"}}
+
+	r := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{Name: "my-file", Target: "example.com/pkg"},
+	}
+	sp.matchOneRule(tree, fakeFile, r, set, dep)
+
+	assert.Empty(t, set.FileRules)
 }
 
 func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.InstRuleSet {
