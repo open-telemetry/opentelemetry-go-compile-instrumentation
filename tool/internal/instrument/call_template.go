@@ -133,6 +133,68 @@ func (t *callTemplate) compileExpression(node dst.Expr) (dst.Expr, error) {
 	return resultExpr, nil
 }
 
+// parseGoExpression parses a Go expression string into a dst.Expr.
+func parseGoExpression(expr string) (dst.Expr, error) {
+	funcDecl, err := parseSnippetFuncDecl("package _\nfunc _() {\n\t"+expr+"\n}\n", expr)
+	if err != nil {
+		return nil, err
+	}
+	exprStmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
+	if !ok {
+		return nil, fmt.Errorf(
+			"expression %q did not parse as an expression statement (got %T)",
+			expr, funcDecl.Body.List[0])
+	}
+	return exprStmt.X, nil
+}
+
+// parseGoTypeExpression parses a Go type string (e.g. "grpc.DialOption") into a dst.Expr.
+func parseGoTypeExpression(typeStr string) (dst.Expr, error) {
+	funcDecl, err := parseSnippetFuncDecl("package _\nfunc _() {\n\tvar _ "+typeStr+"\n}\n", typeStr)
+	if err != nil {
+		return nil, err
+	}
+	declStmt, ok := funcDecl.Body.List[0].(*dst.DeclStmt)
+	if !ok {
+		return nil, fmt.Errorf(
+			"type %q did not parse as a declaration statement (got %T)",
+			typeStr, funcDecl.Body.List[0])
+	}
+	genDecl, ok := declStmt.Decl.(*dst.GenDecl)
+	if !ok || len(genDecl.Specs) == 0 {
+		return nil, fmt.Errorf("unexpected declaration shape for type %q", typeStr)
+	}
+	valueSpec, ok := genDecl.Specs[0].(*dst.ValueSpec)
+	if !ok || valueSpec.Type == nil {
+		return nil, fmt.Errorf("unexpected spec shape for type %q", typeStr)
+	}
+	return valueSpec.Type, nil
+}
+
+// parseSnippetFuncDecl parses a minimal Go source snippet of the form
+// "package _\nfunc _() { <body> }\n" and returns the function declaration.
+// label is used in error messages to identify the original snippet.
+func parseSnippetFuncDecl(src, label string) (*dst.FuncDecl, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", []byte(src), parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse %q: %w", label, err)
+	}
+	dec := decorator.NewDecorator(fset)
+	dstFile, err := dec.DecorateFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decorate AST for %q: %w", label, err)
+	}
+	if len(dstFile.Decls) == 0 {
+		return nil, fmt.Errorf("no declarations found for %q", label)
+	}
+	funcDecl, ok := dstFile.Decls[0].(*dst.FuncDecl)
+	if !ok || funcDecl.Body == nil || len(funcDecl.Body.List) == 0 {
+		return nil, fmt.Errorf("unexpected AST shape for %q", label)
+	}
+	return funcDecl, nil
+}
+
 // replacePlaceholder replaces all occurrences of _.PLACEHOLDER_0 in the AST
 // with the given node. This is used to inject the original call expression
 // into the template-generated code.

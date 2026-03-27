@@ -165,9 +165,15 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 **Fields:**
 
-- `function_call` (string, required): Qualified function name in format `package/path.FunctionName`. Matches calls to functions from a specific import path.
-- `template` (string, required): Wrapper template using Go's `text/template` syntax with `{{ . }}` placeholder for the original call. The template must be a valid Go expression that produces a call expression (current limitation).
-- `imports` (map, optional): Additional imports needed for wrapper code (alias: path).
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `function_call` | string | Yes | Qualified function name: `package/path.FunctionName` |
+| `template` | string | No (one of `template`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a Go call expression. |
+| `append_args` | `[]string` | No (one of `template`/`append_args` required) | Go expression strings appended as additional arguments to the matched call |
+| `variadic_type` | string | No | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
+| `imports` | map[string]string | No | Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`. |
+
+**`template` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `template` wraps the modified call.
 
 **Template System:**
 
@@ -182,6 +188,25 @@ Currently supported template features:
 - Simple wrapping: `wrapper({{ . }})`
 - IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
 - Complex expressions with multiple statements using IIFE
+
+**`append_args` Semantics:**
+
+The `append_args` field appends one or more Go expressions as additional arguments to each matched call.
+
+- **Non-ellipsis calls** (e.g. `grpc.NewClient(addr, opt1)`): the new expressions are appended directly — `grpc.NewClient(addr, opt1, newArg)`.
+- **Ellipsis calls** (e.g. `grpc.Dial(addr, opts...)`): `variadic_type` must be set. An IIFE wrapper is generated that appends the new args to the spread argument:
+
+```go
+// Before:
+grpc.Dial(addr, opts...)
+
+// After (variadic_type: "grpc.DialOption"):
+grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
+    return append(v, grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()))
+}(opts...)...)
+```
+
+If a matched call uses `...` and `variadic_type` is not set, the call is **skipped** with a logged warning.
 
 **Understanding function_call Matching:**
 
@@ -291,6 +316,58 @@ func process() {
 
 **Note:** The `unsafe` package must be imported in the target file for this template to work.
 
+---
+
+#### Example 4: Appending gRPC Interceptors (non-ellipsis)
+
+```yaml
+add_otel_grpc_interceptors:
+  target: myapp
+  function_call: google.golang.org/grpc.NewClient
+  append_args:
+    - "grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor())"
+    - "grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor())"
+  imports:
+    grpc: "google.golang.org/grpc"
+    otelgrpc: "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+```
+
+This transforms `grpc.NewClient("localhost:50051")` into:
+
+```go
+grpc.NewClient("localhost:50051",
+    grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()),
+    grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor()))
+```
+
+---
+
+#### Example 5: Appending gRPC Interceptors (ellipsis call)
+
+When the call site uses a spread (`opts...`), set `variadic_type`:
+
+```yaml
+add_otel_grpc_dial_interceptors:
+  target: myapp
+  function_call: google.golang.org/grpc.Dial
+  append_args:
+    - "grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor())"
+  variadic_type: "grpc.DialOption"
+  imports:
+    grpc: "google.golang.org/grpc"
+    otelgrpc: "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+```
+
+This transforms `grpc.Dial(addr, opts...)` into:
+
+```go
+grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
+    return append(v, grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()))
+}(opts...)...)
+```
+
+---
+
 **Important Notes:**
 
 - The `{{ . }}` placeholder in the template represents the original function call.
@@ -299,6 +376,8 @@ func process() {
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
 - Use the qualified format `package/path.FunctionName` for functions.
+- All packages referenced in `append_args` must be in the target module's `go.mod`.
+- Ellipsis calls without `variadic_type` are skipped with a logged warning.
 
 ### 5. Directive Rule
 
