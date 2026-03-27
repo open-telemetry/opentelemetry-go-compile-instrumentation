@@ -28,3 +28,6 @@ test/apps/*/app.exe
 _tools
 coverage.out
 .bin
+
+profiles
+.pprof
