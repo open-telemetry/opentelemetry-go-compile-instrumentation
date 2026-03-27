@@ -105,6 +105,107 @@ func TestBaseTypeName(t *testing.T) {
 	}
 }
 
+func TestFindTargetParamType(t *testing.T) {
+	tests := []struct {
+		name          string
+		src           string
+		expectedNames []string
+	}{
+		{
+			name:          "named params no receiver",
+			src:           "package main\nfunc F(a int, b string) {}",
+			expectedNames: []string{"param0", "param1"},
+		},
+		{
+			name:          "unnamed params",
+			src:           "package main\nfunc F(int, string) {}",
+			expectedNames: []string{"param0", "param1"},
+		},
+		{
+			name:          "named receiver with named params",
+			src:           "package main\ntype T struct{}\nfunc (t T) F(a int) {}",
+			expectedNames: []string{"recv0", "param0"},
+		},
+		{
+			name:          "unnamed receiver",
+			src:           "package main\ntype T struct{}\nfunc (T) F(a int) {}",
+			expectedNames: []string{"recv0", "param0"},
+		},
+		{
+			name:          "unnamed receiver with unnamed params",
+			src:           "package main\ntype T struct{}\nfunc (T) F(int, string) {}",
+			expectedNames: []string{"recv0", "param0", "param1"},
+		},
+		{
+			name:          "no params no receiver",
+			src:           "package main\nfunc F() {}",
+			expectedNames: nil,
+		},
+		{
+			name:          "multi-name params",
+			src:           "package main\nfunc F(a, b int) {}",
+			expectedNames: []string{"param0", "param1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			funcDecl := parseFunc(t, tt.src)
+			result := findTargetParamType(funcDecl)
+			var names []string
+			for _, field := range result.List {
+				for _, n := range field.Names {
+					names = append(names, n.Name)
+				}
+			}
+			assert.Equal(t, tt.expectedNames, names)
+		})
+	}
+}
+
+func TestFindTargetResultType(t *testing.T) {
+	tests := []struct {
+		name          string
+		src           string
+		expectedNames []string
+	}{
+		{
+			name:          "no return values",
+			src:           "package main\nfunc F() {}",
+			expectedNames: nil,
+		},
+		{
+			name:          "named return values",
+			src:           "package main\nfunc F() (a int, b string) { return }",
+			expectedNames: []string{"arg0", "arg1"},
+		},
+		{
+			name:          "unnamed return values",
+			src:           `package main` + "\n" + `func F() (int, string) { return 0, "" }`,
+			expectedNames: []string{"arg0", "arg1"},
+		},
+		{
+			name:          "multi-name return values",
+			src:           "package main\nfunc F() (a, b int) { return }",
+			expectedNames: []string{"arg0", "arg1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			funcDecl := parseFunc(t, tt.src)
+			result := findTargetResultType(funcDecl)
+			var names []string
+			for _, field := range result.List {
+				for _, n := range field.Names {
+					names = append(names, n.Name)
+				}
+			}
+			assert.Equal(t, tt.expectedNames, names)
+		})
+	}
+}
+
 func TestCheckHookDecl(t *testing.T) {
 	tests := []struct {
 		name        string

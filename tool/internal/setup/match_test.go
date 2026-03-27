@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
@@ -492,4 +494,116 @@ func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.In
 		rs.AddFuncRule(fakeFilePath, fr)
 	}
 	return rs
+}
+
+func TestRunMatch_FileRuleOnlySetsPackageName(t *testing.T) {
+	// Write a temporary Go source file so ParseFileOnlyPackage can parse it
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "mypkg.go")
+	err := os.WriteFile(srcFile, []byte("package mypkg\n"), 0o644)
+	require.NoError(t, err)
+
+	const importPath = "example.com/mypkg"
+
+	// Build a file rule targeting the import path
+	yamlContent := []byte(`
+file: hook.go
+target: example.com/mypkg
+`)
+	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
+	require.NoError(t, err)
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+
+	// The package name must be set from parsing the source file
+	assert.Equal(t, "mypkg", set.PackageName)
+	assert.False(t, set.IsEmpty(), "rule set must contain the file rule")
+}
+
+func TestRunMatch_EmptyRules(t *testing.T) {
+	dep := &Dependency{
+		ImportPath: "example.com/noop",
+		Sources:    []string{},
+		CgoFiles:   make(map[string]string),
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{})
+	require.NoError(t, err)
+	require.NotNil(t, set)
+	assert.True(t, set.IsEmpty())
+}
+
+func TestRunMatch_FileRuleInvalidSource(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "bad.go")
+	err := os.WriteFile(srcFile, []byte("not valid go source {{{"), 0o644)
+	require.NoError(t, err)
+
+	const importPath = "example.com/mypkg"
+
+	yamlContent := []byte(`
+file: hook.go
+target: example.com/mypkg
+`)
+	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
+	require.NoError(t, err)
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
+
+	sp := newTestSetupPhase()
+	_, err = sp.runMatch(context.Background(), dep, rulesByTarget)
+	assert.Error(t, err, "should fail when source file cannot be parsed")
+}
+
+func TestRunMatch_FileRuleNoSources(t *testing.T) {
+	const importPath = "example.com/mypkg"
+
+	yamlContent := []byte(`
+file: hook.go
+target: example.com/mypkg
+`)
+	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
+	require.NoError(t, err)
+
+	// dep with no sources: package name should remain empty
+	dep := &Dependency{
+		ImportPath: importPath,
+		Sources:    []string{},
+		CgoFiles:   make(map[string]string),
+	}
+
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+
+	// No sources means package name is not set
+	assert.Empty(t, set.PackageName)
+	assert.False(t, set.IsEmpty())
 }
