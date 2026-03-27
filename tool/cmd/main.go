@@ -66,6 +66,12 @@ func main() {
 				Usage:   "Merge profile files into one per type after build completes",
 				Hidden:  true,
 			},
+			&cli.BoolFlag{
+				Name:    "stats",
+				Sources: cli.EnvVars(util.EnvOtelcStats),
+				Usage:   "Log per-tool wall-clock duration for toolexec commands",
+				Hidden:  true,
+			},
 		},
 		Commands: []*cli.Command{
 			&commandSetup,
@@ -79,7 +85,11 @@ func main() {
 			if err != nil {
 				return ctx, err
 			}
-			return initProfiling(ctx, cmd)
+			ctx, err = initProfiling(ctx, cmd)
+			if err != nil {
+				return ctx, err
+			}
+			return initStats(ctx, cmd)
 		},
 		After: stopProfiling,
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dave/dst"
 
@@ -366,5 +367,18 @@ func Toolexec(ctx context.Context, args []string) error {
 	}
 
 	// Run the command
-	return util.RunCmd(ctx, args...)
+	if os.Getenv(util.EnvOtelcStats) == "" {
+		return util.RunCmd(ctx, args...)
+	}
+	tool := filepath.Base(args[0])
+	pkg := util.FindFlagValue(args, "-p")
+	start := time.Now()
+	err := util.RunCmd(ctx, args...)
+	elapsed := time.Since(start)
+	util.LoggerFromContext(ctx).InfoContext(ctx, "toolexec stats",
+		"tool", tool,
+		"package", pkg,
+		"duration", elapsed,
+	)
+	return err
 }
