@@ -285,6 +285,42 @@ func TestAppendCallArgs_EllipsisWithVariadicType(t *testing.T) {
 	assert.True(t, ok, "expected FuncLit as IIFE function")
 }
 
+func TestAppendCallArgs_EllipsisNoArgs(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs:   []string{"42"},
+		VariadicType: "int",
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no arguments")
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_InvalidVariadicType(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs:   []string{"42"},
+		VariadicType: "func {{{",
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{&dst.Ident{Name: "opts"}},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse variadic_type")
+	assert.False(t, modified)
+}
+
 func TestAppendCallArgs_InvalidExpr(t *testing.T) {
 	r := &rule.InstCallRule{
 		AppendArgs: []string{"func {{{"},

@@ -141,7 +141,9 @@ func parseGoExpression(expr string) (dst.Expr, error) {
 	}
 	exprStmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
 	if !ok {
-		return nil, fmt.Errorf("expression %q did not parse as an expression statement (got %T)", expr, funcDecl.Body.List[0])
+		return nil, fmt.Errorf(
+			"expression %q did not parse as an expression statement (got %T)",
+			expr, funcDecl.Body.List[0])
 	}
 	return exprStmt.X, nil
 }
@@ -154,7 +156,9 @@ func parseGoTypeExpression(typeStr string) (dst.Expr, error) {
 	}
 	declStmt, ok := funcDecl.Body.List[0].(*dst.DeclStmt)
 	if !ok {
-		return nil, fmt.Errorf("type %q did not parse as a declaration statement (got %T)", typeStr, funcDecl.Body.List[0])
+		return nil, fmt.Errorf(
+			"type %q did not parse as a declaration statement (got %T)",
+			typeStr, funcDecl.Body.List[0])
 	}
 	genDecl, ok := declStmt.Decl.(*dst.GenDecl)
 	if !ok || len(genDecl.Specs) == 0 {

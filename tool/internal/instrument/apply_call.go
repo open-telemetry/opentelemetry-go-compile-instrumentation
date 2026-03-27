@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 // applyCallRule transforms function calls at call sites by wrapping them with
@@ -42,7 +43,7 @@ func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		}
 
 		if r.Template != "" {
-			if err := wrapCall(call, r); err != nil {
+			if err = wrapCall(call, r); err != nil {
 				ip.Warn("Failed to wrap call", "error", err)
 				continue
 			}
@@ -110,16 +111,18 @@ func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
 // buildEllipsisIIFE constructs the IIFE that appends new args to a spread argument:
 //
 //	func(v ...VariadicType) []VariadicType { return append(v, newArgs...) }(spreadArg...)
-func buildEllipsisIIFE(spreadArg dst.Expr, varType dst.Expr, newArgs []dst.Expr) *dst.CallExpr {
+func buildEllipsisIIFE(spreadArg, varType dst.Expr, newArgs []dst.Expr) *dst.CallExpr {
 	param := &dst.Field{
 		Names: []*dst.Ident{{Name: "v"}},
-		Type:  &dst.Ellipsis{Elt: dst.Clone(varType).(dst.Expr)},
+		Type:  &dst.Ellipsis{Elt: util.AssertType[dst.Expr](dst.Clone(varType))},
 	}
-	returnType := &dst.ArrayType{Elt: dst.Clone(varType).(dst.Expr)}
+
+	returnType := &dst.ArrayType{Elt: util.AssertType[dst.Expr](dst.Clone(varType))}
 
 	appendArgs := make([]dst.Expr, 0, 1+len(newArgs))
 	appendArgs = append(appendArgs, &dst.Ident{Name: "v"})
 	appendArgs = append(appendArgs, newArgs...)
+
 	appendCall := &dst.CallExpr{
 		Fun:  &dst.Ident{Name: "append"},
 		Args: appendArgs,

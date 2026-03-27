@@ -166,7 +166,7 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 **Fields:**
 
 | Field | Type | Required | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `function_call` | string | Yes | Qualified function name: `package/path.FunctionName` |
 | `template` | string | No (one of `template`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a Go call expression. |
 | `append_args` | `[]string` | No (one of `template`/`append_args` required) | Go expression strings appended as additional arguments to the matched call |
