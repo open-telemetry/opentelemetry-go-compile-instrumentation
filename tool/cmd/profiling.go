@@ -110,7 +110,7 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 	rawTypes := os.Getenv(profile.EnvEnabledProfiles)
 	types, parseErr := profile.ParseTypes(rawTypes)
 	if parseErr != nil || len(types) == 0 {
-		return ex.Join(stopErr, parseErr)
+		return parseErr
 	}
 
 	logger.InfoContext(ctx, "merging profile files", "dir", profileDir)

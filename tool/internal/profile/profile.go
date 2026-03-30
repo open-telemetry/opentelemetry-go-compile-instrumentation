@@ -125,12 +125,10 @@ func (s *Session) Stop() error {
 		return nil
 	}
 
-	var errs []error
-
 	if s.cpuFile != nil {
 		pprof.StopCPUProfile()
 		if err := s.cpuFile.Close(); err != nil {
-			errs = append(errs, ex.Newf("close CPU profile %q", s.cpuFile.Name()))
+			return ex.Newf("close CPU profile %q", s.cpuFile.Name())
 		}
 		s.cpuFile = nil
 	}
@@ -138,7 +136,7 @@ func (s *Session) Stop() error {
 	if s.traceFile != nil {
 		trace.Stop()
 		if err := s.traceFile.Close(); err != nil {
-			errs = append(errs, ex.Newf("close trace file %q", s.traceFile.Name()))
+			return ex.Newf("close trace file %q", s.traceFile.Name())
 		}
 		s.traceFile = nil
 	}
@@ -146,11 +144,11 @@ func (s *Session) Stop() error {
 	// Write heap snapshot at the end (captures final allocation state).
 	if slices.Contains(s.types, Heap) {
 		if err := s.writeHeapProfile(); err != nil {
-			errs = append(errs, err)
+			return ex.Newf("write heap profile %q", s.filePath("otelc-heap-%d.pprof"))
 		}
 	}
 
-	return ex.Join(errs...)
+	return nil
 }
 
 // Merge merges all PID-stamped profile files in dir into a single file per type.
