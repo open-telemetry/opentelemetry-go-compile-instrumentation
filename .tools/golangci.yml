@@ -550,6 +550,11 @@ linters:
       - path: 'main\.go'
         linters:
           - forbidigo
+      # Only enforce ex.New/ex.Wrapf rules in tool directory
+      - path-except: 'tool/'
+        text: 'use ex\.(New|Newf|Wrapf) instead'
+        linters:
+          - forbidigo
       # Exclude generated files
       - path: '\.pb\.go$'
         linters:
