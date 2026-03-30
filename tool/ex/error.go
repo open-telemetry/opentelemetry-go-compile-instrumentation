@@ -139,6 +139,12 @@ func Fatalf(format string, args ...any) {
 	Fatal(Newf(format, args...))
 }
 
+// Join returns an error combining all non-nil errors in errs.
+// It is a thin wrapper over errors.Join so callers need only import ex.
+func Join(errs ...error) error {
+	return errors.Join(errs...)
+}
+
 func Fatal(err error) {
 	if err == nil {
 		_, _ = fmt.Fprintln(os.Stderr, "Fatal error: unknown")

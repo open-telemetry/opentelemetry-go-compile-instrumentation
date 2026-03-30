@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
@@ -406,15 +407,25 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 		}
 	}()
 
+	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
+
+	setupStart := time.Now()
 	err := Setup(ctx, cmd)
 	if err != nil {
 		return err
 	}
+	if statsEnabled {
+		logger.InfoContext(ctx, "setup stats", "duration", time.Since(setupStart))
+	}
 	logger.InfoContext(ctx, "Setup completed successfully")
 
+	buildStart := time.Now()
 	err = BuildWithToolexec(ctx, cmd)
 	if err != nil {
 		return err
+	}
+	if statsEnabled {
+		logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
 	}
 	logger.InfoContext(ctx, "Instrumentation completed successfully")
 	return nil
