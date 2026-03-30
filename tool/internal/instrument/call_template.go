@@ -4,8 +4,6 @@
 package instrument
 
 import (
-	"errors"
-	"fmt"
 	"go/format"
 	"go/parser"
 	"go/token"
@@ -17,6 +15,7 @@ import (
 	"github.com/dave/dst/dstutil"
 	"github.com/valyala/fasttemplate"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	toolast "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 )
 
@@ -38,7 +37,7 @@ type callTemplate struct {
 func newCallTemplate(text string) (*callTemplate, error) {
 	tmpl, err := fasttemplate.NewTemplate(text, "{{", "}}")
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse template: %w", err)
+		return nil, ex.Newf("failed to parse template %s", text)
 	}
 
 	return &callTemplate{
@@ -72,10 +71,10 @@ func (t *callTemplate) compileExpression(node dst.Expr) (dst.Expr, error) {
 		if cleaned == "." {
 			return io.WriteString(w, "_.PLACEHOLDER_0")
 		}
-		return 0, fmt.Errorf("unknown template tag %q; only {{ . }} is supported", tag)
+		return 0, ex.Newf("unknown template tag %q; only {{ . }} is supported", tag)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute template: %w", err)
+		return nil, ex.Newf("failed to execute template")
 	}
 
 	// Wrap the result in a minimal function so we can parse it as Go code.
@@ -87,47 +86,47 @@ func (t *callTemplate) compileExpression(node dst.Expr) (dst.Expr, error) {
 	if err != nil {
 		// Format the error with the generated code for debugging
 		formatted, _ := format.Source([]byte(wrapped))
-		return nil, fmt.Errorf("failed to parse generated code: %w\nGenerated code:\n%s", err, formatted)
+		return nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", formatted)
 	}
 
 	// Convert ast.File to dst.File
 	dec := decorator.NewDecorator(fset)
 	dstFile, err := dec.DecorateFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decorate AST: %w", err)
+		return nil, ex.Newf("failed to decorate AST")
 	}
 
 	// Extract the expression from the function body
 	if len(dstFile.Decls) == 0 {
-		return nil, errors.New("no declarations found in generated code")
+		return nil, ex.New("no declarations found in generated code")
 	}
 
 	funcDecl, ok := dstFile.Decls[0].(*dst.FuncDecl)
 	if !ok {
-		return nil, fmt.Errorf("expected function declaration, got %T", dstFile.Decls[0])
+		return nil, ex.Newf("expected function declaration, got %T", dstFile.Decls[0])
 	}
 
 	if funcDecl.Body == nil || len(funcDecl.Body.List) == 0 {
-		return nil, errors.New("function body is empty")
+		return nil, ex.New("function body is empty")
 	}
 	if len(funcDecl.Body.List) != 1 {
-		return nil, fmt.Errorf("expected single expression statement, got %d statements", len(funcDecl.Body.List))
+		return nil, ex.Newf("expected single expression statement, got %d statements", len(funcDecl.Body.List))
 	}
 
 	exprStmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
 	if !ok {
-		return nil, fmt.Errorf("expected expression statement, got %T", funcDecl.Body.List[0])
+		return nil, ex.Newf("expected expression statement, got %T", funcDecl.Body.List[0])
 	}
 
 	// Replace placeholder with the actual node
 	result, replaced := replacePlaceholder(exprStmt.X, node)
 	if !replaced {
-		return nil, errors.New("template output did not contain placeholder expression")
+		return nil, ex.New("template output did not contain placeholder expression")
 	}
 
 	resultExpr, ok := result.(dst.Expr)
 	if !ok {
-		return nil, errors.New("placeholder replacement didn't produce an expression")
+		return nil, ex.New("placeholder replacement didn't produce an expression")
 	}
 
 	return resultExpr, nil
