@@ -388,7 +388,6 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 
 	defer func() {
 		// Remove otelc.runtime.go from each instrumented package directory.
-		// This must happen before Cleanup() removes .otelc-build/.
 		pkgs, pkgErr := getBuildPackages(ctx, cmd.Args().Slice())
 		if pkgErr != nil {
 			logger.DebugContext(ctx, "failed to get build packages", "error", pkgErr)
@@ -400,8 +399,10 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 					"file", path, "error", removeErr)
 			}
 		}
-		// Delegate backup restore and temp dir removal to Cleanup.
-		if cleanErr := Cleanup(ctx); cleanErr != nil {
+
+		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
+		// Users can run `otelc cleanup` to remove it explicitly.
+		if cleanErr := Cleanup(ctx, false); cleanErr != nil {
 			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()
