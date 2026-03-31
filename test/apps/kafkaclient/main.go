@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package main provides a minimal Redis client for integration testing.
+// Package main provides a minimal Kafka client for integration testing.
 // This client is designed to be instrumented with the otel compile-time tool.
 package main
 
