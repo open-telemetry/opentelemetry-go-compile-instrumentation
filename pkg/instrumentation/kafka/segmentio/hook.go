@@ -109,6 +109,7 @@ func AfterReadMessage(ictx inst.HookContext, ctx context.Context, msg kafka.Mess
 		return
 	}
 
+	// Process message and extract its Metadata
 	req := semconv.KafkaRequest{
 		EndPoint:        data["endpoint"].(string),
 		Destination:     semconv.KafkaDestination(msg.Topic),
@@ -139,6 +140,7 @@ func AfterMessageProcessing(ictx inst.HookContext, err error) {
 		return
 	}
 	data, ok := ictx.GetData().(map[string]interface{})
+	// Check for any errors
 	if !ok {
 		return
 	}
@@ -153,5 +155,6 @@ func AfterMessageProcessing(ictx inst.HookContext, err error) {
 		span.SetStatus(codes.Error, err.Error())
 	}
 
-	span.End()
+	// end the Span here
+	defer span.End()
 }

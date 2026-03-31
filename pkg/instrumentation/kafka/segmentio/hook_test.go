@@ -2,8 +2,6 @@ package segmentio
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -12,13 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 )
 
 type mockHookContext struct {
@@ -205,6 +200,76 @@ func TestBeforeReadMessage(t *testing.T) {
 			assert.Equal(t, 0, len(sr.Ended()), "no span should be ended in BeforeReadMessage")
 
 			if tt.expectData {
+				data, ok := ictx.GetData().(map[string]interface{})
+				require.True(t, ok, "expected data to be set")
+				require.NotNil(t, data)
+
+				if tt.validateData != nil {
+					tt.validateData(t, data)
+				}
+			} else {
+				assert.Nil(t, ictx.GetData(), "no data should be stored when instrumentation disabled")
+			}
+		})
+	}
+}
+
+func TestAfterReadMessage(t *testing.T) {
+	tests := []struct {
+		name         string
+		setupEnv     func(t *testing.T)
+		setupData    func() map[string]interface{}
+		setupMessage func() kafka.Message
+		readErr      error
+		expectSpan   bool
+		validateData func(*testing.T, map[string]interface{})
+		validateSpan func(*testing.T, trace.Span)
+	}{
+		{
+			name: "success stores open span for AfterMessageProcessing",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "kafka")
+			},
+			setupData: func() map[string]interface{} {
+				return map[string]interface{}{
+					"endpoint":  "localhost:9092",
+					"group_id":  "test-group",
+					"partition": "0",
+					"start":     time.Now(),
+				}
+			},
+			setupMessage: func() kafka.Message {
+				return kafka.Message{Topic: "test-topic", Headers: []kafka.Header{}}
+			},
+			expectSpan: true,
+			validateData: func(t *testing.T, data map[string]interface{}) {
+				assert.NotNil(t, data["span"], "span must be stored for AfterMessageProcessing")
+				assert.NotNil(t, data["ctx"], "ctx must be stored")
+
+				span, ok := data["span"].(trace.Span)
+				require.True(t, ok, "span must implement trace.Span")
+				assert.True(t, span.IsRecording(), "span must still be open for AfterMessageProcessing to use")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			initOnce = sync.Once{}
+
+			tt.setupEnv(t)
+			_, tp := setupTestTracer()
+			defer tp.Shutdown(context.Background())
+
+			ictx := newMockHookContext()
+			if d := tt.setupData(); d != nil {
+				ictx.SetData(d)
+			}
+
+			assert.NotPanics(t, func() {
+				AfterReadMessage(ictx, context.Background(), tt.setupMessage(), tt.readErr)
+			})
+			if tt.expectSpan {
 				data, ok := ictx.GetData().(map[string]interface{})
 				require.True(t, ok, "expected data to be set")
 				require.NotNil(t, data)
