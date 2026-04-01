@@ -12,9 +12,9 @@ The process consists of three main steps:
 
 ## 1. Define Rules
 
-Rules are defined in YAML format and stored in `tool/data/`. These files tell the `otelc` which functions to instrument.
+Rules are defined in YAML format and stored in `pkg/instrumentation/<library-name>/<library-name>.yaml`. This file tells `otelc` which functions to instrument.
 
-Create a new file `tool/data/<library-name>.yaml`. Below is an example configuration for instrumenting a function `NewServer`:
+Create a new file `pkg/instrumentation/<library-name>/<library-name>.yaml`. Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
 inject_to_grpc_newserver:
@@ -120,7 +120,7 @@ make test-integration
 
 Check that your instrumentation package have following elements:
 
-* A rule YAML in `tool/data/` with a correct `target` and version range.
+* A rule YAML in `pkg/instrumentation/<library-name>/<library-name>.yaml` with a correct `target` and version range.
 * Hook implementation under `pkg/instrumentation/<library>/...`
 * Unit tests alongside the hooks for logic-level behavior.
 * Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
