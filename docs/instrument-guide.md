@@ -120,7 +120,7 @@ make test-integration
 
 Check that your instrumentation package have following elements:
 
-* A rule YAML in `pkg/instrumentation/<library-name>/<library-name>.yaml` with a correct `target` and version range.
+* A rule YAML `pkg/instrumentation/<library-name>/<library-name>.yaml` with a correct `target` and version range.
 * Hook implementation under `pkg/instrumentation/<library>/...`
 * Unit tests alongside the hooks for logic-level behavior.
 * Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
