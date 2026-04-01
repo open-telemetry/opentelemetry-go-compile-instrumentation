@@ -18,19 +18,22 @@ Create a new file `pkg/instrumentation/<library-name>/<library-name>.yaml`. Belo
 
 ```yaml
 inject_to_grpc_newserver:
-  target: google.golang.org/grpc
-  version: v1.63.0,v1.70.0
-  func: NewServer
-  before: BeforeNewServer
-  after: AfterNewServer
-  path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/server
+  where:
+    target: google.golang.org/grpc
+    version: v1.63.0,v1.70.0
+    func: NewServer
+  do:
+    inject_hooks:
+      before: BeforeNewServer
+      after: AfterNewServer
+      path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/server
 ```
 
-* `target`: Import path of the package to instrument.
-* `version`: Version range to match. The left bound is inclusive, the right bound is exclusive. If version is not specified, the rule is applicable to all versions.
-* `func`: Name of the function to hook.
-* `before` / `after`: Names of the hook functions.
-* `path`: Import path where the hook functions are defined.
+* `where.target`: Import path of the package to instrument.
+* `where.version`: Version range to match. The left bound is inclusive, the right bound is exclusive. If version is not specified, the rule is applicable to all versions.
+* `where.func`: Name of the function to hook.
+* `do.inject_hooks.before` / `do.inject_hooks.after`: Names of the hook functions.
+* `do.inject_hooks.path`: Import path where the hook functions are defined.
 
 > [!NOTE]
 > In addition to function rules, there are other types of rules available. For detailed information on these, refer to [rules.md](rules.md).

@@ -24,6 +24,266 @@ func (r *mockInstRule) String() string {
 	return r.Name
 }
 
+func TestNormalizeRule(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  map[string]any
+		expect map[string]any
+	}{
+		{
+			name: "flat format passthrough",
+			input: map[string]any{
+				"target": "net/http",
+				"func":   "ServeHTTP",
+				"before": "BeforeHook",
+				"path":   "github.com/example/pkg",
+			},
+			expect: map[string]any{
+				"target": "net/http",
+				"func":   "ServeHTTP",
+				"before": "BeforeHook",
+				"path":   "github.com/example/pkg",
+			},
+		},
+		{
+			name: "inject_hooks: func+recv from where, before/after/path from do",
+			input: map[string]any{
+				"where": map[string]any{
+					"target": "net/http",
+					"func":   "ServeHTTP",
+					"recv":   "serverHandler",
+				},
+				"do": map[string]any{
+					"inject_hooks": map[string]any{
+						"before": "BeforeServeHTTP",
+						"after":  "AfterServeHTTP",
+						"path":   "github.com/example/pkg",
+					},
+				},
+			},
+			expect: map[string]any{
+				"target": "net/http",
+				"func":   "ServeHTTP",
+				"recv":   "serverHandler",
+				"before": "BeforeServeHTTP",
+				"after":  "AfterServeHTTP",
+				"path":   "github.com/example/pkg",
+			},
+		},
+		{
+			name: "inject_code: func from where, raw from do",
+			input: map[string]any{
+				"where": map[string]any{
+					"target": "runtime",
+					"func":   "newproc1",
+				},
+				"do": map[string]any{
+					"inject_code": map[string]any{
+						"raw": "defer func(){}()",
+					},
+				},
+			},
+			expect: map[string]any{
+				"target": "runtime",
+				"func":   "newproc1",
+				"raw":    "defer func(){}()",
+			},
+		},
+		{
+			name: "add_struct_fields: struct from where, new_field from do",
+			input: map[string]any{
+				"where": map[string]any{
+					"target": "runtime",
+					"struct": "g",
+				},
+				"do": map[string]any{
+					"add_struct_fields": map[string]any{
+						"new_field": []any{
+							map[string]any{"name": "otel_ctx", "type": "interface{}"},
+						},
+					},
+				},
+			},
+			expect: map[string]any{
+				"target": "runtime",
+				"struct": "g",
+				"new_field": []any{
+					map[string]any{"name": "otel_ctx", "type": "interface{}"},
+				},
+			},
+		},
+		{
+			name: "add_file: target only in where, file+path from do",
+			input: map[string]any{
+				"where": map[string]any{
+					"target": "runtime",
+				},
+				"do": map[string]any{
+					"add_file": map[string]any{
+						"file": "runtime_gls.go",
+						"path": "github.com/example/pkg",
+					},
+				},
+			},
+			expect: map[string]any{
+				"target": "runtime",
+				"file":   "runtime_gls.go",
+				"path":   "github.com/example/pkg",
+			},
+		},
+		{
+			name: "wrap_call: function_call from where, template from do",
+			input: map[string]any{
+				"where": map[string]any{
+					"target":        "main",
+					"function_call": "unsafe.Sizeof",
+				},
+				"do": map[string]any{
+					"wrap_call": map[string]any{
+						"template": "Wrapper({{ . }})",
+					},
+				},
+			},
+			expect: map[string]any{
+				"target":        "main",
+				"function_call": "unsafe.Sizeof",
+				"template":      "Wrapper({{ . }})",
+			},
+		},
+		{
+			name: "expand_directive: directive from where, template from do",
+			input: map[string]any{
+				"where": map[string]any{
+					"target":    "main",
+					"directive": "otelc:span",
+				},
+				"do": map[string]any{
+					"expand_directive": map[string]any{
+						"template": `defer otelc.End()`,
+					},
+				},
+			},
+			expect: map[string]any{
+				"target":    "main",
+				"directive": "otelc:span",
+				"template":  `defer otelc.End()`,
+			},
+		},
+		{
+			name: "assign_value: kind+identifier from where, value from do",
+			input: map[string]any{
+				"where": map[string]any{
+					"target":     "main",
+					"kind":       "var",
+					"identifier": "GlobalVar",
+				},
+				"do": map[string]any{
+					"assign_value": map[string]any{
+						"value": `"replaced"`,
+					},
+				},
+			},
+			expect: map[string]any{
+				"target":     "main",
+				"kind":       "var",
+				"identifier": "GlobalVar",
+				"value":      `"replaced"`,
+			},
+		},
+		{
+			name: "imports stays at top level",
+			input: map[string]any{
+				"where": map[string]any{
+					"target": "main",
+					"func":   "Fn",
+				},
+				"do": map[string]any{
+					"inject_code": map[string]any{
+						"raw": `fmt.Println("x")`,
+					},
+				},
+				"imports": map[string]any{"fmt": "fmt"},
+			},
+			expect: map[string]any{
+				"target":  "main",
+				"func":    "Fn",
+				"raw":     `fmt.Println("x")`,
+				"imports": map[string]any{"fmt": "fmt"},
+			},
+		},
+		{
+			name: "version from where is preserved",
+			input: map[string]any{
+				"where": map[string]any{
+					"target":  "golang.org/x/time/rate",
+					"version": "v0.14.0,v0.15.0",
+					"func":    "Every",
+				},
+				"do": map[string]any{
+					"inject_code": map[string]any{
+						"raw": `fmt.Println("x")`,
+					},
+				},
+			},
+			expect: map[string]any{
+				"target":  "golang.org/x/time/rate",
+				"version": "v0.14.0,v0.15.0",
+				"func":    "Every",
+				"raw":     `fmt.Println("x")`,
+			},
+		},
+		{
+			name: "only where block (no do)",
+			input: map[string]any{
+				"where": map[string]any{
+					"target": "main",
+					"func":   "Fn",
+				},
+			},
+			expect: map[string]any{
+				"target": "main",
+				"func":   "Fn",
+			},
+		},
+		{
+			name: "only do block (no where)",
+			input: map[string]any{
+				"do": map[string]any{
+					"inject_code": map[string]any{
+						"raw": "_ = 0",
+					},
+				},
+			},
+			expect: map[string]any{
+				"raw": "_ = 0",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeRule(tt.input)
+			if len(got) != len(tt.expect) {
+				t.Errorf("normalizeRule() len = %d, want %d; got %v", len(got), len(tt.expect), got)
+				return
+			}
+			for k, wantVal := range tt.expect {
+				gotVal, exists := got[k]
+				if !exists {
+					t.Errorf("normalizeRule() missing key %q", k)
+					continue
+				}
+				// Use yaml round-trip for deep equality of nested maps/slices.
+				wantYAML, _ := yaml.Marshal(wantVal)
+				gotYAML, _ := yaml.Marshal(gotVal)
+				if string(wantYAML) != string(gotYAML) {
+					t.Errorf("normalizeRule()[%q] = %v, want %v", k, gotVal, wantVal)
+				}
+			}
+		})
+	}
+}
+
 func TestMatchVersion(t *testing.T) {
 	tests := []struct {
 		name           string
