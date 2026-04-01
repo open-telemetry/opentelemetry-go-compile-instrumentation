@@ -186,7 +186,15 @@ func FindTypeDecl(root *dst.File, name string) *dst.GenDecl {
 
 // FindNamedDecl finds a package-level declaration by name and optional kind.
 // kind may be "func", "var", "const", "type", or "" to match any.
-// Returns the matched AST node (FuncDecl, ValueSpec, or GenDecl) or nil.
+//
+// The concrete type of the returned node varies by kind:
+//   - "func"        → *dst.FuncDecl
+//   - "var"/"const" → *dst.ValueSpec  (the spec, not the enclosing GenDecl)
+//   - "type"        → *dst.GenDecl    (the enclosing GenDecl, not the TypeSpec)
+//   - ""            → one of the above, whichever matches first (func > var > const > type)
+//
+// Callers must type-assert the result. Passing assign_value with a "func" or
+// "type" node will produce a runtime error from the apply layer.
 func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 	switch kind {
 	case "func":

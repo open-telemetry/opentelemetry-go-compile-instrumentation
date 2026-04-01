@@ -1,0 +1,4 @@
+replace_bool:
+  target: main
+  value_declaration: "bool"
+  assign_value: "true"

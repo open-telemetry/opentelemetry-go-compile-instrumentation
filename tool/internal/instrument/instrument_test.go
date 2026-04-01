@@ -112,6 +112,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		CallRules:      make(map[string][]*rule.InstCallRule),
 		DirectiveRules: make(map[string][]*rule.InstDirectiveRule),
 		DeclRules:      make(map[string][]*rule.InstDeclRule),
+		ValueDeclRules: make(map[string][]*rule.InstValueDeclRule),
 		FileRules:      make([]*rule.InstFileRule, 0),
 	}
 
@@ -149,6 +150,9 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		case props["identifier"] != nil:
 			r, _ := rule.NewInstDeclRule(ruleData, name)
 			ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+		case props["value_declaration"] != nil:
+			r, _ := rule.NewInstValueDeclRule(ruleData, name)
+			ruleSet.ValueDeclRules[sourceFile] = append(ruleSet.ValueDeclRules[sourceFile], r)
 		}
 	}
 
@@ -410,6 +414,23 @@ func TestGroupRules(t *testing.T) {
 				},
 			},
 			expectedFiles: []string{"file1.go"},
+		},
+		{
+			name: "value decl rules only",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				ValueDeclRules: map[string][]*rule.InstValueDeclRule{
+					"file1.go": {
+						{InstBaseRule: rule.InstBaseRule{Name: "vd1"}},
+					},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
+			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
+				assert.Len(t, grouped["file1.go"], 1)
+			},
 		},
 	}
 

@@ -1,0 +1,13 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+var enabled bool = true
+var name string = "default"
+
+const threshold int = 10
+
+var untyped = "no annotation"
+
+func main() {}

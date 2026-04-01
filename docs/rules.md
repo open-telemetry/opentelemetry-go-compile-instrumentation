@@ -441,3 +441,50 @@ This rule replaces `http.DefaultTransport` in the `net/http` package with a cust
 - `value` must be a valid Go expression (not a statement).
 - If the matched symbol has multiple names in a single declaration (e.g., `var a, b = ...`), the expression is cloned and assigned to each name.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.
+
+### 8. Value Declaration Rule
+
+This rule targets package-level `var` or `const` declarations by their **declared type** rather than by name. Every declaration in the target package whose type matches the rule is replaced with the new value. Only declarations with an explicit type annotation are matched — untyped declarations (e.g., `const x = true`) are skipped.
+
+**Use Cases:**
+
+- Replacing all `var` declarations of a specific interface type with an instrumented implementation.
+- Overriding all feature flags of a given type across a package.
+
+**Fields:**
+
+- `value_declaration` (string, required): The type to match. Supported formats:
+  - Built-in types: `bool`, `string`, `int`, etc.
+  - Qualified types: `net/http.Client` (full import path + type name)
+  - Pointer types: `*net/http.Client`
+- `assign_value` (string, required): A Go expression to assign as the new value for every matched declaration.
+- `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
+
+**Examples:**
+
+Replace every `http.RoundTripper` variable in `net/http` with an OTel-instrumented transport, so all outbound HTTP calls are automatically traced:
+
+```yaml
+instrument_http_transport:
+  target: net/http
+  value_declaration: "net/http.RoundTripper"
+  assign_value: "otelhttp.NewTransport(http.DefaultTransport)"
+  imports:
+    otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+    http: "net/http"
+```
+
+Override all explicitly-typed boolean feature flags in a package:
+
+```yaml
+enable_feature_flag:
+  target: mypackage
+  value_declaration: "bool"
+  assign_value: "true"
+```
+
+**Notes:**
+
+- `assign_value` must be a valid Go expression (not a statement).
+- Untyped declarations (e.g., `const x = false`) are not matched.
+- All matched declarations in the file receive the same expression (cloned per declaration).
