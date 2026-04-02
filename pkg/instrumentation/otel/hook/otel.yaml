@@ -4,12 +4,6 @@ trace_context:
   file: otel_trace_context.go
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/sdk/trace"
 
-trace_test_func_holder:
-  target: go.opentelemetry.io/otel/sdk/trace
-  version: "v1.39.0"
-  file: otel_trace_test_func_holder.go
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/sdk/trace"
-
 # Function hooks for go.opentelemetry.io/otel/sdk/trace
 hook_non_recording_span_end:
   target: go.opentelemetry.io/otel/sdk/trace
