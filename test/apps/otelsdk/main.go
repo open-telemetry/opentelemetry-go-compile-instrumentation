@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
@@ -48,14 +49,15 @@ func main() {
 
 	http.HandleFunc("/otel", otelHandler)
 
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
 	go func() {
-		if err := http.ListenAndServe(addr, nil); err != nil {
+		if err := http.Serve(ln, nil); err != nil {
 			log.Fatalf("failed to serve: %v", err)
 		}
 	}()
-
-	// Wait for the server to start
-	time.Sleep(2 * time.Second)
 
 	// Send a request to self
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%s/otel", *port))

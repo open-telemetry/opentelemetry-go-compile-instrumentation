@@ -97,6 +97,9 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 	}
 	for _, field := range funcDecl.Type.Params.List {
 		if len(field.Names) == 0 {
+			// Unnamed parameters (e.g. func F(int)) are valid in declarations but
+			// cannot be referenced in generated trampoline calls. Assign a synthetic
+			// identifier so later instrumentation code can take its address.
 			name := fmt.Sprintf("%s%d", ignoredParam, idx)
 			idx++
 			field.Names = []*dst.Ident{ast.Ident(name)}

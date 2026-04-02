@@ -13,11 +13,11 @@ import (
 //go:linkname traceContextAddSpan go.opentelemetry.io/otel/sdk/trace.traceContextAddSpan
 func traceContextAddSpan(span trace.Span)
 
-func newRecordingSpanOnExit(ictx inst.HookContext, span interface{}) {
+func newRecordingSpanAfter(ictx inst.HookContext, span interface{}) {
 	addSpanToGls(span)
 }
 
-func newNonRecordingSpanOnExit(ictx inst.HookContext, span interface{}) {
+func newNonRecordingSpanAfter(ictx inst.HookContext, span interface{}) {
 	addSpanToGls(span)
 }
 

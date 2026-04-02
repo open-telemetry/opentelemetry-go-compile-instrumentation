@@ -13,11 +13,11 @@ import (
 //go:linkname traceContextDelSpan go.opentelemetry.io/otel/sdk/trace.traceContextDelSpan
 func traceContextDelSpan(span trace.Span)
 
-func nonRecordingSpanEndOnEnter(ictx inst.HookContext, span interface{}, options ...interface{}) {
+func nonRecordingSpanEndBefore(ictx inst.HookContext, span interface{}, options ...interface{}) {
 	deleteFromGls(span)
 }
 
-func recordingSpanEndOnEnter(ictx inst.HookContext, span interface{}, options ...interface{}) {
+func recordingSpanEndBefore(ictx inst.HookContext, span interface{}, options ...interface{}) {
 	deleteFromGls(span)
 }
 
