@@ -13,14 +13,16 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
-const maxSpans = 1000
+const defaultGLSMaxSpans = 1000
+
+var otelGLSMaxSpans = defaultGLSMaxSpans
 
 func init() {
 	ms := os.Getenv("OTEL_GLS_MAX_SPANS")
-	if ms == "" {
-		maxSpans = 1000
-	} else {
-		maxSpans, _ = strconv.Atoi(ms)
+	if ms != "" {
+		if parsed, err := strconv.Atoi(ms); err == nil && parsed > 0 {
+			otelGLSMaxSpans = parsed
+		}
 	}
 }
 
@@ -41,7 +43,7 @@ func (tc *traceContext) size() int {
 
 func (tc *traceContext) add(span trace.Span) bool {
 	if tc.n > 0 {
-		if tc.n >= maxSpans {
+		if tc.n >= otelGLSMaxSpans {
 			return false
 		}
 	}

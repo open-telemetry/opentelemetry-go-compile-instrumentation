@@ -51,6 +51,7 @@ This approach provides dynamic instrumentation without runtime overhead or invas
 
 - [User Experience Design](./ux-design.md) - Detailed UX documentation and configuration options
 - [Implementation Details](./implementation.md) - Technical architecture and internals
+- [GLS Operation](./gls-operation.md) - How goroutine-local span fallback is wired for OTel SDK
 - [API Design](./api-design-and-project-structure.md) - API structure and project organization
 - [Contributing Guide](../CONTRIBUTING.md) - How to contribute to the project
 
