@@ -14,15 +14,14 @@ import (
 func traceContextAddSpan(span trace.Span)
 
 func newRecordingSpanOnExit(ictx inst.HookContext, span interface{}) {
-	if span != nil {
-		s, ok := span.(trace.Span)
-		if ok {
-			traceContextAddSpan(s)
-		}
-	}
+	addSpanToGls(span)
 }
 
 func newNonRecordingSpanOnExit(ictx inst.HookContext, span interface{}) {
+	addSpanToGls(span)
+}
+
+func addSpanToGls(span interface{}) {
 	if span != nil {
 		if s, ok := span.(trace.Span); ok {
 			traceContextAddSpan(s)

@@ -14,14 +14,14 @@ import (
 func traceContextDelSpan(span trace.Span)
 
 func nonRecordingSpanEndOnEnter(ictx inst.HookContext, span interface{}, options ...interface{}) {
-	if span != nil {
-		if s, ok := span.(trace.Span); ok {
-			traceContextDelSpan(s)
-		}
-	}
+	deleteFromGls(span)
 }
 
 func recordingSpanEndOnEnter(ictx inst.HookContext, span interface{}, options ...interface{}) {
+	deleteFromGls(span)
+}
+
+func deleteFromGls(span interface{}) {
 	if span != nil {
 		if s, ok := span.(trace.Span); ok {
 			traceContextDelSpan(s)

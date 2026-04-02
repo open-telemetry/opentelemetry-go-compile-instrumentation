@@ -68,8 +68,3 @@ hook_set_tracer_provider:
   func: SetTracerProvider
   before: setTracerProviderOnEnter
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/hook"
-
-baggage_util:
-  target: go.opentelemetry.io/otel/baggage
-  file: otel_baggage_util.go
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/otel/sdk/baggage"

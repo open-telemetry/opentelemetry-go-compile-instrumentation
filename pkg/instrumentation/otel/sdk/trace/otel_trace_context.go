@@ -6,12 +6,23 @@
 package trace
 
 import (
+	"os"
 	"runtime"
+	"strconv"
 
 	trace "go.opentelemetry.io/otel/trace"
 )
 
-const maxSpans = 300
+const maxSpans = 1000
+
+func init() {
+	ms := os.Getenv("OTEL_GLS_MAX_SPANS")
+	if ms == "" {
+		maxSpans = 1000
+	} else {
+		maxSpans, _ = strconv.Atoi(ms)
+	}
+}
 
 type traceContext struct {
 	sw  *spanWrapper
@@ -95,7 +106,7 @@ func (tc *traceContext) Clone() interface{} {
 	return &traceContext{sw, 1, nil}
 }
 
-func getTraceContext() trace.SpanContext {
+func GetTraceContext() trace.SpanContext {
 	t := getOrInitTraceContext()
 	if t.size() != 0 {
 		return t.tail().SpanContext()
@@ -125,7 +136,7 @@ func traceContextAddSpan(span trace.Span) {
 	}
 }
 
-func getTraceAndSpanId() (string, string) {
+func GetTraceAndSpanId() (string, string) {
 	tc := runtime.GetTraceContextFromGLS()
 	if tc == nil || tc.(*traceContext).tail() == nil {
 		return "", ""
@@ -139,7 +150,7 @@ func traceContextDelSpan(span trace.Span) {
 	ctx.del(span)
 }
 
-func clearTraceContext() {
+func ClearTraceContext() {
 	getOrInitTraceContext().clear()
 }
 
@@ -149,12 +160,4 @@ func spanFromGLS() trace.Span {
 		return nil
 	}
 	return gls.(*traceContext).tail()
-}
-
-func localRootSpanFromGLS() trace.Span {
-	gls := runtime.GetTraceContextFromGLS()
-	if gls == nil {
-		return nil
-	}
-	return gls.(*traceContext).lcs
 }
