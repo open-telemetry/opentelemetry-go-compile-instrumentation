@@ -98,18 +98,15 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 			args = append(args, receiver)
 		}
 	}
-	if funcDecl.Name.Name == "Unnamed" {
-		dst.Print(funcDecl.Type.Params.List)
-	}
 	for _, field := range funcDecl.Type.Params.List {
 		util.Assert(field.Type != nil, "why not otherwise")
 		if field.Names == nil {
 			// Unnamed Parameters, e.g. func(int, string){}
 			// Assign a name for these parameters and collect it then
-			names := fmt.Sprintf("%s%d", ignoredParam, idx)
-			field.Names = []*dst.Ident{ast.Ident(names)}
+			name := fmt.Sprintf("%s%d", ignoredParam, idx)
+			field.Names = []*dst.Ident{ast.Ident(name)}
 			idx++
-			args = append(args, names)
+			args = append(args, name)
 		} else {
 			// Named Parameters, e.g. func(a int, b string){}
 			for _, name := range field.Names {
