@@ -386,7 +386,7 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	@echo "Running pkg unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
