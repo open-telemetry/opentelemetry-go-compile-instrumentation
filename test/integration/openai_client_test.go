@@ -30,6 +30,7 @@ func TestOpenAIClient(t *testing.T) {
 			// The OpenAI client will fail to connect (no mock server),
 			// but the instrumentation should still create a span with an error status and expected attributes.
 			_ = f.BuildAndRun("openaiclient")
+			testutil.WaitForSpanFlush(t)
 
 			spans := testutil.AllSpans(f.Traces())
 			require.GreaterOrEqual(t, len(spans), 1, "expected at least 1 span (chat completion)")
@@ -41,7 +42,7 @@ func TestOpenAIClient(t *testing.T) {
 				testutil.HasAttribute("gen_ai.operation.name", "chat"),
 			)
 			// Verify error status since connection is expected to fail
-			require.Equal(t, chatSpan.Status().Code(), ptrace.StatusCodeError, "expected ERROR status for failed connection")
+			require.Equal(t, ptrace.StatusCodeError, chatSpan.Status().Code(), "expected ERROR status for failed connection")
 			testutil.RequireGenAIClientSemconv(
 				t,
 				chatSpan,

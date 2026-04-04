@@ -38,7 +38,7 @@ func setupTestTracer() (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {
 }
 
 func resetInit() {
-	initOnce = *new(sync.Once)
+	initOnce = sync.Once{}
 }
 
 // ---------------------------------------------------------------------------
@@ -50,7 +50,12 @@ func TestBeforeAfterChatCompletionNew(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "OPENAI")
 
 	sr, tp := setupTestTracer()
-	defer tp.Shutdown(context.Background())
+	defer func(tp *sdktrace.TracerProvider, ctx context.Context) {
+		err := tp.Shutdown(ctx)
+		if err != nil {
+
+		}
+	}(tp, context.Background())
 
 	ictx := newMockHookContext()
 	ctx := context.Background()
