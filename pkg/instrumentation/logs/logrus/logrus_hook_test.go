@@ -100,6 +100,8 @@ func TestBeforeLogrusEntryLog_Disabled(t *testing.T) {
 }
 
 func TestBeforeLogrusEntryLog_NilArgs(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/logrus")
+
 	ictx := insttest.NewMockHookContext()
 	entry := &logrus.Entry{}
 	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel)

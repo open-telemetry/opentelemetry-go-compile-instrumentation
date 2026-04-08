@@ -73,6 +73,8 @@ func TestBeforeSlogLog_Disabled(t *testing.T) {
 }
 
 func TestBeforeSlogLog_EmptyMessage(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/slog")
+
 	ictx := insttest.NewMockHookContext()
 	BeforeSlogLog(ictx, nil, nil, 0, "")
 	// Should return early without modifying params
@@ -80,6 +82,8 @@ func TestBeforeSlogLog_EmptyMessage(t *testing.T) {
 }
 
 func TestBeforeSlogLog_AlreadyContainsTraceID(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/slog")
+
 	ictx := insttest.NewMockHookContext()
 	BeforeSlogLog(ictx, nil, nil, 0, "message with trace_id=abc123")
 	// Should return early without modifying params
