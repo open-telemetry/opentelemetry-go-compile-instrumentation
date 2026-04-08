@@ -28,7 +28,14 @@ func (l logEnabler) Enable() bool {
 var enabler = logEnabler{}
 
 // BeforeSlogLog is called before (*Logger).log() to inject trace context into log message
-func BeforeSlogLog(ictx inst.HookContext, logger *slog.Logger, ctx context.Context, level slog.Level, msg string, args ...any) {
+func BeforeSlogLog(
+	ictx inst.HookContext,
+	logger *slog.Logger,
+	ctx context.Context,
+	level slog.Level,
+	msg string,
+	args ...any,
+) {
 	if !enabler.Enable() {
 		return
 	}

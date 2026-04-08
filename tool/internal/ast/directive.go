@@ -163,18 +163,18 @@ func tokenize(input string) ([]string, error) {
 
 	for _, ch := range input {
 		if escaped {
-			current.WriteRune(ch)
+			_, _ = current.WriteRune(ch)
 			escaped = false
 			continue
 		}
 		if ch == '\\' && inQuote {
-			current.WriteRune(ch)
+			_, _ = current.WriteRune(ch)
 			escaped = true
 			continue
 		}
 		if ch == '"' {
 			inQuote = !inQuote
-			current.WriteRune(ch)
+			_, _ = current.WriteRune(ch)
 			continue
 		}
 		if unicode.IsSpace(ch) && !inQuote {
@@ -184,7 +184,7 @@ func tokenize(input string) ([]string, error) {
 			}
 			continue
 		}
-		current.WriteRune(ch)
+		_, _ = current.WriteRune(ch)
 	}
 	if inQuote {
 		return nil, ex.New("unclosed double quote")

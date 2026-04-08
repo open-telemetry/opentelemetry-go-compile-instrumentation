@@ -6,8 +6,8 @@ package logrus
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
 )

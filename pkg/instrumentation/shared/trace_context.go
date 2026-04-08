@@ -11,4 +11,4 @@ import (
 // This is useful for log instrumentation to inject trace context into log messages.
 //
 //go:linkname GetTraceAndSpanId go.opentelemetry.io/otel/sdk/trace.GetTraceAndSpanId
-func GetTraceAndSpanId() (traceId string, spanId string)
+func GetTraceAndSpanId() (traceId, spanId string)

@@ -27,7 +27,13 @@ func (l logEnabler) Enable() bool {
 var enabler = logEnabler{}
 
 // BeforeLogOutput is called before (*Logger).output() to inject trace context into log message
-func BeforeLogOutput(ictx inst.HookContext, logger *log.Logger, pc uintptr, calldepth int, appendOutput func([]byte) []byte) {
+func BeforeLogOutput(
+	ictx inst.HookContext,
+	logger *log.Logger,
+	pc uintptr,
+	calldepth int,
+	appendOutput func([]byte) []byte,
+) {
 	if !enabler.Enable() {
 		return
 	}
