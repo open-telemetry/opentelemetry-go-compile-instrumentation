@@ -6,6 +6,7 @@ package instrument
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -29,6 +30,10 @@ func listRuleFiles(path string) ([]string, error) {
 	return util.ListFiles(p)
 }
 
+func stripBuildIgnoreTag(content string) string {
+	return strings.ReplaceAll(content, "//go:build ignore", "")
+}
+
 // applyFileRule introduces the new file to the target package at compile time.
 func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
 	// List all files in the rule module path
@@ -46,8 +51,13 @@ func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 	}
 	file := files[index]
 
-	// Parse the new file into AST nodes and modify it as needed
-	root, err := ip.parseFile(file)
+	// Parse the new file into AST nodes and modify it as needed.
+	// Keep processing in-memory to avoid mutating shared temp rule files.
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return ex.Wrapf(err, "reading rule source file %s", file)
+	}
+	root, err := ast.NewAstParser().ParseSource(stripBuildIgnoreTag(string(data)))
 	if err != nil {
 		return ex.Wrapf(err, "parsing rule source file %s", file)
 	}
