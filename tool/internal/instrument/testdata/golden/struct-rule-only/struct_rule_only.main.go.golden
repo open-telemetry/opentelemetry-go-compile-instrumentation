@@ -40,4 +40,6 @@ func EllipsisFunc(p1 ...string) {}
 
 func UnderscoreFunc(_ int, _ float32) {}
 
+func Unnamed(int, float32) {}
+
 func main() { Func1("hello", 123) }
