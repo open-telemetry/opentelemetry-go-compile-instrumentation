@@ -157,3 +157,7 @@ func FunctionBBefore(ictx inst.HookContext, ctx context.Context) {
 		span.SpanContext().SpanID().String(),
 	)
 }
+
+func UnnamedBefore(ictx inst.HookContext, recv interface{}, arg1 int, arg2 float32) {
+	fmt.Printf("UnnamedBefore %v %v\n", arg1, arg2)
+}

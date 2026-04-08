@@ -87,7 +87,7 @@ func captureStack() []string {
 			break
 		}
 		fnName := strings.TrimPrefix(frame.Function, modPrefix)
-		f := fmt.Sprintf("[%d]%s:%d %s", cnt, frame.File, frame.Line, fnName)
+		f := fmt.Sprintf("[%d] %s:%d %s", cnt, frame.File, frame.Line, fnName)
 		frameList = append(frameList, f)
 		cnt++
 	}

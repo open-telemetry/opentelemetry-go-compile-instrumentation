@@ -84,6 +84,8 @@ func FunctionB(ctx context.Context) {}
 // not import, so the import must be resolved via auto-detection.
 func AutoDetect() {}
 
+func (MyStruct) Unnamed(int, float32) {}
+
 func main() {
 	ctx := &traceContext{
 		traceID: "123",
@@ -123,4 +125,5 @@ func main() {
 	FunctionA(context.Background())
 
 	AutoDetect()
+	MyStruct{}.Unnamed(42, 2.7)
 }
