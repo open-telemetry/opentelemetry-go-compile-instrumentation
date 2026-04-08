@@ -480,7 +480,7 @@ add_file_with_extra_imports:
     log: "log"  # Add extra import to the copied file
 ```
 
-### 6. Named Declaration Rule
+### 7. Named Declaration Rule
 
 This rule targets a named package-level symbol (variable, constant, function, or type) and replaces its initializer with a new expression. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing a default HTTP transport with an instrumented one to enable distributed tracing.
 

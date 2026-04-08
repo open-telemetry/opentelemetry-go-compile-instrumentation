@@ -48,6 +48,8 @@ func UnderscoreFunc(_ignoredParam0 int, _ignoredParam1 float32) {
 	//line main.go:41:39
 }
 
+func Unnamed(int, float32) {}
+
 func main() { Func1("hello", 123) }
 
 //line <generated>:1

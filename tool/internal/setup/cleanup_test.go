@@ -72,7 +72,7 @@ func TestCleanup(t *testing.T) {
 
 			tt.setup(t, tmpDir)
 
-			err := Cleanup(context.Background())
+			err := Cleanup(context.Background(), true)
 			if err != nil {
 				t.Fatalf("Cleanup() returned unexpected error: %v", err)
 			}
@@ -98,7 +98,7 @@ func TestCleanupRestoresBackup(t *testing.T) {
 	mustWriteFile(t, filepath.Join(tmpDir, "go.mod"), modifiedContent)
 	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "backup", "go.mod"), originalContent)
 
-	err := Cleanup(context.Background())
+	err := Cleanup(context.Background(), true)
 	if err != nil {
 		t.Fatalf("Cleanup() returned unexpected error: %v", err)
 	}
@@ -115,6 +115,55 @@ func TestCleanupRestoresBackup(t *testing.T) {
 	// .otelc-build/ should be removed after restoration.
 	if _, statErr := os.Stat(filepath.Join(tmpDir, util.BuildTempDir)); !os.IsNotExist(statErr) {
 		t.Error("expected .otelc-build/ to be removed after cleanup")
+	}
+}
+
+func TestCleanupKeepsBuildDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	const originalContent = "module original.com\n\ngo 1.24.0\n"
+	const modifiedContent = "module modified.com\n\ngo 1.24.0\n"
+
+	// Simulate a completed build: modified go.mod, backup, runtime file, and build artifacts.
+	mustWriteFile(t, filepath.Join(tmpDir, "go.mod"), modifiedContent)
+	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "backup", "go.mod"), originalContent)
+	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "matched.json"), "{}")
+	mustWriteFile(t, filepath.Join(tmpDir, OtelcRuntimeFile), "dummy")
+
+	err := Cleanup(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
+	}
+
+	// go.mod should be restored to the original content.
+	got, readErr := os.ReadFile(filepath.Join(tmpDir, "go.mod"))
+	if readErr != nil {
+		t.Fatalf("failed to read go.mod after cleanup: %v", readErr)
+	}
+	if string(got) != originalContent {
+		t.Errorf("go.mod content = %q, want %q", string(got), originalContent)
+	}
+
+	// otelc.runtime.go should be removed.
+	if _, statErr := os.Stat(filepath.Join(tmpDir, OtelcRuntimeFile)); !os.IsNotExist(statErr) {
+		t.Error("expected otelc.runtime.go to be removed after Cleanup(cleanAll=false)")
+	}
+
+	// .otelc-build/ should still exist (kept for debugging).
+	if _, statErr := os.Stat(filepath.Join(tmpDir, util.BuildTempDir)); os.IsNotExist(statErr) {
+		t.Error("expected .otelc-build/ to be kept after Cleanup(cleanAll=false), but it was removed")
+	}
+}
+
+func TestCleanupKeepsBuildDirNoArtifacts(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	// No artifacts exist — Cleanup(cleanAll=false) should not panic or fail.
+	err := Cleanup(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
 	}
 }
 

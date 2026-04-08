@@ -15,8 +15,11 @@ const (
 	EnvOtelcWorkDir    = "OTELC_WORK_DIR"
 	EnvOtelcRules      = "OTELC_RULES"
 	EnvOtelcBuildFlags = "OTELC_BUILD_FLAGS"
-	BuildTempDir       = ".otelc-build"
-	OtelcRoot          = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	// EnvOtelcStats enables per-toolexec timing stats when set to "1".
+	// Set automatically when --stats is used; propagated to child processes.
+	EnvOtelcStats = "OTELC_STATS"
+	BuildTempDir  = ".otelc-build"
+	OtelcRoot     = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
 )
 
 func GetMatchedRuleFile() string {

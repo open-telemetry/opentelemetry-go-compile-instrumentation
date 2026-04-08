@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
@@ -387,7 +388,6 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 
 	defer func() {
 		// Remove otelc.runtime.go from each instrumented package directory.
-		// This must happen before Cleanup() removes .otelc-build/.
 		pkgs, pkgErr := getBuildPackages(ctx, cmd.Args().Slice())
 		if pkgErr != nil {
 			logger.DebugContext(ctx, "failed to get build packages", "error", pkgErr)
@@ -399,21 +399,33 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 					"file", path, "error", removeErr)
 			}
 		}
-		// Delegate backup restore and temp dir removal to Cleanup.
-		if cleanErr := Cleanup(ctx); cleanErr != nil {
+
+		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
+		// Users can run `otelc cleanup` to remove it explicitly.
+		if cleanErr := Cleanup(ctx, false); cleanErr != nil {
 			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()
 
+	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
+
+	setupStart := time.Now()
 	err := Setup(ctx, cmd)
 	if err != nil {
 		return err
 	}
+	if statsEnabled {
+		logger.InfoContext(ctx, "setup stats", "duration", time.Since(setupStart))
+	}
 	logger.InfoContext(ctx, "Setup completed successfully")
 
+	buildStart := time.Now()
 	err = BuildWithToolexec(ctx, cmd)
 	if err != nil {
 		return err
+	}
+	if statsEnabled {
+		logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
 	}
 	logger.InfoContext(ctx, "Instrumentation completed successfully")
 	return nil

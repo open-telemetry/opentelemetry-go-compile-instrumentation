@@ -10,21 +10,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// InstStructRule represents a rule that guides hook struct field injection into
-// appropriate target struct locations. For example, if we want to inject
-// custom Foo field at the target struct Bar, we can define a rule:
-//
-//	rule:
-//		name: "rule"
-//		target: "main"
-//		struct: "Bar"
-//		field_name: "Foo"
-//		field_type: "int"
+// InstStructField represents a single field to be added to a struct.
 type InstStructField struct {
 	Name string `json:"name" yaml:"name"` // The name of the field to be added
 	Type string `json:"type" yaml:"type"` // The type of the field to be added
 }
 
+// InstStructRule represents a rule that adds new fields to a target struct.
+// For example, to inject a custom field into a struct:
+//
+//	add_new_field:
+//	  target: main
+//	  struct: MyStruct
+//	  new_field:
+//	    - name: NewField
+//	      type: string
 type InstStructRule struct {
 	InstBaseRule `yaml:",inline"`
 
