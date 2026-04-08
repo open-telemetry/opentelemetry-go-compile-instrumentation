@@ -5,7 +5,6 @@ package util
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,13 +59,15 @@ func GetBuildTemp(name string) string {
 }
 
 func copyBackupFiles(names []string, src, dst string) error {
-	var err error
 	for _, name := range names {
 		srcFile := filepath.Join(src, name)
 		dstFile := filepath.Join(dst, name)
-		err = errors.Join(err, CopyFile(srcFile, dstFile))
+		err := CopyFile(srcFile, dstFile)
+		if err != nil {
+			return err
+		}
 	}
-	return err
+	return nil
 }
 
 // BackupFile backups the source file to $BUILD_TEMP/backup/name.

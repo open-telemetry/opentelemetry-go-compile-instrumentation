@@ -104,16 +104,16 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 	// Use the absolute path stored in env (set by initProfiling).
 	profileDir := os.Getenv(profile.EnvProfilePath)
 	if profileDir == "" {
-		return stopErr
+		return ex.New("profile path not set")
 	}
 
 	rawTypes := os.Getenv(profile.EnvEnabledProfiles)
 	types, parseErr := profile.ParseTypes(rawTypes)
 	if parseErr != nil || len(types) == 0 {
-		return ex.Join(stopErr, parseErr)
+		return parseErr
 	}
 
 	logger.InfoContext(ctx, "merging profile files", "dir", profileDir)
 	mergeErr := profile.Merge(ctx, profileDir, types)
-	return ex.Join(stopErr, mergeErr)
+	return mergeErr
 }
