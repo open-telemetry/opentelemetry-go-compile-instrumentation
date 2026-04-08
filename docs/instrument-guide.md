@@ -114,7 +114,7 @@ At runtime:
 
 #### Main Components
 
-**1) Runtime GLS accessors**
+##### 1) Runtime GLS accessors
 
 `pkg/instrumentation/runtime/runtime_gls.go` provides low-level accessors:
 
@@ -125,7 +125,7 @@ At runtime:
 
 It also defines `OtelContextCloner` for goroutine propagation logic.
 
-**2) Injected trace context holder**
+##### 2) Injected trace context holder
 
 `pkg/instrumentation/otel/sdk/trace/otel_trace_context.go` defines an internal linked-list based trace context container in GLS:
 
@@ -139,7 +139,7 @@ The max chain size is configurable:
 - default: `1000`
 - invalid or non-positive values are ignored (default remains in effect)
 
-**3) Hook integration points**
+##### 3) Hook integration points
 
 Configured in `pkg/instrumentation/otel/hook/otel.yaml` and implemented in `pkg/instrumentation/otel/hook/`:
 
