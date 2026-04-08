@@ -6,6 +6,10 @@ replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ..
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver => ./apps/grpcserver
 
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/logslog => ./apps/logslog
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/logslogrus => ./apps/logslogrus
+
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation v0.0.0
