@@ -56,7 +56,9 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 	if retList := funcDecl.Type.Results; retList != nil {
 		idx := 0
 		for _, field := range retList.List {
+			util.Assert(field.Type != nil, "why not otherwise")
 			if field.Names == nil {
+				// Unnamed Return Values, e.g. func() (int, string)
 				// Rename (for referenceability)
 				name := fmt.Sprintf("%s%d", unnamedRetValName, idx)
 				field.Names = []*dst.Ident{ast.Ident(name)}
@@ -64,6 +66,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 				// Collect (for further use)
 				retVals = append(retVals, name)
 			} else {
+				// Named Return Values, e.g. func() (a int, b string)
 				// Collect only (for further use)
 				for _, name := range field.Names {
 					if name.Name == ast.IdentIgnore {
@@ -84,11 +87,11 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 	idx := 0
 	if ast.HasReceiver(funcDecl) {
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
-			// Named receiver
+			// Named receiver, e.g. func (r R) F() {}
 			receiver := funcDecl.Recv.List[0].Names[0].Name
 			args = append(args, receiver)
 		} else {
-			// Unnamed receiver, i.e. func (R) F() {}
+			// Unnamed receiver, e.g. func (R) F() {}
 			receiver := fmt.Sprintf("%s%d", ignoredParam, idx)
 			idx++
 			funcDecl.Recv.List[0].Names = []*dst.Ident{ast.Ident(receiver)}
@@ -96,15 +99,16 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 		}
 	}
 	for _, field := range funcDecl.Type.Params.List {
-		if len(field.Names) == 0 {
-			// Unnamed parameters (e.g. func F(int)) are valid in declarations but
-			// cannot be referenced in generated trampoline calls. Assign a synthetic
-			// identifier so later instrumentation code can take its address.
+		util.Assert(field.Type != nil, "why not otherwise")
+		if field.Names == nil {
+			// Unnamed Parameters, e.g. func(int, string){}
+			// Assign a name for these parameters and collect it then
 			name := fmt.Sprintf("%s%d", ignoredParam, idx)
-			idx++
 			field.Names = []*dst.Ident{ast.Ident(name)}
+			idx++
 			args = append(args, name)
 		} else {
+			// Named Parameters, e.g. func(a int, b string){}
 			for _, name := range field.Names {
 				if name.Name == ast.IdentIgnore {
 					name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
