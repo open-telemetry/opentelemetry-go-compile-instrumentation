@@ -63,7 +63,6 @@ make test
 - [Semantic Conventions](./docs/semantic-conventions.md) - Managing semantic conventions
 - [Instrumentation Guide](./docs/instrument-guide.md) - Add instrumentation hook for new libraries
 - [Instrumentation Rules](./docs/rules.md) - Rule types and YAML format reference
-- [GLS Operation](./docs/gls-operation.md) - How goroutine-local span fallback works for OTel SDK hooks
 - [Testing](./docs/testing.md) - Testing strategy, categories, and how to run tests
 
 ### Video Talks

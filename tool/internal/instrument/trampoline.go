@@ -431,15 +431,9 @@ func findTargetParamType(targetFunc *dst.FuncDecl) *dst.FieldList {
 	if ast.HasReceiver(targetFunc) {
 		splitRecv := ast.SplitMultiNameFields(targetFunc.Recv)
 		recvField := util.AssertType[*dst.Field](dst.Clone(splitRecv.List[0]))
-		if len(recvField.Names) == 0 {
-			// Unnamed receiver (e.g. func (T) M()) still has a runtime value.
-			// Give it a synthetic name so trampoline code can reference it.
-			recvField.Names = []*dst.Ident{{Name: fmt.Sprintf("recv%d", idx)}}
-		} else {
-			for _, names := range recvField.Names {
-				names.Name = fmt.Sprintf("%s%d", "recv", idx)
-				idx++
-			}
+		for _, names := range recvField.Names {
+			names.Name = fmt.Sprintf("%s%d", "recv", idx)
+			idx++
 		}
 		paramTypes.List = append(paramTypes.List, recvField)
 	}
@@ -447,16 +441,9 @@ func findTargetParamType(targetFunc *dst.FuncDecl) *dst.FieldList {
 	splitParams := ast.SplitMultiNameFields(targetFunc.Type.Params)
 	for _, field := range splitParams.List {
 		paramField := util.AssertType[*dst.Field](dst.Clone(field))
-		if len(paramField.Names) == 0 {
-			// Unnamed parameter (e.g. func F(int)) needs a synthetic identifier
-			// for generated trampoline argument/address operations.
-			paramField.Names = []*dst.Ident{{Name: fmt.Sprintf("param%d", idx)}}
+		for _, names := range paramField.Names {
+			names.Name = fmt.Sprintf("%s%d", "param", idx)
 			idx++
-		} else {
-			for _, names := range paramField.Names {
-				names.Name = fmt.Sprintf("%s%d", "param", idx)
-				idx++
-			}
 		}
 		paramTypes.List = append(paramTypes.List, paramField)
 	}
@@ -475,16 +462,9 @@ func findTargetResultType(targetFunc *dst.FuncDecl) *dst.FieldList {
 		idx := 0
 		for _, field := range splitResults.List {
 			retField := util.AssertType[*dst.Field](dst.Clone(field))
-			if len(retField.Names) == 0 {
-				// Unnamed return values need names in generated after-trampoline
-				// signatures so hook context can read/write them.
-				retField.Names = []*dst.Ident{{Name: fmt.Sprintf("arg%d", idx)}}
+			for _, names := range retField.Names {
+				names.Name = fmt.Sprintf("%s%d", "arg", idx)
 				idx++
-			} else {
-				for _, names := range retField.Names {
-					names.Name = fmt.Sprintf("%s%d", "arg", idx)
-					idx++
-				}
 			}
 			paramTypes.List = append(paramTypes.List, retField)
 		}
