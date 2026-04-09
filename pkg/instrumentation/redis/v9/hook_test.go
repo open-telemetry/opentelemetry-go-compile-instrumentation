@@ -180,7 +180,8 @@ func TestProcessHook_CreatesSpan(t *testing.T) {
 	}
 	assert.Equal(t, "redis", attrMap["db.system.name"])
 	assert.Equal(t, "get", attrMap["db.operation.name"])
-	assert.Equal(t, "localhost:6379", attrMap["network.peer.address"])
+	assert.Equal(t, "localhost", attrMap["server.address"])
+	assert.Equal(t, int64(6379), attrMap["server.port"])
 }
 
 func TestProcessHook_RecordsError(t *testing.T) {
