@@ -405,7 +405,7 @@ test-unit/tool: build package $(GOTESTFMT) ## Run unit tests for tool modules on
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
 
 # Notes on test-unit/pkg implementation:
-# - Uses find -maxdepth 3 to discover modules at pkg/instrumentation/{name}/ level only.
+# - Uses find -maxdepth 4 to discover modules at pkg/instrumentation/{name}/ and pkg/instrumentation/{name}/{sub} levels only.
 #   This naturally excludes client/ and server/ subdirectories (which will have link errors because it requires the parent module to be built).
 # - Excludes "runtime" and "databasesql" modules (have build errors because of compile-time field injection) and root "pkg" module (no tests).
 # - Skips modules without test files to avoid empty test output.
@@ -418,7 +418,7 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	@echo "Running pkg unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -461,7 +461,7 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
