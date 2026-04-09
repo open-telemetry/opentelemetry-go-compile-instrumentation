@@ -12,7 +12,8 @@ SHELL := /bin/bash
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
-        adr-tools adr-new adr-list
+        adr-tools adr-new adr-list \
+        benchmark benchmark/run
 
 # Constant variables
 BINARY_NAME := otelc
@@ -23,7 +24,7 @@ INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
-GO_VERSION = 1.24
+GO_VERSION = 1.25
 
 ##@ Tooling
 
@@ -345,6 +346,37 @@ check-golden-files: package
 	fi
 	git status --porcelain -- tool/internal/instrument/testdata/golden/ | grep -q . && (echo "Golden files have untracked changes"; exit 1) || true
 	echo "Golden files are up to date"
+
+##@ Benchmarking
+
+BENCH_HARNESS_DIR := test/bench/cmd/bench
+BENCH_SCENARIOS_DIR := test/bench/scenarios
+BENCH_OUTPUT := bench.json
+BENCH_ITERATIONS ?= 5
+BENCH_WARMUP ?= 1
+BENCH_MAX_OVERHEAD_PCT ?= -1
+
+benchmark: build ## Build benchmark harness and print usage
+	@echo "Building benchmark harness..."
+	@go build -C $(BENCH_HARNESS_DIR) -o $(TOOLS)/bench .
+	@echo ""
+	@echo "Run benchmarks with: make benchmark/run"
+	@echo "Override iterations: make benchmark/run BENCH_ITERATIONS=10"
+
+.ONESHELL:
+benchmark/run: build ## Run compile-time benchmarks and emit bench.json
+benchmark/run: benchmark
+	@echo "Running compile-time benchmarks (iterations=$(BENCH_ITERATIONS), warmup=$(BENCH_WARMUP))..."
+	set -euo pipefail
+	nice -n -10 $(TOOLS)/bench \
+		-otelc=$(CURDIR)/$(BINARY_NAME) \
+		-scenarios=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
+		-iterations=$(BENCH_ITERATIONS) \
+		-warmup=$(BENCH_WARMUP) \
+		-max-overhead-pct=$(BENCH_MAX_OVERHEAD_PCT) \
+		-output=$(CURDIR)/$(BENCH_OUTPUT)
+	@echo ""
+	@echo "Results written to $(BENCH_OUTPUT)"
 
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
