@@ -932,16 +932,46 @@ func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 		// Preserve variadic syntax. This maintains variadic semantics in the
 		// generated hook signatures
 		return ast.Ellipsis(replaceTypeParamsWithAny(tType.Elt, typeParams))
+	case *dst.FuncType:
+		// func(T) U -> func(interface{}) interface{}
+		// Process params and results recursively
+		newFuncType := &dst.FuncType{}
+		if tType.Params != nil {
+			newFuncType.Params = &dst.FieldList{
+				List: processFieldList(tType.Params.List, typeParams),
+			}
+		}
+		if tType.Results != nil {
+			newFuncType.Results = &dst.FieldList{
+				List: processFieldList(tType.Results.List, typeParams),
+			}
+		}
+		return newFuncType
 	case *dst.Ident, *dst.SelectorExpr, *dst.InterfaceType:
 		// Base types without type parameters, return as-is
 		return t
 	default:
 		// Unsupported cases:
-		// - *dst.FuncType (function types with type parameters)
 		// - Other uncommon type expressions
 		util.Unimplemented(fmt.Sprintf("unexpected generic type: %T", tType))
 		return t
 	}
+}
+
+func processFieldList(fields []*dst.Field, typeParams *dst.FieldList) []*dst.Field {
+	result := make([]*dst.Field, len(fields))
+	for i, field := range fields {
+		newField := &dst.Field{}
+		if field.Names != nil {
+			newField.Names = make([]*dst.Ident, len(field.Names))
+			for j, name := range field.Names {
+				newField.Names[j] = dst.NewIdent(name.Name)
+			}
+		}
+		newField.Type = replaceTypeParamsWithAny(field.Type, typeParams)
+		result[i] = newField
+	}
+	return result
 }
 
 func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
