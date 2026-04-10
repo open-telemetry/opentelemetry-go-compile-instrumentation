@@ -1,6 +1,6 @@
 module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/k8s-client-go
 
-go 1.25.8
+go 1.25.0
 
 require (
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20260401125211-cf21a4ee411b
