@@ -19,7 +19,7 @@ import (
 
 func TestK8SClient(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("k3s not ")
+		t.Skip("k3s not supported on windows")
 	}
 
 	f := testutil.NewTestFixture(t)
