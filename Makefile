@@ -373,7 +373,7 @@ test-unit/tool: build package $(GOTESTFMT) ## Run unit tests for tool modules on
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
 
 # Notes on test-unit/pkg implementation:
-# - Uses find -maxdepth 3 to discover modules at pkg/instrumentation/{name}/ level only.
+# - Uses find -maxdepth 4 to discover modules at pkg/instrumentation/{name}/ and pkg/instrumentation/{name}/{sub} levels only.
 #   This naturally excludes client/ and server/ subdirectories (which will have link errors because it requires the parent module to be built).
 # - Excludes "runtime" and "databasesql" modules (have build errors because of compile-time field injection) and root "pkg" module (no tests).
 # - Skips modules without test files to avoid empty test output.
@@ -386,7 +386,7 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	@echo "Running pkg unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -417,10 +417,10 @@ test-unit/demo: ## Run unit tests for demo applications
 test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage ## Run all unit tests with coverage
 
 .ONESHELL:
-test-unit/tool/coverage: package $(GOTESTFMT) ## Run unit tests with coverage for tool modules only
+test-unit/tool/coverage: package ## Run unit tests with coverage for tool modules only
 	@echo "Running tool unit tests with coverage..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log | $(GOTESTFMT)
+	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log
 
 # Same implementation as test-unit/pkg but with coverage flags.
 # Coverage files from each module are merged into a single coverage-pkg.txt file.
@@ -429,7 +429,7 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -446,31 +446,31 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
-test-integration: build build-demo $(GOTESTFMT)
+test-integration: build build-demo
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log | $(GOTESTFMT)
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log
 
 .ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
-test-integration/coverage: build build-demo $(GOTESTFMT)
+test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ../gotest-integration.log | $(GOTESTFMT)
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ../gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
-test-e2e: build build-demo $(GOTESTFMT)
+test-e2e: build build-demo
 	@echo "Running e2e tests..."
 	set -euo pipefail
-	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ../gotest-e2e.log | $(GOTESTFMT)
+	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ../gotest-e2e.log
 
 .ONESHELL:
 test-e2e/coverage: ## Run e2e tests with coverage report
-test-e2e/coverage: build build-demo $(GOTESTFMT)
+test-e2e/coverage: build build-demo
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
-	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ../gotest-e2e.log | $(GOTESTFMT)
+	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ../gotest-e2e.log
 
 .PHONY: crosslink
 crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
