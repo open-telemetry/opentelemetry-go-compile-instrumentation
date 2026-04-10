@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/openaiclient
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/openaiclientv1
 
 go 1.25.0
 

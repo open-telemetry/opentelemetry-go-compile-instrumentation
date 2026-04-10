@@ -14,13 +14,18 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
+// TestOpenAIClient runs the same assertions against every supported major
+// version of github.com/openai/openai-go. The per-version test apps live in
+// test/apps/openaiclientv{1,2,3} and are instrumented via the shared HTTP
+// middleware wired up by pkg/instrumentation/openai/v{1,2,3}.
 func TestOpenAIClient(t *testing.T) {
 	testCases := []struct {
-		name string
+		name    string
+		appName string
 	}{
-		{
-			name: "basic",
-		},
+		{name: "v1", appName: "openaiclientv1"},
+		{name: "v2", appName: "openaiclientv2"},
+		{name: "v3", appName: "openaiclientv3"},
 	}
 
 	for _, tc := range testCases {
@@ -29,7 +34,7 @@ func TestOpenAIClient(t *testing.T) {
 
 			// The OpenAI client will fail to connect (no mock server),
 			// but the instrumentation should still create a span with an error status and expected attributes.
-			_ = f.BuildAndRun("openaiclient")
+			_ = f.BuildAndRun(tc.appName)
 			testutil.WaitForSpanFlush(t)
 
 			spans := testutil.AllSpans(f.Traces())
