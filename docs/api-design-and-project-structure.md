@@ -12,6 +12,7 @@ The project structure is as follows:
       - `semconv`: Semantic conventions for HTTP
     - `grpc`: gRPC instrumentation
     - `redis`: redis instrumentation
+    - `k8s-client-go`: Kubernetes client-go informers instrumentation
     - `helloworld`: Example instrumentation
     - `runtime`: Runtime context management
     - `shared`: Shared utilities and OTel SDK setup
