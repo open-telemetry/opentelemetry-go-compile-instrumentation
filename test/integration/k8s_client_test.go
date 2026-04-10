@@ -7,6 +7,7 @@ package test
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,10 @@ import (
 )
 
 func TestK8SClient(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("k3s not ")
+	}
+
 	f := testutil.NewTestFixture(t)
 	StartK3sCluster(t)
 
