@@ -1,12 +1,12 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package shared contains the HTTP middleware and initialization code used by
-// all OpenAI SDK versions (v1, v2, v3). Each version package is a thin wrapper
-// that injects this middleware via option.WithMiddleware, so the attribute
-// extraction and metric recording logic lives here, in one place, with no
-// dependency on any specific openai-go module.
-package shared
+// Package middleware contains the HTTP middleware and initialization code used
+// by the OpenAI v1 SDK hook. It is kept as an internal package so the hook
+// module is self-contained: the compile-time instrumentation framework only
+// knows how to wire up hook modules and their pkg/instrumentation/shared
+// dependency, so transitive in-tree modules are not supported.
+package middleware
 
 import (
 	"context"

@@ -10,9 +10,9 @@ Instruments OpenAI chat completion API calls at compile-time with zero code chan
 
 | Package import path          | Hook module                                    |
 |------------------------------|------------------------------------------------|
-| `github.com/openai/openai-go`    | `pkg/instrumentation/openai/v1` |
-| `github.com/openai/openai-go/v2` | `pkg/instrumentation/openai/v2` |
-| `github.com/openai/openai-go/v3` | `pkg/instrumentation/openai/v3` |
+| `github.com/openai/openai-go`    | `pkg/instrumentation/openai/v1sdk` |
+| `github.com/openai/openai-go/v2` | `pkg/instrumentation/openai/v2`    |
+| `github.com/openai/openai-go/v3` | `pkg/instrumentation/openai/v3`    |
 
 Azure OpenAI deployments are covered automatically — they call `openai.NewClient(azure.WithEndpoint(...))`, which is the same entry point this instrumentation hooks.
 
@@ -21,13 +21,15 @@ Azure OpenAI deployments are covered automatically — they call `openai.NewClie
 ```
 pkg/instrumentation/openai/
 ├── semconv/   GenAI attribute keys + helpers (shared across versions)
-├── shared/    Version-independent HTTP middleware, body parsing, metrics
-├── v1/        Hook for github.com/openai/openai-go
+├── v1sdk/     Hook for github.com/openai/openai-go (SDK v1.x)
+│   └── internal/middleware/   HTTP middleware, body parsing, metrics
 ├── v2/        Hook for github.com/openai/openai-go/v2
+│   └── internal/middleware/   HTTP middleware, body parsing, metrics
 └── v3/        Hook for github.com/openai/openai-go/v3
+    └── internal/middleware/   HTTP middleware, body parsing, metrics
 ```
 
-Each `v{N}/hook.go` is a thin adapter that prepends `option.WithMiddleware(shared.OtelMiddleware)` to the opts slice passed to `NewClient` and `NewChatCompletionService`. All span, metric, and body-parsing logic lives in `shared/middleware.go`, so adding future SDK majors is a matter of copying the ~60-line adapter.
+Each `v{N}/hook.go` is a thin adapter that prepends `option.WithMiddleware(middleware.OtelMiddleware)` to the opts slice passed to `NewClient` and `NewChatCompletionService`. The span, metric, and body-parsing logic is duplicated across each version's `internal/middleware/` subpackage: the compile-time framework only wires up a hook module plus the framework-provided `pkg/instrumentation/shared`, so keeping middleware as an internal subpackage avoids a cross-module dependency that the tool cannot resolve. Adding future SDK majors is a matter of copying a hook module wholesale.
 
 ## Features
 

@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package shared
+package middleware
 
 import (
 	"net/http"
@@ -25,7 +25,7 @@ type MiddlewareNext = func(*http.Request) (*http.Response, error)
 // talks only to the standard net/http types, not to any openai-go type.
 //
 // It is wired into each SDK version by a thin hook that calls
-// option.WithMiddleware(shared.OtelMiddleware) on client construction.
+// option.WithMiddleware(middleware.OtelMiddleware) on client construction.
 func OtelMiddleware(req *http.Request, next MiddlewareNext) (*http.Response, error) {
 	if !Enabled() {
 		return next(req)
@@ -43,8 +43,8 @@ func OtelMiddleware(req *http.Request, next MiddlewareNext) (*http.Response, err
 	}
 
 	var (
-		model      string
-		isStream   bool
+		model    string
+		isStream bool
 	)
 	if reqParsed != nil {
 		model = reqParsed.Model

@@ -3,18 +3,18 @@
 
 // Package openai contains the compile-time hooks that instrument
 // github.com/openai/openai-go/v3. The hooks inject
-// option.WithMiddleware(openaishared.OtelMiddleware) into client construction
+// option.WithMiddleware(middleware.OtelMiddleware) into client construction
 // so that every HTTP call the SDK makes flows through our OpenTelemetry
-// middleware. All span/metric logic lives in the version-independent
-// openai/shared package — this file is a thin adapter that bridges v3's
-// option.RequestOption type to the shared middleware.
+// middleware. All span/metric logic lives in the internal/middleware
+// subpackage — this file is a thin adapter that bridges v3's
+// option.RequestOption type to that middleware.
 package openai
 
 import (
 	"github.com/openai/openai-go/v3/option"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-	openaishared "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai/shared"
+	middleware "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai/v3/internal/middleware"
 )
 
 // optsParamIndex is the index of the variadic opts slice in the target
@@ -28,10 +28,10 @@ const optsParamIndex = 0
 func withOtelMiddleware(opts []option.RequestOption) []option.RequestOption {
 	// option.Middleware in v3 is a type alias to
 	// func(*http.Request, MiddlewareNext) (*http.Response, error), which is
-	// exactly openaishared.OtelMiddleware's signature, so no conversion is
+	// exactly middleware.OtelMiddleware's signature, so no conversion is
 	// needed.
 	newOpts := make([]option.RequestOption, 0, len(opts)+1)
-	newOpts = append(newOpts, option.WithMiddleware(openaishared.OtelMiddleware))
+	newOpts = append(newOpts, option.WithMiddleware(middleware.OtelMiddleware))
 	newOpts = append(newOpts, opts...)
 	return newOpts
 }
@@ -41,7 +41,7 @@ func withOtelMiddleware(opts []option.RequestOption) []option.RequestOption {
 // openai.NewClient(azure.WithEndpoint(...)), this hook also covers Azure
 // OpenAI deployments.
 func BeforeNewClient(ictx inst.HookContext, opts ...option.RequestOption) {
-	if !openaishared.Enabled() {
+	if !middleware.Enabled() {
 		return
 	}
 	ictx.SetParam(optsParamIndex, withOtelMiddleware(opts))
@@ -51,7 +51,7 @@ func BeforeNewClient(ictx inst.HookContext, opts ...option.RequestOption) {
 // users who construct the chat service directly without going through
 // openai.NewClient.
 func BeforeNewChatCompletionService(ictx inst.HookContext, opts ...option.RequestOption) {
-	if !openaishared.Enabled() {
+	if !middleware.Enabled() {
 		return
 	}
 	ictx.SetParam(optsParamIndex, withOtelMiddleware(opts))
