@@ -152,6 +152,9 @@ func listScenarios(dir string) ([]string, error) {
 func buildArgs(prefix []string) []string {
 	args := make([]string, 0, len(prefix)+5)
 	args = append(args, prefix...)
+	// -a forces a full rebuild from scratch, deliberately bypassing the build
+	// cache so every run reflects the true end-to-end compile time of all
+	// packages rather than a cache-warmed incremental build.
 	return append(args, "go", "build", "-a", "-o", "app", ".")
 }
 
