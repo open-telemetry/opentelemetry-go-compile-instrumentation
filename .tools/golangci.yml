@@ -212,6 +212,12 @@ linters:
         # Forbid fmt.Print* in non-main packages (use structured logging instead)
         - pattern: '^(fmt\.Print(|f|ln)|print|println)$'
           msg: use structured logging instead of fmt.Print*
+        # Forbid fmt.Errorf - use ex.Newf or ex.Wrapf instead for stack traces
+        - pattern: '^fmt\.Errorf$'
+          msg: use ex.Newf or ex.Wrapf instead of fmt.Errorf for stack trace support
+        # Forbid errors.New - use ex.New instead for stack traces
+        - pattern: '^errors\.New$'
+          msg: use ex.New instead of errors.New for stack trace support
 
     funcorder:
       # Checks if the exported methods of a structure are placed before the non-exported ones.
@@ -542,6 +548,11 @@ linters:
           - testpackage  # Allow testing internal implementation
       # Allow fmt.Print* in main packages
       - path: 'main\.go'
+        linters:
+          - forbidigo
+      # Only enforce ex.New/ex.Wrapf rules in tool directory
+      - path-except: 'tool/'
+        text: 'use ex\.(New|Newf|Wrapf) instead'
         linters:
           - forbidigo
       # Exclude generated files

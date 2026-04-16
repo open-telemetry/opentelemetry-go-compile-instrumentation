@@ -5,10 +5,11 @@ package util
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 const (
@@ -64,7 +65,7 @@ func copyBackupFiles(names []string, src, dst string) error {
 	for _, name := range names {
 		srcFile := filepath.Join(src, name)
 		dstFile := filepath.Join(dst, name)
-		err = errors.Join(err, CopyFile(srcFile, dstFile))
+		err = ex.Join(err, CopyFile(srcFile, dstFile))
 	}
 	return err
 }
