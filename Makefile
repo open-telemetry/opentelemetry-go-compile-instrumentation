@@ -352,6 +352,7 @@ check-golden-files: package
 BENCH_HARNESS_DIR := test/bench/cmd/bench
 BENCH_SCENARIOS_DIR := test/bench/scenarios
 BENCH_OUTPUT := bench.json
+BENCH_ACTION_OUTPUT := bench-action.json
 BENCH_ITERATIONS ?= 5
 BENCH_WARMUP ?= 1
 BENCH_MAX_OVERHEAD_PCT ?= -1
@@ -374,9 +375,10 @@ benchmark/run: benchmark
 		-iterations=$(BENCH_ITERATIONS) \
 		-warmup=$(BENCH_WARMUP) \
 		-max-overhead-pct=$(BENCH_MAX_OVERHEAD_PCT) \
-		-output=$(CURDIR)/$(BENCH_OUTPUT)
+		-output=$(CURDIR)/$(BENCH_OUTPUT) \
+		-benchmark-action-output=$(CURDIR)/$(BENCH_ACTION_OUTPUT)
 	@echo ""
-	@echo "Results written to $(BENCH_OUTPUT)"
+	@echo "Results written to $(BENCH_OUTPUT) and $(BENCH_ACTION_OUTPUT)"
 
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
