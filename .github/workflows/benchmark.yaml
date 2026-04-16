@@ -1,0 +1,26 @@
+name: Compile-Time Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions: read-all
+
+jobs:
+  benchmark:
+    name: Compile-Time Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Build otelc
+        run: make build
+      - name: Run benchmarks
+        run: make benchmark/run BENCH_ITERATIONS=5 BENCH_MAX_OVERHEAD_PCT=150

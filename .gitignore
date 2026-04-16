@@ -25,6 +25,9 @@ dist
 test/apps/*/app
 test/apps/*/app.exe
 
+test/bench/scenarios/*/app
+bench.json
+
 _tools
 coverage.out
 .bin
