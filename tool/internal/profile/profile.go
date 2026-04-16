@@ -124,11 +124,12 @@ func (s *Session) Stop() error {
 	if s == nil {
 		return nil
 	}
+	var errs []error
 
 	if s.cpuFile != nil {
 		pprof.StopCPUProfile()
 		if err := s.cpuFile.Close(); err != nil {
-			return ex.Wrapf(err, "close CPU profile %q", s.cpuFile.Name())
+			errs = append(errs, ex.Wrapf(err, "close CPU profile %q", s.cpuFile.Name()))
 		}
 		s.cpuFile = nil
 	}
@@ -136,7 +137,7 @@ func (s *Session) Stop() error {
 	if s.traceFile != nil {
 		trace.Stop()
 		if err := s.traceFile.Close(); err != nil {
-			return ex.Wrapf(err, "close trace file %q", s.traceFile.Name())
+			errs = append(errs, ex.Wrapf(err, "close trace file %q", s.traceFile.Name()))
 		}
 		s.traceFile = nil
 	}
@@ -144,11 +145,11 @@ func (s *Session) Stop() error {
 	// Write heap snapshot at the end (captures final allocation state).
 	if slices.Contains(s.types, Heap) {
 		if err := s.writeHeapProfile(); err != nil {
-			return ex.Wrapf(err, "write heap profile %q", s.filePath("otelc-heap-%d.pprof"))
+			errs = append(errs, ex.Wrapf(err, "write heap profile %q", s.filePath("otelc-heap-%d.pprof")))
 		}
 	}
 
-	return nil
+	return ex.Join(errs...)
 }
 
 // Merge merges all PID-stamped profile files in dir into a single file per type.
@@ -159,16 +160,17 @@ func (s *Session) Stop() error {
 //
 // Merge requires the Go toolchain to be installed (uses "go tool pprof -proto").
 func Merge(ctx context.Context, dir string, types []Type) error {
+	var errs []error
 	for _, t := range types {
 		if t == Trace {
 			// Execution traces cannot be merged; leave them as-is.
 			continue
 		}
 		if err := mergeType(ctx, dir, t); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return ex.Join(errs...)
 }
 
 // mergeType merges all PID-stamped files for a single profile type.

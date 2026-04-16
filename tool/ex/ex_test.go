@@ -24,3 +24,28 @@ func TestError(t *testing.T) {
 	require.Contains(t, err.Error(), "c")
 	require.Contains(t, err.Error(), "d")
 }
+
+func TestJoinStackful(t *testing.T) {
+	e1 := New("first")
+	e2 := Newf("second %d", 2)
+	joined := Join(e1, e2)
+
+	require.True(t, errors.Is(joined, e1))
+	require.True(t, errors.Is(joined, e2))
+
+	var se *stackfulError
+	require.True(t, errors.As(joined, &se))
+}
+
+func TestJoinMixed(t *testing.T) {
+	stdErr := errors.New("std")
+	exErr := New("ex")
+	joined := Join(stdErr, exErr)
+
+	require.True(t, errors.Is(joined, stdErr))
+	require.True(t, errors.Is(joined, exErr))
+
+	var se *stackfulError
+	require.True(t, errors.As(joined, &se))
+	require.Contains(t, se.Error(), "ex")
+}
