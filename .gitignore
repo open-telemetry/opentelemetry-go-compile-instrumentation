@@ -27,6 +27,7 @@ test/apps/*/app.exe
 
 test/bench/scenarios/*/app
 bench.json
+bench-action.json
 
 _tools
 coverage.out

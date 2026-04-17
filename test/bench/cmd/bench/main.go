@@ -10,6 +10,10 @@
 // Usage:
 //
 //	bench -otelc=./otelc -scenarios=../../scenarios -iterations=5 -warmup=1 -output=bench.json
+//
+// To additionally emit a benchmark-action compatible file:
+//
+//	bench ... -benchmark-action-output=bench-action.json
 package main
 
 import (
@@ -40,6 +44,16 @@ type ScenarioResult struct {
 	OverheadPct float64 `json:"overhead_pct"`
 }
 
+// benchmarkActionEntry is a single entry in the customSmallerIsBetter JSON
+// format consumed by benchmark-action/github-action-benchmark.
+type benchmarkActionEntry struct {
+	Name  string  `json:"name"`
+	Unit  string  `json:"unit"`
+	Value float64 `json:"value"`
+	Range string  `json:"range,omitempty"`
+	Extra string  `json:"extra,omitempty"`
+}
+
 // buildEnv is the environment used for all build commands.
 // GOGC=off suppresses GC jitter inside the Go toolchain during timed builds.
 var buildEnv = append(os.Environ(), "GOGC=off")
@@ -51,6 +65,7 @@ func main() {
 	warmup := flag.Int("warmup", 1, "Number of discarded warmup builds before timing begins")
 	outputFile := flag.String("output", "bench.json", "Output file path for benchmark results JSON")
 	maxOverheadPct := flag.Float64("max-overhead-pct", -1, "Fail if any scenario's otelc overhead exceeds this percentage relative to the plain baseline (negative = disabled)")
+	benchActionOutput := flag.String("benchmark-action-output", "", "Additional output file in benchmark-action customSmallerIsBetter JSON format (empty = disabled)")
 	flag.Parse()
 
 	otelcAbs, err := filepath.Abs(*otelcBin)
@@ -123,6 +138,18 @@ func main() {
 	}
 
 	log.Printf("results written to %s", *outputFile)
+
+	if *benchActionOutput != "" {
+		entries := toBenchmarkActionEntries(results)
+		actionOut, err := json.MarshalIndent(entries, "", "  ")
+		if err != nil {
+			log.Fatalf("marshaling benchmark-action output: %v", err)
+		}
+		if err := os.WriteFile(*benchActionOutput, actionOut, 0o644); err != nil {
+			log.Fatalf("writing benchmark-action output file %s: %v", *benchActionOutput, err)
+		}
+		log.Printf("benchmark-action results written to %s", *benchActionOutput)
+	}
 
 	if len(violations) > 0 {
 		log.Printf("FAIL: overhead threshold of %.1f%% exceeded in %d scenario(s):", *maxOverheadPct, len(violations))
@@ -233,4 +260,33 @@ func trimmedStddev(values []float64) float64 {
 // round3 rounds v to 3 decimal places.
 func round3(v float64) float64 {
 	return math.Round(v*1000) / 1000
+}
+
+// toBenchmarkActionEntries converts a slice of ScenarioResults to the
+// customSmallerIsBetter JSON format required by github-action-benchmark.
+func toBenchmarkActionEntries(results []ScenarioResult) []benchmarkActionEntry {
+	entries := make([]benchmarkActionEntry, 0, len(results)*3)
+	for _, r := range results {
+		entries = append(entries,
+			benchmarkActionEntry{
+				Name:  r.Scenario + " / otelc compile time",
+				Unit:  "s",
+				Value: r.OtelcMean,
+				Range: fmt.Sprintf("± %.3f", r.OtelcRange),
+				Extra: fmt.Sprintf("plain=%.3fs (±%.3f) overhead=%+.1f%%", r.PlainMean, r.PlainRange, r.OverheadPct),
+			},
+			benchmarkActionEntry{
+				Name:  r.Scenario + " / plain compile time",
+				Unit:  "s",
+				Value: r.PlainMean,
+				Range: fmt.Sprintf("± %.3f", r.PlainRange),
+			},
+			benchmarkActionEntry{
+				Name:  r.Scenario + " / overhead",
+				Unit:  "%",
+				Value: r.OverheadPct,
+			},
+		)
+	}
+	return entries
 }
