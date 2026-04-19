@@ -40,11 +40,12 @@ type int64Hist interface {
 }
 
 var (
-	logger     = shared.Logger()
-	tracer     trace.Tracer
-	propagator propagation.TextMapPropagator
-	meter      metric.Meter
-	initOnce   sync.Once
+	logger       = shared.Logger()
+	tracer       trace.Tracer
+	propagator   propagation.TextMapPropagator
+	meter        metric.Meter
+	initOnce     sync.Once
+	initializing atomic.Bool
 
 	// Metrics
 	clientDuration        rpcconv.ClientDuration
@@ -71,7 +72,14 @@ func moduleVersion() string {
 }
 
 func initInstrumentation() {
+	// If we're already in the process of initializing, return immediately to avoid deadlock
+	if initializing.Load() {
+		return
+	}
 	initOnce.Do(func() {
+		initializing.Store(true)
+		defer initializing.Store(false)
+
 		version := moduleVersion()
 		if err := shared.SetupOTelSDK("go.opentelemetry.io/compile-instrumentation/grpc/client", version); err != nil {
 			logger.Error("failed to setup OTel SDK", "error", err)
