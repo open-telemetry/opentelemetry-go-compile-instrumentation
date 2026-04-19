@@ -111,8 +111,8 @@ services:
     ports:
       - "50051:50051"
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=grpc-server
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
@@ -130,8 +130,8 @@ services:
     container_name: grpc-client
     command: ["-addr", "grpc-server:50051", "-name", "demo-client", "-count", "10000"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=grpc-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
@@ -214,8 +214,8 @@ services:
       - "8081:8081"
     command: ["-port", "8081", "-dsn", "demo:demo@tcp(mysql:3306)/demodb?parseTime=true"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=db-server
   # Redis - In-memory data store for Redis demo
   redis:
@@ -239,15 +239,14 @@ services:
     container_name: redis-client
     command: ["-addr", "redis:6379", "-count", "10000"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=redis-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
     networks:
       - observability
     depends_on:
-      mysql:
       redis:
         condition: service_healthy
       otel-collector:
@@ -262,8 +261,8 @@ services:
     container_name: db-client
     command: ["-addr", "http://db-server:8081", "-count", "10000"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=db-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info

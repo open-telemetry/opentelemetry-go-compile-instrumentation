@@ -56,8 +56,8 @@ USER appuser
 EXPOSE 8081
 
 # Environment variables for OpenTelemetry
-ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
-    OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
+    OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
     OTEL_SERVICE_NAME=db-server \
     OTEL_RESOURCE_ATTRIBUTES="service.namespace=demo,service.version=1.0.0" \
     OTEL_LOG_LEVEL=info
