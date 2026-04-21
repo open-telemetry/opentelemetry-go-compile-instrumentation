@@ -146,7 +146,7 @@ func BeforeNewClient(ictx inst.HookContext, target string, opts ...grpc.DialOpti
 	}
 
 	// Skip instrumentation for OTLP exporter endpoints to prevent deadlock/infinite recursion
-	if strings.Contains(endpoint, target) {
+	if target != "" && strings.Contains(endpoint, target) {
 		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target, "endpoint", endpoint)
 		return
 	}
