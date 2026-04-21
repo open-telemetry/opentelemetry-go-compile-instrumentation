@@ -5,7 +5,9 @@ package client
 
 import (
 	"context"
+	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,12 +42,11 @@ type int64Hist interface {
 }
 
 var (
-	logger       = shared.Logger()
-	tracer       trace.Tracer
-	propagator   propagation.TextMapPropagator
-	meter        metric.Meter
-	initOnce     sync.Once
-	initializing atomic.Bool
+	logger     = shared.Logger()
+	tracer     trace.Tracer
+	propagator propagation.TextMapPropagator
+	meter      metric.Meter
+	initOnce   sync.Once
 
 	// Metrics
 	clientDuration        rpcconv.ClientDuration
@@ -72,14 +73,7 @@ func moduleVersion() string {
 }
 
 func initInstrumentation() {
-	// If we're already in the process of initializing, return immediately to avoid deadlock
-	if initializing.Load() {
-		return
-	}
 	initOnce.Do(func() {
-		initializing.Store(true)
-		defer initializing.Store(false)
-
 		version := moduleVersion()
 		if err := shared.SetupOTelSDK("go.opentelemetry.io/compile-instrumentation/grpc/client", version); err != nil {
 			logger.Error("failed to setup OTel SDK", "error", err)
@@ -143,6 +137,17 @@ var clientEnabler = grpcClientEnabler{}
 func BeforeNewClient(ictx inst.HookContext, target string, opts ...grpc.DialOption) {
 	if !clientEnabler.Enable() {
 		logger.Debug("gRPC client instrumentation disabled")
+		return
+	}
+
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+	}
+
+	// Skip instrumentation for OTLP exporter endpoints to prevent deadlock/infinite recursion
+	if strings.Contains(endpoint, target) {
+		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target, "endpoint", endpoint)
 		return
 	}
 

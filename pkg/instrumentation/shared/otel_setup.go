@@ -7,13 +7,9 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 )
 
-var (
-	setupOnce    sync.Once
-	initializing atomic.Bool
-)
+var setupOnce sync.Once
 
 // SetupOTelSDK initializes the OpenTelemetry SDK if not already initialized.
 // This function is idempotent and safe to call multiple times.
@@ -51,14 +47,7 @@ var (
 //	    logger.Error("failed to setup OTel SDK", "error", err)
 //	}
 func SetupOTelSDK(instrumentationName, instrumentationVersion string) error {
-	// If we're already in the process of initializing, return immediately to avoid deadlock
-	if initializing.Load() {
-		return nil
-	}
 	setupOnce.Do(func() {
-		initializing.Store(true)
-		defer initializing.Store(false)
-
 		// Initialize OpenTelemetry SDK with defensive error handling
 		Initialize(Config{
 			ServiceName:            "otelc-instrumentation",
