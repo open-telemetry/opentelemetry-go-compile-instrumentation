@@ -177,9 +177,7 @@ func TestAfterProcessDeltas(t *testing.T) {
 				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := insttest.NewMockHookContext()
-				mockCtx.SetData(map[string]any{
-					"span": span,
-				})
+				mockCtx.SetKeyData("span", span)
 				return mockCtx
 			},
 			err: nil,
@@ -199,9 +197,7 @@ func TestAfterProcessDeltas(t *testing.T) {
 				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := insttest.NewMockHookContext()
-				mockCtx.SetData(map[string]any{
-					"span": span,
-				})
+				mockCtx.SetKeyData("span", span)
 				return mockCtx
 			},
 			err: errors.New("processing failed"),
@@ -241,9 +237,7 @@ func TestAfterProcessDeltas(t *testing.T) {
 				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := insttest.NewMockHookContext()
-				mockCtx.SetData(map[string]any{
-					"span": span,
-				})
+				mockCtx.SetKeyData("span", span)
 				return mockCtx
 			},
 			err: nil,
@@ -341,9 +335,7 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := insttest.NewMockHookContext()
-				mockCtx.SetData(map[string]any{
-					"span": span,
-				})
+				mockCtx.SetKeyData("span", span)
 				return mockCtx
 			},
 			err: nil,
@@ -363,9 +355,7 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := insttest.NewMockHookContext()
-				mockCtx.SetData(map[string]any{
-					"span": span,
-				})
+				mockCtx.SetKeyData("span", span)
 				return mockCtx
 			},
 			err: errors.New("processing failed"),
@@ -405,9 +395,7 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := insttest.NewMockHookContext()
-				mockCtx.SetData(map[string]any{
-					"span": span,
-				})
+				mockCtx.SetKeyData("span", span)
 				return mockCtx
 			},
 			err: nil,

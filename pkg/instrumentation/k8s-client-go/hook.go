@@ -103,9 +103,7 @@ func beforeProcessDeltas(
 	)
 
 	ictx.SetParam(0, newK8SOtelEventHandler(handler, ctx))
-	ictx.SetData(map[string]any{
-		"span": span,
-	})
+	ictx.SetKeyData("span", span)
 }
 
 func afterProcessDeltas(ictx inst.HookContext, err error) {
@@ -154,9 +152,7 @@ func beforeProcessDeltasInBatch(
 	)
 
 	ictx.SetParam(0, newK8SOtelEventHandler(handler, ctx))
-	ictx.SetData(map[string]any{
-		"span": span,
-	})
+	ictx.SetKeyData("span", span)
 }
 
 func afterProcessDeltasInBatch(ictx inst.HookContext, err error) {
