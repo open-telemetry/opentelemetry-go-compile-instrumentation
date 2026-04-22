@@ -5,7 +5,9 @@ package client
 
 import (
 	"context"
+	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -135,6 +137,17 @@ var clientEnabler = grpcClientEnabler{}
 func BeforeNewClient(ictx inst.HookContext, target string, opts ...grpc.DialOption) {
 	if !clientEnabler.Enable() {
 		logger.Debug("gRPC client instrumentation disabled")
+		return
+	}
+
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+	}
+
+	// Skip instrumentation for OTLP exporter endpoints to prevent deadlock/infinite recursion
+	if target != "" && strings.Contains(endpoint, target) {
+		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target, "endpoint", endpoint)
 		return
 	}
 
