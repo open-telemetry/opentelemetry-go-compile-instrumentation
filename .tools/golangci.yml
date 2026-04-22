@@ -403,6 +403,8 @@ linters:
         - name: unexported-naming
         - name: unhandled-error
           exclude: ["TEST"]
+          arguments:
+            - "strings.Builder.WriteRune"
         - name: unnecessary-stmt
         - name: unreachable-code
         - name: unused-parameter
