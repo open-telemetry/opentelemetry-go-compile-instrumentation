@@ -77,17 +77,17 @@ value: "42"
 			},
 		},
 		{
-			name: "empty value",
+			name: "neither value nor wrap_expression",
 			yaml: `
 target: example.com/pkg
 identifier: SomeDecl
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "one of value or wrap_expression must be set",
 		},
 		{
-			name: "whitespace-only value",
+			name: "whitespace-only value and no wrap_expression",
 			yaml: `
 target: example.com/pkg
 identifier: SomeDecl
@@ -95,10 +95,23 @@ value: "   "
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "one of value or wrap_expression must be set",
 		},
 		{
-			name: "func kind without value",
+			name: "both value and wrap_expression set",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+value: "42"
+wrap_expression:
+  template: "wrapper({{ . }})"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "value and wrap_expression are mutually exclusive",
+		},
+		{
+			name: "func kind without value or wrap_expression",
 			yaml: `
 target: example.com/pkg
 kind: func
@@ -106,10 +119,10 @@ identifier: MyFunc
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "has no supported advice",
 		},
 		{
-			name: "type kind without value",
+			name: "type kind without value or wrap_expression",
 			yaml: `
 target: example.com/pkg
 kind: type
@@ -117,7 +130,79 @@ identifier: MyType
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "has no supported advice",
+		},
+		{
+			name: "func kind with wrap_expression",
+			yaml: `
+target: example.com/pkg
+kind: func
+identifier: MyFunc
+wrap_expression:
+  template: "wrapper({{ . }})"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "wrap_expression is not valid when kind is",
+		},
+		{
+			name: "wrap_expression with empty template",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap_expression:
+  template: ""
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "wrap_expression template cannot be empty",
+		},
+		{
+			name: "wrap_expression template missing placeholder",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap_expression:
+  template: "wrapper(x)"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "wrap_expression template must contain {{ . }} placeholder",
+		},
+		{
+			name: "wrap_expression valid",
+			yaml: `
+target: example.com/pkg
+kind: var
+identifier: DefaultTransport
+wrap_expression:
+  template: "otelhttp.NewTransport({{ . }})"
+imports:
+  otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+`,
+			ruleName: "wrap_default_transport",
+			check: func(t *testing.T, r *InstDeclRule) {
+				assert.Equal(t, "wrap_default_transport", r.Name)
+				assert.Equal(t, "var", r.Kind)
+				assert.Equal(t, "DefaultTransport", r.Identifier)
+				assert.Empty(t, r.Value)
+				require.NotNil(t, r.WrapExpression)
+				assert.Equal(t, "otelhttp.NewTransport({{ . }})", r.WrapExpression.Template)
+			},
+		},
+		{
+			name: "wrap_expression compact placeholder variant",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap_expression:
+  template: "wrapper({{.}})"
+`,
+			ruleName: "wrap_some_decl",
+			check: func(t *testing.T, r *InstDeclRule) {
+				require.NotNil(t, r.WrapExpression)
+				assert.Equal(t, "wrapper({{.}})", r.WrapExpression.Template)
+			},
 		},
 		{
 			name: "empty identifier",
