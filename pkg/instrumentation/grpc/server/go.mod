@@ -10,10 +10,10 @@ require (
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
-	go.opentelemetry.io/otel v1.40.0
-	go.opentelemetry.io/otel/metric v1.40.0
+	go.opentelemetry.io/otel v1.43.0
+	go.opentelemetry.io/otel/metric v1.43.0
 	go.opentelemetry.io/otel/sdk v1.40.0
-	go.opentelemetry.io/otel/trace v1.40.0
+	go.opentelemetry.io/otel/trace v1.43.0
 	google.golang.org/grpc v1.78.0
 )
 
