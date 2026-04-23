@@ -77,7 +77,7 @@ func main() {
 			case cache.DeletedFinalStateUnknown:
 				pod = t.Obj.(*corev1.Pod)
 			}
-			if pod.Name != "test-pod" {
+			if pod == nil || pod.Name != "test-pod" {
 				return
 			}
 			log.Printf("Deleted Pod: %s", pod.Name)
@@ -113,12 +113,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create pod: %v", err)
 	}
-createLoop:
-	for {
+	objCreated := false
+	for !objCreated {
 		select {
 		case ev := <-podUpdatesCh:
 			if ev == PodAdded {
-				break createLoop
+				objCreated = true
 			}
 		case <-time.After(10 * time.Second):
 			log.Fatalf("Timed out waiting for pod creation event")
@@ -139,12 +139,12 @@ createLoop:
 	if err != nil {
 		log.Fatalf("Failed to update pod: %v", err)
 	}
-updateLoop:
-	for {
+	objUpdated := false
+	for !objUpdated {
 		select {
 		case ev := <-podUpdatesCh:
 			if ev == PodUpdated {
-				break updateLoop
+				objUpdated = true
 			}
 		case <-time.After(10 * time.Second):
 			log.Fatalf("Timed out waiting for pod updation event")
@@ -156,12 +156,12 @@ updateLoop:
 	if err != nil {
 		log.Fatalf("Failed to delete pod: %v", err)
 	}
-deleteLoop:
-	for {
+	objDeleted := false
+	for !objDeleted {
 		select {
 		case ev := <-podUpdatesCh:
 			if ev == PodDeleted {
-				break deleteLoop
+				objDeleted = true
 			}
 		case <-time.After(10 * time.Second):
 			log.Fatalf("Timed out waiting for pod deletion event")
@@ -169,5 +169,6 @@ deleteLoop:
 	}
 
 	close(stopCh)
+	factory.Shutdown()
 	close(podUpdatesCh)
 }

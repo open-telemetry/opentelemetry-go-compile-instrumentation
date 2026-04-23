@@ -57,6 +57,10 @@ func (h k8SOtelEventHandler) OnUpdate(oldObj, newObj any) {
 }
 
 func (h k8SOtelEventHandler) OnDelete(obj any) {
+	if o, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = o.Obj
+	}
+
 	objInfo := getObjectInfo(obj)
 	attrs := semconv.K8SObjectInfoTraceAttrs(objInfo)
 
