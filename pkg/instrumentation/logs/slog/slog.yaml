@@ -1,0 +1,17 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Instrumentation for log/slog to inject trace context into log messages
+
+hook_slog_log:
+  target: log/slog
+  func: log
+  recv: "*Logger"
+  before: BeforeSlogLog
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/logs/slog"
+
+hook_slog_new_record:
+  target: log/slog
+  func: NewRecord
+  after: AfterSlogNewRecord
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/logs/slog"
