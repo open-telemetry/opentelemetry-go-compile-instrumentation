@@ -66,7 +66,7 @@ func HasAttributeContaining(key, substr string) SpanMatcher {
 	}
 }
 
-// AttributeExists matches spans where the given span has an attribute
+// AttributeExists matches spans where the given span has an attribute.
 func AttributeExists(key string) SpanMatcher {
 	return func(s ptrace.Span) bool {
 		_, ok := Attrs(s)[key]
