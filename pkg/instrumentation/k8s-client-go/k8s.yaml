@@ -1,0 +1,15 @@
+k8s_hook_processdeltas:
+  target: k8s.io/client-go/tools/cache
+  version: ",v0.36.0"
+  func: processDeltas
+  before: beforeProcessDeltas
+  after: afterProcessDeltas
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/k8s-client-go"
+
+k8s_hook_processdeltasinbatch:
+  target: k8s.io/client-go/tools/cache
+  version: v0.35.0,v0.36.0
+  func: processDeltasInBatch
+  before: beforeProcessDeltasInBatch
+  after: afterProcessDeltasInBatch
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/k8s-client-go"

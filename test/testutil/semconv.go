@@ -130,3 +130,21 @@ func RequireRedisClientSemconv(
 		}
 	}
 }
+
+// RequireK8SClientSemconv verifies that a K8S informers span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/resource/k8s/
+func RequireK8SClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	podName string,
+	requireNodeName bool,
+) {
+	RequireAttributeExists(t, span, string(semconv.K8SPodUIDKey))
+	RequireAttribute(t, span, string(semconv.K8SPodNameKey), podName)
+	if requireNodeName {
+		RequireAttributeExists(t, span, string(semconv.K8SNodeNameKey))
+	}
+	RequireAttribute(t, span, string(semconv.K8SNamespaceNameKey), "default")
+	RequireAttribute(t, span, "k8s.object.kind", "Pod")
+	RequireAttribute(t, span, "k8s.object.api_version", "v1")
+}
