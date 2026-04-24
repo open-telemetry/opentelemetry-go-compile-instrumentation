@@ -140,7 +140,7 @@ func parseGoExpression(expr string) (dst.Expr, error) {
 	}
 	exprStmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
 	if !ok {
-		return nil, fmt.Errorf(
+		return nil, ex.Newf(
 			"expression %q did not parse as an expression statement (got %T)",
 			expr, funcDecl.Body.List[0])
 	}
@@ -155,17 +155,17 @@ func parseGoTypeExpression(typeStr string) (dst.Expr, error) {
 	}
 	declStmt, ok := funcDecl.Body.List[0].(*dst.DeclStmt)
 	if !ok {
-		return nil, fmt.Errorf(
+		return nil, ex.Newf(
 			"type %q did not parse as a declaration statement (got %T)",
 			typeStr, funcDecl.Body.List[0])
 	}
 	genDecl, ok := declStmt.Decl.(*dst.GenDecl)
 	if !ok || len(genDecl.Specs) == 0 {
-		return nil, fmt.Errorf("unexpected declaration shape for type %q", typeStr)
+		return nil, ex.Newf("unexpected declaration shape for type %q", typeStr)
 	}
 	valueSpec, ok := genDecl.Specs[0].(*dst.ValueSpec)
 	if !ok || valueSpec.Type == nil {
-		return nil, fmt.Errorf("unexpected spec shape for type %q", typeStr)
+		return nil, ex.Newf("unexpected spec shape for type %q", typeStr)
 	}
 	return valueSpec.Type, nil
 }
@@ -177,19 +177,19 @@ func parseSnippetFuncDecl(src, label string) (*dst.FuncDecl, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "", []byte(src), parser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse %q: %w", label, err)
+		return nil, ex.Wrapf(err, "failed to parse %q", label)
 	}
 	dec := decorator.NewDecorator(fset)
 	dstFile, err := dec.DecorateFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decorate AST for %q: %w", label, err)
+		return nil, ex.Wrapf(err, "failed to decorate AST for %q", label)
 	}
 	if len(dstFile.Decls) == 0 {
-		return nil, fmt.Errorf("no declarations found for %q", label)
+		return nil, ex.Newf("no declarations found for %q", label)
 	}
 	funcDecl, ok := dstFile.Decls[0].(*dst.FuncDecl)
 	if !ok || funcDecl.Body == nil || len(funcDecl.Body.List) == 0 {
-		return nil, fmt.Errorf("unexpected AST shape for %q", label)
+		return nil, ex.Newf("unexpected AST shape for %q", label)
 	}
 	return funcDecl, nil
 }

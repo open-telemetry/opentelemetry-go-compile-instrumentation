@@ -64,8 +64,16 @@ func main() {
 	iterations := flag.Int("iterations", 5, "Number of timed build repetitions per scenario and tool")
 	warmup := flag.Int("warmup", 1, "Number of discarded warmup builds before timing begins")
 	outputFile := flag.String("output", "bench.json", "Output file path for benchmark results JSON")
-	maxOverheadPct := flag.Float64("max-overhead-pct", -1, "Fail if any scenario's otelc overhead exceeds this percentage relative to the plain baseline (negative = disabled)")
-	benchActionOutput := flag.String("benchmark-action-output", "", "Additional output file in benchmark-action customSmallerIsBetter JSON format (empty = disabled)")
+	maxOverheadPct := flag.Float64(
+		"max-overhead-pct",
+		-1,
+		"Fail if any scenario's otelc overhead exceeds this percentage relative to the plain baseline (negative = disabled)",
+	)
+	benchActionOutput := flag.String(
+		"benchmark-action-output",
+		"",
+		"Additional output file in benchmark-action customSmallerIsBetter JSON format (empty = disabled)",
+	)
 	flag.Parse()
 
 	otelcAbs, err := filepath.Abs(*otelcBin)
@@ -188,7 +196,11 @@ func buildArgs(prefix []string) []string {
 // measureInterleaved downloads module dependencies, runs warmup builds for both
 // tools, then times plainArgs and otelcArgs in alternating order so that both
 // tools experience the same system conditions within each iteration cycle.
-func measureInterleaved(dir string, plainArgs, otelcArgs []string, warmup, iterations int) ([]float64, []float64, error) {
+func measureInterleaved(
+	dir string,
+	plainArgs, otelcArgs []string,
+	warmup, iterations int,
+) ([]float64, []float64, error) {
 	if err := runCmd(dir, "go", "mod", "download"); err != nil {
 		return nil, nil, fmt.Errorf("go mod download: %w", err)
 	}
