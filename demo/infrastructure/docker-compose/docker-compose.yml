@@ -264,6 +264,29 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # OpenAI Client - Demo client making requests to OpenAI API
+  openai-client:
+    build:
+      context: ../../..
+      dockerfile: demo/app/openai/client/Dockerfile
+    container_name: openai-client
+    command: ["-count", "10000"]
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_SERVICE_NAME=openai-client
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      otel-collector:
+        condition: service_started
+    restart: unless-stopped
+    profiles:
+      - openai
+
   # DB Client - Demo client making CRUD requests to DB server
   db-client:
     build:
