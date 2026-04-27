@@ -9,6 +9,8 @@ import (
 	"regexp"
 
 	"github.com/dave/dst"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 // typeNameRe parses type-name strings of the form [*][pkg.]Name.
@@ -30,7 +32,7 @@ type parsedTypeName struct {
 func parseTypeName(s string) (parsedTypeName, error) {
 	m := typeNameRe.FindStringSubmatch(s)
 	if m == nil {
-		return parsedTypeName{}, fmt.Errorf("invalid type name %q", s)
+		return parsedTypeName{}, ex.Newf("invalid type name %q", s)
 	}
 	return parsedTypeName{pointer: m[1] == "*", importPath: m[2], name: m[3]}, nil
 }
