@@ -66,10 +66,9 @@ func (t parsedTypeName) matches(node dst.Expr) bool {
 
 	default:
 		// Unsupported AST node types (chan, func, map, slice, array, interface
-		// literals) cannot be matched by type-name filters.  Log a warning so
-		// the user knows the filter will never fire for this parameter/result.
+		// literals) cannot be matched by type-name filters.
 		//nolint:sloglint // no context available
-		slog.Warn("signature filter: unsupported type node; filter will not match",
+		slog.Debug("signature filter: unsupported type node; filter will not match",
 			"node_type", fmt.Sprintf("%T", node),
 			"filter", t.importPath+"."+t.name,
 		)
@@ -85,6 +84,8 @@ func fieldListContainsType(fields *dst.FieldList, typeStr string) bool {
 	}
 	tn, err := parseTypeName(typeStr)
 	if err != nil {
+		//nolint:sloglint // no context available
+		slog.Warn("signature filter: invalid type string; filter will never match", "type", typeStr, "err", err)
 		return false
 	}
 	for _, field := range fields.List {

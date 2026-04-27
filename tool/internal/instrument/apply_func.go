@@ -352,9 +352,7 @@ func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	if funcDecl == nil {
 		return ex.Newf("can not find function %s", rule.Func)
 	}
-	// Verify signature sub-filters (if any).  A mismatch here means the
-	// setup phase matched this file but the function's signature does not
-	// satisfy the rule's constraints — skip gracefully rather than error.
+	// Setup phase matched by name; skip if signature filters no longer match.
 	if !ast.FuncDeclMatchesFilters(funcDecl, rule) {
 		ip.Warn("Skipping func rule: signature filters did not match",
 			"rule", rule.Name, "func", rule.Func)

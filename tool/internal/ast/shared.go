@@ -6,6 +6,7 @@ package ast
 import (
 	"fmt"
 	"go/token"
+	"log/slog"
 	"strconv"
 
 	"github.com/dave/dst"
@@ -321,20 +322,32 @@ func matchesExactSignature(ft *dst.FuncType, sig *rule.FuncSignature) bool {
 
 // matchesFieldList returns true when expected type strings match the types in
 // fields exactly (same count, same order).
-// Multi-name fields (e.g. "a, b int") are split before comparison so that
-// each name maps to exactly one type entry.
+// Multi-name fields (e.g. "a, b int") are expanded inline so each name maps
+// to exactly one type slot — without cloning AST nodes.
 func matchesFieldList(expected []string, fields *dst.FieldList) bool {
-	split := SplitMultiNameFields(fields)
-	count := 0
-	if split != nil {
-		count = len(split.List)
+	var types []dst.Expr
+	if fields != nil {
+		for _, f := range fields.List {
+			if len(f.Names) == 0 {
+				types = append(types, f.Type)
+			} else {
+				for range f.Names {
+					types = append(types, f.Type)
+				}
+			}
+		}
 	}
-	if len(expected) != count {
+	if len(expected) != len(types) {
 		return false
 	}
 	for i, typeStr := range expected {
 		tn, err := parseTypeName(typeStr)
-		if err != nil || !tn.matches(split.List[i].Type) {
+		if err != nil {
+			//nolint:sloglint // no context available
+			slog.Warn("signature filter: invalid type string; filter will never match", "type", typeStr, "err", err)
+			return false
+		}
+		if !tn.matches(types[i]) {
 			return false
 		}
 	}
@@ -365,6 +378,8 @@ func matchesLastResult(fields *dst.FieldList, typeStr string) bool {
 	}
 	tn, err := parseTypeName(typeStr)
 	if err != nil {
+		//nolint:sloglint // no context available
+		slog.Warn("signature filter: invalid type string; filter will never match", "type", typeStr, "err", err)
 		return false
 	}
 	return tn.matches(fields.List[len(fields.List)-1].Type)

@@ -13,8 +13,10 @@ import (
 // FuncSignature specifies the argument and result types used by signature
 // sub-filters on InstFuncRule.  Each entry is a type name string in the form
 // accepted by the type-name parser (e.g. "error", "context.Context",
-// "*http.Request").  Matching follows field-list order: the i-th entry is
-// compared to the i-th field in the parameter or result list.
+// "*http.Request").  For exact matching (signature), the i-th entry is
+// compared to the i-th field in order.  For contains matching
+// (signature_contains), each entry is checked for presence anywhere in the
+// corresponding list.
 type FuncSignature struct {
 	Args    []string `json:"args,omitempty"    yaml:"args"`
 	Returns []string `json:"returns,omitempty" yaml:"returns"`
@@ -79,7 +81,7 @@ func (r *InstFuncRule) validate() error {
 	if strings.TrimSpace(r.Func) == "" {
 		return ex.Newf("func cannot be empty")
 	}
-	if r.Before == "" && r.After == "" {
+	if strings.TrimSpace(r.Before) == "" && strings.TrimSpace(r.After) == "" {
 		return ex.Newf("before or after must be set")
 	}
 	return nil
