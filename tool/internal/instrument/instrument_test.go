@@ -17,6 +17,7 @@ package instrument
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -97,44 +98,104 @@ func runTest(t *testing.T, testName string) {
 	verifyGoldenFiles(t, tempDir, testName)
 }
 
-// normalizeRuleFields translates the structured where/do format to the flat
-// format expected by rule constructors. Fields not using the new format are
-// returned unchanged.
-func normalizeRuleFields(fields map[string]any) map[string]any {
+// normalizeRuleFields translates the structured target/version + where + do
+// format to one or more flat rule maps expected by rule constructors. Fields
+// not using the structured format are returned unchanged as a single-element
+// slice.
+func normalizeRuleFields(fields map[string]any) ([]map[string]any, error) {
 	_, hasWhere := fields["where"]
 	_, hasDo := fields["do"]
 	if !hasWhere && !hasDo {
-		return fields
+		return []map[string]any{fields}, nil
+	}
+	if !hasDo {
+		return nil, errors.New("structured rule is missing do")
 	}
 
-	flat := make(map[string]any)
+	common := make(map[string]any)
 
 	// Copy top-level fields (e.g. imports, name) excluding where/do.
 	for k, v := range fields {
 		if k != "where" && k != "do" {
-			flat[k] = v
+			common[k] = v
 		}
 	}
 
-	// Merge selector fields from the where block.
 	if whereRaw, ok := fields["where"]; ok {
-		if whereMap, isMap := whereRaw.(map[string]any); isMap {
-			maps.Copy(flat, whereMap)
+		whereMap, isMap := whereRaw.(map[string]any)
+		if !isMap {
+			return nil, errors.New("where must be a map")
+		}
+		normalizedWhere, normErr := normalizeWhereFieldsForTest(common, whereMap)
+		if normErr != nil {
+			return nil, normErr
+		}
+		if len(normalizedWhere) > 0 {
+			common["where"] = normalizedWhere
 		}
 	}
 
-	// Merge modifier fields from the do block (exactly one modifier key).
-	if doRaw, ok := fields["do"]; ok {
-		if doMap, isMap := doRaw.(map[string]any); isMap {
-			for _, modifierVal := range doMap {
-				if modFields, isModMap := modifierVal.(map[string]any); isModMap {
-					maps.Copy(flat, modFields)
-				}
+	doItems, normErr := normalizeDoItemsForTest(common, fields["do"])
+	if normErr != nil {
+		return nil, normErr
+	}
+
+	return doItems, nil
+}
+
+func normalizeWhereFieldsForTest(common, where map[string]any) (map[string]any, error) {
+	if _, exists := where["target"]; exists {
+		return nil, errors.New("target must be top-level, not inside where")
+	}
+	if _, exists := where["version"]; exists {
+		return nil, errors.New("version must be top-level, not inside where")
+	}
+
+	normalizedWhere := make(map[string]any)
+	for key, value := range where {
+		switch key {
+		case "func", "recv", "struct", "function_call", "directive", "kind", "identifier":
+			common[key] = value
+		case "file", "all-of", "one-of", "not":
+			normalizedWhere[key] = value
+		default:
+			return nil, fmt.Errorf("unsupported where key %q", key)
+		}
+	}
+
+	return normalizedWhere, nil
+}
+
+func normalizeDoItemsForTest(common map[string]any, doRaw any) ([]map[string]any, error) {
+	doItems, ok := doRaw.([]any)
+	if !ok {
+		return nil, errors.New("do must be a non-empty list of single-key modifier objects")
+	}
+	if len(doItems) == 0 {
+		return nil, errors.New("do must not be empty")
+	}
+
+	normalized := make([]map[string]any, 0, len(doItems))
+	for idx, item := range doItems {
+		modifierMap, isMap := item.(map[string]any)
+		if !isMap {
+			return nil, fmt.Errorf("do[%d] must be a single-key modifier object", idx)
+		}
+		if len(modifierMap) != 1 {
+			return nil, fmt.Errorf("do[%d] must contain exactly one modifier key", idx)
+		}
+		for _, modifierRaw := range modifierMap {
+			modifierFields, hasModifierFields := modifierRaw.(map[string]any)
+			if !hasModifierFields {
+				return nil, fmt.Errorf("do[%d] modifier payload must be a map", idx)
 			}
+			flat := maps.Clone(common)
+			maps.Copy(flat, modifierFields)
+			normalized = append(normalized, flat)
 		}
 	}
 
-	return flat
+	return normalized, nil
 }
 
 func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet {
@@ -164,33 +225,35 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	slices.Sort(ruleNames)
 
 	for _, name := range ruleNames {
-		// Translate where/do format to the flat format expected by constructors.
-		props := normalizeRuleFields(rawRules[name])
-		props["name"] = name
-		ruleData, _ := yaml.Marshal(props)
+		propsList, normErr := normalizeRuleFields(rawRules[name])
+		require.NoError(t, normErr)
+		for _, props := range propsList {
+			props["name"] = name
+			ruleData, _ := yaml.Marshal(props)
 
-		switch {
-		case props["struct"] != nil:
-			r, _ := rule.NewInstStructRule(ruleData, name)
-			ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
-		case props["file"] != nil:
-			r, _ := rule.NewInstFileRule(ruleData, name)
-			ruleSet.FileRules = append(ruleSet.FileRules, r)
-		case props["directive"] != nil:
-			r, _ := rule.NewInstDirectiveRule(ruleData, name)
-			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
-		case props["raw"] != nil:
-			r, _ := rule.NewInstRawRule(ruleData, name)
-			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
-		case props["func"] != nil:
-			r, _ := rule.NewInstFuncRule(ruleData, name)
-			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
-		case props["function_call"] != nil:
-			r, _ := rule.NewInstCallRule(ruleData, name)
-			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
-		case props["identifier"] != nil:
-			r, _ := rule.NewInstDeclRule(ruleData, name)
-			ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+			switch {
+			case props["struct"] != nil:
+				r, _ := rule.NewInstStructRule(ruleData, name)
+				ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
+			case props["file"] != nil:
+				r, _ := rule.NewInstFileRule(ruleData, name)
+				ruleSet.FileRules = append(ruleSet.FileRules, r)
+			case props["directive"] != nil:
+				r, _ := rule.NewInstDirectiveRule(ruleData, name)
+				ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
+			case props["raw"] != nil:
+				r, _ := rule.NewInstRawRule(ruleData, name)
+				ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
+			case props["func"] != nil:
+				r, _ := rule.NewInstFuncRule(ruleData, name)
+				ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
+			case props["function_call"] != nil:
+				r, _ := rule.NewInstCallRule(ruleData, name)
+				ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
+			case props["identifier"] != nil:
+				r, _ := rule.NewInstDeclRule(ruleData, name)
+				ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+			}
 		}
 	}
 

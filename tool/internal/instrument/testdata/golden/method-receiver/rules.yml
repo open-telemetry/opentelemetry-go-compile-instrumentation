@@ -1,20 +1,20 @@
 hook_method:
+  target: main
   where:
-    target: main
     func: Func1
     recv: "*T"
   do:
-    inject_hooks:
-      before: H3Before
-      after: H3After
-      path: testdata
+    - inject_hooks:
+        before: H3Before
+        after: H3After
+        path: testdata
 
 hook_method_unnamed_recv:
+  target: main
   where:
-    target: main
     func: Func3
     recv: "T"
   do:
-    inject_hooks:
-      before: H11Before
-      path: testdata
+    - inject_hooks:
+        before: H11Before
+        path: testdata

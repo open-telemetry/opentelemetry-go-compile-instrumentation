@@ -1,2 +1,1 @@
-# Error: has_directive filter is not yet implemented
-has_directive: "otelc:enabled"
+has_directive: otelc:span

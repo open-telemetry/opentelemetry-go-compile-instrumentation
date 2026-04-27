@@ -1,9 +1,9 @@
 wrap_sizeof_with_strings:
+  target: main
   where:
-    target: main
     function_call: unsafe.Sizeof
   do:
-    wrap_call:
-      template: "(func() uintptr { fmt.Println(\"Wrapped!\"); return {{ . }} })()"
+    - wrap_call:
+        template: "(func() uintptr { fmt.Println(\"Wrapped!\"); return {{ . }} })()"
   imports:
     fmt: "fmt"

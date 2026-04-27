@@ -1,8 +1,8 @@
 assign_max_retries:
+  target: main
   where:
-    target: main
     kind: const
     identifier: MaxRetries
   do:
-    assign_value:
-      value: "99"
+    - assign_value:
+        value: "99"

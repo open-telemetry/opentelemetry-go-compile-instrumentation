@@ -1,7 +1,6 @@
 add_new_file:
-  where:
-    target: main
+  target: main
   do:
-    add_file:
-      file: newfile.go
-      path: testdata
+    - add_file:
+        file: newfile.go
+        path: testdata

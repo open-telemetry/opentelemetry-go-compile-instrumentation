@@ -19,47 +19,50 @@ import (
 // bound is exclusive. For example, "v1.0.0,v2.0.0" means the rule is applicable
 // to the target module version range [v1.0.0, v2.0.0).
 type InstRule interface {
-	String() string       // The string representation of the rule
-	GetName() string      // The unique name of the rule
-	GetTarget() string    // The target module path where the rule is applied
-	GetVersion() string   // The version range of target module if available, e.g "v1.0.0,v2.0.0"
-	GetWhere() *FilterDef // The optional join point filter; nil means no additional filtering
+	String() string      // The string representation of the rule
+	GetName() string     // The unique name of the rule
+	GetTarget() string   // The target module path where the rule is applied
+	GetVersion() string  // The version range of target module if available, e.g "v1.0.0,v2.0.0"
+	GetWhere() *WhereDef // Optional non-package selectors that remain after normalization
 }
 
-// FilterDef describes a file-level predicate for a join point rule. It is the
-// YAML representation of a where clause and is evaluated during the setup phase
-// to decide whether a rule applies to a given source file.
+// FilterDef describes file predicates nested under where.file.
 //
-// FilterDef sits at Tier 2 of the 3-tier instrumentation model:
-//
-//	Tier 1 — Package Scope: target (exact or glob) + version
-//	Tier 2 — File Predicate: where clause (this type)
-//	Tier 3 — Point Selector: rule-type fields (func, struct, directive, …)
-//
-// A FilterDef is either a leaf (exactly one of HasFunc/Recv, HasStruct,
-// HasDirective, IncludeTest) or a combinator (AllOf, OneOf, Not). Combinators
-// contain nested FilterDef instances. Exactly one leaf predicate must be set
-// on any given FilterDef. Combinators are defined in the schema but not yet
-// implemented; they return an error from filter.Build.
-//
-// The has_ prefix on leaf fields distinguishes file predicates from Tier 3
-// point selectors: "func: Handler" at rule level means "instrument Handler",
-// while "has_func: init" in where means "only in files that contain init()".
-//
-// HasRecv is only meaningful alongside HasFunc; it narrows the function match to
-// a specific receiver type.
+// The file predicate model currently supports implicit all-of across top-level
+// fields plus the explicit qualifier keys needed by the agreed surface. Runtime
+// support remains intentionally narrow: simple leaf predicates are supported,
+// while qualifier composition is validated but not yet executed.
 type FilterDef struct {
-	// Combinators — not yet implemented; return an error from Build.
 	AllOf []FilterDef `json:"all-of,omitempty" yaml:"all-of,omitempty"`
 	OneOf []FilterDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
 	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`
 
-	// Leaf file predicates — supported by Build.
 	HasFunc      string `json:"has_func,omitempty"      yaml:"has_func,omitempty"`
-	HasRecv      string `json:"has_recv,omitempty"      yaml:"has_recv,omitempty"` // optional, requires HasFunc
+	Recv         string `json:"recv,omitempty"          yaml:"recv,omitempty"`
 	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`
-	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"` // not yet implemented
-	IncludeTest  *bool  `json:"include_test,omitempty"  yaml:"include_test,omitempty"`  // not yet implemented
+	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"`
+}
+
+// WhereDef carries the structured where clause after package selectors have
+// been split back out to top-level target/version fields.
+//
+// Today the setup phase only executes where.file predicates. The remaining
+// selector and qualifier fields are preserved here so the agreed syntax surface
+// can be normalized now without forcing the broader internal refactor yet.
+type WhereDef struct {
+	File *FilterDef `json:"file,omitempty" yaml:"file,omitempty"`
+
+	AllOf []WhereDef `json:"all-of,omitempty" yaml:"all-of,omitempty"`
+	OneOf []WhereDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
+	Not   *WhereDef  `json:"not,omitempty"    yaml:"not,omitempty"`
+
+	Func         string `json:"func,omitempty"          yaml:"func,omitempty"`
+	Recv         string `json:"recv,omitempty"          yaml:"recv,omitempty"`
+	Struct       string `json:"struct,omitempty"        yaml:"struct,omitempty"`
+	FunctionCall string `json:"function_call,omitempty" yaml:"function_call,omitempty"`
+	Directive    string `json:"directive,omitempty"     yaml:"directive,omitempty"`
+	Kind         string `json:"kind,omitempty"          yaml:"kind,omitempty"`
+	Identifier   string `json:"identifier,omitempty"    yaml:"identifier,omitempty"`
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
@@ -68,14 +71,14 @@ type InstBaseRule struct {
 	Target  string            `json:"target"            yaml:"target"`
 	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
 	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"` // map[alias]path
-	Where   *FilterDef        `json:"where,omitempty"   yaml:"where,omitempty"`
+	Where   *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
 }
 
-func (ibr *InstBaseRule) String() string       { return ibr.Name }
-func (ibr *InstBaseRule) GetName() string      { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string    { return ibr.Target }
-func (ibr *InstBaseRule) GetVersion() string   { return ibr.Version }
-func (ibr *InstBaseRule) GetWhere() *FilterDef { return ibr.Where }
+func (ibr *InstBaseRule) String() string      { return ibr.Name }
+func (ibr *InstBaseRule) GetName() string     { return ibr.Name }
+func (ibr *InstBaseRule) GetTarget() string   { return ibr.Target }
+func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
+func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,

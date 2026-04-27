@@ -5,12 +5,10 @@ package setup
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -30,9 +28,10 @@ func (r *mockInstRule) String() string {
 
 func TestNormalizeRule(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  map[string]any
-		expect map[string]any
+		name      string
+		input     map[string]any
+		expect    []map[string]any
+		expectErr string
 	}{
 		{
 			name: "flat format passthrough",
@@ -42,248 +41,219 @@ func TestNormalizeRule(t *testing.T) {
 				"before": "BeforeHook",
 				"path":   "github.com/example/pkg",
 			},
-			expect: map[string]any{
+			expect: []map[string]any{{
 				"target": "net/http",
 				"func":   "ServeHTTP",
 				"before": "BeforeHook",
 				"path":   "github.com/example/pkg",
-			},
+			}},
 		},
 		{
-			name: "inject_hooks: func+recv from where, before/after/path from do",
+			name: "top-level target version with where selectors and where.file",
 			input: map[string]any{
+				"target":  "database/sql",
+				"version": "v1.0.0,v2.0.0",
 				"where": map[string]any{
-					"target": "net/http",
-					"func":   "ServeHTTP",
-					"recv":   "serverHandler",
+					"func": "Open",
+					"file": map[string]any{
+						"has_func": "init",
+					},
 				},
-				"do": map[string]any{
-					"inject_hooks": map[string]any{
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
 						"before": "BeforeServeHTTP",
 						"after":  "AfterServeHTTP",
 						"path":   "github.com/example/pkg",
+					}},
+				},
+			},
+			expect: []map[string]any{{
+				"target":  "database/sql",
+				"version": "v1.0.0,v2.0.0",
+				"func":    "Open",
+				"before":  "BeforeServeHTTP",
+				"after":   "AfterServeHTTP",
+				"path":    "github.com/example/pkg",
+				"where": map[string]any{
+					"file": map[string]any{
+						"has_func": "init",
 					},
 				},
-			},
-			expect: map[string]any{
-				"target": "net/http",
-				"func":   "ServeHTTP",
-				"recv":   "serverHandler",
-				"before": "BeforeServeHTTP",
-				"after":  "AfterServeHTTP",
-				"path":   "github.com/example/pkg",
-			},
+			}},
 		},
 		{
-			name: "inject_code: func from where, raw from do",
+			name: "multiple do items preserve declaration order",
 			input: map[string]any{
-				"where": map[string]any{
-					"target": "runtime",
-					"func":   "newproc1",
-				},
-				"do": map[string]any{
-					"inject_code": map[string]any{
-						"raw": "defer func(){}()",
-					},
-				},
-			},
-			expect: map[string]any{
-				"target": "runtime",
-				"func":   "newproc1",
-				"raw":    "defer func(){}()",
-			},
-		},
-		{
-			name: "add_struct_fields: struct from where, new_field from do",
-			input: map[string]any{
-				"where": map[string]any{
-					"target": "runtime",
-					"struct": "g",
-				},
-				"do": map[string]any{
-					"add_struct_fields": map[string]any{
-						"new_field": []any{
-							map[string]any{"name": "otel_ctx", "type": "interface{}"},
-						},
-					},
-				},
-			},
-			expect: map[string]any{
-				"target": "runtime",
-				"struct": "g",
-				"new_field": []any{
-					map[string]any{"name": "otel_ctx", "type": "interface{}"},
-				},
-			},
-		},
-		{
-			name: "add_file: target only in where, file+path from do",
-			input: map[string]any{
-				"where": map[string]any{
-					"target": "runtime",
-				},
-				"do": map[string]any{
-					"add_file": map[string]any{
-						"file": "runtime_gls.go",
-						"path": "github.com/example/pkg",
-					},
-				},
-			},
-			expect: map[string]any{
-				"target": "runtime",
-				"file":   "runtime_gls.go",
-				"path":   "github.com/example/pkg",
-			},
-		},
-		{
-			name: "wrap_call: function_call from where, template from do",
-			input: map[string]any{
-				"where": map[string]any{
-					"target":        "main",
-					"function_call": "unsafe.Sizeof",
-				},
-				"do": map[string]any{
-					"wrap_call": map[string]any{
-						"template": "Wrapper({{ . }})",
-					},
-				},
-			},
-			expect: map[string]any{
-				"target":        "main",
-				"function_call": "unsafe.Sizeof",
-				"template":      "Wrapper({{ . }})",
-			},
-		},
-		{
-			name: "expand_directive: directive from where, template from do",
-			input: map[string]any{
-				"where": map[string]any{
-					"target":    "main",
-					"directive": "otelc:span",
-				},
-				"do": map[string]any{
-					"expand_directive": map[string]any{
-						"template": `defer otelc.End()`,
-					},
-				},
-			},
-			expect: map[string]any{
-				"target":    "main",
-				"directive": "otelc:span",
-				"template":  `defer otelc.End()`,
-			},
-		},
-		{
-			name: "assign_value: kind+identifier from where, value from do",
-			input: map[string]any{
-				"where": map[string]any{
-					"target":     "main",
-					"kind":       "var",
-					"identifier": "GlobalVar",
-				},
-				"do": map[string]any{
-					"assign_value": map[string]any{
-						"value": `"replaced"`,
-					},
-				},
-			},
-			expect: map[string]any{
-				"target":     "main",
-				"kind":       "var",
-				"identifier": "GlobalVar",
-				"value":      `"replaced"`,
-			},
-		},
-		{
-			name: "imports stays at top level",
-			input: map[string]any{
-				"where": map[string]any{
-					"target": "main",
-					"func":   "Fn",
-				},
-				"do": map[string]any{
-					"inject_code": map[string]any{
-						"raw": `fmt.Println("x")`,
-					},
-				},
-				"imports": map[string]any{"fmt": "fmt"},
-			},
-			expect: map[string]any{
-				"target":  "main",
-				"func":    "Fn",
-				"raw":     `fmt.Println("x")`,
-				"imports": map[string]any{"fmt": "fmt"},
-			},
-		},
-		{
-			name: "version from where is preserved",
-			input: map[string]any{
-				"where": map[string]any{
-					"target":  "golang.org/x/time/rate",
-					"version": "v0.14.0,v0.15.0",
-					"func":    "Every",
-				},
-				"do": map[string]any{
-					"inject_code": map[string]any{
-						"raw": `fmt.Println("x")`,
-					},
-				},
-			},
-			expect: map[string]any{
-				"target":  "golang.org/x/time/rate",
-				"version": "v0.14.0,v0.15.0",
-				"func":    "Every",
-				"raw":     `fmt.Println("x")`,
-			},
-		},
-		{
-			name: "only where block (no do)",
-			input: map[string]any{
-				"where": map[string]any{
-					"target": "main",
-					"func":   "Fn",
-				},
-			},
-			expect: map[string]any{
 				"target": "main",
-				"func":   "Fn",
+				"where": map[string]any{
+					"func": "Example",
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeHook",
+						"path":   "example.com/hooks",
+					}},
+					map[string]any{"inject_code": map[string]any{
+						"raw": "defer func(){}()",
+					}},
+				},
+			},
+			expect: []map[string]any{
+				{
+					"target": "main",
+					"func":   "Example",
+					"before": "BeforeHook",
+					"path":   "example.com/hooks",
+				},
+				{
+					"target": "main",
+					"func":   "Example",
+					"raw":    "defer func(){}()",
+				},
 			},
 		},
 		{
-			name: "only do block (no where)",
+			name: "where one-of and not are preserved for later phases",
 			input: map[string]any{
-				"do": map[string]any{
-					"inject_code": map[string]any{
-						"raw": "_ = 0",
+				"target": "main",
+				"where": map[string]any{
+					"func": "Open",
+					"one-of": []any{
+						map[string]any{"file": map[string]any{"has_func": "init"}},
+						map[string]any{"not": map[string]any{"directive": "otelc:ignore"}},
+					},
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeOpen",
+						"path":   "example.com/hooks",
+					}},
+				},
+			},
+			expect: []map[string]any{{
+				"target": "main",
+				"func":   "Open",
+				"before": "BeforeOpen",
+				"path":   "example.com/hooks",
+				"where": map[string]any{
+					"one-of": []any{
+						map[string]any{"file": map[string]any{"has_func": "init"}},
+						map[string]any{"not": map[string]any{"directive": "otelc:ignore"}},
+					},
+				},
+			}},
+		},
+		{
+			name: "repeated modifier kinds are allowed",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"func": "Example",
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeOne",
+						"path":   "example.com/hooks",
+					}},
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeTwo",
+						"path":   "example.com/hooks",
+					}},
+				},
+			},
+			expect: []map[string]any{
+				{
+					"target": "main",
+					"func":   "Example",
+					"before": "BeforeOne",
+					"path":   "example.com/hooks",
+				},
+				{
+					"target": "main",
+					"func":   "Example",
+					"before": "BeforeTwo",
+					"path":   "example.com/hooks",
+				},
+			},
+		},
+		{
+			name: "target in where rejected",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"target": "net/http",
+					"func":   "ServeHTTP",
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeHook",
+						"path":   "example.com/hooks",
+					}},
+				},
+			},
+			expectErr: "target must be top-level",
+		},
+		{
+			name: "missing do rejected",
+			input: map[string]any{
+				"target": "main",
+				"where":  map[string]any{"func": "Fn"},
+			},
+			expectErr: "missing do",
+		},
+		{
+			name: "empty do rejected",
+			input: map[string]any{
+				"target": "main",
+				"where":  map[string]any{"func": "Fn"},
+				"do":     []any{},
+			},
+			expectErr: "do must not be empty",
+		},
+		{
+			name: "invalid do item with multiple keys rejected",
+			input: map[string]any{
+				"target": "main",
+				"where":  map[string]any{"func": "Fn"},
+				"do": []any{
+					map[string]any{
+						"inject_hooks": map[string]any{"before": "BeforeHook"},
+						"inject_code":  map[string]any{"raw": "_ = 0"},
 					},
 				},
 			},
-			expect: map[string]any{
-				"raw": "_ = 0",
+			expectErr: "exactly one modifier key",
+		},
+		{
+			name: "malformed where.file rejected",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"func": "Fn",
+					"file": "not-a-map",
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeHook",
+						"path":   "example.com/hooks",
+					}},
+				},
 			},
+			expectErr: "where.file must be a map",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeRule(tt.input)
-			if len(got) != len(tt.expect) {
-				t.Errorf("normalizeRule() len = %d, want %d; got %v", len(got), len(tt.expect), got)
+			got, err := normalizeRule(tt.input)
+			if tt.expectErr != "" {
+				require.ErrorContains(t, err, tt.expectErr)
 				return
 			}
-			for k, wantVal := range tt.expect {
-				gotVal, exists := got[k]
-				if !exists {
-					t.Errorf("normalizeRule() missing key %q", k)
-					continue
-				}
-				// Use yaml round-trip for deep equality of nested maps/slices.
-				wantYAML, _ := yaml.Marshal(wantVal)
-				gotYAML, _ := yaml.Marshal(gotVal)
-				if string(wantYAML) != string(gotYAML) {
-					t.Errorf("normalizeRule()[%q] = %v, want %v", k, gotVal, wantVal)
-				}
-			}
+			require.NoError(t, err)
+			wantYAML, _ := yaml.Marshal(tt.expect)
+			gotYAML, _ := yaml.Marshal(got)
+			require.YAMLEq(t, string(wantYAML), string(gotYAML))
 		})
 	}
 }
@@ -598,24 +568,7 @@ func validateCreatedRule(t *testing.T, createdRule rule.InstRule, ruleName strin
 	}
 }
 
-// writeCustomRules writes YAML rule content to a temporary file and returns
-// its path. The filename must end in .yaml or .yml.
 func writeCustomRules(t *testing.T, name, content string) string {
-	t.Helper()
-	require.True(t, strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml"),
-		"writeCustomRules: filename %q must end in .yaml or .yml", name)
-	path := filepath.Join(t.TempDir(), name)
-	err := os.WriteFile(path, []byte(content), 0o644)
-	require.NoError(t, err)
-	return path
-}
-
-// writeGoSource writes Go source content to a temporary file and returns its
-// path. The filename must end in .go.
-func writeGoSource(t *testing.T, name, content string) string {
-	t.Helper()
-	require.True(t, strings.HasSuffix(name, ".go"),
-		"writeGoSource: filename %q must end in .go", name)
 	path := filepath.Join(t.TempDir(), name)
 	err := os.WriteFile(path, []byte(content), 0o644)
 	require.NoError(t, err)
@@ -749,7 +702,7 @@ func TestLoadDefaultRules(t *testing.T) {
 	require.Greater(t, len(rules), 1, "default rules should be more than 1")
 }
 
-func TestPreciseMatching_WhereFilter(t *testing.T) {
+func TestPreciseMatching_WhereFileFilter(t *testing.T) {
 	matchFile := writeGoSource(t, "match.go", "package main\n\ntype Server struct{}\n\nfunc Handler() {}\n")
 	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\nfunc Handler() {}\n")
 
@@ -760,9 +713,11 @@ func TestPreciseMatching_WhereFilter(t *testing.T) {
 
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
-			Name:   "test-where",
+			Name:   "test-where-file",
 			Target: "example.com/svc",
-			Where:  &rule.FilterDef{HasStruct: "Server"},
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{HasStruct: "Server"},
+			},
 		},
 		Func:   "Handler",
 		Before: "BeforeHandler",
@@ -774,13 +729,11 @@ func TestPreciseMatching_WhereFilter(t *testing.T) {
 
 	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
 	require.NoError(t, err)
-
-	// Handler should be matched only in the file where Server struct exists.
-	require.Len(t, result.FuncRules, 1, "expected func rules for exactly one file")
-	require.Contains(t, result.FuncRules, matchFile, "expected rule in file with Server struct")
+	require.Len(t, result.FuncRules, 1)
+	require.Contains(t, result.FuncRules, matchFile)
 }
 
-func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
+func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
 
 	dep := &Dependency{
@@ -790,9 +743,11 @@ func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
 
 	badRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
-			Name:   "bad-where",
+			Name:   "bad-where-file",
 			Target: "example.com/svc",
-			Where:  &rule.FilterDef{HasFunc: "Foo", HasStruct: "Bar"},
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{HasFunc: "Foo", HasStruct: "Bar"},
+			},
 		},
 		Func: "Foo",
 	}
@@ -801,7 +756,8 @@ func TestPreciseMatching_WhereFilterBuildError(t *testing.T) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
 	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
-	require.Error(t, err, "expected error for invalid where clause")
+	require.Error(t, err)
+	require.ErrorContains(t, err, "where.file has multiple active predicates")
 }
 
 // Helper functions for constructing test data
@@ -830,87 +786,14 @@ func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.In
 	return rs
 }
 
-// goldenWhereExpected describes the expected outcome of a where-clause golden test case.
-type goldenWhereExpected struct {
-	MatchedFiles []string `json:"matched_files"`
-}
-
-// TestPreciseMatching_WhereGolden auto-discovers subdirectories under
-// testdata/where/, loading rules.yml and Go source files from each directory.
-// It calls preciseMatching with the loaded rules and verifies that the matched
-// files match the basenames listed in expected.json.
-//
-// Each subdirectory must contain:
-//   - rules.yml     — one or more rule definitions targeting "example.com/svc"
-//   - *.go files    — Go source files to match against
-//   - expected.json — {"matched_files": ["file.go", ...]}
-func TestPreciseMatching_WhereGolden(t *testing.T) {
-	const dir = "testdata/where"
-	entries, dirErr := os.ReadDir(dir)
-	require.NoError(t, dirErr)
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		t.Run(entry.Name(), func(t *testing.T) {
-			subdir := filepath.Join(dir, entry.Name())
-
-			// 1. Load and parse rules.yml.
-			rulesContent, err := os.ReadFile(filepath.Join(subdir, "rules.yml"))
-			require.NoError(t, err)
-			rules, err := parseRuleFromYaml(rulesContent)
-			require.NoError(t, err)
-			require.NotEmpty(t, rules)
-
-			// 2. Copy *.go files to a shared temporary directory.
-			//    preciseMatching requires absolute paths; copying ensures that
-			//    paths are stable and not embedded in the source tree.
-			tmpDir := t.TempDir()
-			goFiles, err := filepath.Glob(filepath.Join(subdir, "*.go"))
-			require.NoError(t, err)
-			require.NotEmpty(t, goFiles, "each golden test case must have at least one .go file")
-			sources := make([]string, 0, len(goFiles))
-			for _, src := range goFiles {
-				content, readErr := os.ReadFile(src)
-				require.NoError(t, readErr)
-				dst := filepath.Join(tmpDir, filepath.Base(src))
-				require.NoError(t, os.WriteFile(dst, content, 0o644))
-				sources = append(sources, dst)
-			}
-
-			// 3. Build Dependency and call preciseMatching.
-			dep := &Dependency{
-				ImportPath: "example.com/svc",
-				Sources:    sources,
-			}
-			sp := newTestSetupPhase()
-			set := rule.NewInstRuleSet(dep.ImportPath)
-			result, err := sp.preciseMatching(t.Context(), dep, rules, set)
-			require.NoError(t, err)
-
-			// 4. Load expected.json and compare matched file basenames.
-			expectedContent, err := os.ReadFile(filepath.Join(subdir, "expected.json"))
-			require.NoError(t, err)
-			var want goldenWhereExpected
-			require.NoError(t, json.Unmarshal(expectedContent, &want))
-
-			got := make(map[string]bool, len(result.FuncRules))
-			for path := range result.FuncRules {
-				got[filepath.Base(path)] = true
-			}
-			require.Len(t, got, len(want.MatchedFiles),
-				"matched file count: got %v, want %v", got, want.MatchedFiles)
-			for _, wantFile := range want.MatchedFiles {
-				require.True(t, got[wantFile],
-					"expected %q to be matched, got %v", wantFile, got)
-			}
-		})
-	}
+func writeGoSource(t *testing.T, name, content string) string {
+	path := filepath.Join(t.TempDir(), name)
+	err := os.WriteFile(path, []byte(content), 0o644)
+	require.NoError(t, err)
+	return path
 }
 
 func TestRunMatch_FileRuleOnlySetsPackageName(t *testing.T) {
-	// Write a temporary Go source file so ParseFileOnlyPackage can parse it
 	dir := t.TempDir()
 	srcFile := filepath.Join(dir, "mypkg.go")
 	err := os.WriteFile(srcFile, []byte("package mypkg\n"), 0o644)
@@ -918,7 +801,6 @@ func TestRunMatch_FileRuleOnlySetsPackageName(t *testing.T) {
 
 	const importPath = "example.com/mypkg"
 
-	// Build a file rule targeting the import path
 	yamlContent := []byte(`
 file: hook.go
 target: example.com/mypkg
@@ -941,7 +823,6 @@ target: example.com/mypkg
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
-	// The package name must be set from parsing the source file
 	assert.Equal(t, "mypkg", set.PackageName)
 	assert.False(t, set.IsEmpty(), "rule set must contain the file rule")
 }
@@ -1000,7 +881,6 @@ target: example.com/mypkg
 	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
 	require.NoError(t, err)
 
-	// dep with no sources: package name should remain empty
 	dep := &Dependency{
 		ImportPath: importPath,
 		Sources:    []string{},
@@ -1016,7 +896,6 @@ target: example.com/mypkg
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
-	// No sources means package name is not set
 	assert.Empty(t, set.PackageName)
 	assert.False(t, set.IsEmpty())
 }

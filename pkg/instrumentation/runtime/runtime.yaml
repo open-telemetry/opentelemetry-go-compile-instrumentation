@@ -1,31 +1,30 @@
 add_gls_field:
+  target: "runtime"
   where:
-    target: "runtime"
     struct: "g"
   do:
-    add_struct_fields:
-      new_field:
-        - name: "otel_trace_context"
-          type: "interface{}"
-        - name: "otel_baggage_container"
-          type: "interface{}"
+    - add_struct_fields:
+        new_field:
+          - name: "otel_trace_context"
+            type: "interface{}"
+          - name: "otel_baggage_container"
+            type: "interface{}"
 
 gls_linker:
-  where:
-    target: "runtime"
+  target: "runtime"
   do:
-    add_file:
-      file: "runtime_gls.go"
-      path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/runtime"
+    - add_file:
+        file: "runtime_gls.go"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/runtime"
 
 goroutine_propagate:
+  target: "runtime"
   where:
-    target: "runtime"
     func: "newproc1"
   do:
-    inject_code:
-      raw: |
-        defer func(){
-          _unnamedRetVal0.otel_trace_context = propagateOtelContext(callergp.otel_trace_context);
-          _unnamedRetVal0.otel_baggage_container = propagateOtelContext(callergp.otel_baggage_container);
-        }()
+    - inject_code:
+        raw: |
+          defer func(){
+            _unnamedRetVal0.otel_trace_context = propagateOtelContext(callergp.otel_trace_context);
+            _unnamedRetVal0.otel_baggage_container = propagateOtelContext(callergp.otel_baggage_container);
+          }()

@@ -1,8 +1,8 @@
 assign_global_var:
+  target: main
   where:
-    target: main
     kind: var
     identifier: GlobalVar
   do:
-    assign_value:
-      value: '"replaced"'
+    - assign_value:
+        value: '"replaced"'

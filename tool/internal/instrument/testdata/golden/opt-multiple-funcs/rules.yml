@@ -1,27 +1,27 @@
 opt_good:
+  target: main
   where:
-    target: main
     func: OptGood
   do:
-    inject_hooks:
-      before: H5Before
-      path: testdata
+    - inject_hooks:
+        before: H5Before
+        path: testdata
 
 opt_bad:
+  target: main
   where:
-    target: main
     func: OptBad
   do:
-    inject_hooks:
-      before: H6Before
-      path: testdata
+    - inject_hooks:
+        before: H6Before
+        path: testdata
 
 opt_bad2:
+  target: main
   where:
-    target: main
     func: OptBad2
   do:
-    inject_hooks:
-      before: H7Before
-      after: H7After
-      path: testdata
+    - inject_hooks:
+        before: H7Before
+        after: H7After
+        path: testdata

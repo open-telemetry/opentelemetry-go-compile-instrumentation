@@ -1,8 +1,8 @@
 hook_before_only:
+  target: main
   where:
-    target: main
     func: EllipsisFunc
   do:
-    inject_hooks:
-      before: H9Before
-      path: testdata
+    - inject_hooks:
+        before: H9Before
+        path: testdata

@@ -1,9 +1,9 @@
 add_new_field:
+  target: main
   where:
-    target: main
     struct: T
   do:
-    add_struct_fields:
-      new_field:
-        - name: NewField
-          type: string
+    - add_struct_fields:
+        new_field:
+          - name: NewField
+            type: string

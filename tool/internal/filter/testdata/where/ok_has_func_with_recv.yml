@@ -1,3 +1,2 @@
-# Tier 2 file predicate: file must contain method (*Server).Handle
 has_func: Handle
-has_recv: "*Server"
+recv: "*Server"

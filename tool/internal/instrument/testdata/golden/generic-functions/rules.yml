@@ -1,20 +1,20 @@
 generic_func_rule:
+  target: main
   where:
-    target: main
     func: GenericFunc
   do:
-    inject_hooks:
-      before: GenericFuncBefore
-      after: GenericFuncAfter
-      path: testdata
+    - inject_hooks:
+        before: GenericFuncBefore
+        after: GenericFuncAfter
+        path: testdata
 
 generic_method_rule:
+  target: main
   where:
-    target: main
     func: GenericMethod
     recv: "*GenStruct"
   do:
-    inject_hooks:
-      before: GenericMethodBefore
-      after: GenericMethodAfter
-      path: testdata
+    - inject_hooks:
+        before: GenericMethodBefore
+        after: GenericMethodAfter
+        path: testdata

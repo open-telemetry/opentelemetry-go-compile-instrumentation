@@ -1,17 +1,17 @@
 hook_func:
+  target: main
   where:
-    target: main
     func: Func1
   do:
-    inject_hooks:
-      before: H1Before
-      after: H1After
-      path: testdata
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata
 
 add_raw_code:
+  target: main
   where:
-    target: main
     func: Func1
   do:
-    inject_code:
-      raw: "_ = 456"
+    - inject_code:
+        raw: "_ = 456"

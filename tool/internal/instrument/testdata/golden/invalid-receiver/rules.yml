@@ -1,10 +1,10 @@
 hook_invalid_receiver:
+  target: main
   where:
-    target: main
     func: Func1
     recv: "*NonExistent"
   do:
-    inject_hooks:
-      before: H1Before
-      after: H1After
-      path: testdata
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata

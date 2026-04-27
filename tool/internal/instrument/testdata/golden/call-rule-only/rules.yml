@@ -1,7 +1,7 @@
 wrap_sizeof_call:
+  target: main
   where:
-    target: main
     function_call: unsafe.Sizeof
   do:
-    wrap_call:
-      template: "Wrapper({{ . }})"
+    - wrap_call:
+        template: "Wrapper({{ . }})"
