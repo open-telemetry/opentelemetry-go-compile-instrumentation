@@ -12,11 +12,10 @@
       "enabled": false
     },
     {
-      "groupName": "all non-major versions",
-      "matchUpdateTypes": ["patch", "minor", "digest"]
-    },
-    {
-      "matchUpdateTypes": ["major"]
+      "groupName": "all dependencies",
+      "groupSlug": "all-deps",
+      "matchPackagePatterns": ["*"],
+      "matchUpdateTypes": ["patch", "minor", "major", "digest"]
     }
   ],
   "labels": [
