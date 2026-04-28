@@ -10,7 +10,6 @@ EXCLUDE_PATHS=(
     -path '**/vendor/*'
     -o -path './.git/*'
     -o -path './tmp/*'
-    -o -path './.otelc-build/*'
     -o -path '**/pkg_temp/*'
     -o -path '**/pb/*'
     -o -path './LICENSE'
@@ -18,6 +17,7 @@ EXCLUDE_PATHS=(
     -o -path './.github/workflows/*'
     -o -path './scripts/*'
     -o -path '**/.otelc-build/*'
+    -o -path '**/.otel-build/*'
 )
 
 # File patterns that require license headers (source code files only)

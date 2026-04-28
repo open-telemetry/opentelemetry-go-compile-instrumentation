@@ -33,9 +33,7 @@ func parseValueExpr(exprSource string) (dst.Expr, error) {
 // applyDeclRule applies a declaration rule to the target file, modifying the
 // matched named declaration (e.g., assigning a new value to a var or const).
 func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRule, root *dst.File) error {
-	if r.Value == "" {
-		return nil
-	}
+	util.Assert(r.Value != "" || r.Wrap != "", "decl rule must set value or wrap")
 
 	node := ast.FindNamedDecl(root, r.Identifier, r.Kind)
 	if node == nil {
@@ -48,6 +46,15 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	}
 
 	spec := util.AssertType[*dst.ValueSpec](node)
+
+	if r.Wrap != "" {
+		if err := wrapDeclValues(spec, r.Wrap); err != nil {
+			return err
+		}
+		ip.Info("Apply decl rule", "rule", r)
+		return nil
+	}
+
 	expr, err := parseValueExpr(r.Value)
 	if err != nil {
 		return err
@@ -59,5 +66,32 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	}
 
 	ip.Info("Apply decl rule", "rule", r)
+	return nil
+}
+
+// wrapDeclValues wraps each initializer in spec using the given template.
+// Returns an error if spec has no initializers, since wrap requires
+// an existing value to substitute into {{ . }}.
+func wrapDeclValues(spec *dst.ValueSpec, templateStr string) error {
+	if len(spec.Values) == 0 {
+		return ex.Newf(
+			"wrap requires an existing initializer but the declaration has none",
+		)
+	}
+
+	tmpl, err := newCallTemplate(templateStr)
+	if err != nil {
+		return ex.Wrapf(err, "failed to compile wrap template")
+	}
+
+	var wrapped dst.Expr
+	for i, val := range spec.Values {
+		wrapped, err = tmpl.compileExpression(val)
+		if err != nil {
+			return ex.Wrapf(err, "failed to wrap expression at index %d", i)
+		}
+		spec.Values[i] = util.AssertType[dst.Expr](dst.Clone(wrapped))
+	}
+
 	return nil
 }
