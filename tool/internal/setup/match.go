@@ -50,6 +50,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstFuncRule(raw, name)
 	case fields["function_call"] != nil:
 		return rule.NewInstCallRule(raw, name)
+	case fields["identifier"] != nil:
+		return rule.NewInstDeclRule(raw, name)
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
@@ -163,6 +165,15 @@ func (sp *SetupPhase) runMatch(
 	}
 
 	if len(preciseRules) == 0 {
+		if !set.IsEmpty() && len(dep.Sources) > 0 {
+			// TODO: Optimize package name discovery for file-only rules to avoid
+			// parsing source files on the hot path.
+			tree, err := ast.ParseFileOnlyPackage(dep.Sources[0])
+			if err != nil {
+				return nil, err
+			}
+			set.SetPackageName(tree.Name.Name)
+		}
 		return set, nil
 	}
 
@@ -245,22 +256,21 @@ func (sp *SetupPhase) preciseMatching(
 			if rf.where != nil && !rf.where.Match(&mctx) {
 				continue
 			}
-			sp.matchRule(rf.rule, source, tree, set, dep)
+			sp.matchOneRule(tree, source, rf.rule, set, dep)
 		}
 	}
 	return set, nil
 }
 
-// matchRule performs AST-based matching for a single rule against a single
-// source file, adding the rule to set if it matches.
-func (sp *SetupPhase) matchRule(
-	r rule.InstRule,
-	source string,
+// matchOneRule performs precise AST matching for a single rule against a parsed
+// source file, adding the rule to the set if it matches.
+func (sp *SetupPhase) matchOneRule(
 	tree *dst.File,
+	source string,
+	r rule.InstRule,
 	set *rule.InstRuleSet,
 	dep *Dependency,
 ) {
-	// Each rule type uses a different AST query; dispatch to the correct handler.
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
@@ -293,8 +303,13 @@ func (sp *SetupPhase) matchRule(
 			set.AddDirectiveRule(source, rt)
 			sp.Info("Match directive rule", "rule", rt, "dep", dep)
 		}
+	case *rule.InstDeclRule:
+		if ast.FindNamedDecl(tree, rt.Identifier, rt.Kind) != nil {
+			set.AddDeclRule(source, rt)
+			sp.Info("Match decl rule", "rule", rt, "dep", dep)
+		}
 	case *rule.InstFileRule:
-		// Already dispatched in runMatch before preciseMatching is called.
+		// Skip as it's already processed
 	default:
 		util.ShouldNotReachHere()
 	}

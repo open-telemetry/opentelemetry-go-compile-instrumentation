@@ -5,6 +5,8 @@ package main
 
 import _ "unsafe"
 
+var GlobalVar = "original"
+
 type T struct{}
 
 func (t *T) Func1(p1 string, p2 int) (float32, error) {
@@ -41,10 +43,12 @@ func EllipsisFunc(p1 ...string) {
 	if OtelBeforeTrampoline_EllipsisFunc2350319093(&p1); false {
 	} else {
 	}
-	//line main.go:37:33
+	//line main.go:39:33
 }
 
 func UnderscoreFunc(_ int, _ float32) {}
+
+func Unnamed(int, float32) {}
 
 func main() { Func1("hello", 123) }
 

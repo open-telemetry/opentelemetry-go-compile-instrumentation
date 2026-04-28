@@ -111,8 +111,8 @@ services:
     ports:
       - "50051:50051"
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=grpc-server
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
@@ -130,8 +130,8 @@ services:
     container_name: grpc-client
     command: ["-addr", "grpc-server:50051", "-name", "demo-client", "-count", "10000"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=grpc-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
@@ -184,7 +184,7 @@ services:
 
   # MySQL - Database backend for DB demo
   mysql:
-    image: mysql:9.6@sha256:e5dc14f6e01c3e577e669337d2855c6d1561b30d8ef2c592e63e4e8a9a52650a
+    image: mysql:9.6@sha256:c5df04bee1a42b74a5841c6409e669cf62126cd0416f00c1cea8ab933b9361b9
     container_name: mysql
     environment:
       - MYSQL_ROOT_PASSWORD=root
@@ -214,9 +214,20 @@ services:
       - "8081:8081"
     command: ["-port", "8081", "-dsn", "demo:demo@tcp(mysql:3306)/demodb?parseTime=true"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=db-server
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      mysql:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    restart: unless-stopped
+
   # Redis - In-memory data store for Redis demo
   redis:
     image: redis:8-alpine@sha256:2afba59292f25f5d1af200496db41bea2c6c816b059f57ae74703a50a03a27d0
@@ -239,15 +250,14 @@ services:
     container_name: redis-client
     command: ["-addr", "redis:6379", "-count", "10000"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=redis-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
     networks:
       - observability
     depends_on:
-      mysql:
       redis:
         condition: service_healthy
       otel-collector:
@@ -262,8 +272,8 @@ services:
     container_name: db-client
     command: ["-addr", "http://db-server:8081", "-count", "10000"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=db-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info

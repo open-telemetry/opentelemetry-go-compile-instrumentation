@@ -215,6 +215,192 @@ func TestMatchesCallRule_ImportAliasFromVersionSuffix(t *testing.T) {
 	assert.True(t, matches)
 }
 
+func TestAppendCallArgs_Empty(t *testing.T) {
+	r := &rule.InstCallRule{}
+	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.NoError(t, err)
+	assert.False(t, modified)
+	assert.Empty(t, call.Args)
+}
+
+func TestAppendCallArgs_SimpleAppend(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs: []string{"42", "true"},
+	}
+	call := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	assert.Len(t, call.Args, 3)
+}
+
+func TestAppendCallArgs_EllipsisNoVariadicType(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs: []string{"42"},
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{&dst.Ident{Name: "opts"}},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "variadic_type")
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_EllipsisWithVariadicType(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs:   []string{"42"},
+		VariadicType: "int",
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{&dst.Ident{Name: "opts"}},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	// The outer call still has Ellipsis=true
+	assert.True(t, call.Ellipsis)
+	// The last arg is now an IIFE call
+	require.Len(t, call.Args, 1)
+	iifeCall, ok := call.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected IIFE call expression")
+	// The IIFE's function is a FuncLit
+	_, ok = iifeCall.Fun.(*dst.FuncLit)
+	assert.True(t, ok, "expected FuncLit as IIFE function")
+}
+
+func TestAppendCallArgs_EllipsisNoArgs(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs:   []string{"42"},
+		VariadicType: "int",
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no arguments")
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_InvalidVariadicType(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs:   []string{"42"},
+		VariadicType: "func {{{",
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{&dst.Ident{Name: "opts"}},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse variadic_type")
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_InvalidExpr(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs: []string{"func {{{"},
+	}
+	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_WithTemplate(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs: []string{"42"},
+		Template:   "wrapper({{ . }})",
+	}
+	call := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	// Apply appendCallArgs first, then wrapCall (mirrors applyCallRule)
+	modified, err := appendCallArgs(call, r)
+	require.NoError(t, err)
+	assert.True(t, modified)
+	assert.Len(t, call.Args, 2)
+
+	err = wrapCall(call, r)
+	require.NoError(t, err)
+	// After wrapping, outer call is "wrapper"
+	wrapperIdent, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "wrapper", wrapperIdent.Name)
+	// Inner call has 2 args
+	require.Len(t, call.Args, 1)
+	innerCall, ok := call.Args[0].(*dst.CallExpr)
+	require.True(t, ok)
+	assert.Len(t, innerCall.Args, 2)
+}
+
+func TestBuildEllipsisIIFE_Structure(t *testing.T) {
+	varType := &dst.Ident{Name: "int"}
+	spreadArg := &dst.Ident{Name: "opts"}
+	newArgs := []dst.Expr{&dst.BasicLit{Value: "42"}}
+
+	iife := buildEllipsisIIFE(spreadArg, varType, newArgs)
+
+	// Outer call: funcLit(opts...)
+	assert.True(t, iife.Ellipsis)
+	require.Len(t, iife.Args, 1)
+	assert.Equal(t, spreadArg, iife.Args[0])
+
+	funcLit, ok := iife.Fun.(*dst.FuncLit)
+	require.True(t, ok)
+
+	// Param: v ...int
+	require.Len(t, funcLit.Type.Params.List, 1)
+	param := funcLit.Type.Params.List[0]
+	assert.Equal(t, "v", param.Names[0].Name)
+	_, ok = param.Type.(*dst.Ellipsis)
+	assert.True(t, ok)
+
+	// Return: []int
+	require.Len(t, funcLit.Type.Results.List, 1)
+	retType, ok := funcLit.Type.Results.List[0].Type.(*dst.ArrayType)
+	require.True(t, ok)
+	assert.Equal(t, "int", retType.Elt.(*dst.Ident).Name)
+
+	// Body: return append(v, 42)
+	require.Len(t, funcLit.Body.List, 1)
+	retStmt, ok := funcLit.Body.List[0].(*dst.ReturnStmt)
+	require.True(t, ok)
+	require.Len(t, retStmt.Results, 1)
+	appendCall, ok := retStmt.Results[0].(*dst.CallExpr)
+	require.True(t, ok)
+	assert.Equal(t, "append", appendCall.Fun.(*dst.Ident).Name)
+	assert.Len(t, appendCall.Args, 2)
+}
+
 func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 	r := &rule.InstCallRule{
 		ImportPath: "gopkg.in/yaml.v3",

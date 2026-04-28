@@ -55,6 +55,16 @@ type InstCallRule struct {
 	//   - "wrapper({{ . }})" wraps the call with wrapper()
 	//   - "(func() { return {{ . }} })()" uses an IIFE
 	Template string `json:"template" yaml:"template"`
+
+	// AppendArgs is a list of Go expression strings appended as additional
+	// arguments to the matched call. See docs/rules.md for full semantics.
+	AppendArgs []string `json:"append_args" yaml:"append_args"`
+
+	// VariadicType is the element type of the variadic parameter (e.g. "grpc.DialOption").
+	// Required only when the matched call uses an ellipsis spread (f(a, opts...)).
+	// When set and the call is ellipsis, an IIFE wrapper is generated.
+	// When unset and the call is ellipsis, the call is skipped with a warning.
+	VariadicType string `json:"variadic_type" yaml:"variadic_type"`
 }
 
 // funcNamePattern matches qualified function names like "net/http.Get".
@@ -105,8 +115,10 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 	}
 
 	// Validate template syntax
-	if _, err := fasttemplate.NewTemplate(r.Template, "{{", "}}"); err != nil {
-		return nil, ex.Wrapf(err, "invalid template syntax for rule %q", name)
+	if r.Template != "" {
+		if _, err := fasttemplate.NewTemplate(r.Template, "{{", "}}"); err != nil {
+			return nil, ex.Wrapf(err, "invalid template syntax for rule %q", name)
+		}
 	}
 
 	return &r, nil
@@ -118,11 +130,16 @@ func (r *InstCallRule) validate() error {
 		return ex.Newf("function_call cannot be empty")
 	}
 
-	if strings.TrimSpace(r.Template) == "" {
-		return ex.Newf("template cannot be empty")
+	if strings.TrimSpace(r.Template) == "" && len(r.AppendArgs) == 0 {
+		return ex.Newf("at least one of template or append_args must be set")
 	}
-	if !templatePlaceholderPattern.MatchString(r.Template) {
+	if strings.TrimSpace(r.Template) != "" && !templatePlaceholderPattern.MatchString(r.Template) {
 		return ex.Newf("template must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)")
+	}
+	for i, arg := range r.AppendArgs {
+		if strings.TrimSpace(arg) == "" {
+			return ex.Newf("append_args[%d] must be a non-empty string", i)
+		}
 	}
 	return nil
 }

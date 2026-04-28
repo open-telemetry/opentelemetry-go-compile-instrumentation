@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dave/dst"
 
@@ -226,7 +227,8 @@ func CleanupImportTrackingFiles() {
 }
 
 // loadAddedImports discovers and merges all per-process import tracking files.
-func loadAddedImports() (map[string]string, error) {
+func loadAddedImports(ctx context.Context) (map[string]string, error) {
+	logger := util.LoggerFromContext(ctx)
 	pattern := util.GetAddedImportsPattern()
 
 	// Find all per-process import files
@@ -246,8 +248,8 @@ func loadAddedImports() (map[string]string, error) {
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {
 			// Log warning but continue with other files
-			//nolint:sloglint // no context available
-			slog.Warn(
+			logger.WarnContext(
+				ctx,
 				"failed to read import file",
 				"path",
 				filePath,
@@ -259,8 +261,8 @@ func loadAddedImports() (map[string]string, error) {
 
 		var imports map[string]string
 		if unmarshalErr := json.Unmarshal(data, &imports); unmarshalErr != nil {
-			//nolint:sloglint // no context available
-			slog.Warn(
+			logger.WarnContext(
+				ctx,
 				"failed to parse import file",
 				"path",
 				filePath,
@@ -291,7 +293,7 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	}
 
 	// Load imports that were added during compilation
-	addedImports, err := loadAddedImports()
+	addedImports, err := loadAddedImports(ctx)
 	if err != nil {
 		logger.WarnContext(ctx, "failed to load added imports for link phase", "error", err)
 		return args, nil // Non-fatal, proceed with original args
@@ -366,5 +368,18 @@ func Toolexec(ctx context.Context, args []string) error {
 	}
 
 	// Run the command
-	return util.RunCmd(ctx, args...)
+	if os.Getenv(util.EnvOtelcStats) == "" {
+		return util.RunCmd(ctx, args...)
+	}
+	tool := filepath.Base(args[0])
+	pkg := util.FindFlagValue(args, "-p")
+	start := time.Now()
+	err := util.RunCmd(ctx, args...)
+	elapsed := time.Since(start)
+	util.LoggerFromContext(ctx).InfoContext(ctx, "toolexec stats",
+		"tool", tool,
+		"package", pkg,
+		"duration", elapsed,
+	)
+	return err
 }
