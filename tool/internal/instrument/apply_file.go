@@ -4,7 +4,9 @@
 package instrument
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -22,18 +24,22 @@ func listRuleFiles(path string) ([]string, error) {
 	if util.PathExists(path) {
 		p = path
 	} else {
-		p = strings.TrimPrefix(path, util.OtelRoot)
+		p = strings.TrimPrefix(path, util.OtelcRoot)
 		p = filepath.Join(util.GetBuildTempDir(), p)
 	}
 	return util.ListFiles(p)
 }
 
+func stripBuildIgnoreTag(content string) string {
+	return strings.ReplaceAll(content, "//go:build ignore", "")
+}
+
 // applyFileRule introduces the new file to the target package at compile time.
-func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string) error {
+func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
 	// List all files in the rule module path
 	files, err := listRuleFiles(rule.Path)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "listing files for rule %s at path %s", rule.Name, rule.Path)
 	}
 
 	// Find the new file we want to introduce
@@ -45,22 +51,33 @@ func (ip *InstrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string
 	}
 	file := files[index]
 
-	// Parse the new file into AST nodes and modify it as needed
-	root, err := ip.parseFile(file)
+	// Parse the new file into AST nodes and modify it as needed.
+	// Keep processing in-memory to avoid mutating shared temp rule files.
+	data, err := os.ReadFile(file)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "reading rule source file %s", file)
+	}
+	root, err := ast.NewAstParser().ParseSource(stripBuildIgnoreTag(string(data)))
+	if err != nil {
+		return ex.Wrapf(err, "parsing rule source file %s", file)
 	}
 	// Always rename the package name to the target package name
 	root.Name.Name = pkgName
+
+	// The file being added has its own imports that need to be in importcfg.
+	// Without this, the compiler will fail with "could not import X" errors.
+	if err = ip.updateImportConfigForFile(ctx, root, rule.Name); err != nil {
+		return err
+	}
 
 	// Write back the modified AST to a new file in the working directory
 	base := filepath.Base(rule.File)
 	ext := filepath.Ext(base)
 	newName := strings.TrimSuffix(base, ext)
-	newFile := filepath.Join(ip.workDir, fmt.Sprintf("otel.%s.go", newName))
+	newFile := filepath.Join(ip.workDir, fmt.Sprintf("otelc.%s.go", newName))
 	err = ast.WriteFile(newFile, root)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "writing instrumented file %s", newFile)
 	}
 	ip.Info("Apply file rule", "rule", rule)
 

@@ -28,12 +28,32 @@ const (
 )
 
 var (
-	logger             *slog.Logger
-	meterProvider      *sdkmetric.MeterProvider
-	tracerProvider     *sdktrace.TracerProvider
-	initOnce           sync.Once
-	runtimeMetricsOnce sync.Once
+	logger         *slog.Logger
+	meterProvider  *sdkmetric.MeterProvider
+	tracerProvider *sdktrace.TracerProvider
+	initOnce       sync.Once
 )
+
+// startRuntimeMetrics is initialized once and caches the error from the first
+// call. All subsequent calls return the same cached error value.
+var startRuntimeMetrics = sync.OnceValue(func() error {
+	// Check if runtime metrics are enabled
+	if !Instrumented("runtimemetrics") {
+		logger.Debug("runtime metrics disabled via environment variable")
+		return nil
+	}
+
+	// Get the meter provider from the global registry
+	mp := otel.GetMeterProvider()
+
+	if err := runtime.Start(runtime.WithMeterProvider(mp)); err != nil {
+		logger.Warn("failed to start runtime metrics", "error", err)
+		return err
+	}
+
+	logger.Info("runtime metrics enabled")
+	return nil
+})
 
 func init() {
 	// Initialize logger early so hook packages can use it with the correct log level
@@ -208,13 +228,18 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 		return err
 	}
 
-	// Create trace provider with batch span processor
+	spanProcessor := sdktrace.NewBatchSpanProcessor(traceExporter,
+		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
+		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
+	)
+	if os.Getenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR") == "true" {
+		spanProcessor = sdktrace.NewSimpleSpanProcessor(traceExporter)
+		logger.Debug("using SimpleSpanProcessor for immediate span export")
+	}
+
 	tracerProvider = sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
-		sdktrace.WithBatcher(traceExporter,
-			sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
-			sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
-		),
+		sdktrace.WithSpanProcessor(spanProcessor),
 	)
 
 	// Set global tracer provider
@@ -282,28 +307,7 @@ func Shutdown(ctx context.Context) error {
 //
 // Returns error if runtime metrics fail to start, but this is non-fatal.
 func StartRuntimeMetrics() error {
-	var startErr error
-
-	runtimeMetricsOnce.Do(func() {
-		// Check if runtime metrics are enabled
-		if !Instrumented("runtimemetrics") {
-			logger.Debug("runtime metrics disabled via environment variable")
-			return
-		}
-
-		// Get the meter provider from the global registry
-		mp := otel.GetMeterProvider()
-
-		if err := runtime.Start(runtime.WithMeterProvider(mp)); err != nil {
-			logger.Warn("failed to start runtime metrics", "error", err)
-			startErr = err
-			return
-		}
-
-		logger.Info("runtime metrics enabled")
-	})
-
-	return startErr
+	return startRuntimeMetrics()
 }
 
 // setupSignalHandler registers a goroutine that listens for OS signals

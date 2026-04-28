@@ -46,4 +46,5 @@ Fixes #<!-- issue number -->
 - [ ] Linters pass: `make lint`
 - [ ] Tests pass: `make test`
 - [ ] Tests added for new functionality
+- [ ] Tests follow [testing guidelines](docs/testing.md)
 - [ ] Documentation updated (if applicable)

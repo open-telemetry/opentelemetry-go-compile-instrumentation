@@ -71,9 +71,9 @@ func addReplace(modfile *modfile.File, replace *replaceDirective) (bool, error) 
 }
 
 func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
-	rules := make([]*rule.InstFuncRule, 0)
+	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
-		funcRules := m.GetFuncRules()
+		funcRules := m.AllFuncRules()
 		rules = append(rules, funcRules...)
 	}
 	if len(rules) == 0 {
@@ -91,9 +91,9 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	}
 	replaces := make([]*replaceDirective, 0)
 	for _, m := range rules {
-		util.Assert(strings.HasPrefix(m.Path, util.OtelRoot), "sanity check")
+		util.Assert(strings.HasPrefix(m.Path, util.OtelcRoot), "sanity check")
 		oldPath := m.Path
-		newPath := strings.TrimPrefix(oldPath, util.OtelRoot)
+		newPath := strings.TrimPrefix(oldPath, util.OtelcRoot)
 		newPath = filepath.Join(util.GetBuildTempDir(), newPath)
 		replaces = append(replaces, &replaceDirective{
 			oldPath:    oldPath,
@@ -108,7 +108,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	// we need to add the replace directive to the local path.
 	// Once the instrumentation packages are published, we can remove this.
 	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelRoot + "/pkg",
+		oldPath:    util.OtelcRoot + "/pkg",
 		oldVersion: "",
 		newPath:    filepath.Join(util.GetBuildTempDir(), unzippedPkgDir),
 		newVersion: "",
@@ -118,7 +118,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	// shared module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
 	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelRoot + "/pkg/instrumentation/shared",
+		oldPath:    util.OtelcRoot + "/pkg/instrumentation/shared",
 		oldVersion: "",
 		newPath:    filepath.Join(util.GetBuildTempDir(), "pkg/instrumentation/shared"),
 		newVersion: "",
@@ -142,11 +142,11 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	if changed {
 		err = writeGoMod(goModFile, modfile)
 		if err != nil {
-			return err
+			return ex.Wrapf(err, "writing updated go.mod at %s", goModFile)
 		}
 		err = runModTidy(ctx, moduleDir)
 		if err != nil {
-			return err
+			return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
 		}
 		sp.keepForDebug(goModFile)
 	}

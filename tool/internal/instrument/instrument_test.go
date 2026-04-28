@@ -15,12 +15,14 @@
 package instrument
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -61,14 +63,22 @@ func TestInstrumentation_Integration(t *testing.T) {
 
 func runTest(t *testing.T, testName string) {
 	tempDir := t.TempDir()
-	t.Setenv(util.EnvOtelWorkDir, tempDir)
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
 	ctx := util.ContextWithLogger(
 		t.Context(),
 		slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	)
 
 	sourceFile := filepath.Join(tempDir, mainGoFileName)
-	util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
+	// Check if there's a test-specific source file first
+	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, sourceFileName)
+	if _, err := os.Stat(testSpecificSource); err == nil {
+		util.CopyFile(testSpecificSource, sourceFile)
+	} else if os.IsNotExist(err) {
+		util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
+	} else {
+		t.Fatalf("unexpected error checking test-specific source: %v", err)
+	}
 
 	ruleSet := loadRulesYAML(t, testName, sourceFile)
 	writeMatchedJSON(ruleSet)
@@ -94,12 +104,15 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	yaml.Unmarshal(data, &rawRules)
 
 	ruleSet := &rule.InstRuleSet{
-		PackageName: mainPackage,
-		ModulePath:  mainPackage,
-		FuncRules:   make(map[string][]*rule.InstFuncRule),
-		StructRules: make(map[string][]*rule.InstStructRule),
-		RawRules:    make(map[string][]*rule.InstRawRule),
-		FileRules:   make([]*rule.InstFileRule, 0),
+		PackageName:    mainPackage,
+		ModulePath:     mainPackage,
+		FuncRules:      make(map[string][]*rule.InstFuncRule),
+		StructRules:    make(map[string][]*rule.InstStructRule),
+		RawRules:       make(map[string][]*rule.InstRawRule),
+		CallRules:      make(map[string][]*rule.InstCallRule),
+		DirectiveRules: make(map[string][]*rule.InstDirectiveRule),
+		DeclRules:      make(map[string][]*rule.InstDeclRule),
+		FileRules:      make([]*rule.InstFileRule, 0),
 	}
 
 	// Sort rule names to ensure deterministic order in tests
@@ -107,7 +120,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	for name := range rawRules {
 		ruleNames = append(ruleNames, name)
 	}
-	sort.Strings(ruleNames)
+	slices.Sort(ruleNames)
 
 	for _, name := range ruleNames {
 		props := rawRules[name]
@@ -121,12 +134,21 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		case props["file"] != nil:
 			r, _ := rule.NewInstFileRule(ruleData, name)
 			ruleSet.FileRules = append(ruleSet.FileRules, r)
+		case props["directive"] != nil:
+			r, _ := rule.NewInstDirectiveRule(ruleData, name)
+			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
 		case props["raw"] != nil:
 			r, _ := rule.NewInstRawRule(ruleData, name)
 			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
 		case props["func"] != nil:
 			r, _ := rule.NewInstFuncRule(ruleData, name)
 			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
+		case props["function_call"] != nil:
+			r, _ := rule.NewInstCallRule(ruleData, name)
+			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
+		case props["identifier"] != nil:
+			r, _ := rule.NewInstDeclRule(ruleData, name)
+			ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
 		}
 	}
 
@@ -142,14 +164,63 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 
 func compileArgs(tempDir, sourceFile string) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
+
+	// Create importcfg file for the test
+	importCfgPath := filepath.Join(tempDir, "importcfg")
+	createImportCfg(importCfgPath)
+
 	return []string{
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
 		"-p", mainPackage,
 		"-complete",
 		"-buildid", buildID,
+		"-importcfg", importCfgPath,
 		"-pack",
 		sourceFile,
+	}
+}
+
+// createImportCfg creates a basic importcfg file with standard library packages.
+func createImportCfg(path string) {
+	// Get standard library package locations
+	// We'll use go list to populate common packages
+	ctx := context.Background()
+
+	// Start with an empty config
+	cfg := struct {
+		PackageFile map[string]string
+	}{
+		PackageFile: make(map[string]string),
+	}
+
+	// Resolve common standard library packages that might be needed
+	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io"}
+	for _, pkg := range commonPkgs {
+		cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkg)
+		output, err := cmd.Output()
+		if err != nil {
+			continue // Skip if package not found
+		}
+
+		var info struct {
+			ImportPath string `json:"ImportPath"`
+			Export     string `json:"Export"`
+		}
+		if err2 := json.Unmarshal(output, &info); err2 == nil && info.Export != "" {
+			cfg.PackageFile[info.ImportPath] = info.Export
+		}
+	}
+
+	// Write the importcfg file
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	for importPath, archive := range cfg.PackageFile {
+		fmt.Fprintf(f, "packagefile %s=%s\n", importPath, archive)
 	}
 }
 
@@ -270,6 +341,23 @@ func TestGroupRules(t *testing.T) {
 			},
 		},
 		{
+			name: "decl rules only",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				DeclRules: map[string][]*rule.InstDeclRule{
+					"file1.go": {
+						{InstBaseRule: rule.InstBaseRule{Name: "decl1"}, Identifier: "GlobalVar"},
+					},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
+			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
+				assert.Len(t, grouped["file1.go"], 1)
+			},
+		},
+		{
 			name: "multiple rules of same type in same file",
 			ruleSet: &rule.InstRuleSet{
 				FuncRules: map[string][]*rule.InstFuncRule{
@@ -286,6 +374,42 @@ func TestGroupRules(t *testing.T) {
 			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
 				assert.Len(t, grouped["file1.go"], 3)
 			},
+		},
+		{
+			name: "call rules only",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				CallRules: map[string][]*rule.InstCallRule{
+					"file1.go": {
+						{InstBaseRule: rule.InstBaseRule{Name: "call1"}},
+					},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
+			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
+				assert.Len(t, grouped["file1.go"], 1)
+			},
+		},
+		{
+			name: "directive rules included in grouping",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				CallRules:   make(map[string][]*rule.InstCallRule),
+				DirectiveRules: map[string][]*rule.InstDirectiveRule{
+					"file1.go": {
+						{
+							InstBaseRule: rule.InstBaseRule{Name: "directive1"},
+							Directive:    "otelc:span",
+							Template:     "_ = 0",
+						},
+					},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
 		},
 	}
 

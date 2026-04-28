@@ -1,0 +1,39 @@
+redis_hook_newclient:
+  target: github.com/redis/go-redis/v9
+  func: NewClient
+  after: afterNewRedisClientV9
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/v9"
+
+
+redis_hook_newfailoverclient:
+  target: github.com/redis/go-redis/v9
+  func: NewFailoverClient
+  after: afterNewFailOverRedisClientV9
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/v9"
+
+
+redis_hook_newsentinelclient:
+  target: github.com/redis/go-redis/v9
+  func: NewSentinelClient
+  after: afterNewSentinelClientV9
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/v9"
+
+
+redis_client_hook:
+  target: github.com/redis/go-redis/v9
+  func: Conn
+  recv: "*Client"
+  after: afterClientConnV9
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/v9"
+
+redis_hook_newringclient:
+  target: github.com/redis/go-redis/v9
+  func: NewRing
+  after: afterNewRingClientV9
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/v9"
+
+redis_hook_newclusterclient:
+  target: github.com/redis/go-redis/v9
+  func: NewClusterClient
+  after: afterNewClusterClientV9
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/redis/v9"

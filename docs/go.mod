@@ -7,4 +7,4 @@
 // checksums.
 module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/_docs
 
-go 1.23.0
+go 1.25.0

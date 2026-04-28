@@ -87,7 +87,7 @@ func captureStack() []string {
 			break
 		}
 		fnName := strings.TrimPrefix(frame.Function, modPrefix)
-		f := fmt.Sprintf("[%d]%s:%d %s", cnt, frame.File, frame.Line, fnName)
+		f := fmt.Sprintf("[%d] %s:%d %s", cnt, frame.File, frame.Line, fnName)
 		frameList = append(frameList, f)
 		cnt++
 	}
@@ -139,21 +139,43 @@ func Fatalf(format string, args ...any) {
 	Fatal(Newf(format, args...))
 }
 
-func Fatal(err error) {
-	if err == nil {
-		panic("Fatal error: unknown")
-	}
+// Join returns an error combining all non-nil errors in errs.
+// It is a thin wrapper over errors.Join so callers need only import ex.
+func Join(errs ...error) error {
+	return errors.Join(errs...)
+}
+
+func printError(err error) {
 	e := &stackfulError{}
 	if errors.As(err, &e) {
-		em := ""
-		var emSb149 strings.Builder
+		var sb strings.Builder
 		for i, m := range e.message {
-			emSb149.WriteString(fmt.Sprintf("[%d] %s\n", i, m))
+			_, _ = fmt.Fprintf(&sb, "[%d] %s\n", i, m)
 		}
-		em += emSb149.String()
 		_, _ = fmt.Fprintf(os.Stderr, "Error:\n%s\nStack:\n%s\n",
-			em, strings.Join(e.frame, "\n"))
+			sb.String(), strings.Join(e.frame, "\n"))
+	} else {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+	}
+}
+
+func Fatal(err error) {
+	if err == nil {
+		_, _ = fmt.Fprintln(os.Stderr, "Fatal error: unknown")
 		os.Exit(1)
 	}
-	panic(err)
+
+	type multiUnwrap interface {
+		Unwrap() []error
+	}
+	if me, ok := err.(multiUnwrap); ok {
+		for i, e := range me.Unwrap() {
+			_, _ = fmt.Fprintf(os.Stderr, "--- error %d ---\n", i)
+			printError(e)
+		}
+		os.Exit(1)
+	}
+
+	printError(err)
+	os.Exit(1)
 }

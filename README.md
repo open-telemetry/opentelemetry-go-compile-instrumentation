@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./docs/assets/otel-logo.png" alt="OpenTelemetry Logo" width="500" />
   <br />
-  <img src="https://img.shields.io/badge/Go-1.21%2B-4A90E2?style=flat&logo=go" alt="Go" />
+  <img src="https://img.shields.io/badge/Go-1.25%2B-4A90E2?style=flat&logo=go" alt="Go" />
   <img src="https://img.shields.io/badge/License-Apache%202.0-4A90E2?style=flat&logo=apache" alt="License" />
   <img src="https://img.shields.io/badge/Status-Development-FF6B35?style=flat&logo=github" alt="Status" />
   <img src="https://img.shields.io/badge/Slack-CNCF-FF6B35?style=flat&logo=slack" alt="Slack" />
@@ -33,15 +33,15 @@ cd opentelemetry-go-compile-instrumentation
 make build
 ```
 
-The `otel` binary will be built in the root directory.
+The `otelc` binary will be built in the root directory.
 
 ### 2. Try the Demo
 
-Just prefix the original `go build` command with `otel`.
+Just prefix the original `go build` command with `otelc`.
 
 ```bash
-cd demo/basic
-../../otel go build
+cd demo/app/basic
+../../otelc go build
 ./basic
 [... output ...]
 ```
@@ -62,6 +62,8 @@ make test
 - [API Design](./docs/api-design-and-project-structure.md) - API structure
 - [Semantic Conventions](./docs/semantic-conventions.md) - Managing semantic conventions
 - [Instrumentation Guide](./docs/instrument-guide.md) - Add instrumentation hook for new libraries
+- [Instrumentation Rules](./docs/rules.md) - Rule types and YAML format reference
+- [Testing](./docs/testing.md) - Testing strategy, categories, and how to run tests
 
 ### Video Talks
 
@@ -79,3 +81,4 @@ make test
 We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [development docs](./docs/).
 
 This project follows the [OpenTelemetry Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md).
+Please also review our [AI usage policy](AI_POLICY.md) if you use AI tools in your workflow.

@@ -58,7 +58,8 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 		}
 		line = filepath.ToSlash(line)
 
-		if _, ok := parseCdDir(line); ok || util.IsCgoCommand(line) || util.IsCompileCommand(line) {
+		if _, ok := parseCdDir(line); ok || util.IsCgoCommand(line) ||
+			util.IsCompileCommandWithArgs(util.SplitCompileCmds(line)) {
 			commands = append(commands, line)
 		}
 	}
@@ -184,7 +185,7 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 			}
 			dep.CgoFiles[originalAbsFile] = filepath.Base(arg)
 			dep.Sources = append(dep.Sources, originalAbsFile)
-			sp.Info("Resolved CGO source", "cgo", arg, "original", originalAbsFile)
+			sp.Debug("Resolved CGO source", "cgo", arg, "original", originalAbsFile)
 			continue
 		}
 
@@ -221,7 +222,7 @@ func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dep
 			continue
 		}
 
-		if util.IsCompileCommand(cmd) {
+		if util.IsCompileCommandWithArgs(util.SplitCompileCmds(cmd)) {
 			args := util.SplitCompileCmds(cmd)
 			dep, err1 := findGoSources(sp, args, cgoObjDirs)
 			if err1 != nil {

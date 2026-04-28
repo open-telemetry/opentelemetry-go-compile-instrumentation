@@ -5,6 +5,8 @@ package main
 
 import _ "unsafe"
 
+var GlobalVar = "original"
+
 type T struct{}
 
 func (t *T) Func1(p1 string, p2 int) (float32, error) {
@@ -21,13 +23,15 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 			defer OtelAfterTrampoline_Func14055471104(hookContext4055471104, &_unnamedRetVal0, &_unnamedRetVal1)
 		}
 	}
-	//line main.go:13:2
+	//line main.go:15:2
 	println("Hello, World!")
-	//line main.go:14:2
+	//line main.go:16:2
 	return 0.0, nil
 }
 
 func Func2(p1 string, _ int) {}
+
+func (T) Func3() {}
 
 func OptGood() {}
 func OptBad()  {}
@@ -48,6 +52,8 @@ func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (T, error) {
 func EllipsisFunc(p1 ...string) {}
 
 func UnderscoreFunc(_ int, _ float32) {}
+
+func Unnamed(int, float32) {}
 
 func main() { Func1("hello", 123) }
 

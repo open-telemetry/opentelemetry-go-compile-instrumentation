@@ -18,38 +18,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/stats"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
 )
-
-// mockHookContext implements inst.HookContext for testing
-type mockHookContext struct {
-	params     []interface{}
-	data       map[string]interface{}
-	returnVals []interface{}
-	skipCall   bool
-}
-
-func newMockHookContext(params ...interface{}) *mockHookContext {
-	return &mockHookContext{
-		params: params,
-		data:   make(map[string]interface{}),
-	}
-}
-
-func (m *mockHookContext) SetSkipCall(skip bool)                  { m.skipCall = skip }
-func (m *mockHookContext) IsSkipCall() bool                       { return m.skipCall }
-func (m *mockHookContext) SetData(data interface{})               { m.data["_default"] = data }
-func (m *mockHookContext) GetData() interface{}                   { return m.data["_default"] }
-func (m *mockHookContext) GetKeyData(key string) interface{}      { return m.data[key] }
-func (m *mockHookContext) SetKeyData(key string, val interface{}) { m.data[key] = val }
-func (m *mockHookContext) HasKeyData(key string) bool             { _, ok := m.data[key]; return ok }
-func (m *mockHookContext) GetParamCount() int                     { return len(m.params) }
-func (m *mockHookContext) GetParam(idx int) interface{}           { return m.params[idx] }
-func (m *mockHookContext) SetParam(idx int, val interface{})      { m.params[idx] = val }
-func (m *mockHookContext) GetReturnValCount() int                 { return len(m.returnVals) }
-func (m *mockHookContext) GetReturnVal(idx int) interface{}       { return m.returnVals[idx] }
-func (m *mockHookContext) SetReturnVal(idx int, val interface{})  { m.returnVals[idx] = val }
-func (m *mockHookContext) GetFuncName() string                    { return "TestFunc" }
-func (m *mockHookContext) GetPackageName() string                 { return "test.package" }
 
 func TestBeforeNewClient(t *testing.T) {
 	// Setup trace exporter
@@ -58,16 +29,15 @@ func TestBeforeNewClient(t *testing.T) {
 		sdktrace.WithSyncer(exporter),
 	)
 	otel.SetTracerProvider(tp)
-	defer func() {
-		_ = tp.Shutdown(context.Background())
-	}()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	tests := []struct {
-		name          string
-		target        string
-		opts          []grpc.DialOption
-		enabledEnv    bool
-		expectHandler bool
+		name                    string
+		target                  string
+		opts                    []grpc.DialOption
+		enabledEnv              bool
+		expectHandler           bool
+		oltpExporterEndpointKey string
 	}{
 		{
 			name:          "no options",
@@ -106,6 +76,22 @@ func TestBeforeNewClient(t *testing.T) {
 			enabledEnv:    true,
 			expectHandler: true,
 		},
+		{
+			name:                    "oltp exporter endpoint target",
+			target:                  "localhost:4317",
+			opts:                    []grpc.DialOption{},
+			enabledEnv:              true,
+			expectHandler:           false,
+			oltpExporterEndpointKey: "OTEL_EXPORTER_OTLP_ENDPOINT",
+		},
+		{
+			name:                    "oltp exporter traces endpoint target",
+			target:                  "localhost:4317",
+			opts:                    []grpc.DialOption{},
+			enabledEnv:              true,
+			expectHandler:           false,
+			oltpExporterEndpointKey: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+		},
 	}
 
 	for _, tt := range tests {
@@ -116,7 +102,11 @@ func TestBeforeNewClient(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			ictx := newMockHookContext(tt.target, tt.opts)
+			if tt.oltpExporterEndpointKey != "" {
+				t.Setenv(tt.oltpExporterEndpointKey, tt.target)
+			}
+
+			ictx := insttest.NewMockHookContext(tt.target, tt.opts)
 
 			// Verify no panic even with edge cases
 			assert.NotPanics(t, func() {
@@ -187,7 +177,7 @@ func TestAfterNewClient(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			ictx := newMockHookContext()
+			ictx := insttest.NewMockHookContext()
 
 			// Verify the hook doesn't panic and handles gracefully
 			assert.NotPanics(t, func() {
@@ -204,9 +194,7 @@ func TestBeforeDialContext(t *testing.T) {
 		sdktrace.WithSyncer(exporter),
 	)
 	otel.SetTracerProvider(tp)
-	defer func() {
-		_ = tp.Shutdown(context.Background())
-	}()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	tests := []struct {
 		name          string
@@ -241,8 +229,8 @@ func TestBeforeDialContext(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			ctx := context.Background()
-			ictx := newMockHookContext(ctx, tt.target, tt.opts)
+			ctx := t.Context()
+			ictx := insttest.NewMockHookContext(ctx, tt.target, tt.opts)
 			BeforeDialContext(ictx, ctx, tt.target, tt.opts...)
 
 			newOpts, ok := ictx.GetParam(dialOptionsParamIndex).([]grpc.DialOption)
@@ -300,7 +288,7 @@ func TestAfterDialContext(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			ictx := newMockHookContext()
+			ictx := insttest.NewMockHookContext()
 
 			// Verify the hook doesn't panic and handles gracefully
 			assert.NotPanics(t, func() {
@@ -323,13 +311,13 @@ func TestClientStatsHandler_TagRPC(t *testing.T) {
 	)
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer func() {
+	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
-	}()
+	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
 
 	handler := newClientStatsHandler()
 
@@ -349,7 +337,7 @@ func TestClientStatsHandler_TagRPC(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			info := &stats.RPCTagInfo{
 				FullMethodName: tt.fullMethodName,
 			}
@@ -392,15 +380,15 @@ func TestClientStatsHandler_Integration(t *testing.T) {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 
-	ictx := newMockHookContext(target, opts)
+	ictx := insttest.NewMockHookContext(target, opts)
 	BeforeNewClient(ictx, target, opts...)
 
 	newOpts := ictx.GetParam(newClientOptionsParamIndex).([]grpc.DialOption)
 	assert.Greater(t, len(newOpts), len(opts), "Expected stats handler to be added")
 
 	// Test DialContext as well
-	ctx := context.Background()
-	ictx2 := newMockHookContext(ctx, target, opts)
+	ctx := t.Context()
+	ictx2 := insttest.NewMockHookContext(ctx, target, opts)
 	BeforeDialContext(ictx2, ctx, target, opts...)
 
 	newOpts2 := ictx2.GetParam(dialOptionsParamIndex).([]grpc.DialOption)
@@ -410,7 +398,7 @@ func TestClientStatsHandler_Integration(t *testing.T) {
 func TestClientStatsHandler_TagConn(t *testing.T) {
 	handler := newClientStatsHandler()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	info := &stats.ConnTagInfo{
 		RemoteAddr: &net.TCPAddr{
 			IP:   net.ParseIP("127.0.0.1"),
@@ -425,7 +413,7 @@ func TestClientStatsHandler_TagConn(t *testing.T) {
 func TestClientStatsHandler_HandleConn(t *testing.T) {
 	handler := newClientStatsHandler()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	handler.HandleConn(ctx, &stats.ConnBegin{})
@@ -444,13 +432,13 @@ func TestClientStatsHandler_OTELExporterFiltering(t *testing.T) {
 	)
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer func() {
+	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
-	}()
+	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
 
 	handler := newClientStatsHandler()
 
@@ -483,7 +471,7 @@ func TestClientStatsHandler_OTELExporterFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			info := &stats.RPCTagInfo{
 				FullMethodName: tt.fullMethodName,
 			}

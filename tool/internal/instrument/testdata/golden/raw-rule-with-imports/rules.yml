@@ -1,0 +1,6 @@
+inject_fmt:
+  target: main
+  func: Func1
+  raw: 'fmt.Println("Instrumented with imports")'
+  imports:
+    fmt: "fmt"

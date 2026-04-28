@@ -4,8 +4,6 @@
 package main
 
 import (
-	"context"
-
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/setup"
 	"github.com/urfave/cli/v3"
 )
@@ -17,7 +15,5 @@ var commandGo = cli.Command{
 	ArgsUsage:       "[go toolchain flags]",
 	SkipFlagParsing: true,
 	Before:          addLoggerPhaseAttribute,
-	Action: func(ctx context.Context, cmd *cli.Command) error {
-		return setup.GoBuild(ctx, cmd.Args().Slice())
-	},
+	Action:          setup.GoBuild,
 }

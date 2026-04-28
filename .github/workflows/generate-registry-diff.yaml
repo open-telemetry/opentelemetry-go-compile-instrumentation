@@ -1,0 +1,54 @@
+name: Generate Registry Diff
+
+on:
+  pull_request:
+    paths:
+      - 'pkg/instrumentation/**/semconv/**'
+      - '.semconv-version'
+
+permissions:
+  contents: read
+
+jobs:
+  registry-diff:
+    name: Generate Registry Diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install OTel Weaver
+        run: make weaver-install
+
+      - name: Read semconv version
+        id: read-version
+        run: |
+          CURRENT_VERSION=$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]')
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Generate registry diff (current vs latest)
+        continue-on-error: true
+        run: |
+          echo "Generating diff between current version and latest (main branch)"
+          make semantic-conventions/diff || echo "::warning::Registry diff generation failed (non-blocking)"
+
+      - name: Save PR metadata
+        run: |
+          mkdir -p tmp
+          echo "${{ github.event.pull_request.number }}" > tmp/pr-number.txt
+          echo "${{ steps.read-version.outputs.current_version }}" > tmp/semconv-version.txt
+
+      - name: Upload diff report and PR metadata
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: registry-diff-report
+          path: |
+            tmp/registry-diff-latest.md
+            tmp/pr-number.txt
+            tmp/semconv-version.txt
+          retention-days: 7
+          if-no-files-found: warn

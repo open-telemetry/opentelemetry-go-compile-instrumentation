@@ -30,7 +30,7 @@ The instrumentation is injected during the build process:
 │  2. Setup Phase:                            │
 │     - Scan dependencies                     │
 │     - Match net/http functions              │
-│     - Generate otel.runtime.go              │
+│     - Generate otelc.runtime.go              │
 │                                             │
 │  3. Instrument Phase:                       │
 │     - Inject trampolines into:              │
@@ -63,7 +63,7 @@ When your application runs, the injected hooks automatically:
 
 ```bash
 # Build with automatic instrumentation
-/path/to/otel go build -a
+/path/to/otelc go build -a
 
 # Run your application normally
 ./myapp
@@ -390,10 +390,10 @@ unset OTEL_GO_DISABLED_INSTRUMENTATIONS
 export OTEL_GO_ENABLED_INSTRUMENTATIONS=nethttp
 ```
 
-**Check 2: Was the app built with the otel tool?**
+**Check 2: Was the app built with the otelc tool?**
 
 ```bash
-/path/to/otel go build -a
+/path/to/otelc go build -a
 ```
 
 **Check 3: Check logs**

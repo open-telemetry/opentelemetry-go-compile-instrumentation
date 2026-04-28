@@ -1,0 +1,7 @@
+client_hook:
+  target: net/http
+  func: RoundTrip
+  recv: "*Transport"
+  before: BeforeRoundTrip
+  after: AfterRoundTrip
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client"

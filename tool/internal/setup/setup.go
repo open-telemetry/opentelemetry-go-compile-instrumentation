@@ -9,15 +9,22 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
 )
 
 type SetupPhase struct {
-	logger *slog.Logger
+	logger     *slog.Logger
+	ruleConfig string
 }
 
 func (sp *SetupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
@@ -81,10 +88,8 @@ var flagsWithPathValues = map[string]bool{
 func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
 	buildPkgs := make([]*packages.Package, 0)
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedModule,
-	}
 	found := false
 	for i := len(args) - 1; i >= 0; i-- {
 		arg := args[i]
@@ -102,7 +107,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 			break
 		}
 
-		pkgs, err := packages.Load(cfg, arg)
+		pkgs, err := pkgload.LoadPackages(ctx, mode, nil, arg)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to load packages for pattern %s", arg)
 		}
@@ -118,7 +123,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 
 	if !found {
 		var err error
-		buildPkgs, err = packages.Load(cfg, ".")
+		buildPkgs, err = pkgload.LoadPackages(ctx, mode, nil, ".")
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to load packages for pattern .")
 		}
@@ -134,7 +139,11 @@ func getPackageDir(pkg *packages.Package) string {
 }
 
 // Setup prepares the environment for further instrumentation.
-func Setup(ctx context.Context, args []string) error {
+func Setup(ctx context.Context, cmd *cli.Command) error {
+	// The args are "go build ..."
+	args := cmd.Args().Slice()
+	args = append([]string{"go"}, args...)
+
 	logger := util.LoggerFromContext(ctx)
 
 	if isSetup() {
@@ -142,11 +151,20 @@ func Setup(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	sp := &SetupPhase{
-		logger: logger,
+	// Back up go.mod / go.sum / go.work / go.work.sum before modifying them.
+	// Cleanup() restores from this backup, so the backup must exist before any
+	// modification happens — including when otelc setup is run standalone.
+	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+	if err := util.BackupFile(backupFiles); err != nil {
+		logger.DebugContext(ctx, "failed to back up files", "error", err)
 	}
 
-	// Introduce additional hook code by generating otel.runtime.go
+	sp := &SetupPhase{
+		logger:     logger,
+		ruleConfig: cmd.String("rules"),
+	}
+
+	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
 	pkgs, err := getBuildPackages(ctx, args)
 	if err != nil {
@@ -158,19 +176,20 @@ func Setup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Extract the embedded pkg module into local directory
+	err = sp.extract()
+	if err != nil {
+		return ex.Wrapf(err, "extracting embedded instrumentation pkg")
+	}
+
 	// Match the hook code with these dependencies
 	matched, err := sp.matchDeps(ctx, deps)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
-	// Extract the embedded instrumentation modules into local directory
-	err = sp.extract()
-	if err != nil {
-		return err
-	}
-
-	// Generate otel.runtime.go for all packages
+	// Generate otelc.runtime.go for all packages
 	moduleDirs := make(map[string]bool)
 	for _, pkg := range pkgs {
 		if pkg.Module == nil {
@@ -182,9 +201,9 @@ func Setup(ctx context.Context, args []string) error {
 		if pkgDir == "" {
 			pkgDir = moduleDir
 		}
-		// Introduce additional hook code by generating otel.runtime.go
+		// Introduce additional hook code by generating otelc.runtime.go
 		if err = sp.addDeps(matched, pkgDir); err != nil {
-			return err
+			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 		moduleDirs[moduleDir] = true
 	}
@@ -192,7 +211,7 @@ func Setup(ctx context.Context, args []string) error {
 	// Sync new dependencies to go.mod or vendor/modules.txt
 	for moduleDir := range moduleDirs {
 		if err = sp.syncDeps(ctx, matched, moduleDir); err != nil {
-			return err
+			return ex.Wrapf(err, "syncing deps in module dir %s", moduleDir)
 		}
 	}
 
@@ -200,11 +219,125 @@ func Setup(ctx context.Context, args []string) error {
 	return sp.store(matched)
 }
 
+// setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
+// This prevents cache pollution when modifying core packages via //go:linkname while
+// allowing incremental builds to work properly.
+func setupGoCache(ctx context.Context, env []string) ([]string, error) {
+	if os.Getenv("GOCACHE") != "" {
+		// User has explicitly set GOCACHE, respect it
+		return env, nil
+	}
+
+	logger := util.LoggerFromContext(ctx)
+	cacheDir := util.GetBuildTemp("gocache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return nil, ex.Wrapf(err, "failed to create persistent GOCACHE")
+	}
+
+	env = append(env, "GOCACHE="+cacheDir)
+	logger.DebugContext(ctx, "using GOCACHE", "path", cacheDir)
+	return env, nil
+}
+
+// buildContextFlagsWithValue are go build flags that take a value and affect the build context.
+//
+//nolint:gochecknoglobals // private lookup table
+var buildContextFlagsWithValue = map[string]bool{
+	"-tags":    true, // Build tags
+	"-mod":     true, // Module mode (vendor, mod, readonly)
+	"-modfile": true, // Custom go.mod file
+}
+
+// buildContextBoolFlags are go build boolean flags that affect the build context.
+//
+//nolint:gochecknoglobals // private lookup table
+var buildContextBoolFlags = map[string]bool{
+	"-race":  true, // Race detector
+	"-msan":  true, // Memory sanitizer
+	"-cover": true, // Coverage
+	"-asan":  true, // Address sanitizer
+}
+
+// extractBuildFlags extracts flags that affect the build context from the arguments.
+// These flags need to be forwarded to `go list` when resolving import archives.
+// Returns a slice of flag arguments preserving their original form.
+//
+// For boolean flags, the last occurrence wins. This correctly handles cases like:
+//   - GOFLAGS=-race with -race=false on CLI (result: -race=false)
+//   - -race -race=false (result: -race=false)
+//   - -race=false -race (result: -race)
+func extractBuildFlags(args []string) []string {
+	var valueFlags []string
+	type boolFlagValue struct {
+		set   bool
+		value bool
+	}
+	boolFlagState := make(map[string]boolFlagValue) // Track final state of boolean flags
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// Handle -flag=value format
+		if idx := strings.Index(arg, "="); idx > 0 {
+			flagName := arg[:idx]
+			flagValue := arg[idx+1:]
+
+			// Handle value flags (e.g., -tags=foo, -mod=vendor)
+			if buildContextFlagsWithValue[flagName] {
+				valueFlags = append(valueFlags, arg)
+				continue
+			}
+
+			// Handle boolean flags in =value format (e.g., -race=true, -race=false)
+			// strconv.ParseBool accepts: 1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False
+			if buildContextBoolFlags[flagName] {
+				if enabled, err := strconv.ParseBool(flagValue); err == nil {
+					boolFlagState[flagName] = boolFlagValue{set: true, value: enabled} // Last value wins
+				}
+				// Parse error: ignore invalid value
+				continue
+			}
+			// Unrecognized -flag=value: skip it
+			continue
+		}
+
+		// Handle boolean flags like -race, -msan, -cover, -asan (implies true)
+		if buildContextBoolFlags[arg] {
+			boolFlagState[arg] = boolFlagValue{set: true, value: true}
+			continue
+		}
+
+		// Handle -flag value format (for flags that take values)
+		if buildContextFlagsWithValue[arg] && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			valueFlags = append(valueFlags, arg, args[i+1])
+			i++ // Skip the value
+		}
+	}
+
+	// Collect boolean flags that are enabled (in deterministic order)
+	var enabledBoolFlags []string
+	for flag := range buildContextBoolFlags {
+		if state, ok := boolFlagState[flag]; ok && state.set {
+			if state.value {
+				enabledBoolFlags = append(enabledBoolFlags, flag)
+			} else {
+				enabledBoolFlags = append(enabledBoolFlags, flag+"=false")
+			}
+		}
+	}
+	// Sort for deterministic output
+	slices.Sort(enabledBoolFlags)
+
+	// Combine: value flags first, then boolean flags
+	return append(valueFlags, enabledBoolFlags...)
+}
+
 // BuildWithToolexec builds the project with the toolexec mode
-func BuildWithToolexec(ctx context.Context, args []string) error {
+func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
+	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
-	// Add -toolexec=otel to the original build command and run it
+	// Add -toolexec=otelc to the original build command and run it
 	execPath, err := os.Executable()
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
@@ -219,59 +352,80 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	newArgs = append(newArgs, "-work")
 	// Add "-toolexec=..."
 	newArgs = append(newArgs, insert)
-	// TODO: We should support incremental build in the future, so we don't need
-	// to force rebuild here.
-	// Add "-a" to force rebuild
-	newArgs = append(newArgs, "-a")
 	// Add the rest
 	newArgs = append(newArgs, args[1:]...)
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
 	env := os.Environ()
-	pwd := util.GetOtelWorkDir()
+	pwd := util.GetOtelcWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
-	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
+	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcWorkDir, pwd))
+
+	// Extract and forward build flags that affect the build context
+	// This ensures `go list` resolves archives matching the current build
+	if buildFlags := extractBuildFlags(args); len(buildFlags) > 0 {
+		encoded := util.EncodeBuildFlags(buildFlags)
+		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))
+		logger.DebugContext(ctx, "forwarding build flags", "flags", buildFlags)
+	}
+
+	// Use a fresh GOCACHE to prevent cache pollution when modifying core packages
+	env, err = setupGoCache(ctx, env)
+	if err != nil {
+		return ex.Wrapf(err, "configuring go cache")
+	}
 
 	return util.RunCmdWithEnv(ctx, env, newArgs...)
 }
 
-func GoBuild(ctx context.Context, args []string) error {
+func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	logger := util.LoggerFromContext(ctx)
-	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
-	err := util.BackupFile(backupFiles)
-	if err != nil {
-		logger.DebugContext(ctx, "failed to back up files", "error", err)
-	}
+
+	// Clean up import tracking files from previous builds at the start
+	// to prevent stale data from affecting this build.
+	instrument.CleanupImportTrackingFiles()
+
 	defer func() {
-		var pkgs []*packages.Package
-		pkgs, err = getBuildPackages(ctx, args)
-		if err != nil {
-			logger.DebugContext(ctx, "failed to get build packages", "error", err)
+		// Remove otelc.runtime.go from each instrumented package directory.
+		pkgs, pkgErr := getBuildPackages(ctx, cmd.Args().Slice())
+		if pkgErr != nil {
+			logger.DebugContext(ctx, "failed to get build packages", "error", pkgErr)
 		}
 		for _, pkg := range pkgs {
-			if err = os.RemoveAll(filepath.Join(pkg.Dir, OtelRuntimeFile)); err != nil {
+			path := filepath.Join(pkg.Dir, OtelcRuntimeFile)
+			if removeErr := os.RemoveAll(path); removeErr != nil {
 				logger.DebugContext(ctx, "failed to remove generated file from package",
-					"file", filepath.Join(pkg.Dir, OtelRuntimeFile), "error", err)
+					"file", path, "error", removeErr)
 			}
 		}
-		if err = os.RemoveAll(unzippedPkgDir); err != nil {
-			logger.DebugContext(ctx, "failed to remove unzipped pkg", "error", err)
-		}
-		if err = util.RestoreFile(backupFiles); err != nil {
-			logger.DebugContext(ctx, "failed to restore files", "error", err)
+
+		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
+		// Users can run `otelc cleanup` to remove it explicitly.
+		if cleanErr := Cleanup(ctx, false); cleanErr != nil {
+			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()
 
-	err = Setup(ctx, os.Args[1:])
+	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
+
+	setupStart := time.Now()
+	err := Setup(ctx, cmd)
 	if err != nil {
 		return err
 	}
+	if statsEnabled {
+		logger.InfoContext(ctx, "setup stats", "duration", time.Since(setupStart))
+	}
 	logger.InfoContext(ctx, "Setup completed successfully")
 
-	err = BuildWithToolexec(ctx, args)
+	buildStart := time.Now()
+	err = BuildWithToolexec(ctx, cmd)
 	if err != nil {
 		return err
+	}
+	if statsEnabled {
+		logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
 	}
 	logger.InfoContext(ctx, "Instrumentation completed successfully")
 	return nil

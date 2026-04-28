@@ -106,13 +106,13 @@ services:
   grpc-server:
     build:
       context: ../../..
-      dockerfile: demo/grpc/server/Dockerfile
+      dockerfile: demo/app/grpc/server/Dockerfile
     container_name: grpc-server
     ports:
       - "50051:50051"
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=grpc-server
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
@@ -126,12 +126,12 @@ services:
   grpc-client:
     build:
       context: ../../..
-      dockerfile: demo/grpc/client/Dockerfile
+      dockerfile: demo/app/grpc/client/Dockerfile
     container_name: grpc-client
     command: ["-addr", "grpc-server:50051", "-name", "demo-client", "-count", "10000"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_SERVICE_NAME=grpc-client
       - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
       - OTEL_LOG_LEVEL=info
@@ -146,7 +146,7 @@ services:
   http-server:
     build:
       context: ../../..
-      dockerfile: demo/http/server/Dockerfile
+      dockerfile: demo/app/http/server/Dockerfile
     container_name: http-server
     ports:
       - "8080:8080"
@@ -166,7 +166,7 @@ services:
   http-client:
     build:
       context: ../../..
-      dockerfile: demo/http/client/Dockerfile
+      dockerfile: demo/app/http/client/Dockerfile
     container_name: http-client
     command: ["-addr", "http://http-server:8080", "-count", "10000", "-method", "GET"]
     environment:
@@ -179,6 +179,108 @@ services:
       - observability
     depends_on:
       - http-server
+      - otel-collector
+    restart: unless-stopped
+
+  # MySQL - Database backend for DB demo
+  mysql:
+    image: mysql:9.6@sha256:c5df04bee1a42b74a5841c6409e669cf62126cd0416f00c1cea8ab933b9361b9
+    container_name: mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=demodb
+      - MYSQL_USER=demo
+      - MYSQL_PASSWORD=demo
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # DB Server - Demo HTTP server with MySQL backend and compile-time instrumentation
+  db-server:
+    build:
+      context: ../../..
+      dockerfile: demo/app/db/server/Dockerfile
+    container_name: db-server
+    ports:
+      - "8081:8081"
+    command: ["-port", "8081", "-dsn", "demo:demo@tcp(mysql:3306)/demodb?parseTime=true"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=db-server
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      mysql:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    restart: unless-stopped
+
+  # Redis - In-memory data store for Redis demo
+  redis:
+    image: redis:8-alpine@sha256:2afba59292f25f5d1af200496db41bea2c6c816b059f57ae74703a50a03a27d0
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Client - Demo client making requests to Redis
+  redis-client:
+    build:
+      context: ../../..
+      dockerfile: demo/app/redis/client/Dockerfile
+    container_name: redis-client
+    command: ["-addr", "redis:6379", "-count", "10000"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=redis-client
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    restart: unless-stopped
+
+  # DB Client - Demo client making CRUD requests to DB server
+  db-client:
+    build:
+      context: ../../..
+      dockerfile: demo/app/db/client/Dockerfile
+    container_name: db-client
+    command: ["-addr", "http://db-server:8081", "-count", "10000"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=db-client
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=demo,service.version=1.0.0
+      - OTEL_LOG_LEVEL=info
+    networks:
+      - observability
+    depends_on:
+      - db-server
       - otel-collector
     restart: unless-stopped
 
@@ -220,7 +322,7 @@ services:
 networks:
   observability:
     driver: bridge
-    name: otel-demo-network
+    name: otelc-demo-network
 
 # Note: No volumes defined for ephemeral demo environment
 # Data will be lost when containers are stopped

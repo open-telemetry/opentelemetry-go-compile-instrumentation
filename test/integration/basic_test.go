@@ -12,18 +12,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/app"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
 func TestBasic(t *testing.T) {
-	appDir := filepath.Join("..", "..", "demo", "basic")
+	appDir := filepath.Join("..", "..", "demo", "app", "basic")
 
-	app.Build(t, appDir, "go", "build", "-a")
-	output := app.Run(t, appDir)
+	testutil.Build(t, appDir, "go", "build", "-a")
+	output := testutil.Run(t, appDir)
 	expect := []string{
 		"Every1",
 		"Every3",
 		"MyStruct.Example",
+		"MyStruct.Example2",
 		"GenericExample before hook",
 		"Hello, Generic World! 1 2",
 		"GenericExample after hook",
@@ -43,6 +44,8 @@ func TestBasic(t *testing.T) {
 		"Ellipsis",
 		"Hello from stdio",
 		"Underscore",
+		"AutoDetect: 00000000-0000-0000-0000-000000000000",
+		"UnnamedBefore 42 2.7",
 	}
 	for _, e := range expect {
 		require.Contains(t, output, e)

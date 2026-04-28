@@ -4,9 +4,16 @@
 package setup
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
@@ -225,6 +232,37 @@ version: v1.0.0,v2.0.0
 			expectedType: "*rule.InstStructRule",
 		},
 		{
+			name: "directive rule creation",
+			yamlContent: `
+directive: "otelc:span"
+target: github.com/example/lib
+template: "_ = 0"
+`,
+			ruleName:     "test-directive-rule",
+			expectError:  false,
+			expectedType: "*rule.InstDirectiveRule",
+		},
+		{
+			name: "directive rule missing field",
+			yamlContent: `
+directive: ""
+target: github.com/example/lib
+`,
+			ruleName:    "test-invalid-directive-rule",
+			expectError: true,
+		},
+		{
+			name: "decl rule creation",
+			yamlContent: `
+target: github.com/example/lib
+identifier: GlobalVar
+value: "replaced"
+`,
+			ruleName:     "test-decl-rule",
+			expectError:  false,
+			expectedType: "*rule.InstDeclRule",
+		},
+		{
 			name: "invalid yaml syntax",
 			yamlContent: `
 struct: [
@@ -298,10 +336,274 @@ func validateCreatedRule(t *testing.T, createdRule rule.InstRule, ruleName strin
 	}
 }
 
-func TestMaterializeRules(t *testing.T) {
-	rules, err := materializeRules()
-	if err != nil {
-		t.Fatalf("failed to materialize rules: %v", err)
+func writeCustomRules(t *testing.T, name, content string) string {
+	path := filepath.Join(t.TempDir(), name)
+	err := os.WriteFile(path, []byte(content), 0o644)
+	require.NoError(t, err)
+	return path
+}
+
+func TestRuleFilesFromDir(t *testing.T) {
+	content1 := `h1:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+	content2 := `h2:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+
+	// Manually make a temporary and sub temporary Directories
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub_dir")
+
+	err := os.Mkdir(subDir, 0o755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(dir, "r1.otelc.yaml"), []byte(content1), 0o644)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(subDir, "r2.otelc.yaml"), []byte(content2), 0o644)
+	require.NoError(t, err)
+
+	t.Setenv(util.EnvOtelcRules, "")
+
+	sp := newTestSetupPhase()
+	err = sp.extract()
+	require.NoError(t, err)
+
+	sp.ruleConfig = dir
+
+	rules, err := sp.loadRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+}
+
+func TestMultipleRuleFiles(t *testing.T) {
+	content1 := `h1:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+	content2 := `h2:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+
+	p1 := writeCustomRules(t, "r1.yaml", content1)
+	p2 := writeCustomRules(t, "r2.yaml", content2)
+
+	t.Setenv(util.EnvOtelcRules, "")
+
+	sp := newTestSetupPhase()
+	err := sp.extract()
+	require.NoError(t, err)
+
+	sp.ruleConfig = p1 + "," + p2
+
+	rules, err := sp.loadRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+	names := []string{
+		rules[0].GetName(),
+		rules[1].GetName(),
 	}
+	require.Contains(t, names, "h1")
+	require.Contains(t, names, "h2")
+
+	// Check for duplicate rule by name
+	sp = newTestSetupPhase()
+	err = sp.extract()
+	require.NoError(t, err)
+
+	sp.ruleConfig = p1 + "," + p1
+
+	rules, err = sp.loadRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	require.Equal(t, "h1", rules[0].GetName())
+}
+
+func TestLoadDefaultRules(t *testing.T) {
+	// Write custom rules to temporary files
+	content1 := `h1:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+	content2 := `h2:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+	p1 := writeCustomRules(t, "r1.yaml", content1)
+	p2 := writeCustomRules(t, "r2.yaml", content2)
+	t.Setenv(util.EnvOtelcRules, p1)
+
+	// Prepare setup phase and set custom rules via environment variable and flag
+	sp := newTestSetupPhase()
+	err := sp.extract()
+	require.NoError(t, err)
+	sp.ruleConfig = p2
+
+	// Verify that the custom rule specified by environment variable has
+	// higher priority than the custom rule specified by flag
+	rules, err := sp.loadRules()
+	require.NoError(t, err)
 	require.NotEmpty(t, rules)
+	require.Len(t, rules, 1)
+	require.Equal(t, "h1", rules[0].GetName())
+
+	// Verify that the custom rule specified by flag has higher priority than
+	// default rules
+	t.Setenv(util.EnvOtelcRules, "")
+	rules, err = sp.loadRules()
+	require.NoError(t, err)
+	require.NotEmpty(t, rules)
+	require.Len(t, rules, 1)
+	require.Equal(t, "h2", rules[0].GetName())
+
+	// Verify that the default rules are loaded
+	t.Setenv(util.EnvOtelcRules, "")
+	sp.ruleConfig = ""
+
+	rules, err = sp.loadRules()
+	require.NoError(t, err)
+	require.NotEmpty(t, rules)
+	require.Greater(t, len(rules), 1, "default rules should be more than 1")
+}
+
+// Helper functions for constructing test data
+
+func newTestSetupPhase() *SetupPhase {
+	return &SetupPhase{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+}
+
+func newTestFuncRule(path, target string) *rule.InstFuncRule {
+	return &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Target: target,
+		},
+		Path: path,
+	}
+}
+
+func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.InstRuleSet {
+	rs := rule.NewInstRuleSet(modulePath)
+	fakeFilePath := filepath.Join(os.TempDir(), "file.go")
+	for _, fr := range funcRules {
+		rs.AddFuncRule(fakeFilePath, fr)
+	}
+	return rs
+}
+
+func TestRunMatch_FileRuleOnlySetsPackageName(t *testing.T) {
+	// Write a temporary Go source file so ParseFileOnlyPackage can parse it
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "mypkg.go")
+	err := os.WriteFile(srcFile, []byte("package mypkg\n"), 0o644)
+	require.NoError(t, err)
+
+	const importPath = "example.com/mypkg"
+
+	// Build a file rule targeting the import path
+	yamlContent := []byte(`
+file: hook.go
+target: example.com/mypkg
+`)
+	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
+	require.NoError(t, err)
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+
+	// The package name must be set from parsing the source file
+	assert.Equal(t, "mypkg", set.PackageName)
+	assert.False(t, set.IsEmpty(), "rule set must contain the file rule")
+}
+
+func TestRunMatch_EmptyRules(t *testing.T) {
+	dep := &Dependency{
+		ImportPath: "example.com/noop",
+		Sources:    []string{},
+		CgoFiles:   make(map[string]string),
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{})
+	require.NoError(t, err)
+	require.NotNil(t, set)
+	assert.True(t, set.IsEmpty())
+}
+
+func TestRunMatch_FileRuleInvalidSource(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "bad.go")
+	err := os.WriteFile(srcFile, []byte("not valid go source {{{"), 0o644)
+	require.NoError(t, err)
+
+	const importPath = "example.com/mypkg"
+
+	yamlContent := []byte(`
+file: hook.go
+target: example.com/mypkg
+`)
+	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
+	require.NoError(t, err)
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
+
+	sp := newTestSetupPhase()
+	_, err = sp.runMatch(context.Background(), dep, rulesByTarget)
+	assert.Error(t, err, "should fail when source file cannot be parsed")
+}
+
+func TestRunMatch_FileRuleNoSources(t *testing.T) {
+	const importPath = "example.com/mypkg"
+
+	yamlContent := []byte(`
+file: hook.go
+target: example.com/mypkg
+`)
+	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
+	require.NoError(t, err)
+
+	// dep with no sources: package name should remain empty
+	dep := &Dependency{
+		ImportPath: importPath,
+		Sources:    []string{},
+		CgoFiles:   make(map[string]string),
+	}
+
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+
+	// No sources means package name is not set
+	assert.Empty(t, set.PackageName)
+	assert.False(t, set.IsEmpty())
 }

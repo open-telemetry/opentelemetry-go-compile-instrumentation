@@ -3,6 +3,8 @@
 
 package main
 
+var GlobalVar = "original"
+
 type T struct {
 	Field1 string
 	Field2 int
@@ -19,6 +21,8 @@ func Func1(p1 string, p2 int) (float32, error) {
 }
 
 func Func2(p1 string, _ int) {}
+
+func (T) Func3() {}
 
 func OptGood() {}
 func OptBad()  {}
@@ -39,5 +43,7 @@ func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (T, error) {
 func EllipsisFunc(p1 ...string) {}
 
 func UnderscoreFunc(_ int, _ float32) {}
+
+func Unnamed(int, float32) {}
 
 func main() { Func1("hello", 123) }

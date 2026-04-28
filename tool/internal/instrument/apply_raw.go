@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/dave/dst"
@@ -50,12 +51,18 @@ func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl) error {
 
 // applyRawRule injects the raw code into the target function at the beginning
 // of the function.
-func (ip *InstrumentPhase) applyRawRule(rule *rule.InstRawRule, root *dst.File) error {
+func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
 	// Find the target function to be instrumented
 	funcDecl := ast.FindFuncDecl(root, rule.Func, rule.Recv)
 	if funcDecl == nil {
 		return ex.Newf("can not find function %s", rule.Func)
 	}
+
+	// Handle imports if specified in the rule
+	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+		return err
+	}
+
 	// Insert the raw code into the target function
 	err := insertRaw(rule, funcDecl)
 	if err != nil {

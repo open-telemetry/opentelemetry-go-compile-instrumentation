@@ -3,12 +3,14 @@
 
 module github.com/open-telemetry/opentelemetry-go-compile-instrumentation
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/dave/dst v0.27.3
+	github.com/google/go-cmp v0.7.0
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.6.1
+	github.com/valyala/fasttemplate v1.2.2
 	golang.org/x/mod v0.30.0
 	golang.org/x/sync v0.18.0
 	golang.org/x/tools v0.38.0
@@ -18,9 +20,9 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )

@@ -4,15 +4,23 @@
 package util
 
 import (
-	"errors"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 const (
-	EnvOtelWorkDir = "OTEL_WORK_DIR"
-	BuildTempDir   = ".otel-build"
-	OtelRoot       = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	EnvOtelcWorkDir    = "OTELC_WORK_DIR"
+	EnvOtelcRules      = "OTELC_RULES"
+	EnvOtelcBuildFlags = "OTELC_BUILD_FLAGS"
+	// EnvOtelcStats enables per-toolexec timing stats when set to "1".
+	// Set automatically when --stats is used; propagated to child processes.
+	EnvOtelcStats = "OTELC_STATS"
+	BuildTempDir  = ".otelc-build"
+	OtelcRoot     = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
 )
 
 func GetMatchedRuleFile() string {
@@ -20,8 +28,21 @@ func GetMatchedRuleFile() string {
 	return GetBuildTemp(matchedRuleFile)
 }
 
-func GetOtelWorkDir() string {
-	wd := os.Getenv(EnvOtelWorkDir)
+// GetAddedImportsFileForProcess returns the per-process import tracking file.
+// Each compile process writes to its own file to avoid inter-process race conditions.
+func GetAddedImportsFileForProcess() string {
+	pid := os.Getpid()
+	return GetBuildTemp(fmt.Sprintf("added_imports.%d.json", pid))
+}
+
+// GetAddedImportsPattern returns the glob pattern for all import tracking files.
+// Used by the link phase to discover and merge all per-process import files.
+func GetAddedImportsPattern() string {
+	return GetBuildTemp("added_imports.*.json")
+}
+
+func GetOtelcWorkDir() string {
+	wd := os.Getenv(EnvOtelcWorkDir)
 	if wd == "" {
 		wd, _ = os.Getwd()
 		return wd
@@ -31,12 +52,12 @@ func GetOtelWorkDir() string {
 
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTempDir() string {
-	return filepath.Join(GetOtelWorkDir(), BuildTempDir)
+	return filepath.Join(GetOtelcWorkDir(), BuildTempDir)
 }
 
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
-	return filepath.Join(GetOtelWorkDir(), BuildTempDir, name)
+	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
 }
 
 func copyBackupFiles(names []string, src, dst string) error {
@@ -44,7 +65,7 @@ func copyBackupFiles(names []string, src, dst string) error {
 	for _, name := range names {
 		srcFile := filepath.Join(src, name)
 		dstFile := filepath.Join(dst, name)
-		err = errors.Join(err, CopyFile(srcFile, dstFile))
+		err = ex.Join(err, CopyFile(srcFile, dstFile))
 	}
 	return err
 }
@@ -57,4 +78,33 @@ func BackupFile(names []string) error {
 // RestoreFile restores the source file from $BUILD_TEMP/backup/name.
 func RestoreFile(names []string) error {
 	return copyBackupFiles(names, GetBuildTemp("backup"), ".")
+}
+
+// GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.
+// The flags are stored as a JSON-encoded string array to preserve arguments that contain spaces.
+// Returns nil if not set or on decode error.
+func GetBuildFlags() []string {
+	encoded := os.Getenv(EnvOtelcBuildFlags)
+	if encoded == "" {
+		return nil
+	}
+	var flags []string
+	if err := json.Unmarshal([]byte(encoded), &flags); err != nil {
+		// Malformed JSON, return nil
+		return nil
+	}
+	return flags
+}
+
+// EncodeBuildFlags encodes build flags as a JSON string for storage in an environment variable.
+// This preserves arguments that contain spaces (e.g., -tags "foo bar").
+func EncodeBuildFlags(flags []string) string {
+	if len(flags) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(flags)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }

@@ -106,10 +106,11 @@ func ParseFileOnlyPackage(filePath string) (*dst.File, error) {
 	return NewAstParser().Parse(filePath, parser.PackageClauseOnly)
 }
 
-// ParseFileFast parses the AST from a file. Use this version if you only need
-// to read information from the AST without writing it back to a file.
+// ParseFileFast parses the AST from a file, including comments as node
+// decorations. Use this version if you only need to read information from
+// the AST without writing it back to a file.
 func ParseFileFast(filePath string) (*dst.File, error) {
-	return NewAstParser().Parse(filePath, parser.SkipObjectResolution)
+	return NewAstParser().Parse(filePath, parser.SkipObjectResolution|parser.ParseComments)
 }
 
 // ParseFile parses the AST from a file. Use this standard version if you need to

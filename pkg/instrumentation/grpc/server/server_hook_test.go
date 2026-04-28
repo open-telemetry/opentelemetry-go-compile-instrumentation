@@ -18,38 +18,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
 )
-
-// mockHookContext implements inst.HookContext for testing
-type mockHookContext struct {
-	params     []interface{}
-	data       map[string]interface{}
-	returnVals []interface{}
-	skipCall   bool
-}
-
-func newMockHookContext(params ...interface{}) *mockHookContext {
-	return &mockHookContext{
-		params: params,
-		data:   make(map[string]interface{}),
-	}
-}
-
-func (m *mockHookContext) SetSkipCall(skip bool)                  { m.skipCall = skip }
-func (m *mockHookContext) IsSkipCall() bool                       { return m.skipCall }
-func (m *mockHookContext) SetData(data interface{})               { m.data["_default"] = data }
-func (m *mockHookContext) GetData() interface{}                   { return m.data["_default"] }
-func (m *mockHookContext) GetKeyData(key string) interface{}      { return m.data[key] }
-func (m *mockHookContext) SetKeyData(key string, val interface{}) { m.data[key] = val }
-func (m *mockHookContext) HasKeyData(key string) bool             { _, ok := m.data[key]; return ok }
-func (m *mockHookContext) GetParamCount() int                     { return len(m.params) }
-func (m *mockHookContext) GetParam(idx int) interface{}           { return m.params[idx] }
-func (m *mockHookContext) SetParam(idx int, val interface{})      { m.params[idx] = val }
-func (m *mockHookContext) GetReturnValCount() int                 { return len(m.returnVals) }
-func (m *mockHookContext) GetReturnVal(idx int) interface{}       { return m.returnVals[idx] }
-func (m *mockHookContext) SetReturnVal(idx int, val interface{})  { m.returnVals[idx] = val }
-func (m *mockHookContext) GetFuncName() string                    { return "TestFunc" }
-func (m *mockHookContext) GetPackageName() string                 { return "test.package" }
 
 func TestBeforeNewServer(t *testing.T) {
 	// Setup trace exporter
@@ -58,9 +29,7 @@ func TestBeforeNewServer(t *testing.T) {
 		sdktrace.WithSyncer(exporter),
 	)
 	otel.SetTracerProvider(tp)
-	defer func() {
-		_ = tp.Shutdown(context.Background())
-	}()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	tests := []struct {
 		name          string
@@ -98,7 +67,7 @@ func TestBeforeNewServer(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			ictx := newMockHookContext(tt.opts)
+			ictx := insttest.NewMockHookContext(tt.opts)
 			BeforeNewServer(ictx, tt.opts...)
 
 			newOpts, ok := ictx.GetParam(0).([]grpc.ServerOption)
@@ -151,10 +120,10 @@ func TestAfterNewServer(t *testing.T) {
 
 			// Cleanup server if created
 			if tt.server != nil {
-				defer tt.server.Stop()
+				t.Cleanup(tt.server.Stop)
 			}
 
-			ictx := newMockHookContext()
+			ictx := insttest.NewMockHookContext()
 
 			// Verify the hook doesn't panic and handles gracefully
 			assert.NotPanics(t, func() {
@@ -177,13 +146,13 @@ func TestServerStatsHandler_TagRPC(t *testing.T) {
 	)
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer func() {
+	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
-	}()
+	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
 
 	handler := newServerStatsHandler()
 
@@ -207,7 +176,7 @@ func TestServerStatsHandler_TagRPC(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.incomingMD != nil {
 				ctx = metadata.NewIncomingContext(ctx, tt.incomingMD)
 			}
@@ -250,7 +219,7 @@ func TestServerStatsHandler_Integration(t *testing.T) {
 
 	// Create instrumented server
 	opts := []grpc.ServerOption{}
-	ictx := newMockHookContext(opts)
+	ictx := insttest.NewMockHookContext(opts)
 	BeforeNewServer(ictx, opts...)
 
 	newOpts := ictx.GetParam(0).([]grpc.ServerOption)
@@ -258,14 +227,14 @@ func TestServerStatsHandler_Integration(t *testing.T) {
 
 	// Verify hook behavior
 	server := grpc.NewServer(newOpts...)
-	defer server.Stop()
+	t.Cleanup(server.Stop)
 	assert.NotNil(t, server)
 }
 
 func TestServerStatsHandler_TagConn(t *testing.T) {
 	handler := newServerStatsHandler()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	info := &stats.ConnTagInfo{
 		LocalAddr: &net.TCPAddr{
 			IP:   net.ParseIP("127.0.0.1"),
@@ -280,7 +249,7 @@ func TestServerStatsHandler_TagConn(t *testing.T) {
 func TestServerStatsHandler_HandleConn(t *testing.T) {
 	handler := newServerStatsHandler()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	handler.HandleConn(ctx, &stats.ConnBegin{})
@@ -299,13 +268,13 @@ func TestServerStatsHandler_OTELExporterFiltering(t *testing.T) {
 	)
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer func() {
+	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
-	}()
+	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
 
 	handler := newServerStatsHandler()
 
@@ -338,7 +307,7 @@ func TestServerStatsHandler_OTELExporterFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			info := &stats.RPCTagInfo{
 				FullMethodName: tt.fullMethodName,
 			}

@@ -5,6 +5,8 @@ package main
 
 import _ "unsafe"
 
+var GlobalVar = "original"
+
 type T struct{}
 
 func (t *T) Func1(p1 string, p2 int) (float32, error) {
@@ -17,6 +19,8 @@ func Func1(p1 string, p2 int) (float32, error) {
 }
 
 func Func2(p1 string, _ int) {}
+
+func (T) Func3() {}
 
 func OptGood() {}
 func OptBad()  {}
@@ -41,8 +45,10 @@ func UnderscoreFunc(_ignoredParam0 int, _ignoredParam1 float32) {
 	if OtelBeforeTrampoline_UnderscoreFunc2694310588(&_ignoredParam0, &_ignoredParam1); false {
 	} else {
 	}
-	//line main.go:37:39
+	//line main.go:41:39
 }
+
+func Unnamed(int, float32) {}
 
 func main() { Func1("hello", 123) }
 

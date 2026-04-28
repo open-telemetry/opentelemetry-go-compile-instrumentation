@@ -19,12 +19,22 @@ func TestIsCompileCommand(t *testing.T) {
 		{
 			name:     "valid compile command on Unix",
 			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123",
-			expected: !IsWindows(),
+			expected: true,
 		},
 		{
 			name:     "valid compile command on Windows",
 			line:     "C:\\Go\\pkg\\tool\\windows_amd64\\compile.exe -o C:\\tmp\\output.a -p main -buildid abc123",
-			expected: true, // Contains compile.exe on any platform
+			expected: true, // compile.exe is recognized on all platforms
+		},
+		{
+			name:     "valid compile command on Windows with spaces in path",
+			line:     `"C:\Program Files\Go\pkg\tool\windows_amd64\compile.exe" -o C:\tmp\output.a -p main -buildid abc123`,
+			expected: true, // quoted path with spaces should be parsed correctly
+		},
+		{
+			name:     "unquoted Windows path with spaces (go build -x -n output)",
+			line:     `C:/Program Files/Go/pkg/tool/windows_amd64/compile.exe -o C:/tmp/output.a -p main -buildid abc123`,
+			expected: true,
 		},
 		{
 			name:     "missing -o flag",
@@ -54,12 +64,12 @@ func TestIsCompileCommand(t *testing.T) {
 		{
 			name:     "complete compile command with additional flags",
 			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -trimpath -p main -buildid abc123 -goversion go1.21",
-			expected: !IsWindows(),
+			expected: true,
 		},
 		{
 			name:     "complete compile command with quoted paths",
 			line:     `/usr/local/go/pkg/tool/linux_amd64/compile -o "/tmp/my output.a" -p main -buildid abc123`,
-			expected: !IsWindows(),
+			expected: true,
 		},
 		{
 			name:     "empty line",
@@ -79,14 +89,300 @@ func TestIsCompileCommand(t *testing.T) {
 		{
 			name:     "all required flags with importcfg",
 			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123 -importcfg /tmp/importcfg",
-			expected: !IsWindows(),
+			expected: true,
+		},
+		// Edge case: output path contains "compile" - should NOT match
+		{
+			name:     "link command with output path containing compile",
+			line:     "/usr/local/go/pkg/tool/linux_amd64/link -o /tmp/compile -buildid abc123 -importcfg /tmp/importcfg",
+			expected: false, // This is a link command, not compile
+		},
+		{
+			name:     "link command with output dir containing compile",
+			line:     "/usr/local/go/pkg/tool/linux_amd64/link -o /home/compile/output -buildid abc123 -importcfg /tmp/importcfg",
+			expected: false, // This is a link command, not compile
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsCompileCommand(tt.line)
+			result := IsCompileCommandWithArgs(SplitCompileCmds(tt.line))
 			assert.Equal(t, tt.expected, result, "IsCompileCommand(%q) = %v, want %v", tt.line, result, tt.expected)
+		})
+	}
+}
+
+func TestIsCompileArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected bool
+	}{
+		{
+			name: "valid compile args on Unix",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/compile",
+				"-o",
+				"/tmp/output.a",
+				"-p",
+				"main",
+				"-buildid",
+				"abc123",
+			},
+			expected: true,
+		},
+		{
+			name: "valid compile args on Windows",
+			args: []string{
+				`C:\Go\pkg\tool\windows_amd64\compile.exe`,
+				"-o",
+				`C:\tmp\output.a`,
+				"-p",
+				"main",
+				"-buildid",
+				"abc123",
+			},
+			expected: true,
+		},
+		{
+			name: "Windows path with spaces - unquoted args from toolexec",
+			args: []string{
+				`C:\Program Files\Go\pkg\tool\windows_amd64\compile.exe`,
+				"-o",
+				`C:\tmp\output.a`,
+				"-p",
+				"main",
+				"-buildid",
+				"abc123",
+			},
+			expected: true, // This is the key test case - args slice preserves the full path
+		},
+		{
+			name:     "empty args",
+			args:     []string{},
+			expected: false,
+		},
+		{
+			name:     "nil args",
+			args:     nil,
+			expected: false,
+		},
+		{
+			name: "missing -o flag",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/compile",
+				"-p",
+				"main",
+				"-buildid",
+				"abc123",
+			},
+			expected: false,
+		},
+		{
+			name: "missing -p flag",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/compile",
+				"-o",
+				"/tmp/output.a",
+				"-buildid",
+				"abc123",
+			},
+			expected: false,
+		},
+		{
+			name: "missing -buildid flag",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/compile",
+				"-o",
+				"/tmp/output.a",
+				"-p",
+				"main",
+			},
+			expected: false,
+		},
+		{
+			name: "PGO compile should be excluded",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/compile",
+				"-o",
+				"/tmp/output.a",
+				"-p",
+				"main",
+				"-buildid",
+				"abc123",
+				"-pgoprofile",
+				"/tmp/default.pgo",
+			},
+			expected: false,
+		},
+		{
+			name: "link command should not match",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/link",
+				"-o",
+				"/tmp/output",
+				"-buildid",
+				"abc123",
+				"-importcfg",
+				"/tmp/importcfg",
+			},
+			expected: false,
+		},
+		{
+			name: "flags with = syntax",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/compile",
+				"-o=/tmp/output.a",
+				"-p=main",
+				"-buildid=abc123",
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsCompileCommandWithArgs(tt.args)
+			assert.Equal(
+				t,
+				tt.expected,
+				result,
+				"IsCompileCommandWithArgs(%v) = %v, want %v",
+				tt.args,
+				result,
+				tt.expected,
+			)
+		})
+	}
+}
+
+func TestIsLinkArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected bool
+	}{
+		{
+			name: "valid link args on Unix",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/link",
+				"-o",
+				"/tmp/output",
+				"-buildid",
+				"abc123",
+				"-importcfg",
+				"/tmp/importcfg.link",
+			},
+			expected: true,
+		},
+		{
+			name: "valid link args on Windows",
+			args: []string{
+				`C:\Go\pkg\tool\windows_amd64\link.exe`,
+				"-o",
+				`C:\tmp\output.exe`,
+				"-buildid",
+				"abc123",
+				"-importcfg",
+				`C:\tmp\importcfg.link`,
+			},
+			expected: true,
+		},
+		{
+			name: "Windows path with spaces - unquoted args from toolexec",
+			args: []string{
+				`C:\Program Files\Go\pkg\tool\windows_amd64\link.exe`,
+				"-o",
+				`C:\tmp\output.exe`,
+				"-buildid",
+				"abc123",
+				"-importcfg",
+				`C:\tmp\importcfg.link`,
+			},
+			expected: true, // This is the key test case - args slice preserves the full path
+		},
+		{
+			name:     "empty args",
+			args:     []string{},
+			expected: false,
+		},
+		{
+			name:     "nil args",
+			args:     nil,
+			expected: false,
+		},
+		{
+			name: "missing -o flag",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/link",
+				"-buildid",
+				"abc123",
+				"-importcfg",
+				"/tmp/importcfg.link",
+			},
+			expected: false,
+		},
+		{
+			name: "missing -buildid flag",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/link",
+				"-o",
+				"/tmp/output",
+				"-importcfg",
+				"/tmp/importcfg.link",
+			},
+			expected: false,
+		},
+		{
+			name: "missing -importcfg flag",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/link",
+				"-o",
+				"/tmp/output",
+				"-buildid",
+				"abc123",
+			},
+			expected: false,
+		},
+		{
+			name: "compile command should not match",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/compile",
+				"-o",
+				"/tmp/output.a",
+				"-p",
+				"main",
+				"-buildid",
+				"abc123",
+				"-importcfg",
+				"/tmp/importcfg",
+			},
+			expected: false,
+		},
+		{
+			name: "flags with = syntax",
+			args: []string{
+				"/usr/local/go/pkg/tool/linux_amd64/link",
+				"-o=/tmp/output",
+				"-buildid=abc123",
+				"-importcfg=/tmp/importcfg.link",
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsLinkCommandWithArgs(tt.args)
+			assert.Equal(
+				t,
+				tt.expected,
+				result,
+				"IsLinkCommandWithArgs(%v) = %v, want %v",
+				tt.args,
+				result,
+				tt.expected,
+			)
 		})
 	}
 }
@@ -213,6 +509,18 @@ func TestFindFlagValue(t *testing.T) {
 			cmd:      []string{"compile", "-flag", "first", "-flag", "second"},
 			flag:     "-flag",
 			expected: "first",
+		},
+		{
+			name:     "flag in equals form",
+			cmd:      []string{"compile", "-o=output.a", "-p", "main"},
+			flag:     "-o",
+			expected: "output.a",
+		},
+		{
+			name:     "flag equals form without value",
+			cmd:      []string{"compile", "-o=", "-p", "main"},
+			flag:     "-o",
+			expected: "",
 		},
 	}
 

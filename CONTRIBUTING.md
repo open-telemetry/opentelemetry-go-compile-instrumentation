@@ -16,7 +16,7 @@ for a summary description of past meetings. You can also get in touch on slack c
 
 This project uses several tools for development. Most tools will be automatically installed when you first run the corresponding `make` target. However, you need to have:
 
-- [Go](https://golang.org/dl/) 1.21 or later
+- [Go](https://golang.org/dl/) 1.25 or later
 - [Git](https://git-scm.com/)
 - Make (usually pre-installed on macOS and Linux)
 
@@ -52,7 +52,7 @@ make help
 #### Build Targets
 
 - `make build` - Build the instrumentation tool (includes packaging)
-- `make install` - Install the `otel` binary to `$GOPATH/bin`
+- `make install` - Install the `otelc` binary to `$GOPATH/bin`
 - `make package` - Package the instrumentation code into a binary archive
 - `make build-demo-grpc` - Build gRPC demo server and client
 
@@ -85,6 +85,7 @@ The license header checker has a dedicated CI workflow (`check-license-headers.y
 - `make test` - Run all tests (unit + integration)
 - `make test-unit` - Run unit tests only with formatted output
 - `make test-integration` - Run integration tests only with formatted output
+- `make test-e2e` - Run end-to-end tests
 
 Test results are saved to `gotest-unit.log` and `gotest-integration.log` for review.
 
@@ -139,6 +140,36 @@ The following development tools are used and will be automatically installed on 
 - **[actionlint](https://github.com/rhysd/actionlint)** - GitHub Actions linter
 - **[ratchet](https://github.com/sethvargo/ratchet)** - GitHub Actions security pinning
 - **[embedmd](https://github.com/campoy/embedmd)** - Embed code in markdown files
+
+### Architecture Decision Records
+
+Significant architectural decisions are documented as Architecture Decision Records (ADRs) in [`docs/adr/`](docs/adr/). Read them to understand *why* the project is structured the way it is.
+
+Create a new ADR when proposing:
+
+- Changes to the instrumentation API or hook model
+- New external dependencies or replacements
+- Changes to the two-phase build process
+- Any decision the SIG discusses and reaches consensus on
+
+To create a new ADR:
+
+```sh
+make adr-new TITLE="Title of Your Decision"
+```
+
+This requires `adr-tools` (`npryce/adr-tools`). Run `make adr-tools` to install it. To list existing ADRs:
+
+```sh
+make adr-list
+```
+
+## AI Usage
+
+This project welcomes the use of AI tools. Please read the [AI Usage Policy](AI_POLICY.md) before
+contributing. The critical rule is: **you must understand every line of code you submit.**
+Contributors using AI tools are held to the same quality standards as any other contribution.
+
 
 ## Pull Requests
 
@@ -310,11 +341,8 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 
 ## Release Process
 
-The release process is automated using GitHub Actions. To create a new release:
-
-1. Push a new tag with the version number (e.g., `v0.1.0`).
-2. The [Release workflow](.github/workflows/release.yml) will automatically trigger, build the binaries, and create a draft release on GitHub.
-3. Maintainers should review the draft release, edit the release notes if necessary, and publish it.
+See [RELEASE.md](RELEASE.md) for the full release process, including release
+cadence, tagging conventions, cross-compilation targets, and hotfix guidance.
 
 ## Approvers and Maintainers
 

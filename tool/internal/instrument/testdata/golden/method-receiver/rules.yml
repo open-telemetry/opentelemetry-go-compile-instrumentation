@@ -6,3 +6,9 @@ hook_method:
   after: H3After
   path: testdata
 
+hook_method_unnamed_recv:
+  target: main
+  func: Func3
+  recv: "T"
+  before: H11Before
+  path: testdata

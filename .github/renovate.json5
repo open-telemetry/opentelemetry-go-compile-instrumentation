@@ -1,21 +1,35 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:best-practices",
-    "helpers:pinGitHubActionDigestsToSemver"
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:best-practices',
+    'helpers:pinGitHubActionDigestsToSemver',
   ],
-  "packageRules": [
+  schedule: [
+    'before 8am on the 1st and 15th day of the month',
+  ],
+  updateNotScheduled: false,
+  packageRules: [
     {
-      "groupName": "all non-major versions",
-      "matchUpdateTypes": ["patch", "minor", "digest"],
-      "schedule": ["before 8am on Monday"]
+      matchFileNames: [
+        '.github/**',
+      ],
+      enabled: false,
     },
     {
-      "matchUpdateTypes": ["major"],
-      "schedule": ["before 8am on Monday"]
-    }
+      groupName: 'all dependencies',
+      groupSlug: 'all-deps',
+      matchUpdateTypes: [
+        'patch',
+        'minor',
+        'major',
+        'digest',
+      ],
+      matchPackageNames: [
+        '*',
+      ],
+    },
   ],
-  "labels": [
-    "dependencies"
-  ]
+  labels: [
+    'dependencies',
+  ],
 }

@@ -39,6 +39,8 @@ func H9Before(ctx inst.HookContext, p1 ...string) {}
 
 func H10Before(ctx inst.HookContext, _ int, _ float32) {}
 
+func H11Before(ctx inst.HookContext, recv interface{}) {}
+
 func GenericFuncBefore(ctx inst.HookContext, p1 interface{}, p2 int) {}
 
 func GenericFuncAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
@@ -46,3 +48,7 @@ func GenericFuncAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
 func GenericMethodBefore(ctx inst.HookContext, recv interface{}, p1 interface{}, p2 string) {}
 
 func GenericMethodAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
+
+func H12UnderscoreReturnAfter(ctx inst.HookContext, r1 int, r2 error) {}
+
+func H13Before(ctx inst.HookContext, p1 int, p2 float32) {}

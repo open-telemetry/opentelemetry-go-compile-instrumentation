@@ -1,17 +1,17 @@
 *.log
 opentelemetry-go-compile-instrumentation
-otel
-otel.exe
+otelc
+otelc.exe
 demo/basic/basic
 .idea
 tmp
 
-.otel-build
+.otelc-build
 **/.DS_Store
 demo/demo
 
-otel.runtime.go
-otel-pkg.gz
+otelc.runtime.go
+otelc-pkg.gz
 pkg_temp
 coverage.txt
 
@@ -21,3 +21,17 @@ go.work.sum
 coverage*.txt
 gotest*.log
 dist
+
+test/apps/*/app
+test/apps/*/app.exe
+
+test/bench/scenarios/*/app
+bench.json
+bench-action.json
+
+_tools
+coverage.out
+.bin
+
+profiles
+.pprof

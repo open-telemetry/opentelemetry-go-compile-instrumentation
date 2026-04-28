@@ -50,7 +50,7 @@ func SetupOTelSDK(instrumentationName, instrumentationVersion string) error {
 	setupOnce.Do(func() {
 		// Initialize OpenTelemetry SDK with defensive error handling
 		Initialize(Config{
-			ServiceName:            "otel-instrumentation",
+			ServiceName:            "otelc-instrumentation",
 			InstrumentationName:    instrumentationName,
 			InstrumentationVersion: instrumentationVersion,
 		})

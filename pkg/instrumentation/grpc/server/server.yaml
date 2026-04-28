@@ -1,0 +1,6 @@
+server_hook:
+  target: google.golang.org/grpc
+  func: NewServer
+  before: BeforeNewServer
+  after: AfterNewServer
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/server"
