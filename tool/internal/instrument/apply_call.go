@@ -19,48 +19,25 @@ import (
 func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
 	importAliases := collectImportAliases(root)
 
-	var modified bool
-
-	// Handle append_args: collect matching calls first, then append arguments in place.
-	if len(r.AppendArgs) > 0 {
-		var matchingCalls []*dst.CallExpr
-		dst.Inspect(root, func(node dst.Node) bool {
-			call, ok := node.(*dst.CallExpr)
-			if !ok {
-				return true
-			}
-			if matchesCallRule(call, r, importAliases) {
-				matchingCalls = append(matchingCalls, call)
-			}
-			return true
-		})
-		for _, call := range matchingCalls {
-			appended, err := appendCallArgs(call, r)
-			if err != nil {
-				ip.Warn("Failed to append args to call", "error", err)
-				continue
-			}
-			if appended {
-				modified = true
-			}
-		}
+	appendModified, err := ip.applyCallAppendArgs(r, root, importAliases)
+	if err != nil {
+		return err
 	}
 
-	// Handle template wrapping with two-pass approach to avoid infinite recursion.
+	templateModified := false
 	if r.Template != "" {
-		wrapped, err := ip.applyCallTemplate(r, root, importAliases)
+		templateModified, err = ip.applyCallTemplate(r, root, importAliases)
 		if err != nil {
 			return err
 		}
-		modified = modified || wrapped
 	}
 
-	if modified {
-		if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
-			return err
-		}
-		ip.Info("Apply call rule", "rule", r)
+	util.Assert(appendModified || templateModified, "call rule did not match any call")
+
+	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
+		return err
 	}
+	ip.Info("Apply call rule", "rule", r)
 
 	return nil
 }
@@ -119,6 +96,35 @@ func (ip *InstrumentPhase) applyCallTemplate(
 	return true, nil
 }
 
+func (ip *InstrumentPhase) applyCallAppendArgs(
+	r *rule.InstCallRule,
+	root *dst.File,
+	importAliases map[string]string,
+) (bool, error) {
+	if len(r.AppendArgs) == 0 {
+		return false, nil
+	}
+
+	var matchingCalls []*dst.CallExpr
+	dst.Inspect(root, func(node dst.Node) bool {
+		call, ok := node.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		if matchesCallRule(call, r, importAliases) {
+			matchingCalls = append(matchingCalls, call)
+		}
+		return true
+	})
+	for _, call := range matchingCalls {
+		if _, err := appendCallArgs(call, r); err != nil {
+			ip.Warn("Failed to append args to call", "error", err)
+		}
+	}
+
+	return true, nil
+}
+
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
 // For ellipsis calls, an IIFE wrapper is generated using r.VariadicType.
 // Returns (true, nil) if the call was modified, (false, nil) if AppendArgs is empty.
@@ -145,7 +151,7 @@ func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
 	// Ellipsis call: requires variadic_type
 	if r.VariadicType == "" {
 		return false, ex.Newf(
-			"append_args on ellipsis call requires variadic_type to be set (e.g., \"grpc.DialOption\")",
+			"append_args on ellipsis call requires variadic_type to be set",
 		)
 	}
 

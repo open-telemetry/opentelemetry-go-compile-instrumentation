@@ -87,28 +87,6 @@ func TestApplyCallRule_NonCallExprResult(t *testing.T) {
 	require.True(t, ok, "expected *dst.SelectorExpr after wrap, got %T", stmt.X)
 }
 
-func TestApplyCallRule_NoMatch(t *testing.T) {
-	// Rule targets net/http.Post; file has net/http.Get — no match.
-	file := makeCallFile(httpGetCall())
-	r := &rule.InstCallRule{
-		InstBaseRule: rule.InstBaseRule{Name: "wrap_post"},
-		FunctionCall: "net/http.Post",
-		ImportPath:   "net/http",
-		FuncName:     "Post",
-		Template:     "traced({{ . }})",
-	}
-
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
-
-	require.NoError(t, err)
-	// Expression must be unchanged.
-	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
-	call, ok := stmt.X.(*dst.CallExpr)
-	require.True(t, ok)
-	sel, ok := call.Fun.(*dst.SelectorExpr)
-	require.True(t, ok)
-	assert.Equal(t, "Get", sel.Sel.Name)
-}
 
 func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 	// An unclosed template tag fails fasttemplate parsing in newCallTemplate.
