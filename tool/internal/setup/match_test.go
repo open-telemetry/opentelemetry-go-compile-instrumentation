@@ -177,6 +177,39 @@ func TestNormalizeRule(t *testing.T) {
 			},
 		},
 		{
+			name: "do map form is sugar for one-element list",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"func": "Example",
+				},
+				"do": map[string]any{
+					"inject_hooks": map[string]any{
+						"before": "BeforeHook",
+						"path":   "example.com/hooks",
+					},
+				},
+			},
+			expect: []map[string]any{{
+				"target": "main",
+				"func":   "Example",
+				"before": "BeforeHook",
+				"path":   "example.com/hooks",
+			}},
+		},
+		{
+			name: "do map form with multiple keys rejected",
+			input: map[string]any{
+				"target": "main",
+				"where":  map[string]any{"func": "Example"},
+				"do": map[string]any{
+					"inject_hooks": map[string]any{"before": "BeforeHook"},
+					"inject_code":  map[string]any{"raw": "_ = 0"},
+				},
+			},
+			expectErr: "exactly one modifier key when written as a map",
+		},
+		{
 			name: "target in where rejected",
 			input: map[string]any{
 				"target": "main",
@@ -245,7 +278,7 @@ func TestNormalizeRule(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := normalizeRule(tt.input)
+			got, err := rule.Normalize(tt.input)
 			if tt.expectErr != "" {
 				require.ErrorContains(t, err, tt.expectErr)
 				return

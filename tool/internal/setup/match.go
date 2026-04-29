@@ -33,146 +33,8 @@ const (
 	matchDepsConcurrencyMultiplier = 2
 )
 
-// normalizeRule detects the structured target/version + where + do format and
-// expands it into one or more flat rule maps expected by the existing rule
-// constructors. If the fields map contains neither "where" nor "do", it is
-// returned unchanged as a single-element slice.
-//
-// New format:
-//
-//	rule_name:
-//	  target: pkg
-//	  version: "v1.0.0,v2.0.0"
-//	  where:
-//	    func: Fn
-//	    file:
-//	      has_func: init
-//	  do:
-//	    - inject_hooks:
-//	        before: HookBefore
-//	        path: "github.com/..."
-//	  imports:
-//	    fmt: "fmt"
-//
-// Flat (internal) format that constructors expect:
-//
-//	target: pkg
-//	func: Fn
-//	before: HookBefore
-//	path: "github.com/..."
-//	where:
-//	  file:
-//	    has_func: init
-//	imports:
-//	  fmt: "fmt"
-func normalizeRule(fields map[string]any) ([]map[string]any, error) {
-	_, hasWhere := fields["where"]
-	_, hasDo := fields["do"]
-	if !hasWhere && !hasDo {
-		return []map[string]any{fields}, nil
-	}
-	if !hasDo {
-		return nil, ex.Newf("structured rule is missing do")
-	}
-
-	common := make(map[string]any)
-
-	// Copy top-level fields (e.g. imports, name) that sit outside where/do.
-	for k, v := range fields {
-		if k != "where" && k != "do" {
-			common[k] = v
-		}
-	}
-
-	if whereRaw, ok := fields["where"]; ok {
-		whereMap, isMap := whereRaw.(map[string]any)
-		if !isMap {
-			return nil, ex.Newf("where must be a map")
-		}
-		normalizedWhere, err := normalizeWhere(common, whereMap)
-		if err != nil {
-			return nil, err
-		}
-		if len(normalizedWhere) > 0 {
-			common["where"] = normalizedWhere
-		}
-	}
-
-	doItems, err := normalizeDo(fields["do"])
-	if err != nil {
-		return nil, err
-	}
-
-	normalized := make([]map[string]any, 0, len(doItems))
-	for _, item := range doItems {
-		flat := maps.Clone(common)
-		maps.Copy(flat, item)
-		normalized = append(normalized, flat)
-	}
-
-	return normalized, nil
-}
-
-func normalizeWhere(common, where map[string]any) (map[string]any, error) {
-	if _, exists := where["target"]; exists {
-		return nil, ex.Newf("target must be top-level, not inside where")
-	}
-	if _, exists := where["version"]; exists {
-		return nil, ex.Newf("version must be top-level, not inside where")
-	}
-
-	normalized := make(map[string]any)
-	for key, value := range where {
-		switch key {
-		case "func", "recv", "struct", "function_call", "directive", "kind", "identifier":
-			common[key] = value
-		case "file":
-			if _, ok := value.(map[string]any); !ok {
-				return nil, ex.Newf("where.file must be a map")
-			}
-			normalized[key] = value
-		case "all-of", "one-of", "not":
-			normalized[key] = value
-		default:
-			return nil, ex.Newf("unsupported where key %q", key)
-		}
-	}
-
-	return normalized, nil
-}
-
-func normalizeDo(doRaw any) ([]map[string]any, error) {
-	doItems, ok := doRaw.([]any)
-	if !ok {
-		return nil, ex.Newf("do must be a non-empty list of single-key modifier objects")
-	}
-	if len(doItems) == 0 {
-		return nil, ex.Newf("do must not be empty")
-	}
-
-	normalized := make([]map[string]any, 0, len(doItems))
-	for idx, item := range doItems {
-		modifierMap, isMap := item.(map[string]any)
-		if !isMap {
-			return nil, ex.Newf("do[%d] must be a single-key modifier object", idx)
-		}
-		if len(modifierMap) != 1 {
-			return nil, ex.Newf("do[%d] must contain exactly one modifier key", idx)
-		}
-		for _, modifierRaw := range modifierMap {
-			modifierFields, hasModifierFields := modifierRaw.(map[string]any)
-			if !hasModifierFields {
-				return nil, ex.Newf("do[%d] modifier payload must be a map", idx)
-			}
-			normalized = append(normalized, maps.Clone(modifierFields))
-		}
-	}
-
-	return normalized, nil
-}
-
 // createRuleFromFields creates a rule instance based on the field type present
-// in the (already-normalized) flat YAML fields map.
+// in the (already-normalized) flat YAML fields map produced by [rule.Normalize].
 //
 //nolint:nilnil // factory function; default branch is unreachable per normalizeRule
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
@@ -205,7 +67,7 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 	}
 	rules := make([]rule.InstRule, 0)
 	for name, fields := range h {
-		flatRules, normErr := normalizeRule(fields)
+		flatRules, normErr := rule.Normalize(fields)
 		if normErr != nil {
 			return nil, normErr
 		}

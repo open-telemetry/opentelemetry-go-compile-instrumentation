@@ -17,10 +17,8 @@ package instrument
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,106 +96,6 @@ func runTest(t *testing.T, testName string) {
 	verifyGoldenFiles(t, tempDir, testName)
 }
 
-// normalizeRuleFields translates the structured target/version + where + do
-// format to one or more flat rule maps expected by rule constructors. Fields
-// not using the structured format are returned unchanged as a single-element
-// slice.
-func normalizeRuleFields(fields map[string]any) ([]map[string]any, error) {
-	_, hasWhere := fields["where"]
-	_, hasDo := fields["do"]
-	if !hasWhere && !hasDo {
-		return []map[string]any{fields}, nil
-	}
-	if !hasDo {
-		return nil, errors.New("structured rule is missing do")
-	}
-
-	common := make(map[string]any)
-
-	// Copy top-level fields (e.g. imports, name) excluding where/do.
-	for k, v := range fields {
-		if k != "where" && k != "do" {
-			common[k] = v
-		}
-	}
-
-	if whereRaw, ok := fields["where"]; ok {
-		whereMap, isMap := whereRaw.(map[string]any)
-		if !isMap {
-			return nil, errors.New("where must be a map")
-		}
-		normalizedWhere, normErr := normalizeWhereFieldsForTest(common, whereMap)
-		if normErr != nil {
-			return nil, normErr
-		}
-		if len(normalizedWhere) > 0 {
-			common["where"] = normalizedWhere
-		}
-	}
-
-	doItems, normErr := normalizeDoItemsForTest(common, fields["do"])
-	if normErr != nil {
-		return nil, normErr
-	}
-
-	return doItems, nil
-}
-
-func normalizeWhereFieldsForTest(common, where map[string]any) (map[string]any, error) {
-	if _, exists := where["target"]; exists {
-		return nil, errors.New("target must be top-level, not inside where")
-	}
-	if _, exists := where["version"]; exists {
-		return nil, errors.New("version must be top-level, not inside where")
-	}
-
-	normalizedWhere := make(map[string]any)
-	for key, value := range where {
-		switch key {
-		case "func", "recv", "struct", "function_call", "directive", "kind", "identifier":
-			common[key] = value
-		case "file", "all-of", "one-of", "not":
-			normalizedWhere[key] = value
-		default:
-			return nil, fmt.Errorf("unsupported where key %q", key)
-		}
-	}
-
-	return normalizedWhere, nil
-}
-
-func normalizeDoItemsForTest(common map[string]any, doRaw any) ([]map[string]any, error) {
-	doItems, ok := doRaw.([]any)
-	if !ok {
-		return nil, errors.New("do must be a non-empty list of single-key modifier objects")
-	}
-	if len(doItems) == 0 {
-		return nil, errors.New("do must not be empty")
-	}
-
-	normalized := make([]map[string]any, 0, len(doItems))
-	for idx, item := range doItems {
-		modifierMap, isMap := item.(map[string]any)
-		if !isMap {
-			return nil, fmt.Errorf("do[%d] must be a single-key modifier object", idx)
-		}
-		if len(modifierMap) != 1 {
-			return nil, fmt.Errorf("do[%d] must contain exactly one modifier key", idx)
-		}
-		for _, modifierRaw := range modifierMap {
-			modifierFields, hasModifierFields := modifierRaw.(map[string]any)
-			if !hasModifierFields {
-				return nil, fmt.Errorf("do[%d] modifier payload must be a map", idx)
-			}
-			flat := maps.Clone(common)
-			maps.Copy(flat, modifierFields)
-			normalized = append(normalized, flat)
-		}
-	}
-
-	return normalized, nil
-}
-
 func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet {
 	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
 	require.NoError(t, err)
@@ -225,7 +123,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	slices.Sort(ruleNames)
 
 	for _, name := range ruleNames {
-		propsList, normErr := normalizeRuleFields(rawRules[name])
+		propsList, normErr := rule.Normalize(rawRules[name])
 		require.NoError(t, normErr)
 		for _, props := range propsList {
 			props["name"] = name
