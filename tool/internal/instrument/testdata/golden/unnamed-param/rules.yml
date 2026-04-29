@@ -1,6 +1,8 @@
 hook_unnamed:
   target: main
-  func: Unnamed
-  before: H13Before
-  path: testdata
-
+  where:
+    func: Unnamed
+  do:
+    - inject_hooks:
+        before: H13Before
+        path: testdata
