@@ -1,0 +1,8 @@
+instrument-all:
+  target: example.com/svc
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: BeforeHandler
+        path: example.com/hooks

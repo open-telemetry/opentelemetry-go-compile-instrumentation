@@ -19,10 +19,50 @@ import (
 // bound is exclusive. For example, "v1.0.0,v2.0.0" means the rule is applicable
 // to the target module version range [v1.0.0, v2.0.0).
 type InstRule interface {
-	String() string     // The string representation of the rule
-	GetName() string    // The unique name of the rule
-	GetTarget() string  // The target module path where the rule is applied
-	GetVersion() string // The version range of target module if available, e.g "v1.0.0,v2.0.0"
+	String() string      // The string representation of the rule
+	GetName() string     // The unique name of the rule
+	GetTarget() string   // The target module path where the rule is applied
+	GetVersion() string  // The version range of target module if available, e.g "v1.0.0,v2.0.0"
+	GetWhere() *WhereDef // Optional non-package selectors that remain after normalization
+}
+
+// FilterDef describes file predicates nested under where.file.
+//
+// The file predicate model currently supports implicit all-of across top-level
+// fields plus the explicit qualifier keys needed by the agreed surface. Runtime
+// support remains intentionally narrow: simple leaf predicates are supported,
+// while qualifier composition is validated but not yet executed.
+type FilterDef struct {
+	AllOf []FilterDef `json:"all-of,omitempty" yaml:"all-of,omitempty"`
+	OneOf []FilterDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
+	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`
+
+	HasFunc      string `json:"has_func,omitempty"      yaml:"has_func,omitempty"`
+	HasRecv      string `json:"recv,omitempty"          yaml:"recv,omitempty"`
+	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`
+	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"`
+}
+
+// WhereDef carries the structured where clause after package selectors have
+// been split back out to top-level target/version fields.
+//
+// Today the setup phase only executes where.file predicates. The remaining
+// selector and qualifier fields are preserved here so the agreed syntax surface
+// can be normalized now without forcing the broader internal refactor yet.
+type WhereDef struct {
+	File *FilterDef `json:"file,omitempty" yaml:"file,omitempty"`
+
+	AllOf []WhereDef `json:"all-of,omitempty" yaml:"all-of,omitempty"`
+	OneOf []WhereDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
+	Not   *WhereDef  `json:"not,omitempty"    yaml:"not,omitempty"`
+
+	Func         string `json:"func,omitempty"          yaml:"func,omitempty"`
+	Recv         string `json:"recv,omitempty"          yaml:"recv,omitempty"`
+	Struct       string `json:"struct,omitempty"        yaml:"struct,omitempty"`
+	FunctionCall string `json:"function_call,omitempty" yaml:"function_call,omitempty"`
+	Directive    string `json:"directive,omitempty"     yaml:"directive,omitempty"`
+	Kind         string `json:"kind,omitempty"          yaml:"kind,omitempty"`
+	Identifier   string `json:"identifier,omitempty"    yaml:"identifier,omitempty"`
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
@@ -31,12 +71,14 @@ type InstBaseRule struct {
 	Target  string            `json:"target"            yaml:"target"`
 	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
 	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"` // map[alias]path
+	Where   *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
 }
 
-func (ibr *InstBaseRule) String() string     { return ibr.Name }
-func (ibr *InstBaseRule) GetName() string    { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string  { return ibr.Target }
-func (ibr *InstBaseRule) GetVersion() string { return ibr.Version }
+func (ibr *InstBaseRule) String() string      { return ibr.Name }
+func (ibr *InstBaseRule) GetName() string     { return ibr.Name }
+func (ibr *InstBaseRule) GetTarget() string   { return ibr.Target }
+func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
+func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,

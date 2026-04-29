@@ -73,24 +73,30 @@ That's it! All HTTP traffic is now instrumented.
 
 ### Configuration
 
-The instrumentation is configured at compile-time via `tool/data/nethttp.yaml`:
+The instrumentation is configured at compile-time via `pkg/instrumentation/nethttp/client/client.yaml` and `pkg/instrumentation/nethttp/server/server.yaml`:
 
 ```yaml
 client_hook:
   target: net/http
-  func: RoundTrip
-  recv: "*Transport"
-  before: BeforeRoundTrip
-  after: AfterRoundTrip
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client"
+  where:
+    func: RoundTrip
+    recv: "*Transport"
+  do:
+    - inject_hooks:
+        before: BeforeRoundTrip
+        after: AfterRoundTrip
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client"
 
 server_hook:
   target: net/http
-  func: ServeHTTP
-  recv: serverHandler
-  before: BeforeServeHTTP
-  after: AfterServeHTTP
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server"
+  where:
+    func: ServeHTTP
+    recv: serverHandler
+  do:
+    - inject_hooks:
+        before: BeforeServeHTTP
+        after: AfterServeHTTP
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server"
 ```
 
 ### Environment Variables

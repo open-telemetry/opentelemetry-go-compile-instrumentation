@@ -1,6 +1,8 @@
 hook_before_only:
   target: main
-  func: Func1
-  before: H1Before
-  path: testdata
-
+  where:
+    func: Func1
+  do:
+    - inject_hooks:
+        before: H1Before
+        path: testdata

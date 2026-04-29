@@ -1,6 +1,9 @@
 inject_fmt:
   target: main
-  func: Func1
-  raw: 'fmt.Println("Instrumented with imports")'
+  where:
+    func: Func1
+  do:
+    - inject_code:
+        raw: 'fmt.Println("Instrumented with imports")'
   imports:
     fmt: "fmt"

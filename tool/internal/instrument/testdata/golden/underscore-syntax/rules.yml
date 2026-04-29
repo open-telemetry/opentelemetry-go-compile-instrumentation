@@ -1,6 +1,8 @@
 hook_underscore:
   target: main
-  func: UnderscoreFunc
-  before: H10Before
-  path: testdata
-
+  where:
+    func: UnderscoreFunc
+  do:
+    - inject_hooks:
+        before: H10Before
+        path: testdata

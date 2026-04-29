@@ -1,0 +1,5 @@
+{
+  "matched_files": ["a.go", "b.go"],
+  "rule_name": "instrument-all",
+  "rule_type": "func"
+}

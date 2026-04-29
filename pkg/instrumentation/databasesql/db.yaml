@@ -1,208 +1,280 @@
 add_new_field_db:
   target: database/sql
-  struct: DB
-  new_field:
-    - name: Endpoint
-      type: string
-    - name: DbName
-      type: string
-    - name: DriverName
-      type: string
-    - name: DSN
-      type: string
+  where:
+    struct: DB
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: Endpoint
+            type: string
+          - name: DbName
+            type: string
+          - name: DriverName
+            type: string
+          - name: DSN
+            type: string
 
 add_new_field_stmt:
   target: database/sql
-  struct: Stmt
-  new_field:
-    - name: Data
-      type: map[string]string
-    - name: DriverName
-      type: string
-    - name: DSN
-      type: string
+  where:
+    struct: Stmt
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: Data
+            type: map[string]string
+          - name: DriverName
+            type: string
+          - name: DSN
+            type: string
 
 add_new_field_tx:
   target: database/sql
-  struct: Tx
-  new_field:
-    - name: Endpoint
-      type: string
-    - name: DbName
-      type: string
-    - name: DriverName
-      type: string
-    - name: DSN
-      type: string
+  where:
+    struct: Tx
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: Endpoint
+            type: string
+          - name: DbName
+            type: string
+          - name: DriverName
+            type: string
+          - name: DSN
+            type: string
 
 add_new_field_conn:
   target: database/sql
-  struct: Conn
-  new_field:
-    - name: Endpoint
-      type: string
-    - name: DbName
-      type: string
-    - name: DriverName
-      type: string
-    - name: DSN
-      type: string
+  where:
+    struct: Conn
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: Endpoint
+            type: string
+          - name: DbName
+            type: string
+          - name: DriverName
+            type: string
+          - name: DSN
+            type: string
 
 hook_open:
   target: database/sql
-  func: Open
-  before: beforeOpenInstrumentation
-  after: afterOpenInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: Open
+  do:
+    - inject_hooks:
+        before: beforeOpenInstrumentation
+        after: afterOpenInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_db_ping_context:
   target: database/sql
-  func: PingContext
-  recv: "*DB"
-  before: beforePingContextInstrumentation
-  after: afterPingContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: PingContext
+    recv: "*DB"
+  do:
+    - inject_hooks:
+        before: beforePingContextInstrumentation
+        after: afterPingContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_db_prepare_context:
   target: database/sql
-  func: PrepareContext
-  recv: "*DB"
-  before: beforePrepareContextInstrumentation
-  after: afterPrepareContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: PrepareContext
+    recv: "*DB"
+  do:
+    - inject_hooks:
+        before: beforePrepareContextInstrumentation
+        after: afterPrepareContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_db_exec_context:
   target: database/sql
-  func: ExecContext
-  recv: "*DB"
-  before: beforeExecContextInstrumentation
-  after: afterExecContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: ExecContext
+    recv: "*DB"
+  do:
+    - inject_hooks:
+        before: beforeExecContextInstrumentation
+        after: afterExecContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_db_query_context:
   target: database/sql
-  func: QueryContext
-  recv: "*DB"
-  before: beforeQueryContextInstrumentation
-  after: afterQueryContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: QueryContext
+    recv: "*DB"
+  do:
+    - inject_hooks:
+        before: beforeQueryContextInstrumentation
+        after: afterQueryContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_db_begin_tx:
   target: database/sql
-  func: BeginTx
-  recv: "*DB"
-  before: beforeTxInstrumentation
-  after: afterTxInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: BeginTx
+    recv: "*DB"
+  do:
+    - inject_hooks:
+        before: beforeTxInstrumentation
+        after: afterTxInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_db_conn:
   target: database/sql
-  func: Conn
-  recv: "*DB"
-  before: beforeConnInstrumentation
-  after: afterConnInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: Conn
+    recv: "*DB"
+  do:
+    - inject_hooks:
+        before: beforeConnInstrumentation
+        after: afterConnInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_conn_ping_context:
   target: database/sql
-  func: PingContext
-  recv: "*Conn"
-  before: beforeConnPingContextInstrumentation
-  after: afterConnPingContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: PingContext
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: beforeConnPingContextInstrumentation
+        after: afterConnPingContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_conn_prepare_context:
   target: database/sql
-  func: PrepareContext
-  recv: "*Conn"
-  before: beforeConnPrepareContextInstrumentation
-  after: afterConnPrepareContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: PrepareContext
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: beforeConnPrepareContextInstrumentation
+        after: afterConnPrepareContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_conn_exec_context:
   target: database/sql
-  func: ExecContext
-  recv: "*Conn"
-  before: beforeConnExecContextInstrumentation
-  after: afterConnExecContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: ExecContext
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: beforeConnExecContextInstrumentation
+        after: afterConnExecContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_conn_query_context:
   target: database/sql
-  func: QueryContext
-  recv: "*Conn"
-  before: beforeConnQueryContextInstrumentation
-  after: afterConnQueryContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: QueryContext
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: beforeConnQueryContextInstrumentation
+        after: afterConnQueryContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_conn_begin_tx:
   target: database/sql
-  func: BeginTx
-  recv: "*Conn"
-  before: beforeConnTxInstrumentation
-  after: afterConnTxInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: BeginTx
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: beforeConnTxInstrumentation
+        after: afterConnTxInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_tx_stmt_context:
   target: database/sql
-  func: StmtContext
-  recv: "*Tx"
-  before: beforeTxStmtContextInstrumentation
-  after: afterTxStmtContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: StmtContext
+    recv: "*Tx"
+  do:
+    - inject_hooks:
+        before: beforeTxStmtContextInstrumentation
+        after: afterTxStmtContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_tx_prepare_context:
   target: database/sql
-  func: PrepareContext
-  recv: "*Tx"
-  before: beforeTxPrepareContextInstrumentation
-  after: afterTxPrepareContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: PrepareContext
+    recv: "*Tx"
+  do:
+    - inject_hooks:
+        before: beforeTxPrepareContextInstrumentation
+        after: afterTxPrepareContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_tx_exec_context:
   target: database/sql
-  func: ExecContext
-  recv: "*Tx"
-  before: beforeTxExecContextInstrumentation
-  after: afterTxExecContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: ExecContext
+    recv: "*Tx"
+  do:
+    - inject_hooks:
+        before: beforeTxExecContextInstrumentation
+        after: afterTxExecContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_tx_query_context:
   target: database/sql
-  func: QueryContext
-  recv: "*Tx"
-  before: beforeTxQueryContextInstrumentation
-  after: afterTxQueryContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: QueryContext
+    recv: "*Tx"
+  do:
+    - inject_hooks:
+        before: beforeTxQueryContextInstrumentation
+        after: afterTxQueryContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_tx_commit:
   target: database/sql
-  func: Commit
-  recv: "*Tx"
-  before: beforeTxCommitInstrumentation
-  after: afterTxCommitInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: Commit
+    recv: "*Tx"
+  do:
+    - inject_hooks:
+        before: beforeTxCommitInstrumentation
+        after: afterTxCommitInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_tx_rollback:
   target: database/sql
-  func: Rollback
-  recv: "*Tx"
-  before: beforeTxRollbackInstrumentation
-  after: afterTxRollbackInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: Rollback
+    recv: "*Tx"
+  do:
+    - inject_hooks:
+        before: beforeTxRollbackInstrumentation
+        after: afterTxRollbackInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_stmt_exec_context:
   target: database/sql
-  func: ExecContext
-  recv: "*Stmt"
-  before: beforeStmtExecContextInstrumentation
-  after: afterStmtExecContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: ExecContext
+    recv: "*Stmt"
+  do:
+    - inject_hooks:
+        before: beforeStmtExecContextInstrumentation
+        after: afterStmtExecContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
 
 hook_stmt_query_context:
   target: database/sql
-  func: QueryContext
-  recv: "*Stmt"
-  before: beforeStmtQueryContextInstrumentation
-  after: afterStmtQueryContextInstrumentation
-  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"
+  where:
+    func: QueryContext
+    recv: "*Stmt"
+  do:
+    - inject_hooks:
+        before: beforeStmtQueryContextInstrumentation
+        after: afterStmtQueryContextInstrumentation
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql"

@@ -26,6 +26,271 @@ func (r *mockInstRule) String() string {
 	return r.Name
 }
 
+func TestNormalizeRule(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     map[string]any
+		expect    []map[string]any
+		expectErr string
+	}{
+		{
+			name: "flat format passthrough",
+			input: map[string]any{
+				"target": "net/http",
+				"func":   "ServeHTTP",
+				"before": "BeforeHook",
+				"path":   "github.com/example/pkg",
+			},
+			expect: []map[string]any{{
+				"target": "net/http",
+				"func":   "ServeHTTP",
+				"before": "BeforeHook",
+				"path":   "github.com/example/pkg",
+			}},
+		},
+		{
+			name: "top-level target version with where selectors and where.file",
+			input: map[string]any{
+				"target":  "database/sql",
+				"version": "v1.0.0,v2.0.0",
+				"where": map[string]any{
+					"func": "Open",
+					"file": map[string]any{
+						"has_func": "init",
+					},
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeServeHTTP",
+						"after":  "AfterServeHTTP",
+						"path":   "github.com/example/pkg",
+					}},
+				},
+			},
+			expect: []map[string]any{{
+				"target":  "database/sql",
+				"version": "v1.0.0,v2.0.0",
+				"func":    "Open",
+				"before":  "BeforeServeHTTP",
+				"after":   "AfterServeHTTP",
+				"path":    "github.com/example/pkg",
+				"where": map[string]any{
+					"file": map[string]any{
+						"has_func": "init",
+					},
+				},
+			}},
+		},
+		{
+			name: "multiple do items preserve declaration order",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"func": "Example",
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeHook",
+						"path":   "example.com/hooks",
+					}},
+					map[string]any{"inject_code": map[string]any{
+						"raw": "defer func(){}()",
+					}},
+				},
+			},
+			expect: []map[string]any{
+				{
+					"target": "main",
+					"func":   "Example",
+					"before": "BeforeHook",
+					"path":   "example.com/hooks",
+				},
+				{
+					"target": "main",
+					"func":   "Example",
+					"raw":    "defer func(){}()",
+				},
+			},
+		},
+		{
+			name: "where one-of and not are preserved for later phases",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"func": "Open",
+					"one-of": []any{
+						map[string]any{"file": map[string]any{"has_func": "init"}},
+						map[string]any{"not": map[string]any{"directive": "otelc:ignore"}},
+					},
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeOpen",
+						"path":   "example.com/hooks",
+					}},
+				},
+			},
+			expect: []map[string]any{{
+				"target": "main",
+				"func":   "Open",
+				"before": "BeforeOpen",
+				"path":   "example.com/hooks",
+				"where": map[string]any{
+					"one-of": []any{
+						map[string]any{"file": map[string]any{"has_func": "init"}},
+						map[string]any{"not": map[string]any{"directive": "otelc:ignore"}},
+					},
+				},
+			}},
+		},
+		{
+			name: "repeated modifier kinds are allowed",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"func": "Example",
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeOne",
+						"path":   "example.com/hooks",
+					}},
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeTwo",
+						"path":   "example.com/hooks",
+					}},
+				},
+			},
+			expect: []map[string]any{
+				{
+					"target": "main",
+					"func":   "Example",
+					"before": "BeforeOne",
+					"path":   "example.com/hooks",
+				},
+				{
+					"target": "main",
+					"func":   "Example",
+					"before": "BeforeTwo",
+					"path":   "example.com/hooks",
+				},
+			},
+		},
+		{
+			name: "do map form is sugar for one-element list",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"func": "Example",
+				},
+				"do": map[string]any{
+					"inject_hooks": map[string]any{
+						"before": "BeforeHook",
+						"path":   "example.com/hooks",
+					},
+				},
+			},
+			expect: []map[string]any{{
+				"target": "main",
+				"func":   "Example",
+				"before": "BeforeHook",
+				"path":   "example.com/hooks",
+			}},
+		},
+		{
+			name: "do map form with multiple keys rejected",
+			input: map[string]any{
+				"target": "main",
+				"where":  map[string]any{"func": "Example"},
+				"do": map[string]any{
+					"inject_hooks": map[string]any{"before": "BeforeHook"},
+					"inject_code":  map[string]any{"raw": "_ = 0"},
+				},
+			},
+			expectErr: "exactly one modifier key when written as a map",
+		},
+		{
+			name: "target in where rejected",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"target": "net/http",
+					"func":   "ServeHTTP",
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeHook",
+						"path":   "example.com/hooks",
+					}},
+				},
+			},
+			expectErr: "target must be top-level",
+		},
+		{
+			name: "missing do rejected",
+			input: map[string]any{
+				"target": "main",
+				"where":  map[string]any{"func": "Fn"},
+			},
+			expectErr: "missing do",
+		},
+		{
+			name: "empty do rejected",
+			input: map[string]any{
+				"target": "main",
+				"where":  map[string]any{"func": "Fn"},
+				"do":     []any{},
+			},
+			expectErr: "do must not be empty",
+		},
+		{
+			name: "invalid do item with multiple keys rejected",
+			input: map[string]any{
+				"target": "main",
+				"where":  map[string]any{"func": "Fn"},
+				"do": []any{
+					map[string]any{
+						"inject_hooks": map[string]any{"before": "BeforeHook"},
+						"inject_code":  map[string]any{"raw": "_ = 0"},
+					},
+				},
+			},
+			expectErr: "exactly one modifier key",
+		},
+		{
+			name: "malformed where.file rejected",
+			input: map[string]any{
+				"target": "main",
+				"where": map[string]any{
+					"func": "Fn",
+					"file": "not-a-map",
+				},
+				"do": []any{
+					map[string]any{"inject_hooks": map[string]any{
+						"before": "BeforeHook",
+						"path":   "example.com/hooks",
+					}},
+				},
+			},
+			expectErr: "where.file must be a map",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := rule.Normalize(tt.input)
+			if tt.expectErr != "" {
+				require.ErrorContains(t, err, tt.expectErr)
+				return
+			}
+			require.NoError(t, err)
+			wantYAML, _ := yaml.Marshal(tt.expect)
+			gotYAML, _ := yaml.Marshal(got)
+			require.YAMLEq(t, string(wantYAML), string(gotYAML))
+		})
+	}
+}
+
 func TestMatchVersion(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -470,6 +735,64 @@ func TestLoadDefaultRules(t *testing.T) {
 	require.Greater(t, len(rules), 1, "default rules should be more than 1")
 }
 
+func TestPreciseMatching_WhereFileFilter(t *testing.T) {
+	matchFile := writeGoSource(t, "match.go", "package main\n\ntype Server struct{}\n\nfunc Handler() {}\n")
+	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\nfunc Handler() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-where-file",
+			Target: "example.com/svc",
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{HasStruct: "Server"},
+			},
+		},
+		Func:   "Handler",
+		Before: "BeforeHandler",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.FuncRules, 1)
+	require.Contains(t, result.FuncRules, matchFile)
+}
+
+func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
+	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{srcFile},
+	}
+
+	badRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "bad-where-file",
+			Target: "example.com/svc",
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{HasFunc: "Foo", HasStruct: "Bar"},
+			},
+		},
+		Func: "Foo",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "where.file has multiple active predicates")
+}
+
 // Helper functions for constructing test data
 
 func newTestSetupPhase() *SetupPhase {
@@ -496,8 +819,14 @@ func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.In
 	return rs
 }
 
+func writeGoSource(t *testing.T, name, content string) string {
+	path := filepath.Join(t.TempDir(), name)
+	err := os.WriteFile(path, []byte(content), 0o644)
+	require.NoError(t, err)
+	return path
+}
+
 func TestRunMatch_FileRuleOnlySetsPackageName(t *testing.T) {
-	// Write a temporary Go source file so ParseFileOnlyPackage can parse it
 	dir := t.TempDir()
 	srcFile := filepath.Join(dir, "mypkg.go")
 	err := os.WriteFile(srcFile, []byte("package mypkg\n"), 0o644)
@@ -505,7 +834,6 @@ func TestRunMatch_FileRuleOnlySetsPackageName(t *testing.T) {
 
 	const importPath = "example.com/mypkg"
 
-	// Build a file rule targeting the import path
 	yamlContent := []byte(`
 file: hook.go
 target: example.com/mypkg
@@ -528,7 +856,6 @@ target: example.com/mypkg
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
-	// The package name must be set from parsing the source file
 	assert.Equal(t, "mypkg", set.PackageName)
 	assert.False(t, set.IsEmpty(), "rule set must contain the file rule")
 }
@@ -587,7 +914,6 @@ target: example.com/mypkg
 	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
 	require.NoError(t, err)
 
-	// dep with no sources: package name should remain empty
 	dep := &Dependency{
 		ImportPath: importPath,
 		Sources:    []string{},
@@ -603,7 +929,6 @@ target: example.com/mypkg
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
-	// No sources means package name is not set
 	assert.Empty(t, set.PackageName)
 	assert.False(t, set.IsEmpty())
 }

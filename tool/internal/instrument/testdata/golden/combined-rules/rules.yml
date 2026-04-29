@@ -1,24 +1,34 @@
 hook_func:
   target: main
-  func: Func1
-  before: H1Before
-  after: H1After
-  path: testdata
+  where:
+    func: Func1
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata
 
 add_field:
   target: main
-  struct: T
-  new_field:
-    - name: NewField
-      type: string
+  where:
+    struct: T
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: NewField
+            type: string
 
 add_raw:
   target: main
-  func: Func1
-  raw: "_ = 789"
+  where:
+    func: Func1
+  do:
+    - inject_code:
+        raw: "_ = 789"
 
 add_file:
   target: main
-  file: newfile.go
-  path: testdata
-
+  do:
+    - add_file:
+        file: newfile.go
+        path: testdata

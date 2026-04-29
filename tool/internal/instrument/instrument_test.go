@@ -123,32 +123,35 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	slices.Sort(ruleNames)
 
 	for _, name := range ruleNames {
-		props := rawRules[name]
-		props["name"] = name
-		ruleData, _ := yaml.Marshal(props)
+		propsList, normErr := rule.Normalize(rawRules[name])
+		require.NoError(t, normErr)
+		for _, props := range propsList {
+			props["name"] = name
+			ruleData, _ := yaml.Marshal(props)
 
-		switch {
-		case props["struct"] != nil:
-			r, _ := rule.NewInstStructRule(ruleData, name)
-			ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
-		case props["file"] != nil:
-			r, _ := rule.NewInstFileRule(ruleData, name)
-			ruleSet.FileRules = append(ruleSet.FileRules, r)
-		case props["directive"] != nil:
-			r, _ := rule.NewInstDirectiveRule(ruleData, name)
-			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
-		case props["raw"] != nil:
-			r, _ := rule.NewInstRawRule(ruleData, name)
-			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
-		case props["func"] != nil:
-			r, _ := rule.NewInstFuncRule(ruleData, name)
-			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
-		case props["function_call"] != nil:
-			r, _ := rule.NewInstCallRule(ruleData, name)
-			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
-		case props["identifier"] != nil:
-			r, _ := rule.NewInstDeclRule(ruleData, name)
-			ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+			switch {
+			case props["struct"] != nil:
+				r, _ := rule.NewInstStructRule(ruleData, name)
+				ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
+			case props["file"] != nil:
+				r, _ := rule.NewInstFileRule(ruleData, name)
+				ruleSet.FileRules = append(ruleSet.FileRules, r)
+			case props["directive"] != nil:
+				r, _ := rule.NewInstDirectiveRule(ruleData, name)
+				ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
+			case props["raw"] != nil:
+				r, _ := rule.NewInstRawRule(ruleData, name)
+				ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
+			case props["func"] != nil:
+				r, _ := rule.NewInstFuncRule(ruleData, name)
+				ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
+			case props["function_call"] != nil:
+				r, _ := rule.NewInstCallRule(ruleData, name)
+				ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
+			case props["identifier"] != nil:
+				r, _ := rule.NewInstDeclRule(ruleData, name)
+				ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+			}
 		}
 	}
 

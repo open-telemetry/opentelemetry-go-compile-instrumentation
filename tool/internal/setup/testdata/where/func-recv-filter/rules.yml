@@ -1,0 +1,11 @@
+instrument-open:
+  target: example.com/svc
+  where:
+    func: Open
+    file:
+      has_func: Handle
+      recv: "*Server"
+  do:
+    - inject_hooks:
+        before: BeforeOpen
+        path: example.com/hooks
