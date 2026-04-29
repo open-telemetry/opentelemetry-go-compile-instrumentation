@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"context"
 	"go/token"
 	"testing"
 
@@ -14,79 +15,90 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
-func TestWrapCall_Success(t *testing.T) {
-	// Create a rule with a simple template
-	r := &rule.InstCallRule{
-		Template: "wrapper({{ . }})",
+// makeCallFile builds a minimal *dst.File containing a single function whose
+// body consists of a single expression statement holding the given call.
+func makeCallFile(call *dst.CallExpr) *dst.File {
+	return &dst.File{
+		Name: &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{
+			&dst.FuncDecl{
+				Name: &dst.Ident{Name: "f"},
+				Type: &dst.FuncType{Params: &dst.FieldList{}},
+				Body: &dst.BlockStmt{
+					List: []dst.Stmt{
+						&dst.ExprStmt{X: call},
+					},
+				},
+			},
+		},
 	}
+}
 
-	// Create a call expression
-	call := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "original"},
+func httpGetCall() *dst.CallExpr {
+	return &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "http", Path: "net/http"},
+			Sel: &dst.Ident{Name: "Get"},
+		},
+		Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"url"`}},
 	}
+}
 
-	// Wrap it
-	err := wrapCall(call, r)
+func httpGetRule(template string) *rule.InstCallRule {
+	return &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Template:     template,
+	}
+}
 
-	// Verify - the call expression is modified in place
+// --- applyCallRule tests ---
+
+func TestApplyCallRule_Success(t *testing.T) {
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("traced({{ . }})")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
 	require.NoError(t, err)
-	// After wrapping, the outer call is now "wrapper"
-	wrapperIdent, ok := call.Fun.(*dst.Ident)
+	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
+	outerCall, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	fn, ok := outerCall.Fun.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "wrapper", wrapperIdent.Name)
-	// Should have exactly one argument (the original call)
-	require.Len(t, call.Args, 1)
-	// Verify the argument is a call expression (structure preserved)
-	_, ok = call.Args[0].(*dst.CallExpr)
+	assert.Equal(t, "traced", fn.Name)
+	require.Len(t, outerCall.Args, 1)
+	_, ok = outerCall.Args[0].(*dst.CallExpr)
 	require.True(t, ok, "expected inner argument to be a call expression")
 }
 
-func TestWrapCall_EmptyTemplate(t *testing.T) {
-	r := &rule.InstCallRule{
-		Template: "", // Empty template
-	}
+func TestApplyCallRule_NonCallExprResult(t *testing.T) {
+	// Template produces a selector expression, not a call expression.
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("{{ . }}.Response")
 
-	call := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "test"},
-	}
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
 
-	err := wrapCall(call, r)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to compile template")
+	require.NoError(t, err)
+	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
+	_, ok := stmt.X.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr after wrap, got %T", stmt.X)
 }
 
-func TestWrapCall_TemplateCompilationError(t *testing.T) {
-	// Create a rule with a template that produces invalid Go syntax
-	r := &rule.InstCallRule{
-		Template: "func {{ . }}", // "func" keyword without proper syntax
-	}
+func TestApplyCallRule_InvalidTemplate(t *testing.T) {
+	// An unclosed template tag fails fasttemplate parsing in newCallTemplate.
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("wrapper({{")
 
-	call := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "test"},
-	}
-
-	err := wrapCall(call, r)
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to compile template")
+	assert.Contains(t, err.Error(), "rule has no compiled template")
 }
 
-func TestWrapCall_NonCallExpressionResult(t *testing.T) {
-	// Create a template that produces a non-call expression
-	r := &rule.InstCallRule{
-		Template: "{{ . }}.Field",
-	}
-
-	call := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "test"},
-	}
-
-	err := wrapCall(call, r)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "template output must be a call expression")
-}
+// --- matchesCallRule tests ---
 
 func TestMatchesCallRule_QualifiedCallMatches(t *testing.T) {
 	r := &rule.InstCallRule{
@@ -334,30 +346,31 @@ func TestAppendCallArgs_InvalidExpr(t *testing.T) {
 }
 
 func TestAppendCallArgs_WithTemplate(t *testing.T) {
+	// Both append_args and template: args appended first, then template wraps.
+	call := httpGetCall()
+	file := makeCallFile(call)
 	r := &rule.InstCallRule{
-		AppendArgs: []string{"42"},
-		Template:   "wrapper({{ . }})",
-	}
-	call := &dst.CallExpr{
-		Fun:  &dst.Ident{Name: "f"},
-		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		AppendArgs:   []string{"42"},
+		Template:     "wrapper({{ . }})",
 	}
 
-	// Apply appendCallArgs first, then wrapCall (mirrors applyCallRule)
-	modified, err := appendCallArgs(call, r)
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
 	require.NoError(t, err)
-	assert.True(t, modified)
-	assert.Len(t, call.Args, 2)
 
-	err = wrapCall(call, r)
-	require.NoError(t, err)
-	// After wrapping, outer call is "wrapper"
-	wrapperIdent, ok := call.Fun.(*dst.Ident)
+	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
+	outerCall, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	// Outer call is "wrapper"
+	wrapperIdent, ok := outerCall.Fun.(*dst.Ident)
 	require.True(t, ok)
 	assert.Equal(t, "wrapper", wrapperIdent.Name)
-	// Inner call has 2 args
-	require.Len(t, call.Args, 1)
-	innerCall, ok := call.Args[0].(*dst.CallExpr)
+	// Inner call has 2 args (original + appended 42)
+	require.Len(t, outerCall.Args, 1)
+	innerCall, ok := outerCall.Args[0].(*dst.CallExpr)
 	require.True(t, ok)
 	assert.Len(t, innerCall.Args, 2)
 }
