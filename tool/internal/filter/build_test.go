@@ -26,7 +26,7 @@ func TestBuild_NilWhere(t *testing.T) {
 }
 
 func TestBuild_FuncFilter(t *testing.T) {
-	where := &rule.WhereDef{File: &rule.FilterDef{HasFunc: "ServeHTTP", Recv: "*serverHandler"}}
+	where := &rule.WhereDef{File: &rule.FilterDef{HasFunc: "ServeHTTP", HasRecv: "*serverHandler"}}
 	f, err := filter.Build(where)
 	if err != nil {
 		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
@@ -69,7 +69,7 @@ func TestBuild_ErrorCases(t *testing.T) {
 		},
 		{
 			name:  "recv without has_func",
-			where: &rule.WhereDef{File: &rule.FilterDef{Recv: "*Server"}},
+			where: &rule.WhereDef{File: &rule.FilterDef{HasRecv: "*Server"}},
 		},
 		{
 			name:  "multiple file predicates",

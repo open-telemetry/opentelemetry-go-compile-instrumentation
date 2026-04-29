@@ -51,7 +51,7 @@ The max chain size is configurable:
 
 ### 3) Hook integration points
 
-Configured in `pkg/instrumentation/otel/hook/otel.yaml` and implemented in `pkg/instrumentation/otel/hook/`:
+Configured in `pkg/instrumentation/otel/hook/hooks.yaml` and implemented in `pkg/instrumentation/otel/hook/`:
 
 - `tracer_setup.go`: add span to GLS after span creation
 - `span_setup.go`: remove span from GLS before span end

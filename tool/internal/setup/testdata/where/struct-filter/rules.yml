@@ -1,7 +1,10 @@
 instrument-handler:
   target: example.com/svc
-  func: Handler
-  before: BeforeHandler
-  path: example.com/hooks
   where:
-    has_struct: Server
+    func: Handler
+    file:
+      has_struct: Server
+  do:
+    - inject_hooks:
+        before: BeforeHandler
+        path: example.com/hooks

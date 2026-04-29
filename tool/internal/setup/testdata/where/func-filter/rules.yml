@@ -1,7 +1,10 @@
 instrument-open:
   target: example.com/svc
-  func: Open
-  before: BeforeOpen
-  path: example.com/hooks
   where:
-    has_func: init
+    func: Open
+    file:
+      has_func: init
+  do:
+    - inject_hooks:
+        before: BeforeOpen
+        path: example.com/hooks

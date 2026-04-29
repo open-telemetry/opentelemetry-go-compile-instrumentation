@@ -55,7 +55,7 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		return nil, ex.Newf("where.file not predicate composition is not yet supported")
 	}
 
-	if def.Recv != "" && def.HasFunc == "" {
+	if def.HasRecv != "" && def.HasFunc == "" {
 		return nil, ex.Newf("where.file.recv requires where.file.has_func")
 	}
 
@@ -79,7 +79,7 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 
 	switch {
 	case def.HasFunc != "":
-		return &FuncFilter{Func: def.HasFunc, Recv: def.Recv}, nil
+		return &FuncFilter{Func: def.HasFunc, Recv: def.HasRecv}, nil
 	case def.HasStruct != "":
 		return &StructFilter{Struct: def.HasStruct}, nil
 	case def.HasDirective != "":

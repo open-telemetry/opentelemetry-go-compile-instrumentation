@@ -38,7 +38,7 @@ type FilterDef struct {
 	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`
 
 	HasFunc      string `json:"has_func,omitempty"      yaml:"has_func,omitempty"`
-	Recv         string `json:"recv,omitempty"          yaml:"recv,omitempty"`
+	HasRecv      string `json:"recv,omitempty"          yaml:"recv,omitempty"`
 	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`
 	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"`
 }
