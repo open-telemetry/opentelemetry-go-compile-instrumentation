@@ -87,7 +87,6 @@ func TestApplyCallRule_NonCallExprResult(t *testing.T) {
 	require.True(t, ok, "expected *dst.SelectorExpr after wrap, got %T", stmt.X)
 }
 
-
 func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 	// An unclosed template tag fails fasttemplate parsing in newCallTemplate.
 	file := makeCallFile(httpGetCall())

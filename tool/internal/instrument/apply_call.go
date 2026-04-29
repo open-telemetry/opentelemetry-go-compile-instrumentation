@@ -19,13 +19,11 @@ import (
 func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
 	importAliases := collectImportAliases(root)
 
-	appendModified, err := ip.applyCallAppendArgs(r, root, importAliases)
-	if err != nil {
-		return err
-	}
+	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
 
 	templateModified := false
 	if r.Template != "" {
+		var err error
 		templateModified, err = ip.applyCallTemplate(r, root, importAliases)
 		if err != nil {
 			return err
@@ -100,9 +98,9 @@ func (ip *InstrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
-) (bool, error) {
+) bool {
 	if len(r.AppendArgs) == 0 {
-		return false, nil
+		return false
 	}
 
 	var matchingCalls []*dst.CallExpr
@@ -122,7 +120,7 @@ func (ip *InstrumentPhase) applyCallAppendArgs(
 		}
 	}
 
-	return true, nil
+	return true
 }
 
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
