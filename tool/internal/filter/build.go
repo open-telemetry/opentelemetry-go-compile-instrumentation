@@ -6,6 +6,7 @@ package filter
 import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 // Build constructs a runtime Filter from a structured where clause.
@@ -42,6 +43,7 @@ func Build(where *rule.WhereDef) (Filter, error) {
 	return buildFile(where.File)
 }
 
+//nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
 func buildFile(def *rule.FilterDef) (Filter, error) {
 	if len(def.AllOf) > 0 {
 		return nil, ex.Newf("where.file all-of predicate composition is not yet supported")
@@ -83,6 +85,10 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 	case def.HasDirective != "":
 		return nil, ex.Newf("where.file.has_directive is not yet supported")
 	default:
-		return nil, ex.Newf("where.file reached an unsupported predicate shape")
+		// The active-predicate counter above proves at least one leaf is set;
+		// matching the convention in match.go / instrument.go / trampoline.go,
+		// flag this branch as unreachable rather than synthesizing an error.
+		util.ShouldNotReachHere()
+		return nil, nil
 	}
 }
