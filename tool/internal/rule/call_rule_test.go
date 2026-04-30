@@ -21,10 +21,10 @@ func TestNewInstCallRule(t *testing.T) {
 		check       func(*testing.T, *InstCallRule)
 	}{
 		{
-			name: "template only",
+			name: "replace only",
 			yaml: `
 function_call: net/http.Get
-template: "wrapper({{ . }})"
+replace: "wrapper({{ . }})"
 `,
 			ruleName: "wrap_http_get",
 			check: func(t *testing.T, r *InstCallRule) {
@@ -32,7 +32,7 @@ template: "wrapper({{ . }})"
 				assert.Equal(t, "net/http.Get", r.FunctionCall)
 				assert.Equal(t, "net/http", r.ImportPath)
 				assert.Equal(t, "Get", r.FuncName)
-				assert.Equal(t, "wrapper({{ . }})", r.Template)
+				assert.Equal(t, "wrapper({{ . }})", r.Replace)
 			},
 		},
 		{
@@ -46,7 +46,7 @@ append_args: ["ctx"]
 				assert.Equal(t, "net/http", r.ImportPath)
 				assert.Equal(t, "Get", r.FuncName)
 				assert.Equal(t, []string{"ctx"}, r.AppendArgs)
-				assert.Empty(t, r.Template)
+				assert.Empty(t, r.Replace)
 			},
 		},
 		{
@@ -63,15 +63,15 @@ variadic_type: "grpc.DialOption"
 			},
 		},
 		{
-			name: "both template and append_args",
+			name: "both replace and append_args",
 			yaml: `
 function_call: net/http.Get
-template: "wrapper({{ . }})"
+replace: "wrapper({{ . }})"
 append_args: ["ctx"]
 `,
 			ruleName: "combined",
 			check: func(t *testing.T, r *InstCallRule) {
-				assert.NotEmpty(t, r.Template)
+				assert.NotEmpty(t, r.Replace)
 				assert.NotEmpty(t, r.AppendArgs)
 			},
 		},
@@ -80,7 +80,7 @@ append_args: ["ctx"]
 			yaml: `
 name: yaml_name
 function_call: net/http.Get
-template: "wrapper({{ . }})"
+replace: "wrapper({{ . }})"
 `,
 			ruleName: "arg_name",
 			check: func(t *testing.T, r *InstCallRule) {
@@ -91,30 +91,30 @@ template: "wrapper({{ . }})"
 			name: "invalid function_call format",
 			yaml: `
 function_call: NoPackagePath
-template: "wrapper({{ . }})"
+replace: "wrapper({{ . }})"
 `,
 			ruleName:    "bad",
 			wantErr:     true,
 			errContains: "invalid function_call format",
 		},
 		{
-			name: "neither template nor append_args",
+			name: "neither replace nor append_args",
 			yaml: `
 function_call: net/http.Get
 `,
 			ruleName:    "bad",
 			wantErr:     true,
-			errContains: "at least one of template or append_args must be set",
+			errContains: "at least one of replace or append_args must be set",
 		},
 		{
-			name: "template without placeholder",
+			name: "replace without placeholder",
 			yaml: `
 function_call: net/http.Get
-template: "noPlaceholder()"
+replace: "noPlaceholder()"
 `,
 			ruleName:    "bad",
 			wantErr:     true,
-			errContains: "template must contain {{ . }} placeholder",
+			errContains: "replace must contain {{ . }} placeholder",
 		},
 		{
 			name: "empty append_args entry",
@@ -137,14 +137,14 @@ append_args: ["   "]
 			errContains: "append_args[0] must be a non-empty string",
 		},
 		{
-			name: "invalid template syntax",
+			name: "invalid replace syntax",
 			yaml: `
 function_call: net/http.Get
-template: "wrapper({{ . }}) {{ unclosed"
+replace: "wrapper({{ . }}) {{ unclosed"
 `,
 			ruleName:    "bad",
 			wantErr:     true,
-			errContains: "invalid template syntax",
+			errContains: "invalid replace syntax",
 		},
 		{
 			name:     "invalid yaml",
@@ -175,7 +175,7 @@ template: "wrapper({{ . }}) {{ unclosed"
 
 func TestInstCallRule_UnmarshalJSON(t *testing.T) {
 	t.Run("populates derived fields", func(t *testing.T) {
-		data := `{"function_call":"net/http.Get","template":"wrapper({{ . }})"}`
+		data := `{"function_call":"net/http.Get","replace":"wrapper({{ . }})"}`
 		var r InstCallRule
 		err := json.Unmarshal([]byte(data), &r)
 		require.NoError(t, err)

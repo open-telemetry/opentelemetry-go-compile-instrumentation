@@ -1,6 +1,6 @@
 wrap_sizeof_with_strings:
   target: main
   function_call: unsafe.Sizeof
-  template: "(func() uintptr { fmt.Println(\"Wrapped!\"); return {{ . }} })()"
+  replace: "(func() uintptr { fmt.Println(\"Wrapped!\"); return {{ . }} })()"
   imports:
     fmt: "fmt"

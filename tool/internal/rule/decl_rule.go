@@ -19,7 +19,7 @@ import (
 //	  target: net/http
 //	  kind: var
 //	  identifier: DefaultTransport
-//	  value: |
+//	  replace: |
 //	    &http.Transport{MaxIdleConns: 100}
 type InstDeclRule struct {
 	InstBaseRule `yaml:",inline"`
@@ -31,9 +31,9 @@ type InstDeclRule struct {
 	// Identifier is the name of the top-level declaration to match.
 	Identifier string `json:"identifier" yaml:"identifier"`
 
-	// Value is a Go expression to assign as the value of the matched
+	// Replace is a Go expression to assign as the value of the matched
 	// var or const declaration.
-	Value string `json:"value" yaml:"value"`
+	Replace string `json:"replace" yaml:"replace"`
 }
 
 // NewInstDeclRule loads and validates an InstDeclRule from YAML data.
@@ -68,11 +68,11 @@ func (r *InstDeclRule) validate() error {
 	if !validDeclKinds[r.Kind] {
 		return ex.Newf("kind %q is invalid; must be one of: func, var, const, type, or empty", r.Kind)
 	}
-	if strings.TrimSpace(r.Value) == "" {
-		return ex.Newf("value cannot be empty")
+	if strings.TrimSpace(r.Replace) == "" {
+		return ex.Newf("replace cannot be empty")
 	}
 	if r.Kind == "func" || r.Kind == "type" {
-		return ex.Newf("value is not valid when kind is %q", r.Kind)
+		return ex.Newf("replace is not valid when kind is %q", r.Kind)
 	}
 	return nil
 }
