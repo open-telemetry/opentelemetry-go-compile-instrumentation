@@ -1,4 +1,4 @@
 wrap_nested_call:
   target: main
   function_call: unsafe.Sizeof
-  template: "(func() uintptr { return {{ . }} })()"
+  replace: "(func() uintptr { return {{ . }} })()"

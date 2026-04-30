@@ -33,7 +33,7 @@ func parseValueExpr(exprSource string) (dst.Expr, error) {
 // applyDeclRule applies a declaration rule to the target file, modifying the
 // matched named declaration (e.g., assigning a new value to a var or const).
 func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRule, root *dst.File) error {
-	if r.Value == "" {
+	if r.Replace == "" {
 		return nil
 	}
 
@@ -48,7 +48,7 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	}
 
 	spec := util.AssertType[*dst.ValueSpec](node)
-	expr, err := parseValueExpr(r.Value)
+	expr, err := parseValueExpr(r.Replace)
 	if err != nil {
 		return err
 	}

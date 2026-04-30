@@ -15,9 +15,9 @@ import (
 )
 
 func TestWrapCall_Success(t *testing.T) {
-	// Create a rule with a simple template
+	// Create a rule with a simple replacement template.
 	r := &rule.InstCallRule{
-		Template: "wrapper({{ . }})",
+		Replace: "wrapper({{ . }})",
 	}
 
 	// Create a call expression
@@ -43,7 +43,7 @@ func TestWrapCall_Success(t *testing.T) {
 
 func TestWrapCall_EmptyTemplate(t *testing.T) {
 	r := &rule.InstCallRule{
-		Template: "", // Empty template
+		Replace: "", // Empty replacement template
 	}
 
 	call := &dst.CallExpr{
@@ -53,13 +53,13 @@ func TestWrapCall_EmptyTemplate(t *testing.T) {
 	err := wrapCall(call, r)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to compile template")
+	assert.Contains(t, err.Error(), "failed to compile replacement template")
 }
 
 func TestWrapCall_TemplateCompilationError(t *testing.T) {
-	// Create a rule with a template that produces invalid Go syntax
+	// Create a rule with a replacement template that produces invalid Go syntax.
 	r := &rule.InstCallRule{
-		Template: "func {{ . }}", // "func" keyword without proper syntax
+		Replace: "func {{ . }}", // "func" keyword without proper syntax
 	}
 
 	call := &dst.CallExpr{
@@ -69,13 +69,13 @@ func TestWrapCall_TemplateCompilationError(t *testing.T) {
 	err := wrapCall(call, r)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to compile template")
+	assert.Contains(t, err.Error(), "failed to compile replacement template")
 }
 
 func TestWrapCall_NonCallExpressionResult(t *testing.T) {
-	// Create a template that produces a non-call expression
+	// Create a replacement template that produces a non-call expression.
 	r := &rule.InstCallRule{
-		Template: "{{ . }}.Field",
+		Replace: "{{ . }}.Field",
 	}
 
 	call := &dst.CallExpr{
@@ -85,7 +85,7 @@ func TestWrapCall_NonCallExpressionResult(t *testing.T) {
 	err := wrapCall(call, r)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "template output must be a call expression")
+	assert.Contains(t, err.Error(), "replace output must be a call expression")
 }
 
 func TestMatchesCallRule_QualifiedCallMatches(t *testing.T) {
@@ -333,10 +333,10 @@ func TestAppendCallArgs_InvalidExpr(t *testing.T) {
 	assert.False(t, modified)
 }
 
-func TestAppendCallArgs_WithTemplate(t *testing.T) {
+func TestAppendCallArgs_WithReplace(t *testing.T) {
 	r := &rule.InstCallRule{
 		AppendArgs: []string{"42"},
-		Template:   "wrapper({{ . }})",
+		Replace:    "wrapper({{ . }})",
 	}
 	call := &dst.CallExpr{
 		Fun:  &dst.Ident{Name: "f"},

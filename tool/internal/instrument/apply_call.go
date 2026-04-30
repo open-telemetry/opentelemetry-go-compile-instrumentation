@@ -14,7 +14,7 @@ import (
 )
 
 // applyCallRule transforms function calls at call sites by wrapping them with
-// instrumentation code according to the provided template.
+// instrumentation code according to the provided replacement template.
 func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
 	modified := false
 	importAliases := collectImportAliases(root)
@@ -42,14 +42,14 @@ func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 			continue
 		}
 
-		if r.Template != "" {
+		if r.Replace != "" {
 			if err = wrapCall(call, r); err != nil {
 				ip.Warn("Failed to wrap call", "error", err)
 				continue
 			}
 		}
 
-		if appended || r.Template != "" {
+		if appended || r.Replace != "" {
 			modified = true
 		}
 	}
@@ -145,24 +145,24 @@ func buildEllipsisIIFE(spreadArg, varType dst.Expr, newArgs []dst.Expr) *dst.Cal
 	}
 }
 
-// wrapCall applies the template transformation to wrap the original call.
+// wrapCall applies the replacement template transformation to wrap the original call.
 func wrapCall(call *dst.CallExpr, r *rule.InstCallRule) error {
-	tmpl, err := newCallTemplate(r.Template)
+	tmpl, err := newCallTemplate(r.Replace)
 	if err != nil {
-		return ex.Wrapf(err, "rule has no compiled template")
+		return ex.Wrapf(err, "rule has no compiled replacement template")
 	}
 
-	// Use the template to compile the wrapped expression
+	// Use the replacement template to compile the wrapped expression.
 	wrappedExpr, err := tmpl.compileExpression(call)
 	if err != nil {
-		return ex.Wrapf(err, "failed to compile template")
+		return ex.Wrapf(err, "failed to compile replacement template")
 	}
 
 	// Verify we got a call expression back
 	wrappedCall, ok := wrappedExpr.(*dst.CallExpr)
 	if !ok {
 		return ex.Newf(
-			"template output must be a call expression (e.g. \"wrapper({{ . }})\") but got %T; see docs/rules.md for supported template patterns",
+			"replace output must be a call expression (e.g. \"wrapper({{ . }})\") but got %T; see docs/rules.md for supported template patterns",
 			wrappedExpr,
 		)
 	}
