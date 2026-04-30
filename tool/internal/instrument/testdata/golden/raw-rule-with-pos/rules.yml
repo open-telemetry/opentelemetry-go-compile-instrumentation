@@ -1,0 +1,47 @@
+func1_first_match:
+  target: main
+  func: func1
+  raw: "print(\"Hello\")"
+  pos: "^println\\(\", World!\"\\)$"
+
+func2_inside_goroutine:
+  target: main
+  func: func2
+  raw: "print(\"Inside goroutine\")"
+  pos: "^println\\(\", World!\"\\)$"
+
+func2_before_go:
+  target: main
+  func: func2
+  raw: "print(\"Before go func\")"
+  pos: "^go func\\(\\) \\{"
+
+func3_before_select:
+  target: main
+  func: func3
+  raw: "print(\"Before select\")"
+  pos: "^select \\{"
+
+func4_if_block:
+  target: main
+  func: func4
+  raw: "print(\"Inside if\")"
+  pos: "^println\\(\"IF BLOCK\"\\)"
+
+func5_loop_match:
+  target: main
+  func: func5
+  raw: "print(\"Loop hit\")"
+  pos: "^println\\(\"loop\"\\)"
+
+func6_multiline_statement:
+  target: main
+  func: func6
+  raw: "print(\"Multiline match\")"
+  pos: "fmt\\.Println"
+
+func7_similar_but_not_exact:
+  target: main
+  func: func7
+  raw: "print(\"Exact only\")"
+  pos: "^println\\(\"exact\"\\)$"

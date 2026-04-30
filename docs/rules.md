@@ -120,6 +120,11 @@ This rule injects a string of raw Go code at the beginning of a target function.
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
 - `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function.
+- `pos` (string, optional): The position within the function where the raw code should be injected. By default, the code is injected at the start of the function body. If provided, the value must be a valid regular expression.
+
+  The pattern is matched against the canonical gofmt representation for each statement in the function body (not always the exact original source formatting). The injected code is placed immediately before the first statement that matches the pattern.
+
+  If no statement matches the pattern, an error is returned.
 - `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Common Fields](#common-fields).
 
 **Example:**
@@ -151,6 +156,34 @@ raw_with_hash:
     fmt: "fmt"
     sha256: "crypto/sha256"
 ```
+
+**Example with pos:**
+
+Sometimes you may want to inject raw code at a specific location within the function body rather than at the start. Use the `pos` field with a regex pattern to specify the injection point:
+
+```yaml
+raw_with_hash:
+  target: main
+  func: Example
+  raw: "go func(){ println(\"RawCode\") }()"
+  pos: "^println\\(\"hello\"\\)$"
+```
+
+If `Example()` looks like this:
+
+```go
+func Example() {
+  if true {
+    println("hello")
+  }
+}
+```
+
+The injected code will be placed immediately before the `println("hello")` statement.
+
+Note the pattern starts with `^`. During AST traversal, outer statements (such as `if`, `for`, or `go func`) are visited before their inner statements. Since matching is performed on the formatted string of each statement, a loose pattern may accidentally match a parent statement if it contains the target code.
+
+Anchoring the pattern with `^` (and usually `$`) ensures that only the exact statement is matched, preventing insertion at the wrong level (e.g., before an entire block instead of the intended inner statement).
 
 ### 4. Call Wrapping Rule
 
