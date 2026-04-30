@@ -162,7 +162,7 @@ func wrapCall(call *dst.CallExpr, r *rule.InstCallRule) error {
 	wrappedCall, ok := wrappedExpr.(*dst.CallExpr)
 	if !ok {
 		return ex.Newf(
-			"replace output must be a call expression (e.g. \"wrapper({{ . }})\") but got %T; see docs/rules.md for supported template patterns",
+			"replace output must be a call expression (e.g. \"wrapper({{ . }})\") but got %T",
 			wrappedExpr,
 		)
 	}
