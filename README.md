@@ -82,3 +82,13 @@ We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [dev
 
 This project follows the [OpenTelemetry Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md).
 Please also review our [AI usage policy](AI_POLICY.md) if you use AI tools in your workflow.
+
+### Emeritus
+
+- [Dinesh Gurumurthy](https://github.com/dineshg13), Maintainer
+- [Eliott B](https://github.com/eliottness), Approver
+- [Liu Ziming](https://github.com/123liuziming), Maintainer
+- [Romain Marcadier](https://github.com/RomainMuller), Maintainer
+
+For more information about the emeritus role, see the
+[community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
