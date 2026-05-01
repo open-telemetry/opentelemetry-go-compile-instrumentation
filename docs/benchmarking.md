@@ -52,7 +52,7 @@ Scenarios live in `test/bench/scenarios/`:
 | Scenario | Dependencies | Instrumented pkgs | What it measures |
 | :--- | :--- | :---: | :--- |
 | `baseline` | stdlib only (`fmt`) | 0 | Pure scaffolding: setup phase + toolexec passthrough for a small stdlib dep tree, no rule matches. |
-| `multi` | `net/http` + gRPC + `database/sql` + Redis | 6–8 | Worst case: all available instrumentation rules active and exercised simultaneously. |
+| `multi` | `net/http` + gRPC + `database/sql` + Redis + K8S-Client-Go | 6–8 | Worst case: all available instrumentation rules active and exercised simultaneously. |
 | `largeidle` | Heavy stdlib + many third-party libs, no matching targets | **0** | "Tax" on large projects: many compilation units all passing through toolexec with zero AST rewriting. |
 
 The `largeidle` scenario is the most important for realistic enterprise codebases where a user enables `net/http` instrumentation but has hundreds of internal or third-party packages that do not match any rule.

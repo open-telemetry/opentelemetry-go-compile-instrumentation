@@ -138,6 +138,38 @@ func TestMatchVersion(t *testing.T) {
 			expectedResult: true,
 		},
 		{
+			name: "start inclusive only - good",
+			dependency: &Dependency{
+				Version: "v1.2.3",
+			},
+			ruleVersion:    "v1.2.3,",
+			expectedResult: true,
+		},
+		{
+			name: "start inclusive only - bad",
+			dependency: &Dependency{
+				Version: "v1.2.3",
+			},
+			ruleVersion:    "v1.2.4,",
+			expectedResult: false,
+		},
+		{
+			name: "end exclusive only - good",
+			dependency: &Dependency{
+				Version: "v1.2.3",
+			},
+			ruleVersion:    ",v1.2.4",
+			expectedResult: true,
+		},
+		{
+			name: "end exclusive only - bad",
+			dependency: &Dependency{
+				Version: "v1.2.3",
+			},
+			ruleVersion:    ",v1.2.3",
+			expectedResult: false,
+		},
+		{
 			name: "minimal version only - good",
 			dependency: &Dependency{
 				Version: "v1.2.3",
