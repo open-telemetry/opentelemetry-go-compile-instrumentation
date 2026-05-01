@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for gRPC client with OpenTelemetry compile-time instrumentation
 # Stage 1: Build the otelc tool
-FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS otelc-builder
+FROM golang:1.26-alpine@sha256:f85330846cde1e57ca9ec309382da3b8e6ae3ab943d2739500e08c86393a21b1 AS otelc-builder
 
 WORKDIR /build
 
@@ -15,7 +15,7 @@ COPY . .
 RUN go build -o /otelc ./tool/cmd
 
 # Stage 2: Build the gRPC client with instrumentation
-FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS app-builder
+FROM golang:1.26-alpine@sha256:f85330846cde1e57ca9ec309382da3b8e6ae3ab943d2739500e08c86393a21b1 AS app-builder
 
 WORKDIR /app
 
@@ -36,7 +36,7 @@ RUN go mod download
 RUN otelc go build -o client .
 
 # Stage 3: Runtime image
-FROM alpine:3.23@sha256:51183f2cfa6320055da30872f211093f9ff1d3cf06f39a0bdb212314c5dc7375
+FROM alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
 
 # Install ca-certificates for TLS and timezone data
 RUN apk --no-cache add ca-certificates tzdata
