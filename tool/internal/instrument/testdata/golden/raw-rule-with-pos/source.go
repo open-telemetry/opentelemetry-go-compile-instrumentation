@@ -7,14 +7,14 @@ import "fmt"
 
 func func1() {
 	println(", World!")
-	println(", World!") // duplicate match case
+	println(", World!")
 }
 
 func func2() {
 	go func() {
-		println(", World!") // inside goroutine
+		println("goroutine!")
 	}()
-	println(", World!") // outside goroutine
+	println("goroutine!")
 }
 
 func func3() {

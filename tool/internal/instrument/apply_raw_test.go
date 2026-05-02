@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRawCodeInserter(t *testing.T) {
+func TestInsertRawAtPos(t *testing.T) {
 	tests := []struct {
 		name           string
 		src            string
@@ -36,7 +36,8 @@ func a() {
 			expected: `package main
 
 func a() {
-	print("hi")
+	print("Hello, ")
+	print("World!")
 	println("x")
 }
 `,
@@ -55,7 +56,8 @@ func a() {
 			expected: `package main
 
 func a() {
-	print("hi")
+	print("Hello, ")
+	print("World!")
 	println("x")
 	println("x")
 }
@@ -77,7 +79,8 @@ func a() {
 
 func a() {
 	if true {
-		print("hi")
+		print("Hello, ")
+		print("World!")
 		println("x")
 	}
 }
@@ -100,7 +103,8 @@ func a() {
 
 func a() {
 	if true {
-		print("hi")
+		print("Hello, ")
+		print("World!")
 		println("x")
 	}
 	println("x")
@@ -122,7 +126,8 @@ func a() {
 			expected: `package main
 
 func a() {
-	print("hi")
+	print("Hello, ")
+	print("World!")
 	go func() {
 		println("x")
 	}()
@@ -143,7 +148,8 @@ func a() {
 
 func a() {
 	println("y")
-	print("hi")
+	print("Hello, ")
+	print("World!")
 	println("x")
 }
 `,
@@ -203,25 +209,23 @@ func a() {
 			}
 			require.NotNil(t, fn, "function a not found")
 
-			// insert a simple print("hi") statement
 			stmts := []dst.Stmt{
 				&dst.ExprStmt{
 					X: &dst.CallExpr{
 						Fun:  dst.NewIdent("print"),
-						Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"hi"`}},
+						Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"Hello, "`}},
+					},
+				},
+				&dst.ExprStmt{
+					X: &dst.CallExpr{
+						Fun:  dst.NewIdent("print"),
+						Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"World!"`}},
 					},
 				},
 			}
 
-			inserter := rawCodeInserter{
-				stmts:    stmts,
-				restorer: restorer,
-				pattern:  regexp.MustCompile(tc.pattern),
-			}
-
-			dst.Walk(&inserter, fn.Body)
-
-			require.Equal(t, tc.expectInserted, inserter.inserted)
+			inserted := insertRawAtPos(fn, restorer, regexp.MustCompile(tc.pattern), stmts)
+			require.Equal(t, tc.expectInserted, inserted)
 
 			var modifiedSrc strings.Builder
 			decorator.Fprint(&modifiedSrc, dstFile)

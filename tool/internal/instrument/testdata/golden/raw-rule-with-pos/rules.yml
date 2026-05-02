@@ -8,7 +8,7 @@ func2_inside_goroutine:
   target: main
   func: func2
   raw: "print(\"Inside goroutine\")"
-  pos: "^println\\(\", World!\"\\)$"
+  pos: "^println\\(\"goroutine!\"\\)$"
 
 func2_before_go:
   target: main

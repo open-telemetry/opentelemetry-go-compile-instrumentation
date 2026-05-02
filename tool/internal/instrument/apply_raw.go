@@ -12,6 +12,7 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
+	"github.com/dave/dst/dstutil"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
@@ -37,55 +38,49 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 	}
 }
 
-type rawCodeInserter struct {
-	stmts    []dst.Stmt
-	restorer *decorator.Restorer
-	pattern  *regexp.Regexp
+func insertRawAtPos(
+	decl *dst.FuncDecl,
+	restorer *decorator.Restorer,
+	pattern *regexp.Regexp,
+	stmts []dst.Stmt,
+) bool {
+	inserted := false
 
-	block *dst.BlockStmt
-	idx   int
+	dstutil.Apply(decl.Body, func(cursor *dstutil.Cursor) bool {
+		if inserted {
+			return false
+		}
 
-	inserted bool
-}
+		stmt, isStmt := cursor.Node().(dst.Stmt)
+		if !isStmt {
+			return true
+		}
 
-func (r *rawCodeInserter) Visit(node dst.Node) dst.Visitor {
-	if node == nil || r.inserted {
-		return nil
-	}
+		astNode, nodeFound := restorer.Ast.Nodes[stmt]
+		if !nodeFound {
+			return true
+		}
 
-	stmt, isStmt := node.(dst.Stmt)
-	if !isStmt {
-		return r
-	}
+		var buf strings.Builder
+		_ = format.Node(&buf, restorer.Fset, astNode)
 
-	block, isBlock := stmt.(*dst.BlockStmt)
-	if isBlock {
-		r.block = block
-		r.idx = 0
+		if pattern.MatchString(buf.String()) {
+			if _, ok := cursor.Parent().(*dst.BlockStmt); !ok {
+				return true
+			}
 
-		return r
-	}
+			for _, s := range stmts {
+				cursor.InsertBefore(s)
+			}
 
-	astNode, nodeFound := r.restorer.Ast.Nodes[stmt]
-	if !nodeFound {
-		return r
-	}
+			inserted = true
+			return false
+		}
 
-	var buf strings.Builder
-	_ = format.Node(&buf, r.restorer.Fset, astNode)
+		return true
+	}, nil)
 
-	if r.pattern.MatchString(buf.String()) {
-		r.block.List = append(
-			r.block.List[:r.idx],
-			append(r.stmts, r.block.List[r.idx:]...)...,
-		)
-
-		r.inserted = true
-		return nil
-	}
-
-	r.idx++
-	return r
+	return inserted
 }
 
 func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl, root *dst.File) error {
@@ -108,13 +103,8 @@ func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl, root *dst.File) error {
 		}
 
 		pattern := regexp.MustCompile(r.Pos)
-		inserter := rawCodeInserter{
-			stmts:    stmts,
-			restorer: restorer,
-			pattern:  pattern,
-		}
-		dst.Walk(&inserter, decl.Body)
-		if !inserter.inserted {
+		inserted := insertRawAtPos(decl, restorer, pattern, stmts)
+		if !inserted {
 			return ex.Newf("failed to find the position to insert raw code with pattern: %s", r.Pos)
 		}
 

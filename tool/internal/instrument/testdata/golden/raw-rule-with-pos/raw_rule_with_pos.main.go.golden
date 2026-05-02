@@ -8,16 +8,16 @@ import "fmt"
 func func1() {
 	print("Hello")
 	println(", World!")
-	println(", World!") // duplicate match case
+	println(", World!")
 }
 
 func func2() {
 	print("Before go func")
 	go func() {
 		print("Inside goroutine")
-		println(", World!") // inside goroutine
+		println("goroutine!")
 	}()
-	println(", World!") // outside goroutine
+	println("goroutine!")
 }
 
 func func3() {
