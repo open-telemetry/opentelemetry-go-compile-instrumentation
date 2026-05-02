@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
@@ -47,7 +46,7 @@ func TestGRPCServerTelemetryFlushOnSignal(t *testing.T) {
 
 	serverSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsServer,
-		testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+		testutil.HasAttribute("rpc.system.name", "grpc"),
 	)
 	testutil.RequireGRPCServerSemconv(t, serverSpan, "greeter.Greeter", "SayHello", 0)
 }
