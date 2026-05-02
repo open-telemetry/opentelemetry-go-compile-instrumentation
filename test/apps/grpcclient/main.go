@@ -19,30 +19,52 @@ import (
 )
 
 var (
-	addr   = flag.String("addr", "localhost:50051", "The server address")
-	name   = flag.String("name", "world", "The name to greet")
-	stream = flag.Bool("stream", false, "Use streaming RPC")
-	count  = flag.Int("count", 1, "Number of requests to make (for streaming)")
+	addr    = flag.String("addr", "localhost:50051", "The server address")
+	name    = flag.String("name", "world", "The name to greet")
+	stream  = flag.Bool("stream", false, "Use streaming RPC")
+	count   = flag.Int("count", 1, "Number of requests to make (for streaming)")
+	dialAPI = flag.String("dial-api", "newclient", "gRPC client API to use: newclient, dialcontext, or dial")
 )
 
 func main() {
 	flag.Parse()
 
-	conn, err := grpc.NewClient(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("failed to connect: %v", err)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn := dial(ctx)
 	defer conn.Close()
 
 	client := pb.NewGreeterClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
 	if *stream {
 		doStreaming(ctx, client)
 	} else {
 		doUnary(ctx, client)
 	}
+}
+
+func dial(ctx context.Context) *grpc.ClientConn {
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+
+	var (
+		conn *grpc.ClientConn
+		err  error
+	)
+	switch *dialAPI {
+	case "newclient":
+		conn, err = grpc.NewClient(*addr, opts...)
+	case "dialcontext":
+		conn, err = grpc.DialContext(ctx, *addr, opts...)
+	case "dial":
+		conn, err = grpc.Dial(*addr, opts...) //nolint:staticcheck // Exercise legacy Dial join-point coverage.
+	default:
+		log.Fatalf("unsupported -dial-api %q", *dialAPI)
+	}
+	if err != nil {
+		log.Fatalf("failed to connect with %s: %v", *dialAPI, err)
+	}
+	return conn
 }
 
 func doUnary(ctx context.Context, client pb.GreeterClient) {

@@ -1,5 +1,6 @@
 client_hook_newclient:
   target: google.golang.org/grpc
+  version: v1.63.0
   func: NewClient
   before: BeforeNewClient
   after: AfterNewClient
@@ -7,6 +8,7 @@ client_hook_newclient:
 
 client_hook_dialcontext:
   target: google.golang.org/grpc
+  version: v1.0.0,v1.63.0
   func: DialContext
   before: BeforeDialContext
   after: AfterDialContext

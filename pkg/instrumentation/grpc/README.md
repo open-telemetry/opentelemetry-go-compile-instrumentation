@@ -6,6 +6,10 @@ This package provides automatic OpenTelemetry instrumentation for `google.golang
 
 Unlike traditional gRPC instrumentation that requires manually adding interceptors or stats handlers, this package automatically instruments **all** gRPC traffic in your application at compile-time. Zero code changes required!
 
+The generated instrumentation follows the same stats-handler model recommended by
+`go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` without adding a
+runtime dependency on the contrib package.
+
 ### Key Features
 
 ✅ **Zero Code Changes**: Automatic instrumentation without modifying application code
@@ -36,8 +40,10 @@ The instrumentation is injected during the build process:
 │  3. Instrument Phase:                       │
 │     - Inject trampolines into:              │
 │       • grpc.NewServer                      │
-│       • grpc.NewClient                      │
-│       • grpc.DialContext                    │
+│       • grpc.NewClient (gRPC v1.63.0+)      │
+│       • grpc.DialContext (before v1.63.0)   │
+│     - grpc.Dial is covered through grpc-go  │
+│       delegation to DialContext/NewClient   │
 │                                             │
 │  4. Build with instrumentation baked in     │
 └─────────────────────────────────────────────┘
@@ -55,7 +61,8 @@ When your application runs, the injected hooks automatically:
    - `HandleRPC`: Record message events, end span, collect metrics
 3. **Result**: Fully instrumented gRPC server
 
-**For gRPC Clients** (`grpc.NewClient` / `grpc.DialContext`):
+**For gRPC Clients** (`grpc.NewClient`, legacy `grpc.DialContext`, and `grpc.Dial` through
+grpc-go delegation):
 
 1. **Before**: Inject stats.Handler into dial options
 2. **Stats Handler**:

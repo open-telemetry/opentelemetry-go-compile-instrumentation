@@ -21,18 +21,35 @@ import (
 func TestGRPCClient(t *testing.T) {
 	testCases := []struct {
 		name           string
+		dialAPI        string
 		extraArgs      []string
 		method         string
 		expectedOutput string
 	}{
 		{
-			name:           "unary",
+			name:           "unary newclient",
+			dialAPI:        "newclient",
+			extraArgs:      []string{"-name=ClientTest"},
+			method:         "SayHello",
+			expectedOutput: "Hello ClientTest",
+		},
+		{
+			name:           "unary dialcontext",
+			dialAPI:        "dialcontext",
+			extraArgs:      []string{"-name=ClientTest"},
+			method:         "SayHello",
+			expectedOutput: "Hello ClientTest",
+		},
+		{
+			name:           "unary dial",
+			dialAPI:        "dial",
 			extraArgs:      []string{"-name=ClientTest"},
 			method:         "SayHello",
 			expectedOutput: "Hello ClientTest",
 		},
 		{
 			name:           "streaming",
+			dialAPI:        "newclient",
 			extraArgs:      []string{"-stream", "-count=3"},
 			method:         "SayHelloStream",
 			expectedOutput: "stream response",
@@ -44,7 +61,7 @@ func TestGRPCClient(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 			server := StartGRPCServer(t)
 
-			args := append([]string{"-addr=" + server.Addr}, tc.extraArgs...)
+			args := append([]string{"-addr=" + server.Addr, "-dial-api=" + tc.dialAPI}, tc.extraArgs...)
 			output := f.BuildAndRun("grpcclient", args...)
 
 			require.Contains(t, output, tc.expectedOutput)
