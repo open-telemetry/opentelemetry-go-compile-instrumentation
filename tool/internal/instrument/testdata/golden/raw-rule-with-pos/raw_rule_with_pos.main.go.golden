@@ -1,0 +1,59 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "fmt"
+
+func func1() {
+	print("Hello")
+	println(", World!")
+	println(", World!")
+}
+
+func func2() {
+	print("Before go func")
+	go func() {
+		print("Inside goroutine")
+		println("goroutine!")
+	}()
+	println("goroutine!")
+}
+
+func func3() {
+	ch := make(chan int)
+
+	print("Before select")
+
+	select {
+	case <-ch:
+		println("Hello, World!")
+	}
+}
+
+func func4() {
+	if true {
+		print("Inside if")
+		println("IF BLOCK")
+	}
+}
+
+func func5() {
+	for i := 0; i < 3; i++ {
+		print("Loop hit")
+		println("loop")
+	}
+}
+
+func func6() {
+	print("Multiline match")
+	fmt.Println(
+		"multiline",
+	)
+}
+
+func func7() {
+	print("Exact only")
+	println("exact")
+	println("exact ")
+}
