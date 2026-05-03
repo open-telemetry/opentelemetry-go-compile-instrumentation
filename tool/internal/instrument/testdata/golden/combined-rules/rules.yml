@@ -3,7 +3,7 @@ hook_func:
   func: Func1
   before: H1Before
   after: H1After
-  path: testdata
+  path: testdata/golden/combined-rules
 
 add_field:
   target: main

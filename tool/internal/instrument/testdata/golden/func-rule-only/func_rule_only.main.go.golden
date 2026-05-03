@@ -182,8 +182,8 @@ func OtelAfterTrampoline_Func13460655653(hookContext HookContext, arg0 *float32,
 	}
 }
 
-//go:linkname H1Before testdata.H1Before
+//go:linkname H1Before testdata/golden/func-rule-only.H1Before
 func H1Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H1After testdata.H1After
+//go:linkname H1After testdata/golden/func-rule-only.H1After
 func H1After(hookContext HookContext, arg0 float32, arg1 error)

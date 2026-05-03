@@ -191,10 +191,10 @@ func OtelAfterTrampoline_Func12501994857(hookContext HookContext, arg0 *float32,
 	}
 }
 
-//go:linkname H3Before testdata.H3Before
+//go:linkname H3Before testdata/golden/method-receiver.H3Before
 func H3Before(hookContext HookContext, recv0 interface{}, param0 string, param1 int)
 
-//go:linkname H3After testdata.H3After
+//go:linkname H3After testdata/golden/method-receiver.H3After
 func H3After(hookContext HookContext, arg0 float32, arg1 error)
 
 //line <generated>:1
@@ -311,5 +311,5 @@ func OtelAfterTrampoline_Func32216990050(hookContext HookContext) {
 	hookContext.(*HookContextImpl2216990050).returnVals = []interface{}{}
 }
 
-//go:linkname H11Before testdata.H11Before
+//go:linkname H11Before testdata/golden/method-receiver.H11Before
 func H11Before(hookContext HookContext, recv0 interface{})
