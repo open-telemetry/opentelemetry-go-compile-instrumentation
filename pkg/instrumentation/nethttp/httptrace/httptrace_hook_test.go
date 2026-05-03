@@ -42,8 +42,6 @@ func TestNewClientTrace_ReturnsValidTrace(t *testing.T) {
 	assert.NotNil(t, ct.TLSHandshakeDone)
 	assert.NotNil(t, ct.WroteHeaders)
 	assert.NotNil(t, ct.WroteRequest)
-	assert.NotNil(t, ct.GotFirstResponseByte)
-	assert.NotNil(t, ct.PutIdleConn)
 }
 
 func TestNewClientTrace_NilTracerProvider(t *testing.T) {
@@ -260,29 +258,7 @@ func TestTLSFailure(t *testing.T) {
 	assert.Equal(t, "certificate verify failed", tlsSpan.Status().Description)
 }
 
-func TestSendReceiveLifecycle(t *testing.T) {
-	sr, tp := setupTestTracer(t)
-	ctx := context.Background()
 
-	ct := NewClientTrace(ctx, tp, "test")
-
-	// Send phase
-	ct.WroteHeaders()
-	ct.WroteRequest(httptrace.WroteRequestInfo{})
-
-	// Receive phase
-	ct.GotFirstResponseByte()
-	ct.PutIdleConn(nil)
-
-	spans := sr.Ended()
-	require.Len(t, spans, 2)
-
-	sendSpan := spans[0]
-	assert.Equal(t, "http.send", sendSpan.Name())
-
-	receiveSpan := spans[1]
-	assert.Equal(t, "http.receive", receiveSpan.Name())
-}
 
 func TestWroteRequestError(t *testing.T) {
 	sr, tp := setupTestTracer(t)
@@ -381,13 +357,9 @@ func TestFullRequestLifecycle(t *testing.T) {
 	ct.WroteHeaders()
 	ct.WroteRequest(httptrace.WroteRequestInfo{})
 
-	// 7. Receive
-	ct.GotFirstResponseByte()
-	ct.PutIdleConn(nil)
-
 	spans := sr.Ended()
-	// dns, connect, tls, getconn, send, receive = 6 sub-spans
-	require.Len(t, spans, 6)
+	// dns, connect, tls, getconn, send = 5 sub-spans
+	require.Len(t, spans, 5)
 
 	spanNames := make([]string, len(spans))
 	for i, s := range spans {
@@ -399,7 +371,6 @@ func TestFullRequestLifecycle(t *testing.T) {
 	assert.Contains(t, spanNames, "http.tls")
 	assert.Contains(t, spanNames, "http.getconn")
 	assert.Contains(t, spanNames, "http.send")
-	assert.Contains(t, spanNames, "http.receive")
 }
 
 func TestParentHook(t *testing.T) {
@@ -411,7 +382,6 @@ func TestParentHook(t *testing.T) {
 		{"http.connect.93.184.216.34:443", "http.getconn"},
 		{"http.tls", "http.getconn"},
 		{"http.send", ""},
-		{"http.receive", ""},
 	}
 
 	for _, tt := range tests {

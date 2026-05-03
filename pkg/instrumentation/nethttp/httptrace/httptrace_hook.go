@@ -6,6 +6,7 @@ package httptrace
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/http/httptrace"
 	"strings"
 	"sync"
@@ -80,8 +81,6 @@ func NewClientTrace(ctx context.Context, tp trace.TracerProvider, version string
 	return &httptrace.ClientTrace{
 		GetConn:              ct.getConn,
 		GotConn:              ct.gotConn,
-		PutIdleConn:          ct.putIdleConn,
-		GotFirstResponseByte: ct.gotFirstResponseByte,
 		DNSStart:             ct.dnsStart,
 		DNSDone:              ct.dnsDone,
 		ConnectStart:         ct.connectStart,
@@ -160,7 +159,11 @@ func (ct *clientTracer) getParentContext(hook string) context.Context {
 	return ctx
 }
 
-func (ct *clientTracer) getConn(host string) {
+func (ct *clientTracer) getConn(hostPort string) {
+	host := hostPort
+	if h, _, err := net.SplitHostPort(hostPort); err == nil {
+		host = h
+	}
 	ct.start("http.getconn", "http.getconn", HTTPHostAttribute.String(host))
 }
 
@@ -175,14 +178,6 @@ func (ct *clientTracer) gotConn(info httptrace.GotConnInfo) {
 		attrs = append(attrs, HTTPConnectionIdleTime.String(info.IdleTime.String()))
 	}
 	ct.end("http.getconn", nil, attrs...)
-}
-
-func (ct *clientTracer) putIdleConn(err error) {
-	ct.end("http.receive", err)
-}
-
-func (ct *clientTracer) gotFirstResponseByte() {
-	ct.start("http.receive", "http.receive")
 }
 
 func (ct *clientTracer) dnsStart(info httptrace.DNSStartInfo) {
