@@ -1,0 +1,5 @@
+wrap_config:
+  target: main
+  struct_literal: main.Config
+  match: value-only
+  template: "WrapConfig({{ . }})"

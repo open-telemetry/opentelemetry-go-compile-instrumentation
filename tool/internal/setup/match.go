@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -136,7 +135,7 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 func (sp *SetupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
-	allRules []rule.InstRule,
+	rulesByTarget map[string][]rule.InstRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
@@ -145,37 +144,8 @@ func (sp *SetupPhase) runMatch(
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
 	}
 
-	// Filter rules by target using pattern matching
-	relevantRules := make([]rule.InstRule, 0)
-	for _, r := range allRules {
-		matched, err := path.Match(r.GetTarget(), dep.ImportPath)
-		if err != nil {
-			sp.Error("Invalid target pattern", "target", r.GetTarget(), "err", err)
-			continue
-		}
-		if !matched {
-			continue
-		}
-
-		// Check excludes
-		excluded := false
-		for _, excl := range r.GetExcludes() {
-			exclMatch, exclErr := path.Match(excl, dep.ImportPath)
-			if exclErr != nil {
-				sp.Warn("Invalid exclude pattern", "pattern", excl, "error", exclErr)
-				continue
-			}
-			if exclMatch {
-				excluded = true
-				break
-			}
-		}
-
-		if !excluded {
-			relevantRules = append(relevantRules, r)
-		}
-	}
-
+	// Filter rules by target
+	relevantRules := rulesByTarget[dep.ImportPath]
 	if len(relevantRules) == 0 {
 		return set, nil
 	}
@@ -421,6 +391,13 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, nil
 	}
 
+	// Pre-index rules by target
+	rulesByTarget := make(map[string][]rule.InstRule)
+	for _, r := range allRules {
+		target := r.GetTarget()
+		rulesByTarget[target] = append(rulesByTarget[target], r)
+	}
+
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRuleSet, 0)
 	var mu sync.Mutex
@@ -429,7 +406,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			m, err1 := sp.runMatch(gCtx, dep, allRules)
+			m, err1 := sp.runMatch(gCtx, dep, rulesByTarget)
 			if err1 != nil {
 				return err1
 			}

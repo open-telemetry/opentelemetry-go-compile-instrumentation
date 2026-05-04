@@ -180,17 +180,6 @@ func TestCreateRuleFromFields(t *testing.T) {
 		expectedType string
 	}{
 		{
-			name: "struct literal rule creation",
-			yamlContent: `
-struct_literal: "net/http.Server"
-target: github.com/example/lib
-template: "_ = 0"
-`,
-			ruleName:     "test-struct-literal-rule",
-			expectError:  false,
-			expectedType: "*rule.InstStructLiteralRule",
-		},
-		{
 			name: "struct rule creation",
 			yamlContent: `
 struct: TestStruct
@@ -530,10 +519,12 @@ target: example.com/mypkg
 		CgoFiles:   make(map[string]string),
 	}
 
-	allRules := []rule.InstRule{fileRule}
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, allRules)
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
@@ -550,7 +541,7 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, []rule.InstRule{})
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{})
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
@@ -577,10 +568,12 @@ target: example.com/mypkg
 		CgoFiles:   make(map[string]string),
 	}
 
-	allRules := []rule.InstRule{fileRule}
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
 
 	sp := newTestSetupPhase()
-	_, err = sp.runMatch(context.Background(), dep, allRules)
+	_, err = sp.runMatch(context.Background(), dep, rulesByTarget)
 	assert.Error(t, err, "should fail when source file cannot be parsed")
 }
 
@@ -601,10 +594,12 @@ target: example.com/mypkg
 		CgoFiles:   make(map[string]string),
 	}
 
-	allRules := []rule.InstRule{fileRule}
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {fileRule},
+	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, allRules)
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 

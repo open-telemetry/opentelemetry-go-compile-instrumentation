@@ -19,27 +19,24 @@ import (
 // bound is exclusive. For example, "v1.0.0,v2.0.0" means the rule is applicable
 // to the target module version range [v1.0.0, v2.0.0).
 type InstRule interface {
-	String() string        // The string representation of the rule
-	GetName() string       // The unique name of the rule
-	GetTarget() string     // The target module path where the rule is applied
-	GetExcludes() []string // The target module exclusions where the rule is not applied
-	GetVersion() string    // The version range of target module if available, e.g "v1.0.0,v2.0.0"
+	String() string     // The string representation of the rule
+	GetName() string    // The unique name of the rule
+	GetTarget() string  // The target module path where the rule is applied
+	GetVersion() string // The version range of target module if available, e.g "v1.0.0,v2.0.0"
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
 type InstBaseRule struct {
-	Name     string            `json:"name,omitempty"     yaml:"name,omitempty"`
-	Target   string            `json:"target"             yaml:"target"`
-	Excludes []string          `json:"excludes,omitempty" yaml:"excludes,omitempty"`
-	Version  string            `json:"version,omitempty"  yaml:"version,omitempty"`
-	Imports  map[string]string `json:"imports,omitempty"  yaml:"imports,omitempty"` // map[alias]path
+	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`
+	Target  string            `json:"target"            yaml:"target"`
+	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
+	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"` // map[alias]path
 }
 
-func (ibr *InstBaseRule) String() string        { return ibr.Name }
-func (ibr *InstBaseRule) GetName() string       { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string     { return ibr.Target }
-func (ibr *InstBaseRule) GetExcludes() []string { return ibr.Excludes }
-func (ibr *InstBaseRule) GetVersion() string    { return ibr.Version }
+func (ibr *InstBaseRule) String() string     { return ibr.Name }
+func (ibr *InstBaseRule) GetName() string    { return ibr.Name }
+func (ibr *InstBaseRule) GetTarget() string  { return ibr.Target }
+func (ibr *InstBaseRule) GetVersion() string { return ibr.Version }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
@@ -121,12 +118,12 @@ func (irs *InstRuleSet) AddStructRule(file string, rule *InstStructRule) {
 	addRule(file, rule, irs.StructRules)
 }
 
-func (irs *InstRuleSet) AddStructLiteralRule(file string, rule *InstStructLiteralRule) {
-	addRule(file, rule, irs.StructLiteralRules)
-}
-
 func (irs *InstRuleSet) AddCallRule(file string, rule *InstCallRule) {
 	addRule(file, rule, irs.CallRules)
+}
+
+func (irs *InstRuleSet) AddStructLiteralRule(file string, rule *InstStructLiteralRule) {
+	addRule(file, rule, irs.StructLiteralRules)
 }
 
 func (irs *InstRuleSet) AddDirectiveRule(file string, rule *InstDirectiveRule) {

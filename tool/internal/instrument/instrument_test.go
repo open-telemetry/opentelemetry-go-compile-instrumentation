@@ -104,15 +104,16 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	yaml.Unmarshal(data, &rawRules)
 
 	ruleSet := &rule.InstRuleSet{
-		PackageName:    mainPackage,
-		ModulePath:     mainPackage,
-		FuncRules:      make(map[string][]*rule.InstFuncRule),
-		StructRules:    make(map[string][]*rule.InstStructRule),
-		RawRules:       make(map[string][]*rule.InstRawRule),
-		CallRules:      make(map[string][]*rule.InstCallRule),
-		DirectiveRules: make(map[string][]*rule.InstDirectiveRule),
-		DeclRules:      make(map[string][]*rule.InstDeclRule),
-		FileRules:      make([]*rule.InstFileRule, 0),
+		PackageName:        mainPackage,
+		ModulePath:         mainPackage,
+		FuncRules:          make(map[string][]*rule.InstFuncRule),
+		StructRules:        make(map[string][]*rule.InstStructRule),
+		StructLiteralRules: make(map[string][]*rule.InstStructLiteralRule),
+		RawRules:           make(map[string][]*rule.InstRawRule),
+		CallRules:          make(map[string][]*rule.InstCallRule),
+		DirectiveRules:     make(map[string][]*rule.InstDirectiveRule),
+		DeclRules:          make(map[string][]*rule.InstDeclRule),
+		FileRules:          make([]*rule.InstFileRule, 0),
 	}
 
 	// Sort rule names to ensure deterministic order in tests
@@ -128,6 +129,9 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		ruleData, _ := yaml.Marshal(props)
 
 		switch {
+		case props["struct_literal"] != nil:
+			r, _ := rule.NewInstStructLiteralRule(ruleData, name)
+			ruleSet.StructLiteralRules[sourceFile] = append(ruleSet.StructLiteralRules[sourceFile], r)
 		case props["struct"] != nil:
 			r, _ := rule.NewInstStructRule(ruleData, name)
 			ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)

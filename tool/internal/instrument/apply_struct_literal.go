@@ -109,6 +109,11 @@ func (ip *InstrumentPhase) applyStructLiteralRule(
 }
 
 func matchesStructType(expr dst.Expr, expectedPath, expectedName string, aliases map[string]string) bool {
+	// Case 1: Same-package struct (e.g., Config{} when struct_literal is "main.Config")
+	if ident, ok := expr.(*dst.Ident); ok {
+		return ident.Name == expectedName && ident.Path == ""
+	}
+	// Case 2: Imported struct (e.g., http.Server{} when struct_literal is "net/http.Server")
 	sel, ok := expr.(*dst.SelectorExpr)
 	if !ok {
 		return false
