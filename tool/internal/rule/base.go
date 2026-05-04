@@ -19,24 +19,27 @@ import (
 // bound is exclusive. For example, "v1.0.0,v2.0.0" means the rule is applicable
 // to the target module version range [v1.0.0, v2.0.0).
 type InstRule interface {
-	String() string     // The string representation of the rule
-	GetName() string    // The unique name of the rule
-	GetTarget() string  // The target module path where the rule is applied
-	GetVersion() string // The version range of target module if available, e.g "v1.0.0,v2.0.0"
+	String() string        // The string representation of the rule
+	GetName() string       // The unique name of the rule
+	GetTarget() string     // The target module path where the rule is applied
+	GetExcludes() []string // The target module exclusions where the rule is not applied
+	GetVersion() string    // The version range of target module if available, e.g "v1.0.0,v2.0.0"
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
 type InstBaseRule struct {
-	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`
-	Target  string            `json:"target"            yaml:"target"`
-	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"` // map[alias]path
+	Name     string            `json:"name,omitempty"     yaml:"name,omitempty"`
+	Target   string            `json:"target"             yaml:"target"`
+	Excludes []string          `json:"excludes,omitempty" yaml:"excludes,omitempty"`
+	Version  string            `json:"version,omitempty"  yaml:"version,omitempty"`
+	Imports  map[string]string `json:"imports,omitempty"  yaml:"imports,omitempty"` // map[alias]path
 }
 
-func (ibr *InstBaseRule) String() string     { return ibr.Name }
-func (ibr *InstBaseRule) GetName() string    { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string  { return ibr.Target }
-func (ibr *InstBaseRule) GetVersion() string { return ibr.Version }
+func (ibr *InstBaseRule) String() string        { return ibr.Name }
+func (ibr *InstBaseRule) GetName() string       { return ibr.Name }
+func (ibr *InstBaseRule) GetTarget() string     { return ibr.Target }
+func (ibr *InstBaseRule) GetExcludes() []string { return ibr.Excludes }
+func (ibr *InstBaseRule) GetVersion() string    { return ibr.Version }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
@@ -44,30 +47,32 @@ func (ibr *InstBaseRule) GetVersion() string { return ibr.Version }
 // This structure is essential for the instrumentation process, as it allows the
 // tool to efficiently locate and apply the correct rules to the source code.
 type InstRuleSet struct {
-	PackageName    string                          `json:"package_name"`
-	ModulePath     string                          `json:"module_path"`
-	CgoFileMap     map[string]string               `json:"cgo_file_map,omitempty"` // go -> cgo
-	RawRules       map[string][]*InstRawRule       `json:"raw_rules"`
-	FuncRules      map[string][]*InstFuncRule      `json:"func_rules"`
-	StructRules    map[string][]*InstStructRule    `json:"struct_rules"`
-	CallRules      map[string][]*InstCallRule      `json:"call_rules"`
-	DirectiveRules map[string][]*InstDirectiveRule `json:"directive_rules"`
-	DeclRules      map[string][]*InstDeclRule      `json:"decl_rules"`
-	FileRules      []*InstFileRule                 `json:"file_rules"`
+	PackageName        string                              `json:"package_name"`
+	ModulePath         string                              `json:"module_path"`
+	CgoFileMap         map[string]string                   `json:"cgo_file_map,omitempty"` // go -> cgo
+	RawRules           map[string][]*InstRawRule           `json:"raw_rules"`
+	FuncRules          map[string][]*InstFuncRule          `json:"func_rules"`
+	StructRules        map[string][]*InstStructRule        `json:"struct_rules"`
+	StructLiteralRules map[string][]*InstStructLiteralRule `json:"struct_literal_rules"`
+	CallRules          map[string][]*InstCallRule          `json:"call_rules"`
+	DirectiveRules     map[string][]*InstDirectiveRule     `json:"directive_rules"`
+	DeclRules          map[string][]*InstDeclRule          `json:"decl_rules"`
+	FileRules          []*InstFileRule                     `json:"file_rules"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
 	return &InstRuleSet{
-		PackageName:    "",
-		ModulePath:     importPath,
-		CgoFileMap:     make(map[string]string),
-		RawRules:       make(map[string][]*InstRawRule),
-		FuncRules:      make(map[string][]*InstFuncRule),
-		StructRules:    make(map[string][]*InstStructRule),
-		CallRules:      make(map[string][]*InstCallRule),
-		DirectiveRules: make(map[string][]*InstDirectiveRule),
-		DeclRules:      make(map[string][]*InstDeclRule),
-		FileRules:      make([]*InstFileRule, 0),
+		PackageName:        "",
+		ModulePath:         importPath,
+		CgoFileMap:         make(map[string]string),
+		RawRules:           make(map[string][]*InstRawRule),
+		FuncRules:          make(map[string][]*InstFuncRule),
+		StructRules:        make(map[string][]*InstStructRule),
+		StructLiteralRules: make(map[string][]*InstStructLiteralRule),
+		CallRules:          make(map[string][]*InstCallRule),
+		DirectiveRules:     make(map[string][]*InstDirectiveRule),
+		DeclRules:          make(map[string][]*InstDeclRule),
+		FileRules:          make([]*InstFileRule, 0),
 	}
 }
 
@@ -76,6 +81,7 @@ func (irs *InstRuleSet) String() string {
 		fmt.Sprintf("raw=%v", irs.RawRules),
 		fmt.Sprintf("func=%v", irs.FuncRules),
 		fmt.Sprintf("struct=%v", irs.StructRules),
+		fmt.Sprintf("struct_literal=%v", irs.StructLiteralRules),
 		fmt.Sprintf("call=%v", irs.CallRules),
 		fmt.Sprintf("directive=%v", irs.DirectiveRules),
 		fmt.Sprintf("decl=%v", irs.DeclRules),
@@ -88,6 +94,7 @@ func (irs *InstRuleSet) IsEmpty() bool {
 	return irs == nil ||
 		(len(irs.FuncRules) == 0 &&
 			len(irs.StructRules) == 0 &&
+			len(irs.StructLiteralRules) == 0 &&
 			len(irs.RawRules) == 0 &&
 			len(irs.CallRules) == 0 &&
 			len(irs.DirectiveRules) == 0 &&
@@ -112,6 +119,10 @@ func (irs *InstRuleSet) AddFuncRule(file string, rule *InstFuncRule) {
 
 func (irs *InstRuleSet) AddStructRule(file string, rule *InstStructRule) {
 	addRule(file, rule, irs.StructRules)
+}
+
+func (irs *InstRuleSet) AddStructLiteralRule(file string, rule *InstStructLiteralRule) {
+	addRule(file, rule, irs.StructLiteralRules)
 }
 
 func (irs *InstRuleSet) AddCallRule(file string, rule *InstCallRule) {

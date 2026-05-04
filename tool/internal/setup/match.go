@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -37,6 +38,8 @@ const (
 //nolint:nilnil // factory function
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
 	switch {
+	case fields["struct_literal"] != nil:
+		return rule.NewInstStructLiteralRule(raw, name)
 	case fields["struct"] != nil:
 		return rule.NewInstStructRule(raw, name)
 	case fields["file"] != nil:
@@ -133,7 +136,7 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 func (sp *SetupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
-	rulesByTarget map[string][]rule.InstRule,
+	allRules []rule.InstRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
@@ -142,8 +145,37 @@ func (sp *SetupPhase) runMatch(
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
 	}
 
-	// Filter rules by target
-	relevantRules := rulesByTarget[dep.ImportPath]
+	// Filter rules by target using pattern matching
+	relevantRules := make([]rule.InstRule, 0)
+	for _, r := range allRules {
+		matched, err := path.Match(r.GetTarget(), dep.ImportPath)
+		if err != nil {
+			sp.Error("Invalid target pattern", "target", r.GetTarget(), "err", err)
+			continue
+		}
+		if !matched {
+			continue
+		}
+
+		// Check excludes
+		excluded := false
+		for _, excl := range r.GetExcludes() {
+			exclMatch, exclErr := path.Match(excl, dep.ImportPath)
+			if exclErr != nil {
+				sp.Warn("Invalid exclude pattern", "pattern", excl, "error", exclErr)
+				continue
+			}
+			if exclMatch {
+				excluded = true
+				break
+			}
+		}
+
+		if !excluded {
+			relevantRules = append(relevantRules, r)
+		}
+	}
+
 	if len(relevantRules) == 0 {
 		return set, nil
 	}
@@ -253,6 +285,10 @@ func (sp *SetupPhase) matchOneRule(
 		// Files without matching calls are a no-op in applyCallRule.
 		set.AddCallRule(source, rt)
 		sp.Info("Match call rule", "rule", rt, "dep", dep)
+	case *rule.InstStructLiteralRule:
+		// Struct literal rules are added unconditionally, just like call rules.
+		set.AddStructLiteralRule(source, rt)
+		sp.Info("Match struct literal rule", "rule", rt, "dep", dep)
 	case *rule.InstDirectiveRule:
 		if ast.FileHasDirective(tree, rt.Directive) {
 			set.AddDirectiveRule(source, rt)
@@ -385,13 +421,6 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, nil
 	}
 
-	// Pre-index rules by target
-	rulesByTarget := make(map[string][]rule.InstRule)
-	for _, r := range allRules {
-		target := r.GetTarget()
-		rulesByTarget[target] = append(rulesByTarget[target], r)
-	}
-
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRuleSet, 0)
 	var mu sync.Mutex
@@ -400,7 +429,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			m, err1 := sp.runMatch(gCtx, dep, rulesByTarget)
+			m, err1 := sp.runMatch(gCtx, dep, allRules)
 			if err1 != nil {
 				return err1
 			}

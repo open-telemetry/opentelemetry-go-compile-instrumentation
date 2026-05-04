@@ -18,6 +18,7 @@ func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRu
 	file2rules := make(map[string][]rule.InstRule)
 	addRulesToMap(rset.FuncRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, workDir)
+	addRulesToMap(rset.StructLiteralRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.RawRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.CallRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DirectiveRules, file2rules, rset.CgoFileMap, workDir)
@@ -56,6 +57,8 @@ func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 		return true, ip.applyRawRule(ctx, rt, root)
 	case *rule.InstCallRule:
 		return false, ip.applyCallRule(ctx, rt, root)
+	case *rule.InstStructLiteralRule:
+		return false, ip.applyStructLiteralRule(ctx, rt, root)
 	case *rule.InstDirectiveRule:
 		return true, ip.applyDirectiveRule(ctx, rt, root)
 	default:
