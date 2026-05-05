@@ -12,6 +12,8 @@ import (
 const (
 	defaultReadinessTimeout  = 10 * time.Second
 	defaultReadinessInterval = 100 * time.Millisecond
+	defaultSpanFlushTimeout  = 3 * time.Second
+	defaultSpanPollInterval  = 25 * time.Millisecond
 )
 
 // WaitForTCP waits until a TCP connection can be established.
@@ -30,8 +32,16 @@ func WaitForTCP(t *testing.T, addr string) {
 	t.Fatalf("timeout waiting for TCP readiness at %s", addr)
 }
 
-// WaitForSpanFlush waits for spans to be flushed to collector.
-func WaitForSpanFlush(t *testing.T) {
+// WaitForSpans polls the collector until at least minSpans spans are received or the timeout expires.
+func WaitForSpans(t *testing.T, c *Collector, minSpans int) {
 	t.Helper()
-	time.Sleep(200 * time.Millisecond)
+	deadline := time.Now().Add(defaultSpanFlushTimeout)
+	for time.Now().Before(deadline) {
+		if len(AllSpans(c.GetTraces())) >= minSpans {
+			return
+		}
+		time.Sleep(defaultSpanPollInterval)
+	}
+	got := len(AllSpans(c.GetTraces()))
+	t.Fatalf("timeout waiting for %d span(s), collector has %d", minSpans, got)
 }
