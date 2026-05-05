@@ -2,4 +2,4 @@ assign_global_var:
   target: main
   kind: var
   identifier: GlobalVar
-  value: '"replaced"'
+  replace: '"replaced"'
