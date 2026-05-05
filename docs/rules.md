@@ -181,7 +181,7 @@ The `template` field uses Go's standard `text/template` package for code generat
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
 - **Type Safety**: The template is compiled at rule creation time and validated
-- **Expression Output**: The template must produce a valid Go expression that evaluates to a call expression (current limitation)
+- **Expression Output**: The template must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
 
 Currently supported template features:
 
@@ -371,7 +371,7 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 **Important Notes:**
 
 - The `{{ . }}` placeholder in the template represents the original function call.
-- The template must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
+- The template must be a valid Go expression that includes the `{{ . }}` placeholder; the result may be any expression type.
 - Template code can only reference packages and functions that are already imported or defined in the target file.
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
@@ -482,11 +482,12 @@ add_file_with_extra_imports:
 
 ### 7. Named Declaration Rule
 
-This rule targets a named package-level symbol (variable, constant, function, or type) and replaces its initializer with a new expression. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing a default HTTP transport with an instrumented one to enable distributed tracing.
+This rule targets a named package-level symbol (variable, constant, function, or type) and either replaces or wraps its initializer. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing or wrapping a default HTTP transport with an instrumented one to enable distributed tracing.
 
 **Use Cases:**
 
 - Replacing a package-level `var` with an instrumented implementation (e.g., `http.DefaultTransport`).
+- Wrapping an existing package-level `var` initializer with an OTel instrumentation layer.
 - Toggling a package-level flag or sentinel value for observability purposes.
 - Substituting a registered implementation at compile time.
 
@@ -494,10 +495,13 @@ This rule targets a named package-level symbol (variable, constant, function, or
 
 - `kind` (string, optional): Constrains the kind of symbol to match. Valid values: `var`, `const`, or omitted/empty to match any kind. (`func` and `type` are recognized but not currently supported — no action can be applied to them.)
 - `identifier` (string, required): The name of the top-level symbol to match.
-- `value` (string, required): A Go expression to assign as the new value of the matched `var` or `const`. Not valid when `kind` is `func` or `type`.
-- `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
+- `value` (string, optional): A Go expression to assign as the new value of the matched `var` or `const`. Mutually exclusive with `wrap`. Not valid when `kind` is `func` or `type`.
+- `wrap` (string, optional): A Go expression template that wraps the existing initializer of the matched `var` or `const`. `{{ . }}` is substituted with the original expression. Mutually exclusive with `value`. Not valid when `kind` is `func` or `type`.
+- `imports` (map[string]string, optional): Additional imports needed by the advice expression. Same format as [Common Fields](#common-fields).
 
-**Example:**
+> **Note:** Exactly one of `value` or `wrap` must be set.
+
+**Example (replace):**
 
 ```yaml
 assign_default_transport:
@@ -513,10 +517,26 @@ assign_default_transport:
     http: "net/http"
 ```
 
-This rule replaces `http.DefaultTransport` in the `net/http` package with a custom `*http.Transport` at compile time, enabling all outbound HTTP calls to use the configured transport — a common pattern for injecting tracing or connection-pool tuning without modifying the standard library source.
+This rule replaces `http.DefaultTransport` in the `net/http` package with a custom `*http.Transport` at compile time, enabling all outbound HTTP calls to use the configured transport.
+
+**Example (wrap):**
+
+```yaml
+wrap_default_transport:
+  target: net/http
+  kind: var
+  identifier: DefaultTransport
+  wrap: "otelhttp.NewTransport({{ . }})"
+  imports:
+    otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+```
+
+This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTransport`, injecting OTel tracing into all outbound HTTP calls without replacing the transport configuration.
 
 **Notes:**
 
 - `value` must be a valid Go expression (not a statement).
-- If the matched symbol has multiple names in a single declaration (e.g., `var a, b = ...`), the expression is cloned and assigned to each name.
+- `wrap` must contain `{{ . }}` as a placeholder for the original expression. Variants `{{.}}`, `{{- . -}}`, etc. are also accepted. The template must produce exactly one expression statement.
+- `wrap` returns an error at instrumentation time if the matched declaration has no initializer (e.g., `var X T` without `= ...`).
+- If the matched symbol has multiple names in a single declaration (e.g., `var a, b = ...`), the advice is applied to each initializer independently.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.

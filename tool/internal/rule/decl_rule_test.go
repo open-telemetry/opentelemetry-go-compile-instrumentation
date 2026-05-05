@@ -77,17 +77,17 @@ value: "42"
 			},
 		},
 		{
-			name: "empty value",
+			name: "neither value nor wrap",
 			yaml: `
 target: example.com/pkg
 identifier: SomeDecl
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "one of value or wrap must be set",
 		},
 		{
-			name: "whitespace-only value",
+			name: "whitespace-only value and no wrap",
 			yaml: `
 target: example.com/pkg
 identifier: SomeDecl
@@ -95,10 +95,22 @@ value: "   "
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "one of value or wrap must be set",
 		},
 		{
-			name: "func kind without value",
+			name: "both value and wrap set",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+value: "42"
+wrap: "wrapper({{ . }})"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "value and wrap are mutually exclusive",
+		},
+		{
+			name: "func kind without value or wrap",
 			yaml: `
 target: example.com/pkg
 kind: func
@@ -106,10 +118,10 @@ identifier: MyFunc
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "has no supported advice",
 		},
 		{
-			name: "type kind without value",
+			name: "type kind without value or wrap",
 			yaml: `
 target: example.com/pkg
 kind: type
@@ -117,7 +129,61 @@ identifier: MyType
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "has no supported advice",
+		},
+		{
+			name: "func kind with wrap",
+			yaml: `
+target: example.com/pkg
+kind: func
+identifier: MyFunc
+wrap: "wrapper({{ . }})"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "wrap is not valid when kind is",
+		},
+		{
+			name: "wrap template missing placeholder",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap: "wrapper(x)"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "wrap template must contain {{ . }} placeholder",
+		},
+		{
+			name: "wrap valid",
+			yaml: `
+target: example.com/pkg
+kind: var
+identifier: DefaultTransport
+wrap: "otelhttp.NewTransport({{ . }})"
+imports:
+  otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+`,
+			ruleName: "wrap_default_transport",
+			check: func(t *testing.T, r *InstDeclRule) {
+				assert.Equal(t, "wrap_default_transport", r.Name)
+				assert.Equal(t, "var", r.Kind)
+				assert.Equal(t, "DefaultTransport", r.Identifier)
+				assert.Empty(t, r.Value)
+				assert.Equal(t, "otelhttp.NewTransport({{ . }})", r.Wrap)
+			},
+		},
+		{
+			name: "wrap compact placeholder variant",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap: "wrapper({{.}})"
+`,
+			ruleName: "wrap_some_decl",
+			check: func(t *testing.T, r *InstDeclRule) {
+				assert.Equal(t, "wrapper({{.}})", r.Wrap)
+			},
 		},
 		{
 			name: "empty identifier",

@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/dave/dst"
+	"github.com/dave/dst/dstutil"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -16,52 +17,110 @@ import (
 // applyCallRule transforms function calls at call sites by wrapping them with
 // instrumentation code according to the provided template.
 func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
-	modified := false
 	importAliases := collectImportAliases(root)
 
-	// Collect all matching calls first to avoid infinite recursion when wrapping
+	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
+
+	templateModified := false
+	if r.Template != "" {
+		var err error
+		templateModified, err = ip.applyCallTemplate(r, root, importAliases)
+		if err != nil {
+			return err
+		}
+	}
+
+	util.Assert(appendModified || templateModified, "call rule did not match any call")
+
+	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
+		return err
+	}
+	ip.Info("Apply call rule", "rule", r)
+
+	return nil
+}
+
+// applyCallTemplate applies template wrapping to all matching calls in root using a
+// two-pass approach to avoid re-matching wrapped nodes.
+// Returns true if any replacement was made.
+func (ip *InstrumentPhase) applyCallTemplate(
+	r *rule.InstCallRule,
+	root *dst.File,
+	importAliases map[string]string,
+) (bool, error) {
+	tmpl, err := newCallTemplate(r.Template)
+	if err != nil {
+		return false, ex.Wrapf(err, "rule has no compiled template")
+	}
+
+	// Pass 1: collect matching calls and pre-compute replacements to avoid
+	// re-matching the original call pointer inside its own wrapper.
+	replacements := make(map[*dst.CallExpr]dst.Expr)
+	dst.Inspect(root, func(node dst.Node) bool {
+		call, ok := node.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		if !matchesCallRule(call, r, importAliases) {
+			return true
+		}
+		wrapped, wrapErr := tmpl.compileExpression(call)
+		if wrapErr != nil {
+			ip.Warn("Failed to wrap call", "error", wrapErr)
+			return true
+		}
+		replacements[call] = util.AssertType[dst.Expr](dst.Clone(wrapped))
+		return true
+	})
+
+	if len(replacements) == 0 {
+		return false, nil
+	}
+
+	// Pass 2: replace each matched call with its pre-computed expression.
+	dstutil.Apply(root, func(cursor *dstutil.Cursor) bool {
+		call, ok := cursor.Node().(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		replacement, found := replacements[call]
+		if !found {
+			return true
+		}
+		cursor.Replace(replacement)
+		return true
+	}, nil)
+
+	return true, nil
+}
+
+func (ip *InstrumentPhase) applyCallAppendArgs(
+	r *rule.InstCallRule,
+	root *dst.File,
+	importAliases map[string]string,
+) bool {
+	if len(r.AppendArgs) == 0 {
+		return false
+	}
+
 	var matchingCalls []*dst.CallExpr
 	dst.Inspect(root, func(node dst.Node) bool {
 		call, ok := node.(*dst.CallExpr)
 		if !ok {
 			return true
 		}
-
-		// Check if this call matches our rule
 		if matchesCallRule(call, r, importAliases) {
 			matchingCalls = append(matchingCalls, call)
 		}
 		return true
 	})
-
-	// Now apply each matching call
 	for _, call := range matchingCalls {
-		appended, err := appendCallArgs(call, r)
-		if err != nil {
+		if _, err := appendCallArgs(call, r); err != nil {
 			ip.Warn("Failed to append args to call", "error", err)
-			continue
-		}
-
-		if r.Template != "" {
-			if err = wrapCall(call, r); err != nil {
-				ip.Warn("Failed to wrap call", "error", err)
-				continue
-			}
-		}
-
-		if appended || r.Template != "" {
-			modified = true
 		}
 	}
 
-	if modified {
-		if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
-			return err
-		}
-		ip.Info("Apply call rule", "rule", r)
-	}
-
-	return nil
+	return true
 }
 
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
@@ -89,7 +148,9 @@ func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
 
 	// Ellipsis call: requires variadic_type
 	if r.VariadicType == "" {
-		return false, ex.Newf("append_args on ellipsis call requires variadic_type; see docs/rules.md#append_args")
+		return false, ex.Newf(
+			"append_args on ellipsis call requires variadic_type to be set",
+		)
 	}
 
 	if len(call.Args) == 0 {
@@ -143,43 +204,4 @@ func buildEllipsisIIFE(spreadArg, varType dst.Expr, newArgs []dst.Expr) *dst.Cal
 		Args:     []dst.Expr{spreadArg},
 		Ellipsis: true,
 	}
-}
-
-// wrapCall applies the template transformation to wrap the original call.
-func wrapCall(call *dst.CallExpr, r *rule.InstCallRule) error {
-	tmpl, err := newCallTemplate(r.Template)
-	if err != nil {
-		return ex.Wrapf(err, "rule has no compiled template")
-	}
-
-	// Use the template to compile the wrapped expression
-	wrappedExpr, err := tmpl.compileExpression(call)
-	if err != nil {
-		return ex.Wrapf(err, "failed to compile template")
-	}
-
-	// Verify we got a call expression back
-	wrappedCall, ok := wrappedExpr.(*dst.CallExpr)
-	if !ok {
-		return ex.Newf(
-			"template output must be a call expression (e.g. \"wrapper({{ . }})\") but got %T; see docs/rules.md for supported template patterns",
-			wrappedExpr,
-		)
-	}
-
-	// Clone the wrapped expression to avoid decoration conflicts
-	cloned := dst.Clone(wrappedCall)
-	clonedCall, ok := cloned.(*dst.CallExpr)
-	if !ok {
-		return ex.Newf("clone result is not a CallExpr: got %T", cloned)
-	}
-
-	// Replace the original call with the wrapped version
-	// Copy fields to preserve the original call's position in the AST
-	call.Fun = clonedCall.Fun
-	call.Args = clonedCall.Args
-	call.Ellipsis = clonedCall.Ellipsis
-	call.Decs = clonedCall.Decs
-
-	return nil
 }
