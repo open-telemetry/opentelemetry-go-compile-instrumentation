@@ -48,12 +48,13 @@ type InstCallRule struct {
 	FuncName string `json:"func-name" yaml:"-"`
 
 	// Replace is the wrapper code with {{ . }} as placeholder for the original call.
-	// The replacement must be a valid Go expression.
-	// Currently the output must be a call expression.
+	// The replacement must be a valid Go expression. The output may be any
+	// expression type; it is not required to be a call expression.
 	//
 	// Examples:
 	//   - "wrapper({{ . }})" wraps the call with wrapper()
 	//   - "(func() { return {{ . }} })()" uses an IIFE
+	//   - "otelhttp.NewTransport({{ . }})" replaces a transport value
 	Replace string `json:"replace" yaml:"replace"`
 
 	// AppendArgs is a list of Go expression strings appended as additional
