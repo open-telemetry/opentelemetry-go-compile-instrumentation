@@ -86,6 +86,7 @@ The license header checker has a dedicated CI workflow (`check-license-headers.y
 - `make test-unit` - Run unit tests only with formatted output
 - `make test-integration` - Run integration tests only with formatted output
 - `make test-e2e` - Run end-to-end tests
+- `make test-latestlibbuild` - Build instrumented test apps against the `@latest` version of each instrumented library
 
 Test results are saved to `gotest-unit.log` and `gotest-integration.log` for review.
 

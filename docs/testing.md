@@ -2,13 +2,14 @@
 
 This document describes the testing strategy for the project, the different test categories, and when to use each.
 
-Tests are organized in three categories, each with a distinct purpose and scope.
+Tests are organized in four categories, each with a distinct purpose and scope.
 
 | Category | Location | Build Tag | Scope |
 | :------- | :------- | :-------- | :---- |
 | Unit | `tool/**/*_test.go`, `pkg/**/*_test.go` | none | Single function or component in isolation. |
 | Integration | `test/integration/` | `integration` | Instrumented binary against a local or in-process dependency. |
 | E2E | `test/e2e/` | `e2e` | Multiple processes (e.g. client + server). |
+| LatestLibBuild | `test/latestlibbuild/` | `latestlibbuild` | Compile instrumented app against `@latest` of each instrumented library. |
 
 ## Unit Tests
 
@@ -73,6 +74,9 @@ make test-integration
 # E2E tests (requires: make build build-demo)
 make test-e2e
 
+# LatestLibBuild tests (requires: make build; mutates test/apps/*/go.mod — run git restore test/apps afterwards)
+make test-latestlibbuild
+
 # Coverage
 make test-unit/coverage
 make test-integration/coverage
@@ -82,6 +86,22 @@ make test-e2e/coverage
 All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
 
 CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (arm64), and Windows (amd64). See `.github/workflows/test-*.yaml` for details.
+
+## LatestLibBuild Tests
+
+> [!IMPORTANT]
+> **What this test does.** For each app under `test/apps/`, the test discovers all direct, non-stdlib requires in its `go.mod`, bumps them to `@latest`, and verifies that `otelc go build` still succeeds. It is a **compile-only** check — no binary is executed and no spans are asserted. It runs on every pull request and blocks merge if it fails.
+
+| Category | Location | Build Tag | Scope |
+| :------- | :------- | :-------- | :---- |
+| LatestLibBuild | `test/latestlibbuild/` | `latestlibbuild` | Compile instrumented app against `@latest` of each library. |
+
+### What a failure means
+
+A failure means that the latest release of an upstream library introduced a **compile-time API break** that is incompatible with the current instrumentation hook. The remediation is:
+
+1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file (e.g. change `v1.2.3` to `v1.2.3,v4.5.6`).
+2. Open a new rule entry covering `[v4.5.6,)` and implement the updated hook.
 
 ## Writing New Tests
 
