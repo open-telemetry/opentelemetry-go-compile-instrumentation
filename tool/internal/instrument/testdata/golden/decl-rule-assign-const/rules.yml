@@ -2,4 +2,4 @@ assign_max_retries:
   target: main
   kind: const
   identifier: MaxRetries
-  value: "99"
+  replace: "99"

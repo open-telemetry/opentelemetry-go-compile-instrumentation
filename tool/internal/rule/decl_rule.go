@@ -13,7 +13,7 @@ import (
 // InstDeclRule represents a rule that matches a named top-level declaration
 // (function, type, variable, or constant) and applies an action to it.
 //
-// Exactly one of value or wrap must be set.
+// Exactly one of replace or wrap must be set.
 //
 // Example YAML (replace):
 //
@@ -21,7 +21,7 @@ import (
 //	  target: net/http
 //	  kind: var
 //	  identifier: DefaultTransport
-//	  value: |
+//	  replace: |
 //	    &http.Transport{MaxIdleConns: 100}
 //
 // Example YAML (wrap):
@@ -43,13 +43,13 @@ type InstDeclRule struct {
 	// Identifier is the name of the top-level declaration to match.
 	Identifier string `json:"identifier" yaml:"identifier"`
 
-	// Value is a Go expression to assign as the value of the matched var or
+	// Replace is a Go expression to assign as the value of the matched var or
 	// const declaration. Mutually exclusive with Wrap.
-	Value string `json:"value" yaml:"value"`
+	Replace string `json:"replace" yaml:"replace"`
 
 	// Wrap wraps the existing initializer of the matched var or const
 	// declaration using a template. {{ . }} is substituted with the original
-	// expression. Mutually exclusive with Value. An error is returned at
+	// expression. Mutually exclusive with Replace. An error is returned at
 	// instrumentation time if the declaration has no initializer.
 	Wrap string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
 }
@@ -86,29 +86,28 @@ func (r *InstDeclRule) validate() error {
 	if !validDeclKinds[r.Kind] {
 		return ex.Newf("kind %q is invalid; must be one of: func, var, const, type, or empty", r.Kind)
 	}
-
-	hasValue := strings.TrimSpace(r.Value) != ""
+	hasReplace := strings.TrimSpace(r.Replace) != ""
 	hasWrap := strings.TrimSpace(r.Wrap) != ""
 
 	if r.Kind == "func" || r.Kind == "type" {
-		if hasValue {
-			return ex.Newf("value is not valid when kind is %q", r.Kind)
+		if hasReplace {
+			return ex.Newf("replace is not valid when kind is %q", r.Kind)
 		}
 		if hasWrap {
 			return ex.Newf("wrap is not valid when kind is %q", r.Kind)
 		}
-		return ex.Newf("kind %q has no supported advice; use var or const to assign or wrap a value", r.Kind)
+		return ex.Newf("kind %q has no supported advice; use var or const to replace or wrap a value", r.Kind)
 	}
 
-	if !hasValue && !hasWrap {
-		return ex.Newf("one of value or wrap must be set")
+	if !hasReplace && !hasWrap {
+		return ex.Newf("one of replace or wrap must be set")
 	}
-	if hasValue && hasWrap {
-		return ex.Newf("value and wrap are mutually exclusive")
+	if hasReplace && hasWrap {
+		return ex.Newf("replace and wrap are mutually exclusive")
 	}
 
 	if hasWrap {
-		if !templatePlaceholderPattern.MatchString(r.Wrap) {
+		if !replacePlaceholderPattern.MatchString(r.Wrap) {
 			return ex.Newf(
 				"wrap template must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)",
 			)

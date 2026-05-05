@@ -28,7 +28,7 @@ import (
 //	wrap_http_get:
 //		target: "main"
 //		function_call: "net/http.Get"
-//		template: "tracedGet({{ . }})"
+//		replace: "tracedGet({{ . }})"
 //
 // This transforms: http.Get("url")
 // Into: tracedGet(http.Get("url"))
@@ -47,15 +47,15 @@ type InstCallRule struct {
 	// This field is populated during rule creation from FunctionCall.
 	FuncName string `json:"func-name" yaml:"-"`
 
-	// Template is the wrapper code with {{ . }} as placeholder for the original call.
-	// The template must be a valid Go expression. The output may be any expression
-	// type — it is not required to be a call expression.
+	// Replace is the wrapper code with {{ . }} as placeholder for the original call.
+	// The replacement must be a valid Go expression. The output may be any
+	// expression type; it is not required to be a call expression.
 	//
 	// Examples:
 	//   - "wrapper({{ . }})" wraps the call with wrapper()
 	//   - "(func() { return {{ . }} })()" uses an IIFE
 	//   - "otelhttp.NewTransport({{ . }})" replaces a transport value
-	Template string `json:"template" yaml:"template"`
+	Replace string `json:"replace" yaml:"replace"`
 
 	// AppendArgs is a list of Go expression strings appended as additional
 	// arguments to the matched call. See docs/rules.md for full semantics.
@@ -86,9 +86,9 @@ type InstCallRule struct {
 //   - "" (empty string)
 var funcNamePattern = regexp.MustCompile(`^(.+)\.([^\d\W]\w*)$`)
 
-// templatePlaceholderPattern matches template placeholder variants:
+// replacePlaceholderPattern matches replacement template placeholder variants:
 // {{ . }}, {{.}}, {{- . -}}, {{ .  }}, etc.
-var templatePlaceholderPattern = regexp.MustCompile(`\{\{-?\s*\.\s*-?\}\}`)
+var replacePlaceholderPattern = regexp.MustCompile(`\{\{-?\s*\.\s*-?\}\}`)
 
 // NewInstCallRule loads and validates an InstCallRule from YAML data.
 func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
@@ -115,10 +115,10 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 		return nil, ex.Wrapf(err, "invalid call rule %q", name)
 	}
 
-	// Validate template syntax
-	if r.Template != "" {
-		if _, err := fasttemplate.NewTemplate(r.Template, "{{", "}}"); err != nil {
-			return nil, ex.Wrapf(err, "invalid template syntax for rule %q", name)
+	// Validate replacement template syntax
+	if r.Replace != "" {
+		if _, err := fasttemplate.NewTemplate(r.Replace, "{{", "}}"); err != nil {
+			return nil, ex.Wrapf(err, "invalid replace syntax for rule %q", name)
 		}
 	}
 
@@ -131,11 +131,11 @@ func (r *InstCallRule) validate() error {
 		return ex.Newf("function_call cannot be empty")
 	}
 
-	if strings.TrimSpace(r.Template) == "" && len(r.AppendArgs) == 0 {
-		return ex.Newf("at least one of template or append_args must be set")
+	if strings.TrimSpace(r.Replace) == "" && len(r.AppendArgs) == 0 {
+		return ex.Newf("at least one of replace or append_args must be set")
 	}
-	if strings.TrimSpace(r.Template) != "" && !templatePlaceholderPattern.MatchString(r.Template) {
-		return ex.Newf("template must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)")
+	if strings.TrimSpace(r.Replace) != "" && !replacePlaceholderPattern.MatchString(r.Replace) {
+		return ex.Newf("replace must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)")
 	}
 	for i, arg := range r.AppendArgs {
 		if strings.TrimSpace(arg) == "" {

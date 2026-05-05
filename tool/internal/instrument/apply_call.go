@@ -15,22 +15,22 @@ import (
 )
 
 // applyCallRule transforms function calls at call sites by wrapping them with
-// instrumentation code according to the provided template.
+// instrumentation code according to the provided replacement template.
 func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
 	importAliases := collectImportAliases(root)
 
 	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
 
-	templateModified := false
-	if r.Template != "" {
+	replaceModified := false
+	if r.Replace != "" {
 		var err error
-		templateModified, err = ip.applyCallTemplate(r, root, importAliases)
+		replaceModified, err = ip.applyCallReplace(r, root, importAliases)
 		if err != nil {
 			return err
 		}
 	}
 
-	util.Assert(appendModified || templateModified, "call rule did not match any call")
+	util.Assert(appendModified || replaceModified, "call rule did not match any call")
 
 	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
 		return err
@@ -40,17 +40,17 @@ func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 	return nil
 }
 
-// applyCallTemplate applies template wrapping to all matching calls in root using a
+// applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
-func (ip *InstrumentPhase) applyCallTemplate(
+func (ip *InstrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
 ) (bool, error) {
-	tmpl, err := newCallTemplate(r.Template)
+	tmpl, err := newCallTemplate(r.Replace)
 	if err != nil {
-		return false, ex.Wrapf(err, "rule has no compiled template")
+		return false, ex.Wrapf(err, "rule has no compiled replacement template")
 	}
 
 	// Pass 1: collect matching calls and pre-compute replacements to avoid

@@ -168,20 +168,20 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `function_call` | string | Yes | Qualified function name: `package/path.FunctionName` |
-| `template` | string | No (one of `template`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a Go call expression. |
-| `append_args` | `[]string` | No (one of `template`/`append_args` required) | Go expression strings appended as additional arguments to the matched call |
+| `replace` | string | No (one of `replace`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a valid Go expression. |
+| `append_args` | `[]string` | No (one of `replace`/`append_args` required) | Go expression strings appended as additional arguments to the matched call |
 | `variadic_type` | string | No | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
 | `imports` | map[string]string | No | Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`. |
 
-**`template` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `template` wraps the modified call.
+**`replace` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `replace` wraps the modified call.
 
-**Template System:**
+**Replacement Template System:**
 
-The `template` field uses Go's standard `text/template` package for code generation. This provides:
+The `replace` field uses Go's standard `text/template` package for code generation. This provides:
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
-- **Type Safety**: The template is compiled at rule creation time and validated
-- **Expression Output**: The template must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
+- **Type Safety**: The replacement template is compiled at rule creation time and validated
+- **Expression Output**: The replacement template must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
 
 Currently supported template features:
 
@@ -231,7 +231,7 @@ Examples:
 wrap_http_get:
   target: myapp/server
   function_call: net/http.Get
-  template: "tracedGet({{ . }})"
+  replace: "tracedGet({{ . }})"
 ```
 
 In the `myapp/server` package, this transforms:
@@ -263,7 +263,7 @@ func fetchData(url string) {
 wrap_redis_get:
   target: myapp/cache
   function_call: github.com/redis/go-redis/v9.Get
-  template: "tracedRedisGet(ctx, {{ . }})"
+  replace: "tracedRedisGet(ctx, {{ . }})"
 ```
 
 In the `myapp/cache` package:
@@ -290,7 +290,7 @@ This example demonstrates the power of the `text/template` system by using an II
 wrap_with_unsafe:
   target: client
   function_call: myapp/utils.Helper
-  template: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
+  replace: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
 ```
 
 This uses an immediately-invoked function expression (IIFE) to inject logic after the call:
@@ -314,7 +314,7 @@ func process() {
 }
 ```
 
-**Note:** The `unsafe` package must be imported in the target file for this template to work.
+**Note:** The `unsafe` package must be imported in the target file for this replacement to work.
 
 ---
 
@@ -370,9 +370,9 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 
 **Important Notes:**
 
-- The `{{ . }}` placeholder in the template represents the original function call.
-- The template must be a valid Go expression that includes the `{{ . }}` placeholder; the result may be any expression type.
-- Template code can only reference packages and functions that are already imported or defined in the target file.
+- The `{{ . }}` placeholder in `replace` represents the original function call.
+- `replace` must be a valid Go expression that includes the placeholder; the result may be any expression type.
+- Replacement code can only reference packages and functions that are already imported or defined in the target file.
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
 - Use the qualified format `package/path.FunctionName` for functions.
@@ -495,11 +495,11 @@ This rule targets a named package-level symbol (variable, constant, function, or
 
 - `kind` (string, optional): Constrains the kind of symbol to match. Valid values: `var`, `const`, or omitted/empty to match any kind. (`func` and `type` are recognized but not currently supported — no action can be applied to them.)
 - `identifier` (string, required): The name of the top-level symbol to match.
-- `value` (string, optional): A Go expression to assign as the new value of the matched `var` or `const`. Mutually exclusive with `wrap`. Not valid when `kind` is `func` or `type`.
-- `wrap` (string, optional): A Go expression template that wraps the existing initializer of the matched `var` or `const`. `{{ . }}` is substituted with the original expression. Mutually exclusive with `value`. Not valid when `kind` is `func` or `type`.
-- `imports` (map[string]string, optional): Additional imports needed by the advice expression. Same format as [Common Fields](#common-fields).
+- `replace` (string, optional): A Go expression to assign as the new value of the matched `var` or `const`. Mutually exclusive with `wrap`. Not valid when `kind` is `func` or `type`.
+- `wrap` (string, optional): A Go expression template that wraps the existing initializer of the matched `var` or `const`. `{{ . }}` is substituted with the original expression. Mutually exclusive with `replace`. Not valid when `kind` is `func` or `type`.
+- `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
 
-> **Note:** Exactly one of `value` or `wrap` must be set.
+> **Note:** Exactly one of `replace` or `wrap` must be set.
 
 **Example (replace):**
 
@@ -508,7 +508,7 @@ assign_default_transport:
   target: net/http
   kind: var
   identifier: DefaultTransport
-  value: |
+  replace: |
     &http.Transport{
       MaxIdleConns:    100,
       MaxConnsPerHost: 100,
@@ -535,8 +535,9 @@ This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTra
 
 **Notes:**
 
-- `value` must be a valid Go expression (not a statement).
+- `replace` must be a valid Go expression (not a statement).
 - `wrap` must contain `{{ . }}` as a placeholder for the original expression. Variants `{{.}}`, `{{- . -}}`, etc. are also accepted. The template must produce exactly one expression statement.
 - `wrap` returns an error at instrumentation time if the matched declaration has no initializer (e.g., `var X T` without `= ...`).
-- If the matched symbol has multiple names in a single declaration (e.g., `var a, b = ...`), the advice is applied to each initializer independently.
+- If `replace` matches multiple names in a single declaration (e.g., `var a, b = ...`), the replacement expression is cloned and assigned to each name.
+- If `wrap` matches multiple initialized values in a single declaration, each initializer is wrapped independently.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.

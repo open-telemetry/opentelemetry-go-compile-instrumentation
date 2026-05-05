@@ -44,13 +44,13 @@ func httpGetCall() *dst.CallExpr {
 	}
 }
 
-func httpGetRule(template string) *rule.InstCallRule {
+func httpGetRule(replace string) *rule.InstCallRule {
 	return &rule.InstCallRule{
 		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
 		FunctionCall: "net/http.Get",
 		ImportPath:   "net/http",
 		FuncName:     "Get",
-		Template:     template,
+		Replace:      replace,
 	}
 }
 
@@ -75,7 +75,7 @@ func TestApplyCallRule_Success(t *testing.T) {
 }
 
 func TestApplyCallRule_NonCallExprResult(t *testing.T) {
-	// Template produces a selector expression, not a call expression.
+	// Replace produces a selector expression, not a call expression.
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("{{ . }}.Response")
 
@@ -95,7 +95,7 @@ func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 	err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rule has no compiled template")
+	assert.Contains(t, err.Error(), "rule has no compiled replacement template")
 }
 
 // --- matchesCallRule tests ---
@@ -345,8 +345,8 @@ func TestAppendCallArgs_InvalidExpr(t *testing.T) {
 	assert.False(t, modified)
 }
 
-func TestAppendCallArgs_WithTemplate(t *testing.T) {
-	// Both append_args and template: args appended first, then template wraps.
+func TestAppendCallArgs_WithReplace(t *testing.T) {
+	// Both append_args and replace: args appended first, then replace wraps.
 	call := httpGetCall()
 	file := makeCallFile(call)
 	r := &rule.InstCallRule{
@@ -355,7 +355,7 @@ func TestAppendCallArgs_WithTemplate(t *testing.T) {
 		ImportPath:   "net/http",
 		FuncName:     "Get",
 		AppendArgs:   []string{"42"},
-		Template:     "wrapper({{ . }})",
+		Replace:      "wrapper({{ . }})",
 	}
 
 	err := newTestPhase().applyCallRule(context.Background(), r, file)

@@ -33,7 +33,7 @@ func parseValueExpr(exprSource string) (dst.Expr, error) {
 // applyDeclRule applies a declaration rule to the target file, modifying the
 // matched named declaration (e.g., assigning a new value to a var or const).
 func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRule, root *dst.File) error {
-	util.Assert(r.Value != "" || r.Wrap != "", "decl rule must set value or wrap")
+	util.Assert(r.Replace != "" || r.Wrap != "", "decl rule must set replace or wrap")
 
 	node := ast.FindNamedDecl(root, r.Identifier, r.Kind)
 	if node == nil {
@@ -55,7 +55,7 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 		return nil
 	}
 
-	expr, err := parseValueExpr(r.Value)
+	expr, err := parseValueExpr(r.Replace)
 	if err != nil {
 		return err
 	}
