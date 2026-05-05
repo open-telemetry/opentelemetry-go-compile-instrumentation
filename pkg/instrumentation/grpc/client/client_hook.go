@@ -5,9 +5,7 @@ package client
 
 import (
 	"context"
-	"os"
 	"runtime/debug"
-	"strings"
 	"sync"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -15,7 +13,7 @@ import (
 	"google.golang.org/grpc/stats"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-	grpcsemconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/semconv"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/internal/otlpfilter"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 )
 
@@ -74,7 +72,7 @@ func BeforeNewClient(ictx inst.HookContext, target string, opts ...grpc.DialOpti
 		return
 	}
 
-	if isOTLPExporterTarget(target) {
+	if otlpfilter.IsExporterTarget(target) {
 		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target)
 		return
 	}
@@ -104,7 +102,7 @@ func BeforeDialContext(ictx inst.HookContext, ctx context.Context, target string
 		return
 	}
 
-	if isOTLPExporterTarget(target) {
+	if otlpfilter.IsExporterTarget(target) {
 		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target)
 		return
 	}
@@ -133,18 +131,5 @@ func newClientStatsHandler() stats.Handler {
 }
 
 func recordRPC(info *stats.RPCTagInfo) bool {
-	return info == nil || !grpcsemconv.IsOTELExporterPath(info.FullMethodName)
-}
-
-func isOTLPExporterTarget(target string) bool {
-	if target == "" {
-		return false
-	}
-
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
-		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-	}
-
-	return endpoint != "" && strings.Contains(endpoint, target)
+	return info == nil || !otlpfilter.IsExporterPath(info.FullMethodName)
 }

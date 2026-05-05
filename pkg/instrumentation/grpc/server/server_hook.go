@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/stats"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-	grpcsemconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/semconv"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/internal/otlpfilter"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 )
 
@@ -90,5 +90,5 @@ func newServerStatsHandler() stats.Handler {
 }
 
 func recordRPC(info *stats.RPCTagInfo) bool {
-	return info == nil || !grpcsemconv.IsOTELExporterPath(info.FullMethodName)
+	return info == nil || !otlpfilter.IsExporterPath(info.FullMethodName)
 }

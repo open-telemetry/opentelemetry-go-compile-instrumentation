@@ -27,7 +27,7 @@ func TestBeforeNewClient(t *testing.T) {
 		opts                    []grpc.DialOption
 		enabledEnv              bool
 		expectHandler           bool
-		oltpExporterEndpointKey string
+		otlpExporterEndpointKey string
 	}{
 		{
 			name:          "no options",
@@ -67,20 +67,36 @@ func TestBeforeNewClient(t *testing.T) {
 			expectHandler: true,
 		},
 		{
-			name:                    "oltp exporter endpoint target",
+			name:                    "OTLP exporter endpoint target",
 			target:                  "localhost:4317",
 			opts:                    []grpc.DialOption{},
 			enabledEnv:              true,
 			expectHandler:           false,
-			oltpExporterEndpointKey: "OTEL_EXPORTER_OTLP_ENDPOINT",
+			otlpExporterEndpointKey: "OTEL_EXPORTER_OTLP_ENDPOINT",
 		},
 		{
-			name:                    "oltp exporter traces endpoint target",
+			name:                    "OTLP exporter traces endpoint target",
 			target:                  "localhost:4317",
 			opts:                    []grpc.DialOption{},
 			enabledEnv:              true,
 			expectHandler:           false,
-			oltpExporterEndpointKey: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+			otlpExporterEndpointKey: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+		},
+		{
+			name:                    "OTLP exporter metrics endpoint target",
+			target:                  "localhost:4317",
+			opts:                    []grpc.DialOption{},
+			enabledEnv:              true,
+			expectHandler:           false,
+			otlpExporterEndpointKey: "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+		},
+		{
+			name:                    "OTLP exporter logs endpoint target",
+			target:                  "localhost:4317",
+			opts:                    []grpc.DialOption{},
+			enabledEnv:              true,
+			expectHandler:           false,
+			otlpExporterEndpointKey: "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
 		},
 	}
 
@@ -92,8 +108,8 @@ func TestBeforeNewClient(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			if tt.oltpExporterEndpointKey != "" {
-				t.Setenv(tt.oltpExporterEndpointKey, tt.target)
+			if tt.otlpExporterEndpointKey != "" {
+				t.Setenv(tt.otlpExporterEndpointKey, tt.target)
 			}
 
 			ictx := insttest.NewMockHookContext(tt.target, tt.opts)
@@ -176,7 +192,7 @@ func TestBeforeDialContext(t *testing.T) {
 		opts                    []grpc.DialOption
 		enabledEnv              bool
 		expectHandler           bool
-		oltpExporterEndpointKey string
+		otlpExporterEndpointKey string
 	}{
 		{
 			name:          "no options",
@@ -202,20 +218,36 @@ func TestBeforeDialContext(t *testing.T) {
 			expectHandler: false,
 		},
 		{
-			name:                    "oltp exporter endpoint target",
+			name:                    "OTLP exporter endpoint target",
 			target:                  "localhost:4317",
 			opts:                    []grpc.DialOption{},
 			enabledEnv:              true,
 			expectHandler:           false,
-			oltpExporterEndpointKey: "OTEL_EXPORTER_OTLP_ENDPOINT",
+			otlpExporterEndpointKey: "OTEL_EXPORTER_OTLP_ENDPOINT",
 		},
 		{
-			name:                    "oltp exporter traces endpoint target",
+			name:                    "OTLP exporter traces endpoint target",
 			target:                  "localhost:4317",
 			opts:                    []grpc.DialOption{},
 			enabledEnv:              true,
 			expectHandler:           false,
-			oltpExporterEndpointKey: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+			otlpExporterEndpointKey: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+		},
+		{
+			name:                    "OTLP exporter metrics endpoint target",
+			target:                  "localhost:4317",
+			opts:                    []grpc.DialOption{},
+			enabledEnv:              true,
+			expectHandler:           false,
+			otlpExporterEndpointKey: "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+		},
+		{
+			name:                    "OTLP exporter logs endpoint target",
+			target:                  "localhost:4317",
+			opts:                    []grpc.DialOption{},
+			enabledEnv:              true,
+			expectHandler:           false,
+			otlpExporterEndpointKey: "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
 		},
 	}
 
@@ -227,8 +259,8 @@ func TestBeforeDialContext(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			if tt.oltpExporterEndpointKey != "" {
-				t.Setenv(tt.oltpExporterEndpointKey, tt.target)
+			if tt.otlpExporterEndpointKey != "" {
+				t.Setenv(tt.otlpExporterEndpointKey, tt.target)
 			}
 
 			ctx := t.Context()
