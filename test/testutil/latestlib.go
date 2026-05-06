@@ -5,11 +5,15 @@ package testutil
 
 import (
 	"encoding/json"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // goModJSON is the subset of `go mod edit -json` output we care about.
@@ -24,11 +28,44 @@ type goModJSON struct {
 	}
 }
 
-// DiscoverDirectDeps returns the direct, non-replaced third-party module paths
-// declared in the go.mod at appDir. Modules overridden by a local-filesystem
-// replace directive (path starting with "." or "/") are excluded, as are
-// indirect dependencies. Stdlib-only apps return an empty slice.
-func DiscoverDirectDeps(t *testing.T, appDir string) []string {
+// yamlRule is the subset of a single rule entry we need to read the target from.
+type yamlRule struct {
+	Target string `yaml:"target"`
+}
+
+// InstrumentedTargets walks rulesRoot, parses every *.yaml file as an
+// instrumentation rule set, and returns the set of third-party module paths
+// declared as `target:`.
+func InstrumentedTargets(t *testing.T, rulesRoot string) map[string]bool {
+	targets := map[string]bool{}
+	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+			return nil
+		}
+		data, readErr := os.ReadFile(path) //nolint:gosec
+		require.NoError(t, readErr, "read rule file %s", path)
+
+		var rules map[string]yamlRule
+		require.NoError(t, yaml.Unmarshal(data, &rules), "parse rule file %s", path)
+
+		for _, r := range rules {
+			if r.Target != "" {
+				targets[r.Target] = true
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err, "walk rules root %s", rulesRoot)
+	return targets
+}
+
+// DiscoverInstrumentedDeps returns the direct, non-replaced third-party
+// requires of the go.mod at appDir that are covered by at least one
+// instrumentation rule target.
+func DiscoverInstrumentedDeps(t *testing.T, appDir string, targets map[string]bool) []string {
 	cmd := exec.CommandContext(t.Context(), "go", "mod", "edit", "-json")
 	cmd.Dir = appDir
 	out, err := cmd.Output()
@@ -46,11 +83,27 @@ func DiscoverDirectDeps(t *testing.T, appDir string) []string {
 
 	var deps []string
 	for _, req := range mod.Require {
-		if !req.Indirect && !localReplaces[req.Path] {
+		if req.Indirect || localReplaces[req.Path] {
+			continue
+		}
+		if coversAnyTarget(req.Path, targets) {
 			deps = append(deps, req.Path)
 		}
 	}
 	return deps
+}
+
+// coversAnyTarget reports whether requirePath is the module path of any
+// instrumented target. A module covers a target when the target equals the
+// module path or is rooted at it (target == path or target starts with path+"/").
+func coversAnyTarget(requirePath string, targets map[string]bool) bool {
+	prefix := requirePath + "/"
+	for target := range targets {
+		if target == requirePath || strings.HasPrefix(target, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // BumpToLatest runs "go get <dep>@latest" for each dep in appDir, followed by "go mod tidy".

@@ -15,6 +15,9 @@ import (
 
 func TestLatestLibBuild(t *testing.T) {
 	appsRoot := filepath.Join("..", "apps")
+	rulesRoot := filepath.Join("..", "..", "pkg", "instrumentation")
+	targets := testutil.InstrumentedTargets(t, rulesRoot)
+
 	entries, err := os.ReadDir(appsRoot)
 	if err != nil {
 		t.Fatalf("read %s: %v", appsRoot, err)
@@ -29,9 +32,9 @@ func TestLatestLibBuild(t *testing.T) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
-			deps := testutil.DiscoverDirectDeps(t, appDir)
+			deps := testutil.DiscoverInstrumentedDeps(t, appDir, targets)
 			if len(deps) == 0 {
-				t.Skipf("%s has no third-party deps to bump (stdlib-only)", name)
+				t.Skipf("%s has no instrumented third-party deps to bump", name)
 			}
 			testutil.BumpToLatest(t, appDir, deps...)
 			testutil.Build(t, appDir, "go", "build", "-a")
