@@ -100,7 +100,7 @@ CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (
 
 A failure means that the latest release of an upstream library introduced a **compile-time API break** that is incompatible with the current instrumentation hook. The remediation is:
 
-1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file (e.g. change `v1.2.3` to `v1.2.3,v4.5.6`).
+1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file (e.g. change the version field from `v1.2.3` to `v1.2.3,v4.5.6`).
 2. Open a new rule entry covering `[v4.5.6,)` and implement the updated hook.
 
 ## Writing New Tests
