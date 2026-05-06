@@ -29,7 +29,6 @@ func TestLatestLibBuild(t *testing.T) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
-			t.Parallel()
 			deps := testutil.DiscoverDirectDeps(t, appDir)
 			if len(deps) == 0 {
 				t.Skipf("%s has no third-party deps to bump (stdlib-only)", name)
