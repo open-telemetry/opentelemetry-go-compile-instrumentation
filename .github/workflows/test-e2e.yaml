@@ -14,6 +14,7 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation'
     permissions:
       pull-requests: read
     outputs:
@@ -39,7 +40,7 @@ jobs:
     name: Coverage E2E Tests
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation' && needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
@@ -51,7 +52,7 @@ jobs:
   test-e2e:
     name: Test (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation' && needs.changes.outputs.code == 'true'
     strategy:
       matrix:
         platform:
@@ -82,7 +83,7 @@ jobs:
     name: Done (E2E Tests)
     runs-on: ubuntu-latest
     needs: [changes, test-e2e-coverage, test-e2e]
-    if: always()
+    if: always() && github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation'
     steps:
       - name: Check result
         run: |

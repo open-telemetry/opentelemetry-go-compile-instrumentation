@@ -12,6 +12,7 @@ jobs:
   benchmark:
     name: Compile-Time Benchmarks
     runs-on: ubuntu-latest
+    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation'
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
@@ -36,7 +37,8 @@ jobs:
     name: Store Benchmark Results
     runs-on: ubuntu-latest
     needs: benchmark
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation' && github.event_name == 'push' && github.ref
+      == 'refs/heads/main'
     permissions:
       contents: write
     steps:

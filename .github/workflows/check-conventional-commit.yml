@@ -19,8 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     # Prevent double triggers: skip pull_request runs for forks (pull_request_target will handle them)
     if: |
-      github.event_name == 'pull_request_target' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation' &&
+      (
+        github.event_name == 'pull_request_target' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      )
     steps:
       # Check if we have the necessary permissions to update labels
       # This is needed because:
@@ -71,4 +74,3 @@ jobs:
           }}" -pr="${{ github.event.pull_request.number }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

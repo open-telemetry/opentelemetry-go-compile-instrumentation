@@ -17,6 +17,7 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation'
     permissions:
       pull-requests: read
     outputs:
@@ -37,7 +38,7 @@ jobs:
     name: Check License Headers
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation' && needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
       - run: make lint/license-header
@@ -46,7 +47,7 @@ jobs:
     name: Done (Check License Headers)
     runs-on: ubuntu-latest
     needs: [changes, check-license-headers]
-    if: always()
+    if: always() && github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation'
     steps:
       - name: Check result
         run: |
