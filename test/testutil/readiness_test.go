@@ -20,7 +20,7 @@ func TestWaitForSpans_returnsWhenSpansArrive(t *testing.T) {
 
 	start := time.Now()
 	WaitForSpans(t, c, 1)
-	assert.Less(t, time.Since(start), defaultSpanFlushTimeout)
+	assert.Less(t, time.Since(start), 100*time.Millisecond)
 }
 
 func TestWaitForSpans_pollsUntilSpansArrive(t *testing.T) {
