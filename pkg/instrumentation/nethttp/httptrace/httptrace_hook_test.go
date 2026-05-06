@@ -42,6 +42,7 @@ func TestNewClientTrace_ReturnsValidTrace(t *testing.T) {
 	assert.NotNil(t, ct.TLSHandshakeDone)
 	assert.NotNil(t, ct.WroteHeaders)
 	assert.NotNil(t, ct.WroteRequest)
+	assert.NotNil(t, ct.GotFirstResponseByte)
 }
 
 func TestNewClientTrace_NilTracerProvider(t *testing.T) {
@@ -53,6 +54,7 @@ func TestNewClientTrace_NilTracerProvider(t *testing.T) {
 
 	// Calling hooks should not panic
 	ct.GetConn("example.com:443")
+	ct.GotFirstResponseByte()
 }
 
 func TestNewClientTrace_InheritsProviderFromSpan(t *testing.T) {
@@ -258,8 +260,6 @@ func TestTLSFailure(t *testing.T) {
 	assert.Equal(t, "certificate verify failed", tlsSpan.Status().Description)
 }
 
-
-
 func TestWroteRequestError(t *testing.T) {
 	sr, tp := setupTestTracer(t)
 	ctx := context.Background()
@@ -276,6 +276,92 @@ func TestWroteRequestError(t *testing.T) {
 	sendSpan := spans[0]
 	assert.Equal(t, "http.send", sendSpan.Name())
 	assert.Equal(t, "broken pipe", sendSpan.Status().Description)
+}
+
+func TestWroteRequestErrorMarksRootSpanWhenStarted(t *testing.T) {
+	sr, tp := setupTestTracer(t)
+	ctx := context.Background()
+
+	ct := NewClientTrace(ctx, tp, "test")
+	ct.GetConn("example.com:443")
+	ct.WroteHeaders()
+
+	writeErr := errors.New("broken pipe")
+	ct.WroteRequest(httptrace.WroteRequestInfo{Err: writeErr})
+	ct.GotConn(httptrace.GotConnInfo{
+		Conn: &mockConn{
+			remoteAddr: &net.TCPAddr{IP: net.ParseIP("93.184.216.34"), Port: 443},
+			localAddr:  &net.TCPAddr{IP: net.ParseIP("192.168.1.1"), Port: 54321},
+		},
+	})
+
+	spans := sr.Ended()
+	require.Len(t, spans, 2)
+	assert.Equal(t, "http.send", spans[0].Name())
+	assert.Equal(t, "http.getconn", spans[1].Name())
+	assert.Equal(t, "broken pipe", spans[1].Status().Description)
+}
+
+func TestGetConnHostAttribute(t *testing.T) {
+	tests := []struct {
+		name     string
+		hostPort string
+		wantHost string
+	}{
+		{name: "host and port", hostPort: "example.com:443", wantHost: "example.com"},
+		{name: "host without port", hostPort: "example.com", wantHost: "example.com"},
+		{name: "ipv6 host and port", hostPort: "[2001:db8::1]:443", wantHost: "2001:db8::1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr, tp := setupTestTracer(t)
+			ct := NewClientTrace(context.Background(), tp, "test")
+
+			ct.GetConn(tt.hostPort)
+			ct.GotConn(httptrace.GotConnInfo{
+				Conn: &mockConn{
+					remoteAddr: &net.TCPAddr{IP: net.ParseIP("93.184.216.34"), Port: 443},
+					localAddr:  &net.TCPAddr{IP: net.ParseIP("192.168.1.1"), Port: 54321},
+				},
+			})
+
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+			assert.Contains(t, spans[0].Attributes(), HTTPHostAttribute.String(tt.wantHost))
+		})
+	}
+}
+
+func TestGotFirstResponseByteEndsReceiveSpan(t *testing.T) {
+	sr, tp := setupTestTracer(t)
+	ct := NewClientTrace(context.Background(), tp, "test")
+
+	ct.GotFirstResponseByte()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, "http.receive", spans[0].Name())
+}
+
+func TestEndBeforeStartCompletesSpanOnStart(t *testing.T) {
+	sr, tp := setupTestTracer(t)
+	ct := &clientTracer{
+		Context:     context.Background(),
+		tr:          tp.Tracer("test"),
+		activeHooks: make(map[string]context.Context),
+	}
+
+	lateErr := errors.New("late failure")
+	ct.end("custom", lateErr, HTTPConnectionDoneNetwork.String("tcp"))
+	ct.start("custom", "custom", HTTPConnectionStartNetwork.String("tcp"))
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, "custom", spans[0].Name())
+	assert.Equal(t, "late failure", spans[0].Status().Description)
+	assert.Contains(t, spans[0].Attributes(), HTTPConnectionStartNetwork.String("tcp"))
+	assert.Contains(t, spans[0].Attributes(), HTTPConnectionDoneNetwork.String("tcp"))
 }
 
 func TestConnectionReusedAttributes(t *testing.T) {
@@ -357,9 +443,12 @@ func TestFullRequestLifecycle(t *testing.T) {
 	ct.WroteHeaders()
 	ct.WroteRequest(httptrace.WroteRequestInfo{})
 
+	// 7. Receive
+	ct.GotFirstResponseByte()
+
 	spans := sr.Ended()
-	// dns, connect, tls, getconn, send = 5 sub-spans
-	require.Len(t, spans, 5)
+	// dns, connect, tls, getconn, send, receive = 6 sub-spans
+	require.Len(t, spans, 6)
 
 	spanNames := make([]string, len(spans))
 	for i, s := range spans {
@@ -371,6 +460,7 @@ func TestFullRequestLifecycle(t *testing.T) {
 	assert.Contains(t, spanNames, "http.tls")
 	assert.Contains(t, spanNames, "http.getconn")
 	assert.Contains(t, spanNames, "http.send")
+	assert.Contains(t, spanNames, "http.receive")
 }
 
 func TestParentHook(t *testing.T) {
@@ -382,6 +472,7 @@ func TestParentHook(t *testing.T) {
 		{"http.connect.93.184.216.34:443", "http.getconn"},
 		{"http.tls", "http.getconn"},
 		{"http.send", ""},
+		{"http.receive", ""},
 	}
 
 	for _, tt := range tests {

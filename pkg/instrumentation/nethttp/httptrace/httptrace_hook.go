@@ -89,6 +89,7 @@ func NewClientTrace(ctx context.Context, tp trace.TracerProvider, version string
 		TLSHandshakeDone:     ct.tlsHandshakeDone,
 		WroteHeaders:         ct.wroteHeaders,
 		WroteRequest:         ct.wroteRequest,
+		GotFirstResponseByte: ct.gotFirstResponseByte,
 	}
 }
 
@@ -223,4 +224,9 @@ func (ct *clientTracer) wroteRequest(info httptrace.WroteRequestInfo) {
 		ct.root.SetStatus(codes.Error, info.Err.Error())
 	}
 	ct.end("http.send", info.Err)
+}
+
+func (ct *clientTracer) gotFirstResponseByte() {
+	ct.start("http.receive", "http.receive")
+	ct.end("http.receive", nil)
 }

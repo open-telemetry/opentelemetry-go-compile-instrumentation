@@ -51,6 +51,53 @@ type replaceDirective struct {
 	newVersion string
 }
 
+func localModulePath(modulePath string) string {
+	relPath := strings.TrimPrefix(modulePath, util.OtelcRoot)
+	relPath = strings.TrimPrefix(relPath, "/")
+	return filepath.Join(util.GetBuildTempDir(), filepath.FromSlash(relPath))
+}
+
+func localModuleReplaces(modulePaths ...string) ([]*replaceDirective, error) {
+	replaces := make([]*replaceDirective, 0, len(modulePaths))
+	seen := make(map[string]bool, len(modulePaths))
+	queue := append([]string(nil), modulePaths...)
+
+	for len(queue) > 0 {
+		modulePath := queue[0]
+		queue = queue[1:]
+
+		if seen[modulePath] || !strings.HasPrefix(modulePath, util.OtelcRoot+"/pkg") {
+			continue
+		}
+		seen[modulePath] = true
+
+		replaces = append(replaces, &replaceDirective{
+			oldPath: modulePath,
+			newPath: localModulePath(modulePath),
+		})
+
+		goModFile := filepath.Join(localModulePath(modulePath), "go.mod")
+		if _, err := os.Stat(goModFile); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, ex.Wrapf(err, "checking local module go.mod at %s", goModFile)
+		}
+
+		modfile, err := parseGoMod(goModFile)
+		if err != nil {
+			return nil, err
+		}
+		for _, req := range modfile.Require {
+			if strings.HasPrefix(req.Mod.Path, util.OtelcRoot+"/pkg") {
+				queue = append(queue, req.Mod.Path)
+			}
+		}
+	}
+
+	return replaces, nil
+}
+
 func addReplace(modfile *modfile.File, replace *replaceDirective) (bool, error) {
 	hasReplace := false
 	for _, r := range modfile.Replace {
@@ -89,40 +136,27 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	if err != nil {
 		return err
 	}
-	replaces := make([]*replaceDirective, 0)
+	modulePaths := make([]string, 0, len(rules)+2)
 	for _, m := range rules {
 		util.Assert(strings.HasPrefix(m.Path, util.OtelcRoot), "sanity check")
-		oldPath := m.Path
-		newPath := strings.TrimPrefix(oldPath, util.OtelcRoot)
-		newPath = filepath.Join(util.GetBuildTempDir(), newPath)
-		replaces = append(replaces, &replaceDirective{
-			oldPath:    oldPath,
-			oldVersion: "",
-			newPath:    newPath,
-			newVersion: "",
-		})
+		modulePaths = append(modulePaths, m.Path)
 	}
 
 	// Add replace directive for special pkg module
 	// TODO: Since we haven't published the instrumentation packages yet,
 	// we need to add the replace directive to the local path.
 	// Once the instrumentation packages are published, we can remove this.
-	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelcRoot + "/pkg",
-		oldVersion: "",
-		newPath:    filepath.Join(util.GetBuildTempDir(), unzippedPkgDir),
-		newVersion: "",
-	})
+	modulePaths = append(modulePaths, util.OtelcRoot+"/pkg")
 
 	// Add replace directive for special shared module
 	// shared module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
-	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelcRoot + "/pkg/instrumentation/shared",
-		oldVersion: "",
-		newPath:    filepath.Join(util.GetBuildTempDir(), "pkg/instrumentation/shared"),
-		newVersion: "",
-	})
+	modulePaths = append(modulePaths, util.OtelcRoot+"/pkg/instrumentation/shared")
+
+	replaces, err := localModuleReplaces(modulePaths...)
+	if err != nil {
+		return err
+	}
 
 	// Okay, now add all the replace directives to go.mod
 	changed := false
