@@ -157,10 +157,10 @@ func OtelAfterTrampoline_GenericFunc3543564877[T any](hookContext HookContext, a
 	}
 }
 
-//go:linkname GenericFuncBefore testdata.GenericFuncBefore
+//go:linkname GenericFuncBefore testdata/golden/generic-functions.GenericFuncBefore
 func GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 int)
 
-//go:linkname GenericFuncAfter testdata.GenericFuncAfter
+//go:linkname GenericFuncAfter testdata/golden/generic-functions.GenericFuncAfter
 func GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)
 
 //line <generated>:1
@@ -262,8 +262,8 @@ func OtelAfterTrampoline_GenericMethod3378413897[T any](hookContext HookContext,
 	}
 }
 
-//go:linkname GenericMethodBefore testdata.GenericMethodBefore
+//go:linkname GenericMethodBefore testdata/golden/generic-functions.GenericMethodBefore
 func GenericMethodBefore(hookContext HookContext, recv0 interface{}, param0 interface{}, param1 string)
 
-//go:linkname GenericMethodAfter testdata.GenericMethodAfter
+//go:linkname GenericMethodAfter testdata/golden/generic-functions.GenericMethodAfter
 func GenericMethodAfter(hookContext HookContext, arg0 interface{}, arg1 error)

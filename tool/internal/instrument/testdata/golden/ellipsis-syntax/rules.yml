@@ -2,5 +2,5 @@ hook_before_only:
   target: main
   func: EllipsisFunc
   before: H9Before
-  path: testdata
+  path: testdata/golden/ellipsis-syntax
 

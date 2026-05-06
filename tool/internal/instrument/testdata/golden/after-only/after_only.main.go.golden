@@ -164,7 +164,7 @@ func OtelAfterTrampoline_Func13335793671(hookContext HookContext, arg0 *float32,
 	}
 }
 
-//go:linkname H1After testdata.H1After
+//go:linkname H1After testdata/golden/after-only.H1After
 func H1After(hookContext HookContext, arg0 float32, arg1 error)
 
 //line <generated>:1
@@ -276,5 +276,5 @@ func OtelAfterTrampoline_Func11091117693(hookContext HookContext, arg0 *float32,
 	}
 }
 
-//go:linkname H8After testdata.H8After
+//go:linkname H8After testdata/golden/after-only.H8After
 func H8After(hookContext HookContext, arg0 float32, arg1 error)

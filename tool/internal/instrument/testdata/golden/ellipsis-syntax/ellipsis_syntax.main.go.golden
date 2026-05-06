@@ -166,5 +166,5 @@ func OtelAfterTrampoline_EllipsisFunc2350319093(hookContext HookContext) {
 	hookContext.(*HookContextImpl2350319093).returnVals = []interface{}{}
 }
 
-//go:linkname H9Before testdata.H9Before
+//go:linkname H9Before testdata/golden/ellipsis-syntax.H9Before
 func H9Before(hookContext HookContext, param0 ...string)

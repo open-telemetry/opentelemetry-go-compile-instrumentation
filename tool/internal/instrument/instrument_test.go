@@ -70,15 +70,10 @@ func runTest(t *testing.T, testName string) {
 	)
 
 	sourceFile := filepath.Join(tempDir, mainGoFileName)
-	// Check if there's a test-specific source file first
+	// Each test case must provide its own source.go in its golden directory.
 	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, sourceFileName)
-	if _, err := os.Stat(testSpecificSource); err == nil {
-		util.CopyFile(testSpecificSource, sourceFile)
-	} else if os.IsNotExist(err) {
-		util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
-	} else {
-		t.Fatalf("unexpected error checking test-specific source: %v", err)
-	}
+	require.NoError(t, util.CopyFile(testSpecificSource, sourceFile),
+		"missing source.go for test %q at %s", testName, testSpecificSource)
 
 	ruleSet := loadRulesYAML(t, testName, sourceFile)
 	writeMatchedJSON(ruleSet)

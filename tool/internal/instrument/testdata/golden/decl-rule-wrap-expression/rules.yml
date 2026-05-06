@@ -1,0 +1,5 @@
+wrap_default_transport:
+  target: main
+  kind: var
+  identifier: DefaultTransport
+  wrap: "wrapTransport({{ . }})"

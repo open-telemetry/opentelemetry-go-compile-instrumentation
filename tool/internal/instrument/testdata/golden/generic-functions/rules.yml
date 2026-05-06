@@ -3,7 +3,7 @@ generic_func_rule:
   func: GenericFunc
   before: GenericFuncBefore
   after: GenericFuncAfter
-  path: testdata
+  path: testdata/golden/generic-functions
 
 generic_method_rule:
   target: main
@@ -11,5 +11,5 @@ generic_method_rule:
   recv: "*GenStruct"
   before: GenericMethodBefore
   after: GenericMethodAfter
-  path: testdata
+  path: testdata/golden/generic-functions
 
