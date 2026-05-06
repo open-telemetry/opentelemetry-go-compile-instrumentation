@@ -181,3 +181,60 @@ func TestDBClientAll(t *testing.T) {
 		"testdb",
 	)
 }
+
+func TestDBClientPostgresLibpqDSN(t *testing.T) {
+	f := testutil.NewTestFixture(t)
+
+	f.BuildAndRun("dbclient",
+		"-driver=postgres",
+		"-dsn=host=localhost port=5432 dbname=mydb user=postgres",
+		"-op=ping",
+	)
+
+	span := f.RequireSingleSpan()
+	require.Equal(t, "PING", span.Name())
+	testutil.RequireDBClientSemconv(t, span,
+		"PING",
+		"ping",
+		"localhost", 5432,
+		"mydb",
+	)
+}
+
+func TestDBClientMySQLDefaultHostDSN(t *testing.T) {
+	f := testutil.NewTestFixture(t)
+
+	f.BuildAndRun("dbclient",
+		"-driver=mysql",
+		"-dsn=user:pass@/mydb",
+		"-op=ping",
+	)
+
+	span := f.RequireSingleSpan()
+	require.Equal(t, "PING", span.Name())
+	testutil.RequireDBClientSemconv(t, span,
+		"PING",
+		"ping",
+		"localhost", 3306,
+		"mydb",
+	)
+}
+
+func TestDBClientSQLServerDatabaseKeyDSN(t *testing.T) {
+	f := testutil.NewTestFixture(t)
+
+	f.BuildAndRun("dbclient",
+		"-driver=sqlserver",
+		"-dsn=Server=localhost,1433;Database=myDB;User Id=sa;Password=Pass123",
+		"-op=ping",
+	)
+
+	span := f.RequireSingleSpan()
+	require.Equal(t, "PING", span.Name())
+	testutil.RequireDBClientSemconv(t, span,
+		"PING",
+		"ping",
+		"localhost", 1433,
+		"myDB",
+	)
+}
