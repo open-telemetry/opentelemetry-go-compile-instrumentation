@@ -34,10 +34,22 @@ jobs:
               - '.github/workflows/test-latestlibbuild.yaml'
 
   test-latestlibbuild:
-    name: LatestLibBuild Tests
+    name: LatestLibBuild Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: macos-latest
+            arch: arm64
+          - os: windows-latest
+            arch: amd64
+    runs-on: ${{ matrix.platform.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
@@ -47,6 +59,8 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.mod"
       - name: Build and test
+        env:
+          GOARCH: ${{ matrix.platform.arch }}
         run: make test-latestlibbuild
 
   done:
