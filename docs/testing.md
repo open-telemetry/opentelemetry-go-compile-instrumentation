@@ -90,7 +90,7 @@ CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (
 ## LatestLibBuild Tests
 
 > [!IMPORTANT]
-> **What this test does.** For each app under `test/apps/`, the test discovers all direct, non-stdlib requires in its `go.mod`, bumps them to `@latest`, and verifies that `otelc go build` still succeeds. It is a **compile-only** check — no binary is executed and no spans are asserted. It runs on every pull request and blocks merge if it fails.
+ > **What this test does.** For each app under `test/apps/`, the test discovers the app's direct dependencies whose module paths match an instrumentation rule `target:`, bumps those dependencies to `@latest`, and verifies that `otelc go build` still succeeds. It is a **compile-only** check — no binary is executed and no spans are asserted. It runs on every pull request and blocks merge if it fails.
 
 | Category | Location | Build Tag | Scope |
 | :------- | :------- | :-------- | :---- |

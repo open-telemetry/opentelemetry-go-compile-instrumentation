@@ -34,7 +34,7 @@ type yamlRule struct {
 }
 
 // InstrumentedTargets walks rulesRoot, parses every *.yaml file as an
-// instrumentation rule set, and returns the set of third-party module paths
+// instrumentation rule set, and returns the set of package/module paths
 // declared as `target:`.
 func InstrumentedTargets(t *testing.T, rulesRoot string) map[string]bool {
 	targets := map[string]bool{}
@@ -59,6 +59,7 @@ func InstrumentedTargets(t *testing.T, rulesRoot string) map[string]bool {
 		return nil
 	})
 	require.NoError(t, err, "walk rules root %s", rulesRoot)
+	require.NotEmpty(t, targets, "no instrumentation rule targets found under %s", rulesRoot)
 	return targets
 }
 
@@ -76,7 +77,7 @@ func DiscoverInstrumentedDeps(t *testing.T, appDir string, targets map[string]bo
 
 	localReplaces := make(map[string]bool, len(mod.Replace))
 	for _, r := range mod.Replace {
-		if strings.HasPrefix(r.New.Path, ".") || strings.HasPrefix(r.New.Path, "/") {
+		if strings.HasPrefix(r.New.Path, ".") || filepath.IsAbs(r.New.Path) {
 			localReplaces[r.Old.Path] = true
 		}
 	}
