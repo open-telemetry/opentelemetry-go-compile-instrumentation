@@ -170,5 +170,5 @@ func OtelAfterTrampoline_Unnamed3742873013(hookContext HookContext) {
 	hookContext.(*HookContextImpl3742873013).returnVals = []interface{}{}
 }
 
-//go:linkname H13Before testdata.H13Before
+//go:linkname H13Before testdata/golden/unnamed-param.H13Before
 func H13Before(hookContext HookContext, param0 int, param1 float32)

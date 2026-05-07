@@ -13,7 +13,7 @@ SHELL := /bin/bash
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         adr-tools adr-new adr-list \
-        benchmark benchmark/run
+        benchmark/codspeed benchmark/threshold
 
 # Constant variables
 BINARY_NAME := otelc
@@ -349,36 +349,23 @@ check-golden-files: package
 
 ##@ Benchmarking
 
-BENCH_HARNESS_DIR := test/bench/cmd/bench
-BENCH_SCENARIOS_DIR := test/bench/scenarios
-BENCH_OUTPUT := bench.json
-BENCH_ACTION_OUTPUT := bench-action.json
-BENCH_ITERATIONS ?= 5
-BENCH_WARMUP ?= 1
-BENCH_MAX_OVERHEAD_PCT ?= -1
+BENCH_DIR := test/bench
+BENCH_SCENARIOS_DIR := $(BENCH_DIR)/scenarios
+BENCH_TIME ?= 5x
+BENCH_MAX_OVERHEAD_PCT ?= 150
 
-benchmark: build ## Build benchmark harness and print usage
-	@echo "Building benchmark harness..."
-	@go build -C $(BENCH_HARNESS_DIR) -o $(TOOLS)/bench .
-	@echo ""
-	@echo "Run benchmarks with: make benchmark/run"
-	@echo "Override iterations: make benchmark/run BENCH_ITERATIONS=10"
+benchmark/codspeed: build ## Run compile-time benchmarks using Go testing.B (for CodSpeed walltime)
+	cd $(BENCH_DIR) && \
+	OTELC_BIN=$(CURDIR)/$(BINARY_NAME) \
+	BENCH_SCENARIOS_DIR=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
+	go test -v -run=^$$ -bench=. -benchtime=$(BENCH_TIME)
 
-.ONESHELL:
-benchmark/run: build ## Run compile-time benchmarks and emit bench.json
-benchmark/run: benchmark
-	@echo "Running compile-time benchmarks (iterations=$(BENCH_ITERATIONS), warmup=$(BENCH_WARMUP))..."
-	set -euo pipefail
-	nice -n -10 $(TOOLS)/bench \
-		-otelc=$(CURDIR)/$(BINARY_NAME) \
-		-scenarios=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
-		-iterations=$(BENCH_ITERATIONS) \
-		-warmup=$(BENCH_WARMUP) \
-		-max-overhead-pct=$(BENCH_MAX_OVERHEAD_PCT) \
-		-output=$(CURDIR)/$(BENCH_OUTPUT) \
-		-benchmark-action-output=$(CURDIR)/$(BENCH_ACTION_OUTPUT)
-	@echo ""
-	@echo "Results written to $(BENCH_OUTPUT) and $(BENCH_ACTION_OUTPUT)"
+benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if overhead exceeds BENCH_MAX_OVERHEAD_PCT)
+	cd $(BENCH_DIR) && \
+	OTELC_BIN=$(CURDIR)/$(BINARY_NAME) \
+	BENCH_SCENARIOS_DIR=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
+	BENCH_MAX_OVERHEAD_PCT=$(BENCH_MAX_OVERHEAD_PCT) \
+	go test -tags=overhead_check -run=TestOverheadCeiling -v -count=1 -timeout=30m
 
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go

@@ -179,7 +179,7 @@ func OtelAfterTrampoline_OptBad166090657(hookContext HookContext) {
 	hookContext.(*HookContextImpl166090657).returnVals = []interface{}{}
 }
 
-//go:linkname H6Before testdata.H6Before
+//go:linkname H6Before testdata/golden/opt-multiple-funcs.H6Before
 func H6Before(hookContext HookContext)
 
 //line <generated>:1
@@ -295,10 +295,10 @@ func OtelAfterTrampoline_OptBad23138243364(hookContext HookContext) {
 	}
 }
 
-//go:linkname H7Before testdata.H7Before
+//go:linkname H7Before testdata/golden/opt-multiple-funcs.H7Before
 func H7Before(hookContext HookContext)
 
-//go:linkname H7After testdata.H7After
+//go:linkname H7After testdata/golden/opt-multiple-funcs.H7After
 func H7After(hookContext HookContext)
 
 //line <generated>:1
@@ -411,5 +411,5 @@ func OtelAfterTrampoline_OptGood3887151894(hookContext HookContext) {
 	hookContext.(*HookContextImpl3887151894).returnVals = []interface{}{}
 }
 
-//go:linkname H5Before testdata.H5Before
+//go:linkname H5Before testdata/golden/opt-multiple-funcs.H5Before
 func H5Before(hookContext HookContext)

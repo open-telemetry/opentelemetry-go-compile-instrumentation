@@ -1,0 +1,45 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+var GlobalVar = "original"
+
+type T struct{}
+
+func (t *T) Func1(p1 string, p2 int) (float32, error) {
+	return 0.0, nil
+}
+
+func Func1(p1 string, p2 int) (float32, error) {
+	println("Hello, World!")
+	return 0.0, nil
+}
+
+func Func2(p1 string, _ int) {}
+
+func (T) Func3() {}
+
+func OptGood() {}
+func OptBad()  {}
+func OptBad2() {}
+
+func GenericFunc[T any](p1 T, p2 int) (T, error) {
+	return p1, nil
+}
+
+type GenStruct[T any] struct {
+	value T
+}
+
+func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (T, error) {
+	return p1, nil
+}
+
+func EllipsisFunc(p1 ...string) {}
+
+func UnderscoreFunc(_ int, _ float32) {}
+
+func Unnamed(int, float32) {}
+
+func main() { Func1("hello", 123) }
