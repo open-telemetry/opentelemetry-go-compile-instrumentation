@@ -76,7 +76,7 @@ make test
 - [GitHub Issues](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues) - Report bugs
 - [Slack Channel](https://cloud-native.slack.com/archives/C088D8GSSSF) - Real-time chat
 
-### Contributing
+## Contributing
 
 We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [development docs](./docs/).
 
@@ -89,25 +89,28 @@ Here is a list of community roles with current and previous members:
 
 - [Huxing Zhang](https://github.com/ralf0131), Alibaba
 - [Kemal Akkoyun](https://github.com/kakkoyun), Datadog
-- [Liu Ziming](https://github.com/123liuziming), Alibaba
 - [Przemyslaw Delewski](https://github.com/pdelewski), Quesma
-- [Romain Marcadier](https://github.com/RomainMuller), Datadog
+- [Yi Yang](https://github.com/y1yang0), Alibaba
 
 For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
 
 ### Approvers
 
 - [Dario Castañe](https://github.com/darccio), Datadog
-- [Eliott Bouhana](https://github.com/eliottness), Datadog
 - [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
 - [Xabier Martinez](https://github.com/txabman42), Cabify
-- [Yi Yang](https://github.com/y1yang0), Alibaba
 
 For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
 ### Emeritus
 
-- [Dinesh Gurumurthy](https://github.com/dineshg13)
+- [Dinesh Gurumurthy](https://github.com/dineshg13), Maintainer
+- [Eliott B](https://github.com/eliottness), Approver
+- [Liu Ziming](https://github.com/123liuziming), Maintainer
+- [Romain Marcadier](https://github.com/RomainMuller), Maintainer
+
+For more information about the emeritus role, see the
+[community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
 
 For more information about the emeritus role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
 
