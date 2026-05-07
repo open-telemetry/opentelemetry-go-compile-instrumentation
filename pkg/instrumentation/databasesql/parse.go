@@ -6,6 +6,7 @@ package db
 import (
 	"errors"
 	"fmt"
+	"net"
 	nurl "net/url"
 	"regexp"
 	"strings"
@@ -92,7 +93,7 @@ func parsePostgres(url string) (addr string, err error) {
 		if port == "" {
 			port = "5432"
 		}
-		return host + ":" + port, nil
+		return net.JoinHostPort(strings.Trim(host, "[]"), port), nil
 	}
 
 	u, err := nurl.Parse(url)

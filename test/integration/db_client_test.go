@@ -17,7 +17,7 @@ import (
 func TestDBClientPing(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient", "-op=ping")
+	f.BuildSharedAndRun("dbclient", "-op=ping")
 
 	span := f.RequireSingleSpan()
 	require.Equal(t, "PING", span.Name())
@@ -32,7 +32,7 @@ func TestDBClientPing(t *testing.T) {
 func TestDBClientExec(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient", "-op=exec")
+	f.BuildSharedAndRun("dbclient", "-op=exec")
 
 	span := f.RequireSingleSpan()
 	require.Equal(t, "INSERT", span.Name())
@@ -47,7 +47,7 @@ func TestDBClientExec(t *testing.T) {
 func TestDBClientQuery(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient", "-op=query")
+	f.BuildSharedAndRun("dbclient", "-op=query")
 
 	span := f.RequireSingleSpan()
 	require.Equal(t, "SELECT", span.Name())
@@ -62,7 +62,7 @@ func TestDBClientQuery(t *testing.T) {
 func TestDBClientPrepareAndQuery(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient", "-op=prepare")
+	f.BuildSharedAndRun("dbclient", "-op=prepare")
 
 	// PrepareContext doesn't create a span directly, but stmt.QueryContext does
 	spans := testutil.AllSpans(f.Traces())
@@ -76,7 +76,7 @@ func TestDBClientPrepareAndQuery(t *testing.T) {
 func TestDBClientTransaction(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient", "-op=tx")
+	f.BuildSharedAndRun("dbclient", "-op=tx")
 
 	spans := testutil.AllSpans(f.Traces())
 	// BeginTx -> ExecContext -> Commit = 3 spans
@@ -105,7 +105,7 @@ func TestDBClientTransaction(t *testing.T) {
 func TestDBClientAll(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient",
+	f.BuildSharedAndRun("dbclient",
 		"-driver=testdb",
 		"-dsn=user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
 		"-op=all",
@@ -185,7 +185,7 @@ func TestDBClientAll(t *testing.T) {
 func TestDBClientPostgresLibpqDSN(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient",
+	f.BuildSharedAndRun("dbclient",
 		"-driver=postgres",
 		"-dsn=host=localhost port=5432 dbname=mydb user=postgres",
 		"-op=ping",
@@ -201,10 +201,29 @@ func TestDBClientPostgresLibpqDSN(t *testing.T) {
 	)
 }
 
+func TestDBClientPostgresLibpqIPv6DSN(t *testing.T) {
+	f := testutil.NewTestFixture(t)
+
+	f.BuildSharedAndRun("dbclient",
+		"-driver=postgres",
+		"-dsn=host=::1 port=5432 dbname=mydb user=postgres",
+		"-op=ping",
+	)
+
+	span := f.RequireSingleSpan()
+	require.Equal(t, "PING", span.Name())
+	testutil.RequireDBClientSemconv(t, span,
+		"PING",
+		"ping",
+		"::1", 5432,
+		"mydb",
+	)
+}
+
 func TestDBClientMySQLDefaultHostDSN(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient",
+	f.BuildSharedAndRun("dbclient",
 		"-driver=mysql",
 		"-dsn=user:pass@/mydb",
 		"-op=ping",
@@ -223,7 +242,7 @@ func TestDBClientMySQLDefaultHostDSN(t *testing.T) {
 func TestDBClientSQLServerDatabaseKeyDSN(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndRun("dbclient",
+	f.BuildSharedAndRun("dbclient",
 		"-driver=sqlserver",
 		"-dsn=Server=localhost,1433;Database=myDB;User Id=sa;Password=Pass123",
 		"-op=ping",
