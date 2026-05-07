@@ -343,31 +343,3 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 
 See [RELEASE.md](RELEASE.md) for the full release process, including release
 cadence, tagging conventions, cross-compilation targets, and hotfix guidance.
-
-## Approvers and Maintainers
-
-### Maintainers
-
-- [Huxing Zhang](https://github.com/ralf0131), Alibaba
-- [Kemal Akkoyun](https://github.com/kakkoyun), Datadog
-- [Liu Ziming](https://github.com/123liuziming), Alibaba
-- [Przemyslaw Delewski](https://github.com/pdelewski), Quesma
-- [Romain Marcadier](https://github.com/RomainMuller), Datadog
-
-For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
-
-### Approvers
-
-- [Dario Castañe](https://github.com/darccio), Datadog
-- [Eliott Bouhana](https://github.com/eliottness), Datadog
-- [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
-- [Xabier Martinez](https://github.com/txabman42), Cabify
-- [Yi Yang](https://github.com/y1yang0), Alibaba
-
-For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
-
-### Emeritus maintainers
-
-- [Dinesh Gurumurthy](https://github.com/dineshg13)
-
-For more information about the emeritus role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
