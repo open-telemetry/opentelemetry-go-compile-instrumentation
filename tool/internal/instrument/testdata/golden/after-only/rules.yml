@@ -2,12 +2,12 @@ hook_after_only:
   target: main
   func: Func1
   after: H1After
-  path: testdata
+  path: testdata/golden/after-only
 
 hook_with_receiver_after_only:
   target: main
   func: Func1
   recv: "*T"
   after: H8After
-  path: testdata
+  path: testdata/golden/after-only
 

@@ -170,5 +170,5 @@ func OtelAfterTrampoline_UnderscoreFunc2694310588(hookContext HookContext) {
 	hookContext.(*HookContextImpl2694310588).returnVals = []interface{}{}
 }
 
-//go:linkname H10Before testdata.H10Before
+//go:linkname H10Before testdata/golden/underscore-syntax.H10Before
 func H10Before(hookContext HookContext, param0 int, param1 float32)

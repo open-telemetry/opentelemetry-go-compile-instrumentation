@@ -4,11 +4,11 @@ hook_method:
   recv: "*T"
   before: H3Before
   after: H3After
-  path: testdata
+  path: testdata/golden/method-receiver
 
 hook_method_unnamed_recv:
   target: main
   func: Func3
   recv: "T"
   before: H11Before
-  path: testdata
+  path: testdata/golden/method-receiver
