@@ -186,10 +186,10 @@ func OtelAfterTrampoline_Func11756415418(hookContext HookContext, arg0 *float32,
 	}
 }
 
-//go:linkname H1Before testdata.H1Before
+//go:linkname H1Before testdata/golden/multiple-func-rules.H1Before
 func H1Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H1After testdata.H1After
+//go:linkname H1After testdata/golden/multiple-func-rules.H1After
 func H1After(hookContext HookContext, arg0 float32, arg1 error)
 
 //line <generated>:1
@@ -321,8 +321,8 @@ func OtelAfterTrampoline_Func14055471104(hookContext HookContext, arg0 *float32,
 	}
 }
 
-//go:linkname H2Before testdata.H2Before
+//go:linkname H2Before testdata/golden/multiple-func-rules.H2Before
 func H2Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H2After testdata.H2After
+//go:linkname H2After testdata/golden/multiple-func-rules.H2After
 func H2After(hookContext HookContext, arg0 float32, arg1 error)

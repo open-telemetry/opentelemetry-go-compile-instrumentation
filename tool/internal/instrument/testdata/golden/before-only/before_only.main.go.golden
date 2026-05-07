@@ -178,5 +178,5 @@ func OtelAfterTrampoline_Func12350319093(hookContext HookContext) {
 	hookContext.(*HookContextImpl2350319093).returnVals = []interface{}{}
 }
 
-//go:linkname H1Before testdata.H1Before
+//go:linkname H1Before testdata/golden/before-only.H1Before
 func H1Before(hookContext HookContext, param0 string, param1 int)

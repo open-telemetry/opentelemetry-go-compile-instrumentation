@@ -76,9 +76,46 @@ make test
 - [GitHub Issues](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues) - Report bugs
 - [Slack Channel](https://cloud-native.slack.com/archives/C088D8GSSSF) - Real-time chat
 
-### Contributing
+## Contributing
 
 We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [development docs](./docs/).
 
 This project follows the [OpenTelemetry Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md).
 Please also review our [AI usage policy](AI_POLICY.md) if you use AI tools in your workflow.
+
+Here is a list of community roles with current and previous members:
+
+### Maintainers
+
+- [Dario Castañe](https://github.com/darccio), Datadog
+- [Huxing Zhang](https://github.com/ralf0131), Alibaba
+- [Kemal Akkoyun](https://github.com/kakkoyun), Datadog
+- [Przemyslaw Delewski](https://github.com/pdelewski), Quesma
+- [Xabier Martinez](https://github.com/txabman42), Cabify
+- [Yi Yang](https://github.com/y1yang0), Alibaba
+
+For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
+
+### Approvers
+
+- [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
+
+For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
+
+### Emeritus
+
+- [Dinesh Gurumurthy](https://github.com/dineshg13), Maintainer
+- [Eliott B](https://github.com/eliottness), Approver
+- [Liu Ziming](https://github.com/123liuziming), Maintainer
+- [Romain Marcadier](https://github.com/RomainMuller), Maintainer
+
+For more information about the emeritus role, see the
+[community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
+
+For more information about the emeritus role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
+
+### Thanks to all of our contributors!
+
+<a href="https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/graphs/contributors">
+  <img alt="Repo contributors" src="https://contrib.rocks/image?repo=open-telemetry/opentelemetry-go-compile-instrumentation" />
+</a>

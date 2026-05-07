@@ -5,13 +5,17 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions: read-all
 
 jobs:
-  benchmark:
-    name: Compile-Time Benchmarks
-    runs-on: ubuntu-latest
+  # CodSpeed posts PR comments by comparing the PR head to the most recent main
+  # baseline.
+  codspeed:
+    name: CodSpeed Benchmarks
+    runs-on: ubuntu-latest  # TODO: oracle-bare-metal-64cpu-1024gb-x86-64-ubuntu-24
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
@@ -23,40 +27,24 @@ jobs:
       - name: Build otelc
         run: make build
       - name: Run benchmarks
-        run: make benchmark/run BENCH_ITERATIONS=5 BENCH_MAX_OVERHEAD_PCT=150 BENCH_ACTION_OUTPUT=bench-action.json
-      - name: Upload benchmark-action results
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: CodSpeedHQ/action@db35df748deb45fdef0960669f57d627c1956c30  # ratchet:CodSpeedHQ/action@v4
         with:
-          name: bench-action
-          path: bench-action.json
-          retention-days: 1
+          mode: walltime
+          run: make benchmark/codspeed BENCH_TIME=5x
 
-  benchmark-store:
-    name: Store Benchmark Results
-    runs-on: ubuntu-latest
-    needs: benchmark
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
+  # Fails if any scenario's otelc overhead exceeds 150% of the plain baseline.
+  overhead-threshold:
+    name: Overhead Threshold Check
+    runs-on: ubuntu-latest  # TODO: oracle-bare-metal-64cpu-1024gb-x86-64-ubuntu-24
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
-      - name: Download benchmark-action results
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
-          name: bench-action
-      - name: Store benchmark results in gh-pages
-        uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372  # ratchet:benchmark-action/github-action-benchmark@v1.22.0
-        with:
-          name: otelc Compile-Time Benchmarks
-          tool: customSmallerIsBetter
-          output-file-path: bench-action.json
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
-          comment-on-alert: false
-          fail-on-alert: false
-          summary-always: true
-          max-items-in-chart: 100
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Build otelc
+        run: make build
+      - name: Check overhead ceiling
+        run: make benchmark/threshold
