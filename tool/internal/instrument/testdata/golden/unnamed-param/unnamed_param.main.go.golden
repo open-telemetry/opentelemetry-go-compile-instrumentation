@@ -154,21 +154,5 @@ func OtelBeforeTrampoline_Unnamed3742873013(param0 *int, param1 *float32) (hookC
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_Unnamed3742873013(hookContext HookContext) {
-	defer func() {
-		if err := recover(); err != nil {
-			println("failed to exec After hook", "")
-			if e, ok := err.(error); ok {
-				println(e.Error())
-			}
-			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
-			if fetchStack != nil && printStack != nil {
-				printStack(fetchStack())
-			}
-		}
-	}()
-	hookContext.(*HookContextImpl3742873013).returnVals = []interface{}{}
-}
-
 //go:linkname H13Before testdata/golden/unnamed-param.H13Before
 func H13Before(hookContext HookContext, param0 int, param1 float32)

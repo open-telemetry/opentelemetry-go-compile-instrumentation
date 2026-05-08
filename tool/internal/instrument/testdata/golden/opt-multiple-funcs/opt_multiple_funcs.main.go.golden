@@ -395,21 +395,5 @@ func OtelBeforeTrampoline_OptGood3887151894() (hookContext *HookContextImpl38871
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_OptGood3887151894(hookContext HookContext) {
-	defer func() {
-		if err := recover(); err != nil {
-			println("failed to exec After hook", "")
-			if e, ok := err.(error); ok {
-				println(e.Error())
-			}
-			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
-			if fetchStack != nil && printStack != nil {
-				printStack(fetchStack())
-			}
-		}
-	}()
-	hookContext.(*HookContextImpl3887151894).returnVals = []interface{}{}
-}
-
 //go:linkname H5Before testdata/golden/opt-multiple-funcs.H5Before
 func H5Before(hookContext HookContext)

@@ -178,6 +178,50 @@ func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
 	return ex.Newf("can not remove Before trampoline function")
 }
 
+func callsFuncName(expr dst.Expr, name string) bool {
+	switch expr := expr.(type) {
+	case *dst.Ident:
+		return expr.Name == name
+	case *dst.IndexExpr:
+		return callsFuncName(expr.X, name)
+	case *dst.IndexListExpr:
+		return callsFuncName(expr.X, name)
+	default:
+		return false
+	}
+}
+
+func hasFuncCall(root dst.Node, name string) bool {
+	found := false
+	dst.Inspect(root, func(node dst.Node) bool {
+		if found {
+			return false
+		}
+		if callExpr, ok := node.(*dst.CallExpr); ok && callsFuncName(callExpr.Fun, name) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func removeUnusedAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
+	afterTrampolineName := makeName(tjump.rule, tjump.target, false)
+	if hasFuncCall(targetFile, afterTrampolineName) {
+		return nil
+	}
+	for i, decl := range targetFile.Decls {
+		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
+			if funcDecl.Name.Name == afterTrampolineName {
+				targetFile.Decls = append(targetFile.Decls[:i], targetFile.Decls[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return ex.Newf("can not remove unused After trampoline function")
+}
+
 // canFlattenTJump checks if the tjump can be safely flattened based on
 // the hook function's usage of HookContext. Returns true if:
 // 1. SetSkipCall is never called (so skip is always false)
@@ -302,7 +346,6 @@ func flattenTJump(tjump *TJump, removedOnExit bool) error {
 		// block, at this point, all lhs are unused, replace assignment to simple
 		// function call
 		ifStmt.Init = ast.ExprStmt(initStmt.Rhs[0])
-		// TODO: Remove After declaration as well
 	} else {
 		// Otherwise, mark skipCall identifier as unused
 		skipCallIdent := util.AssertType[*dst.Ident](initStmt.Lhs[1])
@@ -314,6 +357,27 @@ func flattenTJump(tjump *TJump, removedOnExit bool) error {
 func stripTJumpLabel(tjump *TJump) {
 	ifStmt := tjump.ifStmt
 	ifStmt.Decs.If = nil
+}
+
+func (ip *InstrumentPhase) flattenTJumpIfPossible(tjump *TJump, removedOnExit bool) error {
+	if tjump.rule.Before == "" {
+		return nil
+	}
+
+	hookFunc, err := getHookFunc(tjump.rule, true)
+	if err != nil {
+		return err
+	}
+	if !canFlattenTJump(hookFunc) {
+		return nil
+	}
+	if err = flattenTJump(tjump, removedOnExit); err != nil {
+		return err
+	}
+	if removedOnExit {
+		return removeUnusedAfterTrampolineDecl(ip.target, tjump)
+	}
+	return nil
 }
 
 func (ip *InstrumentPhase) optimizeTJumps() error {
@@ -353,17 +417,8 @@ func (ip *InstrumentPhase) optimizeTJumps() error {
 		// memory aware and may generate memory SSA values during compilation.
 		// This further simplifies the trampoline-jump-if and gives more chances
 		// for optimization passes to kick in.
-		if rule.Before != "" {
-			hookFunc, err := getHookFunc(tjump.rule, true)
-			if err != nil {
-				return err
-			}
-			if canFlattenTJump(hookFunc) {
-				err1 := flattenTJump(tjump, removedOnExit)
-				if err1 != nil {
-					return err1
-				}
-			}
+		if err := ip.flattenTJumpIfPossible(tjump, removedOnExit); err != nil {
+			return err
 		}
 	}
 	return nil

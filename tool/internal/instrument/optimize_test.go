@@ -386,6 +386,65 @@ func TestRemoveBeforeTrampolineCall(t *testing.T) {
 	assert.Len(t, tjump.ifStmt.Body.List, 1)
 }
 
+func TestRemoveUnusedAfterTrampolineDecl(t *testing.T) {
+	funcSrc := `package main
+	func testFunc(param1 string) {}`
+
+	targetFunc := parseFunc(t, funcSrc)
+	rule := &rule.InstFuncRule{
+		Func:   targetFunc.Name.Name,
+		Before: "beforeHook",
+	}
+	tjump := &TJump{
+		target: targetFunc,
+		rule:   rule,
+	}
+
+	afterFuncName := makeName(tjump.rule, tjump.target, false)
+	tests := []struct {
+		name    string
+		decls   string
+		removed bool
+	}{
+		{
+			name:    "unused",
+			decls:   fmt.Sprintf("func %s() {}", afterFuncName),
+			removed: true,
+		},
+		{
+			name: "referenced",
+			decls: fmt.Sprintf(`func caller() { %s() }
+			func %s() {}`, afterFuncName, afterFuncName),
+		},
+		{
+			name: "referenced generic call",
+			decls: fmt.Sprintf(`func caller() { %s[int]() }
+			func %s() {}`, afterFuncName, afterFuncName),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fileSrc := fmt.Sprintf(`package main
+			func testFunc(param1 string) {}
+			%s`, tt.decls)
+			targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
+			require.NoError(t, err)
+			require.NotNil(t, ast.FindFuncDeclWithoutRecv(targetFile, afterFuncName))
+
+			err = removeUnusedAfterTrampolineDecl(targetFile, tjump)
+			require.NoError(t, err)
+
+			afterFuncDecl := ast.FindFuncDeclWithoutRecv(targetFile, afterFuncName)
+			if tt.removed {
+				assert.Nil(t, afterFuncDecl)
+			} else {
+				assert.NotNil(t, afterFuncDecl)
+			}
+		})
+	}
+}
+
 func TestFlattenTJump(t *testing.T) {
 	tests := []struct {
 		name          string
