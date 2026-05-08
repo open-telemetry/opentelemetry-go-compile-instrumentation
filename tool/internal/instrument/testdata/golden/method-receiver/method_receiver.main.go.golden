@@ -295,21 +295,5 @@ func OtelBeforeTrampoline_Func32216990050(recv0 *T) (hookContext *HookContextImp
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_Func32216990050(hookContext HookContext) {
-	defer func() {
-		if err := recover(); err != nil {
-			println("failed to exec After hook", "")
-			if e, ok := err.(error); ok {
-				println(e.Error())
-			}
-			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
-			if fetchStack != nil && printStack != nil {
-				printStack(fetchStack())
-			}
-		}
-	}()
-	hookContext.(*HookContextImpl2216990050).returnVals = []interface{}{}
-}
-
 //go:linkname H11Before testdata/golden/method-receiver.H11Before
 func H11Before(hookContext HookContext, recv0 interface{})

@@ -154,21 +154,5 @@ func OtelBeforeTrampoline_UnderscoreFunc2694310588(param0 *int, param1 *float32)
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_UnderscoreFunc2694310588(hookContext HookContext) {
-	defer func() {
-		if err := recover(); err != nil {
-			println("failed to exec After hook", "")
-			if e, ok := err.(error); ok {
-				println(e.Error())
-			}
-			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
-			if fetchStack != nil && printStack != nil {
-				printStack(fetchStack())
-			}
-		}
-	}()
-	hookContext.(*HookContextImpl2694310588).returnVals = []interface{}{}
-}
-
 //go:linkname H10Before testdata/golden/underscore-syntax.H10Before
 func H10Before(hookContext HookContext, param0 int, param1 float32)

@@ -150,21 +150,5 @@ func OtelBeforeTrampoline_EllipsisFunc2350319093(param0 *[]string) (hookContext 
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_EllipsisFunc2350319093(hookContext HookContext) {
-	defer func() {
-		if err := recover(); err != nil {
-			println("failed to exec After hook", "")
-			if e, ok := err.(error); ok {
-				println(e.Error())
-			}
-			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
-			if fetchStack != nil && printStack != nil {
-				printStack(fetchStack())
-			}
-		}
-	}()
-	hookContext.(*HookContextImpl2350319093).returnVals = []interface{}{}
-}
-
 //go:linkname H9Before testdata/golden/ellipsis-syntax.H9Before
 func H9Before(hookContext HookContext, param0 ...string)

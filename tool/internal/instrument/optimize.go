@@ -94,6 +94,10 @@ func mustTJump(ifStmt *dst.IfStmt) {
 
 func removeAfterTrampolineCall(tjump *TJump) error {
 	ifStmt := tjump.ifStmt
+	util.Assert(len(ifStmt.Body.List) > 0, "must have then block statements")
+	util.AssertType[*dst.ExprStmt](ifStmt.Body.List[0])
+	ifStmt.Body.List[0] = ast.EmptyStmt()
+
 	elseBlock := util.AssertType[*dst.BlockStmt](ifStmt.Else)
 	for i, stmt := range elseBlock.List {
 		switch stmt.(type) {
@@ -106,6 +110,11 @@ func removeAfterTrampolineCall(tjump *TJump) error {
 			util.ShouldNotReachHere()
 		}
 	}
+
+	initStmt := util.AssertType[*dst.AssignStmt](ifStmt.Init)
+	util.Assert(len(initStmt.Lhs) == 2, "must have two lhs")
+	hookContextIdent := util.AssertType[*dst.Ident](initStmt.Lhs[0])
+	ast.MakeUnusedIdent(hookContextIdent)
 	return nil
 }
 
@@ -176,6 +185,19 @@ func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
 		}
 	}
 	return ex.Newf("can not remove Before trampoline function")
+}
+
+func removeAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
+	afterTrampolineName := makeName(tjump.rule, tjump.target, false)
+	for i, decl := range targetFile.Decls {
+		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
+			if funcDecl.Name.Name == afterTrampolineName {
+				targetFile.Decls = append(targetFile.Decls[:i], targetFile.Decls[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return ex.Newf("can not remove After trampoline function")
 }
 
 // canFlattenTJump checks if the tjump can be safely flattened based on
@@ -302,7 +324,6 @@ func flattenTJump(tjump *TJump, removedOnExit bool) error {
 		// block, at this point, all lhs are unused, replace assignment to simple
 		// function call
 		ifStmt.Init = ast.ExprStmt(initStmt.Rhs[0])
-		// TODO: Remove After declaration as well
 	} else {
 		// Otherwise, mark skipCall identifier as unused
 		skipCallIdent := util.AssertType[*dst.Ident](initStmt.Lhs[1])
@@ -316,13 +337,28 @@ func stripTJumpLabel(tjump *TJump) {
 	ifStmt.Decs.If = nil
 }
 
+func flattenTJumpIfPossible(tjump *TJump, removedOnExit bool) error {
+	if tjump.rule.Before == "" {
+		return nil
+	}
+
+	hookFunc, err := getHookFunc(tjump.rule, true)
+	if err != nil {
+		return err
+	}
+	if !canFlattenTJump(hookFunc) {
+		return nil
+	}
+	return flattenTJump(tjump, removedOnExit)
+}
+
 func (ip *InstrumentPhase) optimizeTJumps() error {
 	for _, tjump := range ip.tjumps {
 		mustTJump(tjump.ifStmt)
 		// Strip the trampoline-jump-if anchor label as no longer needed
 		stripTJumpLabel(tjump)
 
-		// No After hook present? Simply remove defer call to After trampoline.
+		// No After hook present? Remove generated calls to After trampoline.
 		// Why we don't remove the whole else block of trampoline-jump-if? Well,
 		// because there might be more than one trampoline-jump-if in the same
 		// function, they are nested in the else block. See findJumpPoint for
@@ -332,6 +368,10 @@ func (ip *InstrumentPhase) optimizeTJumps() error {
 		rule := tjump.rule
 		if rule.After == "" {
 			err := removeAfterTrampolineCall(tjump)
+			if err != nil {
+				return err
+			}
+			err = removeAfterTrampolineDecl(ip.target, tjump)
 			if err != nil {
 				return err
 			}
@@ -353,17 +393,8 @@ func (ip *InstrumentPhase) optimizeTJumps() error {
 		// memory aware and may generate memory SSA values during compilation.
 		// This further simplifies the trampoline-jump-if and gives more chances
 		// for optimization passes to kick in.
-		if rule.Before != "" {
-			hookFunc, err := getHookFunc(tjump.rule, true)
-			if err != nil {
-				return err
-			}
-			if canFlattenTJump(hookFunc) {
-				err1 := flattenTJump(tjump, removedOnExit)
-				if err1 != nil {
-					return err1
-				}
-			}
+		if err := flattenTJumpIfPossible(tjump, removedOnExit); err != nil {
+			return err
 		}
 	}
 	return nil
