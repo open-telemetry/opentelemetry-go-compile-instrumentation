@@ -8,14 +8,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 const (
-	EnvOtelcWorkDir    = "OTELC_WORK_DIR"
-	EnvOtelcRules      = "OTELC_RULES"
-	EnvOtelcBuildFlags = "OTELC_BUILD_FLAGS"
+	EnvOtelcWorkDir = "OTELC_WORK_DIR"
+	EnvOtelcRules   = "OTELC_RULES"
+	// EnvOtelcAllowExternalRules when set to "1" allows OTELC_RULES and --rules
+	// to point to files outside the working directory. This is a guardrail for
+	// accidental misconfiguration, not a hard security boundary.
+	EnvOtelcAllowExternalRules = "OTELC_ALLOW_EXTERNAL_RULES"
+	EnvOtelcBuildFlags         = "OTELC_BUILD_FLAGS"
 	// EnvOtelcStats enables per-toolexec timing stats when set to "1".
 	// Set automatically when --stats is used; propagated to child processes.
 	EnvOtelcStats = "OTELC_STATS"
@@ -58,6 +63,49 @@ func GetBuildTempDir() string {
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
+}
+
+// IsPathInside returns true when the candidate path is inside the base
+// directory. Both paths are made absolute and cleaned before comparison.
+func IsPathInside(base, candidate string) bool {
+	if base == "" || candidate == "" {
+		return false
+	}
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return false
+	}
+	absCand, err := filepath.Abs(candidate)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absBase, absCand)
+	if err != nil {
+		return false
+	}
+	// When rel starts with ".." it is outside, otherwise inside (or same).
+	return !strings.HasPrefix(rel, "..")
+}
+
+// ValidateRulesPath checks whether a rules path stays within the working directory
+// unless explicitly opted in. This helps avoid accidental/confused-deputy loading
+// of unintended files in normal developer/CI flows.
+func ValidateRulesPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	wd := GetOtelcWorkDir()
+	if wd == "" {
+		return ex.New("OTELC_WORK_DIR is not set and cannot determine current directory")
+	}
+	// IsPathInside handles absolute path conversion; no need to Clean here.
+	if !IsPathInside(wd, path) {
+		if os.Getenv(EnvOtelcAllowExternalRules) != "1" {
+			return ex.Newf("refusing to load rules from %s; set %s=1 to opt-in",
+				path, EnvOtelcAllowExternalRules)
+		}
+	}
+	return nil
 }
 
 func copyBackupFiles(names []string, src, dst string) error {

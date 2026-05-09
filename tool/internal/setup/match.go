@@ -324,7 +324,13 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 	for path := range ruleFiles {
 		path = strings.TrimSpace(path)
 
-		// Get all rule files from path (file or directory)
+		// Guardrail: keep rules inside working directory unless opt-in is set.
+		if err := util.ValidateRulesPath(path); err != nil {
+			return nil, err
+		}
+
+		// Get all rule files from path (file or directory).
+		// IsPathInside uses filepath.Abs internally which handles path normalization.
 		files, err := ruleFromDir(path)
 		if err != nil {
 			return nil, err
@@ -356,7 +362,20 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
 		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
-		content, err := os.ReadFile(filepath.Clean(rulePath))
+
+		// Guardrail: keep rules inside working directory unless opt-in is set.
+		if err := util.ValidateRulesPath(rulePath); err != nil {
+			return nil, err
+		}
+		// Warn if loading from external path (user has opted in).
+		wd := util.GetOtelcWorkDir()
+		if wd != "" && !util.IsPathInside(wd, rulePath) {
+			sp.Warn("loading rules from external path (opt-in)", "path", rulePath)
+		}
+
+		// Path is validated by ValidateRulesPath() call above; safe for use.
+		// #nosec G304
+		content, err := os.ReadFile(rulePath)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to read %s from env variable", rulePath)
 		}

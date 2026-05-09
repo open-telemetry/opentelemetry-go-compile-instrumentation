@@ -367,6 +367,7 @@ func TestRuleFilesFromDir(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Setenv(util.EnvOtelcRules, "")
+	t.Setenv(util.EnvOtelcAllowExternalRules, "1")
 
 	sp := newTestSetupPhase()
 	err = sp.extract()
@@ -393,6 +394,7 @@ func TestMultipleRuleFiles(t *testing.T) {
 	p2 := writeCustomRules(t, "r2.yaml", content2)
 
 	t.Setenv(util.EnvOtelcRules, "")
+	t.Setenv(util.EnvOtelcAllowExternalRules, "1")
 
 	sp := newTestSetupPhase()
 	err := sp.extract()
@@ -435,6 +437,7 @@ func TestLoadDefaultRules(t *testing.T) {
   raw: "_ = 1"`
 	p1 := writeCustomRules(t, "r1.yaml", content1)
 	p2 := writeCustomRules(t, "r2.yaml", content2)
+	t.Setenv(util.EnvOtelcAllowExternalRules, "1")
 	t.Setenv(util.EnvOtelcRules, p1)
 
 	// Prepare setup phase and set custom rules via environment variable and flag
@@ -531,6 +534,39 @@ target: example.com/mypkg
 	// The package name must be set from parsing the source file
 	assert.Equal(t, "mypkg", set.PackageName)
 	assert.False(t, set.IsEmpty(), "rule set must contain the file rule")
+}
+
+func TestLoadRulesEnvValidation(t *testing.T) {
+	// Create a workspace dir and an external dir to simulate outside path
+	workdir := t.TempDir()
+	external := t.TempDir()
+
+	// Point otelc work dir to our workspace
+	t.Setenv(util.EnvOtelcWorkDir, workdir)
+
+	// Write a rule file in the external directory
+	content := "h1:\n  target: main\n  func: Example\n  raw: \"_ = 1\"\n"
+	extPath := filepath.Join(external, "r_ext.yaml")
+	err := os.WriteFile(extPath, []byte(content), 0o644)
+	require.NoError(t, err)
+
+	// Set OTELC_RULES to point to the external file
+	t.Setenv(util.EnvOtelcRules, extPath)
+
+	sp := newTestSetupPhase()
+	// extract is required by other tests before loadRules
+	err = sp.extract()
+	require.NoError(t, err)
+
+	// Without opt-in, loading external rules must fail
+	_, err = sp.loadRules()
+	require.Error(t, err)
+
+	// With opt-in env var, loading should succeed
+	t.Setenv(util.EnvOtelcAllowExternalRules, "1")
+	rules, err := sp.loadRules()
+	require.NoError(t, err)
+	require.NotEmpty(t, rules)
 }
 
 func TestRunMatch_EmptyRules(t *testing.T) {
