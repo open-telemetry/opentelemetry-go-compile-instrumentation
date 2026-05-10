@@ -24,59 +24,79 @@ func TestGetPackages(t *testing.T) {
 		args             []string
 		expectedCount    int
 		expectedPackages []string
+		expectError      bool
 	}{
 		{
 			name:             "single package",
 			args:             []string{"build", "-a", "-o", "tmp", "./cmd"},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
+			expectError:      false,
 		},
 		{
 			name:             "multiple packages",
 			args:             []string{"build", "./cmd", "./foo/demo"},
 			expectedCount:    2,
 			expectedPackages: []string{"testmodule/cmd", "testmodule/foo/demo"},
+			expectError:      false,
 		},
 		{
 			name:             "wildcard pattern",
 			args:             []string{"build", "./cmd/..."},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
+			expectError:      false,
+		},
+		{
+			name:             "file as a target",
+			args:             []string{"build", "./cmd/main.go"},
+			expectedCount:    1,
+			expectedPackages: []string{"command-line-arguments"},
+			expectError:      false,
+		},
+		{
+			name:             "file and pkg mixed targets",
+			args:             []string{"build", "./cmd/main.go", "./foo/demo"},
+			expectedCount:    0,
+			expectedPackages: []string{},
+			expectError:      true,
 		},
 		{
 			name:             "default to current directory",
 			args:             []string{"build"},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule"},
+			expectError:      false,
 		},
 		{
 			name:             "current directory explicit",
 			args:             []string{"build", "."},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule"},
+			expectError:      false,
 		},
 		{
 			name:             "nonexistent package mixed with valid",
 			args:             []string{"build", "./cmd", "./nonexistent"},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
+			expectError:      false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pkgs, err := getBuildPackages(t.Context(), tt.args)
-			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
-			}
+			if tt.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, pkgs, tt.expectedCount)
 
-			if len(pkgs) != tt.expectedCount {
-				t.Errorf("Expected %d packages, got %d", tt.expectedCount, len(pkgs))
-			}
-
-			if tt.expectedPackages != nil {
-				pkgIDs := extractPackageIDs(pkgs)
-				checkPackages(t, pkgIDs, tt.expectedPackages)
+				if tt.expectedPackages != nil {
+					pkgIDs := extractPackageIDs(pkgs)
+					checkPackages(t, pkgIDs, tt.expectedPackages)
+				}
 			}
 		})
 	}
