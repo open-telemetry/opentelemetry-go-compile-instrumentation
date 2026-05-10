@@ -87,10 +87,57 @@ var flagsWithPathValues = map[string]bool{
 //   - args ["build"] returns packages for "."
 func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
-
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
-	buildPkgs := make([]*packages.Package, 0)
-	found := false
+
+	pkgTargets, fileTargets, err := splitBuildTargets(args)
+	if err != nil {
+		return nil, ex.Wrapf(err, "splitting build targets")
+	}
+
+	var (
+		pkgs    []*packages.Package
+		loadErr error
+	)
+	switch {
+	case len(fileTargets) > 0:
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, fileTargets...)
+		if loadErr != nil {
+			return nil, ex.Wrapf(loadErr, "failed to load packages for files %v", fileTargets)
+		}
+
+		if len(pkgs) > 1 {
+			return nil, ex.New("multiple packages found for file targets")
+		}
+	case len(pkgTargets) > 0:
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, pkgTargets...)
+		if loadErr != nil {
+			return nil, ex.Wrapf(loadErr, "failed to load packages for patterns %v", pkgTargets)
+		}
+	default:
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, ".")
+		if loadErr != nil {
+			return nil, ex.Wrapf(loadErr, "failed to load packages for pattern .")
+		}
+	}
+
+	buildPkgs := make([]*packages.Package, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		// file-based builds use synthetic "command-line-arguments" packages
+		if pkg.Errors != nil || (pkg.Module == nil && pkg.PkgPath != "command-line-arguments") {
+			logger.DebugContext(ctx, "skipping package", "name", pkg.Name, "errors", pkg.Errors, "args", args)
+			continue
+		}
+
+		buildPkgs = append(buildPkgs, pkg)
+	}
+
+	return buildPkgs, nil
+}
+
+//nolint:revive // if we add named returns then nonamedreturns will complain
+func splitBuildTargets(args []string) ([]string, []string, error) {
+	var pkgs, files []string
+
 	for i := len(args) - 1; i >= 0; i-- {
 		arg := args[i]
 
@@ -107,28 +154,28 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 			break
 		}
 
-		pkgs, err := pkgload.LoadPackages(ctx, mode, nil, arg)
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to load packages for pattern %s", arg)
-		}
-		for _, pkg := range pkgs {
-			if pkg.Errors != nil || pkg.Module == nil {
-				logger.DebugContext(ctx, "skipping package", "pattern", arg, "errors", pkg.Errors, "module", pkg.Module)
-				continue
-			}
-			buildPkgs = append(buildPkgs, pkg)
-			found = true
+		if filepath.Ext(arg) == ".go" {
+			files = append(files, arg)
+		} else {
+			pkgs = append(pkgs, arg)
 		}
 	}
 
-	if !found {
-		var err error
-		buildPkgs, err = pkgload.LoadPackages(ctx, mode, nil, ".")
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to load packages for pattern .")
+	if len(files) > 0 && len(pkgs) > 0 {
+		return nil, nil, ex.New("cannot mix .go files and packages")
+	}
+
+	if len(files) > 0 {
+		dir := filepath.Dir(files[0])
+
+		for _, f := range files[1:] {
+			if filepath.Dir(f) != dir {
+				return nil, nil, ex.New("named files must all be in one directory")
+			}
 		}
 	}
-	return buildPkgs, nil
+
+	return pkgs, files, nil
 }
 
 func getPackageDir(pkg *packages.Package) string {
@@ -192,12 +239,21 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	// Generate otelc.runtime.go for all packages
 	moduleDirs := make(map[string]bool)
 	for _, pkg := range pkgs {
-		if pkg.Module == nil {
+		// file-based builds use synthetic "command-line-arguments" packages
+		if pkg.Module == nil && pkg.PkgPath != "command-line-arguments" {
 			sp.Warn("skipping package without module", "package", pkg.PkgPath)
 			continue
 		}
-		moduleDir := pkg.Module.Dir
+
 		pkgDir := getPackageDir(pkg)
+
+		var moduleDir string
+		if pkg.Module != nil {
+			moduleDir = pkg.Module.Dir
+		} else {
+			moduleDir = pkgDir
+		}
+
 		if pkgDir == "" {
 			pkgDir = moduleDir
 		}
@@ -353,7 +409,14 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	// Add "-toolexec=..."
 	newArgs = append(newArgs, insert)
 	// Add the rest
-	newArgs = append(newArgs, args[1:]...)
+	restArgs := args[1:]
+	if _, fileTargets, err2 := splitBuildTargets(restArgs); err2 == nil && len(fileTargets) > 0 {
+		// add otelc.runtime.go manually to command line for file targets
+		dir := filepath.Dir(fileTargets[0])
+		otelcRuntimePath := filepath.Join(dir, OtelcRuntimeFile)
+		restArgs = append(restArgs, otelcRuntimePath)
+	}
+	newArgs = append(newArgs, restArgs...)
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
