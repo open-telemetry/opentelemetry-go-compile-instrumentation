@@ -374,8 +374,7 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 		}
 
 		// Path is validated by ValidateRulesPath() call above; safe for use.
-		// #nosec G304
-		content, err := os.ReadFile(rulePath)
+		content, err := os.ReadFile(rulePath) //nolint:gosec // validated above
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to read %s from env variable", rulePath)
 		}
