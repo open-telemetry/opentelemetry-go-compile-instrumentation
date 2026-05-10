@@ -29,6 +29,7 @@ import (
 //		target: "main"
 //		function_call: "net/http.Get"
 //		replace: "tracedGet({{ . }})"
+//		path: "github.com/foo/bar/hook_rule"
 //
 // This transforms: http.Get("url")
 // Into: tracedGet(http.Get("url"))
@@ -66,6 +67,9 @@ type InstCallRule struct {
 	// When set and the call is ellipsis, an IIFE wrapper is generated.
 	// When unset and the call is ellipsis, the call is skipped with a warning.
 	VariadicType string `json:"variadic_type" yaml:"variadic_type"`
+
+	// Path is the module path where helper code referenced by the replacement is located.
+	Path string `json:"path" yaml:"path"`
 }
 
 // funcNamePattern matches qualified function names like "net/http.Get".

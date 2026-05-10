@@ -6,6 +6,9 @@ package instrument
 import (
 	"context"
 	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -96,6 +99,60 @@ func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rule has no compiled replacement template")
+}
+
+func TestApplyCallRule_AddsHelperFileFromPath(t *testing.T) {
+	helperDir := t.TempDir()
+	helperFile := filepath.Join(helperDir, "helper.go")
+	require.NoError(t, os.WriteFile(helperFile, []byte(`package helper
+
+import "fmt"
+
+func Wrapper(resp any) any {
+	fmt.Println("wrapped")
+	return resp
+}
+`), 0o600))
+
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("Wrapper({{ . }})")
+	r.Path = helperDir
+
+	phase := newTestPhase()
+	phase.workDir = t.TempDir()
+
+	err := phase.applyCallRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	generated := filepath.Join(phase.workDir, "otelc.wrap_get.helper.go")
+	assert.Contains(t, phase.compileArgs, generated)
+	content, err := os.ReadFile(generated)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "package main")
+	assert.Contains(t, string(content), "func Wrapper(resp any) any")
+	assert.Contains(t, string(content), `"fmt"`)
+}
+
+func TestApplyCallRule_PathWithMissingHelper(t *testing.T) {
+	helperDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(helperDir, "helper.go"), []byte(`package helper
+
+func Other(resp any) any {
+	return resp
+}
+`), 0o600))
+
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("Wrapper({{ . }})")
+	r.Path = helperDir
+
+	phase := newTestPhase()
+	phase.workDir = t.TempDir()
+
+	err := phase.applyCallRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "Wrapper"), err.Error())
 }
 
 // --- matchesCallRule tests ---
