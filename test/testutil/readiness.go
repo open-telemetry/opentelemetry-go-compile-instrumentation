@@ -7,6 +7,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -17,21 +19,20 @@ const (
 // WaitForTCP waits until a TCP connection can be established.
 func WaitForTCP(t *testing.T, addr string) {
 	t.Helper()
-	deadline := time.Now().Add(defaultReadinessTimeout)
-
-	for time.Now().Before(deadline) {
+	require.Eventuallyf(t, func() bool {
 		conn, err := net.DialTimeout("tcp", addr, defaultReadinessInterval)
 		if err == nil {
 			conn.Close()
-			return
+			return true
 		}
-		time.Sleep(defaultReadinessInterval)
-	}
-	t.Fatalf("timeout waiting for TCP readiness at %s", addr)
+		return false
+	}, defaultReadinessTimeout, defaultReadinessInterval, "timeout waiting for TCP readiness at %s", addr)
 }
 
 // WaitForSpanFlush waits for spans to be flushed to collector.
-func WaitForSpanFlush(t *testing.T) {
+func WaitForSpanFlush(t *testing.T, c *Collector) {
 	t.Helper()
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return c != nil && len(AllSpans(c.GetTraces())) > 0
+	}, defaultReadinessTimeout, defaultReadinessInterval, "timeout waiting for spans to be flushed")
 }

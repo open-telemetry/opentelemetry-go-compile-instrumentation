@@ -40,7 +40,7 @@ func TestGRPCServerTelemetryFlushOnSignal(t *testing.T) {
 
 	require.NoError(t, cmd.Process.Signal(os.Interrupt))
 	waitForProcessExit(t, cmd, 10*time.Second)
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpanFlush()
 
 	spans := testutil.AllSpans(f.Traces())
 	require.NotEmpty(t, spans, "expected spans to be flushed on SIGINT shutdown")

@@ -77,6 +77,12 @@ func (f *TestFixture) Traces() ptrace.Traces {
 	return f.collector.GetTraces()
 }
 
+// WaitForSpanFlush waits for at least one span to be flushed to collector.
+func (f *TestFixture) WaitForSpanFlush() {
+	f.t.Helper()
+	WaitForSpanFlush(f.t, f.collector)
+}
+
 // CollectorURL returns the collector endpoint URL.
 func (f *TestFixture) CollectorURL() string {
 	return f.collector.URL
@@ -128,15 +134,28 @@ func (f *TestFixture) BuildAndRun(appName string, args ...string) string {
 
 // RequireTraceCount asserts the expected number of traces were collected.
 func (f *TestFixture) RequireTraceCount(expected int) {
-	stats := AnalyzeTraces(f.t, f.collector.GetTraces())
+	f.t.Helper()
+	require.Eventuallyf(f.t, func() bool {
+		stats := AnalyzeTraces(f.collector.GetTraces())
+		return stats.TraceCount == expected
+	}, defaultReadinessTimeout, defaultReadinessInterval, "Wait for %d traces", expected)
+
+	stats := AnalyzeTraces(f.collector.GetTraces())
+	if stats.TraceCount != expected {
+		LogTraces(f.t, f.collector.GetTraces())
+	}
 	require.Equal(f.t, expected, stats.TraceCount,
 		"Expected %d traces, got %d. %s", expected, stats.TraceCount, stats.String())
 }
 
 // RequireSpansPerTrace asserts each trace has the expected number of spans.
 func (f *TestFixture) RequireSpansPerTrace(expected int) {
-	stats := AnalyzeTraces(f.t, f.collector.GetTraces())
+	f.t.Helper()
+	stats := AnalyzeTraces(f.collector.GetTraces())
 	for traceID, count := range stats.SpansPerTrace {
+		if count != expected {
+			LogTraces(f.t, f.collector.GetTraces())
+		}
 		require.Equal(f.t, expected, count,
 			"Trace %s should have %d spans, got %d", traceID[:16], expected, count)
 	}

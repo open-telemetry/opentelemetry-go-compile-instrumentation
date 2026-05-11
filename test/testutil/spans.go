@@ -102,16 +102,23 @@ type TraceStats struct {
 }
 
 // AnalyzeTraces collects trace statistics.
-func AnalyzeTraces(t *testing.T, td ptrace.Traces) TraceStats {
+func AnalyzeTraces(td ptrace.Traces) TraceStats {
 	stats := TraceStats{SpansPerTrace: make(map[string]int)}
 	for _, s := range AllSpans(td) {
-		t.Logf("Span: name=%s, kind=%v, attrs=%v", s.Name(), s.Kind(), Attrs(s))
 		tid := s.TraceID()
 		stats.SpansPerTrace[hex.EncodeToString(tid[:])]++
 		stats.TotalSpans++
 	}
 	stats.TraceCount = len(stats.SpansPerTrace)
 	return stats
+}
+
+// LogTraces logs all collected spans.
+func LogTraces(t *testing.T, td ptrace.Traces) {
+	t.Helper()
+	for _, s := range AllSpans(td) {
+		t.Logf("Span: name=%s, kind=%v, attrs=%v", s.Name(), s.Kind(), Attrs(s))
+	}
 }
 
 // String returns a human-readable representation of trace statistics.
