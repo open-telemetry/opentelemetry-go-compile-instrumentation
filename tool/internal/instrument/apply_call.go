@@ -120,7 +120,7 @@ func (ip *InstrumentPhase) applyCallAppendArgs(
 		}
 	}
 
-	return true
+	return len(matchingCalls) > 0
 }
 
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
