@@ -35,12 +35,19 @@ func WaitForTCP(t *testing.T, addr string) {
 // WaitForSpans polls the collector until at least minSpans spans are received or the timeout expires.
 func WaitForSpans(t *testing.T, c *Collector, minSpans int) {
 	t.Helper()
-	deadline := time.Now().Add(defaultSpanFlushTimeout)
+	if !pollForSpans(c, minSpans, defaultSpanFlushTimeout) {
+		t.Fatalf("timeout waiting for %d span(s), collector has %d", minSpans, c.SpanCount())
+	}
+}
+
+// pollForSpans returns true if at least minSpans spans arrive within timeout.
+func pollForSpans(c *Collector, minSpans int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if c.SpanCount() >= minSpans {
-			return
+			return true
 		}
 		time.Sleep(defaultSpanPollInterval)
 	}
-	t.Fatalf("timeout waiting for %d span(s), collector has %d", minSpans, c.SpanCount())
+	return false
 }
