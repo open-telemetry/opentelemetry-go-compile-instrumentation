@@ -3,7 +3,7 @@ hook_func:
   func: Func1
   before: H1Before
   after: H1After
-  path: testdata
+  path: testdata/golden/func-and-raw-rules
 
 add_raw_code:
   target: main

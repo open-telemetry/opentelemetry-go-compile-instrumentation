@@ -236,7 +236,7 @@ func TestLoadAddedImports(t *testing.T) {
 		err := os.MkdirAll(util.GetBuildTempDir(), 0o755)
 		require.NoError(t, err)
 
-		result, err := loadAddedImports()
+		result, err := loadAddedImports(t.Context())
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.Empty(t, result)
@@ -264,7 +264,7 @@ func TestLoadAddedImports(t *testing.T) {
 		require.NoError(t, os.WriteFile(file2, data2, 0o644))
 		require.NoError(t, os.WriteFile(file3, data3, 0o644))
 
-		result, err := loadAddedImports()
+		result, err := loadAddedImports(t.Context())
 		require.NoError(t, err)
 
 		expected := map[string]string{
@@ -292,7 +292,7 @@ func TestLoadAddedImports(t *testing.T) {
 		require.NoError(t, os.WriteFile(validFile, validData, 0o644))
 		require.NoError(t, os.WriteFile(corruptedFile, []byte("not valid json"), 0o644))
 
-		result, err := loadAddedImports()
+		result, err := loadAddedImports(t.Context())
 		require.NoError(t, err)
 
 		// Should still get the valid import
@@ -320,7 +320,7 @@ func TestLoadAddedImports(t *testing.T) {
 		require.NoError(t, os.WriteFile(file1, data1, 0o644))
 		require.NoError(t, os.WriteFile(file2, data2, 0o644))
 
-		result, err := loadAddedImports()
+		result, err := loadAddedImports(t.Context())
 		require.NoError(t, err)
 
 		// The second file (lexically) should win

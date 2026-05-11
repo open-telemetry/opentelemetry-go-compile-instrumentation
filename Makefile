@@ -12,7 +12,8 @@ SHELL := /bin/bash
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
-        adr-tools adr-new adr-list
+        adr-tools adr-new adr-list \
+        benchmark/codspeed benchmark/threshold
 
 # Constant variables
 BINARY_NAME := otelc
@@ -23,7 +24,7 @@ INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
-GO_VERSION = 1.24
+GO_VERSION = 1.25
 
 ##@ Tooling
 
@@ -346,6 +347,26 @@ check-golden-files: package
 	git status --porcelain -- tool/internal/instrument/testdata/golden/ | grep -q . && (echo "Golden files have untracked changes"; exit 1) || true
 	echo "Golden files are up to date"
 
+##@ Benchmarking
+
+BENCH_DIR := test/bench
+BENCH_SCENARIOS_DIR := $(BENCH_DIR)/scenarios
+BENCH_TIME ?= 5x
+BENCH_MAX_OVERHEAD_PCT ?= 150
+
+benchmark/codspeed: build ## Run compile-time benchmarks using Go testing.B (for CodSpeed walltime)
+	cd $(BENCH_DIR) && \
+	OTELC_BIN=$(CURDIR)/$(BINARY_NAME) \
+	BENCH_SCENARIOS_DIR=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
+	go test -v -run=^$$ -bench=. -benchtime=$(BENCH_TIME)
+
+benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if overhead exceeds BENCH_MAX_OVERHEAD_PCT)
+	cd $(BENCH_DIR) && \
+	OTELC_BIN=$(CURDIR)/$(BINARY_NAME) \
+	BENCH_SCENARIOS_DIR=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
+	BENCH_MAX_OVERHEAD_PCT=$(BENCH_MAX_OVERHEAD_PCT) \
+	go test -tags=overhead_check -run=TestOverheadCeiling -v -count=1 -timeout=30m
+
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
 # uses //go:embed to embed otelc-pkg.gz at compile time. If the file doesn't exist
@@ -452,6 +473,12 @@ test-integration: build build-demo
 	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log
 
 .ONESHELL:
+test-latestlibbuild: build ## Run LatestLibBuild tests
+	@echo "Running LatestLibBuild tests..."
+	set -euo pipefail
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ../gotest-latestlibbuild.log
+
+.ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
@@ -510,7 +537,7 @@ clean: ## Clean build artifacts
 	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
+	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log \) -delete
 
 .ONESHELL:
 tidy/test-apps: ## Run go mod tidy in all test app modules

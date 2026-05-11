@@ -1,0 +1,6 @@
+add_world_arg_ellipsis:
+  target: main
+  function_call: fmt.Println
+  append_args:
+    - '"world"'
+  variadic_type: "any"

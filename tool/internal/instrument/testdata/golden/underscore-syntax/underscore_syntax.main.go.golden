@@ -5,52 +5,13 @@ package main
 
 import _ "unsafe"
 
-var GlobalVar = "original"
-
-type T struct{}
-
-func (t *T) Func1(p1 string, p2 int) (float32, error) {
-	return 0.0, nil
-}
-
-func Func1(p1 string, p2 int) (float32, error) {
-	println("Hello, World!")
-	return 0.0, nil
-}
-
-func Func2(p1 string, _ int) {}
-
-func (T) Func3() {}
-
-func OptGood() {}
-func OptBad()  {}
-func OptBad2() {}
-
-func GenericFunc[T any](p1 T, p2 int) (T, error) {
-	return p1, nil
-}
-
-type GenStruct[T any] struct {
-	value T
-}
-
-func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (T, error) {
-	return p1, nil
-}
-
-func EllipsisFunc(p1 ...string) {}
-
 func UnderscoreFunc(_ignoredParam0 int, _ignoredParam1 float32) {
 	//line <generated>:1
 	if OtelBeforeTrampoline_UnderscoreFunc2694310588(&_ignoredParam0, &_ignoredParam1); false {
 	} else {
 	}
-	//line main.go:41:39
+	//line main.go:6:39
 }
-
-func Unnamed(int, float32) {}
-
-func main() { Func1("hello", 123) }
 
 //line <generated>:1
 type HookContextImpl2694310588 struct {
@@ -170,5 +131,5 @@ func OtelAfterTrampoline_UnderscoreFunc2694310588(hookContext HookContext) {
 	hookContext.(*HookContextImpl2694310588).returnVals = []interface{}{}
 }
 
-//go:linkname H10Before testdata.H10Before
+//go:linkname H10Before testdata/golden/underscore-syntax.H10Before
 func H10Before(hookContext HookContext, param0 int, param1 float32)

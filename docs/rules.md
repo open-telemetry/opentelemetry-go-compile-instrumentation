@@ -165,23 +165,48 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 **Fields:**
 
-- `function_call` (string, required): Qualified function name in format `package/path.FunctionName`. Matches calls to functions from a specific import path.
-- `template` (string, required): Wrapper template using Go's `text/template` syntax with `{{ . }}` placeholder for the original call. The template must be a valid Go expression that produces a call expression (current limitation).
-- `imports` (map, optional): Additional imports needed for wrapper code (alias: path).
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `function_call` | string | Yes | Qualified function name: `package/path.FunctionName` |
+| `replace` | string | No (one of `replace`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a valid Go expression. |
+| `append_args` | `[]string` | No (one of `replace`/`append_args` required) | Go expression strings appended as additional arguments to the matched call |
+| `variadic_type` | string | No | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
+| `imports` | map[string]string | No | Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`. |
 
-**Template System:**
+**`replace` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `replace` wraps the modified call.
 
-The `template` field uses Go's standard `text/template` package for code generation. This provides:
+**Replacement Template System:**
+
+The `replace` field uses Go's standard `text/template` package for code generation. This provides:
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
-- **Type Safety**: The template is compiled at rule creation time and validated
-- **Expression Output**: The template must produce a valid Go expression that evaluates to a call expression (current limitation)
+- **Type Safety**: The replacement template is compiled at rule creation time and validated
+- **Expression Output**: The replacement template must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
 
 Currently supported template features:
 
 - Simple wrapping: `wrapper({{ . }})`
 - IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
 - Complex expressions with multiple statements using IIFE
+
+**`append_args` Semantics:**
+
+The `append_args` field appends one or more Go expressions as additional arguments to each matched call.
+
+- **Non-ellipsis calls** (e.g. `grpc.NewClient(addr, opt1)`): the new expressions are appended directly — `grpc.NewClient(addr, opt1, newArg)`.
+- **Ellipsis calls** (e.g. `grpc.Dial(addr, opts...)`): `variadic_type` must be set. An IIFE wrapper is generated that appends the new args to the spread argument:
+
+```go
+// Before:
+grpc.Dial(addr, opts...)
+
+// After (variadic_type: "grpc.DialOption"):
+grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
+    return append(v, grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()))
+}(opts...)...)
+```
+
+If a matched call uses `...` and `variadic_type` is not set, the call is **skipped** with a logged warning.
 
 **Understanding function_call Matching:**
 
@@ -206,7 +231,7 @@ Examples:
 wrap_http_get:
   target: myapp/server
   function_call: net/http.Get
-  template: "tracedGet({{ . }})"
+  replace: "tracedGet({{ . }})"
 ```
 
 In the `myapp/server` package, this transforms:
@@ -238,7 +263,7 @@ func fetchData(url string) {
 wrap_redis_get:
   target: myapp/cache
   function_call: github.com/redis/go-redis/v9.Get
-  template: "tracedRedisGet(ctx, {{ . }})"
+  replace: "tracedRedisGet(ctx, {{ . }})"
 ```
 
 In the `myapp/cache` package:
@@ -265,7 +290,7 @@ This example demonstrates the power of the `text/template` system by using an II
 wrap_with_unsafe:
   target: client
   function_call: myapp/utils.Helper
-  template: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
+  replace: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
 ```
 
 This uses an immediately-invoked function expression (IIFE) to inject logic after the call:
@@ -289,16 +314,70 @@ func process() {
 }
 ```
 
-**Note:** The `unsafe` package must be imported in the target file for this template to work.
+**Note:** The `unsafe` package must be imported in the target file for this replacement to work.
+
+---
+
+#### Example 4: Appending gRPC Interceptors (non-ellipsis)
+
+```yaml
+add_otel_grpc_interceptors:
+  target: myapp
+  function_call: google.golang.org/grpc.NewClient
+  append_args:
+    - "grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor())"
+    - "grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor())"
+  imports:
+    grpc: "google.golang.org/grpc"
+    otelgrpc: "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+```
+
+This transforms `grpc.NewClient("localhost:50051")` into:
+
+```go
+grpc.NewClient("localhost:50051",
+    grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()),
+    grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor()))
+```
+
+---
+
+#### Example 5: Appending gRPC Interceptors (ellipsis call)
+
+When the call site uses a spread (`opts...`), set `variadic_type`:
+
+```yaml
+add_otel_grpc_dial_interceptors:
+  target: myapp
+  function_call: google.golang.org/grpc.Dial
+  append_args:
+    - "grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor())"
+  variadic_type: "grpc.DialOption"
+  imports:
+    grpc: "google.golang.org/grpc"
+    otelgrpc: "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+```
+
+This transforms `grpc.Dial(addr, opts...)` into:
+
+```go
+grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
+    return append(v, grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()))
+}(opts...)...)
+```
+
+---
 
 **Important Notes:**
 
-- The `{{ . }}` placeholder in the template represents the original function call.
-- The template must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
-- Template code can only reference packages and functions that are already imported or defined in the target file.
+- The `{{ . }}` placeholder in `replace` represents the original function call.
+- `replace` must be a valid Go expression that includes the placeholder; the result may be any expression type.
+- Replacement code can only reference packages and functions that are already imported or defined in the target file.
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
 - Use the qualified format `package/path.FunctionName` for functions.
+- All packages referenced in `append_args` must be in the target module's `go.mod`.
+- Ellipsis calls without `variadic_type` are skipped with a logged warning.
 
 ### 5. Directive Rule
 
@@ -403,11 +482,12 @@ add_file_with_extra_imports:
 
 ### 7. Named Declaration Rule
 
-This rule targets a named package-level symbol (variable, constant, function, or type) and replaces its initializer with a new expression. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing a default HTTP transport with an instrumented one to enable distributed tracing.
+This rule targets a named package-level symbol (variable, constant, function, or type) and either replaces or wraps its initializer. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing or wrapping a default HTTP transport with an instrumented one to enable distributed tracing.
 
 **Use Cases:**
 
 - Replacing a package-level `var` with an instrumented implementation (e.g., `http.DefaultTransport`).
+- Wrapping an existing package-level `var` initializer with an OTel instrumentation layer.
 - Toggling a package-level flag or sentinel value for observability purposes.
 - Substituting a registered implementation at compile time.
 
@@ -415,17 +495,20 @@ This rule targets a named package-level symbol (variable, constant, function, or
 
 - `kind` (string, optional): Constrains the kind of symbol to match. Valid values: `var`, `const`, or omitted/empty to match any kind. (`func` and `type` are recognized but not currently supported — no action can be applied to them.)
 - `identifier` (string, required): The name of the top-level symbol to match.
-- `value` (string, required): A Go expression to assign as the new value of the matched `var` or `const`. Not valid when `kind` is `func` or `type`.
+- `replace` (string, optional): A Go expression to assign as the new value of the matched `var` or `const`. Mutually exclusive with `wrap`. Not valid when `kind` is `func` or `type`.
+- `wrap` (string, optional): A Go expression template that wraps the existing initializer of the matched `var` or `const`. `{{ . }}` is substituted with the original expression. Mutually exclusive with `replace`. Not valid when `kind` is `func` or `type`.
 - `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
 
-**Example:**
+> **Note:** Exactly one of `replace` or `wrap` must be set.
+
+**Example (replace):**
 
 ```yaml
 assign_default_transport:
   target: net/http
   kind: var
   identifier: DefaultTransport
-  value: |
+  replace: |
     &http.Transport{
       MaxIdleConns:    100,
       MaxConnsPerHost: 100,
@@ -434,10 +517,27 @@ assign_default_transport:
     http: "net/http"
 ```
 
-This rule replaces `http.DefaultTransport` in the `net/http` package with a custom `*http.Transport` at compile time, enabling all outbound HTTP calls to use the configured transport — a common pattern for injecting tracing or connection-pool tuning without modifying the standard library source.
+This rule replaces `http.DefaultTransport` in the `net/http` package with a custom `*http.Transport` at compile time, enabling all outbound HTTP calls to use the configured transport.
+
+**Example (wrap):**
+
+```yaml
+wrap_default_transport:
+  target: net/http
+  kind: var
+  identifier: DefaultTransport
+  wrap: "otelhttp.NewTransport({{ . }})"
+  imports:
+    otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+```
+
+This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTransport`, injecting OTel tracing into all outbound HTTP calls without replacing the transport configuration.
 
 **Notes:**
 
-- `value` must be a valid Go expression (not a statement).
-- If the matched symbol has multiple names in a single declaration (e.g., `var a, b = ...`), the expression is cloned and assigned to each name.
+- `replace` must be a valid Go expression (not a statement).
+- `wrap` must contain `{{ . }}` as a placeholder for the original expression. Variants `{{.}}`, `{{- . -}}`, etc. are also accepted. The template must produce exactly one expression statement.
+- `wrap` returns an error at instrumentation time if the matched declaration has no initializer (e.g., `var X T` without `= ...`).
+- If `replace` matches multiple names in a single declaration (e.g., `var a, b = ...`), the replacement expression is cloned and assigned to each name.
+- If `wrap` matches multiple initialized values in a single declaration, each initializer is wrapped independently.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.

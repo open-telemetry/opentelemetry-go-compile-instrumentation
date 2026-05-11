@@ -5,14 +5,6 @@ package main
 
 import _ "unsafe"
 
-var GlobalVar = "original"
-
-type T struct{}
-
-func (t *T) Func1(p1 string, p2 int) (float32, error) {
-	return 0.0, nil
-}
-
 func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	_ = 456
 	//line <generated>:1
@@ -20,39 +12,11 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	} else {
 		defer OtelAfterTrampoline_Func13460655653(hookContext3460655653, &_unnamedRetVal0, &_unnamedRetVal1)
 	}
-	//line main.go:15:2
+	//line main.go:7:2
 	println("Hello, World!")
-	//line main.go:16:2
+	//line main.go:8:2
 	return 0.0, nil
 }
-
-func Func2(p1 string, _ int) {}
-
-func (T) Func3() {}
-
-func OptGood() {}
-func OptBad()  {}
-func OptBad2() {}
-
-func GenericFunc[T any](p1 T, p2 int) (T, error) {
-	return p1, nil
-}
-
-type GenStruct[T any] struct {
-	value T
-}
-
-func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (T, error) {
-	return p1, nil
-}
-
-func EllipsisFunc(p1 ...string) {}
-
-func UnderscoreFunc(_ int, _ float32) {}
-
-func Unnamed(int, float32) {}
-
-func main() { Func1("hello", 123) }
 
 //line <generated>:1
 type HookContextImpl3460655653 struct {
@@ -183,8 +147,8 @@ func OtelAfterTrampoline_Func13460655653(hookContext HookContext, arg0 *float32,
 	}
 }
 
-//go:linkname H1Before testdata.H1Before
+//go:linkname H1Before testdata/golden/func-and-raw-rules.H1Before
 func H1Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H1After testdata.H1After
+//go:linkname H1After testdata/golden/func-and-raw-rules.H1After
 func H1After(hookContext HookContext, arg0 float32, arg1 error)

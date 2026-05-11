@@ -1,0 +1,5 @@
+add_world_arg:
+  target: main
+  function_call: fmt.Println
+  append_args:
+    - '"world"'

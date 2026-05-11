@@ -32,11 +32,12 @@ func TestBeforeNewClient(t *testing.T) {
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	tests := []struct {
-		name          string
-		target        string
-		opts          []grpc.DialOption
-		enabledEnv    bool
-		expectHandler bool
+		name                    string
+		target                  string
+		opts                    []grpc.DialOption
+		enabledEnv              bool
+		expectHandler           bool
+		oltpExporterEndpointKey string
 	}{
 		{
 			name:          "no options",
@@ -75,6 +76,22 @@ func TestBeforeNewClient(t *testing.T) {
 			enabledEnv:    true,
 			expectHandler: true,
 		},
+		{
+			name:                    "oltp exporter endpoint target",
+			target:                  "localhost:4317",
+			opts:                    []grpc.DialOption{},
+			enabledEnv:              true,
+			expectHandler:           false,
+			oltpExporterEndpointKey: "OTEL_EXPORTER_OTLP_ENDPOINT",
+		},
+		{
+			name:                    "oltp exporter traces endpoint target",
+			target:                  "localhost:4317",
+			opts:                    []grpc.DialOption{},
+			enabledEnv:              true,
+			expectHandler:           false,
+			oltpExporterEndpointKey: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+		},
 	}
 
 	for _, tt := range tests {
@@ -83,6 +100,10 @@ func TestBeforeNewClient(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
 			} else {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
+			}
+
+			if tt.oltpExporterEndpointKey != "" {
+				t.Setenv(tt.oltpExporterEndpointKey, tt.target)
 			}
 
 			ictx := insttest.NewMockHookContext(tt.target, tt.opts)

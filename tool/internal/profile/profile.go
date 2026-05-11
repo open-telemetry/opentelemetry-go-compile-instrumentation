@@ -6,7 +6,6 @@ package profile
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +14,8 @@ import (
 	"runtime/trace"
 	"slices"
 	"strings"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
 const (
@@ -63,7 +64,7 @@ func ParseTypes(s string) ([]Type, error) {
 		case CPU, Heap, Trace:
 			types = append(types, Type(p))
 		default:
-			return nil, fmt.Errorf("unrecognized profile type %q (valid: cpu, heap, trace)", p)
+			return nil, ex.Newf("unrecognized profile type %q (valid: cpu, heap, trace)", p)
 		}
 	}
 	return types, nil
@@ -74,7 +75,7 @@ func ParseTypes(s string) ([]Type, error) {
 // sub-processes never collide.
 func Start(dir string, types []Type) (*Session, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("create profile directory %q: %w", dir, err)
+		return nil, ex.Wrapf(err, "create profile directory %q", dir)
 	}
 
 	s := &Session{dir: dir, types: types}
@@ -86,13 +87,13 @@ func Start(dir string, types []Type) (*Session, error) {
 			f, err := os.Create(path)
 			if err != nil {
 				_ = s.Stop()
-				return nil, fmt.Errorf("create CPU profile %q: %w", path, err)
+				return nil, ex.Wrapf(err, "create CPU profile %q", path)
 			}
 			if startErr := pprof.StartCPUProfile(f); startErr != nil {
 				_ = f.Close()
 				_ = os.Remove(path)
 				_ = s.Stop()
-				return nil, fmt.Errorf("start CPU profile: %w", startErr)
+				return nil, ex.Wrapf(startErr, "start CPU profile")
 			}
 			s.cpuFile = f
 		case Trace:
@@ -100,13 +101,13 @@ func Start(dir string, types []Type) (*Session, error) {
 			f, err := os.Create(path)
 			if err != nil {
 				_ = s.Stop()
-				return nil, fmt.Errorf("create trace file %q: %w", path, err)
+				return nil, ex.Wrapf(err, "create trace file %q", path)
 			}
 			if startErr := trace.Start(f); startErr != nil {
 				_ = f.Close()
 				_ = os.Remove(path)
 				_ = s.Stop()
-				return nil, fmt.Errorf("start execution trace: %w", startErr)
+				return nil, ex.Wrapf(startErr, "start execution trace")
 			}
 			s.traceFile = f
 		case Heap:
@@ -123,13 +124,12 @@ func (s *Session) Stop() error {
 	if s == nil {
 		return nil
 	}
-
 	var errs []error
 
 	if s.cpuFile != nil {
 		pprof.StopCPUProfile()
 		if err := s.cpuFile.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close CPU profile: %w", err))
+			errs = append(errs, ex.Wrapf(err, "close CPU profile %q", s.cpuFile.Name()))
 		}
 		s.cpuFile = nil
 	}
@@ -137,7 +137,7 @@ func (s *Session) Stop() error {
 	if s.traceFile != nil {
 		trace.Stop()
 		if err := s.traceFile.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close trace file: %w", err))
+			errs = append(errs, ex.Wrapf(err, "close trace file %q", s.traceFile.Name()))
 		}
 		s.traceFile = nil
 	}
@@ -145,11 +145,11 @@ func (s *Session) Stop() error {
 	// Write heap snapshot at the end (captures final allocation state).
 	if slices.Contains(s.types, Heap) {
 		if err := s.writeHeapProfile(); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, ex.Wrapf(err, "write heap profile %q", s.filePath("otelc-heap-%d.pprof")))
 		}
 	}
 
-	return errors.Join(errs...)
+	return ex.Join(errs...)
 }
 
 // Merge merges all PID-stamped profile files in dir into a single file per type.
@@ -170,7 +170,7 @@ func Merge(ctx context.Context, dir string, types []Type) error {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return ex.Join(errs...)
 }
 
 // mergeType merges all PID-stamped files for a single profile type.
@@ -178,7 +178,7 @@ func mergeType(ctx context.Context, dir string, t Type) error {
 	pattern := filepath.Join(dir, fmt.Sprintf("otelc-%s-*.pprof", t))
 	files, err := filepath.Glob(pattern)
 	if err != nil {
-		return fmt.Errorf("glob %s profiles: %w", t, err)
+		return ex.Wrapf(err, "glob %s profiles", t)
 	}
 	if len(files) == 0 {
 		return nil
@@ -187,7 +187,7 @@ func mergeType(ctx context.Context, dir string, t Type) error {
 	outPath := filepath.Join(dir, fmt.Sprintf("otelc-%s.pprof", t))
 	out, err := os.Create(outPath)
 	if err != nil {
-		return fmt.Errorf("create merged %s profile %q: %w", t, outPath, err)
+		return ex.Wrapf(err, "create merged %s profile %q", t, outPath)
 	}
 
 	// "go tool pprof -proto" writes a binary proto-encoded pprof profile to stdout.
@@ -201,14 +201,14 @@ func mergeType(ctx context.Context, dir string, t Type) error {
 		_ = out.Close()
 		_ = os.Remove(outPath)
 		if stderr.Len() > 0 {
-			return fmt.Errorf("merge %s profiles: %w\n%s", t, runErr, stderr.String())
+			return ex.Newf("merge %s profiles: %s", t, stderr.String())
 		}
-		return fmt.Errorf("merge %s profiles: %w", t, runErr)
+		return ex.Newf("merge %s profiles", t)
 	}
 
 	if closeErr := out.Close(); closeErr != nil {
 		_ = os.Remove(outPath)
-		return fmt.Errorf("close merged %s profile: %w", t, closeErr)
+		return ex.Wrapf(closeErr, "close merged %s profile", t)
 	}
 
 	// Remove individual PID-stamped files now that the merged file is written.
@@ -229,13 +229,13 @@ func (s *Session) writeHeapProfile() error {
 	path := s.filePath("otelc-heap-%d.pprof")
 	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("create heap profile %q: %w", path, err)
+		return ex.Wrapf(err, "create heap profile %q", path)
 	}
 	defer f.Close()
 
 	if writeErr := pprof.WriteHeapProfile(f); writeErr != nil {
 		_ = os.Remove(path)
-		return fmt.Errorf("write heap profile: %w", writeErr)
+		return ex.Wrapf(writeErr, "write heap profile: %q", path)
 	}
 	return nil
 }

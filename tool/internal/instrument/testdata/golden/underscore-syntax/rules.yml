@@ -2,5 +2,5 @@ hook_underscore:
   target: main
   func: UnderscoreFunc
   before: H10Before
-  path: testdata
+  path: testdata/golden/underscore-syntax
 

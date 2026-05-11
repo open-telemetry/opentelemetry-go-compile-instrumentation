@@ -2,4 +2,4 @@ hook_underscore_return:
   target: main
   func: UnderscoreReturnFunc
   after: H12UnderscoreReturnAfter
-  path: testdata
+  path: testdata/golden/underscore-return-syntax
