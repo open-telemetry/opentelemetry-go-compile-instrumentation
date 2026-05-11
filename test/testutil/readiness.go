@@ -37,11 +37,10 @@ func WaitForSpans(t *testing.T, c *Collector, minSpans int) {
 	t.Helper()
 	deadline := time.Now().Add(defaultSpanFlushTimeout)
 	for time.Now().Before(deadline) {
-		if len(AllSpans(c.GetTraces())) >= minSpans {
+		if c.SpanCount() >= minSpans {
 			return
 		}
 		time.Sleep(defaultSpanPollInterval)
 	}
-	got := len(AllSpans(c.GetTraces()))
-	t.Fatalf("timeout waiting for %d span(s), collector has %d", minSpans, got)
+	t.Fatalf("timeout waiting for %d span(s), collector has %d", minSpans, c.SpanCount())
 }
