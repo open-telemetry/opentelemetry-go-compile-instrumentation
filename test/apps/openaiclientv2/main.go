@@ -27,6 +27,7 @@ func main() {
 	client := openai.NewClient(
 		option.WithBaseURL(*baseURL),
 		option.WithAPIKey(*apiKey),
+		option.WithMaxRetries(0),
 	)
 
 	ctx := context.Background()
