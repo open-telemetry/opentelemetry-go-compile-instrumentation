@@ -140,18 +140,18 @@ func getPackageDir(pkg *packages.Package) string {
 
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
+	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
+	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
 	args := cmd.Args().Slice()
+	if cmd.Name == "go" {
+		args = cmd.Args().Tail() // trim build/install
+	}
+
 	logger := util.LoggerFromContext(ctx)
 
 	if isSetup() {
 		logger.InfoContext(ctx, "Setup has already been completed, skipping setup.")
 		return nil
-	}
-
-	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
-	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
-	if cmd.Name == "go" {
-		args = args[1:] // trim build/install
 	}
 
 	// Back up go.mod / go.sum / go.work / go.work.sum before modifying them.

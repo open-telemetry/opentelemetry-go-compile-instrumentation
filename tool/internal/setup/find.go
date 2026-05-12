@@ -18,6 +18,9 @@ import (
 
 const maxBuildPlanBufferSize = 10 * 1024 * 1024 // 10MB
 
+//nolint:gochecknoglobals // allows us to mock exec.CommandContext in tests
+var execCommandContext = exec.CommandContext
+
 type Dependency struct {
 	ImportPath string
 	Version    string
@@ -87,7 +90,7 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]st
 	args = append(args, cmdArgs...)                // args from original build/install or setup command
 	sp.Info("go build command", "args", args)
 
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := execCommandContext(ctx, "go", args...)
 	// This is a little anti-intuitive as the error message is not printed to
 	// the stderr, instead it is printed to the stdout, only the build tool
 	// knows the reason why.
