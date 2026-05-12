@@ -171,6 +171,7 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 | `replace` | string | No (one of `replace`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a valid Go expression. |
 | `append_args` | `[]string` | No (one of `replace`/`append_args` required) | Go expression strings appended as additional arguments to the matched call |
 | `variadic_type` | string | No | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
+| `path` | string | No | Module path containing helper Go files (marked with `//go:build ignore`) that provide wrapper functions referenced in `replace`. These files are compiled into the target package at instrumentation time. Not needed when the wrapper is an inline IIFE or already available in the target. |
 | `imports` | map[string]string | No | Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`. |
 
 **`replace` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `replace` wraps the modified call.
@@ -246,7 +247,7 @@ func fetchData(url string) {
 }
 ```
 
-**Note:** The `tracedGet` function must be available in the target package, either defined locally or imported.
+**Note:** The `tracedGet` function must be available in the target package, either defined locally, imported, or loaded via `path`.
 
 **What gets wrapped:** Only `http.Get()` calls where `http` is imported from `"net/http"`
 
@@ -278,7 +279,7 @@ func getValue(ctx context.Context, key string) {
 }
 ```
 
-**Note:** The `tracedRedisGet` function must be available in the target package.
+**Note:** The `tracedRedisGet` function must be available in the target package, either defined locally, imported, or loaded via `path`.
 
 ---
 
@@ -372,7 +373,8 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 
 - The `{{ . }}` placeholder in `replace` represents the original function call.
 - `replace` must be a valid Go expression that includes the placeholder; the result may be any expression type.
-- Replacement code can only reference packages and functions that are already imported or defined in the target file.
+- Replacement code can only reference packages and functions that are already imported or defined in the target file, or loaded via `path`.
+- When `path` is set, the instrument phase scans that directory for Go files with the `//go:build ignore` tag. These helper files are stripped of the tag, renamed to the target package, and compiled alongside the target. Their imports are automatically added to the build's `importcfg`. This is how wrapper functions like `Wrapper({{ . }})` can live in a separate helper module instead of being defined inline.
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
 - Use the qualified format `package/path.FunctionName` for functions.

@@ -66,6 +66,10 @@ type InstCallRule struct {
 	// When set and the call is ellipsis, an IIFE wrapper is generated.
 	// When unset and the call is ellipsis, the call is skipped with a warning.
 	VariadicType string `json:"variadic_type" yaml:"variadic_type"`
+
+	// Path is the module path where wrapper functions referenced in the
+	// replace template are located (e.g. "github.com/foo/bar/hook").
+	Path string `json:"path" yaml:"path"`
 }
 
 // funcNamePattern matches qualified function names like "net/http.Get".

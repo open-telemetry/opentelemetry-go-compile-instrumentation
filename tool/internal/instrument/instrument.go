@@ -74,6 +74,13 @@ func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
 	}
+	// Load auxiliary files from call rules that specify a path. These files
+	// contain wrapper functions referenced in replace templates. Loading them
+	// here (alongside file rules) ensures the functions are compiled into the
+	// target package before the call-site replacements are applied.
+	if err := ip.loadCallRuleAuxFiles(ctx, rset); err != nil {
+		return err
+	}
 	for file, rules := range groupRules(ip.workDir, rset) {
 		// Group rules by file, then parse the target file once
 		root, err := ip.parseFile(file)
