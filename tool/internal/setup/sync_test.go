@@ -163,8 +163,9 @@ func TestSyncDeps_NoRules(t *testing.T) {
 		logger: slog.Default(),
 	}
 
-	err := sp.syncDeps(t.Context(), []*rule.InstRuleSet{}, tempDir)
-	assert.NoError(t, err)
+	changed, err := sp.syncDeps(t.Context(), []*rule.InstRuleSet{}, tempDir)
+	require.NoError(t, err)
+	assert.False(t, changed, "Expected no changes when no rules are provided")
 }
 
 func TestSyncDeps_WithRules(t *testing.T) {
@@ -211,7 +212,9 @@ go 1.21
 		},
 	}
 
-	err = sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir)
+	changed, err := sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir)
+	assert.True(t, changed, "Expected changes when rules are provided")
+
 	// This will likely fail due to missing instrumentation directories,
 	// but we're testing that it attempts to add replaces
 	if err != nil {

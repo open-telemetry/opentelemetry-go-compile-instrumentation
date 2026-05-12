@@ -70,14 +70,14 @@ func addReplace(modfile *modfile.File, replace *replaceDirective) (bool, error) 
 	return false, nil
 }
 
-func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
+func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) (bool, error) {
 	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
 		funcRules := m.AllFuncRules()
 		rules = append(rules, funcRules...)
 	}
 	if len(rules) == 0 {
-		return nil
+		return false, nil
 	}
 
 	// Add replace directives for matched dependencies
@@ -87,7 +87,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	goModFile := filepath.Join(moduleDir, "go.mod")
 	modfile, err := parseGoMod(goModFile)
 	if err != nil {
-		return err
+		return false, err
 	}
 	replaces := make([]*replaceDirective, 0)
 	for _, m := range rules {
@@ -129,7 +129,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	for _, replace := range replaces {
 		added, addErr := addReplace(modfile, replace)
 		if addErr != nil {
-			return addErr
+			return false, addErr
 		}
 		changed = changed || added
 		if changed {
@@ -142,13 +142,13 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	if changed {
 		err = writeGoMod(goModFile, modfile)
 		if err != nil {
-			return ex.Wrapf(err, "writing updated go.mod at %s", goModFile)
+			return false, ex.Wrapf(err, "writing updated go.mod at %s", goModFile)
 		}
 		err = runModTidy(ctx, moduleDir)
 		if err != nil {
-			return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
+			return false, ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
 		}
 		sp.keepForDebug(goModFile)
 	}
-	return nil
+	return changed, nil
 }
