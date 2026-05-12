@@ -349,8 +349,8 @@ echo nothing useful
 .../compile foo
 .../cgo blah
 `,
-			args: []string{"./..."},
-			expected: nil,
+			args:          []string{"./..."},
+			expected:      nil,
 			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./..."},
 		},
 	}
