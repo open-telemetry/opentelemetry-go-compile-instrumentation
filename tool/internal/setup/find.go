@@ -87,7 +87,7 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]st
 	prefix := []string{"build", "-a", "-x", "-n"}
 	args := make([]string, 0, len(prefix)+len(cmdArgs))
 	args = append(args, prefix...)
-	args = append(args, cmdArgs...)                // args from original build/install or setup command
+	args = append(args, cmdArgs...) // args from original build/install or setup command
 	sp.Info("go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
