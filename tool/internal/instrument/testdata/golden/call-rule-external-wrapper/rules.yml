@@ -1,0 +1,6 @@
+wrap_sizeof_external:
+  target: main
+  function_call: unsafe.Sizeof
+  replace: "wrapper.Wrapper({{ . }})"
+  imports:
+    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/call-rule-external-wrapper/helpers/wrapper"
