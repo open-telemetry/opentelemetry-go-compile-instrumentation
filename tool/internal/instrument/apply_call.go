@@ -134,7 +134,7 @@ func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
-func (ip *InstrumentPhase) applyCallReplace(
+func (*InstrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -147,7 +147,11 @@ func (ip *InstrumentPhase) applyCallReplace(
 	// Pass 1: collect matching calls and pre-compute replacements to avoid
 	// re-matching the original call pointer inside its own wrapper.
 	replacements := make(map[*dst.CallExpr]dst.Expr)
+	var wrapError error
 	dst.Inspect(root, func(node dst.Node) bool {
+		if wrapError != nil {
+			return false
+		}
 		call, ok := node.(*dst.CallExpr)
 		if !ok {
 			return true
@@ -157,12 +161,16 @@ func (ip *InstrumentPhase) applyCallReplace(
 		}
 		wrapped, wrapErr := tmpl.compileExpression(call)
 		if wrapErr != nil {
-			ip.Warn("Failed to wrap call", "error", wrapErr)
-			return true
+			wrapError = wrapErr
+			return false
 		}
 		replacements[call] = util.AssertType[dst.Expr](dst.Clone(wrapped))
 		return true
 	})
+
+	if wrapError != nil {
+		return false, ex.Wrapf(wrapError, "failed to wrap matched call")
+	}
 
 	if len(replacements) == 0 {
 		return false, nil
