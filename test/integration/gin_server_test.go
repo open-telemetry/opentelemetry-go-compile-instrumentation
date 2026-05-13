@@ -60,6 +60,7 @@ func TestGinServer_ServerError(t *testing.T) {
 	testutil.WaitForSpanFlush(t)
 
 	f.RequireTraceCount(1)
+	f.RequireSpansPerTrace(1)
 	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
 
 	testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(500))
