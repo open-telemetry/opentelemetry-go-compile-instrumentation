@@ -247,21 +247,25 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Run multiple passes of dependency discovery, matching, and syncing until the graph stabilizes or we hit the max pass limit.
+	var (
+		matched      []*rule.InstRuleSet
+		graphChanged bool
+	)
 	for i := range otelcSetupMaxPasses {
 		sp.Debug("starting setup pass", "pass", i+1)
 
-		matched, graphChanged, setupErr := sp.runSetupPass(ctx, args, pkgs, allRules)
-		if setupErr != nil {
-			return ex.Wrapf(setupErr, "setup pass %d failed", i+1)
+		matched, graphChanged, err = sp.runSetupPass(ctx, args, pkgs, allRules)
+		if err != nil {
+			return ex.Wrapf(err, "setup pass %d failed", i+1)
 		}
 
 		if !graphChanged {
-			// Write the matched hook to matched.json for further instrument phase
-			return sp.store(matched)
+			break
 		}
 	}
 
-	return nil
+	// Write the matched hook to matched.json for further instrument phase
+	return sp.store(matched)
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
