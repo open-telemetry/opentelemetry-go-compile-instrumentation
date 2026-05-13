@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -70,6 +71,68 @@ func addReplace(modfile *modfile.File, replace *replaceDirective) (bool, error) 
 	return false, nil
 }
 
+type versionSnapshot struct {
+	goVersion string
+	deps      map[string]string // direct deps only
+}
+
+// snapshotVersions records the go directive and direct dep versions
+// so we can detect what go mod tidy bumped.
+func snapshotVersions(mf *modfile.File) versionSnapshot {
+	snap := versionSnapshot{
+		deps: make(map[string]string),
+	}
+	if mf.Go != nil {
+		snap.goVersion = mf.Go.Version
+	}
+	for _, req := range mf.Require {
+		if !req.Indirect {
+			snap.deps[req.Mod.Path] = req.Mod.Version
+		}
+	}
+	return snap
+}
+
+// warnVersionBumps diffs the go.mod after tidy against the pre-mutation
+// snapshot and logs any version that MVS raised.
+func (sp *SetupPhase) warnVersionBumps(goModPath string, before versionSnapshot, hookModules []string) {
+	after, err := parseGoMod(goModPath)
+	if err != nil {
+		sp.Warn("unable to check for version bumps after go mod tidy", "error", err)
+		return
+	}
+
+	hooks := strings.Join(hookModules, ", ")
+
+	// go directives are bare ("1.25.0"), semver wants "v" prefix
+	if after.Go != nil && before.goVersion != "" {
+		oldGo := "v" + before.goVersion
+		newGo := "v" + after.Go.Version
+		if semver.IsValid(oldGo) && semver.IsValid(newGo) && semver.Compare(newGo, oldGo) > 0 {
+			sp.Warn("go directive bumped by instrumentation hooks",
+				"from", before.goVersion, "to", after.Go.Version,
+				"hooks", hooks)
+		}
+	}
+
+	for _, req := range after.Require {
+		if req.Indirect {
+			continue
+		}
+		oldVer, tracked := before.deps[req.Mod.Path]
+		if !tracked {
+			continue
+		}
+		if semver.IsValid(oldVer) && semver.IsValid(req.Mod.Version) &&
+			semver.Compare(req.Mod.Version, oldVer) > 0 {
+			sp.Warn("dependency version bumped by instrumentation hooks",
+				"module", req.Mod.Path,
+				"from", oldVer, "to", req.Mod.Version,
+				"hooks", hooks)
+		}
+	}
+}
+
 func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
 	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
@@ -89,7 +152,11 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	if err != nil {
 		return err
 	}
+
+	// Record pre-mutation versions to detect bumps after tidy.
+	before := snapshotVersions(modfile)
 	replaces := make([]*replaceDirective, 0)
+	hookModules := make([]string, 0, len(rules))
 	for _, m := range rules {
 		util.Assert(strings.HasPrefix(m.Path, util.OtelcRoot), "sanity check")
 		oldPath := m.Path
@@ -101,6 +168,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 			newPath:    newPath,
 			newVersion: "",
 		})
+		hookModules = append(hookModules, oldPath)
 	}
 
 	// Add replace directive for special pkg module
@@ -148,6 +216,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 		if err != nil {
 			return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
 		}
+		sp.warnVersionBumps(goModFile, before, hookModules)
 		sp.keepForDebug(goModFile)
 	}
 	return nil
