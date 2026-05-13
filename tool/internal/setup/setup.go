@@ -123,12 +123,16 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		// file-based builds use synthetic "command-line-arguments" packages
-		if pkg.Errors != nil || (pkg.Module == nil && pkg.PkgPath != "command-line-arguments") {
+		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != "command-line-arguments") {
 			logger.DebugContext(ctx, "skipping package", "name", pkg.Name, "errors", pkg.Errors, "args", args)
 			continue
 		}
 
 		buildPkgs = append(buildPkgs, pkg)
+	}
+
+	if len(buildPkgs) == 0 {
+		return nil, ex.New("no valid packages found in build targets")
 	}
 
 	return buildPkgs, nil
@@ -166,10 +170,18 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 	}
 
 	if len(files) > 0 {
-		dir := filepath.Dir(files[0])
+		dir, err := filepath.Abs(filepath.Dir(files[0]))
+		if err != nil {
+			return nil, nil, ex.Wrapf(err, "failed to get absolute path for directory containing files")
+		}
 
 		for _, f := range files[1:] {
-			if filepath.Dir(f) != dir {
+			fdir, err2 := filepath.Abs(filepath.Dir(f))
+			if err2 != nil {
+				return nil, nil, ex.Wrapf(err2, "failed to get absolute path for directory containing file %s", f)
+			}
+
+			if fdir != dir {
 				return nil, nil, ex.New("named files must all be in one directory")
 			}
 		}
