@@ -20,5 +20,5 @@ func TestGRPCOld(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verifies that we can build a module with old gRPC version
-	testutil.Build(t, filepath.Join(pwd, "..", "apps/grpcold"), "go", "build", "-a")
+	testutil.Build(t, filepath.Join(pwd, "../apps/grpcold"), "go", "build", "-a")
 }
