@@ -132,7 +132,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 			return false, addErr
 		}
 		changed = changed || added
-		if changed {
+		if added {
 			sp.Info("Replace dependency", "old", replace.oldPath, "new", replace.newPath)
 		}
 	}
