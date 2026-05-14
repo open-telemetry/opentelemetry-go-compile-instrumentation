@@ -17,10 +17,19 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
 )
+
+// Upper bound for setup graph stabilization passes.
+// Each pass may introduce additional instrumentation dependencies,
+// requiring dependency discovery and matching to run again.
+//
+// In practice the dependency graph should stabilize within 3 passes.
+// This limit only exists as a safeguard against unexpected infinite loops.
+const otelcSetupMaxPasses = 3
 
 type SetupPhase struct {
 	logger     *slog.Logger
@@ -138,6 +147,74 @@ func getPackageDir(pkg *packages.Package) string {
 	return ""
 }
 
+func (sp *SetupPhase) runSetupPass(
+	ctx context.Context,
+	args []string,
+	pkgs []*packages.Package,
+	allRules []rule.InstRule,
+	originalDeps map[string]bool,
+) ([]*rule.InstRuleSet, bool, error) {
+	// Find all dependencies of the project being build
+	deps, err := sp.findDeps(ctx, args)
+	if err != nil {
+		return nil, false, ex.Wrapf(err, "finding dependencies")
+	}
+
+	// Filter dependencies to only those that were present in the original graph before any modifications.
+	filteredDeps := make([]*Dependency, 0, len(deps))
+	if len(originalDeps) == 0 {
+		for _, dep := range deps {
+			originalDeps[dep.ImportPath] = true
+			filteredDeps = append(filteredDeps, dep)
+		}
+	} else {
+		for _, dep := range deps {
+			if !originalDeps[dep.ImportPath] {
+				continue
+			}
+			filteredDeps = append(filteredDeps, dep)
+		}
+	}
+
+	// Match the hook code with these dependencies and sync new dependencies to go.mod
+	matched, err := sp.matchDeps(ctx, allRules, filteredDeps)
+	if err != nil {
+		return nil, false, ex.Wrapf(err, "matching dependencies to hook rules")
+	}
+
+	// Generate otelc.runtime.go for all packages
+	moduleDirs := make(map[string]bool)
+	for _, pkg := range pkgs {
+		if pkg.Module == nil {
+			sp.Warn("skipping package without module", "package", pkg.PkgPath)
+			continue
+		}
+		moduleDir := pkg.Module.Dir
+		pkgDir := getPackageDir(pkg)
+		if pkgDir == "" {
+			pkgDir = moduleDir
+		}
+		// Introduce additional hook code by generating otelc.runtime.go
+		if err = sp.addDeps(matched, pkgDir); err != nil {
+			return nil, false, ex.Wrapf(err, "adding deps for package at %s", pkgDir)
+		}
+
+		moduleDirs[moduleDir] = true
+	}
+
+	// Sync new dependencies to go.mod
+	graphChanged := false
+	for moduleDir := range moduleDirs {
+		changed, syncErr := sp.syncDeps(ctx, matched, moduleDir)
+		if syncErr != nil {
+			return nil, false, ex.Wrapf(syncErr, "syncing deps in module dir %s", moduleDir)
+		}
+		graphChanged = graphChanged || changed
+	}
+
+	return matched, graphChanged, nil
+}
+
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
 	// The args are "go build ..."
@@ -171,51 +248,41 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// Find all dependencies of the project being build
-	deps, err := sp.findDeps(ctx, args)
-	if err != nil {
-		return err
-	}
-
 	// Extract the embedded pkg module into local directory
-	err = sp.extract()
-	if err != nil {
+	if err = sp.extract(); err != nil {
 		return ex.Wrapf(err, "extracting embedded instrumentation pkg")
 	}
 
-	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(ctx, deps)
+	// Construct the set of default allRules by parsing embedded data (or given by user)
+	allRules, err := sp.loadRules()
 	if err != nil {
-		return ex.Wrapf(err, "matching dependencies to hook rules")
+		return ex.Wrapf(err, "loading instrumentation rules")
+	}
+	sp.Info("Found available rules", "rules", allRules)
+	if len(allRules) == 0 {
+		return ex.New("no rules found")
 	}
 
-	// Generate otelc.runtime.go for all packages
-	moduleDirs := make(map[string]bool)
-	for _, pkg := range pkgs {
-		if pkg.Module == nil {
-			sp.Warn("skipping package without module", "package", pkg.PkgPath)
-			continue
-		}
-		moduleDir := pkg.Module.Dir
-		pkgDir := getPackageDir(pkg)
-		if pkgDir == "" {
-			pkgDir = moduleDir
-		}
-		// Introduce additional hook code by generating otelc.runtime.go
-		if err = sp.addDeps(matched, pkgDir); err != nil {
-			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
-		}
-		moduleDirs[moduleDir] = true
-	}
+	// Run multiple passes of dependency discovery, matching, and syncing until the graph stabilizes or we hit the max pass limit.
+	var (
+		matched      []*rule.InstRuleSet
+		graphChanged bool
+		originalDeps = make(map[string]bool)
+	)
+	for i := range otelcSetupMaxPasses {
+		sp.Debug("starting setup pass", "pass", i+1)
 
-	// Sync new dependencies to go.mod or vendor/modules.txt
-	for moduleDir := range moduleDirs {
-		if err = sp.syncDeps(ctx, matched, moduleDir); err != nil {
-			return ex.Wrapf(err, "syncing deps in module dir %s", moduleDir)
+		matched, graphChanged, err = sp.runSetupPass(ctx, args, pkgs, allRules, originalDeps)
+		if err != nil {
+			return ex.Wrapf(err, "setup pass %d failed", i+1)
+		}
+
+		if !graphChanged {
+			break
 		}
 	}
 
-	// Write the matched hook to matched.txt for further instrument phase
+	// Write the matched hook to matched.json for further instrument phase
 	return sp.store(matched)
 }
 
