@@ -153,12 +153,20 @@ func TestOtelMiddleware_Streaming(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "OPENAI")
 	sr := setupTestTracer(t)
 
-	// stream=true in request body → middleware must skip response buffering.
+	// stream=true in request body -> middleware must pass bytes through and
+	// end the span only after the caller drains the stream.
 	req := newJSONRequest(t, "/v1/chat/completions", `{"model":"gpt-4","stream":true}`)
 
-	// Simulate an SSE response. If the middleware buffers it, reading below
-	// will see EOF and the assertion fails.
-	sseBody := "data: {\"id\":\"1\"}\n\ndata: [DONE]\n\n"
+	sseBody := strings.Join([]string{
+		`data: {"id":"chatcmpl-stream","model":"gpt-4-0613","choices":[{"delta":{"content":"hi"}}]}`,
+		"",
+		`data: {"id":"chatcmpl-stream","model":"gpt-4-0613","choices":[{"finish_reason":"stop"}]}`,
+		"",
+		`data: {"id":"chatcmpl-stream","model":"gpt-4-0613","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -170,6 +178,7 @@ func TestOtelMiddleware_Streaming(t *testing.T) {
 
 	resp, err := OtelMiddleware(req, next)
 	require.NoError(t, err)
+	assert.Empty(t, sr.Ended(), "streaming span must stay open until the response body is consumed")
 
 	// Caller must still be able to read the full stream body.
 	got, err := io.ReadAll(resp.Body)
@@ -180,10 +189,12 @@ func TestOtelMiddleware_Streaming(t *testing.T) {
 	require.Len(t, spans, 1)
 	span := spans[0]
 	assert.Equal(t, "chat gpt-4", span.Name())
-	// No response attributes parsed for streams.
 	attrs := attrMap(span)
-	_, hasID := attrs["gen_ai.response.id"]
-	assert.False(t, hasID, "response.id must not be set for streaming responses")
+	assert.Equal(t, "chatcmpl-stream", attrs["gen_ai.response.id"])
+	assert.Equal(t, "gpt-4-0613", attrs["gen_ai.response.model"])
+	assert.Equal(t, []string{"stop"}, attrs["gen_ai.response.finish_reasons"])
+	assert.Equal(t, int64(10), attrs["gen_ai.usage.input_tokens"])
+	assert.Equal(t, int64(20), attrs["gen_ai.usage.output_tokens"])
 }
 
 func TestOtelMiddleware_NonJSONBody(t *testing.T) {

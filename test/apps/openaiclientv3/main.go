@@ -19,6 +19,7 @@ import (
 var (
 	baseURL = flag.String("base-url", "http://localhost:8090/v1", "OpenAI API base URL")
 	apiKey  = flag.String("api-key", "test-key", "OpenAI API key")
+	stream  = flag.Bool("stream", false, "Use OpenAI chat completion streaming API")
 )
 
 func main() {
@@ -31,6 +32,27 @@ func main() {
 	)
 
 	ctx := context.Background()
+
+	if *stream {
+		stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
+			Model: "gpt-4",
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				openai.UserMessage("Say hello"),
+			},
+			StreamOptions: openai.ChatCompletionStreamOptionsParam{
+				IncludeUsage: openai.Bool(true),
+			},
+		})
+		defer stream.Close()
+		for stream.Next() {
+			chunk := stream.Current()
+			slog.Info("chat completion chunk", "id", chunk.ID, "model", chunk.Model)
+		}
+		if err := stream.Err(); err != nil {
+			log.Printf("chat completion stream error (expected in test): %v", err)
+		}
+		return
+	}
 
 	// Chat completion request
 	completion, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{

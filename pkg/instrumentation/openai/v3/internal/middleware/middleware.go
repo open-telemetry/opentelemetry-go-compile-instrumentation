@@ -63,11 +63,9 @@ func OtelMiddleware(req *http.Request, next MiddlewareNext) (*http.Response, err
 
 	start := time.Now()
 	resp, err := next(req)
-	durationSec := time.Since(start).Seconds()
-
-	recordDuration(ctx, operation, model, durationSec, err)
 
 	if err != nil {
+		recordDuration(ctx, operation, model, time.Since(start).Seconds(), err)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		span.End()
@@ -81,28 +79,33 @@ func OtelMiddleware(req *http.Request, next MiddlewareNext) (*http.Response, err
 			span.SetStatus(codes.Error, resp.Status)
 		}
 
-		// Streaming responses (SSE) must not be buffered: the SDK relies on
-		// the live stream, and buffering would both break iteration and
-		// consume unbounded memory. Token usage for streams is a TODO that
-		// needs event-stream parsing.
-		if !isStream && !isStreamingResponse(resp) {
-			respBuf, respParsed := bufferAndParseResponse(resp)
-			if respBuf != nil {
-				resp.Body = restoreBody(respBuf)
-			}
-			if respParsed != nil {
-				span.SetAttributes(semconv.ChatCompletionResponseTraceAttrs(
-					respParsed.ID,
-					respParsed.Model,
-					respParsed.finishReasons(),
-					respParsed.Usage.PromptTokens,
-					respParsed.Usage.CompletionTokens,
-				)...)
-				recordTokenUsage(ctx, operation, model,
-					respParsed.Usage.PromptTokens,
-					respParsed.Usage.CompletionTokens)
-			}
+		if (isStream || isStreamingResponse(resp)) && resp.Body != nil {
+			resp.Body = newStreamBody(resp.Body, ctx, span, start, operation, model)
+			return resp, err
 		}
+
+		recordDuration(ctx, operation, model, time.Since(start).Seconds(), nil)
+
+		// Non-streaming chat responses are bounded JSON documents, so they
+		// can be buffered and restored before the SDK decodes them.
+		respBuf, respParsed := bufferAndParseResponse(resp)
+		if respBuf != nil {
+			resp.Body = restoreBody(respBuf)
+		}
+		if respParsed != nil {
+			span.SetAttributes(semconv.ChatCompletionResponseTraceAttrs(
+				respParsed.ID,
+				respParsed.Model,
+				respParsed.finishReasons(),
+				respParsed.Usage.PromptTokens,
+				respParsed.Usage.CompletionTokens,
+			)...)
+			recordTokenUsage(ctx, operation, model,
+				respParsed.Usage.PromptTokens,
+				respParsed.Usage.CompletionTokens)
+		}
+	} else {
+		recordDuration(ctx, operation, model, time.Since(start).Seconds(), nil)
 	}
 
 	span.End()

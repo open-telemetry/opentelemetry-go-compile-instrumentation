@@ -26,6 +26,7 @@ var (
 	baseURL  = flag.String("base-url", "", "OpenAI API base URL (optional)")
 	model    = flag.String("model", "gpt-4", "Model to use for chat completions")
 	count    = flag.Int("count", 1, "Number of iterations to run")
+	stream   = flag.Bool("stream", false, "Use OpenAI chat completion streaming API")
 	logLevel = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	logger   *slog.Logger
 )
@@ -55,6 +56,48 @@ func runChatCompletion(ctx context.Context, client *openai.Client, iteration int
 			"input_tokens", completion.Usage.PromptTokens,
 			"output_tokens", completion.Usage.CompletionTokens,
 		)
+	}
+
+	return nil
+}
+
+func runStreamingChatCompletion(ctx context.Context, client *openai.Client, iteration int) error {
+	prompt := fmt.Sprintf("Say hello in a creative way #%d", iteration)
+
+	logger.Info("sending streaming chat completion", "iteration", iteration, "model", *model)
+
+	stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
+		Model: openai.ChatModel(*model),
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(prompt),
+		},
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: openai.Bool(true),
+		},
+	})
+	defer stream.Close()
+
+	for stream.Next() {
+		chunk := stream.Current()
+		if len(chunk.Choices) > 0 {
+			logger.Info("chat completion stream chunk",
+				"id", chunk.ID,
+				"model", chunk.Model,
+				"finish_reason", chunk.Choices[0].FinishReason,
+			)
+		}
+		if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
+			logger.Info("chat completion stream usage",
+				"id", chunk.ID,
+				"model", chunk.Model,
+				"input_tokens", chunk.Usage.PromptTokens,
+				"output_tokens", chunk.Usage.CompletionTokens,
+			)
+		}
+	}
+	if err := stream.Err(); err != nil {
+		logger.Error("streaming chat completion failed", "error", err)
+		return err
 	}
 
 	return nil
@@ -101,6 +144,7 @@ func main() {
 	logger.Info("client starting",
 		"model", *model,
 		"request_count", *count,
+		"stream", *stream,
 		"log_level", *logLevel)
 
 	// Create OpenAI client
@@ -122,8 +166,13 @@ func main() {
 			"iteration", i,
 			"total", *count)
 
-		// Run chat completion
-		if err := runChatCompletion(ctx, &client, i); err != nil {
+		var err error
+		if *stream {
+			err = runStreamingChatCompletion(ctx, &client, i)
+		} else {
+			err = runChatCompletion(ctx, &client, i)
+		}
+		if err != nil {
 			failureCount++
 			continue
 		}
