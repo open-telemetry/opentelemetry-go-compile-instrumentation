@@ -267,7 +267,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	var (
 		matched      []*rule.InstRuleSet
 		graphChanged bool
-		originalDeps  = make(map[string]bool)
+		originalDeps = make(map[string]bool)
 	)
 	for i := range otelcSetupMaxPasses {
 		sp.Debug("starting setup pass", "pass", i+1)
