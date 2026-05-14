@@ -229,11 +229,17 @@ go 1.21
 
 func logCapture() (*SetupPhase, *bytes.Buffer) {
 	var buf bytes.Buffer
+	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})
+	return &SetupPhase{logger: slog.New(handler)}, &buf
+}
+
+func warnCapture() (*SetupPhase, *bytes.Buffer) {
+	var buf bytes.Buffer
 	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
 	return &SetupPhase{logger: slog.New(handler)}, &buf
 }
 
-func TestSnapshotVersions(t *testing.T) {
+func TestSnapshotVersion(t *testing.T) {
 	content := `module example.com/app
 
 go 1.22.0
@@ -250,7 +256,7 @@ require (
 	mf, err := modfile.Parse("go.mod", []byte(content), nil)
 	require.NoError(t, err)
 
-	snap := snapshotVersions(mf)
+	snap := snapshotVersion(mf)
 
 	assert.Equal(t, "1.22.0", snap.goVersion)
 	assert.Equal(t, "v1.38.0", snap.deps["go.opentelemetry.io/otel"])
@@ -261,7 +267,7 @@ require (
 	assert.False(t, tracked)
 }
 
-func TestSnapshotVersions_MinimalGoMod(t *testing.T) {
+func TestSnapshotVersion_MinimalGoMod(t *testing.T) {
 	content := `module example.com/tiny
 
 go 1.21
@@ -269,13 +275,12 @@ go 1.21
 	mf, err := modfile.Parse("go.mod", []byte(content), nil)
 	require.NoError(t, err)
 
-	snap := snapshotVersions(mf)
+	snap := snapshotVersion(mf)
 	assert.Equal(t, "1.21", snap.goVersion)
 	assert.Empty(t, snap.deps)
 }
 
-func TestWarnVersionBumps_GoVersionRaised(t *testing.T) {
-	// go.mod as it looks after tidy bumped 1.22.0 → 1.25.0
+func TestWarnVersion_GoVersionRaised(t *testing.T) {
 	tempDir := t.TempDir()
 	gomodPath := filepath.Join(tempDir, "go.mod")
 	afterContent := `module example.com/app
@@ -288,25 +293,44 @@ require (
 `
 	require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
 
-	sp, buf := logCapture()
+	sp, buf := warnCapture()
 	before := versionSnapshot{
 		goVersion: "1.22.0",
 		deps: map[string]string{
 			"go.opentelemetry.io/otel": "v1.38.0",
 		},
 	}
-	hooks := []string{"pkg/instrumentation/nethttp/server"}
 
-	sp.warnVersionBumps(gomodPath, before, hooks)
+	sp.warnVersion(gomodPath, before)
 
 	logged := buf.String()
-	assert.Contains(t, logged, "go directive bumped")
-	assert.Contains(t, logged, "1.22.0")
-	assert.Contains(t, logged, "1.25.0")
-	assert.Contains(t, logged, "nethttp/server")
+	assert.Contains(t, logged, "Bumped go version")
+	assert.Contains(t, logged, "1.22.0 -> 1.25.0")
 }
 
-func TestWarnVersionBumps_DepVersionRaised(t *testing.T) {
+func TestWarnVersion_GoLanguageVersionRaised(t *testing.T) {
+	tempDir := t.TempDir()
+	gomodPath := filepath.Join(tempDir, "go.mod")
+	afterContent := `module example.com/app
+
+go 1.25.0
+`
+	require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
+
+	sp, buf := warnCapture()
+	before := versionSnapshot{
+		goVersion: "1.21",
+		deps:      map[string]string{},
+	}
+
+	sp.warnVersion(gomodPath, before)
+
+	logged := buf.String()
+	assert.Contains(t, logged, "Bumped go version")
+	assert.Contains(t, logged, "1.21 -> 1.25.0")
+}
+
+func TestWarnVersion_DepVersionRaised(t *testing.T) {
 	tempDir := t.TempDir()
 	gomodPath := filepath.Join(tempDir, "go.mod")
 	afterContent := `module example.com/app
@@ -319,27 +343,22 @@ require (
 `
 	require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
 
-	sp, buf := logCapture()
+	sp, buf := warnCapture()
 	before := versionSnapshot{
 		goVersion: "1.22.0",
 		deps: map[string]string{
 			"go.opentelemetry.io/otel": "v1.38.0",
 		},
 	}
-	hooks := []string{"pkg/instrumentation/grpc/client", "pkg/instrumentation/nethttp/server"}
 
-	sp.warnVersionBumps(gomodPath, before, hooks)
+	sp.warnVersion(gomodPath, before)
 
 	logged := buf.String()
-	assert.Contains(t, logged, "dependency version bumped")
-	assert.Contains(t, logged, "v1.38.0")
-	assert.Contains(t, logged, "v1.43.0")
-	assert.Contains(t, logged, "go.opentelemetry.io/otel")
-	assert.Contains(t, logged, "grpc/client")
-	assert.Contains(t, logged, "nethttp/server")
+	assert.Contains(t, logged, "Bumped dependency go.opentelemetry.io/otel")
+	assert.Contains(t, logged, "v1.38.0 -> v1.43.0")
 }
 
-func TestWarnVersionBumps_NoChange(t *testing.T) {
+func TestWarnVersion_NoChange(t *testing.T) {
 	tempDir := t.TempDir()
 	gomodPath := filepath.Join(tempDir, "go.mod")
 	content := `module example.com/app
@@ -352,7 +371,7 @@ require (
 `
 	require.NoError(t, os.WriteFile(gomodPath, []byte(content), 0o644))
 
-	sp, buf := logCapture()
+	sp, buf := warnCapture()
 	before := versionSnapshot{
 		goVersion: "1.22.0",
 		deps: map[string]string{
@@ -360,23 +379,21 @@ require (
 		},
 	}
 
-	sp.warnVersionBumps(gomodPath, before, nil)
+	sp.warnVersion(gomodPath, before)
 
 	assert.Empty(t, buf.String())
 }
 
-func TestWarnVersionBumps_MissingFile(t *testing.T) {
+func TestWarnVersion_MissingFile(t *testing.T) {
 	sp, buf := logCapture()
 	before := versionSnapshot{goVersion: "1.22.0", deps: map[string]string{}}
 
-	sp.warnVersionBumps("/nonexistent/go.mod", before, nil)
+	sp.warnVersion("/nonexistent/go.mod", before)
 
-	logged := buf.String()
-	assert.Contains(t, logged, "unable to check for version bumps")
+	assert.Contains(t, buf.String(), "unable to check for version bumps")
 }
 
-func TestWarnVersionBumps_EmptyGoVersion(t *testing.T) {
-	// no go directive in the before snapshot — nothing to compare
+func TestWarnVersion_EmptyGoVersion(t *testing.T) {
 	tempDir := t.TempDir()
 	gomodPath := filepath.Join(tempDir, "go.mod")
 	afterContent := `module example.com/app
@@ -385,14 +402,13 @@ go 1.25.0
 `
 	require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
 
-	sp, buf := logCapture()
+	sp, buf := warnCapture()
 	before := versionSnapshot{
 		goVersion: "",
 		deps:      map[string]string{},
 	}
 
-	sp.warnVersionBumps(gomodPath, before, []string{"pkg/instrumentation/basic"})
+	sp.warnVersion(gomodPath, before)
 
-	assert.Empty(t, buf.String(),
-		"no go-bump warning expected when before.goVersion is empty")
+	assert.Empty(t, buf.String())
 }
