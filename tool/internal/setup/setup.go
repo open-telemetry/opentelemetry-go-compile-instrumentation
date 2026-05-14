@@ -152,6 +152,7 @@ func (sp *SetupPhase) runSetupPass(
 	args []string,
 	pkgs []*packages.Package,
 	allRules []rule.InstRule,
+	originalDeps map[string]bool,
 ) ([]*rule.InstRuleSet, bool, error) {
 	// Find all dependencies of the project being build
 	deps, err := sp.findDeps(ctx, args)
@@ -159,8 +160,24 @@ func (sp *SetupPhase) runSetupPass(
 		return nil, false, ex.Wrapf(err, "finding dependencies")
 	}
 
+	// Filter dependencies to only those that were present in the original graph before any modifications.
+	filteredDeps := make([]*Dependency, 0, len(deps))
+	if len(originalDeps) == 0 {
+		for _, dep := range deps {
+			originalDeps[dep.ImportPath] = true
+			filteredDeps = append(filteredDeps, dep)
+		}
+	} else {
+		for _, dep := range deps {
+			if !originalDeps[dep.ImportPath] {
+				continue
+			}
+			filteredDeps = append(filteredDeps, dep)
+		}
+	}
+
 	// Match the hook code with these dependencies and sync new dependencies to go.mod
-	matched, err := sp.matchDeps(ctx, allRules, deps)
+	matched, err := sp.matchDeps(ctx, allRules, filteredDeps)
 	if err != nil {
 		return nil, false, ex.Wrapf(err, "matching dependencies to hook rules")
 	}
@@ -250,11 +267,12 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	var (
 		matched      []*rule.InstRuleSet
 		graphChanged bool
+		originalDeps  = make(map[string]bool)
 	)
 	for i := range otelcSetupMaxPasses {
 		sp.Debug("starting setup pass", "pass", i+1)
 
-		matched, graphChanged, err = sp.runSetupPass(ctx, args, pkgs, allRules)
+		matched, graphChanged, err = sp.runSetupPass(ctx, args, pkgs, allRules, originalDeps)
 		if err != nil {
 			return ex.Wrapf(err, "setup pass %d failed", i+1)
 		}
