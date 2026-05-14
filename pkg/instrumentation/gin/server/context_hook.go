@@ -11,7 +11,8 @@ import (
 )
 
 // routeSetKey is stored on the gin.Context to prevent repeated span updates
-// when multiple middleware layers call c.Next().
+// when multiple middleware layers call c.Next(). The key is reserved by this
+// package; user middleware must not set or read it.
 const routeSetKey = "otel.gin.route.set"
 
 // BeforeNext runs before (*gin.Context).Next. By the time Next is called,
