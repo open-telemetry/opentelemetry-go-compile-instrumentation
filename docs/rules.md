@@ -172,6 +172,7 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 | `append_args` | `[]string` | No (one of `replace`/`append_args` required) | Go expression strings appended as additional arguments to the matched call |
 | `variadic_type` | string | No | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
 | `imports` | map[string]string | No | Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`. |
+| `path` | string | No | Import path or local path containing helper functions referenced by unqualified calls in `replace` or `append_args`. |
 
 **`replace` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `replace` wraps the modified call.
 
@@ -232,6 +233,7 @@ wrap_http_get:
   target: myapp/server
   function_call: net/http.Get
   replace: "tracedGet({{ . }})"
+  path: "github.com/my-org/my-repo/instrumentation/http"
 ```
 
 In the `myapp/server` package, this transforms:
@@ -246,7 +248,7 @@ func fetchData(url string) {
 }
 ```
 
-**Note:** The `tracedGet` function must be available in the target package, either defined locally or imported.
+**Note:** The `tracedGet` function can be defined locally in the target package, or supplied by `path` as a helper function to compile into the target package.
 
 **What gets wrapped:** Only `http.Get()` calls where `http` is imported from `"net/http"`
 
@@ -372,7 +374,7 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 
 - The `{{ . }}` placeholder in `replace` represents the original function call.
 - `replace` must be a valid Go expression that includes the placeholder; the result may be any expression type.
-- Replacement code can only reference packages and functions that are already imported or defined in the target file.
+- Replacement code can reference packages imported through `imports`, functions defined in the target file, or unqualified helper functions found under `path`.
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
 - Use the qualified format `package/path.FunctionName` for functions.

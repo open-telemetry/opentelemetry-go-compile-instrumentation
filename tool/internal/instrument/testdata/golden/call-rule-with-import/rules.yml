@@ -2,5 +2,6 @@ wrap_sizeof_with_strings:
   target: main
   function_call: unsafe.Sizeof
   replace: "(func() uintptr { fmt.Println(\"Wrapped!\"); return {{ . }} })()"
+  path: testdata/golden/call-rule-with-import
   imports:
     fmt: "fmt"

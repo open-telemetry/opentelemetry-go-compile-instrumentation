@@ -2,3 +2,4 @@ wrap_sizeof_call:
   target: main
   function_call: unsafe.Sizeof
   replace: "Wrapper({{ . }})"
+  path: testdata/golden/call-rule-only
