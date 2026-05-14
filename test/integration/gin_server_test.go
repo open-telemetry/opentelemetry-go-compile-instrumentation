@@ -20,10 +20,10 @@ import (
 func TestGinServer(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndStart("ginserver")
-	testutil.WaitForTCP(t, "127.0.0.1:8080")
+	f.BuildAndStart("ginserver", "-port=8090")
+	testutil.WaitForTCP(t, "127.0.0.1:8090")
 
-	resp, err := http.Get("http://127.0.0.1:8080/hello/OpenTelemetry") //nolint:noctx
+	resp, err := http.Get("http://127.0.0.1:8090/hello/OpenTelemetry") //nolint:noctx
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -50,10 +50,10 @@ func TestGinServer(t *testing.T) {
 func TestGinServer_ServerError(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndStart("ginserver")
-	testutil.WaitForTCP(t, "127.0.0.1:8080")
+	f.BuildAndStart("ginserver", "-port=8090")
+	testutil.WaitForTCP(t, "127.0.0.1:8090")
 
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:8080/status/%d", http.StatusInternalServerError)) //nolint:noctx
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:8090/status/%d", http.StatusInternalServerError)) //nolint:noctx
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 

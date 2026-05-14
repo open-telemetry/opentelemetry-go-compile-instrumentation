@@ -37,12 +37,16 @@ func BeforeNext(ictx inst.HookContext, c *gin.Context) {
 	if _, already := c.Get(routeSetKey); already {
 		return
 	}
-	c.Set(routeSetKey, struct{}{})
 
 	span := trace.SpanFromContext(c.Request.Context())
 	if !span.IsRecording() {
 		return
 	}
+
+	// Set the gate only after confirming we have a recording span to update.
+	// Otherwise a non-recording first call would burn the gate and block a
+	// later recording span on the same request from being enriched.
+	c.Set(routeSetKey, struct{}{})
 
 	span.SetName(c.Request.Method + " " + route)
 	span.SetAttributes(semconv.HTTPRouteKey.String(route))
