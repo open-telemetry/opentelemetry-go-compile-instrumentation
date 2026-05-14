@@ -66,3 +66,36 @@ func TestGinServer_ServerError(t *testing.T) {
 	testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(500))
 	testutil.RequireAttributeExists(t, span, string(semconv.ErrorTypeKey))
 }
+
+func TestGinServer_UnregisteredRoute(t *testing.T) {
+	f := testutil.NewTestFixture(t)
+
+	f.BuildAndStart("ginserver", "-port=8090")
+	testutil.WaitForTCP(t, "127.0.0.1:8090")
+
+	resp, err := http.Get("http://127.0.0.1:8090/no-such-route") //nolint:noctx
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	testutil.WaitForSpanFlush(t)
+
+	f.RequireTraceCount(1)
+	f.RequireSpansPerTrace(1)
+	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
+
+	// For unmatched paths gin does not populate c.FullPath() so the hook
+	// bails out. The span name must remain the plain method from the
+	// upstream net/http instrumentation and http.route must not be set.
+	// This guards against a cardinality regression where every probed
+	// URL would otherwise turn into a unique span name.
+	assert.Equal(t, "GET", span.Name(),
+		"span name must remain plain method when no gin route matches")
+
+	_, hasRoute := testutil.Attrs(span)[string(semconv.HTTPRouteKey)]
+	assert.False(t, hasRoute,
+		"http.route must not be set when no gin route matches")
+
+	testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(404))
+	testutil.RequireAttribute(t, span, string(semconv.URLPathKey), "/no-such-route")
+}
