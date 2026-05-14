@@ -6,8 +6,13 @@ package instrument
 import (
 	"context"
 	"fmt"
+	"go/format"
+	"regexp"
+	"strings"
 
 	"github.com/dave/dst"
+	"github.com/dave/dst/decorator"
+	"github.com/dave/dst/dstutil"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
@@ -33,7 +38,52 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 	}
 }
 
-func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl) error {
+func insertRawAtPos(
+	decl *dst.FuncDecl,
+	restorer *decorator.Restorer,
+	pattern *regexp.Regexp,
+	stmts []dst.Stmt,
+) bool {
+	inserted := false
+
+	dstutil.Apply(decl.Body, func(cursor *dstutil.Cursor) bool {
+		if inserted {
+			return false
+		}
+
+		stmt, isStmt := cursor.Node().(dst.Stmt)
+		if !isStmt {
+			return true
+		}
+
+		astNode, nodeFound := restorer.Ast.Nodes[stmt]
+		if !nodeFound {
+			return true
+		}
+
+		var buf strings.Builder
+		_ = format.Node(&buf, restorer.Fset, astNode)
+
+		if pattern.MatchString(buf.String()) {
+			if _, ok := cursor.Parent().(*dst.BlockStmt); !ok {
+				return true
+			}
+
+			for _, s := range stmts {
+				cursor.InsertBefore(s)
+			}
+
+			inserted = true
+			return false
+		}
+
+		return true
+	}, nil)
+
+	return inserted
+}
+
+func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl, root *dst.File) error {
 	util.Assert(decl.Name.Name == r.Func, "sanity check")
 
 	// Rename the unnamed return values so that the raw code can reference them
@@ -44,6 +94,23 @@ func insertRaw(r *rule.InstRawRule, decl *dst.FuncDecl) error {
 	if err != nil {
 		return err
 	}
+
+	// if specified, insert raw code at the position matched by the regex
+	if r.Pos != "" {
+		restorer := decorator.NewRestorer()
+		if _, restoreErr := restorer.RestoreFile(root); restoreErr != nil {
+			return ex.Wrapf(restoreErr, "failed to restore the AST")
+		}
+
+		pattern := regexp.MustCompile(r.Pos)
+		inserted := insertRawAtPos(decl, restorer, pattern, stmts)
+		if !inserted {
+			return ex.Newf("failed to find the position to insert raw code with pattern: %s", r.Pos)
+		}
+
+		return nil
+	}
+
 	// Insert the raw code into target function body
 	decl.Body.List = append(stmts, decl.Body.List...)
 	return nil
@@ -64,7 +131,7 @@ func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	}
 
 	// Insert the raw code into the target function
-	err := insertRaw(rule, funcDecl)
+	err := insertRaw(rule, funcDecl, root)
 	if err != nil {
 		return err
 	}
