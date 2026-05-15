@@ -4,13 +4,18 @@
 package setup
 
 import (
+	"bytes"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -383,4 +388,24 @@ func TestExtractBuildFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWarnIfNoMatches_EmptyMatches(t *testing.T) {
+	sp := &SetupPhase{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	var buf bytes.Buffer
+	sp.warnIfNoMatches([]*rule.InstRuleSet{}, &buf)
+	assert.Contains(t, buf.String(), "0 rules matched")
+}
+
+func TestWarnIfNoMatches_HasMatches(t *testing.T) {
+	sp := &SetupPhase{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	var buf bytes.Buffer
+	sp.warnIfNoMatches([]*rule.InstRuleSet{
+		{ModulePath: "net/http"},
+	}, &buf)
+	assert.Empty(t, buf.String())
 }
