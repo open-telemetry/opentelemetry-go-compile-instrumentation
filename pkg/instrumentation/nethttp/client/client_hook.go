@@ -5,6 +5,7 @@ package client
 
 import (
 	"net/http"
+	nethttptrace "net/http/httptrace"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/httptrace"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/semconv"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
 )
@@ -118,7 +120,14 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
 	// Inject trace context into request headers
 	propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
 
-	// Update request with new context
+	// Attach httptrace.ClientTrace for detailed sub-span instrumentation
+	// (DNS, connect, TLS, send, receive phases)
+	tp := otel.GetTracerProvider()
+	version := moduleVersion()
+	clientTrace := httptrace.NewClientTrace(ctx, tp, version)
+	ctx = nethttptrace.WithClientTrace(ctx, clientTrace)
+
+	// Update request with new context (includes both span and httptrace)
 	newReq := req.WithContext(ctx)
 	ictx.SetParam(requestParamIndex, newReq)
 

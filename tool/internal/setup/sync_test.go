@@ -225,3 +225,65 @@ go 1.21
 	// At minimum, the pkg replace should be added
 	assert.Contains(t, string(content), "replace")
 }
+
+func TestSyncDeps_AddsTransitiveLocalModuleReplaces(t *testing.T) {
+	tempDir := t.TempDir()
+
+	gomodPath := filepath.Join(tempDir, "go.mod")
+	err := os.WriteFile(gomodPath, []byte(`module example.com/test
+
+go 1.25.0
+`), 0o644)
+	require.NoError(t, err)
+
+	t.Chdir(tempDir)
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	writeModule := func(modulePath, content string) {
+		t.Helper()
+		moduleDir := localModulePath(modulePath)
+		require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte(content), 0o644))
+	}
+
+	clientModule := util.OtelcRoot + "/pkg/instrumentation/nethttp/client"
+	httptraceModule := util.OtelcRoot + "/pkg/instrumentation/nethttp/httptrace"
+	sharedModule := util.OtelcRoot + "/pkg/instrumentation/shared"
+	pkgModule := util.OtelcRoot + "/pkg"
+
+	writeModule(clientModule, `module `+clientModule+`
+
+go 1.25.0
+
+require `+httptraceModule+` v0.0.0-00010101000000-000000000000
+`)
+	writeModule(httptraceModule, `module `+httptraceModule+`
+
+go 1.25.0
+`)
+	writeModule(sharedModule, `module `+sharedModule+`
+
+go 1.25.0
+`)
+	writeModule(pkgModule, `module `+pkgModule+`
+
+go 1.25.0
+`)
+
+	sp := &SetupPhase{logger: slog.Default()}
+	ruleSet := &rule.InstRuleSet{
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"test.go": {{
+				InstBaseRule: rule.InstBaseRule{Name: "http-client"},
+				Path:         clientModule,
+			}},
+		},
+	}
+
+	require.NoError(t, sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir))
+
+	content, err := os.ReadFile(gomodPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "replace "+clientModule+" => "+filepath.Join(util.GetBuildTempDir(), "pkg/instrumentation/nethttp/client"))
+	assert.Contains(t, string(content), "replace "+httptraceModule+" => "+filepath.Join(util.GetBuildTempDir(), "pkg/instrumentation/nethttp/httptrace"))
+}

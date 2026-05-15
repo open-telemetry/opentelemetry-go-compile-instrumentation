@@ -8,6 +8,8 @@ replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/i
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client => ../client
 
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/httptrace => ../httptrace
+
 require (
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20251208011108-ac0fa4a155e3
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client v0.0.0-20251208011108-ac0fa4a155e3
@@ -29,6 +31,7 @@ require (
 	github.com/grafana/regexp v0.0.0-20240518133315-a468a5bfb3bc // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/httptrace v0.0.0-00010101000000-000000000000 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.23.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
