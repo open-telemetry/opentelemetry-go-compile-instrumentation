@@ -78,7 +78,7 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
-			name: "unknown driver falls back to other_sql",
+			name: "clickhouse driver maps to clickhouse system name",
 			req: DatabaseSqlRequest{
 				OpType:     "SELECT",
 				Sql:        "SELECT 1",
@@ -88,11 +88,31 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 				DbName:     "default",
 			},
 			expected: map[string]interface{}{
-				"db.system.name":    "other_sql",
+				"db.system.name":    "clickhouse",
 				"db.operation.name": "SELECT",
 				"db.namespace":      "default",
 				"server.address":    "localhost",
 				"server.port":       int64(9000),
+				"network.transport": "tcp",
+				"db.query.text":     "SELECT 1",
+			},
+		},
+		{
+			name: "unknown driver falls back to other_sql",
+			req: DatabaseSqlRequest{
+				OpType:     "SELECT",
+				Sql:        "SELECT 1",
+				Endpoint:   "localhost:9999",
+				DriverName: "exoticdb",
+				Dsn:        "exoticdb://localhost:9999/mydb",
+				DbName:     "mydb",
+			},
+			expected: map[string]interface{}{
+				"db.system.name":    "other_sql",
+				"db.operation.name": "SELECT",
+				"db.namespace":      "mydb",
+				"server.address":    "localhost",
+				"server.port":       int64(9999),
 				"network.transport": "tcp",
 				"db.query.text":     "SELECT 1",
 			},
