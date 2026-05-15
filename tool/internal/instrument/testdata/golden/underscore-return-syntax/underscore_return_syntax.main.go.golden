@@ -114,5 +114,5 @@ func OtelAfterTrampoline_UnderscoreReturnFunc552216505(hookContext HookContext, 
 	}
 }
 
-//go:linkname H12UnderscoreReturnAfter testdata.H12UnderscoreReturnAfter
+//go:linkname H12UnderscoreReturnAfter testdata/golden/underscore-return-syntax.H12UnderscoreReturnAfter
 func H12UnderscoreReturnAfter(hookContext HookContext, arg0 int, arg1 error)

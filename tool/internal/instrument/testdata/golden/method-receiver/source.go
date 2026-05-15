@@ -1,0 +1,12 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+type T struct{}
+
+func (t *T) Func1(p1 string, p2 int) (float32, error) {
+	return 0.0, nil
+}
+
+func (T) Func3() {}
