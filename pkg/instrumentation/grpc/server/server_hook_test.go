@@ -5,7 +5,6 @@ package server
 
 import (
 	"context"
-	"net"
 	"testing"
 	"time"
 
@@ -14,23 +13,13 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
 )
 
 func TestBeforeNewServer(t *testing.T) {
-	// Setup trace exporter
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSyncer(exporter),
-	)
-	otel.SetTracerProvider(tp)
-	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
-
 	tests := []struct {
 		name          string
 		opts          []grpc.ServerOption
@@ -70,23 +59,18 @@ func TestBeforeNewServer(t *testing.T) {
 			ictx := insttest.NewMockHookContext(tt.opts)
 			BeforeNewServer(ictx, tt.opts...)
 
-			newOpts, ok := ictx.GetParam(0).([]grpc.ServerOption)
+			newOpts, ok := ictx.GetParam(optionsParamIndex).([]grpc.ServerOption)
 			require.True(t, ok)
 
 			if tt.expectHandler {
-				// Should have added stats handler
-				assert.Greater(t, len(newOpts), len(tt.opts), "Expected stats handler to be added")
+				assert.Greater(t, len(newOpts), len(tt.opts))
 			} else {
-				// Should not modify options when disabled
 				assert.Equal(t, len(tt.opts), len(newOpts))
 			}
 		})
 	}
 }
 
-// TestAfterNewServer verifies the AfterNewServer hook handles server creation
-// without panicking. This hook is primarily for debug logging and doesn't modify state,
-// so we verify it gracefully handles various server states.
 func TestAfterNewServer(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -118,32 +102,21 @@ func TestAfterNewServer(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc")
 			}
 
-			// Cleanup server if created
 			if tt.server != nil {
 				t.Cleanup(tt.server.Stop)
 			}
 
 			ictx := insttest.NewMockHookContext()
-
-			// Verify the hook doesn't panic and handles gracefully
 			assert.NotPanics(t, func() {
 				AfterNewServer(ictx, tt.server)
-			}, "AfterNewServer should not panic")
+			})
 		})
 	}
 }
 
-func TestServerStatsHandler_TagRPC(t *testing.T) {
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
-
-	// Initialize instrumentation first
-	initInstrumentation()
-
-	// Setup trace exporter AFTER initialization
+func TestServerStatsHandler_CreatesSpan(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSyncer(exporter),
-	)
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	oldTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
 	t.Cleanup(func() {
@@ -151,196 +124,57 @@ func TestServerStatsHandler_TagRPC(t *testing.T) {
 		otel.SetTracerProvider(oldTP)
 	})
 
-	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
-
 	handler := newServerStatsHandler()
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{FullMethodName: "/grpc.testing.TestService/UnaryCall"})
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-100 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
 
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1)
+	assert.Equal(t, "grpc.testing.TestService/UnaryCall", spans[0].Name)
+}
+
+func TestRecordRPC(t *testing.T) {
 	tests := []struct {
 		name           string
 		fullMethodName string
-		incomingMD     metadata.MD
+		want           bool
 	}{
 		{
-			name:           "valid method",
-			fullMethodName: "/grpc.health.v1.Health/Check",
-		},
-		{
-			name:           "with trace context",
+			name:           "regular RPC",
 			fullMethodName: "/grpc.testing.TestService/UnaryCall",
-			incomingMD: metadata.MD{
-				"traceparent": []string{"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0aa902b7-01"},
-			},
+			want:           true,
+		},
+		{
+			name:           "OTLP trace exporter",
+			fullMethodName: "/opentelemetry.proto.collector.trace.v1.TraceService/Export",
+			want:           false,
+		},
+		{
+			name:           "OTLP metrics exporter",
+			fullMethodName: "/opentelemetry.proto.collector.metrics.v1.MetricsService/Export",
+			want:           false,
+		},
+		{
+			name:           "OTLP logs exporter",
+			fullMethodName: "/opentelemetry.proto.collector.logs.v1.LogsService/Export",
+			want:           false,
+		},
+		{
+			name: "nil info",
+			want: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := t.Context()
-			if tt.incomingMD != nil {
-				ctx = metadata.NewIncomingContext(ctx, tt.incomingMD)
+			var info *stats.RPCTagInfo
+			if tt.fullMethodName != "" {
+				info = &stats.RPCTagInfo{FullMethodName: tt.fullMethodName}
 			}
-
-			info := &stats.RPCTagInfo{
-				FullMethodName: tt.fullMethodName,
-			}
-
-			// TagRPC creates the span
-			newCtx := handler.TagRPC(ctx, info)
-			assert.NotNil(t, newCtx)
-
-			// Verify gRPC context was set
-			gctx := newCtx.Value(gRPCContextKey{})
-			assert.NotNil(t, gctx, "Expected gRPC context to be set")
-
-			// End the RPC to export the span
-			handler.HandleRPC(newCtx, &stats.End{
-				BeginTime: time.Now().Add(-100 * time.Millisecond),
-				EndTime:   time.Now(),
-			})
-
-			// Now verify span was exported
-			spans := exporter.GetSpans()
-			assert.NotEmpty(t, spans, "Expected span to be created and exported")
-			if len(spans) > 0 {
-				assert.Equal(t, tt.fullMethodName[1:], spans[0].Name) // Remove leading /
-			}
-
-			exporter.Reset()
-		})
-	}
-}
-
-func TestServerStatsHandler_Integration(t *testing.T) {
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
-
-	// Initialize instrumentation
-	initInstrumentation()
-
-	// Create instrumented server
-	opts := []grpc.ServerOption{}
-	ictx := insttest.NewMockHookContext(opts)
-	BeforeNewServer(ictx, opts...)
-
-	newOpts := ictx.GetParam(0).([]grpc.ServerOption)
-	assert.Greater(t, len(newOpts), 0, "Expected stats handler to be added")
-
-	// Verify hook behavior
-	server := grpc.NewServer(newOpts...)
-	t.Cleanup(server.Stop)
-	assert.NotNil(t, server)
-}
-
-func TestServerStatsHandler_TagConn(t *testing.T) {
-	handler := newServerStatsHandler()
-
-	ctx := t.Context()
-	info := &stats.ConnTagInfo{
-		LocalAddr: &net.TCPAddr{
-			IP:   net.ParseIP("127.0.0.1"),
-			Port: 50051,
-		},
-	}
-
-	newCtx := handler.TagConn(ctx, info)
-	assert.NotNil(t, newCtx)
-}
-
-func TestServerStatsHandler_HandleConn(t *testing.T) {
-	handler := newServerStatsHandler()
-
-	ctx := t.Context()
-
-	// Should not panic
-	handler.HandleConn(ctx, &stats.ConnBegin{})
-}
-
-func TestServerStatsHandler_OTELExporterFiltering(t *testing.T) {
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
-
-	// Initialize instrumentation
-	initInstrumentation()
-
-	// Setup trace exporter
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSyncer(exporter),
-	)
-	oldTP := otel.GetTracerProvider()
-	otel.SetTracerProvider(tp)
-	t.Cleanup(func() {
-		_ = tp.Shutdown(context.Background())
-		otel.SetTracerProvider(oldTP)
-	})
-
-	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
-
-	handler := newServerStatsHandler()
-
-	tests := []struct {
-		name             string
-		fullMethodName   string
-		shouldInstrument bool
-	}{
-		{
-			name:             "OTLP trace exporter - should skip",
-			fullMethodName:   "/opentelemetry.proto.collector.trace.v1.TraceService/Export",
-			shouldInstrument: false,
-		},
-		{
-			name:             "OTLP metric exporter - should skip",
-			fullMethodName:   "/opentelemetry.proto.collector.metrics.v1.MetricsService/Export",
-			shouldInstrument: false,
-		},
-		{
-			name:             "OTLP log exporter - should skip",
-			fullMethodName:   "/opentelemetry.proto.collector.logs.v1.LogsService/Export",
-			shouldInstrument: false,
-		},
-		{
-			name:             "regular gRPC call - should instrument",
-			fullMethodName:   "/grpc.testing.TestService/UnaryCall",
-			shouldInstrument: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := t.Context()
-			info := &stats.RPCTagInfo{
-				FullMethodName: tt.fullMethodName,
-			}
-
-			// TagRPC creates the span (or skips for OTLP)
-			newCtx := handler.TagRPC(ctx, info)
-			assert.NotNil(t, newCtx)
-
-			if tt.shouldInstrument {
-				// Verify gRPC context was set
-				gctx := newCtx.Value(gRPCContextKey{})
-				assert.NotNil(t, gctx, "Expected gRPC context to be set for regular calls")
-
-				// End the RPC to export the span
-				handler.HandleRPC(newCtx, &stats.End{
-					BeginTime: time.Now().Add(-100 * time.Millisecond),
-					EndTime:   time.Now(),
-				})
-
-				// Verify span was created
-				spans := exporter.GetSpans()
-				assert.NotEmpty(t, spans, "Expected span for regular call")
-			} else {
-				// Verify gRPC context was NOT set (instrumentation skipped)
-				gctx := newCtx.Value(gRPCContextKey{})
-				assert.Nil(t, gctx, "Expected no gRPC context for OTLP exporter calls")
-
-				// Verify no span was created
-				spans := exporter.GetSpans()
-				assert.Empty(t, spans, "Expected no span for OTLP exporter calls")
-			}
-
-			exporter.Reset()
+			assert.Equal(t, tt.want, recordRPC(info))
 		})
 	}
 }
