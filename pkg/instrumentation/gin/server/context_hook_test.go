@@ -193,10 +193,12 @@ func TestAfterNext_RecordsGinErrors(t *testing.T) {
 	_, span := tr.Start(context.Background(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
 
+	ictx := insttest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
 	_ = c.Error(errors.New("db connection lost"))
 	_ = c.Error(errors.New("fallback failed"))
 
-	ictx := insttest.NewMockHookContext(c)
 	AfterNext(ictx)
 
 	span.End()
@@ -221,6 +223,7 @@ func TestAfterNext_NoErrorsIsNoop(t *testing.T) {
 	c := newGinContextWithRoute(t, "GET", "/ping", "/ping", span)
 
 	ictx := insttest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
 	AfterNext(ictx)
 
 	span.End()
@@ -229,47 +232,56 @@ func TestAfterNext_NoErrorsIsNoop(t *testing.T) {
 	assert.Empty(t, sr.Ended()[0].Events())
 }
 
-func TestAfterNext_IdempotentOnMultipleCalls(t *testing.T) {
+func TestAfterNext_RecordsOnlyAtOutermostReturn(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	_, span := tr.Start(context.Background(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/items/:id", "/items/7", span)
-
-	_ = c.Error(errors.New("something broke"))
-
 	ictx := insttest.NewMockHookContext(c)
+
+	// Simulate three nested middleware calling c.Next().
+	BeforeNext(ictx, c)
+	BeforeNext(ictx, c)
+	BeforeNext(ictx, c)
+
+	// Handler adds an error.
+	_ = c.Error(errors.New("handler error"))
+
+	// Inner two AfterNext calls — depth > 0, should not record.
 	AfterNext(ictx)
 	AfterNext(ictx)
+
+	// Middleware adds an error after its c.Next() returned.
+	_ = c.Error(errors.New("middleware cleanup error"))
+
+	// Outermost AfterNext — depth == 0, should record both errors.
 	AfterNext(ictx)
 
 	span.End()
 	require.Len(t, sr.Ended(), 1)
-	require.Len(t, sr.Ended()[0].Events(), 1,
-		"error must be recorded exactly once regardless of how many times AfterNext fires")
+	ended := sr.Ended()[0]
+
+	assert.Equal(t, codes.Error, ended.Status().Code)
+	assert.Contains(t, ended.Status().Description, "handler error")
+	assert.Contains(t, ended.Status().Description, "middleware cleanup error")
+	require.Len(t, ended.Events(), 2,
+		"both errors must be recorded at the outermost return")
 }
 
-func TestAfterNext_NonRecordingSpanDoesNotBurnGate(t *testing.T) {
-	sr, tr := setupContextTracer(t)
+func TestAfterNext_NonRecordingSpanSkipsRecording(t *testing.T) {
+	sr, _ := setupContextTracer(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
+	// No span attached — trace.SpanFromContext returns a non-recording no-op.
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", nil)
-	_ = c.Error(errors.New("should be captured later"))
+	_ = c.Error(errors.New("should not be recorded"))
 
 	ictx := insttest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
 	AfterNext(ictx)
 
-	_, recording := tr.Start(context.Background(), "GET")
-	c.Request = c.Request.WithContext(
-		trace.ContextWithSpan(c.Request.Context(), recording),
-	)
-	AfterNext(ictx)
-	recording.End()
-
-	require.Len(t, sr.Ended(), 1)
-	assert.Equal(t, codes.Error, sr.Ended()[0].Status().Code,
-		"recording span must capture errors even after a non-recording call ran first")
-	require.Len(t, sr.Ended()[0].Events(), 1)
+	assert.Empty(t, sr.Ended(), "non-recording span must not produce any recorded spans")
 }
 
 func TestAfterNext_DisabledIsNoop(t *testing.T) {

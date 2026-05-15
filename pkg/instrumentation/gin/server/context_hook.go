@@ -16,8 +16,8 @@ import (
 // when multiple middleware layers call c.Next(). The key is reserved by this
 // package; user middleware must not set or read it.
 const (
-	routeSetKey       = "otel.gin.route.set"
-	errorsRecordedKey = "otel.gin.errors.recorded"
+	routeSetKey  = "otel.gin.route.set"
+	nextDepthKey = "otel.gin.next.depth"
 )
 
 // BeforeNext runs before (*gin.Context).Next. By the time Next is called,
@@ -30,6 +30,16 @@ func BeforeNext(ictx inst.HookContext, c *gin.Context) {
 	}
 	if c == nil || c.Request == nil {
 		return
+	}
+
+	if d, exists := c.Get(nextDepthKey); exists {
+		if depth, ok := d.(int); ok {
+			c.Set(nextDepthKey, depth+1)
+		} else {
+			c.Set(nextDepthKey, 1)
+		}
+	} else {
+		c.Set(nextDepthKey, 1)
 	}
 
 	route := c.FullPath()
@@ -71,10 +81,17 @@ func AfterNext(ictx inst.HookContext) {
 	if !ok || c == nil || c.Request == nil {
 		return
 	}
-	if len(c.Errors) == 0 {
+
+	d, _ := c.Get(nextDepthKey)
+	depth, _ := d.(int)
+	depth--
+	c.Set(nextDepthKey, depth)
+
+	if depth > 0 {
 		return
 	}
-	if _, already := c.Get(errorsRecordedKey); already {
+
+	if len(c.Errors) == 0 {
 		return
 	}
 
@@ -82,8 +99,6 @@ func AfterNext(ictx inst.HookContext) {
 	if !span.IsRecording() {
 		return
 	}
-
-	c.Set(errorsRecordedKey, struct{}{})
 
 	span.SetStatus(codes.Error, c.Errors.String())
 	for _, e := range c.Errors {
