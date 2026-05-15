@@ -5,9 +5,11 @@ package testutil
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,31 +36,66 @@ func newCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// Build builds the application with the instrumentation tool.
-func Build(t *testing.T, appDir string, args ...string) {
+type sharedBuild struct {
+	once sync.Once
+	err  error
+}
+
+var sharedBuilds sync.Map
+
+func appBinaryName() string {
+	name := appBinName
+	if util.IsWindows() {
+		name += ".exe"
+	}
+	return name
+}
+
+func appBinaryPath(appDir string) string {
+	return filepath.Join(appDir, appBinaryName())
+}
+
+func buildApp(ctx context.Context, appDir string, args ...string) error {
 	binName := otelcBinName
 	if util.IsWindows() {
 		binName += ".exe"
 	}
 	pwd, err := os.Getwd()
-	require.NoError(t, err)
+	if err != nil {
+		return err
+	}
 	otelcPath := filepath.Join(pwd, "..", "..", binName)
 
-	// Use a consistent binary name for all test apps
-	outputName := appBinName
-	if util.IsWindows() {
-		outputName += ".exe"
-	}
-
-	args = append(args, "-o", outputName)
+	args = append(args, "-o", appBinaryName())
 	args = append([]string{otelcPath}, args...)
 
-	cmd := newCmd(t.Context(), appDir, args...)
+	cmd := newCmd(ctx, appDir, args...)
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(out))
+	if err != nil {
+		return fmt.Errorf("build failed: %w: %s", err, string(out))
+	}
+	return nil
+}
+
+// Build builds the application with the instrumentation tool.
+func Build(t *testing.T, appDir string, args ...string) {
+	if err := buildApp(t.Context(), appDir, args...); err != nil {
+		require.NoError(t, err)
+	}
 	t.Cleanup(func() {
-		os.Remove(filepath.Join(appDir, outputName))
+		_ = os.Remove(appBinaryPath(appDir))
 	})
+}
+
+// BuildShared builds the app once per process and keeps the binary for reuse.
+func BuildShared(t *testing.T, appDir string, args ...string) {
+	t.Helper()
+	entry, _ := sharedBuilds.LoadOrStore(appDir, &sharedBuild{})
+	build := entry.(*sharedBuild)
+	build.once.Do(func() {
+		build.err = buildApp(t.Context(), appDir, args...)
+	})
+	require.NoError(t, build.err)
 }
 
 // Run runs the application and returns the output.

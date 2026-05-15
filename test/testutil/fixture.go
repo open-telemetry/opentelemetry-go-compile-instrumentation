@@ -92,6 +92,11 @@ func (f *TestFixture) Build(appName string) {
 	Build(f.t, f.resolveAppPath(appName), "go", "build", "-a")
 }
 
+// BuildShared builds a test application once and reuses the binary across tests.
+func (f *TestFixture) BuildShared(appName string) {
+	BuildShared(f.t, f.resolveAppPath(appName), "go", "build", "-a")
+}
+
 // Server represents a running server process.
 type Server struct {
 	t       *testing.T
@@ -123,6 +128,12 @@ func (f *TestFixture) BuildAndStart(appName string, args ...string) *Server {
 // BuildAndRun builds and runs a test application
 func (f *TestFixture) BuildAndRun(appName string, args ...string) string {
 	f.Build(appName)
+	return f.Run(appName, args...)
+}
+
+// BuildSharedAndRun builds a test application once and runs it.
+func (f *TestFixture) BuildSharedAndRun(appName string, args ...string) string {
+	f.BuildShared(appName)
 	return f.Run(appName, args...)
 }
 

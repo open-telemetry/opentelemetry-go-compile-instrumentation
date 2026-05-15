@@ -6,11 +6,19 @@ package db
 import (
 	"errors"
 	"fmt"
+	"net"
 	nurl "net/url"
+	"regexp"
 	"strings"
 )
 
+var dbNamePattern = regexp.MustCompile(`(?i)(^|[\s;?&])(?:dbname|database)\s*=\s*('([^']*)'|"([^"]*)"|[^;\s&]+)`)
+
 func ParseDbName(dsn string) string {
+	if name := parseDBNameFromKeyValue(dsn); name != "" {
+		return name
+	}
+
 	var name string
 	var err error
 	for i := len(dsn) - 1; i >= 0; i-- {
@@ -26,6 +34,30 @@ func ParseDbName(dsn string) string {
 
 			break
 		}
+	}
+	return name
+}
+
+func parseDBNameFromKeyValue(dsn string) string {
+	match := dbNamePattern.FindStringSubmatch(dsn)
+	if len(match) == 0 {
+		return ""
+	}
+
+	value := strings.TrimSpace(match[2])
+	if value == "" {
+		return ""
+	}
+
+	if len(value) >= 2 {
+		if (value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"') {
+			value = value[1 : len(value)-1]
+		}
+	}
+
+	name, err := nurl.PathUnescape(value)
+	if err != nil {
+		return ""
 	}
 	return name
 }
@@ -53,6 +85,17 @@ func parseDSN(driverName, dsn string) (addr string, err error) {
 }
 
 func parsePostgres(url string) (addr string, err error) {
+	if !strings.Contains(url, "://") {
+		host, port, ok := parseConnectionStringPair(url, []string{"host"})
+		if !ok || host == "" {
+			return "", errors.New("invalid Postgres DSN")
+		}
+		if port == "" {
+			port = "5432"
+		}
+		return net.JoinHostPort(strings.Trim(host, "[]"), port), nil
+	}
+
 	u, err := nurl.Parse(url)
 	if err != nil {
 		return "", err
@@ -97,9 +140,47 @@ func parseMySQL(dsn string) (addr string, err error) {
 		}
 	}
 	if i >= 0 && j > i {
-		return dsn[i+1 : j], nil
+		addr := dsn[i+1 : j]
+		if strings.TrimSpace(addr) == "" {
+			return "localhost:3306", nil
+		}
+		return addr, nil
+	}
+
+	if strings.Contains(dsn, "@/") || strings.HasPrefix(dsn, "/") {
+		return "localhost:3306", nil
 	}
 	return "", errors.New("invalid MySQL DSN")
+}
+
+func parseConnectionStringPair(dsn string, keys []string) (host string, port string, ok bool) {
+	pairs := strings.Fields(dsn)
+	var hostFound bool
+
+	for _, pair := range pairs {
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(parts[0]))
+		value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+
+		for _, k := range keys {
+			if key == k {
+				host = value
+				hostFound = true
+				break
+			}
+		}
+		if key == "port" {
+			port = value
+		}
+	}
+
+	if !hostFound {
+		return "", "", false
+	}
+	return host, port, true
 }
 
 func parseClickHouse(dsn string) (addr string, err error) {
