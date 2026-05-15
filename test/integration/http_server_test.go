@@ -44,7 +44,7 @@ func TestHTTPServer(t *testing.T) {
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, http.StatusOK, resp.StatusCode)
-			testutil.WaitForSpanFlush(t)
+			f.WaitForSpans(1)
 
 			span := f.RequireSingleSpan()
 			testutil.RequireHTTPServerSemconv(

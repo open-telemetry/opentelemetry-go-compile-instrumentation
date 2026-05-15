@@ -47,7 +47,7 @@ func TestGRPCServer(t *testing.T) {
 
 			client := NewGRPCClient(t, "localhost:50051")
 			tc.exercise(t, client)
-			testutil.WaitForSpanFlush(t)
+			f.WaitForSpans(1)
 
 			span := f.RequireSingleSpan()
 			testutil.RequireGRPCServerSemconv(t, span, "greeter.Greeter", tc.method, 0)

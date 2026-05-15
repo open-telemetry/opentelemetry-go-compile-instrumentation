@@ -27,6 +27,23 @@ func (c *Collector) GetTraces() ptrace.Traces {
 	return c.traces
 }
 
+// SpanCount returns the total number of collected spans under the lock.
+func (c *Collector) SpanCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return countSpans(c.traces)
+}
+
+func countSpans(td ptrace.Traces) int {
+	n := 0
+	for i := range td.ResourceSpans().Len() {
+		for j := range td.ResourceSpans().At(i).ScopeSpans().Len() {
+			n += td.ResourceSpans().At(i).ScopeSpans().At(j).Spans().Len()
+		}
+	}
+	return n
+}
+
 // StartCollector starts an in-memory OTLP HTTP server that collects traces
 func StartCollector(t *testing.T) *Collector {
 	c := &Collector{traces: ptrace.NewTraces()}
