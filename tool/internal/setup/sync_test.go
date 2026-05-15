@@ -275,9 +275,25 @@ go 1.21
 }
 
 func TestWarnVersion_GoVersionRaised(t *testing.T) {
-	tempDir := t.TempDir()
-	gomodPath := filepath.Join(tempDir, "go.mod")
-	afterContent := `module example.com/app
+	tests := []struct {
+		name      string
+		goVersion string
+	}{
+		{
+			name:      "patch version",
+			goVersion: "1.22.0",
+		},
+		{
+			name:      "language version",
+			goVersion: "1.21",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			gomodPath := filepath.Join(tempDir, "go.mod")
+			afterContent := `module example.com/app
 
 go 1.25.0
 
@@ -285,43 +301,23 @@ require (
 	go.opentelemetry.io/otel v1.38.0
 )
 `
-	require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
+			require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
 
-	sp, buf := warnCapture()
-	before := versionSnapshot{
-		goVersion: "1.22.0",
-		deps: map[string]string{
-			"go.opentelemetry.io/otel": "v1.38.0",
-		},
+			sp, buf := warnCapture()
+			before := versionSnapshot{
+				goVersion: test.goVersion,
+				deps: map[string]string{
+					"go.opentelemetry.io/otel": "v1.38.0",
+				},
+			}
+
+			require.NoError(t, sp.warnVersion(gomodPath, before))
+
+			logged := buf.String()
+			assert.Contains(t, logged, "Bumped go version")
+			assert.Contains(t, logged, test.goVersion+" -> 1.25.0")
+		})
 	}
-
-	require.NoError(t, sp.warnVersion(gomodPath, before))
-
-	logged := buf.String()
-	assert.Contains(t, logged, "Bumped go version")
-	assert.Contains(t, logged, "1.22.0 -> 1.25.0")
-}
-
-func TestWarnVersion_GoLanguageVersionRaised(t *testing.T) {
-	tempDir := t.TempDir()
-	gomodPath := filepath.Join(tempDir, "go.mod")
-	afterContent := `module example.com/app
-
-go 1.25.0
-`
-	require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
-
-	sp, buf := warnCapture()
-	before := versionSnapshot{
-		goVersion: "1.21",
-		deps:      map[string]string{},
-	}
-
-	require.NoError(t, sp.warnVersion(gomodPath, before))
-
-	logged := buf.String()
-	assert.Contains(t, logged, "Bumped go version")
-	assert.Contains(t, logged, "1.21 -> 1.25.0")
 }
 
 func TestWarnVersion_DepVersionRaised(t *testing.T) {
