@@ -7,7 +7,7 @@ This document explains the different types of instrumentation rules used by the 
 All rules share a set of common fields that define the target of the instrumentation.
 
 - `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package.
-- `version` (string, optional): Specifies a version range for the target package. The rule will only be applied if the package's version falls within this range. The format is `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` means the rule applies to versions greater than or equal to `v0.11.0` and less than `v0.12.0`. If omitted, the rule applies to all versions.
+- `version` (string, optional): Specifies a version range for the target package. The rule will only be applied if the package's version falls within this range. The format is `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` means the rule applies to versions greater than or equal to `v0.11.0` and less than `v0.12.0`. If omitted, the rule applies to all versions. Both `start_inclusive` and `end_exclusive` can be omitted to create open-ended ranges (e.g., `v0.11.0,` applies to all versions >= `v0.11.0`, and `,v0.12.0` applies to all versions < `v0.12.0`).
 - `imports` (map[string]string, optional): A map of imports to inject into the instrumented file. The key is the import alias and the value is the import path. For standard imports without an alias, use the package name as both key and value. For blank imports, use `_` as the key. This field is used by raw, struct, and call rules. Function hook rules do not require it — their imports are detected automatically from the hook source file.
 
   Examples:
