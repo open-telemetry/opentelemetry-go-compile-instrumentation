@@ -37,6 +37,8 @@ const (
 //nolint:nilnil // factory function
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
 	switch {
+	case fields["struct_literal"] != nil:
+		return rule.NewInstStructLiteralRule(raw, name)
 	case fields["struct"] != nil:
 		return rule.NewInstStructRule(raw, name)
 	case fields["file"] != nil:
@@ -253,6 +255,10 @@ func (sp *SetupPhase) matchOneRule(
 		// Files without matching calls are a no-op in applyCallRule.
 		set.AddCallRule(source, rt)
 		sp.Info("Match call rule", "rule", rt, "dep", dep)
+	case *rule.InstStructLiteralRule:
+		// Struct literal rules are added unconditionally, just like call rules.
+		set.AddStructLiteralRule(source, rt)
+		sp.Info("Match struct literal rule", "rule", rt, "dep", dep)
 	case *rule.InstDirectiveRule:
 		if ast.FileHasDirective(tree, rt.Directive) {
 			set.AddDirectiveRule(source, rt)

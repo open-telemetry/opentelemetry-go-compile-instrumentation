@@ -379,7 +379,86 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 - All packages referenced in `append_args` must be in the target module's `go.mod`.
 - Ellipsis calls without `variadic_type` are skipped with a logged warning.
 
-### 5. Directive Rule
+### 5. Struct Literal Wrapping Rule
+
+This rule wraps struct literal expressions (`SomeType{}`) at instantiation sites with instrumentation code. It is the struct equivalent of the Call Wrapping Rule.
+
+**Use Cases:**
+
+- Wrapping `&http.Transport{}` with an instrumented transport.
+- Injecting middleware when `&http.Server{}` is created.
+- Instrumenting configuration struct creation without modifying the consuming code.
+
+**Fields:**
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `struct_literal` | string | Yes | Qualified struct name: `package/path.StructName` |
+| `match` | string | No | Match mode: `value-only`, `pointer-only`, or `any` (default: `any`) |
+| `template` | string | Yes | Wrapper template with `{{ . }}` placeholder for the original literal |
+| `imports` | map[string]string | No | Additional imports needed for injected code |
+
+**Match Modes:**
+
+- `value-only`: Only matches value literals like `Config{}`. Does not match `&Config{}`.
+- `pointer-only`: Only matches pointer literals like `&Config{}`. Does not match `Config{}`.
+- `any`: Matches both value and pointer literals.
+
+**Template System:**
+
+The `template` field uses Go's `text/template` package. The `{{ . }}` placeholder is replaced with the original struct literal expression (including the `&` prefix for pointer matches).
+
+**Examples:**
+
+#### Example 1: Wrapping HTTP Server Creation
+
+```yaml
+wrap_http_server:
+  target: myapp/server
+  struct_literal: net/http.Server
+  match: pointer-only
+  template: |
+    func(s *http.Server) *http.Server {
+        s.Handler = otelhttp.NewHandler(s.Handler)
+        return s
+    }({{ . }})
+  imports:
+    otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+```
+
+This transforms `&http.Server{Addr: ":8080", Handler: mux}` into:
+
+```go
+func(s *http.Server) *http.Server {
+    s.Handler = otelhttp.NewHandler(s.Handler)
+    return s
+}(&http.Server{Addr: ":8080", Handler: mux})
+```
+
+#### Example 2: Value-Only Wrapping
+
+```yaml
+wrap_config:
+  target: main
+  struct_literal: main.Config
+  match: value-only
+  template: "WrapConfig({{ . }})"
+```
+
+This transforms `Config{Host: "localhost", Port: 8080}` into `WrapConfig(Config{Host: "localhost", Port: 8080})`.
+
+Pointer usages like `&Config{}` are not affected when `match` is `value-only`.
+
+**Important Notes:**
+
+- The `{{ . }}` placeholder represents the original struct literal expression.
+- The template must produce a valid Go expression.
+- When using `match: any`, be careful with templates that take the value's address — wrapping in an IIFE may prevent taking the address without first assigning to a variable.
+- The `struct_literal` field uses the qualified format `package/path.StructName`. For same-package structs, use `packagename.StructName`.
+
+---
+
+### 6. Directive Rule
 
 This rule instruments functions annotated with a magic comment (a "directive") by prepending templated Go code into their bodies. The template is rendered once per annotated function, and the resulting statements are inserted at the top of the function body.
 
@@ -440,7 +519,7 @@ func foo() {
 - Functions without the directive comment are not affected.
 - Multiple functions in the same file can carry the directive; each gets the template applied independently with its own `{{FuncName}}`.
 
-### 6. File Addition Rule
+### 7. File Addition Rule
 
 This rule adds a new Go source file to the target package.
 
@@ -480,7 +559,7 @@ add_file_with_extra_imports:
     log: "log"  # Add extra import to the copied file
 ```
 
-### 7. Named Declaration Rule
+### 8. Named Declaration Rule
 
 This rule targets a named package-level symbol (variable, constant, function, or type) and either replaces or wraps its initializer. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing or wrapping a default HTTP transport with an instrumented one to enable distributed tracing.
 
