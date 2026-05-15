@@ -1,0 +1,11 @@
+openai_v2_new_client:
+  target: github.com/openai/openai-go/v2
+  func: NewClient
+  before: BeforeNewClient
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai/v2"
+
+openai_v2_new_chat_completion_service:
+  target: github.com/openai/openai-go/v2
+  func: NewChatCompletionService
+  before: BeforeNewChatCompletionService
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/openai/v2"
