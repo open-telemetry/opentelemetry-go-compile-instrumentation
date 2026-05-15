@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
@@ -65,6 +66,30 @@ func TestGinServer_ServerError(t *testing.T) {
 
 	testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(500))
 	testutil.RequireAttributeExists(t, span, string(semconv.ErrorTypeKey))
+}
+
+func TestGinServer_GinError(t *testing.T) {
+	f := testutil.NewTestFixture(t)
+
+	f.BuildAndStart("ginserver", "-port=8090")
+	testutil.WaitForTCP(t, "127.0.0.1:8090")
+
+	resp, err := http.Get("http://127.0.0.1:8090/error") //nolint:noctx
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	testutil.WaitForSpanFlush(t)
+
+	f.RequireTraceCount(1)
+	f.RequireSpansPerTrace(1)
+	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
+
+	assert.Equal(t, "GET /error", span.Name())
+	assert.Equal(t, ptrace.StatusCodeError, span.Status().Code(),
+		"span status must be Error when c.Error() was called")
+	assert.GreaterOrEqual(t, span.Events().Len(), 1,
+		"span must have at least one exception event from RecordError")
 }
 
 func TestGinServer_UnregisteredRoute(t *testing.T) {

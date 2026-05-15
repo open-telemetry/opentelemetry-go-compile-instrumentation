@@ -5,15 +5,20 @@ package server
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
 )
 
 // routeSetKey is stored on the gin.Context to prevent repeated span updates
 // when multiple middleware layers call c.Next(). The key is reserved by this
 // package; user middleware must not set or read it.
-const routeSetKey = "otel.gin.route.set"
+const (
+	routeSetKey       = "otel.gin.route.set"
+	errorsRecordedKey = "otel.gin.errors.recorded"
+)
 
 // BeforeNext runs before (*gin.Context).Next. By the time Next is called,
 // gin's router has already matched the request to a route and populated
@@ -53,4 +58,35 @@ func BeforeNext(ictx inst.HookContext, c *gin.Context) {
 	span.SetAttributes(semconv.HTTPRouteKey.String(route))
 
 	logger.Debug("gin route resolved", "route", route)
+}
+
+// AfterNext runs after (*gin.Context).Next returns. It records any errors
+// accumulated via c.Error() during request handling.
+func AfterNext(ictx inst.HookContext) {
+	if !serverEnabler.Enable() {
+		return
+	}
+
+	c, ok := ictx.GetParam(0).(*gin.Context)
+	if !ok || c == nil || c.Request == nil {
+		return
+	}
+	if len(c.Errors) == 0 {
+		return
+	}
+	if _, already := c.Get(errorsRecordedKey); already {
+		return
+	}
+
+	span := trace.SpanFromContext(c.Request.Context())
+	if !span.IsRecording() {
+		return
+	}
+
+	c.Set(errorsRecordedKey, struct{}{})
+
+	span.SetStatus(codes.Error, c.Errors.String())
+	for _, e := range c.Errors {
+		span.RecordError(e.Err)
+	}
 }

@@ -27,6 +27,11 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"message": "Hello " + name})
 	})
 
+	r.GET("/error", func(c *gin.Context) {
+		_ = c.Error(fmt.Errorf("gin context error"))
+		c.JSON(http.StatusOK, gin.H{"error": "recorded"})
+	})
+
 	r.GET("/status/:code", func(c *gin.Context) {
 		code, err := strconv.Atoi(c.Param("code"))
 		if err != nil || code < 100 || code > 599 {

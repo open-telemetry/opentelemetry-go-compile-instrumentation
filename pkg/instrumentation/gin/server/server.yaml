@@ -3,4 +3,5 @@ gin_context_next_hook:
   func: Next
   recv: "*Context"
   before: BeforeNext
+  after: AfterNext
   path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/gin/server"

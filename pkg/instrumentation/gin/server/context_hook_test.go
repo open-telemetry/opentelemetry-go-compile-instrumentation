@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -182,4 +184,108 @@ func TestBeforeNext_NonRecordingSpanDoesNotBurnGate(t *testing.T) {
 		attrs[string(a.Key)] = a.Value.AsInterface()
 	}
 	assert.Equal(t, "/users/:id", attrs["http.route"])
+}
+
+func TestAfterNext_RecordsGinErrors(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	_ = c.Error(errors.New("db connection lost"))
+	_ = c.Error(errors.New("fallback failed"))
+
+	ictx := insttest.NewMockHookContext(c)
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	ended := sr.Ended()[0]
+
+	assert.Equal(t, codes.Error, ended.Status().Code)
+	assert.Contains(t, ended.Status().Description, "db connection lost")
+	assert.Contains(t, ended.Status().Description, "fallback failed")
+
+	events := ended.Events()
+	require.Len(t, events, 2)
+	assert.Equal(t, "exception", events[0].Name)
+	assert.Equal(t, "exception", events[1].Name)
+}
+
+func TestAfterNext_NoErrorsIsNoop(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/ping", "/ping", span)
+
+	ictx := insttest.NewMockHookContext(c)
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Unset, sr.Ended()[0].Status().Code)
+	assert.Empty(t, sr.Ended()[0].Events())
+}
+
+func TestAfterNext_IdempotentOnMultipleCalls(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/items/:id", "/items/7", span)
+
+	_ = c.Error(errors.New("something broke"))
+
+	ictx := insttest.NewMockHookContext(c)
+	AfterNext(ictx)
+	AfterNext(ictx)
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	require.Len(t, sr.Ended()[0].Events(), 1,
+		"error must be recorded exactly once regardless of how many times AfterNext fires")
+}
+
+func TestAfterNext_NonRecordingSpanDoesNotBurnGate(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
+
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", nil)
+	_ = c.Error(errors.New("should be captured later"))
+
+	ictx := insttest.NewMockHookContext(c)
+	AfterNext(ictx)
+
+	_, recording := tr.Start(context.Background(), "GET")
+	c.Request = c.Request.WithContext(
+		trace.ContextWithSpan(c.Request.Context(), recording),
+	)
+	AfterNext(ictx)
+	recording.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Error, sr.Ended()[0].Status().Code,
+		"recording span must capture errors even after a non-recording call ran first")
+	require.Len(t, sr.Ended()[0].Events(), 1)
+}
+
+func TestAfterNext_DisabledIsNoop(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin")
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/ping", "/ping", span)
+
+	_ = c.Error(errors.New("should be ignored"))
+
+	ictx := insttest.NewMockHookContext(c)
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Unset, sr.Ended()[0].Status().Code)
+	assert.Empty(t, sr.Ended()[0].Events())
 }
