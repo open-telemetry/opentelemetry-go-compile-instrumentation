@@ -4,7 +4,7 @@
 services:
   # Jaeger - Distributed tracing backend (v2 with native OTLP support + SPM)
   jaeger:
-    image: jaegertracing/jaeger:2.13.0@sha256:d5e5fe1c2b2f663b07c28c6f7cc5a6e61aef076752dab8df8eeb6b0f5494c94b
+    image: jaegertracing/jaeger:2.18.0@sha256:d2cbd047e44b50c11454820f84fd5f34c24a435e5301cf94fe026bf055db80b3
     container_name: jaeger
     command:
       - --config=/etc/jaeger/config.yaml
@@ -30,7 +30,7 @@ services:
 
   # Prometheus - Metrics backend with native OTLP support (v3)
   prometheus:
-    image: prom/prometheus:v3.8.0@sha256:d936808bdea528155c0154a922cd42fd75716b8bb7ba302641350f9f3eaeba09
+    image: prom/prometheus:v3.11.3@sha256:e4254400b85610324913f0dc4acf92603d9984e7519414c5a12811aa6146acc3
     container_name: prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -55,7 +55,7 @@ services:
 
   # OpenTelemetry Collector - Receives, processes, and exports telemetry
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.141.0@sha256:b14234c4bc1b7364629af272e564913bb57bdc9736d45b8b6db5ab3417dc75f9
+    image: otel/opentelemetry-collector-contrib:0.152.0@sha256:f41d7995565df3733b7568702073a9c490792f9c6ac60684fe6a4da21a313f8d
     container_name: otel-collector
     command:
       - "--config=/etc/otelcol-contrib/config.yaml"
@@ -184,7 +184,7 @@ services:
 
   # MySQL - Database backend for DB demo
   mysql:
-    image: mysql:9.6@sha256:c5df04bee1a42b74a5841c6409e669cf62126cd0416f00c1cea8ab933b9361b9
+    image: mysql:9.7@sha256:c11782aa2a96624c1efc121768641d96954faa136d6aa82751b032d8c426ffbc
     container_name: mysql
     environment:
       - MYSQL_ROOT_PASSWORD=root
@@ -230,7 +230,7 @@ services:
 
   # Redis - In-memory data store for Redis demo
   redis:
-    image: redis:8-alpine@sha256:2afba59292f25f5d1af200496db41bea2c6c816b059f57ae74703a50a03a27d0
+    image: redis:8-alpine@sha256:d146f83b1e0f02fc27c26a50cee39338c736674c5959db84363e6ae3cd9e02d2
     container_name: redis
     ports:
       - "6379:6379"
@@ -286,7 +286,7 @@ services:
 
   # k6 gRPC Load Testing - Generates continuous load against gRPC server
   k6-grpc:
-    image: grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7
+    image: grafana/k6:1.7.1@sha256:4fd3a694926b064d3491d9b02b01cde886583c4931f1223816e3d9a7bdfa7e0f
     container_name: k6-grpc
     command: run --quiet /scripts/grpc-load-test.js
     volumes:
@@ -304,7 +304,7 @@ services:
 
   # k6 HTTP Load Testing - Generates continuous load against HTTP server
   k6-http:
-    image: grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7
+    image: grafana/k6:1.7.1@sha256:4fd3a694926b064d3491d9b02b01cde886583c4931f1223816e3d9a7bdfa7e0f
     container_name: k6-http
     command: run --quiet /scripts/http-load-test.js
     volumes:
