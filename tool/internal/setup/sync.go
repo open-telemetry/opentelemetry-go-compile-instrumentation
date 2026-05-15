@@ -94,11 +94,10 @@ func snapshotVersion(mf *modfile.File) versionSnapshot {
 	return snap
 }
 
-func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) {
+func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) error {
 	after, err := parseGoMod(goModPath)
 	if err != nil {
-		sp.Error("unable to check for version bumps after go mod tidy", "error", err)
-		return
+		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
 	}
 
 	// Go directives use Go toolchain syntax ("1.21"), not module semver.
@@ -109,12 +108,13 @@ func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) {
 	}
 
 	for _, req := range after.Require {
-		if oldVer, tracked := before.deps[req.Mod.Path]; tracked && !req.Indirect {
+		if oldVer, tracked := before.deps[req.Mod.Path]; tracked {
 			if semver.Compare(req.Mod.Version, oldVer) > 0 {
 				sp.Warn(fmt.Sprintf("Bumped dependency %s (%s -> %s)", req.Mod.Path, oldVer, req.Mod.Version))
 			}
 		}
 	}
+	return nil
 }
 
 func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
@@ -198,7 +198,10 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 			return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
 		}
 		// Compare after tidy because MVS may raise existing consumer versions.
-		sp.warnVersion(goModFile, before)
+		err = sp.warnVersion(goModFile, before)
+		if err != nil {
+			return err
+		}
 		sp.keepForDebug(goModFile)
 	}
 	return nil

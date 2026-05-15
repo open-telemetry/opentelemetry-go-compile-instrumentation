@@ -227,12 +227,6 @@ go 1.21
 	assert.Contains(t, string(content), "replace")
 }
 
-func logCapture() (*SetupPhase, *bytes.Buffer) {
-	var buf bytes.Buffer
-	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})
-	return &SetupPhase{logger: slog.New(handler)}, &buf
-}
-
 func warnCapture() (*SetupPhase, *bytes.Buffer) {
 	var buf bytes.Buffer
 	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
@@ -301,7 +295,7 @@ require (
 		},
 	}
 
-	sp.warnVersion(gomodPath, before)
+	require.NoError(t, sp.warnVersion(gomodPath, before))
 
 	logged := buf.String()
 	assert.Contains(t, logged, "Bumped go version")
@@ -323,7 +317,7 @@ go 1.25.0
 		deps:      map[string]string{},
 	}
 
-	sp.warnVersion(gomodPath, before)
+	require.NoError(t, sp.warnVersion(gomodPath, before))
 
 	logged := buf.String()
 	assert.Contains(t, logged, "Bumped go version")
@@ -351,7 +345,7 @@ require (
 		},
 	}
 
-	sp.warnVersion(gomodPath, before)
+	require.NoError(t, sp.warnVersion(gomodPath, before))
 
 	logged := buf.String()
 	assert.Contains(t, logged, "Bumped dependency go.opentelemetry.io/otel")
@@ -379,18 +373,19 @@ require (
 		},
 	}
 
-	sp.warnVersion(gomodPath, before)
+	require.NoError(t, sp.warnVersion(gomodPath, before))
 
 	assert.Empty(t, buf.String())
 }
 
 func TestWarnVersion_MissingFile(t *testing.T) {
-	sp, buf := logCapture()
+	sp, _ := warnCapture()
 	before := versionSnapshot{goVersion: "1.22.0", deps: map[string]string{}}
 
-	sp.warnVersion("/nonexistent/go.mod", before)
+	err := sp.warnVersion("/nonexistent/go.mod", before)
 
-	assert.Contains(t, buf.String(), "unable to check for version bumps")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unable to check for version bumps")
 }
 
 func TestWarnVersion_EmptyGoVersion(t *testing.T) {
@@ -408,7 +403,7 @@ go 1.25.0
 		deps:      map[string]string{},
 	}
 
-	sp.warnVersion(gomodPath, before)
+	require.NoError(t, sp.warnVersion(gomodPath, before))
 
 	assert.Empty(t, buf.String())
 }
