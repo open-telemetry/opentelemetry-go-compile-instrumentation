@@ -46,7 +46,7 @@ func beforeOpenInstrumentation(ictx inst.HookContext, driverName, dataSourceName
 			"driver", driverName, "error", err)
 		addr = "unknown"
 	}
-	dbName := ParseDbName(dataSourceName)
+	dbName := parseDbName(dataSourceName)
 	ictx.SetData(map[string]string{
 		"endpoint": addr,
 		"driver":   driverName,
