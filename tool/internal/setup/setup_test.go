@@ -51,7 +51,7 @@ func TestGetPackages(t *testing.T) {
 			name:             "file as a target",
 			args:             []string{"build", "./cmd/main.go"},
 			expectedCount:    1,
-			expectedPackages: []string{"command-line-arguments"},
+			expectedPackages: []string{commandLineArgumentsPackage},
 			expectError:      false,
 		},
 		{
@@ -260,6 +260,134 @@ func TestGetPackageDir(t *testing.T) {
 			if result != expected {
 				t.Errorf("getPackageDir() = %q, expected %q", result, expected)
 			}
+		})
+	}
+}
+
+func TestFindModuleDir(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, root string) string
+		expectedDir string
+		expectError bool
+	}{
+		{
+			name: "finds go.mod in current directory",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				err = os.WriteFile(
+					filepath.Join(root, "main.go"),
+					[]byte("package main\n\nfunc main() {}\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				return root
+			},
+			expectedDir: ".",
+		},
+		{
+			name: "finds go.mod in parent directory",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				nested := filepath.Join(root, "a", "b", "c")
+				err = os.MkdirAll(nested, 0o755)
+				require.NoError(t, err)
+
+				err = os.WriteFile(
+					filepath.Join(nested, "main.go"),
+					[]byte("package main\n\nfunc main() {}\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				return nested
+			},
+			expectedDir: ".",
+		},
+		{
+			name: "returns error when no go.mod exists",
+			setup: func(t *testing.T, root string) string {
+				return root
+			},
+			expectError: true,
+		},
+		{
+			name: "fails for directory without go files",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				emptyDir := filepath.Join(root, "empty")
+				err = os.MkdirAll(emptyDir, 0o755)
+				require.NoError(t, err)
+
+				return emptyDir
+			},
+			expectError: true,
+		},
+		{
+			name: "fails for build-tag-excluded package",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				err = os.WriteFile(
+					filepath.Join(root, "main.go"),
+					[]byte("//go:build never\n\npackage main\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				return root
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			workDir := tt.setup(t, tmpDir)
+
+			t.Chdir(workDir)
+
+			ctx := t.Context()
+			moduleDir, err := findModuleDir(ctx, workDir)
+
+			if tt.expectError {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+
+			expectedDir := tmpDir
+			if tt.expectedDir != "." {
+				expectedDir = tt.expectedDir
+			}
+
+			require.Equal(t, expectedDir, moduleDir)
 		})
 	}
 }

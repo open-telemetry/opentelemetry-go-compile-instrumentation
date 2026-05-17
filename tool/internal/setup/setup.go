@@ -75,6 +75,8 @@ var flagsWithPathValues = map[string]bool{
 	"-toolexec":      true,
 }
 
+const commandLineArgumentsPackage = "command-line-arguments"
+
 // GetBuildPackages loads all packages from the go build command arguments.
 // Returns a list of loaded packages. If no package patterns are found in args,
 // defaults to loading the current directory package.
@@ -123,7 +125,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		// file-based builds use synthetic "command-line-arguments" packages
-		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != "command-line-arguments") {
+		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage) {
 			logger.DebugContext(ctx, "skipping package", "name", pkg.Name, "errors", pkg.Errors, "args", args)
 			continue
 		}
@@ -197,6 +199,29 @@ func getPackageDir(pkg *packages.Package) string {
 	return ""
 }
 
+// findModuleDir is meant to be used for "command-line-arguments" packages that don't have an associated module.
+func findModuleDir(ctx context.Context, pkgDir string) (string, error) {
+	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedModule, nil, pkgDir)
+	if err != nil {
+		return "", err
+	}
+	if len(pkgs) == 0 {
+		return "", ex.Newf("no packages found for directory: %s", pkgDir)
+	}
+
+	pkg := pkgs[0]
+	if pkg.Module == nil || pkg.Module.Dir == "" || len(pkg.Errors) > 0 {
+		return "", ex.Newf(
+			"failed to load module information for package in directory %s: module=%v, errors=%v",
+			pkgDir,
+			pkg.Module,
+			pkg.Errors,
+		)
+	}
+
+	return pkg.Module.Dir, nil
+}
+
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
 	// The args are "go build ..."
@@ -252,23 +277,26 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	moduleDirs := make(map[string]bool)
 	for _, pkg := range pkgs {
 		// file-based builds use synthetic "command-line-arguments" packages
-		if pkg.Module == nil && pkg.PkgPath != "command-line-arguments" {
+		if pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage {
 			sp.Warn("skipping package without module", "package", pkg.PkgPath)
 			continue
 		}
 
 		pkgDir := getPackageDir(pkg)
+		if pkgDir == "" {
+			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
+			continue
+		}
 
 		var moduleDir string
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
-			moduleDir = pkgDir
+			if moduleDir, err = findModuleDir(ctx, pkgDir); err != nil {
+				return ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
+			}
 		}
 
-		if pkgDir == "" {
-			pkgDir = moduleDir
-		}
 		// Introduce additional hook code by generating otelc.runtime.go
 		if err = sp.addDeps(matched, pkgDir); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
@@ -426,7 +454,9 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 		// add otelc.runtime.go manually to command line for file targets
 		dir := filepath.Dir(fileTargets[0])
 		otelcRuntimePath := filepath.Join(dir, OtelcRuntimeFile)
-		restArgs = append(restArgs, otelcRuntimePath)
+		if _, err3 := os.Stat(otelcRuntimePath); err3 == nil {
+			restArgs = append(restArgs, otelcRuntimePath)
+		}
 	}
 	newArgs = append(newArgs, restArgs...)
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
