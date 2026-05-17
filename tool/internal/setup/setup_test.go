@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -22,59 +24,137 @@ func TestGetPackages(t *testing.T) {
 		args             []string
 		expectedCount    int
 		expectedPackages []string
+		expectError      bool
 	}{
 		{
 			name:             "single package",
 			args:             []string{"build", "-a", "-o", "tmp", "./cmd"},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
+			expectError:      false,
 		},
 		{
 			name:             "multiple packages",
 			args:             []string{"build", "./cmd", "./foo/demo"},
 			expectedCount:    2,
 			expectedPackages: []string{"testmodule/cmd", "testmodule/foo/demo"},
+			expectError:      false,
 		},
 		{
 			name:             "wildcard pattern",
 			args:             []string{"build", "./cmd/..."},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
+			expectError:      false,
+		},
+		{
+			name:             "file as a target",
+			args:             []string{"build", "./cmd/main.go"},
+			expectedCount:    1,
+			expectedPackages: []string{commandLineArgumentsPackage},
+			expectError:      false,
+		},
+		{
+			name:             "file and pkg mixed targets",
+			args:             []string{"build", "./cmd/main.go", "./foo/demo"},
+			expectedCount:    0,
+			expectedPackages: []string{},
+			expectError:      true,
 		},
 		{
 			name:             "default to current directory",
 			args:             []string{"build"},
 			expectedCount:    1,
-			expectedPackages: []string{"."},
+			expectedPackages: []string{"testmodule"},
+			expectError:      false,
 		},
 		{
 			name:             "current directory explicit",
 			args:             []string{"build", "."},
 			expectedCount:    1,
-			expectedPackages: []string{"."},
+			expectedPackages: []string{"testmodule"},
+			expectError:      false,
 		},
 		{
 			name:             "nonexistent package mixed with valid",
 			args:             []string{"build", "./cmd", "./nonexistent"},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
+			expectError:      false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pkgs, err := getBuildPackages(t.Context(), tt.args)
-			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
-			}
+			if tt.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, pkgs, tt.expectedCount)
 
-			if len(pkgs) != tt.expectedCount {
-				t.Errorf("Expected %d packages, got %d", tt.expectedCount, len(pkgs))
+				if tt.expectedPackages != nil {
+					pkgIDs := extractPackageIDs(pkgs)
+					checkPackages(t, pkgIDs, tt.expectedPackages)
+				}
 			}
+		})
+	}
+}
 
-			if tt.expectedPackages != nil {
-				pkgIDs := extractPackageIDs(pkgs)
-				checkPackages(t, pkgIDs, tt.expectedPackages)
+func TestSplitBuildTargets(t *testing.T) {
+	tests := []struct {
+		name        string
+		targets     []string
+		pkgTargets  []string
+		fileTargets []string
+		expectError bool
+	}{
+		{
+			name:        "all package targets",
+			targets:     []string{"./cmd", "./foo/demo"},
+			pkgTargets:  []string{"./cmd", "./foo/demo"},
+			fileTargets: nil,
+			expectError: false,
+		},
+		{
+			name:        "all file targets",
+			targets:     []string{"./cmd/main.go", "./cmd/util.go"},
+			pkgTargets:  nil,
+			fileTargets: []string{"./cmd/main.go", "./cmd/util.go"},
+			expectError: false,
+		},
+		{
+			name:        "all file targets from different packages",
+			targets:     []string{"./cmd/main.go", "./util/util.go"},
+			pkgTargets:  nil,
+			fileTargets: nil,
+			expectError: true,
+		},
+		{
+			name:        "mixed package and file targets with valid package",
+			targets:     []string{"./cmd/main.go", "./foo/demo"},
+			pkgTargets:  nil,
+			fileTargets: nil,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pkgTargets, fileTargets, err := splitBuildTargets(tt.targets)
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Nil(t, pkgTargets)
+				assert.Nil(t, fileTargets)
+			} else {
+				assert.NoError(t, err)
+				for _, exp := range tt.pkgTargets {
+					assert.Contains(t, pkgTargets, exp, "Expected package target %q not found in %v", exp, pkgTargets)
+				}
+				for _, exp := range tt.fileTargets {
+					assert.Contains(t, fileTargets, exp, "Expected file target %q not found in %v", exp, fileTargets)
+				}
 			}
 		})
 	}
@@ -126,6 +206,11 @@ func setupTestModule(t *testing.T, subDirs []string) {
 		t.Fatalf("Failed to create go.mod: %v", err)
 	}
 
+	mainGoPath := filepath.Join(tmpDir, "main.go")
+	if err := os.WriteFile(mainGoPath, []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("Failed to create main.go: %v", err)
+	}
+
 	t.Chdir(tmpDir)
 }
 
@@ -175,6 +260,134 @@ func TestGetPackageDir(t *testing.T) {
 			if result != expected {
 				t.Errorf("getPackageDir() = %q, expected %q", result, expected)
 			}
+		})
+	}
+}
+
+func TestFindModuleDir(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, root string) string
+		expectedDir string
+		expectError bool
+	}{
+		{
+			name: "finds go.mod in current directory",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				err = os.WriteFile(
+					filepath.Join(root, "main.go"),
+					[]byte("package main\n\nfunc main() {}\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				return root
+			},
+			expectedDir: ".",
+		},
+		{
+			name: "finds go.mod in parent directory",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				nested := filepath.Join(root, "a", "b", "c")
+				err = os.MkdirAll(nested, 0o755)
+				require.NoError(t, err)
+
+				err = os.WriteFile(
+					filepath.Join(nested, "main.go"),
+					[]byte("package main\n\nfunc main() {}\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				return nested
+			},
+			expectedDir: ".",
+		},
+		{
+			name: "returns error when no go.mod exists",
+			setup: func(t *testing.T, root string) string {
+				return root
+			},
+			expectError: true,
+		},
+		{
+			name: "fails for directory without go files",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				emptyDir := filepath.Join(root, "empty")
+				err = os.MkdirAll(emptyDir, 0o755)
+				require.NoError(t, err)
+
+				return emptyDir
+			},
+			expectError: true,
+		},
+		{
+			name: "fails for build-tag-excluded package",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				err = os.WriteFile(
+					filepath.Join(root, "main.go"),
+					[]byte("//go:build never\n\npackage main\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				return root
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			workDir := tt.setup(t, tmpDir)
+
+			t.Chdir(workDir)
+
+			ctx := t.Context()
+			moduleDir, err := findModuleDir(ctx, workDir)
+
+			if tt.expectError {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+
+			expectedDir := tmpDir
+			if tt.expectedDir != "." {
+				expectedDir = tt.expectedDir
+			}
+
+			require.Equal(t, expectedDir, moduleDir)
 		})
 	}
 }
