@@ -471,3 +471,14 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
 }
+
+func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
+	// Template parses but generates invalid Go when applied to the matched call.
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("not a valid expression {{ . }}")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to wrap")
+}
