@@ -5,12 +5,12 @@ package ast
 
 import (
 	"fmt"
-	"log/slog"
 	"regexp"
 
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 // typeNameRe parses type-name strings of the form [*][pkg.]Name.
@@ -69,31 +69,25 @@ func (t parsedTypeName) matches(node dst.Expr) bool {
 	default:
 		// Unsupported AST node types (chan, func, map, slice, array, interface
 		// literals) cannot be matched by type-name filters.
-		//nolint:sloglint // no context available
-		slog.Debug("signature filter: unsupported type node; filter will not match",
-			"node_type", fmt.Sprintf("%T", node),
-			"filter", t.importPath+"."+t.name,
-		)
+		util.Unimplemented(fmt.Sprintf("signature filter: unsupported type node %T", node))
 		return false
 	}
 }
 
 // fieldListContainsType reports whether any field in fields has a type that
-// matches typeStr.  Returns false when typeStr is invalid or fields is empty.
-func fieldListContainsType(fields *dst.FieldList, typeStr string) bool {
+// matches typeStr.  Returns an error when typeStr cannot be parsed.
+func fieldListContainsType(fields *dst.FieldList, typeStr string) (bool, error) {
 	if fields == nil || len(fields.List) == 0 {
-		return false
+		return false, nil
 	}
 	tn, err := parseTypeName(typeStr)
 	if err != nil {
-		//nolint:sloglint // no context available
-		slog.Warn("signature filter: invalid type string; filter will never match", "type", typeStr, "err", err)
-		return false
+		return false, err
 	}
 	for _, field := range fields.List {
 		if tn.matches(field.Type) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }

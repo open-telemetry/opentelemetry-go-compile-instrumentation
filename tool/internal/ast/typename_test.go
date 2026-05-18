@@ -125,6 +125,13 @@ func TestTypeNameMatches(t *testing.T) {
 	}
 }
 
+func mustContains(t *testing.T, fields *dst.FieldList, typeStr string) bool {
+	t.Helper()
+	ok, err := fieldListContainsType(fields, typeStr)
+	require.NoError(t, err)
+	return ok
+}
+
 func TestFieldListContainsType(t *testing.T) {
 	fields := &dst.FieldList{
 		List: []*dst.Field{
@@ -139,12 +146,14 @@ func TestFieldListContainsType(t *testing.T) {
 		},
 	}
 
-	assert.True(t, fieldListContainsType(fields, "string"))
-	assert.True(t, fieldListContainsType(fields, "context.Context"))
-	assert.True(t, fieldListContainsType(fields, "error"))
-	assert.False(t, fieldListContainsType(fields, "int"))
-	assert.False(t, fieldListContainsType(fields, "io.Reader"))
-	assert.False(t, fieldListContainsType(nil, "error"))
-	assert.False(t, fieldListContainsType(&dst.FieldList{}, "error"))
-	assert.False(t, fieldListContainsType(fields, "[]invalid"))
+	assert.True(t, mustContains(t, fields, "string"))
+	assert.True(t, mustContains(t, fields, "context.Context"))
+	assert.True(t, mustContains(t, fields, "error"))
+	assert.False(t, mustContains(t, fields, "int"))
+	assert.False(t, mustContains(t, fields, "io.Reader"))
+	assert.False(t, mustContains(t, nil, "error"))
+	assert.False(t, mustContains(t, &dst.FieldList{}, "error"))
+
+	_, err := fieldListContainsType(fields, "[]invalid")
+	assert.Error(t, err)
 }

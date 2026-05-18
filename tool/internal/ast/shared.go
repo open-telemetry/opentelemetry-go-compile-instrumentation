@@ -6,7 +6,6 @@ package ast
 import (
 	"fmt"
 	"go/token"
-	"log/slog"
 	"strconv"
 
 	"github.com/dave/dst"
@@ -14,12 +13,6 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
-
-// -----------------------------------------------------------------------------
-// AST Shared Utilities
-//
-// This file contains shared utility functions for AST traversal and manipulation.
-// It provides common operations for finding, filtering, and processing AST nodes
 
 func findFuncDecls(root *dst.File, lambda func(*dst.FuncDecl) bool) []*dst.FuncDecl {
 	funcDecls := ListFuncDecls(root)
@@ -275,56 +268,82 @@ func AddStructField(decl dst.Decl, name, t string) {
 // FuncDeclMatchesFilters reports whether funcDecl satisfies all signature
 // sub-filters in r.  Returns true when no sub-filters are set.
 //
-// All non-nil filters are evaluated and must match (AND semantics).  Any
+// All non-empty filters are evaluated and must match (AND semantics).  Any
 // combination of sub-filters is valid; they are checked in declaration order
 // and evaluation stops at the first failure.
 //
 // Matching uses structural comparison of dst.Expr nodes (no type checker).
-// For the *_type filters this means an exact type-name match rather than
+// For the scalar-type filters this means an exact type-name match rather than
 // full interface-satisfaction checking.
-func FuncDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) bool {
+func FuncDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool, error) {
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
-		if !matchesExactSignature(ft, r.Signature) {
-			return false
+		ok, err := matchesExactSignature(ft, r.Signature)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
 		}
 	}
 	if r.SignatureContains != nil {
-		if !matchesSignatureContains(ft, r.SignatureContains) {
-			return false
+		ok, err := matchesSignatureContains(ft, r.SignatureContains)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
 		}
 	}
-	if r.ResultType != nil {
-		if !fieldListContainsType(ft.Results, *r.ResultType) {
-			return false
+	if r.Result != "" {
+		ok, err := fieldListContainsType(ft.Results, r.Result)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
 		}
 	}
-	if r.LastResultType != nil {
-		if !matchesLastResult(ft.Results, *r.LastResultType) {
-			return false
+	if r.LastResult != "" {
+		ok, err := matchesLastResult(ft.Results, r.LastResult)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
 		}
 	}
-	if r.ArgumentType != nil {
-		if !fieldListContainsType(ft.Params, *r.ArgumentType) {
-			return false
+	if r.Param != "" {
+		ok, err := fieldListContainsType(ft.Params, r.Param)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 // matchesExactSignature returns true when funcType has exactly the parameter
 // and result types listed in sig, compared field-by-field in order.
-func matchesExactSignature(ft *dst.FuncType, sig *rule.FuncSignature) bool {
-	return matchesFieldList(sig.Args, ft.Params) &&
-		matchesFieldList(sig.Returns, ft.Results)
+func matchesExactSignature(ft *dst.FuncType, sig *rule.FuncSignature) (bool, error) {
+	ok, err := matchesFieldList(sig.Args, ft.Params)
+	if err != nil || !ok {
+		return ok, err
+	}
+	return matchesFieldList(sig.Returns, ft.Results)
 }
 
 // matchesFieldList returns true when expected type strings match the types in
 // fields exactly (same count, same order).
 // Multi-name fields (e.g. "a, b int") are expanded inline so each name maps
 // to exactly one type slot — without cloning AST nodes.
-func matchesFieldList(expected []string, fields *dst.FieldList) bool {
+func matchesFieldList(expected []string, fields *dst.FieldList) (bool, error) {
+	if len(expected) == 0 {
+		return fields == nil || len(fields.List) == 0, nil
+	}
 	var types []dst.Expr
 	if fields != nil {
 		for _, f := range fields.List {
@@ -338,51 +357,55 @@ func matchesFieldList(expected []string, fields *dst.FieldList) bool {
 		}
 	}
 	if len(expected) != len(types) {
-		return false
+		return false, nil
 	}
 	for i, typeStr := range expected {
 		tn, err := parseTypeName(typeStr)
 		if err != nil {
-			//nolint:sloglint // no context available
-			slog.Warn("signature filter: invalid type string; filter will never match", "type", typeStr, "err", err)
-			return false
+			return false, err
 		}
 		if !tn.matches(types[i]) {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 // matchesSignatureContains returns true when funcType contains any of the
 // expected argument types among its parameters OR any of the expected return
 // types among its results.
-func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature) bool {
+func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature) (bool, error) {
 	for _, expected := range sig.Args {
-		if fieldListContainsType(ft.Params, expected) {
-			return true
+		ok, err := fieldListContainsType(ft.Params, expected)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
 		}
 	}
 	for _, expected := range sig.Returns {
-		if fieldListContainsType(ft.Results, expected) {
-			return true
+		ok, err := fieldListContainsType(ft.Results, expected)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // matchesLastResult returns true when the last entry in fields matches typeStr.
-func matchesLastResult(fields *dst.FieldList, typeStr string) bool {
+func matchesLastResult(fields *dst.FieldList, typeStr string) (bool, error) {
 	if fields == nil || len(fields.List) == 0 {
-		return false
+		return false, nil
 	}
 	tn, err := parseTypeName(typeStr)
 	if err != nil {
-		//nolint:sloglint // no context available
-		slog.Warn("signature filter: invalid type string; filter will never match", "type", typeStr, "err", err)
-		return false
+		return false, err
 	}
-	return tn.matches(fields.List[len(fields.List)-1].Type)
+	return tn.matches(fields.List[len(fields.List)-1].Type), nil
 }
 
 // SplitMultiNameFields splits fields that have multiple names into separate fields.

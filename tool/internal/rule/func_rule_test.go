@@ -63,42 +63,39 @@ signature_contains:
 			},
 		},
 		{
-			name: "rule with result_type",
+			name: "rule with result",
 			yaml: `
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
-result_type: error
+result: error
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				require.NotNil(t, r.ResultType)
-				assert.Equal(t, "error", *r.ResultType)
+				assert.Equal(t, "error", r.Result)
 			},
 		},
 		{
-			name: "rule with last_result_type",
+			name: "rule with last_result",
 			yaml: `
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
-last_result_type: error
+last_result: error
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				require.NotNil(t, r.LastResultType)
-				assert.Equal(t, "error", *r.LastResultType)
+				assert.Equal(t, "error", r.LastResult)
 			},
 		},
 		{
-			name: "rule with argument_type",
+			name: "rule with param",
 			yaml: `
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
-argument_type: context.Context
+param: context.Context
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
-				require.NotNil(t, r.ArgumentType)
-				assert.Equal(t, "context.Context", *r.ArgumentType)
+				assert.Equal(t, "context.Context", r.Param)
 			},
 		},
 		{
@@ -112,19 +109,16 @@ signature:
   returns: [error]
 signature_contains:
   returns: [error]
-result_type: error
-last_result_type: error
-argument_type: string
+result: error
+last_result: error
+param: string
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
 				require.NotNil(t, r.Signature)
 				require.NotNil(t, r.SignatureContains)
-				require.NotNil(t, r.ResultType)
-				require.NotNil(t, r.LastResultType)
-				require.NotNil(t, r.ArgumentType)
-				assert.Equal(t, "error", *r.ResultType)
-				assert.Equal(t, "error", *r.LastResultType)
-				assert.Equal(t, "string", *r.ArgumentType)
+				assert.Equal(t, "error", r.Result)
+				assert.Equal(t, "error", r.LastResult)
+				assert.Equal(t, "string", r.Param)
 			},
 		},
 		{

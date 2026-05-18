@@ -41,9 +41,9 @@ type FuncSignature struct {
 //	  returns: [error]
 //	signature_contains:
 //	  args: [context.Context]
-//	result_type: error
-//	last_result_type: error
-//	argument_type: context.Context
+//	result: error
+//	last_result: error
+//	param: context.Context
 type InstFuncRule struct {
 	InstBaseRule `yaml:",inline"`
 
@@ -53,13 +53,13 @@ type InstFuncRule struct {
 	After  string `json:"after"  yaml:"after"`  // The function we inject at the target function exit
 	Path   string `json:"path"   yaml:"path"`   // The module path where hook code is located
 
-	// Optional signature sub-filters (all non-nil filters must match; combined
+	// Optional signature sub-filters (all non-empty filters must match; combined
 	// with AND logic so any combination is allowed).
 	Signature         *FuncSignature `json:"signature,omitempty"          yaml:"signature"`
 	SignatureContains *FuncSignature `json:"signature_contains,omitempty" yaml:"signature_contains"`
-	ResultType        *string        `json:"result_type,omitempty"        yaml:"result_type"`
-	LastResultType    *string        `json:"last_result_type,omitempty"   yaml:"last_result_type"`
-	ArgumentType      *string        `json:"argument_type,omitempty"      yaml:"argument_type"`
+	Result            string         `json:"result,omitempty"             yaml:"result"`
+	LastResult        string         `json:"last_result,omitempty"        yaml:"last_result"`
+	Param             string         `json:"param,omitempty"              yaml:"param"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
