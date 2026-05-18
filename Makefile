@@ -36,7 +36,7 @@ $(TOOLS):
 
 $(TOOLS)/%: $(TOOLS_DIR)/go.mod | $(TOOLS)
 	cd $(TOOLS_DIR) && \
-	go build -o $@ $(PACKAGE)
+	GOWORK=off go build -o $@ $(PACKAGE)
 
 CROSSLINK = $(TOOLS)/crosslink
 $(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
@@ -473,6 +473,12 @@ test-integration: build build-demo
 	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log
 
 .ONESHELL:
+test-latestlibbuild: build ## Run LatestLibBuild tests
+	@echo "Running LatestLibBuild tests..."
+	set -euo pipefail
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ../gotest-latestlibbuild.log
+
+.ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
@@ -506,6 +512,10 @@ go-work: $(CROSSLINK) ## Generate go.work file for local development
 	@$(CROSSLINK) work --root=$(CURDIR) --go=$(GO_VERSION)
 	@# Fix go version to include patch version (crosslink only supports major.minor)
 	@sed -i.bak 's/^go $(GO_VERSION)$$/go $(GO_VERSION).0/' go.work && rm -f go.work.bak
+	@# Drop tool-only modules: their transitive deps conflict with the main modules
+	@# (e.g. old monolithic genproto vs. split genproto/googleapis/rpc).
+	@go work edit -dropuse ./.tools
+	@go work edit -dropuse ./.github/tools
 	@echo "go.work file generated successfully"
 
 .PHONY: go-mod-tidy
@@ -531,7 +541,7 @@ clean: ## Clean build artifacts
 	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
+	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log \) -delete
 
 .ONESHELL:
 tidy/test-apps: ## Run go mod tidy in all test app modules
