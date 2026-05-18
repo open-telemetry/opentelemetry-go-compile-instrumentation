@@ -457,7 +457,7 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 		// add otelc.runtime.go manually to command line for file targets
 		dir := filepath.Dir(fileTargets[0])
 		otelcRuntimePath := filepath.Join(dir, OtelcRuntimeFile)
-		if _, err3 := os.Stat(otelcRuntimePath); err3 == nil {
+		if util.PathExists(otelcRuntimePath) {
 			restArgs = append(restArgs, otelcRuntimePath)
 		}
 	}
