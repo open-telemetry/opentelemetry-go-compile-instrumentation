@@ -96,7 +96,11 @@ Here is a list of community roles with current and previous members:
 - [Xabier Martinez](https://github.com/txabman42), Cabify
 - [Yi Yang](https://github.com/y1yang0), Alibaba
 
+For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
+
 ### Approvers
+
+For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
 ### Emeritus
 
@@ -105,7 +109,8 @@ Here is a list of community roles with current and previous members:
 - [Liu Ziming](https://github.com/123liuziming), Maintainer
 - [Romain Marcadier](https://github.com/RomainMuller), Maintainer
 
-For more information about these roles, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md).
+For more information about the emeritus role, see the
+[community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
 
 ### Thanks to all of our contributors!
 
