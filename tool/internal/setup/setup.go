@@ -75,16 +75,16 @@ var flagsWithPathValues = map[string]bool{
 	"-toolexec":      true,
 }
 
-// GetBuildPackages loads all packages from the go build command arguments.
+// GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
 // Returns a list of loaded packages. If no package patterns are found in args,
 // defaults to loading the current directory package.
-// The args parameter should be the go build command arguments (e.g., ["build", "-a", "./cmd"]).
+// The args parameter should be the go build/install command arguments (e.g., ["-a", "./cmd"]).
 // Returns an error if package loading fails or if invalid patterns are provided.
 // For example:
-//   - args ["build", "-a", "./cmd"] returns packages for "./cmd"
-//   - args ["build", "-a", "cmd"] returns packages for the "cmd" package in the module
-//   - args ["build", "-a", ".", "./cmd"] returns packages for both "." and "./cmd"
-//   - args ["build"] returns packages for "."
+//   - args ["-a", "./cmd"] returns packages for "./cmd"
+//   - args ["-a", "cmd"] returns packages for the "cmd" package in the module
+//   - args ["-a", ".", "./cmd"] returns packages for both "." and "./cmd"
+//   - args [] returns packages for "."
 func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 
@@ -103,7 +103,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 
 		// If we hit a flag, stop. Packages come after all flags
 		// go build [-o output] [build flags] [packages]
-		if strings.HasPrefix(arg, "-") || arg == "go" || arg == "build" || arg == "install" {
+		if strings.HasPrefix(arg, "-") {
 			break
 		}
 
@@ -140,9 +140,12 @@ func getPackageDir(pkg *packages.Package) string {
 
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
-	// The args are "go build ..."
+	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
+	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
 	args := cmd.Args().Slice()
-	args = append([]string{"go"}, args...)
+	if cmd.Name == "go" {
+		args = cmd.Args().Tail() // trim build/install
+	}
 
 	logger := util.LoggerFromContext(ctx)
 
@@ -386,9 +389,17 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
 
+	if !cmd.Args().Present() {
+		return ex.Newf("no command provided. Only 'go build' and 'go install' are supported")
+	}
+
+	if cmd.Args().First() != "build" && cmd.Args().First() != "install" {
+		return ex.Newf("unsupported command: %s. Only 'go build' and 'go install' are supported", cmd.Args().First())
+	}
+
 	defer func() {
 		// Remove otelc.runtime.go from each instrumented package directory.
-		pkgs, pkgErr := getBuildPackages(ctx, cmd.Args().Slice())
+		pkgs, pkgErr := getBuildPackages(ctx, cmd.Args().Tail()) // pass args without build/install
 		if pkgErr != nil {
 			logger.DebugContext(ctx, "failed to get build packages", "error", pkgErr)
 		}
