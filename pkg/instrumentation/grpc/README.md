@@ -1,6 +1,6 @@
 # gRPC Compile-Time Instrumentation
 
-This package provides automatic OpenTelemetry instrumentation for `google.golang.org/grpc` using compile-time code injection.
+This package provides automatic OpenTelemetry instrumentation for `google.golang.org/grpc` using compile-time code injection and the upstream `otelgrpc` stats handlers.
 
 ## Overview
 
@@ -11,11 +11,11 @@ Unlike traditional gRPC instrumentation that requires manually adding intercepto
 ✅ **Zero Code Changes**: Automatic instrumentation without modifying application code
 ✅ **Universal Coverage**: Instruments ALL gRPC calls, including internal services
 ✅ **W3C Trace Context**: Automatic context propagation via gRPC metadata
-✅ **Semantic Conventions**: Follows OpenTelemetry RPC semantic conventions v1.37.0
+✅ **Semantic Conventions**: Uses upstream `otelgrpc` RPC semantic conventions
 ✅ **Client & Server**: Complete instrumentation for both gRPC clients and servers
 ✅ **Status Code Capture**: Accurate gRPC status code tracking
 ✅ **Error Recording**: Automatic error span status on failures
-✅ **Metrics Collection**: Duration, message sizes, and messages per RPC
+✅ **Metrics Collection**: Duration and message size metrics from `otelgrpc`
 ✅ **Dual API Support**: Both modern (`NewClient`) and legacy (`DialContext`) client APIs
 
 ## How It Works
@@ -50,17 +50,17 @@ When your application runs, the injected hooks automatically:
 **For gRPC Servers** (`grpc.NewServer`):
 
 1. **Before**: Inject stats.Handler into server options
-2. **Stats Handler**:
+2. **otelgrpc Stats Handler**:
    - `TagRPC`: Extract trace context, create server span
-   - `HandleRPC`: Record message events, end span, collect metrics
+   - `HandleRPC`: End span, record status, collect metrics
 3. **Result**: Fully instrumented gRPC server
 
 **For gRPC Clients** (`grpc.NewClient` / `grpc.DialContext`):
 
 1. **Before**: Inject stats.Handler into dial options
-2. **Stats Handler**:
+2. **otelgrpc Stats Handler**:
    - `TagRPC`: Create client span, inject trace context into metadata
-   - `HandleRPC`: Record message events, end span, collect metrics
+   - `HandleRPC`: End span, record status, collect metrics
 3. **Result**: Fully instrumented gRPC client
 
 ## Usage
@@ -96,16 +96,15 @@ export OTEL_LOG_LEVEL=debug  # debug, info, warn, error
 
 ## Semantic Conventions
 
-The instrumentation follows [OpenTelemetry RPC Semantic Conventions v1.37.0](https://opentelemetry.io/docs/specs/semconv/rpc/).
+The instrumentation delegates span and metric production to upstream [`otelgrpc`](https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc). Attribute names and metric instruments therefore follow the semantic convention mode supported by that package.
 
 ### Client Span Attributes
 
 | Attribute | Example | Description |
 |-----------|---------|-------------|
-| `rpc.system` | `grpc` | RPC system identifier |
-| `rpc.service` | `myapp.UserService` | Full service name |
-| `rpc.method` | `GetUser` | RPC method name |
-| `rpc.grpc.status_code` | `0` | gRPC status code (0 = OK) |
+| `rpc.system.name` | `grpc` | RPC system identifier |
+| `rpc.method` | `myapp.UserService/GetUser` | Full RPC method name |
+| `rpc.response.status_code` | `OK` | Canonical gRPC status code |
 | `server.address` | `api.example.com` | Server host |
 | `server.port` | `50051` | Server port |
 
@@ -113,10 +112,9 @@ The instrumentation follows [OpenTelemetry RPC Semantic Conventions v1.37.0](htt
 
 | Attribute | Example | Description |
 |-----------|---------|-------------|
-| `rpc.system` | `grpc` | RPC system identifier |
-| `rpc.service` | `myapp.UserService` | Full service name |
-| `rpc.method` | `CreateUser` | RPC method name |
-| `rpc.grpc.status_code` | `0` | gRPC status code |
+| `rpc.system.name` | `grpc` | RPC system identifier |
+| `rpc.method` | `myapp.UserService/CreateUser` | Full RPC method name |
+| `rpc.response.status_code` | `OK` | Canonical gRPC status code |
 | `client.address` | `192.168.1.100` | Client IP address |
 | `client.port` | `54321` | Client port |
 
@@ -124,22 +122,15 @@ The instrumentation follows [OpenTelemetry RPC Semantic Conventions v1.37.0](htt
 
 **Duration**:
 
-- `rpc.client.duration` - Client RPC duration in milliseconds
-- `rpc.server.duration` - Server RPC duration in milliseconds
+- `rpc.client.call.duration` - Client RPC duration
+- `rpc.server.call.duration` - Server RPC duration
 
 **Message Sizes**:
 
-- `rpc.client.request.size` - Outbound message size (bytes)
-- `rpc.client.response.size` - Inbound message size (bytes)
-- `rpc.server.request.size` - Inbound message size (bytes)
-- `rpc.server.response.size` - Outbound message size (bytes)
-
-**Messages Per RPC**:
-
-- `rpc.client.requests_per_rpc` - Number of messages sent per RPC
-- `rpc.client.responses_per_rpc` - Number of messages received per RPC
-- `rpc.server.requests_per_rpc` - Number of messages received per RPC
-- `rpc.server.responses_per_rpc` - Number of messages sent per RPC
+- `rpc.client.request.size` - Outbound message size
+- `rpc.client.response.size` - Inbound message size
+- `rpc.server.request.size` - Inbound message size
+- `rpc.server.response.size` - Outbound message size
 
 ### Span Names
 
@@ -151,7 +142,7 @@ The instrumentation follows [OpenTelemetry RPC Semantic Conventions v1.37.0](htt
 - **OK**: gRPC status code 0 (OK), 1 (Canceled), 3 (InvalidArgument), etc.
 - **ERROR**: Status codes indicating server errors (Unknown, DeadlineExceeded, Unimplemented, Internal, Unavailable, DataLoss)
 
-See `semconv/grpc.go` for the complete status code mapping.
+Status mapping is handled by upstream `otelgrpc`.
 
 ## Examples
 
@@ -191,7 +182,7 @@ What happens automatically:
 1. Stats handler injected into dial options
 2. Span created: `helloworld.Greeter/SayHello`
 3. Trace context injected into gRPC metadata
-4. Attributes recorded: rpc.system, rpc.service, rpc.method, server address
+4. Attributes recorded: RPC system, RPC method, status, and server address
 5. Metrics collected: duration, message sizes
 6. Span ended after response received
 
@@ -229,7 +220,7 @@ What happens automatically:
 1. Stats handler injected into server options
 2. Trace context extracted from incoming metadata
 3. Span created: `helloworld.Greeter/SayHello`
-4. Attributes recorded: rpc.system, rpc.service, rpc.method, client address
+4. Attributes recorded: RPC system, RPC method, status, and client address
 5. Metrics collected: duration, message sizes
 6. Span ended after handler completes
 
@@ -356,7 +347,7 @@ curl http://localhost:4318/v1/traces
 
 ### No Metrics Being Recorded
 
-Metrics use the `rpcconv` package from OTel semconv v1.37.0. Ensure your metrics pipeline is configured:
+Metrics are created by upstream `otelgrpc`. Ensure your metrics pipeline is configured:
 
 ```bash
 export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://localhost:4317
@@ -364,7 +355,7 @@ export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://localhost:4317
 
 ### Status Code Mapping
 
-gRPC status codes are mapped to OTel span status according to semantic conventions:
+gRPC status codes are mapped to OTel span status by upstream `otelgrpc` according to semantic conventions:
 
 **Server Errors** (span.SetStatus Error):
 
@@ -379,7 +370,7 @@ gRPC status codes are mapped to OTel span status according to semantic conventio
 
 - All non-OK codes (1-16)
 
-See `semconv/grpc.go` for complete mapping logic.
+See the upstream `otelgrpc` package for complete mapping logic.
 
 ## Comparison with Manual Instrumentation
 

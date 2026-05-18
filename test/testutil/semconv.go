@@ -10,6 +10,13 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	"google.golang.org/grpc/codes"
+)
+
+const (
+	grpcRPCSystemKey         = "rpc.system.name"
+	grpcRPCMethodKey         = "rpc.method"
+	grpcRPCResponseStatusKey = "rpc.response.status_code"
 )
 
 // RequireHTTPClientSemconv verifies that an HTTP client span follows semantic conventions.
@@ -65,13 +72,12 @@ func RequireGRPCClientSemconv(
 	grpcStatusCode int64,
 ) {
 	// Required attributes - all validated with exact values
-	RequireAttribute(t, span, string(semconv.RPCSystemKey), "grpc")
+	RequireAttribute(t, span, grpcRPCSystemKey, "grpc")
 	RequireAttribute(t, span, string(semconv.ServerAddressKey), serverAddress)
 	// Recommended attributes - all validated with exact values
-	RequireAttribute(t, span, string(semconv.RPCServiceKey), rpcService)
-	RequireAttribute(t, span, string(semconv.RPCMethodKey), rpcMethod)
+	RequireAttribute(t, span, grpcRPCMethodKey, rpcService+"/"+rpcMethod)
 	// Conditionally required (when server responds) - validated with exact value
-	RequireAttribute(t, span, string(semconv.RPCGRPCStatusCodeKey), grpcStatusCode)
+	RequireAttribute(t, span, grpcRPCResponseStatusKey, codes.Code(grpcStatusCode).String())
 }
 
 // RequireDBClientSemconv verifies that a database client span follows semantic conventions.
@@ -98,12 +104,11 @@ func RequireDBClientSemconv(
 // Reference: https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/
 func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMethod string, grpcStatusCode int64) {
 	// Required attributes - all validated with exact values
-	RequireAttribute(t, span, string(semconv.RPCSystemKey), "grpc")
+	RequireAttribute(t, span, grpcRPCSystemKey, "grpc")
 	// Recommended attributes - all validated with exact values
-	RequireAttribute(t, span, string(semconv.RPCServiceKey), rpcService)
-	RequireAttribute(t, span, string(semconv.RPCMethodKey), rpcMethod)
+	RequireAttribute(t, span, grpcRPCMethodKey, rpcService+"/"+rpcMethod)
 	// Conditionally required (when response is sent) - validated with exact value
-	RequireAttribute(t, span, string(semconv.RPCGRPCStatusCodeKey), grpcStatusCode)
+	RequireAttribute(t, span, grpcRPCResponseStatusKey, codes.Code(grpcStatusCode).String())
 }
 
 // RequireRedisClientSemconv verifies that a Redis client span follows semantic conventions.

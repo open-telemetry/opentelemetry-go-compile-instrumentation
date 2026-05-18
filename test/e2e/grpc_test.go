@@ -8,8 +8,6 @@ package test
 import (
 	"testing"
 
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
-
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
@@ -28,13 +26,13 @@ func TestGrpc(t *testing.T) {
 
 	grpcClientSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsClient,
-		testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+		testutil.HasAttribute("rpc.system.name", "grpc"),
 	)
 	testutil.RequireGRPCClientSemconv(t, grpcClientSpan, "127.0.0.1", "greeter.Greeter", "SayHello", 0)
 
 	grpcServerSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsServer,
-		testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+		testutil.HasAttribute("rpc.system.name", "grpc"),
 	)
 	testutil.RequireGRPCServerSemconv(t, grpcServerSpan, "greeter.Greeter", "SayHello", 0)
 }
