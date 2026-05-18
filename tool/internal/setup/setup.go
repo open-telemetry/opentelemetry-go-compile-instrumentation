@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
@@ -31,6 +33,14 @@ func (sp *SetupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args.
 func (sp *SetupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
 func (sp *SetupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *SetupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
+
+// warnIfNoMatches emits a warning to stderr when no instrumentation rules matched
+func (sp *SetupPhase) warnIfNoMatches(matched []*rule.InstRuleSet, w io.Writer) {
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(w, "Warning : 0 rules matched - no instrumentation will be applied.\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
+	}
+}
 
 // keepForDebug copies the file to the build temp directory for debugging
 // Error is tolerated as it's not critical.
@@ -188,6 +198,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
+	sp.warnIfNoMatches(matched, os.Stderr)
 
 	// Generate otelc.runtime.go for all packages
 	moduleDirs := make(map[string]bool)
