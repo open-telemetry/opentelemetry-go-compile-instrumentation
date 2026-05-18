@@ -8,6 +8,7 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
@@ -32,12 +33,17 @@ func field(typeExpr dst.Expr) *dst.Field {
 	return &dst.Field{Type: typeExpr}
 }
 
-func strPtr(s string) *string { return &s }
-
 func ident(name string) *dst.Ident { return &dst.Ident{Name: name} }
 
 func selector(pkg, name string) *dst.SelectorExpr {
 	return &dst.SelectorExpr{X: ident(pkg), Sel: ident(name)}
+}
+
+func mustMatch(t *testing.T, decl *dst.FuncDecl, r *rule.InstFuncRule) bool {
+	t.Helper()
+	ok, err := FuncDeclMatchesFilters(decl, r)
+	require.NoError(t, err)
+	return ok
 }
 
 func TestFuncDeclMatchesFilters_NoFilters(t *testing.T) {
@@ -46,7 +52,7 @@ func TestFuncDeclMatchesFilters_NoFilters(t *testing.T) {
 		[]*dst.Field{field(ident("error"))},
 	)
 	r := &rule.InstFuncRule{}
-	assert.True(t, FuncDeclMatchesFilters(decl, r), "no filters should always match")
+	assert.True(t, mustMatch(t, decl, r), "no filters should always match")
 }
 
 func TestFuncDeclMatchesFilters_ExactSignature(t *testing.T) {
@@ -97,7 +103,7 @@ func TestFuncDeclMatchesFilters_ExactSignature(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sig := tt.sig
 			r := &rule.InstFuncRule{Signature: &sig}
-			assert.Equal(t, tt.want, FuncDeclMatchesFilters(decl, r))
+			assert.Equal(t, tt.want, mustMatch(t, decl, r))
 		})
 	}
 }
@@ -140,25 +146,25 @@ func TestFuncDeclMatchesFilters_SignatureContains(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sig := tt.sig
 			r := &rule.InstFuncRule{SignatureContains: &sig}
-			assert.Equal(t, tt.want, FuncDeclMatchesFilters(decl, r))
+			assert.Equal(t, tt.want, mustMatch(t, decl, r))
 		})
 	}
 }
 
-func TestFuncDeclMatchesFilters_ResultType(t *testing.T) {
+func TestFuncDeclMatchesFilters_Result(t *testing.T) {
 	// func() (io.Reader, error)
 	decl := makeFuncDecl(
 		nil,
 		[]*dst.Field{field(selector("io", "Reader")), field(ident("error"))},
 	)
 
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultType: strPtr("error")}))
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultType: strPtr("io.Reader")}))
-	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultType: strPtr("io.Writer")}))
-	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ResultType: strPtr("string")}))
+	assert.True(t, mustMatch(t, decl, &rule.InstFuncRule{Result: "error"}))
+	assert.True(t, mustMatch(t, decl, &rule.InstFuncRule{Result: "io.Reader"}))
+	assert.False(t, mustMatch(t, decl, &rule.InstFuncRule{Result: "io.Writer"}))
+	assert.False(t, mustMatch(t, decl, &rule.InstFuncRule{Result: "string"}))
 }
 
-func TestFuncDeclMatchesFilters_LastResultType(t *testing.T) {
+func TestFuncDeclMatchesFilters_LastResult(t *testing.T) {
 	// func() (io.Reader, error)
 	decl := makeFuncDecl(
 		nil,
@@ -166,21 +172,21 @@ func TestFuncDeclMatchesFilters_LastResultType(t *testing.T) {
 	)
 
 	// error is the final result
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{LastResultType: strPtr("error")}))
+	assert.True(t, mustMatch(t, decl, &rule.InstFuncRule{LastResult: "error"}))
 	// io.Reader is NOT the final result
-	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{LastResultType: strPtr("io.Reader")}))
+	assert.False(t, mustMatch(t, decl, &rule.InstFuncRule{LastResult: "io.Reader"}))
 }
 
-func TestFuncDeclMatchesFilters_ArgumentType(t *testing.T) {
+func TestFuncDeclMatchesFilters_Param(t *testing.T) {
 	// func(context.Context, string) error
 	decl := makeFuncDecl(
 		[]*dst.Field{field(selector("context", "Context")), field(ident("string"))},
 		[]*dst.Field{field(ident("error"))},
 	)
 
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentType: strPtr("context.Context")}))
-	assert.True(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentType: strPtr("string")}))
-	assert.False(t, FuncDeclMatchesFilters(decl, &rule.InstFuncRule{ArgumentType: strPtr("int")}))
+	assert.True(t, mustMatch(t, decl, &rule.InstFuncRule{Param: "context.Context"}))
+	assert.True(t, mustMatch(t, decl, &rule.InstFuncRule{Param: "string"}))
+	assert.False(t, mustMatch(t, decl, &rule.InstFuncRule{Param: "int"}))
 }
 
 func TestFuncDeclMatchesFilters_CombinedFilters(t *testing.T) {
@@ -193,19 +199,19 @@ func TestFuncDeclMatchesFilters_CombinedFilters(t *testing.T) {
 	// All filters match → true
 	sig := rule.FuncSignature{Args: []string{"context.Context", "string"}, Returns: []string{"io.Reader", "error"}}
 	r := &rule.InstFuncRule{
-		Signature:      &sig,
-		ResultType:     strPtr("error"),
-		LastResultType: strPtr("error"),
-		ArgumentType:   strPtr("context.Context"),
+		Signature:  &sig,
+		Result:     "error",
+		LastResult: "error",
+		Param:      "context.Context",
 	}
-	assert.True(t, FuncDeclMatchesFilters(decl, r))
+	assert.True(t, mustMatch(t, decl, r))
 
-	// Signature matches but ArgumentType doesn't → false
+	// Signature matches but Param doesn't → false
 	r2 := &rule.InstFuncRule{
-		Signature:    &sig,
-		ArgumentType: strPtr("int"),
+		Signature: &sig,
+		Param:     "int",
 	}
-	assert.False(t, FuncDeclMatchesFilters(decl, r2))
+	assert.False(t, mustMatch(t, decl, r2))
 }
 
 func TestFuncDeclMatchesFilters_NoParams(t *testing.T) {
@@ -214,9 +220,25 @@ func TestFuncDeclMatchesFilters_NoParams(t *testing.T) {
 
 	// Empty signature matches
 	r := &rule.InstFuncRule{Signature: &rule.FuncSignature{Returns: []string{"error"}}}
-	assert.True(t, FuncDeclMatchesFilters(decl, r))
+	assert.True(t, mustMatch(t, decl, r))
 
 	// Non-empty args don't match
 	r2 := &rule.InstFuncRule{Signature: &rule.FuncSignature{Args: []string{"string"}, Returns: []string{"error"}}}
-	assert.False(t, FuncDeclMatchesFilters(decl, r2))
+	assert.False(t, mustMatch(t, decl, r2))
+}
+
+func TestFuncDeclMatchesFilters_InvalidTypeReturnsError(t *testing.T) {
+	decl := makeFuncDecl(
+		[]*dst.Field{field(ident("string"))},
+		[]*dst.Field{field(ident("error"))},
+	)
+
+	_, err := FuncDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"})
+	require.Error(t, err)
+
+	_, err = FuncDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"})
+	require.Error(t, err)
+
+	_, err = FuncDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"})
+	require.Error(t, err)
 }
