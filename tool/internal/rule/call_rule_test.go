@@ -36,6 +36,24 @@ replace: "wrapper({{ . }})"
 			},
 		},
 		{
+			name: "replace with path",
+			yaml: `
+function_call: unsafe.Sizeof
+replace: "Wrapper({{ . }})"
+path: testdata/golden/call-rule-only
+`,
+			ruleName: "wrap_sizeof_call",
+			check: func(t *testing.T, r *InstCallRule) {
+				assert.Equal(t, "wrap_sizeof_call", r.Name)
+				assert.Equal(t, "unsafe.Sizeof", r.FunctionCall)
+				assert.Equal(t, "unsafe", r.ImportPath)
+				assert.Equal(t, "Sizeof", r.FuncName)
+				assert.Equal(t, "Wrapper({{ . }})", r.Replace)
+				assert.Equal(t, "testdata/golden/call-rule-only", r.Path)
+			},
+		},
+
+		{
 			name: "append_args only",
 			yaml: `
 function_call: net/http.Get
