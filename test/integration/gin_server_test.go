@@ -19,108 +19,99 @@ import (
 )
 
 func TestGinServer(t *testing.T) {
-	f := testutil.NewTestFixture(t)
+	build := testutil.NewTestFixture(t, testutil.WithoutCollector())
+	build.Build("ginserver")
 
-	f.BuildAndStart("ginserver", "-port=8090")
-	testutil.WaitForTCP(t, "127.0.0.1:8090")
+	const (
+		addr = "127.0.0.1:8090"
+		port = "-port=8090"
+	)
 
-	resp, err := http.Get("http://127.0.0.1:8090/hello/OpenTelemetry") //nolint:noctx
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	cases := []struct {
+		name       string
+		path       string
+		wantStatus int
+		assertSpan func(t *testing.T, span ptrace.Span)
+	}{
+		{
+			name:       "matched route is enriched with http.route",
+			path:       "/hello/OpenTelemetry",
+			wantStatus: http.StatusOK,
+			assertSpan: func(t *testing.T, span ptrace.Span) {
+				// The single most important assertion: the span name must
+				// use the route template, not the literal URL path. This is
+				// the entire reason this package exists on top of net/http.
+				assert.Equal(t, "GET /hello/:name", span.Name(),
+					"span name must be route pattern, not literal URL")
 
-	testutil.WaitForSpanFlush(t)
+				testutil.RequireAttribute(t, span, string(semconv.HTTPRouteKey), "/hello/:name")
+				testutil.RequireAttribute(t, span, string(semconv.HTTPRequestMethodKey), "GET")
+				testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(200))
+				testutil.RequireAttribute(t, span, string(semconv.URLPathKey), "/hello/OpenTelemetry")
+			},
+		},
+		{
+			name:       "5xx response carries error.type",
+			path:       fmt.Sprintf("/status/%d", http.StatusInternalServerError),
+			wantStatus: http.StatusInternalServerError,
+			assertSpan: func(t *testing.T, span ptrace.Span) {
+				testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(500))
+				testutil.RequireAttributeExists(t, span, string(semconv.ErrorTypeKey))
+			},
+		},
+		{
+			name:       "c.Error() surfaces as span status and exception event",
+			path:       "/error",
+			wantStatus: http.StatusOK,
+			assertSpan: func(t *testing.T, span ptrace.Span) {
+				assert.Equal(t, "GET /error", span.Name())
+				assert.Equal(t, ptrace.StatusCodeError, span.Status().Code(),
+					"span status must be Error when c.Error() was called")
+				assert.GreaterOrEqual(t, span.Events().Len(), 1,
+					"span must have at least one exception event from RecordError")
+			},
+		},
+		{
+			name:       "unmatched route keeps plain method as span name",
+			path:       "/no-such-route",
+			wantStatus: http.StatusNotFound,
+			assertSpan: func(t *testing.T, span ptrace.Span) {
+				// For unmatched paths gin does not populate c.FullPath() so
+				// the hook bails out. The span name must remain the plain
+				// method from the upstream net/http instrumentation and
+				// http.route must not be set. This guards against a
+				// cardinality regression where every probed URL would
+				// otherwise turn into a unique span name.
+				assert.Equal(t, "GET", span.Name(),
+					"span name must remain plain method when no gin route matches")
 
-	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(1)
+				_, hasRoute := testutil.Attrs(span)[string(semconv.HTTPRouteKey)]
+				assert.False(t, hasRoute,
+					"http.route must not be set when no gin route matches")
 
-	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
+				testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(404))
+				testutil.RequireAttribute(t, span, string(semconv.URLPathKey), "/no-such-route")
+			},
+		},
+	}
 
-	// The single most important assertion: the span name must use the route
-	// template, not the literal URL path. This is the entire reason this
-	// package exists on top of the net/http instrumentation.
-	assert.Equal(t, "GET /hello/:name", span.Name(),
-		"span name must be route pattern, not literal URL")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := testutil.NewTestFixture(t)
+			f.Start("ginserver", port)
+			testutil.WaitForTCP(t, addr)
 
-	testutil.RequireAttribute(t, span, string(semconv.HTTPRouteKey), "/hello/:name")
-	testutil.RequireAttribute(t, span, string(semconv.HTTPRequestMethodKey), "GET")
-	testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(200))
-	testutil.RequireAttribute(t, span, string(semconv.URLPathKey), "/hello/OpenTelemetry")
-}
+			resp, err := http.Get("http://" + addr + tc.path) //nolint:noctx
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, tc.wantStatus, resp.StatusCode)
 
-func TestGinServer_ServerError(t *testing.T) {
-	f := testutil.NewTestFixture(t)
+			testutil.WaitForSpanFlush(t)
 
-	f.BuildAndStart("ginserver", "-port=8090")
-	testutil.WaitForTCP(t, "127.0.0.1:8090")
-
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:8090/status/%d", http.StatusInternalServerError)) //nolint:noctx
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	testutil.WaitForSpanFlush(t)
-
-	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(1)
-	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
-
-	testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(500))
-	testutil.RequireAttributeExists(t, span, string(semconv.ErrorTypeKey))
-}
-
-func TestGinServer_GinError(t *testing.T) {
-	f := testutil.NewTestFixture(t)
-
-	f.BuildAndStart("ginserver", "-port=8090")
-	testutil.WaitForTCP(t, "127.0.0.1:8090")
-
-	resp, err := http.Get("http://127.0.0.1:8090/error") //nolint:noctx
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	testutil.WaitForSpanFlush(t)
-
-	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(1)
-	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
-
-	assert.Equal(t, "GET /error", span.Name())
-	assert.Equal(t, ptrace.StatusCodeError, span.Status().Code(),
-		"span status must be Error when c.Error() was called")
-	assert.GreaterOrEqual(t, span.Events().Len(), 1,
-		"span must have at least one exception event from RecordError")
-}
-
-func TestGinServer_UnregisteredRoute(t *testing.T) {
-	f := testutil.NewTestFixture(t)
-
-	f.BuildAndStart("ginserver", "-port=8090")
-	testutil.WaitForTCP(t, "127.0.0.1:8090")
-
-	resp, err := http.Get("http://127.0.0.1:8090/no-such-route") //nolint:noctx
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusNotFound, resp.StatusCode)
-
-	testutil.WaitForSpanFlush(t)
-
-	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(1)
-	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
-
-	// For unmatched paths gin does not populate c.FullPath() so the hook
-	// bails out. The span name must remain the plain method from the
-	// upstream net/http instrumentation and http.route must not be set.
-	// This guards against a cardinality regression where every probed
-	// URL would otherwise turn into a unique span name.
-	assert.Equal(t, "GET", span.Name(),
-		"span name must remain plain method when no gin route matches")
-
-	_, hasRoute := testutil.Attrs(span)[string(semconv.HTTPRouteKey)]
-	assert.False(t, hasRoute,
-		"http.route must not be set when no gin route matches")
-
-	testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(404))
-	testutil.RequireAttribute(t, span, string(semconv.URLPathKey), "/no-such-route")
+			f.RequireTraceCount(1)
+			f.RequireSpansPerTrace(1)
+			span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
+			tc.assertSpan(t, span)
+		})
+	}
 }
