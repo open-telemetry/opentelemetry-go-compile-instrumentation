@@ -42,12 +42,18 @@ func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {
 	}
 
 	switch req.DriverName {
-	case "mysql":
+	case "mysql", "mariadb":
 		attrs = append(attrs, semconv.DBSystemNameMySQL)
-	case "postgres":
+	case "postgres", "postgresql", "pgx", "lib/pq":
 		attrs = append(attrs, semconv.DBSystemNamePostgreSQL)
 	case "sqlite3":
 		attrs = append(attrs, semconv.DBSystemNameSQLite)
+	case "clickhouse":
+		attrs = append(attrs, semconv.DBSystemNameClickHouse)
+	case "godror", "oracle", "oci8", "go-oci8":
+		attrs = append(attrs, semconv.DBSystemNameOracleDB)
+	case "mssql", "sqlserver":
+		attrs = append(attrs, semconv.DBSystemNameMicrosoftSQLServer)
 	default:
 		attrs = append(attrs, semconv.DBSystemNameOtherSQL)
 	}
