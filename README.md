@@ -75,6 +75,7 @@ make test
 - [GitHub Discussions](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/discussions) - Ask questions
 - [GitHub Issues](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues) - Report bugs
 - [Slack Channel](https://cloud-native.slack.com/archives/C088D8GSSSF) - Real-time chat
+- [Calendar](https://github.com/open-telemetry/community/#sig-go-compile-instrumentation) - Community meetings (Thursdays, UTC: 08:00 – 09:00)
 
 ## Contributing
 
