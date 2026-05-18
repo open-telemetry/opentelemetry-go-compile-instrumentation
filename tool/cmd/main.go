@@ -38,6 +38,7 @@ func main() {
 			&cli.BoolFlag{
 				Name:    "debug",
 				Aliases: []string{"d"},
+				Sources: cli.EnvVars(util.EnvOtelcDebug),
 				Usage:   "Enable debug mode",
 				Value:   false,
 			},
@@ -111,21 +112,29 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	}
 
 	logFilename := filepath.Join(buildTempDir, debugLogFilename)
-	writer, err := os.OpenFile(logFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logFile, err := os.OpenFile(logFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return ctx, ex.Wrapf(err, "failed to open log file %q", logFilename)
 	}
 
+	level := slog.LevelInfo
+	if cmd.Bool("debug") {
+		level = slog.LevelDebug
+		if setErr := os.Setenv(util.EnvOtelcDebug, "1"); setErr != nil {
+			return ctx, ex.Wrapf(setErr, "set %s", util.EnvOtelcDebug)
+		}
+	}
+
 	// Log timestamps and levels are omitted: they add noise when correlating
 	// with Go toolchain output and the log file is for human debugging only.
-	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{
+	handler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey || a.Key == slog.LevelKey {
 				return slog.Attr{}
 			}
 			return a
 		},
-		Level: slog.LevelInfo,
+		Level: level,
 	})
 	logger := slog.New(handler)
 	ctx = util.ContextWithLogger(ctx, logger)

@@ -30,6 +30,7 @@ jobs:
             code:
               - '**/*.go'
               - '**/go.mod'
+              - '**/go.sum'
               - 'pkg/inst/context.go'
               - 'tool/internal/instrument/api.tmpl'
               - 'tool/internal/instrument/testdata/**'
@@ -62,20 +63,41 @@ jobs:
       - name: Check golden files are up to date
         run: make check-golden-files
 
+  check-mod-tidy:
+    name: Check go.mod/go.sum Tidy
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Run go mod tidy
+        run: make go-mod-tidy
+      - name: Check for uncommitted go.mod/go.sum changes
+        run: git diff --exit-code -- '**/go.mod' '**/go.sum'
+
   done:
     name: Done (Check Consistency)
     runs-on: ubuntu-latest
-    needs: [changes, check-api-sync, check-golden-files]
+    needs: [changes, check-api-sync, check-golden-files, check-mod-tidy]
     if: always()
     steps:
       - name: Check result
         run: |
           api_result="${{ needs.check-api-sync.result }}"
           golden_result="${{ needs.check-golden-files.result }}"
+          mod_tidy_result="${{ needs.check-mod-tidy.result }}"
           echo "api-sync result: $api_result"
           echo "golden-files result: $golden_result"
+          echo "mod-tidy result: $mod_tidy_result"
           if [[ ("$api_result" == "success" || "$api_result" == "skipped") && \
-                ("$golden_result" == "success" || "$golden_result" == "skipped") ]]; then
+                ("$golden_result" == "success" || "$golden_result" == "skipped") && \
+                ("$mod_tidy_result" == "success" || "$mod_tidy_result" == "skipped") ]]; then
             echo "✅ Consistency checks passed or were skipped"
             exit 0
           else
