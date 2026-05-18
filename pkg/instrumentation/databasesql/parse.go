@@ -14,7 +14,9 @@ type DSNParser = dsnparse.DSNParser
 // Built-in parsers are registered automatically during package initialization.
 // Calling RegisterDSNParser for an already-registered name overwrites the previous parser.
 // It is safe to call from package init() functions.
-var RegisterDSNParser = dsnparse.RegisterDSNParser
+func RegisterDSNParser(driverName string, parser dsnparse.DSNParser) {
+	dsnparse.RegisterDSNParser(driverName, parser)
+}
 
 func parseDSN(driverName, dsn string) (string, error) {
 	return dsnparse.ParseDSN(driverName, dsn)
