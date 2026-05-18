@@ -7,7 +7,7 @@
 package tools // import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tools"
 
 import (
-	_ "github.com/campoy/embedmd"
+	_ "github.com/campoy/embedmd/v2"
 	_ "github.com/checkmake/checkmake/cmd/checkmake"
 	_ "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"
 	_ "github.com/google/yamlfmt/cmd/yamlfmt"
@@ -16,4 +16,3 @@ import (
 	_ "github.com/sethvargo/ratchet"
 	_ "go.opentelemetry.io/build-tools/crosslink"
 )
-
