@@ -21,6 +21,9 @@ import (
 const (
 	tJumpLabel       = "/* __TRAMPOLINE_JUMP_IF__ */"
 	otelcGlobalsFile = "otelc.globals.go"
+
+	directiveIgnore     = "otelc:ignore"
+	directiveInstrument = "otelc:instrument"
 )
 
 func makeName(r *rule.InstFuncRule, funcDecl *dst.FuncDecl, isBefore bool) string {
@@ -351,6 +354,10 @@ func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	// No function found for the rule, skip
 	if funcDecl == nil {
 		return ex.Newf("can not find function %s", rule.Func)
+	}
+	if ast.FuncHasDirective(funcDecl, directiveIgnore) {
+		ip.Debug("Skip func rule due to //otelc:ignore", "func", rule.Func, "rule", rule.Name)
+		return nil
 	}
 
 	// Handle imports if specified in the rule

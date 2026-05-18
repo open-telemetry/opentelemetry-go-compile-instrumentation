@@ -1,0 +1,13 @@
+hook_ignored:
+  target: main
+  func: IgnoredFunc
+  before: HBefore
+  after: HAfter
+  path: testdata/golden/ignore-directive
+
+hook_instrumented:
+  target: main
+  func: InstrumentedFunc
+  before: HBefore
+  after: HAfter
+  path: testdata/golden/ignore-directive
