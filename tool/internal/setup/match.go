@@ -229,7 +229,7 @@ func (sp *SetupPhase) matchOneRule(
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
-		if funcDecl != nil {
+		if funcDecl != nil && ast.FuncDeclMatchesFilters(funcDecl, rt) {
 			set.AddFuncRule(source, rt)
 			sp.Info("Match func rule", "rule", rt, "dep", dep)
 		}

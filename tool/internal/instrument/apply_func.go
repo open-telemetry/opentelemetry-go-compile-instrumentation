@@ -352,6 +352,12 @@ func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	if funcDecl == nil {
 		return ex.Newf("can not find function %s", rule.Func)
 	}
+	// Setup phase matched by name; skip if signature filters no longer match.
+	if !ast.FuncDeclMatchesFilters(funcDecl, rule) {
+		ip.Warn("Skipping func rule: signature filters did not match",
+			"rule", rule.Name, "func", rule.Func)
+		return nil
+	}
 
 	// Handle imports if specified in the rule
 	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {

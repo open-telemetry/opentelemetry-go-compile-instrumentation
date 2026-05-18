@@ -58,6 +58,67 @@ This rule will inject `MyHookBefore` at the start of the `Example` function in t
 
 The tool automatically reads the hook source file and ensures all of its imports are present in the build. No `imports:` field is needed for function hook rules.
 
+#### Signature Sub-Filters
+
+By default the rule matches any function with the given name (and optional receiver). Five optional sub-filters can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
+
+| Field | Type | Semantics |
+| --- | --- | --- |
+| `signature` | object | Exact match — the parameter list and result list must match the given type sequences in order |
+| `signature_contains` | object | Partial match — at least one of the listed arg types appears anywhere in the parameter list **or** at least one of the listed return types appears anywhere in the result list |
+| `result_type` | string | Any return type matches the named type |
+| `last_result_type` | string | The last return type matches the named type |
+| `argument_type` | string | Any parameter type matches the named type |
+
+`signature` and `signature_contains` each take an object with two optional lists:
+
+- `args` — type names for parameters
+- `returns` — type names for results
+
+Type names follow the form `[*][pkg.]Name`, for example `error`, `context.Context`, `*http.Request`. Matching is structural (AST-level) rather than type-checker-based, so the package qualifier must match the local identifier used in the source file (typically the last path component, e.g. `http` for `"net/http"`).
+
+> **Note on `*_type` semantics:** Because there is no type checker at instrumentation time, `result_type`, `last_result_type`, and `argument_type` perform an exact type-name match. For example, `result_type: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`.
+>
+> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it.
+
+**Example — match only functions with a specific signature:**
+
+```yaml
+hook_open:
+  target: example.com/store
+  func: Open
+  signature:
+    args: [context.Context, string]
+    returns: ["*Connection", error]
+  before: OnOpen
+  path: example.com/hooks/store
+```
+
+The rule only applies when `Open` takes exactly a `context.Context` and a `string` and returns exactly a `*Connection` and an `error`. Functions named `Open` with different signatures are left untouched.
+
+**Example — match any function that accepts a `context.Context`:**
+
+```yaml
+hook_ctx_funcs:
+  target: example.com/worker
+  func: Process
+  signature_contains:
+    args: [context.Context]
+  before: OnProcess
+  path: example.com/hooks/worker
+```
+
+**Example — match functions whose last return value is `error`:**
+
+```yaml
+hook_fallible:
+  target: example.com/db
+  func: Query
+  last_result_type: error
+  before: OnQuery
+  path: example.com/hooks/db
+```
+
 ### 2. Struct Field Injection Rule
 
 This rule adds one or more new fields to a specified struct type.

@@ -10,6 +10,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// FuncSignature specifies the argument and result types used by signature
+// sub-filters on InstFuncRule.  Each entry is a type name string in the form
+// accepted by the type-name parser (e.g. "error", "context.Context",
+// "*http.Request").  For exact matching (signature), the i-th entry is
+// compared to the i-th field in order.  For contains matching
+// (signature_contains), each entry is checked for presence anywhere in the
+// corresponding list.
+type FuncSignature struct {
+	Args    []string `json:"args,omitempty"    yaml:"args"`
+	Returns []string `json:"returns,omitempty" yaml:"returns"`
+}
+
 // InstFuncRule represents a rule that guides hook function injection into
 // appropriate target function locations. For example, if we want to inject
 // custom Foo function at the entry of target function Bar, we can define a rule:
@@ -21,6 +33,17 @@ import (
 //		recv: "*RecvType"
 //		before: "Foo"
 //		path: "github.com/foo/bar/hook_rule"
+//
+// Optional signature sub-filters narrow matching beyond name and receiver:
+//
+//	signature:
+//	  args: [context.Context, string]
+//	  returns: [error]
+//	signature_contains:
+//	  args: [context.Context]
+//	result_type: error
+//	last_result_type: error
+//	argument_type: context.Context
 type InstFuncRule struct {
 	InstBaseRule `yaml:",inline"`
 
@@ -29,6 +52,14 @@ type InstFuncRule struct {
 	Before string `json:"before" yaml:"before"` // The function we inject at the target function entry
 	After  string `json:"after"  yaml:"after"`  // The function we inject at the target function exit
 	Path   string `json:"path"   yaml:"path"`   // The module path where hook code is located
+
+	// Optional signature sub-filters (all non-nil filters must match; combined
+	// with AND logic so any combination is allowed).
+	Signature         *FuncSignature `json:"signature,omitempty"          yaml:"signature"`
+	SignatureContains *FuncSignature `json:"signature_contains,omitempty" yaml:"signature_contains"`
+	ResultType        *string        `json:"result_type,omitempty"        yaml:"result_type"`
+	LastResultType    *string        `json:"last_result_type,omitempty"   yaml:"last_result_type"`
+	ArgumentType      *string        `json:"argument_type,omitempty"      yaml:"argument_type"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
@@ -50,7 +81,7 @@ func (r *InstFuncRule) validate() error {
 	if strings.TrimSpace(r.Func) == "" {
 		return ex.Newf("func cannot be empty")
 	}
-	if r.Before == "" && r.After == "" {
+	if strings.TrimSpace(r.Before) == "" && strings.TrimSpace(r.After) == "" {
 		return ex.Newf("before or after must be set")
 	}
 	return nil
