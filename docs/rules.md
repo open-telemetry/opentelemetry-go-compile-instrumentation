@@ -4,6 +4,217 @@ This document explains the different types of instrumentation rules used by the 
 
 The schema is the 2-tier `target` / `version` + `where` / `do` surface decided in [ADR-0003](adr/0003-structured-rule-schema.md). `where` carries non-package selectors, `do` carries modifiers, and the modifier name in `do` declares the rule type.
 
+## Schema Reference
+
+### Rule shape
+
+Every rule is a YAML map entry whose key is the rule name:
+
+```yaml
+rule_name:
+  target: <package import path>       # required
+  version: <version range>            # optional
+  where:                              # optional; non-package selectors
+    <selector keys>
+    file:
+      <file predicate keys>
+  do:                                 # required; modifier(s)
+    - <modifier name>:
+        <modifier keys>
+  imports:                            # optional; injected imports
+    <alias>: <path>
+  name: <explicit name>               # optional; defaults to YAML key
+```
+
+### Top-level fields
+
+| Key       | Required | Meaning                                                            |
+| --------- | -------- | ------------------------------------------------------------------ |
+| `target`  | yes      | Package import path. Exact match against the compile-time `-p` flag. |
+| `version` | no       | Version range `start_inclusive,end_exclusive`. Omit to match all versions. |
+| `where`   | no       | Non-package selectors and file-level predicates.                   |
+| `do`      | yes      | Ordered modifier list. Modifier name declares the rule type.       |
+| `imports` | no       | `alias: path` map merged into instrumented files.                  |
+| `name`    | no       | Explicit rule name; defaults to the YAML map key.                  |
+
+### `where` semantics
+
+- Flat selector keys inside `where` are an implicit `all-of`.
+- Composition sub-groups `all-of`, `one-of`, `not` may appear at any position
+  to compose nested selector groups.
+- Point selector keys recognized at the top of `where`:
+  `func`, `recv`, `struct`, `function_call`, `directive`, `kind`,
+  `identifier`.
+- File-level predicates live under `where.file`.
+- `target` and `version` **must not** appear inside `where`. They are
+  package-scope selectors and stay top-level.
+
+### `where.file` semantics
+
+- Predicate keys: `has_func`, `recv`, `has_struct`, `has_directive`.
+  Combinator keys: `all-of`, `one-of`, `not`.
+- `recv` inside `where.file` narrows `has_func` to a specific receiver type.
+- Exactly one leaf predicate must be active per `where.file` node;
+  compositions are expressed via `all-of` / `one-of` / `not`.
+- Today the setup phase executes only leaf predicates (`has_func`,
+  `has_struct`); combinators and `has_directive` are validated but return
+  descriptive errors at build time and are wired up in follow-up PRs.
+
+### `do` semantics
+
+`do` accepts two YAML shapes; both normalize to the same ordered internal list:
+
+```yaml
+# Sequence form — canonical, supports one or more modifiers.
+do:
+  - inject_hooks:
+      before: BeforeOpen
+      path: github.com/example/sql
+
+# Map form — sugar for a single modifier.
+do:
+  inject_hooks:
+    before: BeforeOpen
+    path: github.com/example/sql
+```
+
+Rules:
+
+- The sequence form is canonical and used in all in-repo examples.
+- Each list item is a single-key map whose key names the modifier.
+- Duplicate modifier kinds are allowed; declaration order is preserved.
+- `do` must not be missing or empty.
+
+### Modifier names → rule types
+
+| Modifier            | Internal rule type  |
+| ------------------- | ------------------- |
+| `inject_hooks`      | `InstFuncRule`      |
+| `inject_code`       | `InstRawRule`       |
+| `add_struct_fields` | `InstStructRule`    |
+| `add_file`          | `InstFileRule`      |
+| `wrap_call`         | `InstCallRule`      |
+| `expand_directive`  | `InstDirectiveRule` |
+| `assign_value`      | `InstDeclRule`      |
+
+Rule type comes from the modifier key in `do`, not from field-presence priority.
+
+### Special `target` values
+
+- `target: main` — matches the compile-time package named `main`.
+- `target: test_main` — not currently supported; reserved for future work.
+- Wildcards in `target` are out of scope for this release and are tracked
+  separately.
+
+### Valid and invalid shapes
+
+```yaml
+# Minimal valid rule
+open_hook:
+  target: database/sql
+  where:
+    func: Open
+  do:
+    - inject_hooks:
+        before: BeforeOpen
+        path: github.com/example/sql
+
+# File-level predicate — only in files that also declare an init function
+open_hook_with_init:
+  target: database/sql
+  where:
+    func: Open
+    file:
+      has_func: init
+  do:
+    - inject_hooks:
+        before: BeforeOpen
+        path: github.com/example/sql
+
+# target inside where is rejected
+invalid_target_in_where:
+  where:
+    target: net/http   # ERROR: target must be top-level
+    func: Serve
+  do:
+    - inject_hooks:
+        before: BeforeServe
+        path: github.com/example/nethttp
+
+# empty do is rejected
+invalid_empty_do:
+  target: net/http
+  do: []             # ERROR: do must not be empty
+
+# multi-key do item is rejected
+invalid_multi_key_do_item:
+  target: net/http
+  do:
+    - inject_hooks:
+        before: BeforeServe
+        path: github.com/example/nethttp
+      inject_code:   # ERROR: each do item must be a single-key map
+        raw: println("bad")
+
+# scalar where.file is rejected
+invalid_where_file_shape:
+  target: net/http
+  where:
+    file: init       # ERROR: where.file must be a map
+  do:
+    - add_file:
+        file: helpers.go
+        path: github.com/example/helpers
+```
+
+### Migrating from the flat schema
+
+Rules written in the legacy flat format (selector and modifier fields at the
+same level, rule type inferred from field presence) continue to parse without
+error — the normalization layer accepts both shapes. All in-repo YAML files use
+the structured shape.
+
+Flat → structured conversion for the common `inject_hooks` case:
+
+```yaml
+# Flat (legacy)
+hook_serve:
+  target: net/http
+  func: ServeHTTP
+  recv: serverHandler
+  before: BeforeServeHTTP
+  after: AfterServeHTTP
+  path: github.com/example/nethttp/server
+
+# Structured (current)
+hook_serve:
+  target: net/http
+  where:
+    func: ServeHTTP
+    recv: serverHandler
+  do:
+    - inject_hooks:
+        before: BeforeServeHTTP
+        after: AfterServeHTTP
+        path: github.com/example/nethttp/server
+```
+
+Mapping summary:
+
+| Flat field | Structured location |
+| ---------- | ------------------- |
+| `target`, `version` | top-level (unchanged) |
+| `func`, `recv`, `struct`, `function_call`, `directive`, `kind`, `identifier` | `where.<key>` |
+| `before`, `after`, `path` | `do: - inject_hooks:` |
+| `raw` | `do: - inject_code: raw:` |
+| `new_field` | `do: - add_struct_fields: new_field:` |
+| `file` (add_file) | `do: - add_file: file:` |
+| `template`, `append_args` (wrap_call) | `do: - wrap_call:` |
+| `value` | `do: - assign_value: value:` |
+| `imports` | top-level (unchanged) |
+
+---
+
 ## Common Fields
 
 All rules share a small set of top-level fields:
