@@ -105,3 +105,26 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 
 	return result, nil
 }
+
+// ResolveModuleDir returns the module directory for a given package directory.
+func ResolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
+	pkgs, err := LoadPackages(ctx, packages.NeedModule, nil, pkgDir)
+	if err != nil {
+		return "", err
+	}
+	if len(pkgs) == 0 {
+		return "", ex.Newf("no packages found for directory: %s", pkgDir)
+	}
+
+	pkg := pkgs[0]
+	if pkg.Module == nil || pkg.Module.Dir == "" || len(pkg.Errors) > 0 {
+		return "", ex.Newf(
+			"failed to load module information for package in directory %s: module=%v, errors=%v",
+			pkgDir,
+			pkg.Module,
+			pkg.Errors,
+		)
+	}
+
+	return pkg.Module.Dir, nil
+}

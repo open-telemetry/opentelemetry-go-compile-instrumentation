@@ -172,6 +172,8 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 	}
 
 	if len(files) > 0 {
+		// files are collected in reverse order due to reverse argument traversal.
+		// files[0] is therefore the last .go file from the original CLI args.
 		dir, err := filepath.Abs(filepath.Dir(files[0]))
 		if err != nil {
 			return nil, nil, ex.Wrapf(err, "failed to get absolute path for directory containing files")
@@ -197,29 +199,6 @@ func getPackageDir(pkg *packages.Package) string {
 		return filepath.Dir(pkg.GoFiles[0])
 	}
 	return ""
-}
-
-// findModuleDir is meant to be used for "command-line-arguments" packages that don't have an associated module.
-func findModuleDir(ctx context.Context, pkgDir string) (string, error) {
-	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedModule, nil, pkgDir)
-	if err != nil {
-		return "", err
-	}
-	if len(pkgs) == 0 {
-		return "", ex.Newf("no packages found for directory: %s", pkgDir)
-	}
-
-	pkg := pkgs[0]
-	if pkg.Module == nil || pkg.Module.Dir == "" || len(pkg.Errors) > 0 {
-		return "", ex.Newf(
-			"failed to load module information for package in directory %s: module=%v, errors=%v",
-			pkgDir,
-			pkg.Module,
-			pkg.Errors,
-		)
-	}
-
-	return pkg.Module.Dir, nil
 }
 
 // Setup prepares the environment for further instrumentation.
@@ -295,7 +274,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
-			if moduleDir, err = findModuleDir(ctx, pkgDir); err != nil {
+			if moduleDir, err = pkgload.ResolveModuleDir(ctx, pkgDir); err != nil {
 				return ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
 			}
 		}
