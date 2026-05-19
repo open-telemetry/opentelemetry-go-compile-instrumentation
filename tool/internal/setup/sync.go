@@ -5,11 +5,14 @@ package setup
 
 import (
 	"context"
+	"fmt"
+	goversion "go/version"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
@@ -70,6 +73,50 @@ func addReplace(modfile *modfile.File, replace *replaceDirective) (bool, error) 
 	return false, nil
 }
 
+// versionSnapshot records go directive and direct dep versions before tidy.
+type versionSnapshot struct {
+	goVersion string
+	deps      map[string]string
+}
+
+func snapshotVersion(mf *modfile.File) versionSnapshot {
+	snap := versionSnapshot{
+		deps: make(map[string]string),
+	}
+	if mf.Go != nil {
+		snap.goVersion = mf.Go.Version
+	}
+	for _, req := range mf.Require {
+		if !req.Indirect {
+			snap.deps[req.Mod.Path] = req.Mod.Version
+		}
+	}
+	return snap
+}
+
+func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) error {
+	after, err := parseGoMod(goModPath)
+	if err != nil {
+		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
+	}
+
+	// Go directives use Go toolchain syntax ("1.21"), not module semver.
+	if after.Go != nil && before.goVersion != "" {
+		if goversion.Compare("go"+after.Go.Version, "go"+before.goVersion) > 0 {
+			sp.Warn(fmt.Sprintf("Bumped go version (%s -> %s)", before.goVersion, after.Go.Version))
+		}
+	}
+
+	for _, req := range after.Require {
+		if oldVer, tracked := before.deps[req.Mod.Path]; tracked {
+			if semver.Compare(req.Mod.Version, oldVer) > 0 {
+				sp.Warn(fmt.Sprintf("Bumped dependency %s (%s -> %s)", req.Mod.Path, oldVer, req.Mod.Version))
+			}
+		}
+	}
+	return nil
+}
+
 func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
 	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
@@ -89,6 +136,8 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	if err != nil {
 		return err
 	}
+
+	before := snapshotVersion(modfile)
 	replaces := make([]*replaceDirective, 0)
 	for _, m := range rules {
 		util.Assert(strings.HasPrefix(m.Path, util.OtelcRoot), "sanity check")
@@ -147,6 +196,11 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 		err = runModTidy(ctx, moduleDir)
 		if err != nil {
 			return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
+		}
+		// Compare after tidy because MVS may raise existing consumer versions.
+		err = sp.warnVersion(goModFile, before)
+		if err != nil {
+			return err
 		}
 		sp.keepForDebug(goModFile)
 	}

@@ -6,8 +6,10 @@
 package test
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,7 +54,33 @@ func TestBasic(t *testing.T) {
 	}
 
 	verifyGenericHookContextLogs(t, output)
+	verifyExportedHelloWorldSpan(t, output)
 	verifyTracePropagationBetweenFunctionAAndB(t, output)
+}
+
+type exportedSpan struct {
+	Name                 string               `json:"Name"`
+	SpanContext          spanContext          `json:"SpanContext"`
+	Attributes           []spanAttribute      `json:"Attributes"`
+	InstrumentationScope instrumentationScope `json:"InstrumentationScope"`
+}
+
+type spanContext struct {
+	TraceID string `json:"TraceID"`
+	SpanID  string `json:"SpanID"`
+}
+
+type spanAttribute struct {
+	Key   string             `json:"Key"`
+	Value spanAttributeValue `json:"Value"`
+}
+
+type spanAttributeValue struct {
+	Value any `json:"Value"`
+}
+
+type instrumentationScope struct {
+	Name string `json:"Name"`
 }
 
 func verifyGenericHookContextLogs(t *testing.T, output string) {
@@ -68,6 +96,59 @@ func verifyGenericHookContextLogs(t *testing.T, output string) {
 	for _, log := range expectedGenericLogs {
 		require.Contains(t, output, log, "Expected generic HookContext log: %s", log)
 	}
+}
+
+func verifyExportedHelloWorldSpan(t *testing.T, output string) {
+	t.Helper()
+
+	span := findExportedSpan(t, output, "hello-world")
+
+	require.NotEmpty(t, span.SpanContext.TraceID, "expected hello-world span to have a trace ID")
+	require.NotEqual(t,
+		strings.Repeat("0", 32),
+		span.SpanContext.TraceID,
+		"expected hello-world span trace ID to be non-zero",
+	)
+	require.NotEmpty(t, span.SpanContext.SpanID, "expected hello-world span to have a span ID")
+	require.NotEqual(t,
+		strings.Repeat("0", 16),
+		span.SpanContext.SpanID,
+		"expected hello-world span ID to be non-zero",
+	)
+	require.Equal(t,
+		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld",
+		span.InstrumentationScope.Name,
+	)
+
+	attrs := make(map[string]any, len(span.Attributes))
+	for _, attr := range span.Attributes {
+		attrs[attr.Key] = attr.Value.Value
+	}
+	require.Contains(t, attrs, "hello.path")
+	require.Equal(t, "/api/hello", attrs["hello.path"])
+
+	require.Contains(t, attrs, "hello.param.name")
+	require.Equal(t, "world", attrs["hello.param.name"])
+
+	require.Contains(t, attrs, "hello.status")
+	require.EqualValues(t, 200, attrs["hello.status"])
+}
+
+func findExportedSpan(t *testing.T, output, name string) exportedSpan {
+	t.Helper()
+
+	for _, line := range strings.Split(output, "\n") {
+		var span exportedSpan
+		if err := json.Unmarshal([]byte(line), &span); err != nil {
+			continue
+		}
+		if span.Name == name {
+			return span
+		}
+	}
+
+	require.Failf(t, "span not found", "expected exported span %q in basic demo output", name)
+	return exportedSpan{}
 }
 
 func verifyTracePropagationBetweenFunctionAAndB(t *testing.T, output string) {
