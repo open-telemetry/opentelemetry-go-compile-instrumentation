@@ -49,14 +49,14 @@ func TestGetPackages(t *testing.T) {
 		},
 		{
 			name:             "file as a target",
-			args:             []string{"build", "./cmd/main.go"},
+			args:             []string{"./cmd/main.go"},
 			expectedCount:    1,
 			expectedPackages: []string{commandLineArgumentsPackage},
 			expectError:      false,
 		},
 		{
 			name:             "file and pkg mixed targets",
-			args:             []string{"build", "./cmd/main.go", "./foo/demo"},
+			args:             []string{"./cmd/main.go", "./foo/demo"},
 			expectedCount:    0,
 			expectedPackages: []string{},
 			expectError:      true,
