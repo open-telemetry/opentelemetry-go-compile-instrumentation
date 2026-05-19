@@ -36,7 +36,7 @@ $(TOOLS):
 
 $(TOOLS)/%: $(TOOLS_DIR)/go.mod | $(TOOLS)
 	cd $(TOOLS_DIR) && \
-	go build -o $@ $(PACKAGE)
+	GOWORK=off go build -o $@ $(PACKAGE)
 
 CROSSLINK = $(TOOLS)/crosslink
 $(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
@@ -512,6 +512,10 @@ go-work: $(CROSSLINK) ## Generate go.work file for local development
 	@$(CROSSLINK) work --root=$(CURDIR) --go=$(GO_VERSION)
 	@# Fix go version to include patch version (crosslink only supports major.minor)
 	@sed -i.bak 's/^go $(GO_VERSION)$$/go $(GO_VERSION).0/' go.work && rm -f go.work.bak
+	@# Drop tool-only modules: their transitive deps conflict with the main modules
+	@# (e.g. old monolithic genproto vs. split genproto/googleapis/rpc).
+	@go work edit -dropuse ./.tools
+	@go work edit -dropuse ./.github/tools
 	@echo "go.work file generated successfully"
 
 .PHONY: go-mod-tidy
