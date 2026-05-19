@@ -77,6 +77,22 @@ var flagsWithPathValues = map[string]bool{
 
 const commandLineArgumentsPackage = "command-line-arguments"
 
+// consumeCFlagPositional consumes -C only when it appears as the first
+// argument in args, matching Go toolchain semantics (see handleChdirFlag).
+// Returns ("", args) if -C is not present at position 0.
+func consumeCFlagPositional(args []string) (string, []string) {
+	if len(args) == 0 {
+		return "", args
+	}
+	if strings.HasPrefix(args[0], "-C=") {
+		return strings.TrimPrefix(args[0], "-C="), args[1:]
+	}
+	if args[0] == "-C" && len(args) > 1 {
+		return args[1], args[2:]
+	}
+	return "", args
+}
+
 // GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
 // Returns a list of loaded packages. If no package patterns are found in args,
 // defaults to loading the current directory package.
@@ -203,11 +219,32 @@ func getPackageDir(pkg *packages.Package) string {
 
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
-	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
-	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
+	// Setup is invoked in three shapes; -C can appear in any of these positions:
+	//   1. `otelc setup -C ./dir`              -- -C at position 0
+	//   2. `otelc go build -C ./dir ...`       -- -C after build/install
+	//   3. `otelc go -C ./dir build ...`       -- -C before build/install
 	args := cmd.Args().Slice()
 	if cmd.Name == "go" {
-		args = cmd.Args().Tail() // trim build/install
+		// Strip the -C-before-build form first so the build/install element is
+		// at a known position.
+		if dir, rest := consumeCFlagPositional(args); dir != "" {
+			if err := os.Chdir(dir); err != nil {
+				return ex.Wrapf(err, "changing to -C directory %s", dir)
+			}
+			args = rest
+		}
+		if len(args) > 0 {
+			args = args[1:] // trim build/install
+		}
+	}
+
+	// Honor -C as the next positional arg, matching Go toolchain semantics
+	// (see handleChdirFlag). os.Chdir does not affect the parent shell.
+	if dir, rest := consumeCFlagPositional(args); dir != "" {
+		if err := os.Chdir(dir); err != nil {
+			return ex.Wrapf(err, "changing to -C directory %s", dir)
+		}
+		args = rest
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -415,6 +452,18 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
+	// Setup already consumed any -C flag and called os.Chdir; strip it from
+	// the args we forward to the underlying `go build` so it doesn't end up
+	// after build flags (go requires -C before build flags).
+	if _, rest := consumeCFlagPositional(args); len(rest) != len(args) {
+		args = rest
+	}
+	if len(args) > 1 {
+		if _, rest := consumeCFlagPositional(args[1:]); len(rest) != len(args[1:]) {
+			args = append([]string{args[0]}, rest...)
+		}
+	}
+
 	// Add -toolexec=otelc to the original build command and run it
 	execPath, err := os.Executable()
 	if err != nil {
@@ -477,8 +526,22 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 		return ex.Newf("no command provided. Only 'go build' and 'go install' are supported")
 	}
 
-	if cmd.Args().First() != "build" && cmd.Args().First() != "install" {
-		return ex.Newf("unsupported command: %s. Only 'go build' and 'go install' are supported", cmd.Args().First())
+	// `go` accepts -C either before or after build/install:
+	//   go -C ./dir build ...
+	//   go build -C ./dir ...
+	// Look past a leading -C when validating the command form. The actual
+	// os.Chdir happens in Setup, where -C is consumed from args.
+	first := cmd.Args().First()
+	if first == "-C" || strings.HasPrefix(first, "-C=") {
+		_, rest := consumeCFlagPositional(cmd.Args().Slice())
+		if len(rest) == 0 {
+			return ex.Newf("no command provided after -C. Only 'go build' and 'go install' are supported")
+		}
+		first = rest[0]
+	}
+
+	if first != "build" && first != "install" {
+		return ex.Newf("unsupported command: %s. Only 'go build' and 'go install' are supported", first)
 	}
 
 	defer func() {
