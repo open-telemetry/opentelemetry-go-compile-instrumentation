@@ -5,4 +5,4 @@ hook_unnamed:
   do:
     - inject_hooks:
         before: H13Before
-        path: testdata
+        path: testdata/golden/unnamed-param

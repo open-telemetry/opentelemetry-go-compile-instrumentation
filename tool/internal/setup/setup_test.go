@@ -25,37 +25,37 @@ func TestGetPackages(t *testing.T) {
 	}{
 		{
 			name:             "single package",
-			args:             []string{"build", "-a", "-o", "tmp", "./cmd"},
+			args:             []string{"-a", "-o", "tmp", "./cmd"},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
 		},
 		{
 			name:             "multiple packages",
-			args:             []string{"build", "./cmd", "./foo/demo"},
+			args:             []string{"./cmd", "./foo/demo"},
 			expectedCount:    2,
 			expectedPackages: []string{"testmodule/cmd", "testmodule/foo/demo"},
 		},
 		{
 			name:             "wildcard pattern",
-			args:             []string{"build", "./cmd/..."},
+			args:             []string{"./cmd/..."},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
 		},
 		{
 			name:             "default to current directory",
-			args:             []string{"build"},
+			args:             []string{},
 			expectedCount:    1,
 			expectedPackages: []string{"."},
 		},
 		{
 			name:             "current directory explicit",
-			args:             []string{"build", "."},
+			args:             []string{"."},
 			expectedCount:    1,
 			expectedPackages: []string{"."},
 		},
 		{
 			name:             "nonexistent package mixed with valid",
-			args:             []string{"build", "./cmd", "./nonexistent"},
+			args:             []string{"./cmd", "./nonexistent"},
 			expectedCount:    1,
 			expectedPackages: []string{"testmodule/cmd"},
 		},

@@ -13,7 +13,7 @@ SHELL := /bin/bash
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         adr-tools adr-new adr-list \
-        benchmark benchmark/run
+        benchmark/codspeed benchmark/threshold
 
 # Constant variables
 BINARY_NAME := otelc
@@ -36,7 +36,7 @@ $(TOOLS):
 
 $(TOOLS)/%: $(TOOLS_DIR)/go.mod | $(TOOLS)
 	cd $(TOOLS_DIR) && \
-	go build -o $@ $(PACKAGE)
+	GOWORK=off go build -o $@ $(PACKAGE)
 
 CROSSLINK = $(TOOLS)/crosslink
 $(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
@@ -361,36 +361,23 @@ check-golden-files: package
 
 ##@ Benchmarking
 
-BENCH_HARNESS_DIR := test/bench/cmd/bench
-BENCH_SCENARIOS_DIR := test/bench/scenarios
-BENCH_OUTPUT := bench.json
-BENCH_ACTION_OUTPUT := bench-action.json
-BENCH_ITERATIONS ?= 5
-BENCH_WARMUP ?= 1
-BENCH_MAX_OVERHEAD_PCT ?= -1
+BENCH_DIR := test/bench
+BENCH_SCENARIOS_DIR := $(BENCH_DIR)/scenarios
+BENCH_TIME ?= 5x
+BENCH_MAX_OVERHEAD_PCT ?= 150
 
-benchmark: build ## Build benchmark harness and print usage
-	@echo "Building benchmark harness..."
-	@go build -C $(BENCH_HARNESS_DIR) -o $(TOOLS)/bench .
-	@echo ""
-	@echo "Run benchmarks with: make benchmark/run"
-	@echo "Override iterations: make benchmark/run BENCH_ITERATIONS=10"
+benchmark/codspeed: build ## Run compile-time benchmarks using Go testing.B (for CodSpeed walltime)
+	cd $(BENCH_DIR) && \
+	OTELC_BIN=$(CURDIR)/$(BINARY_NAME) \
+	BENCH_SCENARIOS_DIR=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
+	go test -v -run=^$$ -bench=. -benchtime=$(BENCH_TIME)
 
-.ONESHELL:
-benchmark/run: build ## Run compile-time benchmarks and emit bench.json
-benchmark/run: benchmark
-	@echo "Running compile-time benchmarks (iterations=$(BENCH_ITERATIONS), warmup=$(BENCH_WARMUP))..."
-	set -euo pipefail
-	nice -n -10 $(TOOLS)/bench \
-		-otelc=$(CURDIR)/$(BINARY_NAME) \
-		-scenarios=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
-		-iterations=$(BENCH_ITERATIONS) \
-		-warmup=$(BENCH_WARMUP) \
-		-max-overhead-pct=$(BENCH_MAX_OVERHEAD_PCT) \
-		-output=$(CURDIR)/$(BENCH_OUTPUT) \
-		-benchmark-action-output=$(CURDIR)/$(BENCH_ACTION_OUTPUT)
-	@echo ""
-	@echo "Results written to $(BENCH_OUTPUT) and $(BENCH_ACTION_OUTPUT)"
+benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if overhead exceeds BENCH_MAX_OVERHEAD_PCT)
+	cd $(BENCH_DIR) && \
+	OTELC_BIN=$(CURDIR)/$(BINARY_NAME) \
+	BENCH_SCENARIOS_DIR=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
+	BENCH_MAX_OVERHEAD_PCT=$(BENCH_MAX_OVERHEAD_PCT) \
+	go test -tags=overhead_check -run=TestOverheadCeiling -v -count=1 -timeout=30m
 
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
@@ -498,6 +485,12 @@ test-integration: build build-demo
 	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log
 
 .ONESHELL:
+test-latestlibbuild: build ## Run LatestLibBuild tests
+	@echo "Running LatestLibBuild tests..."
+	set -euo pipefail
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ../gotest-latestlibbuild.log
+
+.ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
@@ -531,6 +524,10 @@ go-work: $(CROSSLINK) ## Generate go.work file for local development
 	@$(CROSSLINK) work --root=$(CURDIR) --go=$(GO_VERSION)
 	@# Fix go version to include patch version (crosslink only supports major.minor)
 	@sed -i.bak 's/^go $(GO_VERSION)$$/go $(GO_VERSION).0/' go.work && rm -f go.work.bak
+	@# Drop tool-only modules: their transitive deps conflict with the main modules
+	@# (e.g. old monolithic genproto vs. split genproto/googleapis/rpc).
+	@go work edit -dropuse ./.tools
+	@go work edit -dropuse ./.github/tools
 	@echo "go.work file generated successfully"
 
 .PHONY: go-mod-tidy
@@ -556,7 +553,7 @@ clean: ## Clean build artifacts
 	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log \) -delete
+	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log \) -delete
 
 .ONESHELL:
 tidy/test-apps: ## Run go mod tidy in all test app modules

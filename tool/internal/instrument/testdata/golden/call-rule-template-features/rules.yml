@@ -4,4 +4,4 @@ wrap_nested_call:
     function_call: unsafe.Sizeof
   do:
     - wrap_call:
-        template: "(func() uintptr { return {{ . }} })()"
+        replace: "(func() uintptr { return {{ . }} })()"

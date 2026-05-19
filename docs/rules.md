@@ -209,8 +209,8 @@ Mapping summary:
 | `raw` | `do: - inject_code: raw:` |
 | `new_field` | `do: - add_struct_fields: new_field:` |
 | `file` (add_file) | `do: - add_file: file:` |
-| `template`, `append_args` (wrap_call) | `do: - wrap_call:` |
-| `value` | `do: - assign_value: value:` |
+| `replace`, `append_args` (wrap_call) | `do: - wrap_call:` |
+| `replace`, `wrap` | `do: - assign_value: replace:` or `do: - assign_value: wrap:` |
 | `imports` | top-level (unchanged) |
 
 ---
@@ -411,13 +411,13 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 | Field           | Type       | Required                                      | Notes                                                                                                                  |
 | --------------- | ---------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `template`      | string     | No (one of `template`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a Go call expression.                  |
-| `append_args`   | `[]string` | No (one of `template`/`append_args` required) | Go expression strings appended as additional arguments to the matched call                                             |
+| `replace`       | string     | No (one of `replace`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a Go call expression.                  |
+| `append_args`   | `[]string` | No (one of `replace`/`append_args` required) | Go expression strings appended as additional arguments to the matched call                                             |
 | `variadic_type` | string     | No                                            | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
 
 Top-level `imports` (map[string]string, optional): Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`.
 
-**`template` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `template` wraps the modified call.
+**`replace` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `replace` wraps the modified call.
 
 **Template System:**
 
@@ -425,7 +425,7 @@ The `template` field uses Go's standard `text/template` package for code generat
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
 - **Type Safety**: The template is compiled at rule creation time and validated
-- **Expression Output**: The template must produce a valid Go expression that evaluates to a call expression (current limitation)
+- **Expression Output**: The replacement template must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
 
 Currently supported template features:
 
@@ -478,7 +478,7 @@ wrap_http_get:
     function_call: net/http.Get
   do:
     - wrap_call:
-        template: "tracedGet({{ . }})"
+        replace: "tracedGet({{ . }})"
 ```
 
 In the `myapp/server` package, this transforms:
@@ -513,7 +513,7 @@ wrap_redis_get:
     function_call: github.com/redis/go-redis/v9.Get
   do:
     - wrap_call:
-        template: "tracedRedisGet(ctx, {{ . }})"
+        replace: "tracedRedisGet(ctx, {{ . }})"
 ```
 
 In the `myapp/cache` package:
@@ -543,7 +543,7 @@ wrap_with_unsafe:
     function_call: myapp/utils.Helper
   do:
     - wrap_call:
-        template: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
+        replace: "(func() (float32, error) { r, e := {{ . }}; _ = unsafe.Sizeof(r); return r, e })()"
 ```
 
 This uses an immediately-invoked function expression (IIFE) to inject logic after the call:
@@ -675,7 +675,7 @@ span_directive:
     directive: "otelc:span"
   do:
     - expand_directive:
-        template: |-
+        replace: |-
           println("span start: {{FuncName}}")
           defer println("span end: {{FuncName}}")
 ```
@@ -754,11 +754,12 @@ add_file_with_extra_imports:
 
 ### 7. Named Declaration Rule
 
-This rule targets a named package-level symbol (variable, constant, function, or type) and replaces its initializer with a new expression. It is the primary mechanism for overriding default values in third-party packages without modifying their source — for example, replacing a default HTTP transport with an instrumented one to enable distributed tracing.
+This rule targets a named package-level symbol (variable, constant, function, or type) and replaces or wraps its initializer. It is the primary mechanism for overriding or decorating default values in third-party packages without modifying their source — for example, replacing a default HTTP transport with an instrumented one, or wrapping an existing transport to inject OTel tracing.
 
 **Use Cases:**
 
 - Replacing a package-level `var` with an instrumented implementation (e.g., `http.DefaultTransport`).
+- Wrapping an existing package-level `var` initializer with an OTel instrumentation layer.
 - Toggling a package-level flag or sentinel value for observability purposes.
 - Substituting a registered implementation at compile time.
 
@@ -769,11 +770,14 @@ This rule targets a named package-level symbol (variable, constant, function, or
 
 **Modifier (`do: - assign_value:`):**
 
-- `value` (string, required): A Go expression to assign as the new value of the matched `var` or `const`. Not valid when `kind` is `func` or `type`.
+- `replace` (string, optional): A Go expression to assign as the new value of the matched `var` or `const`. Mutually exclusive with `wrap`. Not valid when `kind` is `func` or `type`.
+- `wrap` (string, optional): A Go expression template that wraps the existing initializer of the matched `var` or `const`. `{{ . }}` is substituted with the original expression. Mutually exclusive with `replace`. Not valid when `kind` is `func` or `type`.
 
 Top-level `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
 
-**Example:**
+> **Note:** Exactly one of `replace` or `wrap` must be set.
+
+**Example (replace):**
 
 ```yaml
 assign_default_transport:
@@ -783,7 +787,7 @@ assign_default_transport:
     identifier: DefaultTransport
   do:
     - assign_value:
-        value: |
+        replace: |
           &http.Transport{
             MaxIdleConns:    100,
             MaxConnsPerHost: 100,
@@ -794,8 +798,28 @@ assign_default_transport:
 
 This rule replaces `http.DefaultTransport` in the `net/http` package with a custom `*http.Transport` at compile time, enabling all outbound HTTP calls to use the configured transport — a common pattern for injecting tracing or connection-pool tuning without modifying the standard library source.
 
+**Example (wrap):**
+
+```yaml
+wrap_default_transport:
+  target: net/http
+  where:
+    kind: var
+    identifier: DefaultTransport
+  do:
+    - assign_value:
+        wrap: "otelhttp.NewTransport({{ . }})"
+  imports:
+    otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+```
+
+This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTransport`, injecting OTel tracing into all outbound HTTP calls without replacing the transport configuration.
+
 **Notes:**
 
-- `value` must be a valid Go expression (not a statement).
-- If the matched symbol has multiple names in a single declaration (e.g., `var a, b = ...`), the expression is cloned and assigned to each name.
+- `replace` must be a valid Go expression (not a statement).
+- `wrap` must contain `{{ . }}` as a placeholder for the original expression. The template must produce exactly one expression.
+- `wrap` returns an error at instrumentation time if the matched declaration has no initializer (e.g., `var X T` without `= ...`).
+- If `replace` matches multiple names in a single declaration (e.g., `var a, b = ...`), the replacement expression is cloned and assigned to each name.
+- If `wrap` matches multiple initialized values in a single declaration, each initializer is wrapped independently.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.

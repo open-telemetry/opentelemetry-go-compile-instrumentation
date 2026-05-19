@@ -521,7 +521,7 @@ target: github.com/example/lib
 			yamlContent: `
 target: github.com/example/lib
 identifier: GlobalVar
-value: "replaced"
+replace: "replaced"
 `,
 			ruleName:     "test-decl-rule",
 			expectError:  false,

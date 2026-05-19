@@ -5,4 +5,4 @@ assign_max_retries:
     identifier: MaxRetries
   do:
     - assign_value:
-        value: "99"
+        replace: "99"

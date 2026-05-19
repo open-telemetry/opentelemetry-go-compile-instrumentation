@@ -5,4 +5,4 @@ assign_global_var:
     identifier: GlobalVar
   do:
     - assign_value:
-        value: '"replaced"'
+        replace: '"replaced"'

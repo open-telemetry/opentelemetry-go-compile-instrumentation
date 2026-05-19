@@ -2,13 +2,14 @@
 
 This document describes the testing strategy for the project, the different test categories, and when to use each.
 
-Tests are organized in three categories, each with a distinct purpose and scope.
+Tests are organized in four categories, each with a distinct purpose and scope.
 
 | Category | Location | Build Tag | Scope |
 | :------- | :------- | :-------- | :---- |
 | Unit | `tool/**/*_test.go`, `pkg/**/*_test.go` | none | Single function or component in isolation. |
 | Integration | `test/integration/` | `integration` | Instrumented binary against a local or in-process dependency. |
 | E2E | `test/e2e/` | `e2e` | Multiple processes (e.g. client + server). |
+| LatestLibBuild | `test/latestlibbuild/` | `latestlibbuild` | Compile instrumented app against `@latest` of each instrumented library. |
 
 ## Unit Tests
 
@@ -21,6 +22,16 @@ There are two main areas:
 
 - **Tool tests** (`tool/`). Cover the compile-time instrumentation pipeline: AST rewriting, import resolution, trampoline generation, package loading, and setup logic. Golden-file tests in `tool/internal/instrument/` snapshot expected output and can be updated with `make test-unit/update-golden`.
 - **Package tests** (`pkg/`). Cover the runtime instrumentation hooks and semantic convention helpers. Each hook package has tests that verify span creation, context propagation, error recording, and the enable/disable mechanism via `OTEL_GO_ENABLED_INSTRUMENTATIONS` / `OTEL_GO_DISABLED_INSTRUMENTATIONS`.
+
+### Golden-test helper packages
+
+A golden testcase directory under `tool/internal/instrument/testdata/golden/<name>/` may contain a `helpers/` subdirectory with one or more Go packages. The test harness automatically discovers each subdirectory, compiles it into a `.a` archive, and registers it in the `importcfg` so the instrumented source can import it at compile time.
+
+Use this convention when a testcase exercises call rules that reference wrapper functions from an external (non-stdlib) package via the `imports:` field. To add a new helper:
+
+1. Create `helpers/<pkgname>/<pkgname>.go` with the wrapper code (package name must match the directory name).
+2. Reference the full import path in `rules.yml` under `imports:`, the path is `<root-module>/tool/internal/instrument/testdata/golden/<testname>/helpers/<pkgname>`.
+3. Create a placeholder for the golden file and run `make test-unit/update-golden` to regenerate the `.golden` snapshot.
 
 ## Integration Tests
 
@@ -73,6 +84,9 @@ make test-integration
 # E2E tests (requires: make build build-demo)
 make test-e2e
 
+# LatestLibBuild tests (requires: make build; mutates test/apps/*/go.mod — run git restore test/apps afterwards)
+make test-latestlibbuild
+
 # Coverage
 make test-unit/coverage
 make test-integration/coverage
@@ -82,6 +96,22 @@ make test-e2e/coverage
 All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
 
 CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (arm64), and Windows (amd64). See `.github/workflows/test-*.yaml` for details.
+
+## LatestLibBuild Tests
+
+> [!IMPORTANT]
+ > **What this test does.** For each app under `test/apps/`, the test discovers the app's direct dependencies whose module paths match an instrumentation rule `target:`, bumps those dependencies to `@latest`, and verifies that `otelc go build` still succeeds. It is a **compile-only** check — no binary is executed and no spans are asserted. It runs on every pull request and blocks merge if it fails.
+
+| Category | Location | Build Tag | Scope |
+| :------- | :------- | :-------- | :---- |
+| LatestLibBuild | `test/latestlibbuild/` | `latestlibbuild` | Compile instrumented app against `@latest` of each library. |
+
+### What a failure means
+
+A failure means that the latest release of an upstream library introduced a **compile-time API break** that is incompatible with the current instrumentation hook. The remediation is:
+
+1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file (e.g. change the version field from `v1.2.3` to `v1.2.3,v4.5.6`).
+2. Open a new rule entry covering `v4.5.6,` and implement the updated hook.
 
 ## Writing New Tests
 

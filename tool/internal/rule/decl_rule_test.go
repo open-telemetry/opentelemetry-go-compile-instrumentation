@@ -20,12 +20,12 @@ func TestNewInstDeclRule(t *testing.T) {
 		check       func(*testing.T, *InstDeclRule)
 	}{
 		{
-			name: "var rule with value",
+			name: "var rule with replace",
 			yaml: `
 target: example.com/pkg
 kind: var
 identifier: GlobalVar
-value: '"replaced"'
+replace: '"replaced"'
 `,
 			ruleName: "assign_global_var",
 			check: func(t *testing.T, r *InstDeclRule) {
@@ -33,22 +33,22 @@ value: '"replaced"'
 				assert.Equal(t, "example.com/pkg", r.Target)
 				assert.Equal(t, "var", r.Kind)
 				assert.Equal(t, "GlobalVar", r.Identifier)
-				assert.Equal(t, `"replaced"`, r.Value)
+				assert.Equal(t, `"replaced"`, r.Replace)
 			},
 		},
 		{
-			name: "const rule with value",
+			name: "const rule with replace",
 			yaml: `
 target: example.com/pkg
 kind: const
 identifier: MaxRetries
-value: "42"
+replace: "42"
 `,
 			ruleName: "patch_const",
 			check: func(t *testing.T, r *InstDeclRule) {
 				assert.Equal(t, "const", r.Kind)
 				assert.Equal(t, "MaxRetries", r.Identifier)
-				assert.Equal(t, "42", r.Value)
+				assert.Equal(t, "42", r.Replace)
 			},
 		},
 		{
@@ -57,7 +57,7 @@ value: "42"
 name: yaml_name
 target: example.com/pkg
 identifier: SomeDecl
-value: "42"
+replace: "42"
 `,
 			ruleName: "arg_name",
 			check: func(t *testing.T, r *InstDeclRule) {
@@ -69,7 +69,7 @@ value: "42"
 			yaml: `
 target: example.com/pkg
 identifier: SomeDecl
-value: "42"
+replace: "42"
 `,
 			ruleName: "arg_name",
 			check: func(t *testing.T, r *InstDeclRule) {
@@ -77,28 +77,40 @@ value: "42"
 			},
 		},
 		{
-			name: "empty value",
+			name: "neither replace nor wrap",
 			yaml: `
 target: example.com/pkg
 identifier: SomeDecl
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "one of replace or wrap must be set",
 		},
 		{
-			name: "whitespace-only value",
+			name: "whitespace-only replace and no wrap",
 			yaml: `
 target: example.com/pkg
 identifier: SomeDecl
-value: "   "
+replace: "   "
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "one of replace or wrap must be set",
 		},
 		{
-			name: "func kind without value",
+			name: "both replace and wrap set",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+replace: "42"
+wrap: "wrapper({{ . }})"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "replace and wrap are mutually exclusive",
+		},
+		{
+			name: "func kind without replace or wrap",
 			yaml: `
 target: example.com/pkg
 kind: func
@@ -106,10 +118,10 @@ identifier: MyFunc
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "has no supported advice",
 		},
 		{
-			name: "type kind without value",
+			name: "type kind without replace or wrap",
 			yaml: `
 target: example.com/pkg
 kind: type
@@ -117,7 +129,61 @@ identifier: MyType
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value cannot be empty",
+			errContains: "has no supported advice",
+		},
+		{
+			name: "func kind with wrap",
+			yaml: `
+target: example.com/pkg
+kind: func
+identifier: MyFunc
+wrap: "wrapper({{ . }})"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "wrap is not valid when kind is",
+		},
+		{
+			name: "wrap template missing placeholder",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap: "wrapper(x)"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "wrap template must contain {{ . }} placeholder",
+		},
+		{
+			name: "wrap valid",
+			yaml: `
+target: example.com/pkg
+kind: var
+identifier: DefaultTransport
+wrap: "otelhttp.NewTransport({{ . }})"
+imports:
+  otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+`,
+			ruleName: "wrap_default_transport",
+			check: func(t *testing.T, r *InstDeclRule) {
+				assert.Equal(t, "wrap_default_transport", r.Name)
+				assert.Equal(t, "var", r.Kind)
+				assert.Equal(t, "DefaultTransport", r.Identifier)
+				assert.Empty(t, r.Replace)
+				assert.Equal(t, "otelhttp.NewTransport({{ . }})", r.Wrap)
+			},
+		},
+		{
+			name: "wrap compact placeholder variant",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap: "wrapper({{.}})"
+`,
+			ruleName: "wrap_some_decl",
+			check: func(t *testing.T, r *InstDeclRule) {
+				assert.Equal(t, "wrapper({{.}})", r.Wrap)
+			},
 		},
 		{
 			name: "empty identifier",
@@ -151,28 +217,28 @@ identifier: MyDecl
 			errContains: "kind",
 		},
 		{
-			name: "value not allowed with kind func",
+			name: "replace not allowed with kind func",
 			yaml: `
 target: example.com/pkg
 kind: func
 identifier: MyFunc
-value: "someExpr()"
+replace: "someExpr()"
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value is not valid when kind is",
+			errContains: "replace is not valid when kind is",
 		},
 		{
-			name: "value not allowed with kind type",
+			name: "replace not allowed with kind type",
 			yaml: `
 target: example.com/pkg
 kind: type
 identifier: MyType
-value: "int"
+replace: "int"
 `,
 			ruleName:    "bad_rule",
 			wantErr:     true,
-			errContains: "value is not valid when kind is",
+			errContains: "replace is not valid when kind is",
 		},
 		{
 			name:     "invalid yaml",

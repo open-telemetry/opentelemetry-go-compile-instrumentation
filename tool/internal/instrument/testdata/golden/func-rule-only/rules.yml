@@ -6,4 +6,4 @@ hook_func:
     - inject_hooks:
         before: H1Before
         after: H1After
-        path: testdata
+        path: testdata/golden/func-rule-only

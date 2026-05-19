@@ -15,6 +15,7 @@
 package instrument
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,12 @@ import (
 	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/golden"
 )
+
+// helperPkg holds a compiled helper package for use in golden tests.
+type helperPkg struct {
+	importPath string
+	archive    string
+}
 
 const (
 	testdataDir        = "testdata"
@@ -70,20 +77,18 @@ func runTest(t *testing.T, testName string) {
 	)
 
 	sourceFile := filepath.Join(tempDir, mainGoFileName)
-	// Check if there's a test-specific source file first
+	// Each test case must provide its own source.go in its golden directory.
 	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, sourceFileName)
-	if _, err := os.Stat(testSpecificSource); err == nil {
-		util.CopyFile(testSpecificSource, sourceFile)
-	} else if os.IsNotExist(err) {
-		util.CopyFile(filepath.Join(testdataDir, sourceFileName), sourceFile)
-	} else {
-		t.Fatalf("unexpected error checking test-specific source: %v", err)
-	}
+	require.NoError(t, util.CopyFile(testSpecificSource, sourceFile),
+		"missing source.go for test %q at %s", testName, testSpecificSource)
 
 	ruleSet := loadRulesYAML(t, testName, sourceFile)
 	writeMatchedJSON(ruleSet)
 
-	args := compileArgs(tempDir, sourceFile)
+	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
+	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
+
+	args := compileArgs(tempDir, sourceFile, helpers)
 	err := Toolexec(ctx, args)
 
 	if testName == invalidReceiver {
@@ -165,12 +170,12 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 	util.WriteFile(matchedFile, string(matchedJSON))
 }
 
-func compileArgs(tempDir, sourceFile string) []string {
+func compileArgs(tempDir, sourceFile string, helpers []helperPkg) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
 
 	// Create importcfg file for the test
 	importCfgPath := filepath.Join(tempDir, "importcfg")
-	createImportCfg(importCfgPath)
+	createImportCfg(importCfgPath, helpers)
 
 	return []string{
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
@@ -184,8 +189,9 @@ func compileArgs(tempDir, sourceFile string) []string {
 	}
 }
 
-// createImportCfg creates a basic importcfg file with standard library packages.
-func createImportCfg(path string) {
+// createImportCfg creates an importcfg file with standard library packages
+// and any additional helper packages built for the testcase.
+func createImportCfg(path string, helpers []helperPkg) {
 	// Get standard library package locations
 	// We'll use go list to populate common packages
 	ctx := context.Background()
@@ -215,6 +221,11 @@ func createImportCfg(path string) {
 		}
 	}
 
+	// Register testcase-local helper packages
+	for _, h := range helpers {
+		cfg.PackageFile[h.importPath] = h.archive
+	}
+
 	// Write the importcfg file
 	f, err := os.Create(path)
 	if err != nil {
@@ -225,6 +236,41 @@ func createImportCfg(path string) {
 	for importPath, archive := range cfg.PackageFile {
 		fmt.Fprintf(f, "packagefile %s=%s\n", importPath, archive)
 	}
+}
+
+// buildTestcaseHelpers discovers Go helper packages under <testcaseDir>/helpers/,
+// compiles each one via "go list -export -json" and returns the resulting
+// (importPath, archivePath) pairs so they can be added to the importcfg.
+func buildTestcaseHelpers(ctx context.Context, t *testing.T, testcaseDir string) []helperPkg {
+	helpersDir := filepath.Join(testcaseDir, "helpers")
+	entries, readErr := os.ReadDir(helpersDir)
+	if os.IsNotExist(readErr) {
+		return nil
+	}
+	require.NoError(t, readErr, "reading helpers dir %s", helpersDir)
+
+	var out []helperPkg
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pkgPath := "./" + filepath.ToSlash(filepath.Join(helpersDir, e.Name()))
+
+		var stderr bytes.Buffer
+		cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkgPath)
+		cmd.Stderr = &stderr
+		listOut, listErr := cmd.Output()
+		require.NoError(t, listErr, "go list -export -json %s: %s", pkgPath, stderr.String())
+
+		var info struct {
+			ImportPath string `json:"ImportPath"`
+			Export     string `json:"Export"`
+		}
+		require.NoError(t, json.Unmarshal(listOut, &info))
+
+		out = append(out, helperPkg{importPath: info.ImportPath, archive: info.Export})
+	}
+	return out
 }
 
 func verifyGoldenFiles(t *testing.T, tempDir, testName string) {

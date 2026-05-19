@@ -5,34 +5,13 @@ package main
 
 import _ "unsafe"
 
-var GlobalVar = "original"
-
-type T struct{}
-
-func (t *T) Func1(p1 string, p2 int) (float32, error) {
-	return 0.0, nil
-}
-
-func Func1(p1 string, p2 int) (float32, error) {
-	println("Hello, World!")
-	return 0.0, nil
-}
-
-func Func2(p1 string, _ int) {}
-
-func (T) Func3() {}
-
-func OptGood() {}
-func OptBad()  {}
-func OptBad2() {}
-
 func GenericFunc[T any](p1 T, p2 int) (_unnamedRetVal0 T, _unnamedRetVal1 error) {
 	//line <generated>:1
 	if hookContext3543564877, _ := OtelBeforeTrampoline_GenericFunc3543564877[T](&p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_GenericFunc3543564877[T](hookContext3543564877, &_unnamedRetVal0, &_unnamedRetVal1)
 	}
-	//line main.go:28:2
+	//line main.go:7:2
 	return p1, nil
 }
 
@@ -46,17 +25,9 @@ func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal0 T, _unnam
 	} else {
 		defer OtelAfterTrampoline_GenericMethod3378413897(hookContext3378413897, &_unnamedRetVal0, &_unnamedRetVal1)
 	}
-	//line main.go:36:2
+	//line main.go:15:2
 	return p1, nil
 }
-
-func EllipsisFunc(p1 ...string) {}
-
-func UnderscoreFunc(_ int, _ float32) {}
-
-func Unnamed(int, float32) {}
-
-func main() { Func1("hello", 123) }
 
 //line <generated>:1
 type HookContextImpl3543564877 struct {
@@ -157,10 +128,10 @@ func OtelAfterTrampoline_GenericFunc3543564877[T any](hookContext HookContext, a
 	}
 }
 
-//go:linkname GenericFuncBefore testdata.GenericFuncBefore
+//go:linkname GenericFuncBefore testdata/golden/generic-functions.GenericFuncBefore
 func GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 int)
 
-//go:linkname GenericFuncAfter testdata.GenericFuncAfter
+//go:linkname GenericFuncAfter testdata/golden/generic-functions.GenericFuncAfter
 func GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)
 
 //line <generated>:1
@@ -262,8 +233,8 @@ func OtelAfterTrampoline_GenericMethod3378413897[T any](hookContext HookContext,
 	}
 }
 
-//go:linkname GenericMethodBefore testdata.GenericMethodBefore
+//go:linkname GenericMethodBefore testdata/golden/generic-functions.GenericMethodBefore
 func GenericMethodBefore(hookContext HookContext, recv0 interface{}, param0 interface{}, param1 string)
 
-//go:linkname GenericMethodAfter testdata.GenericMethodAfter
+//go:linkname GenericMethodAfter testdata/golden/generic-functions.GenericMethodAfter
 func GenericMethodAfter(hookContext HookContext, arg0 interface{}, arg1 error)

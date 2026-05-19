@@ -6,7 +6,7 @@ generic_func_rule:
     - inject_hooks:
         before: GenericFuncBefore
         after: GenericFuncAfter
-        path: testdata
+        path: testdata/golden/generic-functions
 
 generic_method_rule:
   target: main
@@ -17,4 +17,4 @@ generic_method_rule:
     - inject_hooks:
         before: GenericMethodBefore
         after: GenericMethodAfter
-        path: testdata
+        path: testdata/golden/generic-functions

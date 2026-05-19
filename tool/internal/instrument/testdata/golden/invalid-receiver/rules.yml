@@ -7,4 +7,4 @@ hook_invalid_receiver:
     - inject_hooks:
         before: H1Before
         after: H1After
-        path: testdata
+        path: testdata/golden/invalid-receiver

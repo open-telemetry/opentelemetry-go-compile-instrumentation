@@ -4,4 +4,4 @@ wrap_sizeof_call:
     function_call: unsafe.Sizeof
   do:
     - wrap_call:
-        template: "Wrapper({{ . }})"
+        replace: "Wrapper({{ . }})"

@@ -5,4 +5,4 @@ hook_before_only:
   do:
     - inject_hooks:
         before: H9Before
-        path: testdata
+        path: testdata/golden/ellipsis-syntax

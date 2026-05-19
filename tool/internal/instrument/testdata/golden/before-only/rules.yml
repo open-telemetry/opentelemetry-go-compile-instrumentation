@@ -5,4 +5,4 @@ hook_before_only:
   do:
     - inject_hooks:
         before: H1Before
-        path: testdata
+        path: testdata/golden/before-only

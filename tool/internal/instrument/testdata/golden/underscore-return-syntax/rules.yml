@@ -5,4 +5,4 @@ hook_underscore_return:
   do:
     - inject_hooks:
         after: H12UnderscoreReturnAfter
-        path: testdata
+        path: testdata/golden/underscore-return-syntax

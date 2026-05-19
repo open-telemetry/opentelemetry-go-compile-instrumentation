@@ -7,7 +7,7 @@ hook_method:
     - inject_hooks:
         before: H3Before
         after: H3After
-        path: testdata
+        path: testdata/golden/method-receiver
 
 hook_method_unnamed_recv:
   target: main
@@ -17,4 +17,4 @@ hook_method_unnamed_recv:
   do:
     - inject_hooks:
         before: H11Before
-        path: testdata
+        path: testdata/golden/method-receiver

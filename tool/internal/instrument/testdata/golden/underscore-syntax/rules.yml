@@ -5,4 +5,4 @@ hook_underscore:
   do:
     - inject_hooks:
         before: H10Before
-        path: testdata
+        path: testdata/golden/underscore-syntax
