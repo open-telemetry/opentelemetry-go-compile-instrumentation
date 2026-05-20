@@ -34,10 +34,11 @@ func TestOpenAIClient(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
+			f.Build(tc.appName)
 
 			// The OpenAI client will fail to connect (no mock server),
 			// but the instrumentation should still create a span with an error status and expected attributes.
-			_ = f.BuildAndRun(tc.appName)
+			f.Run(tc.appName)
 			testutil.WaitForSpanFlush(t)
 
 			spans := testutil.AllSpans(f.Traces())
@@ -57,23 +58,7 @@ func TestOpenAIClient(t *testing.T) {
 				"chat",
 				"gpt-4",
 			)
-		})
-	}
-}
 
-func TestOpenAIClientStreaming(t *testing.T) {
-	testCases := []struct {
-		name    string
-		appName string
-	}{
-		{name: "v1", appName: "openaiclientv1"},
-		{name: "v2", appName: "openaiclientv2"},
-		{name: "v3", appName: "openaiclientv3"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := testutil.NewTestFixture(t)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Equal(t, "/v1/chat/completions", r.URL.Path)
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -91,25 +76,26 @@ func TestOpenAIClientStreaming(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 
-			_ = f.BuildAndRun(tc.appName, "-base-url", server.URL+"/v1", "-stream")
+			f.Run(tc.appName, "-base-url", server.URL+"/v1", "-stream")
 			testutil.WaitForSpanFlush(t)
 
-			chatSpan := testutil.RequireSpan(t, f.Traces(),
+			streamingSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("gen_ai.system", "openai"),
 				testutil.HasAttribute("gen_ai.operation.name", "chat"),
+				testutil.HasAttribute("gen_ai.response.id", "chatcmpl-stream"),
 			)
-			require.Equal(t, ptrace.StatusCodeUnset, chatSpan.Status().Code(), "expected UNSET status for successful stream")
+			require.Equal(t, ptrace.StatusCodeUnset, streamingSpan.Status().Code(), "expected UNSET status for successful stream")
 			testutil.RequireGenAIClientSemconv(
 				t,
-				chatSpan,
+				streamingSpan,
 				"chat",
 				"gpt-4",
 			)
-			testutil.RequireAttribute(t, chatSpan, "gen_ai.response.id", "chatcmpl-stream")
-			testutil.RequireAttribute(t, chatSpan, "gen_ai.response.model", "gpt-4-0613")
-			testutil.RequireAttribute(t, chatSpan, "gen_ai.usage.input_tokens", int64(10))
-			testutil.RequireAttribute(t, chatSpan, "gen_ai.usage.output_tokens", int64(20))
+			testutil.RequireAttribute(t, streamingSpan, "gen_ai.response.id", "chatcmpl-stream")
+			testutil.RequireAttribute(t, streamingSpan, "gen_ai.response.model", "gpt-4-0613")
+			testutil.RequireAttribute(t, streamingSpan, "gen_ai.usage.input_tokens", int64(10))
+			testutil.RequireAttribute(t, streamingSpan, "gen_ai.usage.output_tokens", int64(20))
 		})
 	}
 }
