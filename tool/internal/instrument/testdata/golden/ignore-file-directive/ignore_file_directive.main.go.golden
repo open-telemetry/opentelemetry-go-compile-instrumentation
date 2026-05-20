@@ -1,0 +1,145 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+//otelc:ignore
+
+package main
+
+import _ "unsafe"
+
+func SkippedFunc(p1 string) {}
+
+//otelc:instrument
+func ForcedFunc(p1 string) {
+	//line <generated>:1
+	if hookContext1720179132, _ := OtelBeforeTrampoline_ForcedFunc1720179132(&p1); false {
+	} else {
+		defer OtelAfterTrampoline_ForcedFunc1720179132(hookContext1720179132)
+	}
+	//line main.go:11:28
+}
+
+func main() {}
+
+//line <generated>:1
+type HookContextImpl1720179132 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl1720179132) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl1720179132) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl1720179132) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl1720179132) GetData() interface{}     { return c.data }
+func (c *HookContextImpl1720179132) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl1720179132) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl1720179132) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl1720179132) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*string))
+	}
+	return nil
+}
+
+func (c *HookContextImpl1720179132) SetParam(idx int, val interface{}) {
+	if val == nil {
+		c.params[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.params[0].(*string)) = val.(string)
+	}
+}
+
+func (c *HookContextImpl1720179132) GetReturnVal(idx int) interface{} {
+	switch idx {
+	}
+	return nil
+}
+
+func (c *HookContextImpl1720179132) SetReturnVal(idx int, val interface{}) {
+	if val == nil {
+		c.returnVals[idx] = nil
+		return
+	}
+	switch idx {
+	}
+}
+func (c *HookContextImpl1720179132) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl1720179132) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl1720179132) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl1720179132) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_ForcedFunc1720179132(param0 *string) (hookContext *HookContextImpl1720179132, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "HBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl1720179132{}
+	hookContext.params = []interface{}{param0}
+	hookContext.funcName = "ForcedFunc"
+	hookContext.packageName = "main"
+	if HBefore != nil {
+		HBefore(hookContext, *param0)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_ForcedFunc1720179132(hookContext HookContext) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "HAfter")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl1720179132).returnVals = []interface{}{}
+	if HAfter != nil {
+		HAfter(hookContext)
+	}
+}
+
+//go:linkname HBefore testdata/golden/ignore-file-directive.HBefore
+func HBefore(hookContext HookContext, param0 string)
+
+//go:linkname HAfter testdata/golden/ignore-file-directive.HAfter
+func HAfter(hookContext HookContext)
