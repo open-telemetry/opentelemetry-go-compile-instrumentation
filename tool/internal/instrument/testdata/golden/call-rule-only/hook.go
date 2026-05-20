@@ -1,0 +1,13 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+//go:build ignore
+
+package testdata
+
+import "fmt"
+
+func Wrapper(size uintptr) uintptr {
+	fmt.Println("Wrapped!")
+	return size
+}
