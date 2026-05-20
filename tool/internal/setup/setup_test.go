@@ -534,17 +534,11 @@ func TestGetPackagesWithCFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(moduleDir, "cmd", "main.go"),
-		[]byte("package main
-
-func main() {}
-"), 0o644); err != nil {
+		[]byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(moduleDir, "go.mod"),
-		[]byte("module cflagmodule
-
-go 1.21
-"), 0o644); err != nil {
+		[]byte("module cflagmodule\n\ngo 1.21\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
