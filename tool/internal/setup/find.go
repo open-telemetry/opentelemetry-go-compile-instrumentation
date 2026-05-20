@@ -18,6 +18,9 @@ import (
 
 const maxBuildPlanBufferSize = 10 * 1024 * 1024 // 10MB
 
+//nolint:gochecknoglobals // allows us to mock exec.CommandContext in tests
+var execCommandContext = exec.CommandContext
+
 type Dependency struct {
 	ImportPath string
 	Version    string
@@ -69,17 +72,10 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 	return commands, nil
 }
 
-// listBuildPlan lists the build plan by running `go build/install -a -x -n`
+// listBuildPlan lists the build plan by running `go build -a -x -n`
 // and then filtering the commands (cd, cgo, compile) from the build plan log.
-func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([]string, error) {
-	const goBuildMinArgs = 2 // go build
+func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]string, error) {
 	const buildPlanLogName = "build-plan.log"
-	if len(goBuildCmd) < goBuildMinArgs {
-		return nil, ex.Newf("at least %d arguments are required", goBuildMinArgs)
-	}
-	if goBuildCmd[1] != "build" && goBuildCmd[1] != "install" {
-		return nil, ex.Newf("must be go build/install, got %s", goBuildCmd[1])
-	}
 
 	// Create a build plan log file in the temporary directory
 	buildPlanLog, err := os.Create(util.GetBuildTemp(buildPlanLogName))
@@ -88,16 +84,13 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	}
 	defer buildPlanLog.Close()
 	// The full build command is: "go build/install -a -x -n  {...}"
-	args := []string{}
-	args = append(args, goBuildCmd[:goBuildMinArgs]...) // go build/install
-	args = append(args, []string{"-a", "-x", "-n"}...)  // -a -x -n
-	if len(goBuildCmd) > goBuildMinArgs {               // {...} remaining
-		args = append(args, goBuildCmd[goBuildMinArgs:]...)
-	}
-	sp.Info("New build command", "new", args, "old", goBuildCmd)
+	prefix := []string{"build", "-a", "-x", "-n"}
+	args := make([]string, 0, len(prefix)+len(cmdArgs))
+	args = append(args, prefix...)
+	args = append(args, cmdArgs...) // args from original build/install or setup command
+	sp.Info("go build command", "args", args)
 
-	//nolint:gosec // Command arguments are validated with above assertions
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd := execCommandContext(ctx, "go", args...)
 	// This is a little anti-intuitive as the error message is not printed to
 	// the stderr, instead it is printed to the stdout, only the build tool
 	// knows the reason why.
@@ -109,7 +102,6 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	err = cmd.Run()
 	if err != nil {
 		// Read the build plan log to see what went wrong
-		_, _ = buildPlanLog.Seek(0, 0)
 		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
 		return nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
 	}
@@ -204,8 +196,8 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 }
 
 // findDeps finds dependencies by listing the build plan.
-func (sp *SetupPhase) findDeps(ctx context.Context, goBuildCmd []string) ([]*Dependency, error) {
-	buildPlan, err := sp.listBuildPlan(ctx, goBuildCmd)
+func (sp *SetupPhase) findDeps(ctx context.Context, cmdArgs []string) ([]*Dependency, error) {
+	buildPlan, err := sp.listBuildPlan(ctx, cmdArgs)
 	if err != nil {
 		return nil, err
 	}
