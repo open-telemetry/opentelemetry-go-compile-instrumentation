@@ -30,8 +30,8 @@ rule_name:
 
 | Key       | Required | Meaning                                                            |
 | --------- | -------- | ------------------------------------------------------------------ |
-| `target`  | yes      | Package import path. Exact match against the compile-time `-p` flag. |
-| `version` | no       | Version range `start_inclusive,end_exclusive`. Omit to match all versions. |
+| `target`  | yes      | Package import path. Exact match against compile-time `-p` flag.   |
+| `version` | no       | Version range `start_inclusive,end_exclusive`. Omit to match all.  |
 | `where`   | no       | Non-package selectors and file-level predicates.                   |
 | `do`      | yes      | Ordered modifier list. Modifier name declares the rule type.       |
 | `imports` | no       | `alias: path` map merged into instrumented files.                  |
@@ -411,8 +411,8 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 | Field           | Type       | Required                                      | Notes                                                                                                                  |
 | --------------- | ---------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `replace`       | string     | No (one of `replace`/`append_args` required) | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a Go call expression.                  |
-| `append_args`   | `[]string` | No (one of `replace`/`append_args` required) | Go expression strings appended as additional arguments to the matched call                                             |
+| `replace`       | string     | No (one of `replace`/`append_args` required)  | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a Go call expression.                  |
+| `append_args`   | `[]string` | No (one of `replace`/`append_args` required)  | Go expression strings appended as additional arguments to the matched call                                             |
 | `variadic_type` | string     | No                                            | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
 
 Top-level `imports` (map[string]string, optional): Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`.
