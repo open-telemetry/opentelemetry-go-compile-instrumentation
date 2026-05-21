@@ -14,8 +14,16 @@ jobs:
   validate:
     name: Validate PR Title
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'pull_request'
     steps:
+      - name: Verify workflow origin
+        if: github.event.workflow_run.event != 'pull_request'
+        run: |
+          echo "::error::This workflow must only be triggered by a pull_request event, got: ${{ github.event.workflow_run.event }}"
+          exit 1
+
       - name: Download PR metadata
         id: download
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
@@ -39,10 +47,15 @@ jobs:
           fi
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
-      # Security: Since this workflow runs in the privileged workflow_run context,
-      # it checks out only base-branch code from the target repository.
-      - name: Check out base code
+      # Security: this workflow runs in the privileged workflow_run context.
+      # A bare checkout (no ref/sha override) checks out the repository's
+      # default branch — never the fork's pull-request branch.  Do NOT add
+      # a ref or sha input here; doing so could check out untrusted fork code
+      # and allow secret exfiltration.
+      - name: Check out base-branch code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0

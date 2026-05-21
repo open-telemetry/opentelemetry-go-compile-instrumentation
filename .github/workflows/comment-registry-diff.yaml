@@ -2,8 +2,10 @@ name: Comment Registry Diff
 
 on:
   # Security: this workflow runs with write permissions via workflow_run.
-  # It must never check out or execute PR code. It only consumes artifacts
+  # It must never check out or execute PR code.  It only consumes artifacts
   # uploaded by the unprivileged "Generate Registry Diff" workflow.
+  # The job-level 'if' additionally verifies the triggering event was a
+  # pull_request to prevent abuse via manual re-runs or other triggers.
   workflow_run:
     workflows: ["Generate Registry Diff"]
     types:
@@ -17,8 +19,17 @@ jobs:
   comment:
     name: Post Registry Diff Comment
     runs-on: ubuntu-latest
-    if: "github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'"
+    if: >-
+      github.event.workflow_run.event == 'pull_request'
+      && (github.event.workflow_run.conclusion == 'success'
+       || github.event.workflow_run.conclusion == 'failure')
     steps:
+      - name: Verify workflow origin
+        if: github.event.workflow_run.event != 'pull_request'
+        run: |
+          echo "::error::This workflow must only be triggered by a pull_request event, got: ${{ github.event.workflow_run.event }}"
+          exit 1
+
       - name: Download diff report artifact
         id: download
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
@@ -80,7 +91,14 @@ jobs:
             comment += `Comparing **latest** (main branch) vs **${currentVersion}** (current)\n\n`;
 
             if (fs.existsSync(diffFile)) {
-              const diffContent = fs.readFileSync(diffFile, 'utf8');
+              let diffContent = fs.readFileSync(diffFile, 'utf8');
+
+              // Guard: cap artifact content to 64 KB to prevent oversized PR comments.
+              const maxDiffBytes = 65536;
+              if (Buffer.byteLength(diffContent, 'utf8') > maxDiffBytes) {
+                diffContent = diffContent.slice(0, maxDiffBytes) + '\n\n…(truncated)';
+              }
+
               if (diffContent.includes('Registry diff generation failed')) {
                 comment += '⚠️ Could not generate diff (possibly due to network issues). This check is non-blocking.\n\n';
               } else if (diffContent.trim().length < 50 || diffContent.includes('No changes')) {
