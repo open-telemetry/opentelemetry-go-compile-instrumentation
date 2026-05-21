@@ -9,6 +9,7 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -172,31 +173,91 @@ func TestExtractGZip_Normal(t *testing.T) {
 }
 
 func TestExtractGZip_SkipsZipSlip(t *testing.T) {
-	tmpDir := t.TempDir()
+	tests := []struct {
+		name      string
+		path      string
+		skipCheck func(t *testing.T, tmpDir string)
+		checkPath func(tmpDir string) string
+	}{
+		{
+			name: "relative traversal",
+			path: "../evil.yaml",
+			skipCheck: func(t *testing.T, tmpDir string) {
+				if _, err := os.Stat(filepath.Join(tmpDir, "../evil.yaml")); err == nil {
+					t.Skip("../evil.yaml already exists")
+				}
+			},
+			checkPath: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "../evil.yaml")
+			},
+		},
+		{
+			name: "unix absolute path",
+			path: "/evil.yaml",
+			skipCheck: func(t *testing.T, tmpDir string) {
+				if runtime.GOOS == "windows" {
+					t.Skip("unix-specific test")
+				}
 
-	var tarBuf bytes.Buffer
-	gz := gzip.NewWriter(&tarBuf)
-	tw := tar.NewWriter(gz)
+				if _, err := os.Stat("/evil.yaml"); err == nil {
+					t.Skip("/evil.yaml already exists")
+				}
+			},
+			checkPath: func(tmpDir string) string {
+				return "/evil.yaml"
+			},
+		},
+		{
+			name: "windows absolute path",
+			path: "C:\\evil.yaml",
+			skipCheck: func(t *testing.T, tmpDir string) {
+				if runtime.GOOS != "windows" {
+					t.Skip("windows-specific test")
+				}
 
-	content := []byte("evil")
+				if _, err := os.Stat("C:\\evil.yaml"); err == nil {
+					t.Skip("C:\\evil.yaml already exists")
+				}
+			},
+			checkPath: func(tmpDir string) string {
+				return "C:\\evil.yaml"
+			},
+		},
+	}
 
-	err := tw.WriteHeader(&tar.Header{
-		Name:     "../evil.yaml",
-		Mode:     0o644,
-		Size:     int64(len(content)),
-		Typeflag: tar.TypeReg,
-	})
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			if tt.skipCheck != nil {
+				tt.skipCheck(t, tmpDir)
+			}
 
-	_, err = tw.Write(content)
-	require.NoError(t, err)
+			var tarBuf bytes.Buffer
+			gz := gzip.NewWriter(&tarBuf)
+			tw := tar.NewWriter(gz)
 
-	require.NoError(t, tw.Close())
-	require.NoError(t, gz.Close())
+			content := []byte("evil")
 
-	err = extractGZip(tarBuf.Bytes(), tmpDir)
-	require.NoError(t, err)
+			err := tw.WriteHeader(&tar.Header{
+				Name:     tt.path,
+				Mode:     0o644,
+				Size:     int64(len(content)),
+				Typeflag: tar.TypeReg,
+			})
+			require.NoError(t, err)
 
-	_, err = os.Stat(filepath.Join(tmpDir, "..", "evil.yaml"))
-	require.True(t, os.IsNotExist(err))
+			_, err = tw.Write(content)
+			require.NoError(t, err)
+
+			require.NoError(t, tw.Close())
+			require.NoError(t, gz.Close())
+
+			require.NoError(t, extractGZip(tarBuf.Bytes(), tmpDir))
+
+			checkPath := tt.checkPath(tmpDir)
+			_, err = os.Stat(checkPath)
+
+			require.True(t, os.IsNotExist(err))
+		})
+	}
 }
