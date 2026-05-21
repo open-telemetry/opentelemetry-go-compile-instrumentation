@@ -4,9 +4,13 @@
 package util
 
 import (
+	"bytes"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAssertType_Success(t *testing.T) {
@@ -26,4 +30,26 @@ func TestAssertType_NilPointer(t *testing.T) {
 
 	ps := AssertType[*string](s)
 	assert.Nil(t, ps)
+}
+
+func TestAssertType_NilFailure(t *testing.T) {
+	if os.Getenv("ASSERTTYPE_FATAL") == "1" {
+		AssertType[*string](nil)
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestAssertType_NilFailure")
+	cmd.Env = append(os.Environ(), "ASSERTTYPE_FATAL=1")
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+
+	assert.Contains(t,
+		stderr.String(),
+		"Type assertion failed: got nil, expected *string")
 }
