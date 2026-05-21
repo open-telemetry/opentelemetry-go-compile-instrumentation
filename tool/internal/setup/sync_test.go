@@ -214,7 +214,6 @@ go 1.21
 	}
 
 	_, err = sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir)
-
 	// This will likely fail due to missing instrumentation directories,
 	// but we're testing that it attempts to add replaces
 	if err != nil {
@@ -317,7 +316,7 @@ require (
 			require.NoError(t, err)
 
 			bumpedDeps := findBumpedDeps(after, before)
-			require.NoError(t, sp.warnVersion(after, before, bumpedDeps))
+			sp.warnVersion(after, before, bumpedDeps)
 
 			logged := buf.String()
 			assert.Contains(t, logged, "Bumped go version")
@@ -351,7 +350,7 @@ require (
 	require.NoError(t, err)
 
 	bumpedDeps := findBumpedDeps(after, before)
-	require.NoError(t, sp.warnVersion(after, before, bumpedDeps))
+	sp.warnVersion(after, before, bumpedDeps)
 
 	logged := buf.String()
 	assert.Contains(t, logged, "Bumped dependency go.opentelemetry.io/otel")
@@ -383,7 +382,7 @@ require (
 	require.NoError(t, err)
 
 	bumpedDeps := findBumpedDeps(after, before)
-	require.NoError(t, sp.warnVersion(after, before, bumpedDeps))
+	sp.warnVersion(after, before, bumpedDeps)
 
 	assert.Empty(t, buf.String())
 }
@@ -407,7 +406,7 @@ go 1.25.0
 	require.NoError(t, err)
 
 	bumpedDeps := findBumpedDeps(after, before)
-	require.NoError(t, sp.warnVersion(after, before, bumpedDeps))
+	sp.warnVersion(after, before, bumpedDeps)
 
 	assert.Empty(t, buf.String())
 }

@@ -113,7 +113,7 @@ func findBumpedDeps(after *modfile.File, before versionSnapshot) []bumpedDep {
 	return bumped
 }
 
-func (sp *SetupPhase) warnVersion(after *modfile.File, before versionSnapshot, bumpedDeps []bumpedDep) error {
+func (sp *SetupPhase) warnVersion(after *modfile.File, before versionSnapshot, bumpedDeps []bumpedDep) {
 	// Go directives use Go toolchain syntax ("1.21"), not module semver.
 	if after.Go != nil && before.goVersion != "" {
 		if goversion.Compare("go"+after.Go.Version, "go"+before.goVersion) > 0 {
@@ -122,12 +122,22 @@ func (sp *SetupPhase) warnVersion(after *modfile.File, before versionSnapshot, b
 	}
 
 	for _, bumped := range bumpedDeps {
-		sp.Warn(fmt.Sprintf("Bumped dependency %s (%s -> %s)", bumped.Req.Mod.Path, bumped.OldVersion, bumped.Req.Mod.Version))
+		sp.Warn(
+			fmt.Sprintf(
+				"Bumped dependency %s (%s -> %s)",
+				bumped.Req.Mod.Path,
+				bumped.OldVersion,
+				bumped.Req.Mod.Version,
+			),
+		)
 	}
-	return nil
 }
 
-func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) ([]bumpedDep, error) {
+func (sp *SetupPhase) syncDeps(
+	ctx context.Context,
+	matched []*rule.InstRuleSet,
+	moduleDir string,
+) ([]bumpedDep, error) {
 	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
 		funcRules := m.AllFuncRules()
@@ -213,10 +223,8 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 			return nil, ex.Wrapf(parseErr, "unable to check for version bumps after go mod tidy")
 		}
 		bumpedDeps := findBumpedDeps(after, before)
-		err = sp.warnVersion(after, before, bumpedDeps)
-		if err != nil {
-			return nil, err
-		}
+		sp.warnVersion(after, before, bumpedDeps)
+
 		sp.keepForDebug(goModFile)
 		return bumpedDeps, nil
 	}
