@@ -1,6 +1,9 @@
 name: Comment Registry Diff
 
 on:
+  # Security: this workflow runs in a privileged workflow_run context. It must
+  # not check out or execute pull request code; it only reads artifacts produced
+  # by the unprivileged "Generate Registry Diff" pull_request workflow.
   workflow_run:
     workflows: ["Generate Registry Diff"]
     types:

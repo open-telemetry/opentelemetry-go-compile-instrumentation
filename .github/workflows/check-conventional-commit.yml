@@ -58,6 +58,10 @@ jobs:
           echo "Is Fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}"
       - name: Check out
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          # This workflow can run in the privileged pull_request_target context,
+          # so always check out trusted base-branch code instead of PR head code.
+          ref: ${{ github.event.pull_request.base.sha }}
       - name: Setup go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
@@ -71,4 +75,3 @@ jobs:
           }}" -pr="${{ github.event.pull_request.number }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
