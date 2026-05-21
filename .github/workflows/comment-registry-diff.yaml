@@ -1,6 +1,9 @@
 name: Comment Registry Diff
 
 on:
+  # Security: this workflow runs with write permissions via workflow_run.
+  # It must never check out or execute PR code. It only consumes artifacts
+  # uploaded by the unprivileged "Generate Registry Diff" workflow.
   workflow_run:
     workflows: ["Generate Registry Diff"]
     types:

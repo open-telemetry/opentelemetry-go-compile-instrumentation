@@ -1,74 +1,62 @@
 name: Conventional Commit
+
 on:
-  # We need both events to handle different scenarios:
-  # - pull_request: Triggers reliably on all PR events, but lacks write permissions for forks
-  # - pull_request_target: Has write permissions for forks, but doesn't always trigger on 'synchronize'
-  pull_request:
-    types: [opened, edited, reopened, synchronize]
-  pull_request_target:
-    types: [opened, edited, reopened, synchronize]
+  workflow_run:
+    workflows: ["Conventional Commit Trigger"]
+    types:
+      - completed
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
-  update-labels:
-    permissions:
-      pull-requests: write  # Needed to post comments & update labels
-    name: Update Labels
+  validate:
+    name: Validate PR Title
     runs-on: ubuntu-latest
-    # Prevent double triggers: skip pull_request runs for forks (pull_request_target will handle them)
-    if: |
-      github.event_name == 'pull_request_target' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
-      # Check if we have the necessary permissions to update labels
-      # This is needed because:
-      # - pull_request from forks doesn't have write permissions
-      # - pull_request_target has write permissions but doesn't always trigger on synchronize
-      - name: Check Permissions
-        id: check-permissions
+      - name: Download PR metadata
+        id: download
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          name: conventional-commit-metadata
+          path: tmp
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Read PR metadata
+        id: metadata
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
-            echo "has_permissions=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Running with pull_request_target - has write permissions"
-          elif [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
-            echo "has_permissions=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Running with pull_request from same repository - has write permissions"
-          else
-            echo "has_permissions=false" >> "$GITHUB_OUTPUT"
-            echo "❌ Running with pull_request from fork - no write permissions"
-            echo "⚠️  Labels cannot be updated on this run. They will be updated when:"
-            echo "   - The PR is opened, edited, or reopened (uses pull_request_target)"
-            echo "   - Or when the PR is merged"
+          if [ ! -f tmp/pr-number.txt ]; then
+            echo "::error::PR number file not found in artifact"
+            exit 1
           fi
-      # Debug information - only shown when we don't have permissions (unexpected scenario)
-      - name: Debug Event
-        if: steps.check-permissions.outputs.has_permissions != 'true'
-        run: |
-          echo "Event Name: ${{ github.event_name }}"
-          echo "Event Action: ${{ github.event.action }}"
-          echo "Event Type: ${{ github.event.pull_request.type }}"
-          echo "Repo Owner: ${{ github.repository_owner }}"
-          echo "Repo Name: ${{ github.event.repository.name }}"
-          echo "PR Number: ${{ github.event.pull_request.number }}"
-          echo "PR State: ${{ github.event.pull_request.state }}"
-          echo "Head Repo: ${{ github.event.pull_request.head.repo.full_name }}"
-          echo "Base Repo: ${{ github.repository }}"
-          echo "Is Fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}"
-      - name: Check out
+          PR_NUMBER=$(tr -d '[:space:]' < tmp/pr-number.txt)
+          if ! echo "$PR_NUMBER" | grep -qE '^[0-9]+$'; then
+            echo "::error::Invalid PR number: $PR_NUMBER"
+            exit 1
+          fi
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      # Security: Since this workflow runs in the privileged workflow_run context,
+      # it checks out only base-branch code from the target repository.
+      - name: Check out base code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+
       - name: Setup go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
           cache-dependency-path: "**/go.mod"
           go-version-file: go.mod
-      # Run the conventionalcommit tool to validate PR title and assign labels
-      # This step is skipped if we don't have write permissions (e.g., pull_request from fork on synchronize)
-      - name: Assign Labels
-        if: steps.check-permissions.outputs.has_permissions == 'true'
-        run: go -C .github/tools/conventionalcommit run . -owner="${{ github.repository_owner }}" -repo="${{ github.event.repository.name
-          }}" -pr="${{ github.event.pull_request.number }}"
+
+      - name: Run conventionalcommit validator
+        run: |
+          go -C .github/tools/conventionalcommit run . \
+            -owner="${{ github.repository_owner }}" \
+            -repo="${{ github.event.repository.name }}" \
+            -pr="${{ steps.metadata.outputs.pr_number }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
