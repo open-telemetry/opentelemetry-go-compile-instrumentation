@@ -53,3 +53,25 @@ func TestAssertType_NilFailure(t *testing.T) {
 		stderr.String(),
 		"Type assertion failed: got nil, expected *string")
 }
+
+func TestAssertType_InvalidType(t *testing.T) {
+	if os.Getenv("ASSERTTYPE_INVALID") == "1" {
+		AssertType[string](123)
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestAssertType_InvalidType")
+	cmd.Env = append(os.Environ(), "ASSERTTYPE_INVALID=1")
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+
+	assert.Contains(t,
+		stderr.String(),
+		"Type assertion failed: got int, expected string")
+}
