@@ -164,8 +164,9 @@ func TestSyncDeps_NoRules(t *testing.T) {
 		logger: slog.Default(),
 	}
 
-	err := sp.syncDeps(t.Context(), []*rule.InstRuleSet{}, tempDir)
-	assert.NoError(t, err)
+	bumpedDeps, err := sp.syncDeps(t.Context(), []*rule.InstRuleSet{}, tempDir)
+	require.NoError(t, err)
+	assert.Empty(t, bumpedDeps)
 }
 
 func TestSyncDeps_WithRules(t *testing.T) {
@@ -212,7 +213,8 @@ go 1.21
 		},
 	}
 
-	err = sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir)
+	_, err = sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir)
+
 	// This will likely fail due to missing instrumentation directories,
 	// but we're testing that it attempts to add replaces
 	if err != nil {
@@ -311,7 +313,11 @@ require (
 				},
 			}
 
-			require.NoError(t, sp.warnVersion(gomodPath, before))
+			after, err := parseGoMod(gomodPath)
+			require.NoError(t, err)
+
+			bumpedDeps := findBumpedDeps(after, before)
+			require.NoError(t, sp.warnVersion(after, before, bumpedDeps))
 
 			logged := buf.String()
 			assert.Contains(t, logged, "Bumped go version")
@@ -341,7 +347,11 @@ require (
 		},
 	}
 
-	require.NoError(t, sp.warnVersion(gomodPath, before))
+	after, err := parseGoMod(gomodPath)
+	require.NoError(t, err)
+
+	bumpedDeps := findBumpedDeps(after, before)
+	require.NoError(t, sp.warnVersion(after, before, bumpedDeps))
 
 	logged := buf.String()
 	assert.Contains(t, logged, "Bumped dependency go.opentelemetry.io/otel")
@@ -369,19 +379,13 @@ require (
 		},
 	}
 
-	require.NoError(t, sp.warnVersion(gomodPath, before))
+	after, err := parseGoMod(gomodPath)
+	require.NoError(t, err)
+
+	bumpedDeps := findBumpedDeps(after, before)
+	require.NoError(t, sp.warnVersion(after, before, bumpedDeps))
 
 	assert.Empty(t, buf.String())
-}
-
-func TestWarnVersion_MissingFile(t *testing.T) {
-	sp, _ := warnCapture()
-	before := versionSnapshot{goVersion: "1.22.0", deps: map[string]string{}}
-
-	err := sp.warnVersion("/nonexistent/go.mod", before)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unable to check for version bumps")
 }
 
 func TestWarnVersion_EmptyGoVersion(t *testing.T) {
@@ -399,7 +403,11 @@ go 1.25.0
 		deps:      map[string]string{},
 	}
 
-	require.NoError(t, sp.warnVersion(gomodPath, before))
+	after, err := parseGoMod(gomodPath)
+	require.NoError(t, err)
+
+	bumpedDeps := findBumpedDeps(after, before)
+	require.NoError(t, sp.warnVersion(after, before, bumpedDeps))
 
 	assert.Empty(t, buf.String())
 }

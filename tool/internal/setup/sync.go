@@ -94,12 +94,26 @@ func snapshotVersion(mf *modfile.File) versionSnapshot {
 	return snap
 }
 
-func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) error {
-	after, err := parseGoMod(goModPath)
-	if err != nil {
-		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
-	}
+type bumpedDep struct {
+	Req        *modfile.Require
+	OldVersion string
+}
 
+func findBumpedDeps(after *modfile.File, before versionSnapshot) []bumpedDep {
+	var bumped []bumpedDep
+	for _, req := range after.Require {
+		oldVer, tracked := before.deps[req.Mod.Path]
+		if tracked && semver.Compare(req.Mod.Version, oldVer) > 0 {
+			bumped = append(bumped, bumpedDep{
+				Req:        req,
+				OldVersion: oldVer,
+			})
+		}
+	}
+	return bumped
+}
+
+func (sp *SetupPhase) warnVersion(after *modfile.File, before versionSnapshot, bumpedDeps []bumpedDep) error {
 	// Go directives use Go toolchain syntax ("1.21"), not module semver.
 	if after.Go != nil && before.goVersion != "" {
 		if goversion.Compare("go"+after.Go.Version, "go"+before.goVersion) > 0 {
@@ -107,24 +121,20 @@ func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) erro
 		}
 	}
 
-	for _, req := range after.Require {
-		if oldVer, tracked := before.deps[req.Mod.Path]; tracked {
-			if semver.Compare(req.Mod.Version, oldVer) > 0 {
-				sp.Warn(fmt.Sprintf("Bumped dependency %s (%s -> %s)", req.Mod.Path, oldVer, req.Mod.Version))
-			}
-		}
+	for _, bumped := range bumpedDeps {
+		sp.Warn(fmt.Sprintf("Bumped dependency %s (%s -> %s)", bumped.Req.Mod.Path, bumped.OldVersion, bumped.Req.Mod.Version))
 	}
 	return nil
 }
 
-func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
+func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) ([]bumpedDep, error) {
 	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
 		funcRules := m.AllFuncRules()
 		rules = append(rules, funcRules...)
 	}
 	if len(rules) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Add replace directives for matched dependencies
@@ -134,7 +144,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	goModFile := filepath.Join(moduleDir, "go.mod")
 	modfile, err := parseGoMod(goModFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	before := snapshotVersion(modfile)
@@ -178,10 +188,10 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	for _, replace := range replaces {
 		added, addErr := addReplace(modfile, replace)
 		if addErr != nil {
-			return addErr
+			return nil, addErr
 		}
 		changed = changed || added
-		if changed {
+		if added {
 			sp.Info("Replace dependency", "old", replace.oldPath, "new", replace.newPath)
 		}
 	}
@@ -191,18 +201,24 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	if changed {
 		err = writeGoMod(goModFile, modfile)
 		if err != nil {
-			return ex.Wrapf(err, "writing updated go.mod at %s", goModFile)
+			return nil, ex.Wrapf(err, "writing updated go.mod at %s", goModFile)
 		}
 		err = runModTidy(ctx, moduleDir)
 		if err != nil {
-			return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
+			return nil, ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
 		}
 		// Compare after tidy because MVS may raise existing consumer versions.
-		err = sp.warnVersion(goModFile, before)
+		after, parseErr := parseGoMod(goModFile)
+		if parseErr != nil {
+			return nil, ex.Wrapf(parseErr, "unable to check for version bumps after go mod tidy")
+		}
+		bumpedDeps := findBumpedDeps(after, before)
+		err = sp.warnVersion(after, before, bumpedDeps)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		sp.keepForDebug(goModFile)
+		return bumpedDeps, nil
 	}
-	return nil
+	return nil, nil
 }

@@ -383,17 +383,11 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 	return loadDefaultRules()
 }
 
-func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
-	// Construct the set of default allRules by parsing embedded data
-	allRules, err := sp.loadRules()
-	if err != nil {
-		return nil, err
-	}
-	sp.Info("Found available rules", "rules", allRules)
-	if len(allRules) == 0 {
-		return nil, nil
-	}
-
+func (sp *SetupPhase) matchDeps(
+	ctx context.Context,
+	allRules []rule.InstRule,
+	deps []*Dependency,
+) ([]*rule.InstRuleSet, error) {
 	// Pre-index rules by target
 	rulesByTarget := make(map[string][]rule.InstRule)
 	for _, r := range allRules {
@@ -422,7 +416,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		})
 	}
 
-	if err = g.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 	return matched, nil
