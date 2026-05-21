@@ -1,0 +1,6 @@
+wrap_sizeof_imported:
+  target: main
+  function_call: unsafe.Sizeof
+  replace: "wrapper.Sizeof({{ . }})"
+  imports:
+    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testhelper/wrapper"

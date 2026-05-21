@@ -78,7 +78,7 @@ func runTest(t *testing.T, testName string) {
 	ruleSet := loadRulesYAML(t, testName, sourceFile)
 	writeMatchedJSON(ruleSet)
 
-	args := compileArgs(tempDir, sourceFile)
+	args := compileArgs(t, tempDir, sourceFile, ruleSet)
 	err := Toolexec(ctx, args)
 
 	if testName == invalidReceiver {
@@ -157,12 +157,16 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 	util.WriteFile(matchedFile, string(matchedJSON))
 }
 
-func compileArgs(tempDir, sourceFile string) []string {
+func compileArgs(t *testing.T, tempDir, sourceFile string, ruleSet *rule.InstRuleSet) []string {
+	t.Helper()
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
+
+	// Collect imports declared by rules so createImportCfg can resolve them
+	extraImports := collectRuleImports(ruleSet)
 
 	// Create importcfg file for the test
 	importCfgPath := filepath.Join(tempDir, "importcfg")
-	createImportCfg(importCfgPath)
+	createImportCfg(t, importCfgPath, extraImports)
 
 	return []string{
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
@@ -176,46 +180,100 @@ func compileArgs(tempDir, sourceFile string) []string {
 	}
 }
 
-// createImportCfg creates a basic importcfg file with standard library packages.
-func createImportCfg(path string) {
-	// Get standard library package locations
-	// We'll use go list to populate common packages
+// collectRuleImports gathers all import paths declared in rule imports fields.
+// This allows createImportCfg to pre-resolve non-stdlib packages that rules
+// reference, fixing the gap where golden tests could only use standard library
+// imports in call rules.
+func collectRuleImports(ruleSet *rule.InstRuleSet) []string {
+	seen := make(map[string]bool)
+	for _, rules := range ruleSet.CallRules {
+		for _, r := range rules {
+			for _, importPath := range r.Imports {
+				if !seen[importPath] {
+					seen[importPath] = true
+				}
+			}
+		}
+	}
+	for _, rules := range ruleSet.RawRules {
+		for _, r := range rules {
+			for _, importPath := range r.Imports {
+				if !seen[importPath] {
+					seen[importPath] = true
+				}
+			}
+		}
+	}
+	for _, rules := range ruleSet.DeclRules {
+		for _, r := range rules {
+			for _, importPath := range r.Imports {
+				if !seen[importPath] {
+					seen[importPath] = true
+				}
+			}
+		}
+	}
+
+	importPaths := make([]string, 0, len(seen))
+	for p := range seen {
+		importPaths = append(importPaths, p)
+	}
+	return importPaths
+}
+
+// createImportCfg creates an importcfg file with standard library packages and
+// any additional packages required by rule imports. The extraImports parameter
+// allows test cases to pre-resolve non-stdlib packages (e.g. helper packages
+// from pkg/instrumentation/) so that the compile command can find them.
+func createImportCfg(t *testing.T, path string, extraImports []string) {
+	t.Helper()
 	ctx := context.Background()
 
-	// Start with an empty config
-	cfg := struct {
-		PackageFile map[string]string
-	}{
-		PackageFile: make(map[string]string),
-	}
+	packageFiles := make(map[string]string)
 
 	// Resolve common standard library packages that might be needed
 	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io"}
 	for _, pkg := range commonPkgs {
-		cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkg)
-		output, err := cmd.Output()
-		if err != nil {
-			continue // Skip if package not found
-		}
+		resolvePackageExport(ctx, pkg, packageFiles)
+	}
 
-		var info struct {
-			ImportPath string `json:"ImportPath"`
-			Export     string `json:"Export"`
+	// Resolve additional imports declared by rules. This is the key
+	// infrastructure fix: without this, call rules that reference helper
+	// packages through the imports field would fail to compile in golden tests
+	// because the importcfg would not include the helper package's archive.
+	for _, pkg := range extraImports {
+		if _, exists := packageFiles[pkg]; exists {
+			continue
 		}
-		if err2 := json.Unmarshal(output, &info); err2 == nil && info.Export != "" {
-			cfg.PackageFile[info.ImportPath] = info.Export
-		}
+		resolvePackageExport(ctx, pkg, packageFiles)
 	}
 
 	// Write the importcfg file
 	f, err := os.Create(path)
+	require.NoError(t, err, "creating importcfg at %s", path)
+	defer f.Close()
+
+	for importPath, archive := range packageFiles {
+		fmt.Fprintf(f, "packagefile %s=%s\n", importPath, archive)
+	}
+}
+
+// resolvePackageExport uses go list to find a package's export file and adds
+// it to the packageFiles map. Packages that cannot be resolved (e.g. builtin
+// pseudo-packages like "unsafe") are silently skipped.
+func resolvePackageExport(ctx context.Context, pkg string, packageFiles map[string]string) {
+	cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkg)
+	output, err := cmd.Output()
 	if err != nil {
 		return
 	}
-	defer f.Close()
 
-	for importPath, archive := range cfg.PackageFile {
-		fmt.Fprintf(f, "packagefile %s=%s\n", importPath, archive)
+	var info struct {
+		ImportPath string `json:"ImportPath"`
+		Export     string `json:"Export"`
+	}
+	if err2 := json.Unmarshal(output, &info); err2 == nil && info.Export != "" {
+		packageFiles[info.ImportPath] = info.Export
 	}
 }
 
