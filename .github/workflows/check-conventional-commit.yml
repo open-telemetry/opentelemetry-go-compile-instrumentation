@@ -15,8 +15,7 @@ jobs:
     name: Validate PR Title
     runs-on: ubuntu-latest
     if: >-
-      github.event.workflow_run.conclusion == 'success'
-      && github.event.workflow_run.event == 'pull_request'
+      github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
     steps:
       - name: Verify workflow origin
         if: github.event.workflow_run.event != 'pull_request'
@@ -35,7 +34,14 @@ jobs:
 
       - name: Read PR metadata
         id: metadata
+        env:
+          EXPECTED_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
+          if [ -z "$EXPECTED_PR_NUMBER" ]; then
+            echo "::error::workflow_run payload did not include an associated pull request"
+            exit 1
+          fi
+
           if [ ! -f tmp/pr-number.txt ]; then
             echo "::error::PR number file not found in artifact"
             exit 1
@@ -43,6 +49,10 @@ jobs:
           PR_NUMBER=$(tr -d '[:space:]' < tmp/pr-number.txt)
           if ! echo "$PR_NUMBER" | grep -qE '^[0-9]+$'; then
             echo "::error::Invalid PR number: $PR_NUMBER"
+            exit 1
+          fi
+          if [ "$PR_NUMBER" != "$EXPECTED_PR_NUMBER" ]; then
+            echo "::error::Artifact PR number $PR_NUMBER does not match workflow_run PR number $EXPECTED_PR_NUMBER"
             exit 1
           fi
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
@@ -71,5 +81,3 @@ jobs:
             -pr="${{ steps.metadata.outputs.pr_number }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
