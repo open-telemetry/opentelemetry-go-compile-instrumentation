@@ -4,6 +4,7 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -75,19 +76,28 @@ func Run(t *testing.T, dir string, args ...string) string {
 }
 
 // Start starts the application but does not wait for it to complete.
-// It returns the command and the combined output pipe(stdout and stderr).
+// Stdout and stderr are captured and logged when the test fails,
+// so that app crashes are visible in CI output.
 func Start(t *testing.T, dir string, args ...string) {
 	appName := "./" + appBinName
 	if util.IsWindows() {
 		appName += ".exe"
 	}
 	cmd := newCmd(t.Context(), dir, append([]string{appName}, args...)...)
-	cmd.Stderr = cmd.Stdout // redirect stderr to stdout for easier debugging
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
 	err := cmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
+			_ = cmd.Wait() // ensure all output is flushed
+		}
+		if t.Failed() && buf.Len() > 0 {
+			t.Logf("app output:\n%s", buf.String())
 		}
 	})
 }

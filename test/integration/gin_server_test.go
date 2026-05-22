@@ -19,22 +19,16 @@ import (
 )
 
 func TestGinServer(t *testing.T) {
-	build := testutil.NewTestFixture(t, testutil.WithoutCollector())
-	build.Build("ginserver")
-
-	const (
-		addr = "127.0.0.1:8090"
-		port = "-port=8090"
-	)
-
-	cases := []struct {
+	testCases := []struct {
 		name       string
+		port       int
 		path       string
 		wantStatus int
 		assertSpan func(t *testing.T, span ptrace.Span)
 	}{
 		{
 			name:       "matched route is enriched with http.route",
+			port:       8090,
 			path:       "/hello/OpenTelemetry",
 			wantStatus: http.StatusOK,
 			assertSpan: func(t *testing.T, span ptrace.Span) {
@@ -52,6 +46,7 @@ func TestGinServer(t *testing.T) {
 		},
 		{
 			name:       "5xx response carries error.type",
+			port:       8091,
 			path:       fmt.Sprintf("/status/%d", http.StatusInternalServerError),
 			wantStatus: http.StatusInternalServerError,
 			assertSpan: func(t *testing.T, span ptrace.Span) {
@@ -61,6 +56,7 @@ func TestGinServer(t *testing.T) {
 		},
 		{
 			name:       "c.Error() surfaces as span status and exception event",
+			port:       8092,
 			path:       "/error",
 			wantStatus: http.StatusOK,
 			assertSpan: func(t *testing.T, span ptrace.Span) {
@@ -73,6 +69,7 @@ func TestGinServer(t *testing.T) {
 		},
 		{
 			name:       "unmatched route keeps plain method as span name",
+			port:       8093,
 			path:       "/no-such-route",
 			wantStatus: http.StatusNotFound,
 			assertSpan: func(t *testing.T, span ptrace.Span) {
@@ -95,10 +92,12 @@ func TestGinServer(t *testing.T) {
 		},
 	}
 
-	for _, tc := range cases {
+	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
-			f.Start("ginserver", port)
+
+			addr := fmt.Sprintf("127.0.0.1:%d", tc.port)
+			f.BuildAndStart("ginserver", fmt.Sprintf("-port=%d", tc.port))
 			testutil.WaitForTCP(t, addr)
 
 			resp, err := http.Get("http://" + addr + tc.path) //nolint:noctx
