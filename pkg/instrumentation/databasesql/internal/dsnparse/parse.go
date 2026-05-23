@@ -22,56 +22,89 @@ type DSNParserFunc func(dsn string) (addr string, err error)
 // Parse calls f(dsn).
 func (f DSNParserFunc) Parse(dsn string) (string, error) { return f(dsn) }
 
-var (
-	parserMu       sync.RWMutex
-	parserRegistry = map[string]DSNParser{}
-)
+// sanitizeURLError strips the raw URL from *url.Error to prevent leaking
+// credentials or other sensitive data embedded in DSNs via error messages.
+func sanitizeURLError(err error) error {
+	var urlErr *nurl.Error
+	if errors.As(err, &urlErr) {
+		return fmt.Errorf("%s: %w", urlErr.Op, urlErr.Err)
+	}
+	return err
+}
+
+// registry holds DSNParser implementations indexed by driver name.
+type registry struct {
+	mu      sync.RWMutex
+	parsers map[string]DSNParser
+}
+
+func (r *registry) register(driverName string, parser DSNParser) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.parsers[driverName] = parser
+}
+
+func (r *registry) registerAll(parsers map[string]DSNParser) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, p := range parsers {
+		r.parsers[name] = p
+	}
+}
+
+func (r *registry) lookup(driverName string) (DSNParser, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	p, ok := r.parsers[driverName]
+	return p, ok
+}
+
+var defaultRegistry = &registry{
+	parsers: map[string]DSNParser{
+		"mysql":      MySQLParser{},
+		"postgres":   PostgresParser{},
+		"postgresql": PostgresParser{},
+		"pgx":        PostgresParser{}, // pgx uses the standard postgres URL format
+		"lib/pq":     PostgresParser{}, // lib/pq uses the standard postgres URL format
+		"clickhouse": ClickHouseParser{},
+		"sqlite3":    SQLiteParser{},
+		"godror":     OracleParser{},
+		"oracle":     OracleParser{},
+		"oci8":       OracleParser{},
+		"go-oci8":    OracleParser{},
+		"mssql":      SQLServerParser{},
+		"sqlserver":  SQLServerParser{},
+	},
+}
 
 // RegisterDSNParser registers a custom DSN parser for the given driver name.
 // Built-in parsers are registered automatically during package initialization.
 // Calling RegisterDSNParser for an already-registered name overwrites the previous parser.
 // It is safe to call from package init() functions.
 func RegisterDSNParser(driverName string, parser DSNParser) {
-	parserMu.Lock()
-	defer parserMu.Unlock()
-	parserRegistry[driverName] = parser
+	defaultRegistry.register(driverName, parser)
 }
 
-func init() {
-	// Register all built-in DSN parsers.
-	RegisterDSNParser("mysql", MySQLParser{})
-	RegisterDSNParser("postgres", PostgresParser{})
-	RegisterDSNParser("postgresql", PostgresParser{})
-	RegisterDSNParser("pgx", PostgresParser{})    // pgx uses the standard postgres URL format
-	RegisterDSNParser("lib/pq", PostgresParser{}) // lib/pq uses the standard postgres URL format
-	RegisterDSNParser("clickhouse", ClickHouseParser{})
-	RegisterDSNParser("sqlite3", SQLiteParser{})
-	RegisterDSNParser("godror", OracleParser{})
-	RegisterDSNParser("oracle", OracleParser{})
-	RegisterDSNParser("oci8", OracleParser{})
-	RegisterDSNParser("go-oci8", OracleParser{})
-	RegisterDSNParser("mssql", SQLServerParser{})
-	RegisterDSNParser("sqlserver", SQLServerParser{})
+// RegisterDSNParsers registers multiple DSN parsers in a single lock acquisition.
+// Prefer this over repeated RegisterDSNParser calls when registering more than one parser.
+func RegisterDSNParsers(parsers map[string]DSNParser) {
+	defaultRegistry.registerAll(parsers)
 }
 
 // ParseDSN parses driverName and dsn into a server address (host:port).
 // It falls back to best-effort URL parsing for unregistered drivers.
 func ParseDSN(driverName, dsn string) (addr string, err error) {
-	parserMu.RLock()
-	parser, ok := parserRegistry[driverName]
-	parserMu.RUnlock()
-
-	if ok {
+	if parser, ok := defaultRegistry.lookup(driverName); ok {
 		return parser.Parse(dsn)
 	}
 
 	// Best-effort: try standard URL parsing for drivers not in the registry.
-	return BestEffortParse(dsn)
+	return bestEffortParse(dsn)
 }
 
-// BestEffortParse attempts to extract a host:port from a DSN using standard URL parsing.
+// bestEffortParse attempts to extract a host:port from a DSN using standard URL parsing.
 // It is used as a fallback for drivers that have no registered parser.
-func BestEffortParse(dsn string) (string, error) {
+func bestEffortParse(dsn string) (string, error) {
 	u, err := nurl.Parse(dsn)
 	if err == nil && u.Host != "" {
 		return u.Host, nil
@@ -106,7 +139,7 @@ type PostgresParser struct{}
 func (PostgresParser) Parse(url string) (addr string, err error) {
 	u, err := nurl.Parse(url)
 	if err != nil {
-		return "", err
+		return "", sanitizeURLError(err)
 	}
 
 	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
@@ -166,7 +199,7 @@ func (ClickHouseParser) Parse(dsn string) (addr string, err error) {
 	// clickhouse://host:port/database?username=user&password=pass
 	u, err := nurl.Parse(dsn)
 	if err != nil {
-		return "", err
+		return "", sanitizeURLError(err)
 	}
 
 	// Return host with port
@@ -256,7 +289,7 @@ func (SQLServerParser) Parse(dsn string) (addr string, err error) {
 	if strings.HasPrefix(dsn, "sqlserver://") || strings.HasPrefix(dsn, "mssql://") {
 		u, err := nurl.Parse(dsn)
 		if err != nil {
-			return "", err
+			return "", sanitizeURLError(err)
 		}
 		if u.Port() != "" {
 			return u.Host, nil

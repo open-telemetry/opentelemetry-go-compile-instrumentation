@@ -13,7 +13,7 @@ import (
 func TestRegisterDSNParser(t *testing.T) {
 	const driver = "testdriver-register"
 
-	// Not registered yet — should fall back to BestEffortParse.
+	// Not registered yet — should fall back to bestEffortParse.
 	_, err := ParseDSN(driver, "not-a-url")
 	assert.Error(t, err, "unregistered driver with unparseable DSN should return error")
 
@@ -72,7 +72,7 @@ func TestBestEffortParse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BestEffortParse(tt.dsn)
+			got, err := bestEffortParse(tt.dsn)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -103,7 +103,7 @@ func TestParseDSN_PostgresDefaultPort(t *testing.T) {
 }
 
 func TestParseDSN_UnknownDriverFallback(t *testing.T) {
-	// Unknown driver with a parseable URL should succeed via BestEffortParse.
+	// Unknown driver with a parseable URL should succeed via bestEffortParse.
 	addr, err := ParseDSN("unknown-driver", "somedb://host.example.com:9876/mydb")
 	require.NoError(t, err)
 	assert.Equal(t, "host.example.com:9876", addr)

@@ -18,6 +18,12 @@ func RegisterDSNParser(driverName string, parser dsnparse.DSNParser) {
 	dsnparse.RegisterDSNParser(driverName, parser)
 }
 
+// RegisterDSNParsers registers multiple DSN parsers in a single lock acquisition.
+// Prefer this over repeated RegisterDSNParser calls when registering more than one parser.
+func RegisterDSNParsers(parsers map[string]dsnparse.DSNParser) {
+	dsnparse.RegisterDSNParsers(parsers)
+}
+
 func parseDSN(driverName, dsn string) (string, error) {
 	return dsnparse.ParseDSN(driverName, dsn)
 }
