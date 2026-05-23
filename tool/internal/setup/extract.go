@@ -42,7 +42,7 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 		}
 
 	case tar.TypeReg:
-		file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR,
+		file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_RDWR,
 			fileInfo.Mode())
 		if err != nil {
 			return ex.Wrap(err)
