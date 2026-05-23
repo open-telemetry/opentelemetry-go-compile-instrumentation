@@ -25,6 +25,7 @@ func TestNewInstCallRule(t *testing.T) {
 			yaml: `
 function_call: net/http.Get
 replace: "wrapper({{ . }})"
+path: "github.com/example/hooks"
 `,
 			ruleName: "wrap_http_get",
 			check: func(t *testing.T, r *InstCallRule) {
@@ -33,6 +34,7 @@ replace: "wrapper({{ . }})"
 				assert.Equal(t, "net/http", r.ImportPath)
 				assert.Equal(t, "Get", r.FuncName)
 				assert.Equal(t, "wrapper({{ . }})", r.Replace)
+				assert.Equal(t, "github.com/example/hooks", r.Path)
 			},
 		},
 		{

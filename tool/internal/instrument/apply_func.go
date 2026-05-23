@@ -270,6 +270,23 @@ func (ip *InstrumentPhase) addCompileArg(newArg string) {
 	ip.compileArgs = append(ip.compileArgs, newArg)
 }
 
+func (ip *InstrumentPhase) hasCompileArg(arg string) bool {
+	absArg, err := filepath.Abs(arg)
+	if err != nil {
+		return false
+	}
+	for _, compileArg := range ip.compileArgs {
+		absCompileArg, err := filepath.Abs(compileArg)
+		if err != nil {
+			continue
+		}
+		if absCompileArg == absArg {
+			return true
+		}
+	}
+	return false
+}
+
 //go:embed api.tmpl
 var templateAPI string
 
