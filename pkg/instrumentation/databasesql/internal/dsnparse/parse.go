@@ -12,7 +12,15 @@ import (
 )
 
 // DSNParser parses a driver-specific DSN and returns the server address (host:port).
-type DSNParser func(dsn string) (addr string, err error)
+type DSNParser interface {
+	Parse(dsn string) (addr string, err error)
+}
+
+// DSNParserFunc is an adapter to allow use of ordinary functions as DSNParsers.
+type DSNParserFunc func(dsn string) (addr string, err error)
+
+// Parse calls f(dsn).
+func (f DSNParserFunc) Parse(dsn string) (string, error) { return f(dsn) }
 
 var (
 	parserMu       sync.RWMutex
@@ -31,19 +39,19 @@ func RegisterDSNParser(driverName string, parser DSNParser) {
 
 func init() {
 	// Register all built-in DSN parsers.
-	RegisterDSNParser("mysql", ParseMySQL)
-	RegisterDSNParser("postgres", ParsePostgres)
-	RegisterDSNParser("postgresql", ParsePostgres)
-	RegisterDSNParser("pgx", ParsePostgres)    // pgx uses the standard postgres URL format
-	RegisterDSNParser("lib/pq", ParsePostgres) // lib/pq uses the standard postgres URL format
-	RegisterDSNParser("clickhouse", ParseClickHouse)
-	RegisterDSNParser("sqlite3", func(_ string) (string, error) { return "sqlite3", nil })
-	RegisterDSNParser("godror", ParseOracle)
-	RegisterDSNParser("oracle", ParseOracle)
-	RegisterDSNParser("oci8", ParseOracle)
-	RegisterDSNParser("go-oci8", ParseOracle)
-	RegisterDSNParser("mssql", ParseSQLServer)
-	RegisterDSNParser("sqlserver", ParseSQLServer)
+	RegisterDSNParser("mysql", MySQLParser{})
+	RegisterDSNParser("postgres", PostgresParser{})
+	RegisterDSNParser("postgresql", PostgresParser{})
+	RegisterDSNParser("pgx", PostgresParser{})    // pgx uses the standard postgres URL format
+	RegisterDSNParser("lib/pq", PostgresParser{}) // lib/pq uses the standard postgres URL format
+	RegisterDSNParser("clickhouse", ClickHouseParser{})
+	RegisterDSNParser("sqlite3", SQLiteParser{})
+	RegisterDSNParser("godror", OracleParser{})
+	RegisterDSNParser("oracle", OracleParser{})
+	RegisterDSNParser("oci8", OracleParser{})
+	RegisterDSNParser("go-oci8", OracleParser{})
+	RegisterDSNParser("mssql", SQLServerParser{})
+	RegisterDSNParser("sqlserver", SQLServerParser{})
 }
 
 // ParseDSN parses driverName and dsn into a server address (host:port).
@@ -54,7 +62,7 @@ func ParseDSN(driverName, dsn string) (addr string, err error) {
 	parserMu.RUnlock()
 
 	if ok {
-		return parser(dsn)
+		return parser.Parse(dsn)
 	}
 
 	// Best-effort: try standard URL parsing for drivers not in the registry.
@@ -92,7 +100,10 @@ func ParseDbName(dsn string) string {
 	return ""
 }
 
-func ParsePostgres(url string) (addr string, err error) {
+// PostgresParser parses PostgreSQL DSNs.
+type PostgresParser struct{}
+
+func (PostgresParser) Parse(url string) (addr string, err error) {
 	u, err := nurl.Parse(url)
 	if err != nil {
 		return "", err
@@ -108,7 +119,10 @@ func ParsePostgres(url string) (addr string, err error) {
 	return u.Hostname() + ":5432", nil
 }
 
-func ParseMySQL(dsn string) (addr string, err error) {
+// MySQLParser parses MySQL DSNs.
+type MySQLParser struct{}
+
+func (MySQLParser) Parse(dsn string) (addr string, err error) {
 	// MySQL DSN format: [username[:password]@][protocol[(address)]]/dbname[?params]
 	// We need to find the protocol part after @ to avoid special chars in password
 
@@ -142,7 +156,10 @@ func ParseMySQL(dsn string) (addr string, err error) {
 	return "", errors.New("invalid MySQL DSN")
 }
 
-func ParseClickHouse(dsn string) (addr string, err error) {
+// ClickHouseParser parses ClickHouse DSNs.
+type ClickHouseParser struct{}
+
+func (ClickHouseParser) Parse(dsn string) (addr string, err error) {
 	// ClickHouse DSN formats:
 	// tcp://host:port?database=dbname&username=user&password=pass
 	// http://host:port?database=dbname
@@ -173,7 +190,15 @@ func ParseClickHouse(dsn string) (addr string, err error) {
 	return u.Host, nil
 }
 
-func ParseOracle(dsn string) (addr string, err error) {
+// SQLiteParser parses SQLite DSNs. SQLite is file-based, so it always returns "sqlite3".
+type SQLiteParser struct{}
+
+func (SQLiteParser) Parse(_ string) (string, error) { return "sqlite3", nil }
+
+// OracleParser parses Oracle DSNs.
+type OracleParser struct{}
+
+func (OracleParser) Parse(dsn string) (addr string, err error) {
 	// Oracle DSN formats:
 	// user/password@host:port/service_name
 	// user/password@host:port/sid
@@ -218,7 +243,10 @@ func ParseOracle(dsn string) (addr string, err error) {
 	return hostPort, nil
 }
 
-func ParseSQLServer(dsn string) (addr string, err error) {
+// SQLServerParser parses SQL Server DSNs.
+type SQLServerParser struct{}
+
+func (SQLServerParser) Parse(dsn string) (addr string, err error) {
 	// SQL Server DSN formats:
 	// sqlserver://username:password@host:port?database=dbname
 	// server=host;port=1433;database=dbname;user id=user;password=pass

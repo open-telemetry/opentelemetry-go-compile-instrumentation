@@ -19,10 +19,10 @@ func TestRegisterDSNParser(t *testing.T) {
 
 	// Register a custom parser.
 	called := false
-	RegisterDSNParser(driver, func(dsn string) (string, error) {
+	RegisterDSNParser(driver, DSNParserFunc(func(dsn string) (string, error) {
 		called = true
 		return "custom-host:1234", nil
-	})
+	}))
 
 	addr, err := ParseDSN(driver, "anything")
 	require.NoError(t, err)
@@ -33,8 +33,8 @@ func TestRegisterDSNParser(t *testing.T) {
 func TestRegisterDSNParser_Overwrite(t *testing.T) {
 	const driver = "testdriver-overwrite"
 
-	RegisterDSNParser(driver, func(_ string) (string, error) { return "first:1111", nil })
-	RegisterDSNParser(driver, func(_ string) (string, error) { return "second:2222", nil })
+	RegisterDSNParser(driver, DSNParserFunc(func(_ string) (string, error) { return "first:1111", nil }))
+	RegisterDSNParser(driver, DSNParserFunc(func(_ string) (string, error) { return "second:2222", nil }))
 
 	addr, err := ParseDSN(driver, "anything")
 	require.NoError(t, err)
