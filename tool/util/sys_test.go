@@ -230,3 +230,84 @@ func TestGetBuildFlags_Empty(t *testing.T) {
 		t.Errorf("GetBuildFlags() with empty env should return nil, got %v", result)
 	}
 }
+
+func TestListFiles_HiddenFileDoesNotSkipSiblings(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	visible1 := filepath.Join(tmpDir, "visible1.txt")
+	hidden := filepath.Join(tmpDir, ".hidden")
+	visible2 := filepath.Join(tmpDir, "visible2.txt")
+
+	for _, file := range []string{visible1, hidden, visible2} {
+		err := os.WriteFile(file, []byte("test"), 0o644)
+		if err != nil {
+			t.Fatalf("failed to create test file %s: %v", file, err)
+		}
+	}
+
+	files, err := ListFiles(tmpDir)
+	if err != nil {
+		t.Fatalf("ListFiles() error = %v", err)
+	}
+
+	var foundVisible1, foundVisible2 bool
+
+	for _, file := range files {
+		switch filepath.Base(file) {
+		case "visible1.txt":
+			foundVisible1 = true
+		case "visible2.txt":
+			foundVisible2 = true
+		case ".hidden":
+			t.Fatalf("hidden file should not be returned")
+		}
+	}
+
+	if !foundVisible1 || !foundVisible2 {
+		t.Fatalf("expected visible sibling files to be returned, got %v", files)
+	}
+}
+
+func TestListFiles_SkipsHiddenDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	hiddenDir := filepath.Join(tmpDir, ".git")
+	err := os.MkdirAll(hiddenDir, 0o755)
+	if err != nil {
+		t.Fatalf("failed to create hidden directory: %v", err)
+	}
+
+	err = os.WriteFile(filepath.Join(hiddenDir, "config"), []byte("test"), 0o644)
+	if err != nil {
+		t.Fatalf("failed to create hidden file: %v", err)
+	}
+
+	visible := filepath.Join(tmpDir, "visible.txt")
+	err = os.WriteFile(visible, []byte("test"), 0o644)
+	if err != nil {
+		t.Fatalf("failed to create visible file: %v", err)
+	}
+
+	files, err := ListFiles(tmpDir)
+	if err != nil {
+		t.Fatalf("ListFiles() error = %v", err)
+	}
+
+	for _, file := range files {
+		if strings.Contains(file, ".git") {
+			t.Fatalf("hidden directory contents should not be returned: %v", files)
+		}
+	}
+
+	var foundVisible bool
+
+	for _, file := range files {
+		if filepath.Base(file) == "visible.txt" {
+			foundVisible = true
+		}
+	}
+
+	if !foundVisible {
+		t.Fatalf("expected visible file to be returned")
+	}
+}
