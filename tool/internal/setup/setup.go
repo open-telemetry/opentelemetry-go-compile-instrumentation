@@ -217,24 +217,42 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	// Back up go.mod / go.sum / go.work / go.work.sum before modifying them.
-	// Cleanup() restores from this backup, so the backup must exist before any
-	// modification happens — including when otelc setup is run standalone.
-	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
-	if err := util.BackupFile(backupFiles); err != nil {
-		logger.DebugContext(ctx, "failed to back up files", "error", err)
-	}
-
 	sp := &SetupPhase{
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 	}
 
-	// Introduce additional hook code by generating otelc.runtime.go
-	// Use GetPackage to determine the build target directory
+	// Resolve the packages first so we know which module directories will be
+	// modified by syncDeps.  Backup must cover all of them, not just cwd.
 	pkgs, err := getBuildPackages(ctx, args)
 	if err != nil {
 		return err
+	}
+
+	// Back up go.mod / go.sum / go.work / go.work.sum before modifying them.
+	// Cleanup() restores from this backup, so the backup must exist before any
+	// modification happens — including when otelc setup is run standalone.
+	//
+	// Workspace files (go.work, go.work.sum) live at cwd; module files
+	// (go.mod, go.sum) may live in subdirectories for multi-module setups.
+	// BackupFileFromDir preserves the relative path so RestoreAllBackedUpFiles
+	// can reconstruct the original location on restore.
+	if err = util.BackupFile([]string{"go.work", "go.work.sum"}); err != nil {
+		logger.DebugContext(ctx, "failed to back up workspace files", "error", err)
+	}
+	backedModuleDirs := make(map[string]bool)
+	for _, pkg := range pkgs {
+		if pkg.Module == nil {
+			continue
+		}
+		moduleDir := pkg.Module.Dir
+		if backedModuleDirs[moduleDir] {
+			continue
+		}
+		if err = util.BackupFileFromDir([]string{"go.mod", "go.sum"}, moduleDir); err != nil {
+			logger.DebugContext(ctx, "failed to back up module files", "moduleDir", moduleDir, "error", err)
+		}
+		backedModuleDirs[moduleDir] = true
 	}
 
 	// Find all dependencies of the project being build

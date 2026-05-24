@@ -6,7 +6,6 @@ package setup
 import (
 	"context"
 	"os"
-	"path/filepath"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -21,22 +20,14 @@ import (
 func Cleanup(ctx context.Context, cleanAll bool) error {
 	logger := util.LoggerFromContext(ctx)
 
-	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
-
 	// Restore backed-up files before removing .otelc-build/, since backups
 	// live inside .otelc-build/backup/.
-	// Only restore files that were actually backed up: repos without go.work
-	// or go.sum will not have those files in the backup dir, and attempting
-	// to restore absent files would produce spurious warnings.
+	// RestoreAllBackedUpFiles walks the backup tree so that module files in
+	// subdirectories (multi-module setups) are also restored to the correct
+	// original paths.
 	backupDir := util.GetBuildTemp("backup")
 	if util.PathExists(backupDir) {
-		var toRestore []string
-		for _, f := range backupFiles {
-			if util.PathExists(filepath.Join(backupDir, f)) {
-				toRestore = append(toRestore, f)
-			}
-		}
-		if err := util.RestoreFile(toRestore); err != nil {
+		if err := util.RestoreAllBackedUpFiles(); err != nil {
 			logger.WarnContext(ctx, "failed to restore backed up files", "error", err)
 		}
 	}

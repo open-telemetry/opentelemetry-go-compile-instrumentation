@@ -6,6 +6,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -73,12 +74,64 @@ func copyBackupFiles(names []string, src, dst string) error {
 	return err
 }
 
-// BackupFile backups the source file to $BUILD_TEMP/backup/name.
+// BackupFileFromDir backs up the named files from dir into the backup directory,
+// preserving the path of dir relative to cwd so that multiple module directories
+// can be backed up without filename collisions.
+//
+// Example: if cwd is /project and dir is /project/submodule, then go.mod is
+// stored at .otelc-build/backup/submodule/go.mod and can later be restored to
+// the correct location by RestoreAllBackedUpFiles.
+func BackupFileFromDir(names []string, dir string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ex.Wrapf(err, "getting working directory for backup")
+	}
+	rel, err := filepath.Rel(wd, dir)
+	if err != nil {
+		rel = filepath.Base(dir)
+	}
+	dst := GetBuildTemp(filepath.Join("backup", rel))
+	if mkErr := os.MkdirAll(dst, 0o755); mkErr != nil {
+		return ex.Wrapf(mkErr, "creating backup directory %s", dst)
+	}
+	return copyBackupFiles(names, dir, dst)
+}
+
+// BackupFile backs up the named files from the current working directory.
+// Deprecated: prefer BackupFileFromDir with an explicit directory.
 func BackupFile(names []string) error {
-	return copyBackupFiles(names, ".", GetBuildTemp("backup"))
+	wd, err := os.Getwd()
+	if err != nil {
+		return ex.Wrapf(err, "getting working directory for backup")
+	}
+	return BackupFileFromDir(names, wd)
+}
+
+// RestoreAllBackedUpFiles restores every file in the backup directory tree to
+// its original location relative to the current working directory. It is the
+// counterpart to BackupFileFromDir: the relative path recorded at backup time
+// is used to reconstruct the original destination path.
+func RestoreAllBackedUpFiles() error {
+	backupRoot := GetBuildTemp("backup")
+	wd, err := os.Getwd()
+	if err != nil {
+		return ex.Wrapf(err, "getting working directory for restore")
+	}
+	return filepath.WalkDir(backupRoot, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(backupRoot, path)
+		if relErr != nil {
+			return relErr
+		}
+		orig := filepath.Join(wd, rel)
+		return CopyFile(path, orig)
+	})
 }
 
 // RestoreFile restores the source file from $BUILD_TEMP/backup/name.
+// Deprecated: use RestoreAllBackedUpFiles which handles multi-module setups.
 func RestoreFile(names []string) error {
 	return copyBackupFiles(names, GetBuildTemp("backup"), ".")
 }
