@@ -17,15 +17,12 @@ jobs:
   codspeed:
     name: CodSpeed Benchmarks
     runs-on: oracle-bare-metal-64cpu-1024gb-x86-64-ubuntu-24
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    container:
+      image: golang:1.25.10-bookworm@sha256:f5ee4bd56e9c06b251da84976cf7306a4b1219b16541f4f895cdfb03f8a61421
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
-      - name: Install Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: "**/go.mod"
       - name: Build otelc
         run: make build
       - name: Run benchmarks
