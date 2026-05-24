@@ -455,6 +455,8 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	// Setup already consumed any -C flag and called os.Chdir; strip it from
 	// the args we forward to the underlying `go build` so it doesn't end up
 	// after build flags (go requires -C before build flags).
+	// Handle both positions: before build/install (`go -C dir build ...`) and
+	// immediately after (`go build -C dir ...`).
 	if _, rest := consumeCFlagPositional(args); len(rest) != len(args) {
 		args = rest
 	}
@@ -479,7 +481,7 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	newArgs = append(newArgs, "-work")
 	// Add "-toolexec=..."
 	newArgs = append(newArgs, insert)
-	// Add the rest
+	// Add the rest (already stripped of -C above)
 	restArgs := args[1:]
 	if _, fileTargets, err2 := splitBuildTargets(restArgs); err2 == nil && len(fileTargets) > 0 {
 		// add otelc.runtime.go manually to command line for file targets
