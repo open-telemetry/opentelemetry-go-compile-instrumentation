@@ -87,6 +87,15 @@ func (f *TestFixture) resolveAppPath(appName string) string {
 	return filepath.Join(f.appsDir, appName)
 }
 
+// BuildApp builds a named app from test/apps/ using the parent test's lifetime.
+// Use this in table-driven tests to build once and call Start/Run per subtest.
+func BuildApp(t *testing.T, appName string) {
+	t.Helper()
+	pwd, err := os.Getwd()
+	require.NoError(t, err)
+	Build(t, filepath.Join(pwd, "..", "apps", appName), "go", "build", "-a")
+}
+
 // Build builds a test application from test/apps/ with the instrumentation tool.
 func (f *TestFixture) Build(appName string) {
 	Build(f.t, f.resolveAppPath(appName), "go", "build", "-a")

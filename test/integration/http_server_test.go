@@ -32,11 +32,13 @@ func TestHTTPServer(t *testing.T) {
 		},
 	}
 
+	testutil.BuildApp(t, "httpserver")
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 
-			f.BuildAndStart("httpserver", fmt.Sprintf("-port=%d", tc.port))
+			f.Start("httpserver", fmt.Sprintf("-port=%d", tc.port))
 			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", tc.port))
 
 			url := fmt.Sprintf("%s://127.0.0.1:%d%s?name=test", tc.scheme, tc.port, tc.path)

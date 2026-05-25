@@ -39,13 +39,15 @@ func TestGRPCClient(t *testing.T) {
 		},
 	}
 
+	testutil.BuildApp(t, "grpcclient")
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 			server := StartGRPCServer(t)
 
 			args := append([]string{"-addr=" + server.Addr}, tc.extraArgs...)
-			output := f.BuildAndRun("grpcclient", args...)
+			output := f.Run("grpcclient", args...)
 
 			require.Contains(t, output, tc.expectedOutput)
 			span := f.RequireSingleSpan()

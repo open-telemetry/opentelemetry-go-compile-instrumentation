@@ -38,11 +38,13 @@ func TestGRPCServer(t *testing.T) {
 		},
 	}
 
+	testutil.BuildApp(t, "grpcserver")
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 
-			f.BuildAndStart("grpcserver")
+			f.Start("grpcserver")
 			testutil.WaitForTCP(t, "localhost:50051")
 
 			client := NewGRPCClient(t, "localhost:50051")
