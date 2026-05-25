@@ -103,7 +103,11 @@ func ListFiles(dir string) ([]string, error) {
 		}
 		// Don't list files under hidden directories
 		if strings.HasPrefix(info.Name(), ".") {
-			return filepath.SkipDir
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+
+			return nil
 		}
 		if !info.IsDir() {
 			files = append(files, path)

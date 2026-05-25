@@ -198,6 +198,7 @@ This repository requires using one of the following commit types:
 - `fix` for bug fixes
 - `release` when cutting a new release
 - `refactor` for code changes that do not add new features or fix bugs
+- `test` for changes to tests or test infrastructure
 
 Please try to keep the commit title concise, yet specific: they are used to derive the release notes
 for this repository. A good litmus test for whether a pull request title is suitable or not is to
@@ -235,6 +236,10 @@ Here are some examples for the various supported commit types:
   - :information_source: What code is being refactored?
   - :white_check_mark: `refactor: remove unused code`
   - :x: `refactor: improve code readability`
+- `test`:
+  - :information_source: What behavior or test coverage is being added?
+  - :white_check_mark: `test: validate exported span output in basic integration test`
+  - :x: `test: improve tests`
 
 [conv-commit]: https://www.conventionalcommits.org/en/v1.0.0/
 
