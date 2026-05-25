@@ -1,0 +1,37 @@
+wrap_sizeof_external:
+  target: main
+  function_call: unsafe.Sizeof
+  replace: "wrapper.Wrapper({{ . }})"
+  imports:
+    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+
+inject_raw_external:
+  target: main
+  func: RawFunc
+  raw: 'wrapper.Log("raw instrumented")'
+  imports:
+    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+
+add_external_field:
+  target: main
+  struct: T
+  new_field:
+    - name: ExternalTag
+      type: wrapper.Tag
+  imports:
+    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+
+wrap_global_var_external:
+  target: main
+  kind: var
+  identifier: GlobalVar
+  wrap: "wrapper.WrapValue({{ . }})"
+  imports:
+    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+
+log_directive_external:
+  target: main
+  directive: "otelc:external-log"
+  template: 'wrapper.Log("{{FuncName}}")'
+  imports:
+    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"

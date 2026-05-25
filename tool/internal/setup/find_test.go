@@ -4,10 +4,14 @@
 package setup
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -265,6 +269,128 @@ C:/Go/pkg/tool/windows_amd64/compile.exe -o C:/tmp/out.a -p main -buildid abc ma
 			commands, err := findCommands(tmpFile)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedCommands, commands)
+		})
+	}
+}
+
+func TestListBuildPlan(t *testing.T) {
+	oldExec := execCommandContext
+	defer func() {
+		execCommandContext = oldExec
+	}()
+
+	tests := []struct {
+		name          string
+		buildPlan     string
+		args          []string
+		expected      []string
+		wantErr       bool
+		buildFails    bool
+		expectedGoCmd []string
+	}{
+		{
+			name: "filters compile and cgo commands",
+			buildPlan: `
+cd /project/pkg
+.../cgo -objdir /tmp/b001 -importpath pkg/cgo
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+echo ignored
+`,
+			args: []string{"./..."},
+			expected: []string{
+				"cd /project/pkg",
+				".../cgo -objdir /tmp/b001 -importpath pkg/cgo",
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{
+				"build", "-a", "-x", "-n", "./...",
+			},
+		},
+		{
+			name: "passes additional build args",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"-tags=integration", "./cmd"},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{
+				"build", "-a", "-x", "-n",
+				"-tags=integration",
+				"./cmd",
+			},
+		},
+		{
+			name: "returns build failure",
+			buildPlan: `
+go: module example.com missing
+`,
+			args:       []string{"./bad"},
+			buildFails: true,
+			wantErr:    true,
+			expectedGoCmd: []string{
+				"build", "-a", "-x", "-n", "./bad",
+			},
+		},
+		{
+			name: "empty build plan",
+			buildPlan: `
+echo nothing useful
+`,
+			args: []string{"./..."},
+			expectedGoCmd: []string{
+				"build", "-a", "-x", "-n", "./...",
+			},
+		},
+		{
+			name: "ignores malformed compile lines",
+			buildPlan: `
+.../compile foo
+.../cgo blah
+`,
+			args:          []string{"./..."},
+			expected:      nil,
+			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./..."},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			err := os.Mkdir(filepath.Join(tempDir, util.BuildTempDir), 0o755)
+			require.NoError(t, err)
+
+			t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+			execCommandContext = func(
+				_ context.Context,
+				name string,
+				args ...string,
+			) *exec.Cmd {
+				assert.Equal(t, "go", name)
+				assert.Equal(t, tt.expectedGoCmd, args)
+
+				script := "cat <<'EOF' >&2\n" + tt.buildPlan + "\nEOF\n"
+				if tt.buildFails {
+					script += "\nexit 1\n"
+				}
+
+				return exec.Command("sh", "-c", script)
+			}
+
+			sp := newTestSetupPhase()
+			buildPlan, err := sp.listBuildPlan(t.Context(), tt.args)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.buildPlan != "" {
+					assert.Contains(t, err.Error(), strings.TrimSpace(tt.buildPlan))
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, buildPlan)
+			}
 		})
 	}
 }

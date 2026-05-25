@@ -75,6 +75,7 @@ make test
 - [GitHub Discussions](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/discussions) - Ask questions
 - [GitHub Issues](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues) - Report bugs
 - [Slack Channel](https://cloud-native.slack.com/archives/C088D8GSSSF) - Real-time chat
+- [Calendar](https://github.com/open-telemetry/community/#sig-go-compile-instrumentation) - Community meetings (Thursdays, UTC: 08:00 – 09:00)
 
 ## Contributing
 
@@ -88,6 +89,7 @@ Here is a list of community roles with current and previous members:
 ### Maintainers
 
 - [Dario Castañe](https://github.com/darccio), Datadog
+- [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
 - [Huxing Zhang](https://github.com/ralf0131), Alibaba
 - [Kemal Akkoyun](https://github.com/kakkoyun), Datadog
 - [Przemyslaw Delewski](https://github.com/pdelewski), Quesma
@@ -97,8 +99,6 @@ Here is a list of community roles with current and previous members:
 For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
 
 ### Approvers
-
-- [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
 
 For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
@@ -111,8 +111,6 @@ For more information about the approver role, see the [community repository](htt
 
 For more information about the emeritus role, see the
 [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
-
-For more information about the emeritus role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
 
 ### Thanks to all of our contributors!
 

@@ -5,29 +5,12 @@ package main
 
 import _ "unsafe"
 
-var GlobalVar = "original"
-
-type T struct{}
-
-func (t *T) Func1(p1 string, p2 int) (float32, error) {
-	return 0.0, nil
-}
-
-func Func1(p1 string, p2 int) (float32, error) {
-	println("Hello, World!")
-	return 0.0, nil
-}
-
-func Func2(p1 string, _ int) {}
-
-func (T) Func3() {}
-
 func OptGood() {
 	//line <generated>:1
 	if OtelBeforeTrampoline_OptGood3887151894(); false {
 	} else {
 	}
-	//line main.go:23:16
+	//line main.go:6:16
 }
 func OptBad() {
 	//line <generated>:1
@@ -35,7 +18,7 @@ func OptBad() {
 		return
 	} else {
 	}
-	//line main.go:24:16
+	//line main.go:7:16
 }
 func OptBad2() {
 	//line <generated>:1
@@ -45,28 +28,8 @@ func OptBad2() {
 	} else {
 		defer OtelAfterTrampoline_OptBad23138243364(hookContext3138243364)
 	}
-	//line main.go:25:16
+	//line main.go:8:16
 }
-
-func GenericFunc[T any](p1 T, p2 int) (T, error) {
-	return p1, nil
-}
-
-type GenStruct[T any] struct {
-	value T
-}
-
-func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (T, error) {
-	return p1, nil
-}
-
-func EllipsisFunc(p1 ...string) {}
-
-func UnderscoreFunc(_ int, _ float32) {}
-
-func Unnamed(int, float32) {}
-
-func main() { Func1("hello", 123) }
 
 //line <generated>:1
 type HookContextImpl166090657 struct {

@@ -33,6 +33,7 @@ var (
 		"fix":      "scope:fix",
 		"release":  "scope:chore",
 		"refactor": "scope:refactor",
+		"test":     "scope:chore",
 	}
 	titleRegexp = regexp.MustCompile(fmt.Sprintf(`^(%s)(?:\(.+\))?!?: .*$`, strings.Join(slices.Collect(maps.Keys(conventionalLabels)), "|")))
 )

@@ -9,7 +9,7 @@ INSTRUCTIONS:
 PR TITLE FORMAT (required):
   type(scope): description
 
-  Types: feat, fix, docs, chore, refactor, test, release
+  Types: chore, doc, docs, feat, fix, release, refactor, test
   Scopes: tool, pkg, demo, test, docs
 
   Examples:

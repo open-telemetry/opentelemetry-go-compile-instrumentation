@@ -65,7 +65,8 @@ func HasAttributeContaining(key, substr string) SpanMatcher {
 
 // RequireSpan finds a span matching all matchers or fails.
 func RequireSpan(t *testing.T, td ptrace.Traces, matchers ...SpanMatcher) ptrace.Span {
-	for _, s := range AllSpans(td) {
+	allSpans := AllSpans(td)
+	for _, s := range allSpans {
 		match := true
 		for _, m := range matchers {
 			if !m(s) {
@@ -77,7 +78,20 @@ func RequireSpan(t *testing.T, td ptrace.Traces, matchers ...SpanMatcher) ptrace
 			return s
 		}
 	}
-	require.Fail(t, "No span found matching criteria")
+
+	var sb strings.Builder
+	sb.WriteString("No span found matching criteria\n")
+	if len(allSpans) == 0 {
+		sb.WriteString("Collected 0 spans")
+	} else {
+		fmt.Fprintf(&sb, "Collected %d span(s):\n", len(allSpans))
+		for _, s := range allSpans {
+			fmt.Fprintf(&sb, "  - Name: %s, Kind: %v, Attrs: %v\n",
+				s.Name(), s.Kind(), Attrs(s))
+		}
+	}
+
+	require.Fail(t, sb.String())
 	return ptrace.NewSpan()
 }
 

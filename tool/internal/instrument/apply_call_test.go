@@ -445,3 +445,40 @@ func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 
 	assert.True(t, matches)
 }
+
+func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
+	// A file with no matching calls should cause applyCallAppendArgs to
+	// return false so the assertion in applyCallRule can detect unmatched rules.
+	file := makeCallFile(&dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "fmt", Path: "fmt"},
+			Sel: &dst.Ident{Name: "Println"},
+		},
+		Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"hello"`}},
+	})
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "no_match"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		AppendArgs:   []string{"ctx"},
+	}
+
+	ip := newTestPhase()
+	importAliases := collectImportAliases(file)
+	result := ip.applyCallAppendArgs(r, file, importAliases)
+
+	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
+}
+
+func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
+	// Template parses but generates invalid Go when applied to the matched call.
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("not a valid expression {{ . }}")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to wrap")
+}
