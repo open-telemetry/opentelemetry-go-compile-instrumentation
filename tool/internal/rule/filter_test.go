@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package filter_test
+package rule_test
 
 import (
 	"os"
@@ -9,14 +9,94 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dave/dst"
 	"gopkg.in/yaml.v3"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/filter"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
+// --- Filter interface and context ---
+
+func TestMatchContext_EmptyDecls(t *testing.T) {
+	tree := &dst.File{Name: &dst.Ident{Name: "pkg"}, Decls: nil}
+	ctx := &rule.MatchContext{
+		ImportPath: "example.com/pkg",
+		SourceFile: "/tmp/empty.go",
+		AST:        tree,
+	}
+
+	if (&rule.FuncFilter{Func: "Missing"}).Match(ctx) {
+		t.Fatal("FuncFilter.Match(empty decls) = true, want false")
+	}
+	if (&rule.StructFilter{Struct: "Missing"}).Match(ctx) {
+		t.Fatal("StructFilter.Match(empty decls) = true, want false")
+	}
+}
+
+// --- Leaf filters ---
+
+func parseSource(t *testing.T, src string) *rule.MatchContext {
+	t.Helper()
+	parser := ast.NewAstParser()
+	tree, err := parser.ParseSource(src)
+	if err != nil {
+		t.Fatalf("parseSource: %v", err)
+	}
+	return &rule.MatchContext{
+		ImportPath: "example.com/pkg",
+		SourceFile: "/tmp/source.go",
+		AST:        tree,
+	}
+}
+
+func TestFuncFilter_Match(t *testing.T) {
+	ctx := parseSource(t, `package main
+
+func Foo() {}
+type MyType struct{}
+func (m *MyType) Method() {}
+`)
+
+	tests := []struct {
+		name string
+		f    *rule.FuncFilter
+		want bool
+	}{
+		{name: "free function", f: &rule.FuncFilter{Func: "Foo"}, want: true},
+		{name: "method with recv", f: &rule.FuncFilter{Func: "Method", Recv: "*MyType"}, want: true},
+		{name: "wrong recv", f: &rule.FuncFilter{Func: "Method", Recv: "*Other"}, want: false},
+		{name: "method without recv", f: &rule.FuncFilter{Func: "Method"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.f.Match(ctx); got != tt.want {
+				t.Fatalf("FuncFilter.Match() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStructFilter_Match(t *testing.T) {
+	ctx := parseSource(t, `package main
+
+type Server struct{}
+func NotAStruct() {}
+`)
+
+	if !(&rule.StructFilter{Struct: "Server"}).Match(ctx) {
+		t.Fatal("StructFilter.Match(Server) = false, want true")
+	}
+	if (&rule.StructFilter{Struct: "NotAStruct"}).Match(ctx) {
+		t.Fatal("StructFilter.Match(NotAStruct) = true, want false")
+	}
+}
+
+// --- Build ---
+
 func TestBuild_NilWhere(t *testing.T) {
-	f, err := filter.Build(nil)
+	f, err := rule.Build(nil)
 	if err != nil {
 		t.Fatalf("Build(nil) error = %v, want nil", err)
 	}
@@ -27,13 +107,13 @@ func TestBuild_NilWhere(t *testing.T) {
 
 func TestBuild_FuncFilter(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{HasFunc: "ServeHTTP", HasRecv: "*serverHandler"}}
-	f, err := filter.Build(where)
+	f, err := rule.Build(where)
 	if err != nil {
 		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
 	}
-	ff, ok := f.(*filter.FuncFilter)
+	ff, ok := f.(*rule.FuncFilter)
 	if !ok {
-		t.Fatalf("Build() returned %T, want *filter.FuncFilter", f)
+		t.Fatalf("Build() returned %T, want *rule.FuncFilter", f)
 	}
 	if ff.Func != "ServeHTTP" {
 		t.Errorf("FuncFilter.Func = %q, want %q", ff.Func, "ServeHTTP")
@@ -45,13 +125,13 @@ func TestBuild_FuncFilter(t *testing.T) {
 
 func TestBuild_StructFilter(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{HasStruct: "Server"}}
-	f, err := filter.Build(where)
+	f, err := rule.Build(where)
 	if err != nil {
 		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
 	}
-	sf, ok := f.(*filter.StructFilter)
+	sf, ok := f.(*rule.StructFilter)
 	if !ok {
-		t.Fatalf("Build() returned %T, want *filter.StructFilter", f)
+		t.Fatalf("Build() returned %T, want *rule.StructFilter", f)
 	}
 	if sf.Struct != "Server" {
 		t.Errorf("StructFilter.Struct = %q, want %q", sf.Struct, "Server")
@@ -68,7 +148,7 @@ func TestBuild_ErrorCases(t *testing.T) {
 			where: &rule.WhereDef{File: &rule.FilterDef{}},
 		},
 		{
-			name:  "recv without has_func",
+			name:  "has_recv without has_func",
 			where: &rule.WhereDef{File: &rule.FilterDef{HasRecv: "*Server"}},
 		},
 		{
@@ -94,7 +174,7 @@ func TestBuild_ErrorCases(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := filter.Build(tt.where); err == nil {
+			if _, err := rule.Build(tt.where); err == nil {
 				t.Fatalf("Build(%+v) error = nil, want error", tt.where)
 			}
 		})
@@ -138,7 +218,7 @@ func runYAMLRoundTripCase(t *testing.T, dir, name string) {
 		t.Fatalf("yaml.Unmarshal(%q) error = %v", name, unmarshalErr)
 	}
 
-	got, buildErr := filter.Build(&rule.WhereDef{File: &def})
+	got, buildErr := rule.Build(&rule.WhereDef{File: &def})
 	if strings.HasPrefix(name, "err_") {
 		if buildErr == nil {
 			t.Fatalf("Build(%q) error = nil, want error", name)
@@ -170,22 +250,22 @@ func loadExpectedFilter(t *testing.T, path string) filterExpected {
 	return want
 }
 
-func assertBuiltFilter(t *testing.T, name string, got filter.Filter, want filterExpected) {
+func assertBuiltFilter(t *testing.T, name string, got rule.Filter, want filterExpected) {
 	t.Helper()
 
 	switch want.Type {
 	case "FuncFilter":
-		funcFilter, ok := got.(*filter.FuncFilter)
+		funcFilter, ok := got.(*rule.FuncFilter)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want *filter.FuncFilter", name, got)
+			t.Fatalf("Build(%q) = %T, want *rule.FuncFilter", name, got)
 		}
 		if funcFilter.Func != want.Func || funcFilter.Recv != want.Recv {
 			t.Fatalf("Build(%q) = %+v, want func=%q recv=%q", name, funcFilter, want.Func, want.Recv)
 		}
 	case "StructFilter":
-		structFilter, ok := got.(*filter.StructFilter)
+		structFilter, ok := got.(*rule.StructFilter)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want *filter.StructFilter", name, got)
+			t.Fatalf("Build(%q) = %T, want *rule.StructFilter", name, got)
 		}
 		if structFilter.Struct != want.Struct {
 			t.Fatalf("Build(%q) = %+v, want struct=%q", name, structFilter, want.Struct)

@@ -7,7 +7,39 @@ import (
 	"maps"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
+
+// Structured top-level keys.
+const (
+	KeyWhere = "where"
+	KeyDo    = "do"
+)
+
+// where selectors (hoisted to flat by normalizeWhere).
+const (
+	SelTarget       = "target"
+	SelVersion      = "version"
+	SelFunc         = "func"
+	SelRecv         = "recv"
+	SelStruct       = "struct"
+	SelFunctionCall = "function_call"
+	SelDirective    = "directive"
+	SelKind         = "kind"
+	SelIdentifier   = "identifier"
+)
+
+// where sub-groups / combinators (preserved nested under flat).
+const (
+	WhereFile = "file"
+	CombAllOf = "all-of"
+	CombOneOf = "one-of"
+	CombNot   = "not"
+)
+
+// RawField is the modifier-output key produced by normalize for raw rules.
+// It is not a where selector; exposed here so match.go can share the literal.
+const RawField = "raw"
 
 // Normalize detects the structured target/version + where + do format defined
 // in ADR-0003 and expands it into one or more flat rule maps expected by the
@@ -49,8 +81,8 @@ import (
 //	imports:
 //	  fmt: fmt
 func Normalize(fields map[string]any) ([]map[string]any, error) {
-	_, hasWhere := fields["where"]
-	_, hasDo := fields["do"]
+	_, hasWhere := fields[KeyWhere]
+	_, hasDo := fields[KeyDo]
 	if !hasWhere && !hasDo {
 		return []map[string]any{fields}, nil
 	}
@@ -62,12 +94,12 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 
 	// Copy top-level fields (e.g. imports, name) that sit outside where/do.
 	for k, v := range fields {
-		if k != "where" && k != "do" {
+		if k != KeyWhere && k != KeyDo {
 			common[k] = v
 		}
 	}
 
-	if whereRaw, ok := fields["where"]; ok {
+	if whereRaw, ok := fields[KeyWhere]; ok {
 		whereMap, isMap := whereRaw.(map[string]any)
 		if !isMap {
 			return nil, ex.Newf("where must be a map")
@@ -77,11 +109,11 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 			return nil, err
 		}
 		if len(normalizedWhere) > 0 {
-			common["where"] = normalizedWhere
+			common[KeyWhere] = normalizedWhere
 		}
 	}
 
-	doItems, err := normalizeDo(fields["do"])
+	doItems, err := normalizeDo(fields[KeyDo])
 	if err != nil {
 		return nil, err
 	}
@@ -103,24 +135,24 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 // target/version are explicitly rejected here because they belong to the
 // top-level package selector slot per ADR-0003.
 func normalizeWhere(common, where map[string]any) (map[string]any, error) {
-	if _, exists := where["target"]; exists {
+	if _, exists := where[SelTarget]; exists {
 		return nil, ex.Newf("target must be top-level, not inside where")
 	}
-	if _, exists := where["version"]; exists {
+	if _, exists := where[SelVersion]; exists {
 		return nil, ex.Newf("version must be top-level, not inside where")
 	}
 
 	normalized := make(map[string]any)
 	for key, value := range where {
 		switch key {
-		case "func", "recv", "struct", "function_call", "directive", "kind", "identifier":
+		case SelFunc, SelRecv, SelStruct, SelFunctionCall, SelDirective, SelKind, SelIdentifier:
 			common[key] = value
-		case "file":
+		case WhereFile:
 			if _, ok := value.(map[string]any); !ok {
 				return nil, ex.Newf("where.file must be a map")
 			}
 			normalized[key] = value
-		case "all-of", "one-of", "not":
+		case CombAllOf, CombOneOf, CombNot:
 			normalized[key] = value
 		default:
 			return nil, ex.Newf("unsupported where key %q", key)
@@ -191,6 +223,9 @@ func normalizeDoMap(modifier map[string]any) ([]map[string]any, error) {
 		}
 		return []map[string]any{maps.Clone(modifierFields)}, nil
 	}
-	// Unreachable: len-1 map iteration guaranteed above.
-	return nil, ex.Newf("do reached an unsupported shape")
+	// The len-1 map check above guarantees the loop body runs exactly once
+	// and returns; reaching this point would mean the runtime broke the map
+	// iteration contract.
+	util.ShouldNotReachHere()
+	return nil, nil
 }

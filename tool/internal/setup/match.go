@@ -21,7 +21,6 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/filter"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -35,27 +34,24 @@ const (
 
 // createRuleFromFields creates a rule instance based on the field type present
 // in the (already-normalized) flat YAML fields map produced by [rule.Normalize].
-//
-//nolint:nilnil // factory function; default branch is unreachable per normalizeRule
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
 	switch {
-	case fields["struct"] != nil:
+	case fields[rule.SelStruct] != nil:
 		return rule.NewInstStructRule(raw, name)
-	case fields["file"] != nil:
+	case fields[rule.WhereFile] != nil:
 		return rule.NewInstFileRule(raw, name)
-	case fields["directive"] != nil:
+	case fields[rule.SelDirective] != nil:
 		return rule.NewInstDirectiveRule(raw, name)
-	case fields["raw"] != nil:
+	case fields[rule.RawField] != nil:
 		return rule.NewInstRawRule(raw, name)
-	case fields["func"] != nil:
+	case fields[rule.SelFunc] != nil:
 		return rule.NewInstFuncRule(raw, name)
-	case fields["function_call"] != nil:
+	case fields[rule.SelFunctionCall] != nil:
 		return rule.NewInstCallRule(raw, name)
-	case fields["identifier"] != nil:
+	case fields[rule.SelIdentifier] != nil:
 		return rule.NewInstDeclRule(raw, name)
 	default:
-		util.ShouldNotReachHere()
-		return nil, nil
+		return nil, ex.Newf("rule %q has no recognised selector", name)
 	}
 }
 
@@ -192,7 +188,7 @@ func (sp *SetupPhase) runMatch(
 // the rules slice is ever sorted or deduplicated before this point.
 type ruleFilter struct {
 	rule  rule.InstRule
-	where filter.Filter // nil means no where clause — apply unconditionally
+	where rule.Filter // nil means no where clause — apply unconditionally
 }
 
 // preciseMatching performs AST-based matching of instrumentation rules against
@@ -217,10 +213,10 @@ func (sp *SetupPhase) preciseMatching(
 	// path, so each filter is built once across the entire matchDeps run.
 	ruleFilters := make([]ruleFilter, 0, len(rules))
 	for _, r := range rules {
-		var f filter.Filter
+		var f rule.Filter
 		if where := r.GetWhere(); where != nil {
 			var err error
-			f, err = filter.Build(where)
+			f, err = rule.Build(where)
 			if err != nil {
 				return nil, ex.Wrapf(err, "build where filter for rule %q", r.GetName())
 			}
@@ -250,7 +246,7 @@ func (sp *SetupPhase) preciseMatching(
 		// mctx is allocated once per source file and reused across all rules
 		// evaluated against that file. All fields are constant for a given
 		// source file, so no updates are needed inside the inner loop.
-		mctx := filter.MatchContext{
+		mctx := rule.MatchContext{
 			ImportPath: dep.ImportPath,
 			SourceFile: source,
 			AST:        tree,
