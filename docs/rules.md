@@ -409,7 +409,7 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 - `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function.
 
-Top-level `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Common Fields](#common-fields).
+Top-level `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Top-level fields](#top-level-fields).
 
 **Example:**
 
@@ -715,7 +715,7 @@ This rule instruments functions annotated with a magic comment (a "directive") b
 
 - `template` (string, required): Go statements to prepend to each matching function body. Rendered with [fasttemplate](https://github.com/valyala/fasttemplate) using `{{` / `}}` delimiters. The only supported placeholder is `{{FuncName}}`, which is replaced with the name of the annotated function.
 
-Top-level `imports` (map[string]string, optional): Additional imports needed by the injected code. Same format as [Common Fields](#common-fields).
+Top-level `imports` (map[string]string, optional): Additional imports needed by the injected code. Same format as [Top-level fields](#top-level-fields).
 
 **Template Placeholders:**
 
@@ -830,7 +830,7 @@ This rule targets a named package-level symbol (variable, constant, function, or
 - `replace` (string, optional): A Go expression to assign as the new value of the matched `var` or `const`. Mutually exclusive with `wrap`. Not valid when `kind` is `func` or `type`.
 - `wrap` (string, optional): A Go expression template that wraps the existing initializer of the matched `var` or `const`. `{{ . }}` is substituted with the original expression. Mutually exclusive with `replace`. Not valid when `kind` is `func` or `type`.
 
-Top-level `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Common Fields](#common-fields).
+Top-level `imports` (map[string]string, optional): Additional imports needed by the injected expression. Same format as [Top-level fields](#top-level-fields).
 
 > **Note:** Exactly one of `replace` or `wrap` must be set.
 
