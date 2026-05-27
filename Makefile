@@ -8,7 +8,7 @@ SHELL := /bin/bash
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
-        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo \
+        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
@@ -387,7 +387,7 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 test: ## Run all tests (unit + integration + e2e)
 test: test-unit test-integration test-e2e
 
-test-unit: test-unit/tool test-unit/pkg test-unit/demo ## Run all unit tests (tool + pkg + demo)
+test-unit: test-unit/tool test-unit/pkg test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
@@ -429,6 +429,13 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 		(cd "$$moddir" && go mod tidy); \
 		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
 	done
+
+.ONESHELL:
+test-unit/helper: ## Run unit tests for test helper packages
+	@echo "Running test helper unit tests..."
+	set -euo pipefail
+	rm -f ./gotest-unit-helper.log
+	go test -C "test" -v -shuffle=on -timeout=5m -count=1 ./testutil/... 2>&1 | tee ./gotest-unit-helper.log
 
 .ONESHELL:
 test-unit/demo: ## Run unit tests for demo applications

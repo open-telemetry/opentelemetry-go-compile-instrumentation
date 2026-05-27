@@ -1,13 +1,14 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package rule
+package setup
 
 import (
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -89,7 +90,7 @@ func (f *StructFilter) Match(ctx *MatchContext) bool {
 // predicate.
 //
 //nolint:nilnil // nil Filter means "no executable file predicate"
-func Build(where *WhereDef) (Filter, error) {
+func Build(where *rule.WhereDef) (Filter, error) {
 	if where == nil {
 		return nil, nil
 	}
@@ -118,7 +119,7 @@ func Build(where *WhereDef) (Filter, error) {
 }
 
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
-func buildFile(def *FilterDef) (Filter, error) {
+func buildFile(def *rule.FilterDef) (Filter, error) {
 	if len(def.AllOf) > 0 {
 		return nil, ex.Newf("where.file all-of predicate composition is not yet supported")
 	}
