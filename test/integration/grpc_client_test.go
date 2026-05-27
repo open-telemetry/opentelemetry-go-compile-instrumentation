@@ -19,6 +19,8 @@ import (
 )
 
 func TestGRPCClient(t *testing.T) {
+	t.Parallel()
+
 	testCases := []struct {
 		name           string
 		extraArgs      []string
@@ -38,8 +40,6 @@ func TestGRPCClient(t *testing.T) {
 			expectedOutput: "stream response",
 		},
 	}
-
-	testutil.BuildApp(t, "grpcclient")
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

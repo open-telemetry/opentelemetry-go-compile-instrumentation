@@ -16,32 +16,31 @@ import (
 )
 
 func TestHTTPServer(t *testing.T) {
+	t.Parallel()
+
 	testCases := []struct {
 		name   string
 		scheme string
-		port   int
 		path   string
 		method string
 	}{
 		{
 			name:   "basic",
 			scheme: "http",
-			port:   8081,
 			path:   "/hello",
 			method: "GET",
 		},
 	}
 
-	testutil.BuildApp(t, "httpserver")
-
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
+			port := testutil.FreePort(t)
 
-			f.Start("httpserver", fmt.Sprintf("-port=%d", tc.port))
-			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", tc.port))
+			f.Start("httpserver", fmt.Sprintf("-port=%d", port))
+			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
-			url := fmt.Sprintf("%s://127.0.0.1:%d%s?name=test", tc.scheme, tc.port, tc.path)
+			url := fmt.Sprintf("%s://127.0.0.1:%d%s?name=test", tc.scheme, port, tc.path)
 			resp, err := http.Get(url)
 			require.NoError(t, err)
 			defer resp.Body.Close()
@@ -56,7 +55,7 @@ func TestHTTPServer(t *testing.T) {
 				tc.path,
 				tc.scheme,
 				200,
-				int64(tc.port),
+				int64(port),
 				"127.0.0.1",
 				"Go-http-client/1.1",
 				"1.1",
