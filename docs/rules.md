@@ -1,5 +1,31 @@
 # Instrumentation Rules Documentation
 
+## Table of Contents
+
+- [Schema Reference](#schema-reference)
+  - [Rule shape](#rule-shape)
+  - [Top-level fields](#top-level-fields)
+  - [Quick demo](#quick-demo)
+  - [`where` semantics](#where-semantics)
+  - [`where.file` semantics](#wherefile-semantics)
+  - [`do` semantics](#do-semantics)
+  - [Modifier names → rule types](#modifier-names--rule-types)
+  - [Special `target` values](#special-target-values)
+  - [Valid and invalid shapes](#valid-and-invalid-shapes)
+- [Rule Types](#rule-types)
+  - [1. Function Hook Rule](#1-function-hook-rule)
+  - [2. Struct Field Injection Rule](#2-struct-field-injection-rule)
+  - [3. Raw Code Injection Rule](#3-raw-code-injection-rule)
+  - [4. Call Wrapping Rule](#4-call-wrapping-rule)
+    - [Example 1: Wrapping Standard Library Calls](#example-1-wrapping-standard-library-calls)
+    - [Example 2: Third-Party Library with Custom Alias](#example-2-third-party-library-with-custom-alias)
+    - [Example 3: Using IIFE for Complex Wrapping with Deferred Cleanup](#example-3-using-iife-for-complex-wrapping-with-deferred-cleanup)
+    - [Example 4: Appending gRPC Interceptors (non-ellipsis)](#example-4-appending-grpc-interceptors-non-ellipsis)
+    - [Example 5: Appending gRPC Interceptors (ellipsis call)](#example-5-appending-grpc-interceptors-ellipsis-call)
+  - [5. Directive Rule](#5-directive-rule)
+  - [6. File Addition Rule](#6-file-addition-rule)
+  - [7. Named Declaration Rule](#7-named-declaration-rule)
+
 This document explains the different types of instrumentation rules used by the Go compile-time instrumentation tool. These rules, defined in YAML files, allow for the injection of code into target Go packages.
 
 The schema is the 2-tier `target` / `version` + `where` / `do` surface decided in [ADR-0003](adr/0003-structured-rule-schema.md). `where` carries non-package selectors, `do` carries modifiers, and the modifier name in `do` declares the rule type.
@@ -37,6 +63,43 @@ rule_name:
 | `imports` | no       | `alias: path` map merged into instrumented files.                  |
 | `name`    | no       | Explicit rule name; defaults to the YAML map key.                  |
 
+Field notes:
+
+- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package.
+- `version` (string, optional): Specifies a version range for the target package using the format `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` matches versions ≥ `v0.11.0` and < `v0.12.0`. Omit to match all versions.
+- `where` (map, optional): Non-package selectors. Flat selector keys inside `where` are an implicit `all-of`. File-level predicates live under `where.file`. See [ADR-0003](adr/0003-structured-rule-schema.md#where-semantics) for the full list of selector keys and the qualifier composition (`all-of`, `one-of`, `not`).
+- `do` (sequence, required): Ordered list of modifier entries. Each entry is a single-key map whose key names the modifier (`inject_hooks`, `inject_code`, `add_struct_fields`, `add_file`, `wrap_call`, `expand_directive`, `assign_value`). A single-modifier rule may also use map form (`do: <modifier>: …`), but the canonical form is the sequence form.
+- `imports` (map[string]string, optional): A map of imports to inject into the instrumented file. The key is the import alias and the value is the import path. For standard imports without an alias, use the package name as both key and value. For blank imports, use `_` as the key. Function hook rules do not require this field — their imports are detected automatically from the hook source file.
+
+  ```yaml
+  imports:
+    fmt: "fmt"       # Standard import: import "fmt"
+    ctx: "context"   # Aliased import: import ctx "context"
+    _: "unsafe"      # Blank import: import _ "unsafe"
+  ```
+
+### Quick demo
+
+A single rule that instruments `(*sql.DB).Exec` — but only in files that also define an `init` function:
+
+```yaml
+instrument_sql_exec:
+  target: database/sql
+  where:
+    func: Exec
+    recv: "*DB"
+    file:
+      all-of:
+        - has_func: init
+  do:
+    - inject_hooks:
+        before: BeforeExec
+        after: AfterExec
+        path: github.com/example/sqlinstr
+```
+
+`target` pins the rule to the `database/sql` package. The `where` block narrows it further: `func` + `recv` together match only the `(*sql.DB).Exec` method. The `where.file` block adds a file-level gate — the hook is injected only into source files that also declare an `init` function (useful when setup code lives alongside `init`). Finally, `do` names the modifier (`inject_hooks`) and declares this as a Function Hook Rule; the tool will call `BeforeExec` at entry and `AfterExec` at exit, importing them from the given path automatically.
+
 ### `where` semantics
 
 - Flat selector keys inside `where` are an implicit `all-of`.
@@ -51,9 +114,9 @@ rule_name:
 
 ### `where.file` semantics
 
-- Predicate keys: `has_func`, `recv`, `has_struct`, `has_directive`.
+- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`.
   Combinator keys: `all-of`, `one-of`, `not`.
-- `recv` inside `where.file` narrows `has_func` to a specific receiver type.
+- `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
 - Today the setup phase executes only leaf predicates (`has_func`,
@@ -97,7 +160,7 @@ Rules:
 | `expand_directive`  | `InstDirectiveRule` |
 | `assign_value`      | `InstDeclRule`      |
 
-Rule type comes from the modifier key in `do`, not from field-presence priority.
+**Planned:** rule type will be derived from the modifier key in `do`. The current implementation still infers from field presence and ignores the modifier name; see #546 for the planned migration.
 
 ### Special `target` values
 
@@ -166,73 +229,6 @@ invalid_where_file_shape:
         file: helpers.go
         path: github.com/example/helpers
 ```
-
-### Migrating from the flat schema
-
-Rules written in the legacy flat format (selector and modifier fields at the
-same level, rule type inferred from field presence) continue to parse without
-error — the normalization layer accepts both shapes. All in-repo YAML files use
-the structured shape.
-
-Flat → structured conversion for the common `inject_hooks` case:
-
-```yaml
-# Flat (legacy)
-hook_serve:
-  target: net/http
-  func: ServeHTTP
-  recv: serverHandler
-  before: BeforeServeHTTP
-  after: AfterServeHTTP
-  path: github.com/example/nethttp/server
-
-# Structured (current)
-hook_serve:
-  target: net/http
-  where:
-    func: ServeHTTP
-    recv: serverHandler
-  do:
-    - inject_hooks:
-        before: BeforeServeHTTP
-        after: AfterServeHTTP
-        path: github.com/example/nethttp/server
-```
-
-Mapping summary:
-
-| Flat field | Structured location |
-| ---------- | ------------------- |
-| `target`, `version` | top-level (unchanged) |
-| `func`, `recv`, `struct`, `function_call`, `directive`, `kind`, `identifier` | `where.<key>` |
-| `before`, `after`, `path` | `do: - inject_hooks:` |
-| `raw` | `do: - inject_code: raw:` |
-| `new_field` | `do: - add_struct_fields: new_field:` |
-| `file` (add_file) | `do: - add_file: file:` |
-| `replace`, `append_args` (wrap_call) | `do: - wrap_call:` |
-| `replace`, `wrap` | `do: - assign_value: replace:` or `do: - assign_value: wrap:` |
-| `imports` | top-level (unchanged) |
-
----
-
-## Common Fields
-
-All rules share a small set of top-level fields:
-
-- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package.
-- `version` (string, optional): Specifies a version range for the target package. The rule will only be applied if the package's version falls within this range. The format is `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` means the rule applies to versions greater than or equal to `v0.11.0` and less than `v0.12.0`. If omitted, the rule applies to all versions.
-- `where` (map, optional): Non-package selectors. Flat selector keys inside `where` are an implicit `all-of`. File-level predicates live under `where.file`. See [ADR-0003](adr/0003-structured-rule-schema.md#where-semantics) for the full list of selector keys and the qualifier composition (`all-of`, `one-of`, `not`).
-- `do` (sequence, required): Ordered list of modifier entries. Each entry is a single-key map whose key names the modifier (`inject_hooks`, `inject_code`, `add_struct_fields`, `add_file`, `wrap_call`, `expand_directive`, `assign_value`). The modifier name declares the rule type. A single-modifier rule may also be written as a one-key map (`do: <modifier>: …`), but the canonical form used throughout this document is the sequence form.
-- `imports` (map[string]string, optional): A map of imports to inject into the instrumented file. The key is the import alias and the value is the import path. For standard imports without an alias, use the package name as both key and value. For blank imports, use `_` as the key. This field is used by raw, struct, and call rules. Function hook rules do not require it — their imports are detected automatically from the hook source file.
-
-  Examples:
-
-  ```yaml
-  imports:
-    fmt: "fmt" # Standard import: import "fmt"
-    ctx: "context" # Aliased import: import ctx "context"
-    _: "unsafe" # Blank import: import _ "unsafe"
-  ```
 
 ---
 
@@ -411,7 +407,7 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 | Field           | Type       | Required                                      | Notes                                                                                                                  |
 | --------------- | ---------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `replace`       | string     | No (one of `replace`/`append_args` required)  | Wrapper template with `{{ . }}` placeholder for the original call. Must produce a Go call expression.                  |
+| `replace`       | string     | No (one of `replace`/`append_args` required)  | Replace string with `{{ . }}` placeholder for the original call. Must produce a Go call expression.                    |
 | `append_args`   | `[]string` | No (one of `replace`/`append_args` required)  | Go expression strings appended as additional arguments to the matched call                                             |
 | `variadic_type` | string     | No                                            | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
 
@@ -419,15 +415,15 @@ Top-level `imports` (map[string]string, optional): Additional imports needed for
 
 **`replace` and `append_args` are independent and can both be set.** When both are present, `append_args` is applied first (arguments are appended to the call), then `replace` wraps the modified call.
 
-**Template System:**
+**`replace` String System:**
 
-The `template` field uses Go's standard `text/template` package for code generation. This provides:
+The `replace` field uses Go's standard `text/template` package for code generation. This provides:
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
-- **Type Safety**: The template is compiled at rule creation time and validated
-- **Expression Output**: The replacement template must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
+- **Type Safety**: The replace string is compiled at rule creation time and validated
+- **Expression Output**: The replace string must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
 
-Currently supported template features:
+Currently supported replace string features:
 
 - Simple wrapping: `wrapper({{ . }})`
 - IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
@@ -534,7 +530,7 @@ func getValue(ctx context.Context, key string) {
 
 #### Example 3: Using IIFE for Complex Wrapping with Deferred Cleanup
 
-This example demonstrates the power of the `text/template` system by using an IIFE (Immediately-Invoked Function Expression) to wrap a call with complex logic:
+This example demonstrates the power of the `replace` string by using an IIFE (Immediately-Invoked Function Expression) to wrap a call with complex logic:
 
 ```yaml
 wrap_with_unsafe:
@@ -567,7 +563,7 @@ func process() {
 }
 ```
 
-**Note:** The `unsafe` package must be imported in the target file for this template to work.
+**Note:** The `unsafe` package must be imported in the target file for this replace string to work.
 
 ---
 
@@ -629,9 +625,9 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 
 **Important Notes:**
 
-- The `{{ . }}` placeholder in the template represents the original function call.
-- The template must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
-- Template code can only reference packages and functions that are already imported or defined in the target file.
+- The `{{ . }}` placeholder in the `replace` string represents the original function call.
+- The `replace` string must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
+- The `replace` string can only reference packages and functions that are already imported or defined in the target file.
 - Call rules only affect call sites in the target package, not the function definition itself.
 - Multiple calls to the same function will all be wrapped independently.
 - Use the qualified format `package/path.FunctionName` for functions.
