@@ -1,5 +1,0 @@
-{
-  "matched_files": ["match.go"],
-  "rule_name": "instrument-handler",
-  "rule_type": "func"
-}

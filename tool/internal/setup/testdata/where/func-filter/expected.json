@@ -1,5 +1,0 @@
-{
-  "matched_files": ["with_init.go"],
-  "rule_name": "instrument-open",
-  "rule_type": "func"
-}
