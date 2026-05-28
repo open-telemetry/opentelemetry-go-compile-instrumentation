@@ -6,6 +6,7 @@ package testutil
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -83,7 +84,7 @@ func (f *TestFixture) SetEnv(key, value string) {
 	prefix := key + "="
 	entry := prefix + value
 	for i, e := range f.env {
-		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+		if strings.HasPrefix(e, prefix) {
 			f.env[i] = entry
 			return
 		}
