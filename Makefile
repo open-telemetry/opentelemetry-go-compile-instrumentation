@@ -356,6 +356,7 @@ BENCH_MAX_OVERHEAD_PCT ?= 150
 
 benchmark/codspeed: build ## Run compile-time benchmarks using Go testing.B (for CodSpeed walltime)
 	cd $(BENCH_DIR) && \
+	trap 'rm -rf $(CURDIR)/$(BENCH_SCENARIOS_DIR)/*/app $(CURDIR)/$(BENCH_SCENARIOS_DIR)/*/.otelc-build $(CURDIR)/.otelc-build' EXIT; \
 	OTELC_BIN=$(CURDIR)/$(BINARY_NAME) \
 	BENCH_SCENARIOS_DIR=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
 	go test -v -run=^$$ -bench=. -benchtime=$(BENCH_TIME)

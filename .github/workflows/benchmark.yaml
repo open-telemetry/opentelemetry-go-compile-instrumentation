@@ -33,6 +33,21 @@ jobs:
         with:
           mode: walltime
           run: make benchmark/codspeed BENCH_TIME=5x
+      - name: Cleanup runner scratch space
+        if: always()
+        run: |
+          set -u
+          # Remove workspace artifacts left by the bench's `go build -a` loops.
+          # The Makefile EXIT trap covers the success path; this step covers
+          # cases where the CodSpeed action was cancelled before the trap fires.
+          rm -rf .otelc-build test/bench/scenarios/*/app test/bench/scenarios/*/.otelc-build || true
+          # Remove Go toolchain scratch dirs created under /tmp by our job.
+          # Scoped to files owned by the current user so we don't touch other
+          # SIGs' artifacts; self-hosted runners serialise jobs so concurrent
+          # writes to these paths from another job are not expected.
+          find /tmp -maxdepth 1 -user "$(id -un)" -name 'go-build*' -exec rm -rf {} + 2>/dev/null || true
+          # Log free space so regressions are visible in CI logs.
+          df -h /tmp /
 
   # Fails if any scenario's otelc overhead exceeds 150% of the plain baseline.
   overhead-threshold:
