@@ -447,16 +447,13 @@ func extractBuildFlags(args []string) []string {
 	return append(valueFlags, enabledBoolFlags...)
 }
 
-// BuildWithToolexec builds the project with the toolexec mode
-func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
-	args := cmd.Args().Slice()
-	logger := util.LoggerFromContext(ctx)
-
-	// Setup already consumed any -C flag and called os.Chdir; strip it from
-	// the args we forward to the underlying `go build` so it doesn't end up
-	// after build flags (go requires -C before build flags).
-	// Handle both positions: before build/install (`go -C dir build ...`) and
-	// immediately after (`go build -C dir ...`).
+// stripCFlag removes a -C flag from either position Go itself accepts:
+//   - before build/install: [-C, dir, build, ...]  -> [build, ...]
+//   - immediately after:    [build, -C, dir, ...]  -> [build, ...]
+//
+// Used to clean args before they are forwarded to the underlying `go build`,
+// after Setup has already consumed -C and called os.Chdir.
+func stripCFlag(args []string) []string {
 	if _, rest := consumeCFlagPositional(args); len(rest) != len(args) {
 		args = rest
 	}
@@ -465,6 +462,18 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 			args = append([]string{args[0]}, rest...)
 		}
 	}
+	return args
+}
+
+// BuildWithToolexec builds the project with the toolexec mode
+func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
+	args := cmd.Args().Slice()
+	logger := util.LoggerFromContext(ctx)
+
+	// Setup already consumed any -C flag and called os.Chdir; strip it from
+	// the args we forward to the underlying `go build` so it doesn't end up
+	// after build flags (go requires -C before build flags).
+	args = stripCFlag(args)
 
 	// Add -toolexec=otelc to the original build command and run it
 	execPath, err := os.Executable()

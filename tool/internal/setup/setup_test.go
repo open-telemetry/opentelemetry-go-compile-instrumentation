@@ -527,6 +527,58 @@ func TestConsumeCFlagPositional(t *testing.T) {
 	}
 }
 
+func TestStripCFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "no -C",
+			args: []string{"build", "-v", "./..."},
+			want: []string{"build", "-v", "./..."},
+		},
+		{
+			name: "-C before build",
+			args: []string{"-C", "/dir", "build", "-v", "./..."},
+			want: []string{"build", "-v", "./..."},
+		},
+		{
+			name: "-C after build",
+			args: []string{"build", "-C", "/dir", "-v", "./..."},
+			want: []string{"build", "-v", "./..."},
+		},
+		{
+			name: "-C=dir before build",
+			args: []string{"-C=/dir", "build", "./..."},
+			want: []string{"build", "./..."},
+		},
+		{
+			name: "-C=dir after build",
+			args: []string{"build", "-C=/dir", "./..."},
+			want: []string{"build", "./..."},
+		},
+		{
+			name: "-C in non-positional spot - left alone",
+			args: []string{"build", "-v", "-C", "/dir", "./..."},
+			want: []string{"build", "-v", "-C", "/dir", "./..."},
+		},
+		{
+			name: "empty",
+			args: []string{},
+			want: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripCFlag(tt.args)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("stripCFlag(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGetPackagesWithCFlag(t *testing.T) {
 	// Create a Go module in a separate temp directory.
 	moduleDir := t.TempDir()
