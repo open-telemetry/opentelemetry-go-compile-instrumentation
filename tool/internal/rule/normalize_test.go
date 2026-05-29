@@ -75,6 +75,47 @@ func TestNormalize(t *testing.T) {
 			},
 		},
 		{
+			name: "where hoists func signature selectors",
+			fields: map[string]any{
+				"target": "database/sql",
+				"where": map[string]any{
+					"func": "Open",
+					"signature": map[string]any{
+						"args": []any{"context.Context"},
+					},
+					"signature_contains": map[string]any{
+						"returns": []any{"error"},
+					},
+					"result":      "io.Reader",
+					"last_result": "error",
+					"param":       "context.Context",
+				},
+				"do": map[string]any{
+					"inject_hooks": map[string]any{
+						"before": "BeforeOpen",
+						"path":   "example.com/hooks",
+					},
+				},
+			},
+			want: []map[string]any{
+				{
+					"target": "database/sql",
+					"func":   "Open",
+					"signature": map[string]any{
+						"args": []any{"context.Context"},
+					},
+					"signature_contains": map[string]any{
+						"returns": []any{"error"},
+					},
+					"result":      "io.Reader",
+					"last_result": "error",
+					"param":       "context.Context",
+					"before":      "BeforeOpen",
+					"path":        "example.com/hooks",
+				},
+			},
+		},
+		{
 			name: "where.file preserved nested",
 			fields: map[string]any{
 				"target": "database/sql",

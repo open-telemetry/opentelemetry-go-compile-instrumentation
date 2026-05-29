@@ -277,7 +277,7 @@ The tool automatically reads the hook source file and ensures all of its imports
 
 #### Signature Sub-Filters
 
-By default the rule matches any function with the given name (and optional receiver). Five optional sub-filters can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
+By default the rule matches any function with the given name (and optional receiver). Five optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
 
 | Field | Type | Semantics |
 | --- | --- | --- |
@@ -303,12 +303,15 @@ Type names follow the form `[*][pkg.]Name`, for example `error`, `context.Contex
 ```yaml
 hook_open:
   target: example.com/store
-  func: Open
-  signature:
-    args: [context.Context, string]
-    returns: ["*Connection", error]
-  before: OnOpen
-  path: example.com/hooks/store
+  where:
+    func: Open
+    signature:
+      args: [context.Context, string]
+      returns: ["*Connection", error]
+  do:
+    - inject_hooks:
+        before: OnOpen
+        path: example.com/hooks/store
 ```
 
 The rule only applies when `Open` takes exactly a `context.Context` and a `string` and returns exactly a `*Connection` and an `error`. Functions named `Open` with different signatures are left untouched.
@@ -318,11 +321,14 @@ The rule only applies when `Open` takes exactly a `context.Context` and a `strin
 ```yaml
 hook_ctx_funcs:
   target: example.com/worker
-  func: Process
-  signature_contains:
-    args: [context.Context]
-  before: OnProcess
-  path: example.com/hooks/worker
+  where:
+    func: Process
+    signature_contains:
+      args: [context.Context]
+  do:
+    - inject_hooks:
+        before: OnProcess
+        path: example.com/hooks/worker
 ```
 
 **Example — match functions whose last return value is `error`:**
@@ -330,10 +336,13 @@ hook_ctx_funcs:
 ```yaml
 hook_fallible:
   target: example.com/db
-  func: Query
-  last_result: error
-  before: OnQuery
-  path: example.com/hooks/db
+  where:
+    func: Query
+    last_result: error
+  do:
+    - inject_hooks:
+        before: OnQuery
+        path: example.com/hooks/db
 ```
 
 ### 2. Struct Field Injection Rule

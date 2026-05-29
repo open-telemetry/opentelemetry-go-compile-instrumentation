@@ -27,6 +27,13 @@ const (
 	SelDirective    = "directive"
 	SelKind         = "kind"
 	SelIdentifier   = "identifier"
+
+	// Signature match-narrowing selectors for func rules (see InstFuncRule).
+	SelSignature         = "signature"
+	SelSignatureContains = "signature_contains"
+	SelResult            = "result"
+	SelLastResult        = "last_result"
+	SelParam             = "param"
 )
 
 // where sub-groups / combinators (preserved nested under flat).
@@ -145,7 +152,8 @@ func normalizeWhere(common, where map[string]any) (map[string]any, error) {
 	normalized := make(map[string]any)
 	for key, value := range where {
 		switch key {
-		case SelFunc, SelRecv, SelStruct, SelFunctionCall, SelDirective, SelKind, SelIdentifier:
+		case SelFunc, SelRecv, SelStruct, SelFunctionCall, SelDirective, SelKind, SelIdentifier,
+			SelSignature, SelSignatureContains, SelResult, SelLastResult, SelParam:
 			common[key] = value
 		case WhereFile:
 			if _, ok := value.(map[string]any); !ok {
