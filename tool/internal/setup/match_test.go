@@ -688,6 +688,60 @@ func TestMultipleRuleFiles(t *testing.T) {
 	require.Equal(t, "h1", rules[0].GetName())
 }
 
+func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
+	// A single YAML entry whose do: sequence carries multiple modifiers expands
+	// into one rule per modifier, all sharing the entry name. loadCustomRules
+	// must retain every expanded rule rather than collapsing them by name.
+	content := `combo:
+  target: main
+  where:
+    func: Example
+  do:
+    - inject_hooks:
+        before: BeforeExample
+        path: example.com/hooks
+    - inject_code:
+        raw: "_ = 1"`
+
+	p := writeCustomRules(t, "combo.yaml", content)
+	t.Setenv(util.EnvOtelcRules, "")
+
+	sp := newTestSetupPhase()
+	require.NoError(t, sp.extract())
+	sp.ruleConfig = p
+
+	rules, err := sp.loadRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+	for _, r := range rules {
+		require.Equal(t, "combo", r.GetName())
+	}
+
+	// Both modifiers must be represented: inject_hooks -> InstFuncRule and
+	// inject_code -> InstRawRule.
+	var hasFunc, hasRaw bool
+	for _, r := range rules {
+		switch r.(type) {
+		case *rule.InstFuncRule:
+			hasFunc = true
+		case *rule.InstRawRule:
+			hasRaw = true
+		}
+	}
+	require.True(t, hasFunc, "expected an InstFuncRule from inject_hooks")
+	require.True(t, hasRaw, "expected an InstRawRule from inject_code")
+
+	// Re-reading the same file must still dedupe the entry as a unit: the
+	// group is replaced, not appended, so the count stays at 2 (not 4).
+	sp = newTestSetupPhase()
+	require.NoError(t, sp.extract())
+	sp.ruleConfig = p + "," + p
+
+	rules, err = sp.loadRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+}
+
 func TestLoadDefaultRules(t *testing.T) {
 	// Write custom rules to temporary files
 	content1 := `h1:

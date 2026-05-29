@@ -374,8 +374,12 @@ func ruleFromDir(path string) ([]string, error) {
 }
 
 func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
-	// Custom map to deduplicate rules
-	ruleSet := make(map[string]rule.InstRule)
+	// Deduplicate by YAML-entry name. A single entry can expand into several
+	// rules (e.g. a do: sequence with multiple modifiers), all sharing that
+	// name, so each name maps to the full slice of rules it produced. Re-reading
+	// the same entry replaces the whole group as a unit, preserving the
+	// "same rule file passed twice should dedupe" behavior.
+	ruleSet := make(map[string][]rule.InstRule)
 	ruleFiles := strings.SplitSeq(ruleConfig, ",")
 	var content []byte
 	for path := range ruleFiles {
@@ -398,13 +402,17 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 				return nil, err
 			}
 
+			// Group this file's rules by entry name, then replace any
+			// previously-seen entry of the same name as a single unit.
+			grouped := make(map[string][]rule.InstRule)
 			for _, r := range rules {
-				ruleSet[r.GetName()] = r
+				grouped[r.GetName()] = append(grouped[r.GetName()], r)
 			}
+			maps.Copy(ruleSet, grouped)
 		}
 	}
 
-	return slices.Collect(maps.Values(ruleSet)), nil
+	return slices.Concat(slices.Collect(maps.Values(ruleSet))...), nil
 }
 
 func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
