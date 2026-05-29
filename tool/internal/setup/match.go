@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -418,6 +419,10 @@ func (sp *SetupPhase) matchDeps(
 
 	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
 	}
 	return matched, nil
 }

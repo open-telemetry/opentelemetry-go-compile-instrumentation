@@ -607,3 +607,33 @@ target: example.com/mypkg
 	assert.Empty(t, set.PackageName)
 	assert.False(t, set.IsEmpty())
 }
+
+func TestMatchDeps_NoMatchesWarning(t *testing.T) {
+	// Create a rule file that won't match any dependencies
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "nomatch.yaml")
+	err := os.WriteFile(ruleFile, []byte(`fake_hook:
+  target: github.com/fake/nonexistent
+  func: DoesNotExist
+  recv: ""
+  before: BeforeFake
+  after: AfterFake
+  path: "github.com/fake/nonexistent/hook"
+`), 0o644)
+	require.NoError(t, err)
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	deps := []*Dependency{
+		{
+			ImportPath: "net/http",
+			Sources:    []string{},
+			CgoFiles:   make(map[string]string),
+		},
+	}
+
+	matched, err := sp.matchDeps(context.Background(), deps)
+	require.NoError(t, err)
+	assert.Empty(t, matched)
+}
