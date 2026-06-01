@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-const eventTimeout = 30 * time.Second
+const eventTimeout = 60 * time.Second
 
 func main() {
 	kubeConfigYaml := os.Getenv("KUBECONFIG_YAML")
