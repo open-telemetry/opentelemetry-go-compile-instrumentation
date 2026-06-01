@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -15,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/dave/dst"
-	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
@@ -105,27 +105,7 @@ func loadDefaultRules() ([]rule.InstRule, error) {
 }
 
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
-	// No version specified, so it's always applicable
-	if rule.GetVersion() == "" {
-		return true
-	}
-
-	// Version range? i.e. "v0.11.0,v0.12.0"
-	ruleVersion := rule.GetVersion()
-	if strings.Contains(ruleVersion, ",") {
-		commaIndex := strings.Index(ruleVersion, ",")
-		//nolint:gocritic // commaIndex is always valid
-		startInclusive := ruleVersion[:commaIndex]
-		endExclusive := ruleVersion[commaIndex+1:]
-		// Version is in the "inclusive,exclusive" range
-		if semver.Compare(dependency.Version, startInclusive) >= 0 &&
-			semver.Compare(dependency.Version, endExclusive) < 0 {
-			return true
-		}
-		return false
-	}
-	// Minimal version only? i.e. "v0.11.0"
-	return semver.Compare(dependency.Version, ruleVersion) >= 0
+	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
 
 // runMatch performs precise matching of rules against the dependency's source code.
@@ -211,7 +191,9 @@ func (sp *SetupPhase) preciseMatching(
 		set.SetPackageName(tree.Name.Name)
 
 		for _, r := range rules {
-			sp.matchOneRule(tree, source, r, set, dep)
+			if err = sp.matchOneRule(tree, source, r, set, dep); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return set, nil
@@ -225,13 +207,19 @@ func (sp *SetupPhase) matchOneRule(
 	r rule.InstRule,
 	set *rule.InstRuleSet,
 	dep *Dependency,
-) {
+) error {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
 		if funcDecl != nil {
-			set.AddFuncRule(source, rt)
-			sp.Info("Match func rule", "rule", rt, "dep", dep)
+			ok, err := ast.FuncDeclMatchesFilters(funcDecl, rt)
+			if err != nil {
+				return err
+			}
+			if ok {
+				set.AddFuncRule(source, rt)
+				sp.Info("Match func rule", "rule", rt, "dep", dep)
+			}
 		}
 	case *rule.InstStructRule:
 		structDecl := ast.FindStructDecl(tree, rt.Struct)
@@ -268,6 +256,7 @@ func (sp *SetupPhase) matchOneRule(
 	default:
 		util.ShouldNotReachHere()
 	}
+	return nil
 }
 
 func ruleFromDir(path string) ([]string, error) {
@@ -415,6 +404,10 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	if err = g.Wait(); err != nil {
 		return nil, err
+	}
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
 	}
 	return matched, nil
 }
