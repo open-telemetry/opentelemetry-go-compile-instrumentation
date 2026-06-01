@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -110,4 +112,25 @@ func EncodeBuildFlags(flags []string) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// VersionInRange checks if a given version is within a specified version range.
+// The version range can be in one of the following formats:
+// - "" (empty string): means all versions are supported.
+// - "v0.11.0": means all versions >= v0.11.0 are supported.
+// - "v0.11.0,v0.12.0": means versions >= v0.11.0 and < v0.12.0 are supported.
+func VersionInRange(version, versionRange string) bool {
+	// No version specified, so it's always applicable
+	if versionRange == "" {
+		return true
+	}
+
+	// Version range? i.e. "v0.11.0,v0.12.0"
+	if startInclusive, endExclusive, ok := strings.Cut(versionRange, ","); ok {
+		return semver.Compare(version, startInclusive) >= 0 &&
+			semver.Compare(version, endExclusive) < 0
+	}
+
+	// Minimal version only? i.e. "v0.11.0"
+	return semver.Compare(version, versionRange) >= 0
 }

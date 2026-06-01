@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 // goModJSON is the subset of `go mod edit -json` output we care about.
@@ -28,16 +30,17 @@ type goModJSON struct {
 	}
 }
 
-// yamlRule is the subset of a single rule entry we need to read the target from.
+// yamlRule is the subset of a single rule entry we need to read the target/version from.
 type yamlRule struct {
-	Target string `yaml:"target"`
+	Target  string `yaml:"target"`
+	Version string `yaml:"version"`
 }
 
 // InstrumentedTargets walks rulesRoot, parses every *.yaml file as an
-// instrumentation rule set, and returns the set of package/module paths
-// declared as `target:`.
-func InstrumentedTargets(t *testing.T, rulesRoot string) map[string]bool {
-	targets := map[string]bool{}
+// instrumentation rule set, and returns instrumented targets mapped
+// to their supported version ranges.
+func InstrumentedTargets(t *testing.T, rulesRoot string) map[string][]string {
+	targets := map[string][]string{}
 	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -53,7 +56,7 @@ func InstrumentedTargets(t *testing.T, rulesRoot string) map[string]bool {
 
 		for _, r := range rules {
 			if r.Target != "" {
-				targets[r.Target] = true
+				targets[r.Target] = append(targets[r.Target], r.Version)
 			}
 		}
 		return nil
@@ -65,8 +68,8 @@ func InstrumentedTargets(t *testing.T, rulesRoot string) map[string]bool {
 
 // DiscoverInstrumentedDeps returns the direct, non-replaced third-party
 // requires of the go.mod at appDir that are covered by at least one
-// instrumentation rule target.
-func DiscoverInstrumentedDeps(t *testing.T, appDir string, targets map[string]bool) []string {
+// instrumentation rule target + supported version range.
+func DiscoverInstrumentedDeps(t *testing.T, appDir string, targets map[string][]string) []string {
 	cmd := exec.CommandContext(t.Context(), "go", "mod", "edit", "-json")
 	cmd.Dir = appDir
 	out, err := cmd.Output()
@@ -87,20 +90,46 @@ func DiscoverInstrumentedDeps(t *testing.T, appDir string, targets map[string]bo
 		if req.Indirect || localReplaces[req.Path] {
 			continue
 		}
-		if coversAnyTarget(req.Path, targets) {
+
+		versionRanges := findMatchingVersionRanges(req.Path, targets)
+		if len(versionRanges) == 0 {
+			continue
+		}
+
+		cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Version}}", req.Path+"@latest")
+		out, err := cmd.Output()
+		require.NoError(t, err, "go list -m -f {{.Version}} %s@latest failed in %s", req.Path, appDir)
+
+		latestVersion := strings.TrimSpace(string(out))
+		if coversAnyVersionRange(latestVersion, versionRanges) {
 			deps = append(deps, req.Path)
 		}
 	}
 	return deps
 }
 
-// coversAnyTarget reports whether requirePath is the module path of any
-// instrumented target. A module covers a target when the target equals the
-// module path or is rooted at it (target == path or target starts with path+"/").
-func coversAnyTarget(requirePath string, targets map[string]bool) bool {
+// findMatchingVersionRanges returns all version ranges for all instrumented targets
+// whose module path matches requirePath.
+// A module covers a target when the target equals the module path
+// or is rooted at it (target == path or target starts with path+"/").
+func findMatchingVersionRanges(requirePath string, targets map[string][]string) map[string]bool {
+	allVersionRanges := map[string]bool{}
 	prefix := requirePath + "/"
-	for target := range targets {
+	for target, versionRanges := range targets {
 		if target == requirePath || strings.HasPrefix(target, prefix) {
+			for _, vr := range versionRanges {
+				allVersionRanges[vr] = true
+			}
+		}
+	}
+	return allVersionRanges
+}
+
+// coversAnyVersionRange reports whether version is included in any
+// of the provided version ranges.
+func coversAnyVersionRange(version string, versionRanges map[string]bool) bool {
+	for vr := range versionRanges {
+		if util.VersionInRange(version, vr) {
 			return true
 		}
 	}

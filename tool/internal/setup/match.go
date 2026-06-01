@@ -16,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/dave/dst"
-	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
@@ -110,19 +109,7 @@ func loadDefaultRules() ([]rule.InstRule, error) {
 }
 
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
-	v := rule.GetVersion()
-	// No version specified, so it's always applicable.
-	if v == "" {
-		return true
-	}
-
-	// Version range? i.e. "v0.11.0,v0.12.0" (inclusive start, exclusive end).
-	if startInclusive, endExclusive, ok := strings.Cut(v, ","); ok {
-		return semver.Compare(dependency.Version, startInclusive) >= 0 &&
-			semver.Compare(dependency.Version, endExclusive) < 0
-	}
-	// Minimal version only? i.e. "v0.11.0"
-	return semver.Compare(dependency.Version, v) >= 0
+	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
 
 // runMatch performs precise matching of rules against the dependency's source code.
