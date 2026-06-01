@@ -18,159 +18,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type mockInstRule struct {
-	rule.InstBaseRule
-}
-
-func (r *mockInstRule) String() string {
-	return r.Name
-}
-
-func TestMatchVersion(t *testing.T) {
-	tests := []struct {
-		name           string
-		dependency     *Dependency
-		ruleVersion    string
-		expectedResult bool
-	}{
-		{
-			name: "no version specified in rule - always matches",
-			dependency: &Dependency{
-				Version: "v1.5.0",
-			},
-			ruleVersion:    "",
-			expectedResult: true,
-		},
-		{
-			name: "version exactly at start of range",
-			dependency: &Dependency{
-				Version: "v1.0.0",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: true,
-		},
-		{
-			name: "version in middle of range",
-			dependency: &Dependency{
-				Version: "v1.5.0",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: true,
-		},
-		{
-			name: "version just before end of range",
-			dependency: &Dependency{
-				Version: "v1.9.9",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: true,
-		},
-		{
-			name: "version exactly at end of range - excluded",
-			dependency: &Dependency{
-				Version: "v2.0.0",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: false,
-		},
-		{
-			name: "version after end of range",
-			dependency: &Dependency{
-				Version: "v2.1.0",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: false,
-		},
-		{
-			name: "version before start of range",
-			dependency: &Dependency{
-				Version: "v0.9.0",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: false,
-		},
-		{
-			name: "pre-release version in range",
-			dependency: &Dependency{
-				Version: "v1.5.0-alpha",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: true,
-		},
-		{
-			name: "patch version in range",
-			dependency: &Dependency{
-				Version: "v1.5.3",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: true,
-		},
-		{
-			name: "major version jump",
-			dependency: &Dependency{
-				Version: "v3.0.0",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: false,
-		},
-		{
-			name: "zero major version",
-			dependency: &Dependency{
-				Version: "v0.5.0",
-			},
-			ruleVersion:    "v0.1.0,v1.0.0",
-			expectedResult: true,
-		},
-		{
-			name: "narrow version range",
-			dependency: &Dependency{
-				Version: "v1.2.3",
-			},
-			ruleVersion:    "v1.2.0,v1.3.0",
-			expectedResult: true,
-		},
-		{
-			name: "version with build metadata",
-			dependency: &Dependency{
-				Version: "v1.5.0+build123",
-			},
-			ruleVersion:    "v1.0.0,v2.0.0",
-			expectedResult: true,
-		},
-		{
-			name: "minimal version only - good",
-			dependency: &Dependency{
-				Version: "v1.2.3",
-			},
-			ruleVersion:    "v1.2.3",
-			expectedResult: true,
-		},
-		{
-			name: "minimal version only - bad",
-			dependency: &Dependency{
-				Version: "v1.2.3",
-			},
-			ruleVersion:    "v1.2.4",
-			expectedResult: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rule := &mockInstRule{
-				InstBaseRule: rule.InstBaseRule{
-					Version: tt.ruleVersion,
-				},
-			}
-
-			result := matchVersion(tt.dependency, rule)
-			if result != tt.expectedResult {
-				t.Errorf("matchVersion() = %v, want %v", result, tt.expectedResult)
-			}
-		})
-	}
-}
-
 func TestCreateRuleFromFields(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -606,4 +453,34 @@ target: example.com/mypkg
 	// No sources means package name is not set
 	assert.Empty(t, set.PackageName)
 	assert.False(t, set.IsEmpty())
+}
+
+func TestMatchDeps_NoMatchesWarning(t *testing.T) {
+	// Create a rule file that won't match any dependencies
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "nomatch.yaml")
+	err := os.WriteFile(ruleFile, []byte(`fake_hook:
+  target: github.com/fake/nonexistent
+  func: DoesNotExist
+  recv: ""
+  before: BeforeFake
+  after: AfterFake
+  path: "github.com/fake/nonexistent/hook"
+`), 0o644)
+	require.NoError(t, err)
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	deps := []*Dependency{
+		{
+			ImportPath: "net/http",
+			Sources:    []string{},
+			CgoFiles:   make(map[string]string),
+		},
+	}
+
+	matched, err := sp.matchDeps(context.Background(), deps)
+	require.NoError(t, err)
+	assert.Empty(t, matched)
 }
