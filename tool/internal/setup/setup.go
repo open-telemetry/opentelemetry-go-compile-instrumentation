@@ -77,8 +77,10 @@ var flagsWithPathValues = map[string]bool{
 
 const commandLineArgumentsPackage = "command-line-arguments"
 
-// consumeCFlagPositional consumes -C only when it appears as the first
-// argument in args, matching Go toolchain semantics (see handleChdirFlag).
+// consumeCFlagPositional consumes -C (or --C) only when it appears as the
+// first argument in args, matching Go toolchain semantics (see handleChdirFlag).
+// Both single-dash (-C) and double-dash (--C) forms are supported, as is the
+// equals form (-C=dir / --C=dir).
 // Returns ("", args) if -C is not present at position 0.
 func consumeCFlagPositional(args []string) (string, []string) {
 	if len(args) == 0 {
@@ -87,7 +89,10 @@ func consumeCFlagPositional(args []string) (string, []string) {
 	if strings.HasPrefix(args[0], "-C=") {
 		return strings.TrimPrefix(args[0], "-C="), args[1:]
 	}
-	if args[0] == "-C" && len(args) > 1 {
+	if strings.HasPrefix(args[0], "--C=") {
+		return strings.TrimPrefix(args[0], "--C="), args[1:]
+	}
+	if (args[0] == "-C" || args[0] == "--C") && len(args) > 1 {
 		return args[1], args[2:]
 	}
 	return "", args
@@ -543,7 +548,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Look past a leading -C when validating the command form. The actual
 	// os.Chdir happens in Setup, where -C is consumed from args.
 	first := cmd.Args().First()
-	if first == "-C" || strings.HasPrefix(first, "-C=") {
+	if first == "-C" || first == "--C" || strings.HasPrefix(first, "-C=") || strings.HasPrefix(first, "--C=") {
 		_, rest := consumeCFlagPositional(cmd.Args().Slice())
 		if len(rest) == 0 {
 			return ex.Newf("no command provided after -C. Only 'go build' and 'go install' are supported")

@@ -490,6 +490,24 @@ func TestConsumeCFlagPositional(t *testing.T) {
 			expectedArgs: []string{"./..."},
 		},
 		{
+			name:         "double-dash space-separated form",
+			args:         []string{"--C", "/some/dir", "./..."},
+			expectedDir:  "/some/dir",
+			expectedArgs: []string{"./..."},
+		},
+		{
+			name:         "double-dash equals form",
+			args:         []string{"--C=/some/dir", "./..."},
+			expectedDir:  "/some/dir",
+			expectedArgs: []string{"./..."},
+		},
+		{
+			name:         "--C at end with no value - not consumed",
+			args:         []string{"--C"},
+			expectedDir:  "",
+			expectedArgs: []string{"--C"},
+		},
+		{
 			name:         "not at position 0 - not consumed",
 			args:         []string{"-v", "-C", "/some/dir", "./..."},
 			expectedDir:  "",
