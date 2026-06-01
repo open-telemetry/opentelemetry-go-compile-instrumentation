@@ -179,8 +179,8 @@ format/yaml: $(YAMLFMT)
 	@echo "Formatting YAML files..."
 	$(YAMLFMT) -conf .tools/yamlfmt -dstar '**/*.yml' '**/*.yaml'
 
-lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile)
-lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile
+lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile, typos)
+lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile lint/typos
 
 lint/action: ## Lint GitHub Actions workflows
 lint/action: $(ACTIONLINT) ratchet/check
@@ -224,6 +224,18 @@ lint/license-header: ## Check license headers in source files
 .PHONY: lint/license-header/fix
 lint/license-header/fix: ## Add missing license headers to source files
 	@.github/scripts/license-check.sh --fix
+
+.PHONY: lint/typos
+lint/typos: ## Check for typos using crate-ci/typos
+	@echo "Checking for typos..."
+	@if command -v typos >/dev/null 2>&1; then \
+		typos --config .tools/typos.toml; \
+	elif command -v docker >/dev/null 2>&1; then \
+		docker run --rm -v "$(CURDIR)":/src -w /src ghcr.io/crate-ci/typos:latest --config .tools/typos.toml; \
+	else \
+		echo "Error: install 'typos' (https://github.com/crate-ci/typos) or Docker to run this check."; \
+		exit 1; \
+	fi
 
 ##@ Markdown
 
