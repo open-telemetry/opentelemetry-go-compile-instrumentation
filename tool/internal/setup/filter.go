@@ -22,7 +22,7 @@ import (
 //
 //	where:
 //	  file:
-//	    all-of:           # AllOf combinator (not yet implemented)
+//	    all-of:           # AllOf combinator
 //	      - has_func: Foo # FuncFilter leaf
 //	      - has_struct: Bar # StructFilter leaf
 
@@ -82,6 +82,24 @@ func (f *StructFilter) Match(ctx *MatchContext) bool {
 	return ast.FindStructDecl(ctx.AST, f.Struct) != nil
 }
 
+// --- Combinators ---
+
+var _ Filter = (AllOf)(nil)
+
+// AllOf matches when every child filter matches. An empty AllOf matches
+// vacuously (all conditions in an empty set are satisfied). Evaluation
+// short-circuits on the first non-matching child.
+type AllOf []Filter
+
+func (a AllOf) Match(ctx *MatchContext) bool {
+	for _, f := range a {
+		if !f.Match(ctx) {
+			return false
+		}
+	}
+	return true
+}
+
 // --- Build ---
 
 // Build constructs a runtime Filter from a structured where clause.
@@ -121,7 +139,7 @@ func Build(where *rule.WhereDef) (Filter, error) {
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
 func buildFile(def *rule.FilterDef) (Filter, error) {
 	if len(def.AllOf) > 0 {
-		return nil, ex.Newf("where.file all-of predicate composition is not yet supported")
+		return buildAllOf(def.AllOf)
 	}
 	if len(def.OneOf) > 0 {
 		return nil, ex.Newf("where.file one-of predicate composition is not yet supported")
@@ -166,4 +184,20 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		util.ShouldNotReachHere()
 		return nil, nil
 	}
+}
+
+// buildAllOf compiles a where.file.all-of group into an AllOf combinator that
+// matches only when every child predicate matches. Children are compiled with
+// the same buildFile rules, so nesting (all-of within all-of) composes
+// naturally.
+func buildAllOf(defs []rule.FilterDef) (Filter, error) {
+	filters := make(AllOf, 0, len(defs))
+	for i := range defs {
+		f, err := buildFile(&defs[i])
+		if err != nil {
+			return nil, ex.Wrapf(err, "where.file.all-of[%d]", i)
+		}
+		filters = append(filters, f)
+	}
+	return filters, nil
 }
