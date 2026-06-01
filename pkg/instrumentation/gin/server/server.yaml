@@ -1,0 +1,7 @@
+server_hook:
+  target: github.com/gin-gonic/gin
+  func: ServeHTTP
+  recv: "*Engine"
+  before: BeforeServeHTTP
+  after: AfterServeHTTP
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/gin/server"
