@@ -14,172 +14,175 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
-func TestDBClientPing(t *testing.T) {
-	f := testutil.NewTestFixture(t)
+func TestDBClient(t *testing.T) {
+	t.Parallel()
 
-	f.BuildAndRun("dbclient", "-op=ping")
+	t.Run("Ping", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
 
-	span := f.RequireSingleSpan()
-	require.Equal(t, "PING", span.Name())
-	testutil.RequireDBClientSemconv(t, span,
-		"PING",
-		"ping",
-		"unknown", 0,
-		"testdb",
-	)
-}
+		f.Run("dbclient", "-op=ping")
 
-func TestDBClientExec(t *testing.T) {
-	f := testutil.NewTestFixture(t)
+		span := f.RequireSingleSpan()
+		require.Equal(t, "PING", span.Name())
+		testutil.RequireDBClientSemconv(t, span,
+			"PING",
+			"ping",
+			"unknown", 0,
+			"testdb",
+		)
+	})
 
-	f.BuildAndRun("dbclient", "-op=exec")
+	t.Run("Exec", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
 
-	span := f.RequireSingleSpan()
-	require.Equal(t, "INSERT", span.Name())
-	testutil.RequireDBClientSemconv(t, span,
-		"INSERT",
-		"INSERT INTO users (name, email) VALUES (?, ?)",
-		"unknown", 0,
-		"testdb",
-	)
-}
+		f.Run("dbclient", "-op=exec")
 
-func TestDBClientQuery(t *testing.T) {
-	f := testutil.NewTestFixture(t)
+		span := f.RequireSingleSpan()
+		require.Equal(t, "INSERT", span.Name())
+		testutil.RequireDBClientSemconv(t, span,
+			"INSERT",
+			"INSERT INTO users (name, email) VALUES (?, ?)",
+			"unknown", 0,
+			"testdb",
+		)
+	})
 
-	f.BuildAndRun("dbclient", "-op=query")
+	t.Run("Query", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
 
-	span := f.RequireSingleSpan()
-	require.Equal(t, "SELECT", span.Name())
-	testutil.RequireDBClientSemconv(t, span,
-		"SELECT",
-		"SELECT id, name FROM users WHERE name = ?",
-		"unknown", 0,
-		"testdb",
-	)
-}
+		f.Run("dbclient", "-op=query")
 
-func TestDBClientPrepareAndQuery(t *testing.T) {
-	f := testutil.NewTestFixture(t)
+		span := f.RequireSingleSpan()
+		require.Equal(t, "SELECT", span.Name())
+		testutil.RequireDBClientSemconv(t, span,
+			"SELECT",
+			"SELECT id, name FROM users WHERE name = ?",
+			"unknown", 0,
+			"testdb",
+		)
+	})
 
-	f.BuildAndRun("dbclient", "-op=prepare")
+	t.Run("PrepareAndQuery", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
 
-	// PrepareContext doesn't create a span directly, but stmt.QueryContext does
-	spans := testutil.AllSpans(f.Traces())
-	require.GreaterOrEqual(t, len(spans), 1, "Expected at least 1 span from prepared statement query")
+		f.Run("dbclient", "-op=prepare")
 
-	// Find the query span from stmt.QueryContext
-	stmtSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
-	require.Equal(t, "SELECT", stmtSpan.Name())
-}
+		// PrepareContext doesn't create a span directly, but stmt.QueryContext does
+		spans := testutil.AllSpans(f.Traces())
+		require.GreaterOrEqual(t, len(spans), 1, "Expected at least 1 span from prepared statement query")
 
-func TestDBClientTransaction(t *testing.T) {
-	f := testutil.NewTestFixture(t)
+		// Find the query span from stmt.QueryContext
+		stmtSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
+		require.Equal(t, "SELECT", stmtSpan.Name())
+	})
 
-	f.BuildAndRun("dbclient", "-op=tx")
+	t.Run("Transaction", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
 
-	spans := testutil.AllSpans(f.Traces())
-	// BeginTx -> ExecContext -> Commit = 3 spans
-	require.Equal(t, 3, len(spans), "Expected 3 spans for transaction: begin, exec, commit")
+		f.Run("dbclient", "-op=tx")
 
-	// Verify we have the expected span types
-	beginSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "START"),
-	)
-	require.Equal(t, "START", beginSpan.Name())
+		spans := testutil.AllSpans(f.Traces())
+		// BeginTx -> ExecContext -> Commit = 3 spans
+		require.Equal(t, 3, len(spans), "Expected 3 spans for transaction: begin, exec, commit")
 
-	execSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "INSERT"),
-	)
-	require.Equal(t, "INSERT", execSpan.Name())
+		beginSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "START"),
+		)
+		require.Equal(t, "START", beginSpan.Name())
 
-	commitSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "COMMIT"),
-	)
-	require.Equal(t, "COMMIT", commitSpan.Name())
-}
+		execSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "INSERT"),
+		)
+		require.Equal(t, "INSERT", execSpan.Name())
 
-func TestDBClientAll(t *testing.T) {
-	f := testutil.NewTestFixture(t)
+		commitSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "COMMIT"),
+		)
+		require.Equal(t, "COMMIT", commitSpan.Name())
+	})
 
-	f.BuildAndRun("dbclient",
-		"-driver=testdb",
-		"-dsn=user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
-		"-op=all",
-	)
+	t.Run("All", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
 
-	// "all" operation produces 7 spans:
-	//   PING (PingContext)
-	//   INSERT (ExecContext)
-	//   SELECT (QueryContext)
-	//   SELECT (Stmt.QueryContext via PrepareContext)
-	//   START (BeginTx)
-	//   INSERT (Tx.ExecContext)
-	//   COMMIT (Tx.Commit)
-	spans := testutil.AllSpans(f.Traces())
-	require.GreaterOrEqual(t, len(spans), 7, "Expected at least 7 spans")
+		f.Run("dbclient",
+			"-driver=testdb",
+			"-dsn=user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8",
+			"-op=all",
+		)
 
-	// For "testdb" driver, parseDSN returns an error (unknown driver),
-	// so beforeOpenInstrumentation falls back to "unknown" as the endpoint.
-	const serverAddr = "unknown"
+		// "all" operation produces 7 spans:
+		//   PING (PingContext)
+		//   INSERT (ExecContext)
+		//   SELECT (QueryContext)
+		//   SELECT (Stmt.QueryContext via PrepareContext)
+		//   START (BeginTx)
+		//   INSERT (Tx.ExecContext)
+		//   COMMIT (Tx.Commit)
+		spans := testutil.AllSpans(f.Traces())
+		require.GreaterOrEqual(t, len(spans), 7, "Expected at least 7 spans")
 
-	pingSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute(string(semconv.DBOperationNameKey), "PING"),
-	)
-	testutil.RequireDBClientSemconv(t, pingSpan,
-		"PING",
-		"ping",
-		serverAddr, 0,
-		"testdb",
-	)
+		// For "testdb" driver, parseDSN returns an error (unknown driver),
+		// so beforeOpenInstrumentation falls back to "unknown" as the endpoint.
+		const serverAddr = "unknown"
 
-	execSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute(string(semconv.DBQueryTextKey), "INSERT INTO users (name, email) VALUES (?, ?)"),
-	)
-	testutil.RequireDBClientSemconv(t, execSpan,
-		"INSERT",
-		"INSERT INTO users (name, email) VALUES (?, ?)",
-		serverAddr, 0,
-		"testdb",
-	)
+		pingSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBOperationNameKey), "PING"),
+		)
+		testutil.RequireDBClientSemconv(t, pingSpan,
+			"PING",
+			"ping",
+			serverAddr, 0,
+			"testdb",
+		)
 
-	querySpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute(string(semconv.DBQueryTextKey), "SELECT id, name FROM users WHERE name = ?"),
-	)
-	testutil.RequireDBClientSemconv(t, querySpan,
-		"SELECT",
-		"SELECT id, name FROM users WHERE name = ?",
-		serverAddr, 0,
-		"testdb",
-	)
+		execSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBQueryTextKey), "INSERT INTO users (name, email) VALUES (?, ?)"),
+		)
+		testutil.RequireDBClientSemconv(t, execSpan,
+			"INSERT",
+			"INSERT INTO users (name, email) VALUES (?, ?)",
+			serverAddr, 0,
+			"testdb",
+		)
 
-	beginSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute(string(semconv.DBOperationNameKey), "START"),
-	)
-	testutil.RequireDBClientSemconv(t, beginSpan,
-		"START",
-		"START TRANSACTION",
-		serverAddr, 0,
-		"testdb",
-	)
+		querySpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBQueryTextKey), "SELECT id, name FROM users WHERE name = ?"),
+		)
+		testutil.RequireDBClientSemconv(t, querySpan,
+			"SELECT",
+			"SELECT id, name FROM users WHERE name = ?",
+			serverAddr, 0,
+			"testdb",
+		)
 
-	commitSpan2 := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute(string(semconv.DBOperationNameKey), "COMMIT"),
-	)
-	testutil.RequireDBClientSemconv(t, commitSpan2,
-		"COMMIT",
-		"COMMIT",
-		serverAddr, 0,
-		"testdb",
-	)
+		beginSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBOperationNameKey), "START"),
+		)
+		testutil.RequireDBClientSemconv(t, beginSpan,
+			"START",
+			"START TRANSACTION",
+			serverAddr, 0,
+			"testdb",
+		)
+
+		commitSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBOperationNameKey), "COMMIT"),
+		)
+		testutil.RequireDBClientSemconv(t, commitSpan,
+			"COMMIT",
+			"COMMIT",
+			serverAddr, 0,
+			"testdb",
+		)
+	})
 }
 
 func TestDBClientDSNParsing(t *testing.T) {
