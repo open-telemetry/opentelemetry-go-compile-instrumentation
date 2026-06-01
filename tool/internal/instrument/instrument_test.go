@@ -27,6 +27,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dave/dst"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
@@ -134,6 +137,14 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 			props["name"] = name
 			ruleData, _ := yaml.Marshal(props)
 
+			// The golden harness has no setup phase, so the where.file filter
+			// that setup.preciseMatching would evaluate is applied inline here.
+			// A rule whose file predicate does not match the source is skipped,
+			// exactly as it would be gated out during matching.
+			if !whereFileMatches(t, ruleData, sourceFile) {
+				continue
+			}
+
 			switch {
 			case props["struct"] != nil:
 				r, _ := rule.NewInstStructRule(ruleData, name)
@@ -161,6 +172,51 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	}
 
 	return ruleSet
+}
+
+// whereFileMatches evaluates the rule's where.file predicate against the source
+// file, mirroring the gating that setup.preciseMatching performs. It returns
+// true when there is no file predicate. The golden harness builds the matched
+// rule set by hand (no setup phase), so this keeps fixtures honest: a rule whose
+// file filter does not match is gated out and produces no instrumentation.
+func whereFileMatches(t *testing.T, ruleData []byte, sourceFile string) bool {
+	t.Helper()
+
+	var probe struct {
+		Where *rule.WhereDef `yaml:"where"`
+	}
+	require.NoError(t, yaml.Unmarshal(ruleData, &probe))
+	if probe.Where == nil || probe.Where.File == nil {
+		return true
+	}
+
+	tree, err := ast.ParseFileFast(sourceFile)
+	require.NoError(t, err)
+	return fileFilterMatches(probe.Where.File, tree)
+}
+
+// fileFilterMatches reports whether a where.file predicate matches the parsed
+// source. It covers the predicates exercised by golden fixtures: all-of
+// composition plus has_func / has_struct leaves. Filter compilation and match
+// semantics are unit-tested in tool/internal/setup; this is a lightweight
+// stand-in for the golden harness only.
+func fileFilterMatches(def *rule.FilterDef, tree *dst.File) bool {
+	if len(def.AllOf) > 0 {
+		for i := range def.AllOf {
+			if !fileFilterMatches(&def.AllOf[i], tree) {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case def.HasFunc != "":
+		return ast.FindFuncDecl(tree, def.HasFunc, def.HasRecv) != nil
+	case def.HasStruct != "":
+		return ast.FindStructDecl(tree, def.HasStruct) != nil
+	default:
+		return true
+	}
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
