@@ -281,6 +281,9 @@ type filterExpected struct {
 	Func   string `yaml:"func"`
 	Recv   string `yaml:"recv"`
 	Struct string `yaml:"struct"`
+	// Children describes the expected sub-filters for combinator types
+	// (e.g. AllOf). It is nil for leaf filters.
+	Children []filterExpected `yaml:"children"`
 }
 
 func TestBuild_YAMLRoundTrip(t *testing.T) {
@@ -364,6 +367,17 @@ func assertBuiltFilter(t *testing.T, name string, got setup.Filter, want filterE
 		}
 		if structFilter.Struct != want.Struct {
 			t.Fatalf("Build(%q) = %+v, want struct=%q", name, structFilter, want.Struct)
+		}
+	case "AllOf":
+		allOf, ok := got.(setup.AllOf)
+		if !ok {
+			t.Fatalf("Build(%q) = %T, want setup.AllOf", name, got)
+		}
+		if len(allOf) != len(want.Children) {
+			t.Fatalf("Build(%q) AllOf len = %d, want %d", name, len(allOf), len(want.Children))
+		}
+		for i := range allOf {
+			assertBuiltFilter(t, name, allOf[i], want.Children[i])
 		}
 	default:
 		t.Fatalf("unexpected expected filter type %q", want.Type)
