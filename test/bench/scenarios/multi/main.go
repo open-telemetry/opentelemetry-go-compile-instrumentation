@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"k8s.io/client-go/tools/cache"
 )
 
 func main() {
@@ -32,6 +33,9 @@ func main() {
 
 	rdb := redis.NewClient(&redis.Options{})
 	_ = rdb
+
+	handler := cache.ResourceEventHandlerFuncs{}
+	_ = handler
 
 	_ = context.Background()
 }
