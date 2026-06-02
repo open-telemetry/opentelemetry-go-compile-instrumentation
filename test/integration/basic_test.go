@@ -18,10 +18,10 @@ import (
 )
 
 func TestBasic(t *testing.T) {
-	appDir := filepath.Join("..", "..", "demo", "app", "basic")
+	t.Parallel()
 
-	testutil.Build(t, appDir, "go", "build", "-a")
-	output := testutil.Run(t, appDir)
+	appDir := filepath.Join("..", "..", "demo", "app", "basic")
+	output := testutil.Run(t, appDir, nil)
 	expect := []string{
 		"Every1",
 		"Every3",
