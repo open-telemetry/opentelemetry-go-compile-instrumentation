@@ -859,7 +859,10 @@ func TestMatchDeps_NoMatchesWarning(t *testing.T) {
 		},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps)
+	rules, err := sp.loadRules()
 	require.NoError(t, err)
+
+	matched, matchErr := sp.matchDeps(context.Background(), rules, deps)
+	require.NoError(t, matchErr)
 	assert.Empty(t, matched)
 }

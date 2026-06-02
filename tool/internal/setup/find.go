@@ -214,8 +214,8 @@ func (sp *SetupPhase) findDeps(ctx context.Context, cmdArgs []string) ([]*Depend
 			continue
 		}
 
-		if util.IsCompileCommandWithArgs(util.SplitCompileCmds(cmd)) {
-			args := util.SplitCompileCmds(cmd)
+		args := util.SplitCompileCmds(cmd)
+		if util.IsCompileCommandWithArgs(args) {
 			dep, err1 := findGoSources(sp, args, cgoObjDirs)
 			if err1 != nil {
 				return nil, err1
@@ -223,7 +223,6 @@ func (sp *SetupPhase) findDeps(ctx context.Context, cmdArgs []string) ([]*Depend
 			deps = append(deps, dep)
 			sp.Info("Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {
-			args := util.SplitCompileCmds(cmd)
 			objDir := util.FindFlagValue(args, "-objdir")
 			util.Assert(objDir != "", "sanity check")
 			cgoObjDirs[util.NormalizePath(objDir)] = currentDir

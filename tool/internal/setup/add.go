@@ -28,13 +28,14 @@ var requiredImports = map[string]string{
 }
 
 func genImportDecl(matched []*rule.InstFuncRule) []dst.Decl {
+	imports := maps.Clone(requiredImports) // clone required imports to avoid mutating the global constant map
 	for _, m := range matched {
-		requiredImports[m.Path] = ast.IdentIgnore
+		imports[m.Path] = ast.IdentIgnore
 	}
-	importDecls := make([]dst.Decl, 0, len(requiredImports))
+	importDecls := make([]dst.Decl, 0, len(imports))
 	// Sort the keys to ensure deterministic order
-	for _, k := range slices.Sorted(maps.Keys(requiredImports)) {
-		importDecls = append(importDecls, ast.ImportDecl(requiredImports[k], k))
+	for _, k := range slices.Sorted(maps.Keys(imports)) {
+		importDecls = append(importDecls, ast.ImportDecl(imports[k], k))
 	}
 	return importDecls
 }
@@ -48,13 +49,13 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		}
 		uniquePath[m.Path] = true
 		// First variable declaration
-		// //go:linkname _getstatck%d %s.OtelGetStackImpl
-		// var _getstatck%d = _otel_debug.Stack
+		// //go:linkname _getstack%d %s.OtelGetStackImpl
+		// var _getstack%d = _otel_debug.Stack
 		value := ast.SelectorExpr(ast.Ident("_otel_debug"), "Stack")
-		getStackVar := ast.VarDecl(fmt.Sprintf("_getstatck%d", i), value)
+		getStackVar := ast.VarDecl(fmt.Sprintf("_getstack%d", i), value)
 		getStackVar.Decs = dst.GenDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname _getstatck%d %s.OtelGetStackImpl", i, m.Path)),
+				fmt.Sprintf("//go:linkname _getstack%d %s.OtelGetStackImpl", i, m.Path)),
 		}
 		// Second variable declaration
 		// //go:linkname _printstack%d %s.OtelPrintStackImpl
