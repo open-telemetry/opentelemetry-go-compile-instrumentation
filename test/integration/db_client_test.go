@@ -239,7 +239,7 @@ func TestDBClientDSNParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
-			f.BuildAndRun("dbclient",
+			f.Run("dbclient",
 				"-driver="+tt.driverName,
 				"-dsn="+tt.dsn,
 				"-op=ping",
