@@ -139,6 +139,12 @@ func Build(where *rule.WhereDef) (Filter, error) {
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
 func buildFile(def *rule.FilterDef) (Filter, error) {
 	if len(def.AllOf) > 0 {
+		// all-of owns the composition for this node; sibling predicates would be
+		// silently ignored, so reject the ambiguous combination explicitly.
+		if def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
+			def.HasDirective != "" || len(def.OneOf) > 0 || def.Not != nil {
+			return nil, ex.Newf("where.file.all-of cannot be combined with other predicates")
+		}
 		return buildAllOf(def.AllOf)
 	}
 	if len(def.OneOf) > 0 {
@@ -196,6 +202,11 @@ func buildAllOf(defs []rule.FilterDef) (Filter, error) {
 		f, err := buildFile(&defs[i])
 		if err != nil {
 			return nil, ex.Wrapf(err, "where.file.all-of[%d]", i)
+		}
+		if f == nil {
+			// buildFile returns a non-nil filter for every valid leaf; a nil here
+			// would make AllOf.Match panic, so fail loudly instead.
+			return nil, ex.Newf("where.file.all-of[%d] produced no filter", i)
 		}
 		filters = append(filters, f)
 	}

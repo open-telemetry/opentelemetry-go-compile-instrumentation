@@ -192,7 +192,7 @@ func whereFileMatches(t *testing.T, ruleData []byte, sourceFile string) bool {
 
 	tree, err := ast.ParseFileFast(sourceFile)
 	require.NoError(t, err)
-	return fileFilterMatches(probe.Where.File, tree)
+	return fileFilterMatches(t, probe.Where.File, tree)
 }
 
 // fileFilterMatches reports whether a where.file predicate matches the parsed
@@ -200,10 +200,16 @@ func whereFileMatches(t *testing.T, ruleData []byte, sourceFile string) bool {
 // composition plus has_func / has_struct leaves. Filter compilation and match
 // semantics are unit-tested in tool/internal/setup; this is a lightweight
 // stand-in for the golden harness only.
-func fileFilterMatches(def *rule.FilterDef, tree *dst.File) bool {
+//
+// Any predicate this evaluator does not model is rejected with t.Fatalf rather
+// than silently treated as a match: setup.buildFile errors on such predicates,
+// so silently matching here would let a fixture certify instrumentation output
+// that production could never produce.
+func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
+	t.Helper()
 	if len(def.AllOf) > 0 {
 		for i := range def.AllOf {
-			if !fileFilterMatches(&def.AllOf[i], tree) {
+			if !fileFilterMatches(t, &def.AllOf[i], tree) {
 				return false
 			}
 		}
@@ -215,7 +221,9 @@ func fileFilterMatches(def *rule.FilterDef, tree *dst.File) bool {
 	case def.HasStruct != "":
 		return ast.FindStructDecl(tree, def.HasStruct) != nil
 	default:
-		return true
+		t.Fatalf("golden fixture uses a where.file predicate the harness cannot "+
+			"evaluate (%+v); extend fileFilterMatches to mirror setup.buildFile", def)
+		return false
 	}
 }
 
