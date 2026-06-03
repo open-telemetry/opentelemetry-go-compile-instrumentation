@@ -134,6 +134,14 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 			props["name"] = name
 			ruleData, _ := yaml.Marshal(props)
 
+			// Mirror the setup-phase target-glob gate: a glob target only
+			// applies when it matches the package import path. Exact targets
+			// (the common case) always pass through. This lets golden fixtures
+			// prove glob match vs no-match end to end.
+			if !targetMatches(props, mainPackage) {
+				continue
+			}
+
 			switch {
 			case props["struct"] != nil:
 				r, _ := rule.NewInstStructRule(ruleData, name)
@@ -161,6 +169,18 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	}
 
 	return ruleSet
+}
+
+// targetMatches reports whether a rule's target applies to importPath. Exact
+// (non-glob) targets always apply in this harness because rule selection by
+// import path happens in the setup phase; only glob targets are evaluated here
+// so that golden fixtures can demonstrate the glob match/no-match split.
+func targetMatches(props map[string]any, importPath string) bool {
+	target, ok := props["target"].(string)
+	if !ok || !rule.IsGlobTarget(target) {
+		return true
+	}
+	return rule.MatchGlobTarget(target, importPath)
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
