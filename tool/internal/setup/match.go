@@ -77,6 +77,19 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 			if err2 != nil {
 				return nil, err2
 			}
+			// target is the sole package selector and is required (docs/rules.md).
+			// An empty or whitespace-only target would land under exactRules[""]
+			// and silently never match any real import path, so reject it loudly
+			// at load time instead.
+			if strings.TrimSpace(r.GetTarget()) == "" {
+				return nil, ex.Newf("rule %q has an empty target; target is required", name)
+			}
+			// Reject ambiguous/invalid glob targets at load time so a bad rule
+			// fails loudly during parsing rather than silently matching nothing
+			// during the setup phase.
+			if err3 := rule.ValidateTarget(r.GetTarget()); err3 != nil {
+				return nil, ex.Wrapf(err3, "rule %q", name)
+			}
 			rules = append(rules, r)
 		}
 	}
@@ -113,11 +126,18 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 }
 
 // runMatch performs precise matching of rules against the dependency's source code.
-// It parses source files and matches rules by examining AST nodes
+// It parses source files and matches rules by examining AST nodes.
+//
+// Rules reach this function through two paths:
+//   - exactRules is the rule index keyed by exact target import path. The fast
+//     path is a single map lookup on dep.ImportPath.
+//   - globRules are rules whose target uses glob syntax; each one's pattern is
+//     evaluated against dep.ImportPath because they cannot be pre-indexed by key.
 func (sp *SetupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
-	rulesByTarget map[string][]rule.InstRule,
+	exactRules map[string][]rule.InstRule,
+	globRules []rule.InstRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
@@ -126,8 +146,24 @@ func (sp *SetupPhase) runMatch(
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
 	}
 
-	// Filter rules by target
-	relevantRules := rulesByTarget[dep.ImportPath]
+	// Fast path: exact-target rules via a single map lookup.
+	relevantRules := exactRules[dep.ImportPath]
+
+	// Glob path: a rule applies when its glob target matches this dependency's
+	// import path. The slice is shared read-only across goroutines, so a fresh
+	// slice is built per dependency to avoid aliasing the exact-match slice.
+	if len(globRules) > 0 {
+		matched := make([]rule.InstRule, 0, len(relevantRules)+len(globRules))
+		matched = append(matched, relevantRules...)
+		for _, r := range globRules {
+			if rule.MatchGlobTarget(r.GetTarget(), dep.ImportPath) {
+				matched = append(matched, r)
+				sp.Debug("Match glob target", "rule", r.GetName(), "target", r.GetTarget(), "dep", dep.ImportPath)
+			}
+		}
+		relevantRules = matched
+	}
+
 	if len(relevantRules) == 0 {
 		return set, nil
 	}
@@ -437,11 +473,19 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, nil
 	}
 
-	// Pre-index rules by target
-	rulesByTarget := make(map[string][]rule.InstRule)
+	// Split rules into two matching tiers. Exact-target rules are pre-indexed
+	// by import path so each dependency resolves them with one map lookup
+	// (unchanged fast path). Glob-target rules cannot be keyed, so they are
+	// kept in a flat slice and evaluated against every dependency's import path.
+	exactRules := make(map[string][]rule.InstRule)
+	globRules := make([]rule.InstRule, 0)
 	for _, r := range allRules {
 		target := r.GetTarget()
-		rulesByTarget[target] = append(rulesByTarget[target], r)
+		if rule.IsGlobTarget(target) {
+			globRules = append(globRules, r)
+			continue
+		}
+		exactRules[target] = append(exactRules[target], r)
 	}
 
 	// Match the default rules with the found dependencies
@@ -452,7 +496,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			m, err1 := sp.runMatch(gCtx, dep, rulesByTarget)
+			m, err1 := sp.runMatch(gCtx, dep, exactRules, globRules)
 			if err1 != nil {
 				return err1
 			}
