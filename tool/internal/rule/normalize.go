@@ -34,6 +34,10 @@ const (
 	SelResult            = "result"
 	SelLastResult        = "last_result"
 	SelParam             = "param"
+
+	// Raw match-narrowing selector for raw rules (see InstRawRule).
+	SelPattern   = "pattern"
+	SelPlacement = "placement"
 )
 
 // where sub-groups / combinators (preserved nested under flat).
@@ -153,7 +157,8 @@ func normalizeWhere(common, where map[string]any) (map[string]any, error) {
 	for key, value := range where {
 		switch key {
 		case SelFunc, SelRecv, SelStruct, SelFunctionCall, SelDirective, SelKind, SelIdentifier,
-			SelSignature, SelSignatureContains, SelResult, SelLastResult, SelParam:
+			SelSignature, SelSignatureContains, SelResult, SelLastResult, SelParam,
+			SelPattern, SelPlacement:
 			common[key] = value
 		case WhereFile:
 			if _, ok := value.(map[string]any); !ok {
