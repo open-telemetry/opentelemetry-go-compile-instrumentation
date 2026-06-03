@@ -19,16 +19,16 @@ import (
 )
 
 func TestGinServer(t *testing.T) {
+	t.Parallel()
+
 	testCases := []struct {
 		name       string
-		port       int
 		path       string
 		wantStatus int
 		assertSpan func(t *testing.T, span ptrace.Span)
 	}{
 		{
 			name:       "matched route is enriched with http.route",
-			port:       8090,
 			path:       "/hello/OpenTelemetry",
 			wantStatus: http.StatusOK,
 			assertSpan: func(t *testing.T, span ptrace.Span) {
@@ -46,7 +46,6 @@ func TestGinServer(t *testing.T) {
 		},
 		{
 			name:       "5xx response carries error.type",
-			port:       8091,
 			path:       fmt.Sprintf("/status/%d", http.StatusInternalServerError),
 			wantStatus: http.StatusInternalServerError,
 			assertSpan: func(t *testing.T, span ptrace.Span) {
@@ -56,7 +55,6 @@ func TestGinServer(t *testing.T) {
 		},
 		{
 			name:       "c.Error() surfaces as span status and exception event",
-			port:       8092,
 			path:       "/error",
 			wantStatus: http.StatusOK,
 			assertSpan: func(t *testing.T, span ptrace.Span) {
@@ -69,7 +67,6 @@ func TestGinServer(t *testing.T) {
 		},
 		{
 			name:       "unmatched route keeps plain method as span name",
-			port:       8093,
 			path:       "/no-such-route",
 			wantStatus: http.StatusNotFound,
 			assertSpan: func(t *testing.T, span ptrace.Span) {
@@ -95,12 +92,12 @@ func TestGinServer(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
+			port := testutil.FreePort(t)
 
-			addr := fmt.Sprintf("127.0.0.1:%d", tc.port)
-			f.BuildAndStart("ginserver", fmt.Sprintf("-port=%d", tc.port))
-			testutil.WaitForTCP(t, addr)
+			f.Start("ginserver", fmt.Sprintf("-port=%d", port))
+			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
-			resp, err := http.Get("http://" + addr + tc.path) //nolint:noctx
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, tc.path)) //nolint:noctx
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.Equal(t, tc.wantStatus, resp.StatusCode)

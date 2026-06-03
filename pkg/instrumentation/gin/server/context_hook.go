@@ -25,9 +25,6 @@ const (
 // c.FullPath(). We use this to update the span name from the initial
 // "METHOD" to "METHOD /route/pattern" and record the http.route attribute.
 func BeforeNext(ictx inst.HookContext, c *gin.Context) {
-	if !serverEnabler.Enable() {
-		return
-	}
 	if c == nil || c.Request == nil {
 		return
 	}
@@ -73,10 +70,6 @@ func BeforeNext(ictx inst.HookContext, c *gin.Context) {
 // AfterNext runs after (*gin.Context).Next returns. It records any errors
 // accumulated via c.Error() during request handling.
 func AfterNext(ictx inst.HookContext) {
-	if !serverEnabler.Enable() {
-		return
-	}
-
 	c, ok := ictx.GetParam(0).(*gin.Context)
 	if !ok || c == nil || c.Request == nil {
 		return

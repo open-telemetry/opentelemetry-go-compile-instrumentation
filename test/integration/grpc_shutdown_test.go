@@ -6,6 +6,7 @@
 package test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,15 +28,17 @@ func TestGRPCServerTelemetryFlushOnSignal(t *testing.T) {
 	if util.IsWindows() {
 		t.Skip("SIGINT is not supported on windows")
 	}
+	t.Parallel()
 
 	f := testutil.NewTestFixture(t)
-	t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
+	f.SetEnv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
 
-	f.Build("grpcserver")
-	cmd := startServerProcess(t, "-port=50052")
-	testutil.WaitForTCP(t, "localhost:50052")
+	port := testutil.FreePort(t)
+	addr := fmt.Sprintf("localhost:%d", port)
+	cmd := startServerProcess(t, f.Env(), fmt.Sprintf("-port=%d", port))
+	testutil.WaitForTCP(t, addr)
 
-	client := NewGRPCClient(t, "localhost:50052")
+	client := NewGRPCClient(t, addr)
 	client.SayHello(t, "ShutdownTest")
 
 	require.NoError(t, cmd.Process.Signal(os.Interrupt))
@@ -53,7 +56,7 @@ func TestGRPCServerTelemetryFlushOnSignal(t *testing.T) {
 }
 
 // startServerProcess starts the instrumented grpcserver app and returns the exec.Cmd.
-func startServerProcess(t *testing.T, args ...string) *exec.Cmd {
+func startServerProcess(t *testing.T, env []string, args ...string) *exec.Cmd {
 	t.Helper()
 
 	pwd, err := os.Getwd()
@@ -67,7 +70,7 @@ func startServerProcess(t *testing.T, args ...string) *exec.Cmd {
 
 	cmd := exec.CommandContext(t.Context(), appName, args...)
 	cmd.Dir = appDir
-	cmd.Env = os.Environ()
+	cmd.Env = env
 
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {

@@ -65,7 +65,6 @@ func setupContextTracer(t *testing.T) (*tracetest.SpanRecorder, trace.Tracer) {
 
 func TestBeforeNext_UpdatesSpanNameAndRoute(t *testing.T) {
 	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	_, span := tr.Start(context.Background(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
@@ -88,7 +87,6 @@ func TestBeforeNext_UpdatesSpanNameAndRoute(t *testing.T) {
 
 func TestBeforeNext_EmptyRouteIsNoop(t *testing.T) {
 	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	_, span := tr.Start(context.Background(), "GET")
 
@@ -109,7 +107,6 @@ func TestBeforeNext_EmptyRouteIsNoop(t *testing.T) {
 
 func TestBeforeNext_IdempotentOnMultipleNextCalls(t *testing.T) {
 	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	_, span := tr.Start(context.Background(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/items/:id", "/items/7", span)
@@ -138,26 +135,8 @@ func TestBeforeNext_IdempotentOnMultipleNextCalls(t *testing.T) {
 	)
 }
 
-func TestBeforeNext_DisabledIsNoop(t *testing.T) {
-	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin")
-
-	_, span := tr.Start(context.Background(), "GET")
-	c := newGinContextWithRoute(t, "GET", "/ping", "/ping", span)
-
-	ictx := insttest.NewMockHookContext(c)
-	BeforeNext(ictx, c)
-
-	span.End()
-	require.Len(t, sr.Ended(), 1)
-
-	// Name should still be the initial "GET" since the hook is disabled.
-	assert.Equal(t, "GET", sr.Ended()[0].Name())
-}
-
 func TestBeforeNext_NonRecordingSpanDoesNotBurnGate(t *testing.T) {
 	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	// First call: request context has no span attached, so trace.SpanFromContext
 	// returns a non-recording no-op span. The gate must NOT be set, because no
@@ -188,7 +167,6 @@ func TestBeforeNext_NonRecordingSpanDoesNotBurnGate(t *testing.T) {
 
 func TestAfterNext_RecordsGinErrors(t *testing.T) {
 	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	_, span := tr.Start(context.Background(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
@@ -217,7 +195,6 @@ func TestAfterNext_RecordsGinErrors(t *testing.T) {
 
 func TestAfterNext_NoErrorsIsNoop(t *testing.T) {
 	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	_, span := tr.Start(context.Background(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/ping", "/ping", span)
@@ -234,7 +211,6 @@ func TestAfterNext_NoErrorsIsNoop(t *testing.T) {
 
 func TestAfterNext_RecordsOnlyAtOutermostReturn(t *testing.T) {
 	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	_, span := tr.Start(context.Background(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/items/:id", "/items/7", span)
@@ -271,7 +247,6 @@ func TestAfterNext_RecordsOnlyAtOutermostReturn(t *testing.T) {
 
 func TestAfterNext_NonRecordingSpanSkipsRecording(t *testing.T) {
 	sr, _ := setupContextTracer(t)
-	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "gin")
 
 	// No span attached — trace.SpanFromContext returns a non-recording no-op.
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", nil)
@@ -282,22 +257,4 @@ func TestAfterNext_NonRecordingSpanSkipsRecording(t *testing.T) {
 	AfterNext(ictx)
 
 	assert.Empty(t, sr.Ended(), "non-recording span must not produce any recorded spans")
-}
-
-func TestAfterNext_DisabledIsNoop(t *testing.T) {
-	sr, tr := setupContextTracer(t)
-	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin")
-
-	_, span := tr.Start(context.Background(), "GET")
-	c := newGinContextWithRoute(t, "GET", "/ping", "/ping", span)
-
-	_ = c.Error(errors.New("should be ignored"))
-
-	ictx := insttest.NewMockHookContext(c)
-	AfterNext(ictx)
-
-	span.End()
-	require.Len(t, sr.Ended(), 1)
-	assert.Equal(t, codes.Unset, sr.Ended()[0].Status().Code)
-	assert.Empty(t, sr.Ended()[0].Events())
 }

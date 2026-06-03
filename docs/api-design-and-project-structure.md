@@ -12,6 +12,7 @@ The project structure is as follows:
       - `semconv`: Semantic conventions for HTTP
     - `grpc`: gRPC instrumentation
     - `redis`: redis instrumentation
+    - `k8s-client-go`: Kubernetes client-go informers instrumentation
     - `helloworld`: Example instrumentation
     - `runtime`: Runtime context management
     - `shared`: Shared utilities and OTel SDK setup
@@ -237,7 +238,7 @@ To add instrumentation for a new library:
 1. Create a new directory under `pkg/instrumentation/<library>`
 2. Implement Before/After hook functions
 3. Create semantic convention helpers in a `semconv` subdirectory
-4. Define rules in `tool/data/<library>.yaml`
+4. Define rules in `pkg/instrumentation/<library>/.../*.yaml`
 5. Add tests and documentation
 
 Example structure:
