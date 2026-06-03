@@ -475,6 +475,17 @@ func assertBuiltFilter(t *testing.T, name string, got setup.Filter, want filterE
 		for i := range allOf {
 			assertBuiltFilter(t, name, allOf[i], want.Children[i])
 		}
+	case "OneOf":
+		oneOf, ok := got.(setup.OneOf)
+		if !ok {
+			t.Fatalf("Build(%q) = %T, want setup.OneOf", name, got)
+		}
+		if len(oneOf) != len(want.Children) {
+			t.Fatalf("Build(%q) OneOf len = %d, want %d", name, len(oneOf), len(want.Children))
+		}
+		for i := range oneOf {
+			assertBuiltFilter(t, name, oneOf[i], want.Children[i])
+		}
 	default:
 		t.Fatalf("unexpected expected filter type %q", want.Type)
 	}
