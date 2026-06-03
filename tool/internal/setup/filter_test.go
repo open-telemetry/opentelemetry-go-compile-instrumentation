@@ -293,6 +293,27 @@ func TestAllOf_Match_ShortCircuits(t *testing.T) {
 	}
 }
 
+func TestBuild_OneOf_Empty(t *testing.T) {
+	// An explicit empty one-of: [] is present (non-nil slice) and compiles to an
+	// empty OneOf that matches nothing (vacuous false), rather than erroring with
+	// "no active predicate".
+	where := &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{}}}
+	f, err := setup.Build(where)
+	if err != nil {
+		t.Fatalf("Build(empty OneOf) error = %v, want nil", err)
+	}
+	oneOf, ok := f.(setup.OneOf)
+	if !ok {
+		t.Fatalf("Build(empty OneOf) = %T, want setup.OneOf", f)
+	}
+	if len(oneOf) != 0 {
+		t.Fatalf("OneOf len = %d, want 0", len(oneOf))
+	}
+	if oneOf.Match(nil) {
+		t.Error("empty OneOf.Match(nil) = true, want false (no member matches)")
+	}
+}
+
 func TestBuild_OneOf(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{
 		{HasFunc: "Foo"},
