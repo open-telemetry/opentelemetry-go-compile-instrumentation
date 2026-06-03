@@ -161,10 +161,6 @@ func TestBuild_ErrorCases(t *testing.T) {
 			where: &rule.WhereDef{OneOf: []rule.WhereDef{{Func: "Foo"}, {Func: "Bar"}}},
 		},
 		{
-			name:  "where.file one-of unsupported",
-			where: &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{{HasFunc: "Foo"}, {HasFunc: "Bar"}}}},
-		},
-		{
 			name:  "where selector composition unsupported",
 			where: &rule.WhereDef{Func: "Foo"},
 		},
@@ -294,6 +290,85 @@ func TestAllOf_Match_ShortCircuits(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("evaluated %d children, want 1 (short-circuit on first non-match)", calls)
+	}
+}
+
+func TestBuild_OneOf(t *testing.T) {
+	where := &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{
+		{HasFunc: "Foo"},
+		{HasStruct: "Bar"},
+	}}}
+	f, err := setup.Build(where)
+	if err != nil {
+		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
+	}
+	oneOf, ok := f.(setup.OneOf)
+	if !ok {
+		t.Fatalf("Build() returned %T, want setup.OneOf", f)
+	}
+	if len(oneOf) != 2 {
+		t.Fatalf("OneOf len = %d, want 2", len(oneOf))
+	}
+	if _, isFunc := oneOf[0].(*setup.FuncFilter); !isFunc {
+		t.Errorf("OneOf[0] = %T, want *setup.FuncFilter", oneOf[0])
+	}
+	if _, isStruct := oneOf[1].(*setup.StructFilter); !isStruct {
+		t.Errorf("OneOf[1] = %T, want *setup.StructFilter", oneOf[1])
+	}
+}
+
+func TestBuild_OneOf_Nested(t *testing.T) {
+	where := &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{
+		{OneOf: []rule.FilterDef{{HasFunc: "Foo"}}},
+	}}}
+	f, err := setup.Build(where)
+	if err != nil {
+		t.Fatalf("Build(nested OneOf) error = %v, want nil", err)
+	}
+	outer, ok := f.(setup.OneOf)
+	if !ok || len(outer) != 1 {
+		t.Fatalf("Build(nested) = %T, want setup.OneOf of len 1", f)
+	}
+	if _, isNested := outer[0].(setup.OneOf); !isNested {
+		t.Errorf("OneOf[0] = %T, want nested setup.OneOf", outer[0])
+	}
+}
+
+func TestBuild_OneOf_InvalidChild(t *testing.T) {
+	// An empty child FilterDef has no active predicate and must fail the build.
+	where := &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{{}}}}
+	if _, err := setup.Build(where); err == nil {
+		t.Fatal("Build(OneOf with empty child) error = nil, want error")
+	}
+}
+
+func TestOneOf_Match(t *testing.T) {
+	tests := []struct {
+		name     string
+		children setup.OneOf
+		want     bool
+	}{
+		{"empty never matches", setup.OneOf{}, false},
+		{"one child matches", setup.OneOf{stubFilter{result: false}, stubFilter{result: true}}, true},
+		{"no children match", setup.OneOf{stubFilter{result: false}, stubFilter{result: false}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.children.Match(nil); got != tt.want {
+				t.Errorf("OneOf.Match() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOneOf_Match_ShortCircuits(t *testing.T) {
+	calls := 0
+	o := setup.OneOf{stubFilter{result: true, calls: &calls}, stubFilter{result: false, calls: &calls}}
+	if !o.Match(nil) {
+		t.Fatal("OneOf.Match() = false, want true")
+	}
+	if calls != 1 {
+		t.Errorf("evaluated %d children, want 1 (short-circuit on first match)", calls)
 	}
 }
 
