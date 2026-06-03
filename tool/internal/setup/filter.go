@@ -162,6 +162,14 @@ func Build(where *rule.WhereDef) (Filter, error) {
 // matches vacuously (see AllOf.Match) — consistent with the documented type
 // semantics.
 //
+// hasLeafPredicate reports whether any leaf (non-combinator) where.file
+// predicate is set on def. The combinator branches use it to reject a leaf
+// predicate that sits as a sibling of a combinator on the same node.
+func hasLeafPredicate(def *rule.FilterDef) bool {
+	return def.HasFunc != "" || def.HasRecv != "" ||
+		def.HasStruct != "" || def.HasDirective != ""
+}
+
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
 func buildFile(def *rule.FilterDef) (Filter, error) {
 	// Presence is detected via a non-nil slice (not len > 0): YAML unmarshals an
@@ -171,9 +179,9 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		// all-of owns the composition for this node; sibling predicates would be
 		// silently ignored, so reject the ambiguous combination explicitly. This
 		// guard runs for the empty case too, so all-of: [] + has_func: X is still
-		// rejected.
-		if def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
-			def.HasDirective != "" || len(def.OneOf) > 0 || def.Not != nil {
+		// rejected. Sibling combinators are detected by non-nil presence (not
+		// len > 0), so an explicit empty one-of: [] is also rejected here.
+		if hasLeafPredicate(def) || def.OneOf != nil || def.Not != nil {
 			return nil, ex.Newf("where.file.all-of cannot be combined with other predicates")
 		}
 		return buildAllOf(def.AllOf)
@@ -184,9 +192,10 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 	if def.OneOf != nil {
 		// one-of owns the composition for this node; reject sibling predicates
 		// that would otherwise be silently ignored. The guard runs for the empty
-		// case too, so one-of: [] + has_func: X is still rejected.
-		if def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
-			def.HasDirective != "" || def.Not != nil {
+		// case too, so one-of: [] + has_func: X is still rejected. Sibling
+		// combinators are detected by non-nil presence, independent of branch
+		// order.
+		if hasLeafPredicate(def) || def.AllOf != nil || def.Not != nil {
 			return nil, ex.Newf("where.file.one-of cannot be combined with other predicates")
 		}
 		return buildOneOf(def.OneOf)

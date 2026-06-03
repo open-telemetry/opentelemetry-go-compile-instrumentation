@@ -212,6 +212,21 @@ func whereFileMatches(t *testing.T, ruleData []byte, tree *dst.File) bool {
 // that production could never produce.
 func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 	t.Helper()
+	// Mirror setup.buildFile's exclusivity rule: a combinator owns the node, so
+	// combining it with a sibling leaf or another combinator is a build-time
+	// error in production. Reject it loudly here too, so an invalid fixture
+	// cannot pass the golden harness when production would refuse the rule.
+	combinators := 0
+	for _, present := range []bool{def.AllOf != nil, def.OneOf != nil, def.Not != nil} {
+		if present {
+			combinators++
+		}
+	}
+	leaf := def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" || def.HasDirective != ""
+	if combinators > 1 || (combinators == 1 && leaf) {
+		t.Fatalf("golden fixture combines a where.file combinator with sibling "+
+			"predicates (%+v); setup.buildFile rejects this at build time", def)
+	}
 	// Mirror setup.buildFile's presence semantics: a non-nil combinator slice
 	// (including an explicit empty one-of: [] / all-of: []) is present and owns
 	// the node. An empty one-of matches nothing (vacuous false); an empty all-of
