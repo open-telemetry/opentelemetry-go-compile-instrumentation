@@ -136,11 +136,26 @@ func Build(where *rule.WhereDef) (Filter, error) {
 	return buildFile(where.File)
 }
 
+// buildFile compiles the where.file predicate for a single node.
+//
+// When all-of is present (a non-nil slice, including an explicit empty
+// all-of: []), it owns the composition for this node: sibling leaf predicates
+// and other combinators on the same node are rejected outright rather than
+// silently ignored, so an ambiguous spec fails fast at Build time. An empty
+// all-of: [] is treated as present and compiles to an empty AllOf{}, which
+// matches vacuously (see AllOf.Match) — consistent with the documented type
+// semantics.
+//
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
 func buildFile(def *rule.FilterDef) (Filter, error) {
-	if len(def.AllOf) > 0 {
+	// Presence is detected via a non-nil slice (not len > 0): YAML unmarshals an
+	// explicit all-of: [] to a non-nil empty slice, and that empty combinator is
+	// a deliberate, vacuously-true predicate — not the absence of one.
+	if def.AllOf != nil {
 		// all-of owns the composition for this node; sibling predicates would be
-		// silently ignored, so reject the ambiguous combination explicitly.
+		// silently ignored, so reject the ambiguous combination explicitly. This
+		// guard runs for the empty case too, so all-of: [] + has_func: X is still
+		// rejected.
 		if def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
 			def.HasDirective != "" || len(def.OneOf) > 0 || def.Not != nil {
 			return nil, ex.Newf("where.file.all-of cannot be combined with other predicates")

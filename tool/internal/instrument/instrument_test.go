@@ -111,6 +111,12 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	var rawRules map[string]map[string]any
 	yaml.Unmarshal(data, &rawRules)
 
+	// Parse the source AST once and reuse it for every rule's where.file gating
+	// below. The gating is per-rule, but the tree is shared, so N rules do not
+	// trigger N reparses of the same file.
+	sourceTree, parseErr := ast.ParseFileFast(sourceFile)
+	require.NoError(t, parseErr)
+
 	ruleSet := &rule.InstRuleSet{
 		PackageName:    mainPackage,
 		ModulePath:     mainPackage,
@@ -141,7 +147,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 			// that setup.preciseMatching would evaluate is applied inline here.
 			// A rule whose file predicate does not match the source is skipped,
 			// exactly as it would be gated out during matching.
-			if !whereFileMatches(t, ruleData, sourceFile) {
+			if !whereFileMatches(t, ruleData, sourceTree) {
 				continue
 			}
 
@@ -174,12 +180,13 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	return ruleSet
 }
 
-// whereFileMatches evaluates the rule's where.file predicate against the source
-// file, mirroring the gating that setup.preciseMatching performs. It returns
-// true when there is no file predicate. The golden harness builds the matched
-// rule set by hand (no setup phase), so this keeps fixtures honest: a rule whose
-// file filter does not match is gated out and produces no instrumentation.
-func whereFileMatches(t *testing.T, ruleData []byte, sourceFile string) bool {
+// whereFileMatches evaluates the rule's where.file predicate against the
+// already-parsed source tree, mirroring the gating that setup.preciseMatching
+// performs. It returns true when there is no file predicate. The golden harness
+// builds the matched rule set by hand (no setup phase), so this keeps fixtures
+// honest: a rule whose file filter does not match is gated out and produces no
+// instrumentation. The caller parses the tree once and shares it across rules.
+func whereFileMatches(t *testing.T, ruleData []byte, tree *dst.File) bool {
 	t.Helper()
 
 	var probe struct {
@@ -190,8 +197,6 @@ func whereFileMatches(t *testing.T, ruleData []byte, sourceFile string) bool {
 		return true
 	}
 
-	tree, err := ast.ParseFileFast(sourceFile)
-	require.NoError(t, err)
 	return fileFilterMatches(t, probe.Where.File, tree)
 }
 
@@ -207,7 +212,10 @@ func whereFileMatches(t *testing.T, ruleData []byte, sourceFile string) bool {
 // that production could never produce.
 func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 	t.Helper()
-	if len(def.AllOf) > 0 {
+	// Mirror setup.buildFile's presence semantics: a non-nil all-of (including an
+	// explicit empty all-of: []) is present and owns the node. An empty all-of
+	// matches vacuously — the loop is skipped and we return true.
+	if def.AllOf != nil {
 		for i := range def.AllOf {
 			if !fileFilterMatches(t, &def.AllOf[i], tree) {
 				return false

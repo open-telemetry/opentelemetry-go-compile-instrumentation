@@ -206,6 +206,27 @@ func TestBuild_AllOf(t *testing.T) {
 	}
 }
 
+func TestBuild_AllOf_Empty(t *testing.T) {
+	// An explicit empty all-of: [] is present (non-nil slice) and compiles to an
+	// empty AllOf that matches vacuously, rather than erroring with "no active
+	// predicate".
+	where := &rule.WhereDef{File: &rule.FilterDef{AllOf: []rule.FilterDef{}}}
+	f, err := setup.Build(where)
+	if err != nil {
+		t.Fatalf("Build(empty AllOf) error = %v, want nil", err)
+	}
+	allOf, ok := f.(setup.AllOf)
+	if !ok {
+		t.Fatalf("Build(empty AllOf) = %T, want setup.AllOf", f)
+	}
+	if len(allOf) != 0 {
+		t.Fatalf("AllOf len = %d, want 0", len(allOf))
+	}
+	if !allOf.Match(nil) {
+		t.Error("empty AllOf.Match(nil) = false, want true (vacuous truth)")
+	}
+}
+
 func TestBuild_AllOf_Nested(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{AllOf: []rule.FilterDef{
 		{AllOf: []rule.FilterDef{{HasFunc: "Foo"}}},
