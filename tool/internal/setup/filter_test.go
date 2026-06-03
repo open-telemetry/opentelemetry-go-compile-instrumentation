@@ -35,6 +35,78 @@ func TestMatchContext_EmptyDecls(t *testing.T) {
 	}
 }
 
+func TestIsTestFilter_Match(t *testing.T) {
+	tree := &dst.File{Name: &dst.Ident{Name: "pkg"}, Decls: nil}
+
+	tests := []struct {
+		name        string
+		shouldMatch bool
+		importPath  string
+		want        bool
+	}{
+		// ShouldMatch: true → match only test packages
+		{
+			name:        "test package matches when ShouldMatch=true",
+			shouldMatch: true,
+			importPath:  "github.com/foo/bar.test",
+			want:        true,
+		},
+		{
+			name:        "non-test package does not match when ShouldMatch=true",
+			shouldMatch: true,
+			importPath:  "github.com/foo/bar",
+			want:        false,
+		},
+		// ShouldMatch: false → match only non-test packages
+		{
+			name:        "non-test package matches when ShouldMatch=false",
+			shouldMatch: false,
+			importPath:  "github.com/foo/bar",
+			want:        true,
+		},
+		{
+			name:        "test package does not match when ShouldMatch=false",
+			shouldMatch: false,
+			importPath:  "github.com/foo/bar.test",
+			want:        false,
+		},
+		// Edge cases
+		{
+			name:        "dottest inside path but not suffix",
+			shouldMatch: true,
+			importPath:  "github.com/foo.test/bar",
+			want:        false,
+		},
+		{
+			name:        "empty import path treated as non-test when ShouldMatch=false",
+			shouldMatch: false,
+			importPath:  "",
+			want:        true,
+		},
+		{
+			name:        "empty import path does not match when ShouldMatch=true",
+			shouldMatch: true,
+			importPath:  "",
+			want:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &setup.MatchContext{
+				ImportPath: tt.importPath,
+				SourceFile: "/tmp/source.go",
+				AST:        tree,
+			}
+			f := &setup.IsTestFilter{ShouldMatch: tt.shouldMatch}
+			if got := f.Match(ctx); got != tt.want {
+				t.Fatalf("IsTestFilter{ShouldMatch:%v}.Match({ImportPath:%q}) = %v, want %v",
+					tt.shouldMatch, tt.importPath, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Leaf filters ---
 
 func parseSource(t *testing.T, src string) *setup.MatchContext {
@@ -139,6 +211,52 @@ func TestBuild_StructFilter(t *testing.T) {
 	}
 }
 
+func boolPtr(b bool) *bool { return &b }
+
+func TestBuild_IsTestFilter(t *testing.T) {
+	t.Run("true matches test packages", func(t *testing.T) {
+		where := &rule.WhereDef{File: &rule.FilterDef{IsTest: boolPtr(true)}}
+		f, err := setup.Build(where)
+		if err != nil {
+			t.Fatalf("Build(IsTest=true) error = %v, want nil", err)
+		}
+		itf, ok := f.(*setup.IsTestFilter)
+		if !ok {
+			t.Fatalf("Build(IsTest=true) returned %T, want *setup.IsTestFilter", f)
+		}
+		if !itf.ShouldMatch {
+			t.Errorf("IsTestFilter.ShouldMatch = false, want true")
+		}
+	})
+
+	t.Run("false matches non-test packages", func(t *testing.T) {
+		where := &rule.WhereDef{File: &rule.FilterDef{IsTest: boolPtr(false)}}
+		f, err := setup.Build(where)
+		if err != nil {
+			t.Fatalf("Build(IsTest=false) error = %v, want nil", err)
+		}
+		itf, ok := f.(*setup.IsTestFilter)
+		if !ok {
+			t.Fatalf("Build(IsTest=false) returned %T, want *setup.IsTestFilter", f)
+		}
+		if itf.ShouldMatch {
+			t.Errorf("IsTestFilter.ShouldMatch = true, want false")
+		}
+	})
+
+	t.Run("nil is_test leaves filter nil", func(t *testing.T) {
+		// A nil IsTest must not produce an IsTestFilter — it means "unset".
+		// We exercise this indirectly: a FilterDef with only IsTest==nil has no
+		// active predicate and Build must return an error, not silently
+		// construct a filter that treats nil as false.
+		where := &rule.WhereDef{File: &rule.FilterDef{}}
+		_, err := setup.Build(where)
+		if err == nil {
+			t.Fatal("Build(empty FilterDef) error = nil, want error: nil IsTest must not count as active predicate")
+		}
+	})
+}
+
 func TestBuild_ErrorCases(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -155,6 +273,10 @@ func TestBuild_ErrorCases(t *testing.T) {
 		{
 			name:  "multiple file predicates",
 			where: &rule.WhereDef{File: &rule.FilterDef{HasFunc: "Foo", HasStruct: "Bar"}},
+		},
+		{
+			name:  "is_test combined with another predicate",
+			where: &rule.WhereDef{File: &rule.FilterDef{HasFunc: "Foo", IsTest: boolPtr(true)}},
 		},
 		{
 			name:  "where one-of unsupported",
@@ -183,10 +305,11 @@ func TestBuild_ErrorCases(t *testing.T) {
 }
 
 type filterExpected struct {
-	Type   string `yaml:"type"`
-	Func   string `yaml:"func"`
-	Recv   string `yaml:"recv"`
-	Struct string `yaml:"struct"`
+	Type        string `yaml:"type"`
+	Func        string `yaml:"func"`
+	Recv        string `yaml:"recv"`
+	Struct      string `yaml:"struct"`
+	ShouldMatch *bool  `yaml:"should_match"`
 }
 
 func TestBuild_YAMLRoundTrip(t *testing.T) {
@@ -270,6 +393,17 @@ func assertBuiltFilter(t *testing.T, name string, got setup.Filter, want filterE
 		}
 		if structFilter.Struct != want.Struct {
 			t.Fatalf("Build(%q) = %+v, want struct=%q", name, structFilter, want.Struct)
+		}
+	case "IsTestFilter":
+		itf, ok := got.(*setup.IsTestFilter)
+		if !ok {
+			t.Fatalf("Build(%q) = %T, want *setup.IsTestFilter", name, got)
+		}
+		if want.ShouldMatch == nil {
+			t.Fatalf("expected file %q has type IsTestFilter but no should_match field", name)
+		}
+		if itf.ShouldMatch != *want.ShouldMatch {
+			t.Fatalf("Build(%q) IsTestFilter.ShouldMatch = %v, want %v", name, itf.ShouldMatch, *want.ShouldMatch)
 		}
 	default:
 		t.Fatalf("unexpected expected filter type %q", want.Type)

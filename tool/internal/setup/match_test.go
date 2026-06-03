@@ -667,6 +667,82 @@ func TestPreciseMatching_WhereFileFilter(t *testing.T) {
 	require.Contains(t, result.FuncRules, matchFile)
 }
 
+func TestPreciseMatching_IsTestFilter(t *testing.T) {
+	// The test binary import path ends in ".test"; a production package does not.
+	// is_test:true should only match the .test path; is_test:false should only
+	// match the production path.
+	srcFile := writeGoSource(t, "handler.go", "package main\n\nfunc Handle() {}\n")
+
+	tests := []struct {
+		name        string
+		importPath  string
+		isTest      bool
+		wantMatched bool
+	}{
+		{
+			name:        "is_test=true matches test import path",
+			importPath:  "example.com/svc.test",
+			isTest:      true,
+			wantMatched: true,
+		},
+		{
+			name:        "is_test=true does not match production import path",
+			importPath:  "example.com/svc",
+			isTest:      true,
+			wantMatched: false,
+		},
+		{
+			name:        "is_test=false matches production import path",
+			importPath:  "example.com/svc",
+			isTest:      false,
+			wantMatched: true,
+		},
+		{
+			name:        "is_test=false does not match test import path",
+			importPath:  "example.com/svc.test",
+			isTest:      false,
+			wantMatched: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isTest := tt.isTest
+			funcRule := &rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:   "test-is-test-filter",
+					Target: tt.importPath,
+					Where: &rule.WhereDef{
+						File: &rule.FilterDef{IsTest: &isTest},
+					},
+				},
+				Func:   "Handle",
+				Before: "BeforeHandle",
+				Path:   "example.com/hooks",
+			}
+
+			dep := &Dependency{
+				ImportPath: tt.importPath,
+				Sources:    []string{srcFile},
+			}
+
+			sp := newTestSetupPhase()
+			set := rule.NewInstRuleSet(dep.ImportPath)
+
+			result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+			require.NoError(t, err)
+
+			if tt.wantMatched {
+				require.Len(t, result.FuncRules, 1,
+					"import path %q with is_test=%v: expected rule to match", tt.importPath, tt.isTest)
+			} else {
+				require.Empty(t, result.FuncRules,
+					"import path %q with is_test=%v: expected rule not to match", tt.importPath, tt.isTest)
+			}
+		})
+	}
+}
+
 func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
 
