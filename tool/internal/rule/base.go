@@ -41,6 +41,15 @@ type FilterDef struct {
 	HasRecv      string `json:"has_recv,omitempty"      yaml:"has_recv,omitempty"`
 	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`
 	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"`
+
+	// IsTest is a tri-state boolean predicate that selects or excludes test
+	// packages. The Go toolchain appends a ".test" suffix to the import path
+	// of a test binary, so this predicate tests for that suffix.
+	//
+	//   is_test: true  → match only test packages (import path ends in ".test")
+	//   is_test: false → match only non-test packages
+	//   absent (nil)   → no filtering; the rule applies to all packages
+	IsTest *bool `json:"is_test,omitempty" yaml:"is_test,omitempty"`
 }
 
 // WhereDef carries the structured where clause after package selectors have
