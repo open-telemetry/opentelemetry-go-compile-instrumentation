@@ -18,10 +18,6 @@ jobs:
     name: CodSpeed Benchmarks
     runs-on: oracle-bare-metal-64cpu-1024gb-x86-64-ubuntu-24
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    # Route TMPDIR through RUNNER_TEMP, which the runner empties
-    # at the start and end of every job.
-    env:
-      TMPDIR: ${{ runner.temp }}
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
@@ -31,9 +27,17 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.mod"
       - name: Build otelc
+        # Route GOTMPDIR through RUNNER_TEMP, which the runner empties at the
+        # start and end of every job.
+        env:
+          GOTMPDIR: ${{ runner.temp }}
         run: make build
       - name: Run benchmarks
         uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd  # ratchet:CodSpeedHQ/action@v4.15.1
+        # Route TMPDIR through RUNNER_TEMP so benchmark temp files do not pile
+        # up in the shared host /tmp.
+        env:
+          TMPDIR: ${{ runner.temp }}
         with:
           mode: walltime
           run: make benchmark/codspeed BENCH_TIME=5x
