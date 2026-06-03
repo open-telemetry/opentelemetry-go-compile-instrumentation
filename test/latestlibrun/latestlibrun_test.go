@@ -36,7 +36,10 @@ func TestBumpAppsToLatest(t *testing.T) {
 		name := e.Name()
 		appDir := filepath.Join(appsRoot, name)
 		if _, err := os.Stat(filepath.Join(appDir, "go.mod")); err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("stat %s/go.mod: %v", appDir, err)
 		}
 		t.Run(name, func(t *testing.T) {
 			deps := testutil.DiscoverInstrumentedDeps(t, appDir, targets)

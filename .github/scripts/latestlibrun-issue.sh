@@ -25,6 +25,7 @@ TITLE="LatestLibRun failed on main (${TODAY})"
 existing_issue="$(gh issue list \
   --label "${LABEL}" \
   --state open \
+  --limit 1 \
   --json number \
   --jq '.[0].number // empty')"
 

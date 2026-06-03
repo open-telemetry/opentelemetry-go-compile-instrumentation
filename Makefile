@@ -501,7 +501,7 @@ test-latestlibbuild: build ## Run LatestLibBuild tests
 test-latestlibrun: build ## Run LatestLibRun tests (bump apps to @latest then run integration suite)
 	@echo "Bumping test apps to @latest..."
 	set -euo pipefail
-	go -C "test" test -v -count=1 -tags latestlibrun ./latestlibrun/... 2>&1 | tee ../gotest-latestlibrun.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibrun ./latestlibrun/... 2>&1 | tee ../gotest-latestlibrun.log
 	$(MAKE) tidy/test-apps
 	@echo "Syncing test module with bumped apps..."
 	go -C "test" mod tidy

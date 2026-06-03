@@ -119,7 +119,7 @@ A failure means that the latest release of an upstream library introduced a **co
 ## LatestLibRun Tests
 
 > [!IMPORTANT]
-> **What this test does.** For each app under `test/apps/`, the test bumps the app's instrumented direct dependencies to `@latest` (same mutation as LatestLibBuild), then runs the full integration suite against those bumped modules. It is a **compile + run + span-assertion** check. It runs on a daily schedule and on demand via `workflow_dispatch`. When it fails on `main`, the CI workflow automatically opens or updates a GitHub issue labelled `latestlibrun-failure`.
+> **What this test does.** For each app under `test/apps/`, the test bumps the app's instrumented direct dependencies to `@latest` (same mutation as LatestLibBuild), then runs the full integration suite against those bumped modules. It is a **compile + run + span-assertion** check. It runs on a weekly schedule and on demand via `workflow_dispatch`. When it fails on `main`, the CI workflow automatically opens or updates a GitHub issue labelled `latestlibrun-failure`.
 
 | Category | Location | Build Tag | Scope |
 | :------- | :------- | :-------- | :---- |
