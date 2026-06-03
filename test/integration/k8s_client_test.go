@@ -21,6 +21,9 @@ func TestK8SClient(t *testing.T) {
 		t.Skip("k3s not supported on windows")
 	}
 
+	// Enable parallelization
+	t.Parallel()
+
 	f := testutil.NewTestFixture(t)
 	StartK3sCluster(t, f)
 
