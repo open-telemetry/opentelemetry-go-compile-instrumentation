@@ -254,9 +254,10 @@ func TestNormalize(t *testing.T) {
 					"before": "BeforeOpen",
 				},
 				{
-					"target": "database/sql",
-					"func":   "Open",
-					"call":   "OpenWrapper",
+					"target":   "database/sql",
+					"func":     "Open",
+					"call":     "OpenWrapper",
+					"do_index": 1,
 				},
 			},
 		},

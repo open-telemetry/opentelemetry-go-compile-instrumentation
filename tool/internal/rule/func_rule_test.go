@@ -152,3 +152,64 @@ param: string
 		})
 	}
 }
+
+// TestInstFuncRule_String pins the identity used to derive trampoline and
+// HookContext names. Two modifiers of the same do sequence share a rule name
+// but must produce distinct identities, otherwise their generated declarations
+// collide (issue #544). Index 0 must keep the bare name so single-modifier and
+// legacy rules retain their historical generated names.
+func TestInstFuncRule_String(t *testing.T) {
+	tests := []struct {
+		name    string
+		doIndex int
+		want    string
+	}{
+		{name: "open_rule", doIndex: 0, want: "open_rule"},
+		{name: "open_rule", doIndex: 1, want: "open_rule_1"},
+		{name: "open_rule", doIndex: 2, want: "open_rule_2"},
+	}
+	for _, tt := range tests {
+		r := &InstFuncRule{
+			InstBaseRule: InstBaseRule{Name: tt.name},
+			DoIndex:      tt.doIndex,
+		}
+		got := r.String()
+		assert.Equal(t, tt.want, got, "String() for do_index %d", tt.doIndex)
+	}
+
+	// Distinct do indices on the same rule name must never collide.
+	first := (&InstFuncRule{InstBaseRule: InstBaseRule{Name: "shared"}, DoIndex: 0}).String()
+	second := (&InstFuncRule{InstBaseRule: InstBaseRule{Name: "shared"}, DoIndex: 1}).String()
+	assert.NotEqual(t, first, second, "do-sequence modifiers must have distinct identities")
+}
+
+// TestNormalize_DoSequenceStampsIndex verifies that Normalize records the
+// zero-based do-sequence position on each expanded modifier (index 0 omitted),
+// preserving order. This index is what keeps trampoline names unique when
+// several modifiers target the same function.
+func TestNormalize_DoSequenceStampsIndex(t *testing.T) {
+	fields := map[string]any{
+		"target": "database/sql",
+		"where":  map[string]any{"func": "Open"},
+		"do": []any{
+			map[string]any{"inject_hooks": map[string]any{"before": "BeforeOpen"}},
+			map[string]any{"inject_hooks": map[string]any{"after": "AfterOpen"}},
+			map[string]any{"inject_hooks": map[string]any{"after": "AfterOpen2"}},
+		},
+	}
+
+	got, err := Normalize(fields)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+
+	// Index 0 carries no discriminator so legacy names are preserved.
+	_, has0 := got[0][KeyDoIndex]
+	assert.False(t, has0, "do[0] must not carry a do_index")
+	assert.Equal(t, "BeforeOpen", got[0]["before"])
+
+	assert.Equal(t, 1, got[1][KeyDoIndex])
+	assert.Equal(t, "AfterOpen", got[1]["after"])
+
+	assert.Equal(t, 2, got[2][KeyDoIndex])
+	assert.Equal(t, "AfterOpen2", got[2]["after"])
+}
