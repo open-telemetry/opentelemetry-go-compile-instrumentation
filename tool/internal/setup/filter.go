@@ -178,9 +178,13 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		}
 		return buildAllOf(def.AllOf)
 	}
-	if len(def.OneOf) > 0 {
+	// Presence via non-nil slice (mirrors all-of): an explicit one-of: [] is a
+	// deliberate, vacuously-false predicate (OneOf.Match returns false for an
+	// empty set), not the absence of one.
+	if def.OneOf != nil {
 		// one-of owns the composition for this node; reject sibling predicates
-		// that would otherwise be silently ignored.
+		// that would otherwise be silently ignored. The guard runs for the empty
+		// case too, so one-of: [] + has_func: X is still rejected.
 		if def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
 			def.HasDirective != "" || def.Not != nil {
 			return nil, ex.Newf("where.file.one-of cannot be combined with other predicates")
