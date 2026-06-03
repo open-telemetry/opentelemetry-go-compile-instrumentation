@@ -11,7 +11,6 @@ require (
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation v0.0.0
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver v0.0.0
 	github.com/stretchr/testify v1.11.1
-	go.mongodb.org/mongo-driver v1.15.0
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/k3s v0.41.0
 	go.mongodb.org/mongo-driver v1.15.0
