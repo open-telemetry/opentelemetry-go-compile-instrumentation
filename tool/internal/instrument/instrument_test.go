@@ -201,9 +201,9 @@ func whereFileMatches(t *testing.T, ruleData []byte, tree *dst.File) bool {
 }
 
 // fileFilterMatches reports whether a where.file predicate matches the parsed
-// source. It covers the predicates exercised by golden fixtures: all-of
-// composition plus has_func / has_struct leaves. Filter compilation and match
-// semantics are unit-tested in tool/internal/setup; this is a lightweight
+// source. It covers the predicates exercised by golden fixtures: all-of and
+// one-of composition plus has_func / has_struct leaves. Filter compilation and
+// match semantics are unit-tested in tool/internal/setup; this is a lightweight
 // stand-in for the golden harness only.
 //
 // Any predicate this evaluator does not model is rejected with t.Fatalf rather
@@ -212,9 +212,18 @@ func whereFileMatches(t *testing.T, ruleData []byte, tree *dst.File) bool {
 // that production could never produce.
 func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 	t.Helper()
-	// Mirror setup.buildFile's presence semantics: a non-nil all-of (including an
-	// explicit empty all-of: []) is present and owns the node. An empty all-of
-	// matches vacuously — the loop is skipped and we return true.
+	// Mirror setup.buildFile's presence semantics: a non-nil combinator slice
+	// (including an explicit empty one-of: [] / all-of: []) is present and owns
+	// the node. An empty one-of matches nothing (vacuous false); an empty all-of
+	// matches vacuously true — the loop is skipped in each case.
+	if def.OneOf != nil {
+		for i := range def.OneOf {
+			if fileFilterMatches(t, &def.OneOf[i], tree) {
+				return true
+			}
+		}
+		return false
+	}
 	if def.AllOf != nil {
 		for i := range def.AllOf {
 			if !fileFilterMatches(t, &def.AllOf[i], tree) {
