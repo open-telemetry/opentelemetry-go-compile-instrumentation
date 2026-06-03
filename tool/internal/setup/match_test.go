@@ -706,6 +706,46 @@ func TestPreciseMatching_WhereFileAllOf(t *testing.T) {
 	require.NotContains(t, result.FuncRules, noMatchFile)
 }
 
+func TestPreciseMatching_WhereFileOneOf(t *testing.T) {
+	// one-of matches the file when it declares EITHER backend driver. The match
+	// file declares PostgresDriver (one of the two), so Open is selected; the
+	// no-match file declares neither, so it is gated out.
+	matchFile := writeGoSource(t, "match.go", "package main\n\ntype PostgresDriver struct{}\n\nfunc Open() {}\n")
+	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\nfunc Open() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-where-file-one-of",
+			Target: "example.com/svc",
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{
+					OneOf: []rule.FilterDef{
+						{HasStruct: "MySQLDriver"},
+						{HasStruct: "PostgresDriver"},
+					},
+				},
+			},
+		},
+		Func:   "Open",
+		Before: "BeforeOpen",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.FuncRules, 1)
+	require.Contains(t, result.FuncRules, matchFile)
+	require.NotContains(t, result.FuncRules, noMatchFile)
+}
+
 func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
 

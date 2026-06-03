@@ -100,6 +100,22 @@ func (a AllOf) Match(ctx *MatchContext) bool {
 	return true
 }
 
+var _ Filter = (OneOf)(nil)
+
+// OneOf matches when at least one child filter matches. An empty OneOf never
+// matches (no condition in an empty set is satisfied). Evaluation
+// short-circuits on the first matching child.
+type OneOf []Filter
+
+func (o OneOf) Match(ctx *MatchContext) bool {
+	for _, f := range o {
+		if f.Match(ctx) {
+			return true
+		}
+	}
+	return false
+}
+
 // --- Build ---
 
 // Build constructs a runtime Filter from a structured where clause.
@@ -163,7 +179,13 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		return buildAllOf(def.AllOf)
 	}
 	if len(def.OneOf) > 0 {
-		return nil, ex.Newf("where.file one-of predicate composition is not yet supported")
+		// one-of owns the composition for this node; reject sibling predicates
+		// that would otherwise be silently ignored.
+		if def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
+			def.HasDirective != "" || def.Not != nil {
+			return nil, ex.Newf("where.file.one-of cannot be combined with other predicates")
+		}
+		return buildOneOf(def.OneOf)
 	}
 	if def.Not != nil {
 		return nil, ex.Newf("where.file not predicate composition is not yet supported")
@@ -222,6 +244,27 @@ func buildAllOf(defs []rule.FilterDef) (Filter, error) {
 			// buildFile returns a non-nil filter for every valid leaf; a nil here
 			// would make AllOf.Match panic, so fail loudly instead.
 			return nil, ex.Newf("where.file.all-of[%d] produced no filter", i)
+		}
+		filters = append(filters, f)
+	}
+	return filters, nil
+}
+
+// buildOneOf compiles a where.file.one-of group into a OneOf combinator that
+// matches when any child predicate matches. Children are compiled with the same
+// buildFile rules, so nesting (one-of within one-of, or all-of) composes
+// naturally.
+func buildOneOf(defs []rule.FilterDef) (Filter, error) {
+	filters := make(OneOf, 0, len(defs))
+	for i := range defs {
+		f, err := buildFile(&defs[i])
+		if err != nil {
+			return nil, ex.Wrapf(err, "where.file.one-of[%d]", i)
+		}
+		if f == nil {
+			// buildFile returns a non-nil filter for every valid leaf; a nil here
+			// would make OneOf.Match panic, so fail loudly instead.
+			return nil, ex.Newf("where.file.one-of[%d] produced no filter", i)
 		}
 		filters = append(filters, f)
 	}
