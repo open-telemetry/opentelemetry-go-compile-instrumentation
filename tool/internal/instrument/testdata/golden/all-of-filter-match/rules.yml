@@ -1,0 +1,17 @@
+# Instrument Connect, but only in the driver-registration file — the one that
+# declares both a package init() (where the driver registers itself) and the
+# Driver type. Other files in the package that define a helper Connect are
+# left untouched.
+instrument_driver_connect:
+  target: main
+  where:
+    func: Connect
+    file:
+      all-of:
+        - has_func: init
+        - has_struct: Driver
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        after: AfterConnect
+        path: testdata/golden/all-of-filter-match
