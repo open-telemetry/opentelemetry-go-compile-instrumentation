@@ -1,0 +1,16 @@
+# An empty where.file.all-of: [] is vacuously true: it matches every file, so
+# it gates nothing out and Open is instrumented. This is the empty-set
+# counterpart to all-of-filter-match, proving the combinator's presence
+# semantics (an explicit empty list is "present and always matches", not "no
+# predicate").
+instrument_open:
+  target: main
+  where:
+    func: Open
+    file:
+      all-of: []
+  do:
+    - inject_hooks:
+        before: BeforeOpen
+        after: AfterOpen
+        path: testdata/golden/all-of-filter-empty
