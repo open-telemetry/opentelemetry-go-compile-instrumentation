@@ -1,9 +1,9 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build latestlibbuild
+//go:build latestlibrun
 
-package latestlibbuild
+package latestlibrun
 
 import (
 	"os"
@@ -13,7 +13,14 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
-func TestLatestLibBuild(t *testing.T) {
+// TestBumpAppsToLatest bumps each test app's instrumented direct dependencies
+// to @latest so that the subsequent integration suite (phase 2 of
+// make test-latestlibrun) exercises the bumped go.mod files.
+//
+// This test intentionally performs no build or run step, it only mutates
+// test/apps/*/go.mod. The integration suite's existing f.BuildAndStart(...)
+// calls rebuild every app after the bump.
+func TestBumpAppsToLatest(t *testing.T) {
 	appsRoot := filepath.Join("..", "apps")
 	rulesRoot := filepath.Join("..", "..", "pkg", "instrumentation")
 	targets := testutil.InstrumentedTargets(t, rulesRoot)
@@ -37,10 +44,9 @@ func TestLatestLibBuild(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			deps := testutil.DiscoverInstrumentedDeps(t, appDir, targets)
 			if len(deps) == 0 {
-				t.Skipf("%s has no instrumented third-party deps with supported latest versions to bump", name)
+				t.Skipf("%s has no instrumented third-party deps to bump", name)
 			}
 			testutil.BumpToLatest(t, appDir, deps...)
-			testutil.Build(t, appDir, "go", "build", "-a")
 		})
 	}
 }
