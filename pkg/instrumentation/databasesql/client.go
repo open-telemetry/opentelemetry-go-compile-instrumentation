@@ -42,9 +42,11 @@ var clientEnabler = dbClientEnabler{}
 func beforeOpenInstrumentation(ictx inst.HookContext, driverName, dataSourceName string) {
 	addr, err := parseDSN(driverName, dataSourceName)
 	if err != nil {
+		logger.Warn("could not determine server address from DSN; server.address will be omitted",
+			"driver", driverName, "error", err)
 		addr = "unknown"
 	}
-	dbName := ParseDbName(dataSourceName)
+	dbName := parseDbName(dataSourceName)
 	ictx.SetData(map[string]string{
 		"endpoint": addr,
 		"driver":   driverName,
