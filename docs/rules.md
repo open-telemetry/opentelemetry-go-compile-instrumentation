@@ -119,9 +119,42 @@ instrument_sql_exec:
 - `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
-- Today the setup phase executes only leaf predicates (`has_func`,
-  `has_struct`); combinators and `has_directive` are validated but return
-  descriptive errors at build time and are wired up in follow-up PRs.
+- During the setup phase, leaf predicates (`has_func`, `has_recv`,
+  `has_struct`) and the `where.file` combinators documented below are
+  executed. `has_directive`, and combinators placed at the top level of
+  `where` (outside `where.file`), are validated but return a descriptive
+  "not yet supported" error at build time.
+
+#### Combining `where.file` predicates
+
+`all-of`, `one-of`, and `not` compose `where.file` predicates into boolean
+expressions. A combinator **owns the node it appears on**: it cannot be mixed
+with a sibling leaf predicate (`has_func`, `has_struct`, etc.) or another
+combinator on the same node — that combination is **rejected at build time**
+with a descriptive error, never silently ignored. Nest predicates inside the
+combinator to express multiple conditions; combinators may be nested to any
+depth. Presence is keyed on the YAML key, so an explicit empty list (for
+example `all-of: []`) is a deliberate predicate, not an omission.
+
+`all-of` matches when **every** nested predicate matches (logical AND); an
+empty `all-of: []` matches vacuously (always true).
+
+```yaml
+# Instrument Connect only in the driver-registration file — the source file
+# that declares both an `init` function and the `Driver` type.
+register_driver:
+  target: github.com/example/sqldriver
+  where:
+    func: Connect
+    file:
+      all-of:
+        - has_func: init
+        - has_struct: Driver
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        path: github.com/example/sqldriver/otel
+```
 
 ### `do` semantics
 
