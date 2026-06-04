@@ -119,9 +119,42 @@ instrument_sql_exec:
 - `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
-- Today the setup phase executes only leaf predicates (`has_func`,
-  `has_struct`); combinators and `has_directive` are validated but return
-  descriptive errors at build time and are wired up in follow-up PRs.
+- During the setup phase, leaf predicates (`has_func`, `has_recv`,
+  `has_struct`) and the `where.file` combinators documented below are
+  executed. `has_directive`, and combinators placed at the top level of
+  `where` (outside `where.file`), are validated but return a descriptive
+  "not yet supported" error at build time.
+
+#### Combining `where.file` predicates
+
+`all-of`, `one-of`, and `not` compose `where.file` predicates into boolean
+expressions. A combinator **owns the node it appears on**: it cannot be mixed
+with a sibling leaf predicate (`has_func`, `has_struct`, etc.) or another
+combinator on the same node — that combination is **rejected at build time**
+with a descriptive error, never silently ignored. Nest predicates inside the
+combinator to express multiple conditions; combinators may be nested to any
+depth. Presence is keyed on the YAML key, so an explicit empty list (for
+example `all-of: []`) is a deliberate predicate, not an omission.
+
+`all-of` matches when **every** nested predicate matches (logical AND); an
+empty `all-of: []` matches vacuously (always true).
+
+```yaml
+# Instrument Connect only in the driver-registration file — the source file
+# that declares both an `init` function and the `Driver` type.
+register_driver:
+  target: github.com/example/sqldriver
+  where:
+    func: Connect
+    file:
+      all-of:
+        - has_func: init
+        - has_struct: Driver
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        path: github.com/example/sqldriver/otel
+```
 
 ### `do` semantics
 
@@ -413,6 +446,13 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
+- `pattern` (string, optional): The position within the function where the raw code should be injected. By default, the code is injected at the start of the function body. If provided, the value must be a valid regular expression.
+
+  The pattern is matched against the canonical gofmt representation for each statement in the function body (not always the exact original source formatting). The injected code is placed immediately before/after the first statement that matches the pattern.
+
+  If no statement matches the pattern, an error is returned.
+
+- `placement` (string, optional): Determines where to inject the raw code when a `pattern` is specified. Can be either `before` (default) or `after`.
 
 **Modifier (`do: - inject_code:`):**
 
@@ -455,6 +495,37 @@ raw_with_hash:
     fmt: "fmt"
     sha256: "crypto/sha256"
 ```
+
+**Example with pattern:**
+
+Sometimes you may want to inject raw code at a specific location within the function body rather than at the start. Use the `pattern` field with a regex pattern to specify the injection point:
+
+```yaml
+raw_with_pattern:
+  target: main
+  where:
+    func: Example
+    pattern: '^println\\("hello"\\)$'
+  do:
+    - inject_code:
+        raw: 'go func(){ println("RawCode") }()'
+```
+
+If `Example()` looks like this:
+
+```go
+func Example() {
+  if true {
+    println("hello")
+  }
+}
+```
+
+The injected code will be placed immediately before the `println("hello")` statement.
+
+Note the pattern starts with `^`. During AST traversal, outer statements (such as `if`, `for`, or `go func`) are visited before their inner statements. Since matching is performed on the formatted string of each statement, a loose pattern may accidentally match a parent statement if it contains the target code.
+
+Anchoring the pattern with `^` (and usually `$`) ensures that only the exact statement is matched, preventing insertion at the wrong level (e.g., before an entire block instead of the intended inner statement).
 
 ### 4. Call Wrapping Rule
 
