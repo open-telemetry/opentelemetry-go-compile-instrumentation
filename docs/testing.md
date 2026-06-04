@@ -96,6 +96,51 @@ make test-integration/coverage
 make test-e2e/coverage
 ```
 
+## Coverage
+
+> [!IMPORTANT]
+> The project enforces a **≥70% unit-test coverage** target for both the `tool/` and `pkg/` module trees.
+> A CI step fails the build if either coverage report drops below this threshold.
+
+### Coverage target rationale
+
+The 70% floor is the minimum bar agreed in [issue #569](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/569)
+(tracked under the release 1.0.0 roadmap). Coverage is enforced **per module tree** — `tool/` and
+`pkg/` are checked independently so that one area cannot mask regression in the other.
+
+### Running coverage locally
+
+```bash
+# Generate coverage reports for both module trees (coverage-tool.txt + coverage-pkg.txt)
+make test-unit/coverage
+
+# Run the full gate (generates reports and enforces ≥70% on each)
+make test-unit/coverage-gate
+
+# Run the gate for a single tree
+make test-unit/tool/coverage-gate   # tool/ only
+make test-unit/pkg/coverage-gate    # pkg/ only
+```
+
+You can also invoke the gate script directly on any coverprofile file:
+
+```bash
+.github/scripts/coverage-gate.sh coverage-tool.txt 70.0
+```
+
+The script prints the current total, the threshold, and exits non-zero on failure.
+
+### CI behaviour
+
+The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
+
+1. Runs `make test-unit/coverage` to generate `coverage-tool.txt` and `coverage-pkg.txt`.
+2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
+3. Runs `.github/scripts/coverage-gate.sh` on each file and **fails the job** if either is below 70%.
+
+The `Done (Unit Tests)` status check (required for merge) reflects both the test results **and** the
+coverage gate result. A coverage regression will block the PR even if all tests pass.
+
 All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
 
 CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (arm64), and Windows (amd64). See `.github/workflows/test-*.yaml` for details.

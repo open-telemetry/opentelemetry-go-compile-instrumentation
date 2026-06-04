@@ -10,6 +10,7 @@ SHELL := /bin/bash
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
+        test-unit/coverage-gate test-unit/tool/coverage-gate test-unit/pkg/coverage-gate \
         test-integration/coverage test-e2e/coverage test-latestlibrun \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         adr-tools adr-new adr-list \
@@ -483,6 +484,16 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 	@echo "mode: atomic" > coverage-pkg.txt
 	@find pkg -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-pkg.txt 2>/dev/null || true
 	@find pkg -name "coverage.txt" -delete 2>/dev/null || true
+
+test-unit/tool/coverage-gate: test-unit/tool/coverage ## Enforce ≥70% coverage gate for tool modules
+	@echo "Checking coverage gate for tool modules..."
+	@.github/scripts/coverage-gate.sh coverage-tool.txt 70.0
+
+test-unit/pkg/coverage-gate: test-unit/pkg/coverage ## Enforce ≥70% coverage gate for pkg modules
+	@echo "Checking coverage gate for pkg modules..."
+	@.github/scripts/coverage-gate.sh coverage-pkg.txt 70.0
+
+test-unit/coverage-gate: test-unit/tool/coverage-gate test-unit/pkg/coverage-gate ## Enforce ≥70% coverage gate for all unit tests
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
