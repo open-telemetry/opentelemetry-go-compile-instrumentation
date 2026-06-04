@@ -4,6 +4,7 @@
 package rule
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -20,12 +21,16 @@ import (
 //		func: "Bar"
 //		recv: "*Recv"
 //		raw: "println(\"Hello, World!\")"
+//		pattern: "^name := getName\\(\\)$"
+//		placement: before|after
 type InstRawRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Func string `json:"func" yaml:"func"` // The name of the target func to be instrumented
-	Recv string `json:"recv" yaml:"recv"` // The name of the receiver type
-	Raw  string `json:"raw"  yaml:"raw"`  // The raw code to be injected
+	Func      string `json:"func"                yaml:"func"`                // The name of the target func to be instrumented
+	Recv      string `json:"recv"                yaml:"recv"`                // The name of the receiver type
+	Raw       string `json:"raw"                 yaml:"raw"`                 // The raw code to be injected
+	Pattern   string `json:"pattern,omitempty"   yaml:"pattern,omitempty"`   // The position to inject the raw code. Must be a regex pattern
+	Placement string `json:"placement,omitempty" yaml:"placement,omitempty"` // The placement of the raw code. Can be "before" or "after". Default is "before".
 }
 
 // NewInstRawRule loads and validates an InstRawRule from YAML data.
@@ -46,6 +51,12 @@ func NewInstRawRule(data []byte, name string) (*InstRawRule, error) {
 func (r *InstRawRule) validate() error {
 	if strings.TrimSpace(r.Raw) == "" {
 		return ex.Newf("raw cannot be empty")
+	}
+	if _, err := regexp.Compile(r.Pattern); err != nil {
+		return ex.Wrapf(err, "invalid regex pattern for raw rule: %q", r.Pattern)
+	}
+	if r.Placement != "" && r.Placement != "before" && r.Placement != "after" {
+		return ex.Newf("invalid placement value: %q, must be 'before' or 'after'", r.Placement)
 	}
 	return nil
 }

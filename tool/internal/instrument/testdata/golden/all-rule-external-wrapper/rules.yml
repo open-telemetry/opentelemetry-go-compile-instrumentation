@@ -1,37 +1,52 @@
 wrap_sizeof_external:
   target: main
-  function_call: unsafe.Sizeof
-  replace: "wrapper.Wrapper({{ . }})"
+  where:
+    function_call: unsafe.Sizeof
+  do:
+    - wrap_call:
+        replace: "wrapper.Wrapper({{ . }})"
   imports:
     wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 
 inject_raw_external:
   target: main
-  func: RawFunc
-  raw: 'wrapper.Log("raw instrumented")'
+  where:
+    func: RawFunc
+  do:
+    - inject_code:
+        raw: 'wrapper.Log("raw instrumented")'
   imports:
     wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 
 add_external_field:
   target: main
-  struct: T
-  new_field:
-    - name: ExternalTag
-      type: wrapper.Tag
+  where:
+    struct: T
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: ExternalTag
+            type: wrapper.Tag
   imports:
     wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 
 wrap_global_var_external:
   target: main
-  kind: var
-  identifier: GlobalVar
-  wrap: "wrapper.WrapValue({{ . }})"
+  where:
+    kind: var
+    identifier: GlobalVar
+  do:
+    - assign_value:
+        wrap: "wrapper.WrapValue({{ . }})"
   imports:
     wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 
 log_directive_external:
   target: main
-  directive: "otelc:external-log"
-  template: 'wrapper.Log("{{FuncName}}")'
+  where:
+    directive: "otelc:external-log"
+  do:
+    - expand_directive:
+        template: 'wrapper.Log("{{FuncName}}")'
   imports:
     wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"

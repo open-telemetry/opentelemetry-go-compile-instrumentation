@@ -22,7 +22,7 @@ func TestFindMatchingVersionRanges(t *testing.T) {
 			name:        "exact match",
 			requirePath: "github.com/redis/go-redis/v9",
 			targets: map[string][]string{
-				"github.com/redis/go-redis/v9": []string{"v9.0.0,v10.0.0"},
+				"github.com/redis/go-redis/v9": {"v9.0.0,v10.0.0"},
 			},
 			want: []string{"v9.0.0,v10.0.0"},
 		},
@@ -30,7 +30,7 @@ func TestFindMatchingVersionRanges(t *testing.T) {
 			name:        "module covers subpackage target",
 			requirePath: "go.opentelemetry.io/otel",
 			targets: map[string][]string{
-				"go.opentelemetry.io/otel/sdk/trace": []string{"v1.0.0"},
+				"go.opentelemetry.io/otel/sdk/trace": {"v1.0.0"},
 			},
 			want: []string{"v1.0.0"},
 		},
@@ -38,8 +38,8 @@ func TestFindMatchingVersionRanges(t *testing.T) {
 			name:        "multiple targets covered",
 			requirePath: "k8s.io/client-go",
 			targets: map[string][]string{
-				"k8s.io/client-go":                   []string{"v0.34.0,v0.35.0", "v0.35.0,v0.36.0"},
-				"k8s.io/client-go/tools/portforward": []string{"v0.35.0"},
+				"k8s.io/client-go":                   {"v0.34.0,v0.35.0", "v0.35.0,v0.36.0"},
+				"k8s.io/client-go/tools/portforward": {"v0.35.0"},
 			},
 			want: []string{"v0.34.0,v0.35.0", "v0.35.0,v0.36.0", "v0.35.0"},
 		},
@@ -47,7 +47,7 @@ func TestFindMatchingVersionRanges(t *testing.T) {
 			name:        "prefix false positive",
 			requirePath: "example.com/foo",
 			targets: map[string][]string{
-				"example.com/foobar": []string{"v1.0.0"},
+				"example.com/foobar": {"v1.0.0"},
 			},
 			want: []string{},
 		},
@@ -55,7 +55,7 @@ func TestFindMatchingVersionRanges(t *testing.T) {
 			name:        "unrelated target",
 			requirePath: "google.golang.org/grpc",
 			targets: map[string][]string{
-				"net/http": []string{"v1.0.0"},
+				"net/http": {"v1.0.0"},
 			},
 			want: []string{},
 		},
@@ -165,12 +165,12 @@ replace example.com/local => ./local
 	require.NoError(t, os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o600))
 
 	targets := map[string][]string{
-		"github.com/redis/go-redis/v9":       []string{"v9.0.0,v10.0.0"},
-		"go.opentelemetry.io/otel/sdk/trace": []string{"v1.0.0"},
-		"k8s.io/client-go":                   []string{"v0.34.0,v0.35.0", "v0.35.0,v0.36.0"},
-		"example.com/unused":                 []string{""},
+		"github.com/redis/go-redis/v9":       {"v9.0.0,v10.0.0"},
+		"go.opentelemetry.io/otel/sdk/trace": {"v1.0.0"},
+		"k8s.io/client-go":                   {"v0.34.0,v0.35.0", "v0.35.0,v0.36.0"},
+		"example.com/unused":                 {""},
 		// The local replacement should be ignored even though it is covered by a target.
-		"example.com/local": []string{""},
+		"example.com/local": {""},
 	}
 
 	// k8s.io/client-go should be skipped because its latest version exceeds the specified version ranges.

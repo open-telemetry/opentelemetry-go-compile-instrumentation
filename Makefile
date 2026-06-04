@@ -10,7 +10,7 @@ SHELL := /bin/bash
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
-        test-integration/coverage test-e2e/coverage \
+        test-integration/coverage test-e2e/coverage test-latestlibrun \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold
@@ -179,8 +179,8 @@ format/yaml: $(YAMLFMT)
 	@echo "Formatting YAML files..."
 	$(YAMLFMT) -conf .tools/yamlfmt -dstar '**/*.yml' '**/*.yaml'
 
-lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile)
-lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile
+lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile, typos)
+lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile lint/typos
 
 lint/action: ## Lint GitHub Actions workflows
 lint/action: $(ACTIONLINT) ratchet/check
@@ -224,6 +224,18 @@ lint/license-header: ## Check license headers in source files
 .PHONY: lint/license-header/fix
 lint/license-header/fix: ## Add missing license headers to source files
 	@.github/scripts/license-check.sh --fix
+
+.PHONY: lint/typos
+lint/typos: ## Check for typos using crate-ci/typos
+	@echo "Checking for typos..."
+	@if command -v typos >/dev/null 2>&1; then \
+		typos --config .tools/typos.toml; \
+	elif command -v docker >/dev/null 2>&1; then \
+		docker run --rm -v "$(CURDIR)":/src -w /src ghcr.io/crate-ci/typos:latest --config .tools/typos.toml; \
+	else \
+		echo "Error: install 'typos' (https://github.com/crate-ci/typos) or Docker to run this check."; \
+		exit 1; \
+	fi
 
 ##@ Markdown
 
@@ -486,6 +498,17 @@ test-latestlibbuild: build ## Run LatestLibBuild tests
 	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ../gotest-latestlibbuild.log
 
 .ONESHELL:
+test-latestlibrun: build ## Run LatestLibRun tests (bump apps to @latest then run integration suite)
+	@echo "Bumping test apps to @latest..."
+	set -euo pipefail
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibrun ./latestlibrun/... 2>&1 | tee ../gotest-latestlibrun.log
+	$(MAKE) tidy/test-apps
+	@echo "Syncing test module with bumped apps..."
+	go -C "test" mod tidy
+	@echo "Running integration suite against @latest deps..."
+	$(MAKE) test-integration
+
+.ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
@@ -548,7 +571,7 @@ clean: ## Clean build artifacts
 	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log \) -delete
+	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log \) -delete
 
 .ONESHELL:
 tidy/test-apps: ## Run go mod tidy in all test app modules
