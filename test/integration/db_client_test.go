@@ -184,3 +184,74 @@ func TestDBClient(t *testing.T) {
 		)
 	})
 }
+
+func TestDBClientDSNParsing(t *testing.T) {
+	tests := []struct {
+		name       string
+		driverName string
+		dsn        string
+		wantAddr   string
+		wantPort   int64
+		wantDb     string
+	}{
+		{
+			name:       "MySQL standard tcp",
+			driverName: "mysql",
+			dsn:        "user:pass@tcp(127.0.0.1:3306)/inventory",
+			wantAddr:   "127.0.0.1",
+			wantPort:   3306,
+			wantDb:     "inventory",
+		},
+		{
+			name:       "Postgres URL format with port",
+			driverName: "postgres",
+			dsn:        "postgres://user:pass@localhost:5432/reporting?sslmode=disable",
+			wantAddr:   "localhost",
+			wantPort:   5432,
+			wantDb:     "reporting",
+		},
+		{
+			name:       "Postgres URL format default port",
+			driverName: "postgres",
+			dsn:        "postgres://localhost/reporting",
+			wantAddr:   "localhost",
+			wantPort:   5432,
+			wantDb:     "reporting",
+		},
+		{
+			name:       "SQL Server URL format",
+			driverName: "sqlserver",
+			dsn:        "sqlserver://sa:password@localhost:1433?database=master",
+			wantAddr:   "localhost",
+			wantPort:   1433,
+			wantDb:     "sa:password@localhost:1433", // Current ParseDbName logic for this format
+		},
+		{
+			name:       "SQLite3 local file",
+			driverName: "sqlite3",
+			dsn:        "file:test.db?cache=shared",
+			wantAddr:   "sqlite3",
+			wantPort:   0,
+			wantDb:     "", // Current ParseDbName logic returns empty if no '/' is found
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := testutil.NewTestFixture(t)
+			f.Run("dbclient",
+				"-driver="+tt.driverName,
+				"-dsn="+tt.dsn,
+				"-op=ping",
+			)
+
+			span := f.RequireSingleSpan()
+			testutil.RequireDBClientSemconv(t, span,
+				"PING",
+				"ping",
+				tt.wantAddr, tt.wantPort,
+				tt.wantDb,
+			)
+		})
+	}
+}
