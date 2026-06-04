@@ -27,6 +27,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
@@ -54,6 +55,76 @@ const (
 	invalidReceiver    = "invalid-receiver"
 	invalidReceiverMsg = "can not find function"
 )
+
+// fileFilterMatches is an inline mirror of setup.buildFile that the golden
+// integration tests use to pre-filter rules before handing them to the
+// instrument harness. It must NOT import the setup package (that would create
+// an ast→rule→setup import cycle), so it re-implements the same logic using
+// only rule.FilterDef fields and the standard library.
+//
+// Maintenance contract:
+//   - Every predicate added to rule.FilterDef / setup.buildFile MUST be
+//     reflected here. Omitting a predicate causes the golden tests to silently
+//     pass because the filter is never applied — exactly the failure mode we
+//     are guarding against.
+//   - If an unknown predicate is encountered this function calls t.Fatalf so
+//     the test suite fails loudly rather than silently passing.
+func fileFilterMatches(t *testing.T, def *rule.FilterDef, importPath, sourceFile string) bool {
+	t.Helper()
+
+	// Count active predicates — mirrors buildFile's active-predicate counter.
+	active := 0
+	if def.HasFunc != "" {
+		active++
+	}
+	if def.HasStruct != "" {
+		active++
+	}
+	if def.HasDirective != "" {
+		active++
+	}
+	if def.IsTest != nil {
+		active++
+	}
+
+	if active == 0 {
+		t.Fatalf("fileFilterMatches: where.file has no active predicate")
+	}
+	if active > 1 {
+		t.Fatalf("fileFilterMatches: where.file has multiple active predicates; explicit composition not supported")
+	}
+
+	switch {
+	case def.HasFunc != "":
+		tree, err := ast.ParseFileFast(sourceFile)
+		if err != nil {
+			t.Fatalf("fileFilterMatches: ParseFileFast(%q): %v", sourceFile, err)
+		}
+		return ast.FindFuncDecl(tree, def.HasFunc, def.HasRecv) != nil
+
+	case def.HasStruct != "":
+		tree, err := ast.ParseFileFast(sourceFile)
+		if err != nil {
+			t.Fatalf("fileFilterMatches: ParseFileFast(%q): %v", sourceFile, err)
+		}
+		return ast.FindStructDecl(tree, def.HasStruct) != nil
+
+	case def.HasDirective != "":
+		t.Fatalf("fileFilterMatches: has_directive predicate is not yet supported")
+		return false
+
+	case def.IsTest != nil:
+		isTest := strings.HasSuffix(importPath, ".test")
+		return *def.IsTest == isTest
+
+	default:
+		// The active-predicate counter above proves one branch must match.
+		// If we reach here a new FilterDef field was added without updating this
+		// mirror — fail loudly so the gap is immediately visible.
+		t.Fatalf("fileFilterMatches: unhandled FilterDef predicate; update this mirror to match setup.buildFile")
+		return false
+	}
+}
 
 func TestInstrumentation_Integration(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join(testdataDir, goldenDir))
@@ -133,6 +204,22 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 		for _, props := range propsList {
 			props["name"] = name
 			ruleData, _ := yaml.Marshal(props)
+
+			// Evaluate the where.file filter if present. This mirrors what
+			// setup.preciseMatching does at runtime: rules whose where.file
+			// predicate does not match the source file are excluded from the
+			// rule set that reaches the instrumentation phase.
+			if whereRaw, ok := props["where"]; ok {
+				whereBytes, marshalErr := yaml.Marshal(whereRaw)
+				require.NoError(t, marshalErr)
+				var whereDef rule.WhereDef
+				require.NoError(t, yaml.Unmarshal(whereBytes, &whereDef))
+				if whereDef.File != nil {
+					if !fileFilterMatches(t, whereDef.File, mainPackage, sourceFile) {
+						continue
+					}
+				}
+			}
 
 			switch {
 			case props["struct"] != nil:
