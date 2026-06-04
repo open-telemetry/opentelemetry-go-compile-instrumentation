@@ -156,6 +156,26 @@ register_driver:
         path: github.com/example/sqldriver/otel
 ```
 
+`one-of` matches when **at least one** nested predicate matches (logical OR);
+an empty `one-of: []` never matches (vacuously false).
+
+```yaml
+# Instrument Exec in the files that hold the driver's statement-execution
+# code — those declaring either a `Conn` or a `Stmt` type.
+trace_exec:
+  target: github.com/example/sqldriver
+  where:
+    func: Exec
+    file:
+      one-of:
+        - has_struct: Conn
+        - has_struct: Stmt
+  do:
+    - inject_hooks:
+        before: BeforeExec
+        path: github.com/example/sqldriver/otel
+```
+
 ### `do` semantics
 
 `do` accepts two YAML shapes; both normalize to the same ordered internal list:
