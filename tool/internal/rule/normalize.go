@@ -15,12 +15,13 @@ const (
 	KeyWhere = "where"
 	KeyDo    = "do"
 
-	// KeyDoIndex is an internal field stamped onto each flat rule map produced by
-	// expanding a do sequence. It records the zero-based position of the modifier
-	// within the do list so that downstream name generation can disambiguate
-	// multiple modifiers that target the same function (see InstFuncRule.String).
-	// It is not part of the user-facing rule schema.
-	KeyDoIndex = "do_index"
+	// KeyApplicationIndex is an internal field stamped onto each flat rule map
+	// produced by expanding a do sequence. It records the zero-based position of
+	// the modifier within the do list — i.e. which application of a modifier to
+	// the same target this entry represents — so that downstream name generation
+	// can disambiguate multiple modifiers that target the same function (see
+	// InstFuncRule.String). It is not part of the user-facing rule schema.
+	KeyApplicationIndex = "application_index"
 )
 
 // where selectors (hoisted to flat by normalizeWhere).
@@ -140,11 +141,12 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 	for idx, item := range doItems {
 		flat := maps.Clone(common)
 		maps.Copy(flat, item)
-		// Stamp the do-sequence position so name generation can disambiguate
-		// multiple modifiers that target the same function. Index 0 is omitted
-		// so that single-modifier rules keep their historical generated names.
+		// Stamp the application index (do-sequence position) so name generation
+		// can disambiguate multiple modifiers that target the same function.
+		// Index 0 is omitted so that single-modifier rules keep their historical
+		// generated names.
 		if idx > 0 {
-			flat[KeyDoIndex] = idx
+			flat[KeyApplicationIndex] = idx
 		}
 		normalized = append(normalized, flat)
 	}

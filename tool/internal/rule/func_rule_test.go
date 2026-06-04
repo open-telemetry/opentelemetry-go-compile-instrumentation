@@ -160,27 +160,35 @@ param: string
 // legacy rules retain their historical generated names.
 func TestInstFuncRule_String(t *testing.T) {
 	tests := []struct {
-		name    string
-		doIndex int
-		want    string
+		name             string
+		applicationIndex int
+		want             string
 	}{
-		{name: "open_rule", doIndex: 0, want: "open_rule"},
-		{name: "open_rule", doIndex: 1, want: "open_rule_1"},
-		{name: "open_rule", doIndex: 2, want: "open_rule_2"},
+		{name: "open_rule", applicationIndex: 0, want: "open_rule"},
+		{name: "open_rule", applicationIndex: 1, want: "open_rule#1"},
+		{name: "open_rule", applicationIndex: 2, want: "open_rule#2"},
 	}
 	for _, tt := range tests {
 		r := &InstFuncRule{
-			InstBaseRule: InstBaseRule{Name: tt.name},
-			DoIndex:      tt.doIndex,
+			InstBaseRule:     InstBaseRule{Name: tt.name},
+			ApplicationIndex: tt.applicationIndex,
 		}
 		got := r.String()
-		assert.Equal(t, tt.want, got, "String() for do_index %d", tt.doIndex)
+		assert.Equal(t, tt.want, got, "String() for application_index %d", tt.applicationIndex)
 	}
 
-	// Distinct do indices on the same rule name must never collide.
-	first := (&InstFuncRule{InstBaseRule: InstBaseRule{Name: "shared"}, DoIndex: 0}).String()
-	second := (&InstFuncRule{InstBaseRule: InstBaseRule{Name: "shared"}, DoIndex: 1}).String()
+	// Distinct application indices on the same rule name must never collide.
+	first := (&InstFuncRule{InstBaseRule: InstBaseRule{Name: "shared"}, ApplicationIndex: 0}).String()
+	second := (&InstFuncRule{InstBaseRule: InstBaseRule{Name: "shared"}, ApplicationIndex: 1}).String()
 	assert.NotEqual(t, first, second, "do-sequence modifiers must have distinct identities")
+
+	// Regression for #560: a rule named "<base>_<n>" at index 0 must not collide
+	// with a distinct rule named "<base>" at application index n. The reserved
+	// separator keeps the two identities apart (a bare "_" suffix would not).
+	bareSuffixed := (&InstFuncRule{InstBaseRule: InstBaseRule{Name: "multi_hook_1"}, ApplicationIndex: 0}).String()
+	indexed := (&InstFuncRule{InstBaseRule: InstBaseRule{Name: "multi_hook"}, ApplicationIndex: 1}).String()
+	assert.NotEqual(t, bareSuffixed, indexed,
+		"a rule named %q must not collide with %q at application index 1", "multi_hook_1", "multi_hook")
 }
 
 // TestNormalize_DoSequenceStampsIndex verifies that Normalize records the
@@ -203,13 +211,13 @@ func TestNormalize_DoSequenceStampsIndex(t *testing.T) {
 	require.Len(t, got, 3)
 
 	// Index 0 carries no discriminator so legacy names are preserved.
-	_, has0 := got[0][KeyDoIndex]
-	assert.False(t, has0, "do[0] must not carry a do_index")
+	_, has0 := got[0][KeyApplicationIndex]
+	assert.False(t, has0, "do[0] must not carry an application_index")
 	assert.Equal(t, "BeforeOpen", got[0]["before"])
 
-	assert.Equal(t, 1, got[1][KeyDoIndex])
+	assert.Equal(t, 1, got[1][KeyApplicationIndex])
 	assert.Equal(t, "AfterOpen", got[1]["after"])
 
-	assert.Equal(t, 2, got[2][KeyDoIndex])
+	assert.Equal(t, 2, got[2][KeyApplicationIndex])
 	assert.Equal(t, "AfterOpen2", got[2]["after"])
 }

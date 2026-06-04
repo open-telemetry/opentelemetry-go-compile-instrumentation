@@ -62,13 +62,14 @@ type InstFuncRule struct {
 	LastResult        string         `json:"last_result,omitempty"        yaml:"last_result"`
 	Param             string         `json:"param,omitempty"              yaml:"param"`
 
-	// DoIndex is the zero-based position of this rule within a do sequence
-	// (see rule.Normalize). It is not part of the user-facing schema; it exists
-	// solely so that String — and therefore the generated trampoline names — stays
-	// unique when several modifiers target the same function. Index 0 is the
-	// default and contributes no suffix, preserving the names of single-modifier
-	// and legacy rules.
-	DoIndex int `json:"do_index,omitempty" yaml:"do_index,omitempty"`
+	// ApplicationIndex is the zero-based position of this rule within a do
+	// sequence (see rule.Normalize): it counts which application of a modifier to
+	// the same target this rule represents. It is not part of the user-facing
+	// schema; it exists solely so that String — and therefore the generated
+	// trampoline names — stays unique when several modifiers target the same
+	// function. Index 0 is the default and contributes no suffix, preserving the
+	// names of single-modifier and legacy rules.
+	ApplicationIndex int `json:"application_index,omitempty" yaml:"application_index,omitempty"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
@@ -96,14 +97,23 @@ func (r *InstFuncRule) validate() error {
 	return nil
 }
 
+// applicationIndexSep separates a rule name from its application-index suffix in
+// String. It is intentionally a character that cannot appear in a rule name
+// (names are identifier-like YAML keys such as "wrap_default_transport"), so a
+// suffixed identity like "open_rule#1" can never collide with a distinct rule
+// literally named "open_rule_1" carrying application index 0 (issue #560).
+const applicationIndexSep = "#"
+
 // String returns a stable identity for the rule used to derive trampoline and
 // HookContext names. It must differ between two rules that target the same
 // function via separate do-sequence modifiers, otherwise their generated
-// declarations collide. The do-index suffix is only appended for index > 0 so
-// that single-modifier and legacy rules keep their historical names.
+// declarations collide. The application-index suffix is only appended for
+// index > 0 so that single-modifier and legacy rules keep their historical
+// names; the reserved separator (applicationIndexSep) guarantees the suffixed
+// form cannot collide with a user-chosen rule name.
 func (r *InstFuncRule) String() string {
-	if r.DoIndex == 0 {
+	if r.ApplicationIndex == 0 {
 		return r.Name
 	}
-	return fmt.Sprintf("%s_%d", r.Name, r.DoIndex)
+	return fmt.Sprintf("%s%s%d", r.Name, applicationIndexSep, r.ApplicationIndex)
 }
