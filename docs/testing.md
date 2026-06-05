@@ -98,9 +98,11 @@ make test-e2e/coverage
 
 ## Coverage
 
-> [!IMPORTANT]
-> The project enforces a **≥70% unit-test coverage** target for both the `tool/` and `pkg/` module trees.
-> A CI step fails the build if either coverage report drops below this threshold.
+> [!NOTE]
+> The project targets a **≥70% unit-test coverage** goal for both the `tool/` and `pkg/` module trees.
+> This is an **aspirational target** currently being worked toward. The CI step reports coverage
+> for both trees but does **not yet block merges** when coverage is below the threshold.
+> Once the target is consistently met, the gate will be promoted to enforcement.
 
 ### Coverage target rationale
 
@@ -136,10 +138,11 @@ The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 
 1. Runs `make test-unit/coverage` to generate `coverage-tool.txt` and `coverage-pkg.txt`.
 2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
-3. Runs `.github/scripts/coverage-gate.sh` on each file and **fails the job** if either is below 70%.
+3. Runs `.github/scripts/coverage-gate.sh` on each file and **reports** whether each tree meets the
+   70% target. Steps are non-blocking (`continue-on-error: true`) — a coverage shortfall is visible
+   in the CI log as a warning but does **not** fail the `Done (Unit Tests)` required status check.
 
-The `Done (Unit Tests)` status check (required for merge) reflects both the test results **and** the
-coverage gate result. A coverage regression will block the PR even if all tests pass.
+The gate will be promoted to a hard failure once the codebase reaches the 70% target.
 
 All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
 

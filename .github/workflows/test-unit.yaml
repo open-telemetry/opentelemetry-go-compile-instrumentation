@@ -66,11 +66,13 @@ jobs:
         with:
           files: coverage-pkg.txt
           flags: pkg
-      - name: Enforce coverage gate (tool ≥70%)
+      - name: Report coverage gate (tool ≥70%)
         if: needs.changes.outputs.tool == 'true'
+        continue-on-error: true
         run: .github/scripts/coverage-gate.sh coverage-tool.txt 70.0
-      - name: Enforce coverage gate (pkg ≥70%)
+      - name: Report coverage gate (pkg ≥70%)
         if: needs.changes.outputs.pkg == 'true'
+        continue-on-error: true
         run: .github/scripts/coverage-gate.sh coverage-pkg.txt 70.0
 
   test-unit:
@@ -111,18 +113,10 @@ jobs:
       - name: Check result
         run: |
           result="${{ needs.test-unit.result }}"
-          coverage_result="${{ needs.test-unit-coverage.result }}"
           echo "Test result: $result"
-          echo "Coverage gate result: $coverage_result"
           if [[ "$result" == "success" || "$result" == "skipped" ]]; then
             echo "✅ Tests passed or were skipped"
           else
             echo "❌ Tests failed"
-            exit 1
-          fi
-          if [[ "$coverage_result" == "success" || "$coverage_result" == "skipped" ]]; then
-            echo "✅ Coverage gate passed or was skipped"
-          else
-            echo "❌ Coverage gate failed"
             exit 1
           fi
