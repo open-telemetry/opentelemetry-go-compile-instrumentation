@@ -63,30 +63,53 @@ func IsUnix() bool {
 }
 
 func CopyFile(src, dst string) error {
-	_, err := os.Stat(filepath.Dir(dst))
-	if os.IsNotExist(err) {
-		err = os.MkdirAll(filepath.Dir(dst), 0o755)
-		if err != nil {
-			return ex.Wrap(err)
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return ex.Wrapf(err, "failed to stat source file %q", src)
+	}
+
+	dstInfo, err := os.Stat(dst)
+	if err == nil {
+		// Avoid self-copy which would otherwise truncate the file.
+		if os.SameFile(srcInfo, dstInfo) {
+			return nil
 		}
+	} else if !os.IsNotExist(err) {
+		return ex.Wrapf(err, "failed to stat destination file %q", dst)
+	}
+
+	err = os.MkdirAll(filepath.Dir(dst), 0o755)
+	if err != nil {
+		return ex.Wrapf(err, "failed to create directory for file %q", dst)
 	}
 
 	srcFile, err := os.Open(src)
 	if err != nil {
-		return ex.Wrap(err)
+		return ex.Wrapf(err, "failed to open source file %q", src)
 	}
 	defer srcFile.Close()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
-		return ex.Wrap(err)
+		return ex.Wrapf(err, "failed to create destination file %q", dst)
 	}
-	defer dstFile.Close()
 
 	_, err = io.Copy(dstFile, srcFile)
 	if err != nil {
-		return ex.Wrap(err)
+		_ = dstFile.Close()
+		return ex.Wrapf(err, "failed to copy file from %q to %q", src, dst)
 	}
+
+	err = dstFile.Close()
+	if err != nil {
+		return ex.Wrapf(err, "failed to close destination file %q", dst)
+	}
+
+	err = os.Chmod(dst, srcInfo.Mode().Perm())
+	if err != nil {
+		return ex.Wrapf(err, "failed to change permissions for file %q", dst)
+	}
+
 	return nil
 }
 
