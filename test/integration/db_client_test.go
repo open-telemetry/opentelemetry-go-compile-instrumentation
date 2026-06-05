@@ -224,7 +224,7 @@ func TestDBClientDSNParsing(t *testing.T) {
 			dsn:        "sqlserver://sa:password@localhost:1433?database=master",
 			wantAddr:   "localhost",
 			wantPort:   1433,
-			wantDb:     "sa:password@localhost:1433", // Current ParseDbName logic for this format
+			wantDb:     "master",
 		},
 		{
 			name:       "SQLite3 local file",
@@ -232,7 +232,7 @@ func TestDBClientDSNParsing(t *testing.T) {
 			dsn:        "file:test.db?cache=shared",
 			wantAddr:   "sqlite3",
 			wantPort:   0,
-			wantDb:     "", // Current ParseDbName logic returns empty if no '/' is found
+			wantDb:     "test.db",
 		},
 	}
 
