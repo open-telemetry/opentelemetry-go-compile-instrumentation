@@ -107,30 +107,8 @@ make test-e2e/coverage
 ### Coverage target rationale
 
 The 70% floor is the minimum bar agreed in [issue #569](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/569)
-(tracked under the release 1.0.0 roadmap). Coverage is enforced **per module tree** — `tool/` and
+(tracked under the release 1.0.0 roadmap). Coverage is tracked **per module tree** — `tool/` and
 `pkg/` are checked independently so that one area cannot mask regression in the other.
-
-### Running coverage locally
-
-```bash
-# Generate coverage reports for both module trees (coverage-tool.txt + coverage-pkg.txt)
-make test-unit/coverage
-
-# Run the full gate (generates reports and enforces ≥70% on each)
-make test-unit/coverage-gate
-
-# Run the gate for a single tree
-make test-unit/tool/coverage-gate   # tool/ only
-make test-unit/pkg/coverage-gate    # pkg/ only
-```
-
-You can also invoke the gate script directly on any coverprofile file:
-
-```bash
-.github/scripts/coverage-gate.sh coverage-tool.txt 70.0
-```
-
-The script prints the current total, the threshold, and exits non-zero on failure.
 
 ### CI behaviour
 
@@ -138,11 +116,10 @@ The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 
 1. Runs `make test-unit/coverage` to generate `coverage-tool.txt` and `coverage-pkg.txt`.
 2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
-3. Runs `.github/scripts/coverage-gate.sh` on each file and **reports** whether each tree meets the
-   70% target. Steps are non-blocking (`continue-on-error: true`) — a coverage shortfall is visible
-   in the CI log as a warning but does **not** fail the `Done (Unit Tests)` required status check.
 
-The gate will be promoted to a hard failure once the codebase reaches the 70% target.
+Codecov evaluates each flag against the 70% target defined in `codecov.yml` and posts the result
+as an **informational** status check — a coverage shortfall is visible in the PR but does **not**
+block merges. Flip `informational: false` in `codecov.yml` once the target is consistently met.
 
 All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
 

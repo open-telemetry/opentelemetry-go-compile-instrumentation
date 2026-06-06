@@ -66,14 +66,6 @@ jobs:
         with:
           files: coverage-pkg.txt
           flags: pkg
-      - name: Report coverage gate (tool ≥70%)
-        if: needs.changes.outputs.tool == 'true'
-        continue-on-error: true
-        run: .github/scripts/coverage-gate.sh coverage-tool.txt 70.0
-      - name: Report coverage gate (pkg ≥70%)
-        if: needs.changes.outputs.pkg == 'true'
-        continue-on-error: true
-        run: .github/scripts/coverage-gate.sh coverage-pkg.txt 70.0
 
   test-unit:
     name: Unit Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
