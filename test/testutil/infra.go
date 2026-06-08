@@ -4,6 +4,7 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -120,7 +121,8 @@ func Run(t *testing.T, dir string, env []string, args ...string) string {
 }
 
 // Start starts the application but does not wait for it to complete. If env
-// is nil, the parent process env is used.
+// is nil, the parent process env is used. Stdout and stderr are captured and
+// logged when the test fails, so that app crashes are visible in CI output.
 func Start(t *testing.T, dir string, env []string, args ...string) {
 	t.Helper()
 	appName := "./" + appBinName
@@ -128,11 +130,19 @@ func Start(t *testing.T, dir string, env []string, args ...string) {
 		appName += ".exe"
 	}
 	cmd := newCmd(t.Context(), dir, env, append([]string{appName}, args...)...)
-	cmd.Stderr = cmd.Stdout // redirect stderr to stdout for easier debugging
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
+			_ = cmd.Wait() // ensure all output is flushed
+		}
+		if t.Failed() && buf.Len() > 0 {
+			t.Logf("app output:\n%s", buf.String())
 		}
 	})
 }

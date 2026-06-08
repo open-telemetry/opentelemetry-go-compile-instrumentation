@@ -667,6 +667,45 @@ func TestPreciseMatching_WhereFileFilter(t *testing.T) {
 	require.Contains(t, result.FuncRules, matchFile)
 }
 
+func TestPreciseMatching_WhereFileAllOf(t *testing.T) {
+	// all-of requires the file to declare BOTH a Handler func and a Server
+	// struct. Only match.go satisfies both; nomatch.go is gated out.
+	matchFile := writeGoSource(t, "match.go", "package main\n\ntype Server struct{}\n\nfunc Handler() {}\n")
+	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\nfunc Handler() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-where-file-all-of",
+			Target: "example.com/svc",
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{
+					AllOf: []rule.FilterDef{
+						{HasFunc: "Handler"},
+						{HasStruct: "Server"},
+					},
+				},
+			},
+		},
+		Func:   "Handler",
+		Before: "BeforeHandler",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.FuncRules, 1)
+	require.Contains(t, result.FuncRules, matchFile)
+	require.NotContains(t, result.FuncRules, noMatchFile)
+}
+
 func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
 
