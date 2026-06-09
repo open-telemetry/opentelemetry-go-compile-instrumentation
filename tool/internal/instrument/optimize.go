@@ -337,21 +337,6 @@ func stripTJumpLabel(tjump *TJump) {
 	ifStmt.Decs.If = nil
 }
 
-func flattenTJumpIfPossible(tjump *TJump, removedOnExit bool) error {
-	if tjump.rule.Before == "" {
-		return nil
-	}
-
-	hookFunc, err := getHookFunc(tjump.rule, true)
-	if err != nil {
-		return err
-	}
-	if !canFlattenTJump(hookFunc) {
-		return nil
-	}
-	return flattenTJump(tjump, removedOnExit)
-}
-
 func (ip *InstrumentPhase) optimizeTJumps() error {
 	for _, tjump := range ip.tjumps {
 		mustTJump(tjump.ifStmt)
@@ -393,8 +378,17 @@ func (ip *InstrumentPhase) optimizeTJumps() error {
 		// memory aware and may generate memory SSA values during compilation.
 		// This further simplifies the trampoline-jump-if and gives more chances
 		// for optimization passes to kick in.
-		if err := flattenTJumpIfPossible(tjump, removedOnExit); err != nil {
-			return err
+		if rule.Before != "" {
+			hookFunc, err := getHookFunc(tjump.rule, true)
+			if err != nil {
+				return err
+			}
+			if canFlattenTJump(hookFunc) {
+				err1 := flattenTJump(tjump, removedOnExit)
+				if err1 != nil {
+					return err1
+				}
+			}
 		}
 	}
 	return nil
