@@ -231,16 +231,13 @@ func (sp *SetupPhase) matchOneRule(
 ) error {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
+		funcDecl, err := ast.FindFuncDeclForRule(tree, rt)
+		if err != nil {
+			return err
+		}
 		if funcDecl != nil {
-			ok, err := ast.FuncDeclMatchesFilters(funcDecl, rt)
-			if err != nil {
-				return err
-			}
-			if ok {
-				set.AddFuncRule(source, rt)
-				sp.Info("Match func rule", "rule", rt, "dep", dep)
-			}
+			set.AddFuncRule(source, rt)
+			sp.Info("Match func rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstStructRule:
 		structDecl := ast.FindStructDecl(tree, rt.Struct)
