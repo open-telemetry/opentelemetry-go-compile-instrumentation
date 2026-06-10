@@ -347,11 +347,11 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 }
 
 func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
-	funcDecl, err := ast.FindFuncDeclForRule(root, rule)
+	funcDecl, ok, err := ast.FindFuncDeclForRule(root, rule)
 	if err != nil {
 		return err
 	}
-	if funcDecl == nil {
+	if !ok {
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
