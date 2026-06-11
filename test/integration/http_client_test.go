@@ -19,6 +19,8 @@ import (
 )
 
 func TestHTTPClient(t *testing.T) {
+	t.Parallel()
+
 	testCases := []struct {
 		name       string
 		queryParam string
@@ -34,7 +36,7 @@ func TestHTTPClient(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 			server := StartHTTPServerWithResponse(t, 200, `{"message":"Hello"}`)
 
-			f.BuildAndRun("httpclient", "-addr="+server.URL, "-name="+tc.queryParam)
+			f.Run("httpclient", "-addr="+server.URL, "-name="+tc.queryParam)
 
 			span := f.RequireSingleSpan()
 			expectedURL := server.URL + "/hello?name=" + tc.queryParam

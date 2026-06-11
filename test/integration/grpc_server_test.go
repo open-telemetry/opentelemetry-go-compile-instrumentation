@@ -6,6 +6,7 @@
 package test
 
 import (
+	"fmt"
 	"io"
 	"testing"
 
@@ -17,6 +18,8 @@ import (
 )
 
 func TestGRPCServer(t *testing.T) {
+	t.Parallel()
+
 	testCases := []struct {
 		name     string
 		method   string
@@ -41,11 +44,13 @@ func TestGRPCServer(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
+			port := testutil.FreePort(t)
+			addr := fmt.Sprintf("localhost:%d", port)
 
-			f.BuildAndStart("grpcserver")
-			testutil.WaitForTCP(t, "localhost:50051")
+			f.Start("grpcserver", fmt.Sprintf("-port=%d", port))
+			testutil.WaitForTCP(t, addr)
 
-			client := NewGRPCClient(t, "localhost:50051")
+			client := NewGRPCClient(t, addr)
 			tc.exercise(t, client)
 			testutil.WaitForSpanFlush(t)
 

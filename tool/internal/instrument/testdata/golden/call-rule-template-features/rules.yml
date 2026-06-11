@@ -1,4 +1,7 @@
 wrap_nested_call:
   target: main
-  function_call: unsafe.Sizeof
-  replace: "(func() uintptr { return {{ . }} })()"
+  where:
+    function_call: unsafe.Sizeof
+  do:
+    - wrap_call:
+        replace: "(func() uintptr { return {{ . }} })()"

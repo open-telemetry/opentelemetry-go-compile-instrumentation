@@ -90,8 +90,9 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
 	}
 
 	// Filter out OTel exporter requests to prevent infinite loops
-	if strings.HasPrefix(req.Header.Get("User-Agent"), otelExporterPrefix) {
-		logger.Debug("Skipping OTel exporter request", "user_agent", req.Header.Get("User-Agent"))
+	ua := req.Header.Get("User-Agent")
+	if strings.HasPrefix(ua, otelExporterPrefix) || strings.HasPrefix(ua, "OTel Go OTLP") || strings.HasPrefix(ua, "OTel-Go-OTLP") {
+		logger.Debug("Skipping OTel exporter request", "user_agent", ua)
 		return
 	}
 

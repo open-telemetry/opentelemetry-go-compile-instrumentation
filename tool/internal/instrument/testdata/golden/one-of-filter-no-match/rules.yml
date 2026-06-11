@@ -1,0 +1,17 @@
+# Same rule as the match fixture: instrument Open in any file declaring one of
+# the supported backend driver types (MySQLDriver or PostgresDriver). This
+# source is a helper file with neither type, so the one-of filter gates the rule
+# out and the file is left unchanged.
+instrument_driver_open:
+  target: main
+  where:
+    func: Open
+    file:
+      one-of:
+        - has_struct: MySQLDriver
+        - has_struct: PostgresDriver
+  do:
+    - inject_hooks:
+        before: BeforeOpen
+        after: AfterOpen
+        path: testdata/golden/one-of-filter-no-match
