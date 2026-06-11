@@ -184,7 +184,11 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		if hasLeafPredicate(def) || def.OneOf != nil || def.Not != nil {
 			return nil, ex.Newf("where.file.all-of cannot be combined with other predicates")
 		}
-		return buildAllOf(def.AllOf)
+		children, err := buildChildren(def.AllOf, "all-of")
+		if err != nil {
+			return nil, err
+		}
+		return AllOf(children), nil
 	}
 	// Presence via non-nil slice (mirrors all-of): an explicit one-of: [] is a
 	// deliberate, vacuously-false predicate (OneOf.Match returns false for an
@@ -198,7 +202,11 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		if hasLeafPredicate(def) || def.AllOf != nil || def.Not != nil {
 			return nil, ex.Newf("where.file.one-of cannot be combined with other predicates")
 		}
-		return buildOneOf(def.OneOf)
+		children, err := buildChildren(def.OneOf, "one-of")
+		if err != nil {
+			return nil, err
+		}
+		return OneOf(children), nil
 	}
 	if def.Not != nil {
 		return nil, ex.Newf("where.file not predicate composition is not yet supported")
@@ -242,42 +250,21 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 	}
 }
 
-// buildAllOf compiles a where.file.all-of group into an AllOf combinator that
-// matches only when every child predicate matches. Children are compiled with
-// the same buildFile rules, so nesting (all-of within all-of) composes
-// naturally.
-func buildAllOf(defs []rule.FilterDef) (Filter, error) {
-	filters := make(AllOf, 0, len(defs))
+// buildChildren compiles each child of a where.file combinator group with the
+// same buildFile rules, so nesting (a combinator within a combinator) composes
+// naturally. The caller converts the result to the concrete combinator type
+// (AllOf / OneOf). label names the combinator for error context.
+func buildChildren(defs []rule.FilterDef, label string) ([]Filter, error) {
+	filters := make([]Filter, 0, len(defs))
 	for i := range defs {
 		f, err := buildFile(&defs[i])
 		if err != nil {
-			return nil, ex.Wrapf(err, "where.file.all-of[%d]", i)
+			return nil, ex.Wrapf(err, "where.file.%s[%d]", label, i)
 		}
 		if f == nil {
 			// buildFile returns a non-nil filter for every valid leaf; a nil here
-			// would make AllOf.Match panic, so fail loudly instead.
-			return nil, ex.Newf("where.file.all-of[%d] produced no filter", i)
-		}
-		filters = append(filters, f)
-	}
-	return filters, nil
-}
-
-// buildOneOf compiles a where.file.one-of group into a OneOf combinator that
-// matches when any child predicate matches. Children are compiled with the same
-// buildFile rules, so nesting (one-of within one-of, or all-of) composes
-// naturally.
-func buildOneOf(defs []rule.FilterDef) (Filter, error) {
-	filters := make(OneOf, 0, len(defs))
-	for i := range defs {
-		f, err := buildFile(&defs[i])
-		if err != nil {
-			return nil, ex.Wrapf(err, "where.file.one-of[%d]", i)
-		}
-		if f == nil {
-			// buildFile returns a non-nil filter for every valid leaf; a nil here
-			// would make OneOf.Match panic, so fail loudly instead.
-			return nil, ex.Newf("where.file.one-of[%d] produced no filter", i)
+			// would make the combinator's Match panic, so fail loudly instead.
+			return nil, ex.Newf("where.file.%s[%d] produced no filter", label, i)
 		}
 		filters = append(filters, f)
 	}
