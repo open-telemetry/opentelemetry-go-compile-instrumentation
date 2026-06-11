@@ -108,6 +108,7 @@ jobs:
           echo "Test result: $result"
           if [[ "$result" == "success" || "$result" == "skipped" ]]; then
             echo "✅ Tests passed or were skipped"
+            exit 0
           else
             echo "❌ Tests failed"
             exit 1
