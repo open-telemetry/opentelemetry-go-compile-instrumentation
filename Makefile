@@ -489,19 +489,19 @@ test-integration: go-protobuf-plugins ## Run integration tests
 test-integration: build build-demo
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ../gotest-integration.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-latestlibbuild: build ## Run LatestLibBuild tests
 	@echo "Running LatestLibBuild tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ../gotest-latestlibbuild.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ./gotest-latestlibbuild.log
 
 .ONESHELL:
 test-latestlibrun: build ## Run LatestLibRun tests (bump apps to @latest then run integration suite)
 	@echo "Bumping test apps to @latest..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibrun ./latestlibrun/... 2>&1 | tee ../gotest-latestlibrun.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibrun ./latestlibrun/... 2>&1 | tee ./gotest-latestlibrun.log
 	$(MAKE) tidy/test-apps
 	@echo "Syncing test module with bumped apps..."
 	go -C "test" mod tidy
@@ -513,21 +513,21 @@ test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ../gotest-integration.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
 test-e2e: build build-demo
 	@echo "Running e2e tests..."
 	set -euo pipefail
-	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ../gotest-e2e.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ./gotest-e2e.log
 
 .ONESHELL:
 test-e2e/coverage: ## Run e2e tests with coverage report
 test-e2e/coverage: build build-demo
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
-	cd test && go test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ../gotest-e2e.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log
 
 .PHONY: crosslink
 crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
