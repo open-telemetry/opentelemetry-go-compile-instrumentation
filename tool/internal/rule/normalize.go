@@ -18,9 +18,10 @@ const (
 	// KeyApplicationIndex is an internal field stamped onto each flat rule map
 	// produced by expanding a do sequence. It records the zero-based position of
 	// the modifier within the do list — i.e. which application of a modifier to
-	// the same target this entry represents — so that downstream name generation
-	// can disambiguate multiple modifiers that target the same function (see
-	// InstFuncRule.String). It is not part of the user-facing rule schema.
+	// the same target this entry represents — preserving the order of application.
+	// It is not part of the user-facing rule schema, and it is intentionally not
+	// part of InstFuncRule.Identity (trampoline/HookContext names are content-
+	// derived; order is preserved by application sequence, not by name).
 	KeyApplicationIndex = "application_index"
 )
 
@@ -141,10 +142,10 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 	for idx, item := range doItems {
 		flat := maps.Clone(common)
 		maps.Copy(flat, item)
-		// Stamp the application index (do-sequence position) so name generation
-		// can disambiguate multiple modifiers that target the same function.
-		// Index 0 is omitted so that single-modifier rules keep their historical
-		// generated names.
+		// Stamp the application index (do-sequence position) to preserve the order
+		// of application for the expanded modifiers. Index 0 is omitted to keep the
+		// normalized rule map minimal; single-modifier and legacy rules then carry
+		// no index field. (The index is not part of InstFuncRule.Identity.)
 		if idx > 0 {
 			flat[KeyApplicationIndex] = idx
 		}

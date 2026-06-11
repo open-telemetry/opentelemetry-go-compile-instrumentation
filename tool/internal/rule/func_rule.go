@@ -4,10 +4,11 @@
 package rule
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,12 +64,17 @@ type InstFuncRule struct {
 	Param             string         `json:"param,omitempty"              yaml:"param"`
 
 	// ApplicationIndex is the zero-based position of this rule within a do
-	// sequence (see rule.Normalize): it counts which application of a modifier to
-	// the same target this rule represents. It is not part of the user-facing
-	// schema; it exists solely so that String — and therefore the generated
-	// trampoline names — stays unique when several modifiers target the same
-	// function. Index 0 is the default and contributes no suffix, preserving the
-	// names of single-modifier and legacy rules.
+	// sequence (see rule.Normalize): it records which application of a modifier to
+	// the same target this rule represents, preserving the order of application so
+	// that hooks run in the sequence the user declared. It is not part of the
+	// user-facing schema.
+	//
+	// It is deliberately NOT part of Identity: trampoline/HookContext names are
+	// content-derived, and application order does not change what a rule does.
+	// Order is preserved by the sequence in which the expanded rules are applied,
+	// not by the generated name. The field is retained so that ordering is
+	// available to downstream and future operations without coupling it to name
+	// generation.
 	ApplicationIndex int `json:"application_index,omitempty" yaml:"application_index,omitempty"`
 }
 
@@ -97,23 +103,47 @@ func (r *InstFuncRule) validate() error {
 	return nil
 }
 
-// applicationIndexSep separates a rule name from its application-index suffix in
-// String. It is intentionally a character that cannot appear in a rule name
-// (names are identifier-like YAML keys such as "wrap_default_transport"), so a
-// suffixed identity like "open_rule#1" can never collide with a distinct rule
-// literally named "open_rule_1" carrying application index 0 (issue #560).
-const applicationIndexSep = "#"
-
-// String returns a stable identity for the rule used to derive trampoline and
-// HookContext names. It must differ between two rules that target the same
-// function via separate do-sequence modifiers, otherwise their generated
-// declarations collide. The application-index suffix is only appended for
-// index > 0 so that single-modifier and legacy rules keep their historical
-// names; the reserved separator (applicationIndexSep) guarantees the suffixed
-// form cannot collide with a user-chosen rule name.
-func (r *InstFuncRule) String() string {
-	if r.ApplicationIndex == 0 {
-		return r.Name
+// Identity returns a content-derived key used to generate trampoline and
+// HookContext names. It is a function purely of what the rule does — its
+// target, function/receiver, before/after hooks, hook path, and signature
+// filters — never of the rule's name or its position in a do sequence.
+//
+// De-duplication: two rules that do the same thing share an identity, so they
+// collapse to a single generated artifact instead of redeclaring it. The only
+// remaining collision is between byte-identical rules, which are effectively the
+// same rule. Application order is intentionally excluded — it does not change
+// what a rule does, and it is preserved separately by the order in which the
+// expanded rules are applied (see ApplicationIndex), not by the generated name.
+//
+// Deriving the identity from content (rather than a "name#index" string) closes
+// the collision in issue #560, where a rule literally named "name#index" at
+// application index 0 rendered the same string as "name" at index N.
+//
+// The key is built with explicit length prefixes ("len:value") instead of a
+// delimiter, so it is injective for arbitrary field content. Type-name strings
+// may legitimately contain any character — commas in function types, "|" in
+// type constraints — so no printable separator is truly reserved; the length
+// prefix marks where each value ends without relying on its content.
+func (r *InstFuncRule) Identity() string {
+	enc := func(s string) string { return strconv.Itoa(len(s)) + ":" + s }
+	encList := func(xs []string) string {
+		encs := make([]string, len(xs))
+		for i, x := range xs {
+			encs[i] = enc(x)
+		}
+		return strconv.Itoa(len(xs)) + ";" + strings.Join(encs, "")
 	}
-	return fmt.Sprintf("%s%s%d", r.Name, applicationIndexSep, r.ApplicationIndex)
+	encSig := func(s *FuncSignature) string {
+		if s == nil {
+			return "-" // absent: distinct from a present-but-empty signature
+		}
+		return "+" + encList(s.Args) + encList(s.Returns)
+	}
+	parts := []string{
+		enc(r.Target), enc(r.Version), enc(r.Func), enc(r.Recv),
+		enc(r.Before), enc(r.After), enc(r.Path),
+		enc(r.Result), enc(r.LastResult), enc(r.Param),
+		encSig(r.Signature), encSig(r.SignatureContains),
+	}
+	return util.CRC32(strings.Join(parts, ""))
 }
