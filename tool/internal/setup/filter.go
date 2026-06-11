@@ -100,6 +100,22 @@ func (a AllOf) Match(ctx *MatchContext) bool {
 	return true
 }
 
+var _ Filter = (OneOf)(nil)
+
+// OneOf matches when at least one child filter matches. An empty OneOf never
+// matches (no condition in an empty set is satisfied). Evaluation
+// short-circuits on the first matching child.
+type OneOf []Filter
+
+func (o OneOf) Match(ctx *MatchContext) bool {
+	for _, f := range o {
+		if f.Match(ctx) {
+			return true
+		}
+	}
+	return false
+}
+
 // --- Build ---
 
 // Build constructs a runtime Filter from a structured where clause.
@@ -146,6 +162,14 @@ func Build(where *rule.WhereDef) (Filter, error) {
 // matches vacuously (see AllOf.Match) — consistent with the documented type
 // semantics.
 //
+// hasLeafPredicate reports whether any leaf (non-combinator) where.file
+// predicate is set on def. The combinator branches use it to reject a leaf
+// predicate that sits as a sibling of a combinator on the same node.
+func hasLeafPredicate(def *rule.FilterDef) bool {
+	return def.HasFunc != "" || def.HasRecv != "" ||
+		def.HasStruct != "" || def.HasDirective != ""
+}
+
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
 func buildFile(def *rule.FilterDef) (Filter, error) {
 	// Presence is detected via a non-nil slice (not len > 0): YAML unmarshals an
@@ -155,15 +179,34 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		// all-of owns the composition for this node; sibling predicates would be
 		// silently ignored, so reject the ambiguous combination explicitly. This
 		// guard runs for the empty case too, so all-of: [] + has_func: X is still
-		// rejected.
-		if def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
-			def.HasDirective != "" || len(def.OneOf) > 0 || def.Not != nil {
+		// rejected. Sibling combinators are detected by non-nil presence (not
+		// len > 0), so an explicit empty one-of: [] is also rejected here.
+		if hasLeafPredicate(def) || def.OneOf != nil || def.Not != nil {
 			return nil, ex.Newf("where.file.all-of cannot be combined with other predicates")
 		}
-		return buildAllOf(def.AllOf)
+		children, err := buildChildren(def.AllOf, "all-of")
+		if err != nil {
+			return nil, err
+		}
+		return AllOf(children), nil
 	}
-	if len(def.OneOf) > 0 {
-		return nil, ex.Newf("where.file one-of predicate composition is not yet supported")
+	// Presence via non-nil slice (mirrors all-of): an explicit one-of: [] is a
+	// deliberate, vacuously-false predicate (OneOf.Match returns false for an
+	// empty set), not the absence of one.
+	if def.OneOf != nil {
+		// one-of owns the composition for this node; reject sibling predicates
+		// that would otherwise be silently ignored. The guard runs for the empty
+		// case too, so one-of: [] + has_func: X is still rejected. Sibling
+		// combinators are detected by non-nil presence, independent of branch
+		// order.
+		if hasLeafPredicate(def) || def.AllOf != nil || def.Not != nil {
+			return nil, ex.Newf("where.file.one-of cannot be combined with other predicates")
+		}
+		children, err := buildChildren(def.OneOf, "one-of")
+		if err != nil {
+			return nil, err
+		}
+		return OneOf(children), nil
 	}
 	if def.Not != nil {
 		return nil, ex.Newf("where.file not predicate composition is not yet supported")
@@ -207,21 +250,21 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 	}
 }
 
-// buildAllOf compiles a where.file.all-of group into an AllOf combinator that
-// matches only when every child predicate matches. Children are compiled with
-// the same buildFile rules, so nesting (all-of within all-of) composes
-// naturally.
-func buildAllOf(defs []rule.FilterDef) (Filter, error) {
-	filters := make(AllOf, 0, len(defs))
+// buildChildren compiles each child of a where.file combinator group with the
+// same buildFile rules, so nesting (a combinator within a combinator) composes
+// naturally. The caller converts the result to the concrete combinator type
+// (AllOf / OneOf). label names the combinator for error context.
+func buildChildren(defs []rule.FilterDef, label string) ([]Filter, error) {
+	filters := make([]Filter, 0, len(defs))
 	for i := range defs {
 		f, err := buildFile(&defs[i])
 		if err != nil {
-			return nil, ex.Wrapf(err, "where.file.all-of[%d]", i)
+			return nil, ex.Wrapf(err, "where.file.%s[%d]", label, i)
 		}
 		if f == nil {
 			// buildFile returns a non-nil filter for every valid leaf; a nil here
-			// would make AllOf.Match panic, so fail loudly instead.
-			return nil, ex.Newf("where.file.all-of[%d] produced no filter", i)
+			// would make the combinator's Match panic, so fail loudly instead.
+			return nil, ex.Newf("where.file.%s[%d] produced no filter", label, i)
 		}
 		filters = append(filters, f)
 	}
