@@ -10,7 +10,7 @@ SHELL := /bin/bash
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
-        test-integration/coverage test-e2e/coverage test-latestlibrun \
+        test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold
@@ -509,6 +509,24 @@ test-latestlibrun: build ## Run LatestLibRun tests (bump apps to @latest then ru
 	$(MAKE) test-integration
 
 .ONESHELL:
+test-versionmatrix: build ## Run VersionMatrix tests (pin apps to each declared range bound then run integration suite)
+	@echo "Pinning test apps to declared lower-bound versions..."
+	set -euo pipefail
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags versionmatrix -run 'TestBumpAppsToLowerBound$$' ./versionmatrix/... 2>&1 | tee ./gotest-versionmatrix.log
+	$(MAKE) tidy/test-apps
+	@echo "Syncing test module with pinned apps..."
+	go -C "test" mod tidy
+	@echo "Running integration suite against lower-bound deps..."
+	$(MAKE) test-integration
+	@echo "Pinning test apps to declared upper-bound versions..."
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags versionmatrix -run 'TestBumpAppsToUpperBound$$' ./versionmatrix/... 2>&1 | tee -a ./gotest-versionmatrix.log
+	$(MAKE) tidy/test-apps
+	@echo "Syncing test module with pinned apps..."
+	go -C "test" mod tidy
+	@echo "Running integration suite against upper-bound deps..."
+	$(MAKE) test-integration
+
+.ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
@@ -571,7 +589,7 @@ clean: ## Clean build artifacts
 	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log \) -delete
+	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log -o -name gotest-versionmatrix.log \) -delete
 
 .ONESHELL:
 tidy/test-apps: ## Run go mod tidy in all test app modules
