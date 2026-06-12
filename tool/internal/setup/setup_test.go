@@ -311,6 +311,33 @@ func TestSetupGoCache(t *testing.T) {
 	})
 }
 
+func TestIsSetup(t *testing.T) {
+	t.Run("returns false when matched.json does not exist", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+		if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if isSetup() {
+			t.Error("isSetup() = true, expected false when matched.json is absent")
+		}
+	})
+
+	t.Run("returns true when matched.json exists", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+		if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(util.GetMatchedRuleFile(), []byte("[]"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if !isSetup() {
+			t.Error("isSetup() = false, expected true when matched.json exists")
+		}
+	})
+}
+
 func TestExtractBuildFlags(t *testing.T) {
 	tests := []struct {
 		name     string

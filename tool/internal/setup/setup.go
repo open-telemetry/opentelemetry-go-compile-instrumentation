@@ -43,10 +43,12 @@ func (sp *SetupPhase) keepForDebug(srcPath string) {
 	}
 }
 
-// This function can be used to check if the setup has been completed.
+// isSetup reports whether setup has already been completed for the current
+// build by checking for the presence of the matched-rules file written by
+// store() at the end of a successful Setup run.
 func isSetup() bool {
-	// TODO: Implement Task
-	return false
+	_, err := os.Stat(util.GetMatchedRuleFile())
+	return err == nil
 }
 
 // flagsWithPathValues contains flags that accept a value from "go build" command.
