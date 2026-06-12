@@ -49,6 +49,13 @@ type InstrumentPhase struct {
 	hookCtxMethods []*dst.FuncDecl
 	// The trampoline jumps to be optimized
 	tjumps []*TJump
+	// Content identities (see InstFuncRule.Identity) of func rules already
+	// applied during this package's instrumentation. Used to de-duplicate rules
+	// that resolve to the same identity, which would otherwise emit duplicate
+	// trampoline/HookContext declarations and fail to compile. Scoped to the
+	// whole package because HookContext declarations accumulate into one globals
+	// file across all instrumented source files.
+	appliedFuncIdentities map[string]struct{}
 }
 
 func (ip *InstrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }

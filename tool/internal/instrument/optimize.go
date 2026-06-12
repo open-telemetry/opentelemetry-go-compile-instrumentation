@@ -123,7 +123,7 @@ func removeAfterTrampolineCall(tjump *TJump) error {
 // The HookContextImpl structure is used to pass arguments to the exit trampoline
 func newHookContextImpl(tjump *TJump) dst.Expr {
 	targetFunc := tjump.target
-	structName := trampolineHookContextImplType + util.CRC32(tjump.rule.String())
+	structName := trampolineHookContextImplType + tjump.rule.Identity()
 
 	// Build params slice: []interface{}{&param1, &param2, ...}
 	// Use createHookArgs to handle underscore parameters correctly
