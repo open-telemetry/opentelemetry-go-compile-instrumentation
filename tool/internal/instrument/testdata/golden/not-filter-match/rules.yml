@@ -1,0 +1,16 @@
+# Instrument Connect everywhere EXCEPT files that declare a MockConn test
+# double. The not filter negates has_struct: MockConn, so a file that does NOT
+# declare MockConn matches and Connect is rewritten with trampoline calls. This
+# source has no MockConn, so Connect IS instrumented.
+instrument_connect:
+  target: main
+  where:
+    func: Connect
+    file:
+      not:
+        has_struct: MockConn
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        after: AfterConnect
+        path: testdata/golden/not-filter-match
