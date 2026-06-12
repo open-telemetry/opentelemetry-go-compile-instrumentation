@@ -748,6 +748,44 @@ func TestPreciseMatching_WhereFileOneOf(t *testing.T) {
 	require.NotContains(t, result.FuncRules, noMatchFile)
 }
 
+func TestPreciseMatching_WhereFileNot(t *testing.T) {
+	// not negates the inner predicate: the rule applies to files that do NOT
+	// declare MockConn. The match file defines Connect but no MockConn, so the
+	// negation holds and Connect is selected; the no-match file declares a
+	// MockConn test double, so the negation fails and the rule is gated out.
+	matchFile := writeGoSource(t, "match.go", "package main\n\nfunc Connect() {}\n")
+	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\ntype MockConn struct{}\n\nfunc Connect() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-where-file-not",
+			Target: "example.com/svc",
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{
+					Not: &rule.FilterDef{HasStruct: "MockConn"},
+				},
+			},
+		},
+		Func:   "Connect",
+		Before: "BeforeConnect",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.FuncRules, 1)
+	require.Contains(t, result.FuncRules, matchFile)
+	require.NotContains(t, result.FuncRules, noMatchFile)
+}
+
 func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
 

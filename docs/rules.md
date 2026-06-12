@@ -176,6 +176,26 @@ trace_exec:
         path: github.com/example/sqldriver/otel
 ```
 
+`not` matches when its single nested predicate does **not** match (logical
+negation). Unlike `all-of`/`one-of`, `not` is unary — it wraps exactly one
+predicate, so there is no list and thus no empty-set case.
+
+```yaml
+# Instrument Connect everywhere except the in-memory mock file — the source
+# file that declares a `MockConn` type, which must not be wrapped.
+trace_connect:
+  target: github.com/example/sqldriver
+  where:
+    func: Connect
+    file:
+      not:
+        has_struct: MockConn
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        path: github.com/example/sqldriver/otel
+```
+
 ### `do` semantics
 
 `do` accepts two YAML shapes; both normalize to the same ordered internal list:
