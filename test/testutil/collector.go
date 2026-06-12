@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-// Collector represents an in-memory OTLP collector for testing
+// Collector represents an in-memory OTLP collector for testing.
 type Collector struct {
 	*httptest.Server
 	mu     sync.Mutex
@@ -45,6 +45,17 @@ func countSpans(td ptrace.Traces) int {
 }
 
 // StartCollector starts an in-memory OTLP HTTP server that collects traces
+// drainOK reads and discards the request body, then returns 200 OK. Used for
+// OTLP signals the harness accepts but does not record (metrics, logs), so
+// instrumented apps can export them without receiving a 404.
+func drainOK(w http.ResponseWriter, r *http.Request) {
+	_, _ = io.Copy(io.Discard, r.Body)
+	_ = r.Body.Close()
+	w.WriteHeader(http.StatusOK)
+}
+
+// StartCollector starts an in-memory OTLP HTTP server. Traces are recorded and
+// retrievable via GetTraces. Metrics and logs are accepted (200 OK).
 func StartCollector(t *testing.T) *Collector {
 	c := &Collector{traces: ptrace.NewTraces()}
 
@@ -72,6 +83,9 @@ func StartCollector(t *testing.T) *Collector {
 
 		w.WriteHeader(http.StatusOK)
 	})
+
+	mux.HandleFunc("/v1/metrics", drainOK)
+	mux.HandleFunc("/v1/logs", drainOK)
 
 	c.Server = httptest.NewServer(mux)
 	t.Cleanup(c.Close)

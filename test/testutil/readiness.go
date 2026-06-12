@@ -50,3 +50,15 @@ func pollForSpans(c *Collector, minSpans int, timeout time.Duration) bool {
 	}
 	return false
 }
+
+// FreePort returns a port the OS just assigned for "localhost:0". The
+// listener is closed before returning, so the test app can bind to it.
+// There is a tiny race window between close and rebind; acceptable for CI.
+func FreePort(t *testing.T) int {
+	t.Helper()
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	port := lis.Addr().(*net.TCPAddr).Port
+	require.NoError(t, lis.Close())
+	return port
+}

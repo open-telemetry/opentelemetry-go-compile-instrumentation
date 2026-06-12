@@ -4,7 +4,7 @@
 package setup
 
 import (
-	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,7 +22,9 @@ func TestCleanup(t *testing.T) {
 			name: "removes all artifacts when they exist",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
-				mustWriteFile(t, filepath.Join(dir, OtelcRuntimeFile), "dummy")
+				// go.mod is required here, otherwise Cleanup will skip the package and otelc.runtime.go won't be removed.
+				mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com\n\ngo 1.24.0\n")
+				mustWriteFile(t, filepath.Join(dir, OtelcRuntimeFile), "package main \n\n// dummy runtime file")
 				// The instrumentation package is extracted inside .otelc-build/pkg/,
 				// not at the project root. It is removed as part of .otelc-build/ cleanup.
 				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, unzippedPkgDir, "a.go"), "dummy")
@@ -45,7 +47,9 @@ func TestCleanup(t *testing.T) {
 			name: "partial cleanup when only runtime file exists",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
-				mustWriteFile(t, filepath.Join(dir, OtelcRuntimeFile), "dummy")
+				// go.mod is required here, otherwise Cleanup will skip the package and otelc.runtime.go won't be removed.
+				mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com\n\ngo 1.24.0\n")
+				mustWriteFile(t, filepath.Join(dir, OtelcRuntimeFile), "package main\n\n// dummy runtime file")
 			},
 			expectRemoved: []string{
 				OtelcRuntimeFile,
@@ -72,7 +76,7 @@ func TestCleanup(t *testing.T) {
 
 			tt.setup(t, tmpDir)
 
-			err := Cleanup(context.Background(), true)
+			err := Cleanup(t.Context(), nil, true)
 			if err != nil {
 				t.Fatalf("Cleanup() returned unexpected error: %v", err)
 			}
@@ -94,17 +98,27 @@ func TestCleanupRestoresBackup(t *testing.T) {
 	const originalContent = "module original.com\n\ngo 1.24.0\n"
 	const modifiedContent = "module modified.com\n\ngo 1.24.0\n"
 
-	// Simulate what GoBuild does: write a modified go.mod and a backup of the original.
-	mustWriteFile(t, filepath.Join(tmpDir, "go.mod"), modifiedContent)
-	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "backup", "go.mod"), originalContent)
-
-	err := Cleanup(context.Background(), true)
+	goModPath := filepath.Join(tmpDir, "go.mod")
+	backupJSONContent, err := json.Marshal([]string{goModPath})
 	if err != nil {
+		t.Fatalf("failed to marshal backup state to JSON: %v", err)
+	}
+
+	// Simulate what GoBuild does: write a modified go.mod and a backup of the original.
+	mustWriteFile(t, goModPath, modifiedContent)
+	mustWriteFile(
+		t,
+		filepath.Join(tmpDir, util.BuildTempDir, backupDir, backupFilePath(goModPath)),
+		originalContent,
+	)
+	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, backupStateFile), string(backupJSONContent))
+
+	if err = Cleanup(t.Context(), nil, true); err != nil {
 		t.Fatalf("Cleanup() returned unexpected error: %v", err)
 	}
 
 	// go.mod should be restored to the original content.
-	got, readErr := os.ReadFile(filepath.Join(tmpDir, "go.mod"))
+	got, readErr := os.ReadFile(goModPath)
 	if readErr != nil {
 		t.Fatalf("failed to read go.mod after cleanup: %v", readErr)
 	}
@@ -118,6 +132,67 @@ func TestCleanupRestoresBackup(t *testing.T) {
 	}
 }
 
+func TestCleanupRestoresMultiModBackup(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	type fileCase struct {
+		path     string
+		original string
+		modified string
+	}
+
+	files := []fileCase{
+		{
+			path:     filepath.Join(tmpDir, "go.work.sum"),
+			original: "// original go.work.sum content",
+			modified: "// modified go.work.sum content",
+		},
+		{
+			path:     filepath.Join(tmpDir, "pkgA", "go.mod"),
+			original: "module original.pkga.com\n\ngo 1.24.0\n",
+			modified: "module modified.pkga.com\n\ngo 1.24.0\n",
+		},
+		{
+			path:     filepath.Join(tmpDir, "pkgB", "go.mod"),
+			original: "module original.pkgb.com\n\ngo 1.24.0\n",
+			modified: "module modified.pkgb.com\n\ngo 1.24.0\n",
+		},
+	}
+
+	mustWriteFile(t, filepath.Join(tmpDir, "go.work"), "go 1.24\n\nuse ./pkgA\nuse ./pkgB")
+
+	backupPaths := make([]string, 0, len(files))
+	for _, f := range files {
+		backupPath := filepath.Join(tmpDir, util.BuildTempDir, backupDir, backupFilePath(f.path))
+		backupPaths = append(backupPaths, f.path)
+
+		mustWriteFile(t, f.path, f.modified)
+		mustWriteFile(t, backupPath, f.original)
+	}
+
+	backupJSONContent, err := json.Marshal(backupPaths)
+	if err != nil {
+		t.Fatalf("marshal backup state: %v", err)
+	}
+	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, backupStateFile), string(backupJSONContent))
+
+	if err = Cleanup(t.Context(), nil, false); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	for _, f := range files {
+		got, readErr := os.ReadFile(f.path)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", f.path, readErr)
+		}
+
+		if string(got) != f.original {
+			t.Errorf("%s content = %q, want %q", f.path, string(got), f.original)
+		}
+	}
+}
+
 func TestCleanupKeepsBuildDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
@@ -125,19 +200,30 @@ func TestCleanupKeepsBuildDir(t *testing.T) {
 	const originalContent = "module original.com\n\ngo 1.24.0\n"
 	const modifiedContent = "module modified.com\n\ngo 1.24.0\n"
 
-	// Simulate a completed build: modified go.mod, backup, runtime file, and build artifacts.
-	mustWriteFile(t, filepath.Join(tmpDir, "go.mod"), modifiedContent)
-	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "backup", "go.mod"), originalContent)
-	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "matched.json"), "{}")
-	mustWriteFile(t, filepath.Join(tmpDir, OtelcRuntimeFile), "dummy")
+	goModPath := filepath.Join(tmpDir, "go.mod")
+	backupJSONContent, err := json.Marshal([]string{goModPath})
+	if err != nil {
+		t.Fatalf("failed to marshal backup state to JSON: %v", err)
+	}
 
-	err := Cleanup(context.Background(), false)
+	// Simulate a completed build: modified go.mod, backup, runtime file, and build artifacts.
+	mustWriteFile(t, goModPath, modifiedContent)
+	mustWriteFile(
+		t,
+		filepath.Join(tmpDir, util.BuildTempDir, backupDir, backupFilePath(goModPath)),
+		originalContent,
+	)
+	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, backupStateFile), string(backupJSONContent))
+	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "matched.json"), "{}")
+	mustWriteFile(t, filepath.Join(tmpDir, OtelcRuntimeFile), "package main \n\n// dummy runtime file")
+
+	err = Cleanup(t.Context(), nil, false)
 	if err != nil {
 		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
 	}
 
 	// go.mod should be restored to the original content.
-	got, readErr := os.ReadFile(filepath.Join(tmpDir, "go.mod"))
+	got, readErr := os.ReadFile(goModPath)
 	if readErr != nil {
 		t.Fatalf("failed to read go.mod after cleanup: %v", readErr)
 	}
@@ -161,7 +247,7 @@ func TestCleanupKeepsBuildDirNoArtifacts(t *testing.T) {
 	t.Chdir(tmpDir)
 
 	// No artifacts exist — Cleanup(cleanAll=false) should not panic or fail.
-	err := Cleanup(context.Background(), false)
+	err := Cleanup(t.Context(), nil, false)
 	if err != nil {
 		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
 	}

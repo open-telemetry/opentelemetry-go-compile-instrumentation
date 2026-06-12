@@ -27,6 +27,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dave/dst"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
@@ -108,6 +111,12 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	var rawRules map[string]map[string]any
 	yaml.Unmarshal(data, &rawRules)
 
+	// Parse the source AST once and reuse it for every rule's where.file gating
+	// below. The gating is per-rule, but the tree is shared, so N rules do not
+	// trigger N reparses of the same file.
+	sourceTree, parseErr := ast.ParseFileFast(sourceFile)
+	require.NoError(t, parseErr)
+
 	ruleSet := &rule.InstRuleSet{
 		PackageName:    mainPackage,
 		ModulePath:     mainPackage,
@@ -128,36 +137,126 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	slices.Sort(ruleNames)
 
 	for _, name := range ruleNames {
-		props := rawRules[name]
-		props["name"] = name
-		ruleData, _ := yaml.Marshal(props)
+		propsList, normErr := rule.Normalize(rawRules[name])
+		require.NoError(t, normErr)
+		for _, props := range propsList {
+			props["name"] = name
+			ruleData, _ := yaml.Marshal(props)
 
-		switch {
-		case props["struct"] != nil:
-			r, _ := rule.NewInstStructRule(ruleData, name)
-			ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
-		case props["file"] != nil:
-			r, _ := rule.NewInstFileRule(ruleData, name)
-			ruleSet.FileRules = append(ruleSet.FileRules, r)
-		case props["directive"] != nil:
-			r, _ := rule.NewInstDirectiveRule(ruleData, name)
-			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
-		case props["raw"] != nil:
-			r, _ := rule.NewInstRawRule(ruleData, name)
-			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
-		case props["func"] != nil:
-			r, _ := rule.NewInstFuncRule(ruleData, name)
-			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
-		case props["function_call"] != nil:
-			r, _ := rule.NewInstCallRule(ruleData, name)
-			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
-		case props["identifier"] != nil:
-			r, _ := rule.NewInstDeclRule(ruleData, name)
-			ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+			// The golden harness has no setup phase, so the where.file filter
+			// that setup.preciseMatching would evaluate is applied inline here.
+			// A rule whose file predicate does not match the source is skipped,
+			// exactly as it would be gated out during matching.
+			if !whereFileMatches(t, ruleData, sourceTree) {
+				continue
+			}
+
+			switch {
+			case props["struct"] != nil:
+				r, _ := rule.NewInstStructRule(ruleData, name)
+				ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
+			case props["file"] != nil:
+				r, _ := rule.NewInstFileRule(ruleData, name)
+				ruleSet.FileRules = append(ruleSet.FileRules, r)
+			case props["directive"] != nil:
+				r, _ := rule.NewInstDirectiveRule(ruleData, name)
+				ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
+			case props["raw"] != nil:
+				r, _ := rule.NewInstRawRule(ruleData, name)
+				ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
+			case props["func"] != nil:
+				r, _ := rule.NewInstFuncRule(ruleData, name)
+				ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
+			case props["function_call"] != nil:
+				r, _ := rule.NewInstCallRule(ruleData, name)
+				ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
+			case props["identifier"] != nil:
+				r, _ := rule.NewInstDeclRule(ruleData, name)
+				ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+			}
 		}
 	}
 
 	return ruleSet
+}
+
+// whereFileMatches evaluates the rule's where.file predicate against the
+// already-parsed source tree, mirroring the gating that setup.preciseMatching
+// performs. It returns true when there is no file predicate. The golden harness
+// builds the matched rule set by hand (no setup phase), so this keeps fixtures
+// honest: a rule whose file filter does not match is gated out and produces no
+// instrumentation. The caller parses the tree once and shares it across rules.
+func whereFileMatches(t *testing.T, ruleData []byte, tree *dst.File) bool {
+	t.Helper()
+
+	var probe struct {
+		Where *rule.WhereDef `yaml:"where"`
+	}
+	require.NoError(t, yaml.Unmarshal(ruleData, &probe))
+	if probe.Where == nil || probe.Where.File == nil {
+		return true
+	}
+
+	return fileFilterMatches(t, probe.Where.File, tree)
+}
+
+// fileFilterMatches reports whether a where.file predicate matches the parsed
+// source. It covers the predicates exercised by golden fixtures: all-of and
+// one-of composition plus has_func / has_struct leaves. Filter compilation and
+// match semantics are unit-tested in tool/internal/setup; this is a lightweight
+// stand-in for the golden harness only.
+//
+// Any predicate this evaluator does not model is rejected with t.Fatalf rather
+// than silently treated as a match: setup.buildFile errors on such predicates,
+// so silently matching here would let a fixture certify instrumentation output
+// that production could never produce.
+func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
+	t.Helper()
+	// Mirror setup.buildFile's exclusivity rule: a combinator owns the node, so
+	// combining it with a sibling leaf or another combinator is a build-time
+	// error in production. Reject it loudly here too, so an invalid fixture
+	// cannot pass the golden harness when production would refuse the rule.
+	combinators := 0
+	for _, present := range []bool{def.AllOf != nil, def.OneOf != nil, def.Not != nil} {
+		if present {
+			combinators++
+		}
+	}
+	leaf := def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" || def.HasDirective != ""
+	if combinators > 1 || (combinators == 1 && leaf) {
+		t.Fatalf("golden fixture combines a where.file combinator with sibling "+
+			"predicates (%+v); setup.buildFile rejects this at build time", def)
+	}
+	// Mirror setup.buildFile's presence semantics: a non-nil combinator slice
+	// (including an explicit empty one-of: [] / all-of: []) is present and owns
+	// the node. An empty one-of matches nothing (vacuous false); an empty all-of
+	// matches vacuously true — the loop is skipped in each case.
+	if def.OneOf != nil {
+		for i := range def.OneOf {
+			if fileFilterMatches(t, &def.OneOf[i], tree) {
+				return true
+			}
+		}
+		return false
+	}
+	if def.AllOf != nil {
+		for i := range def.AllOf {
+			if !fileFilterMatches(t, &def.AllOf[i], tree) {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case def.HasFunc != "":
+		return ast.FindFuncDecl(tree, def.HasFunc, def.HasRecv) != nil
+	case def.HasStruct != "":
+		return ast.FindStructDecl(tree, def.HasStruct) != nil
+	default:
+		t.Fatalf("golden fixture uses a where.file predicate the harness cannot "+
+			"evaluate (%+v); extend fileFilterMatches to mirror setup.buildFile", def)
+		return false
+	}
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
