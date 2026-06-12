@@ -9,6 +9,8 @@ import (
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
 // fixture source used across all shared_test cases
@@ -22,7 +24,7 @@ type MyStruct struct{ x int }
 
 func TopLevel(a, b int) int { return a + b }
 
-func (s *MyStruct) Method() {}
+func (s *MyStruct) Method() error { return nil }
 `
 
 func parseSharedFixture(t *testing.T) *dst.File {
@@ -59,6 +61,50 @@ func TestFindFuncDeclWithoutRecv(t *testing.T) {
 
 	t.Run("not found returns nil", func(t *testing.T) {
 		fn := FindFuncDeclWithoutRecv(file, "NonExistent")
+		assert.Nil(t, fn)
+	})
+}
+
+func TestFindFuncDeclForRule(t *testing.T) {
+	file := parseSharedFixture(t)
+
+	t.Run("matches name receiver and signature filters", func(t *testing.T) {
+		sig := rule.FuncSignature{Returns: []string{"error"}}
+		r := &rule.InstFuncRule{
+			Func:      "Method",
+			Recv:      "*MyStruct",
+			Signature: &sig,
+		}
+
+		fn, ok, err := FindFuncDeclForRule(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Method", fn.Name.Name)
+	})
+
+	t.Run("returns nil when signature filters do not match", func(t *testing.T) {
+		sig := rule.FuncSignature{Args: []string{"string"}}
+		r := &rule.InstFuncRule{
+			Func:      "TopLevel",
+			Signature: &sig,
+		}
+
+		fn, ok, err := FindFuncDeclForRule(file, r)
+		require.NoError(t, err)
+		assert.False(t, ok)
+		assert.Nil(t, fn)
+	})
+
+	t.Run("returns error for invalid filter type", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func:  "TopLevel",
+			Param: "[]invalid",
+		}
+
+		fn, ok, err := FindFuncDeclForRule(file, r)
+		require.Error(t, err)
+		assert.False(t, ok)
 		assert.Nil(t, fn)
 	})
 }

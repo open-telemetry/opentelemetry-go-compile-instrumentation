@@ -113,6 +113,29 @@ func FindFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 	return decls[0]
 }
 
+// FindFuncDeclForRule finds the function declaration targeted by r, including
+// name, receiver, and optional signature-filter matching.
+//
+// The returned bool reports whether a matching declaration was found. It is
+// false both when no declaration matches r's function name and receiver, and
+// when a declaration is found but does not satisfy r's signature filters. When
+// the bool is false, the returned function declaration is nil.
+func FindFuncDeclForRule(root *dst.File, r *rule.InstFuncRule) (*dst.FuncDecl, bool, error) {
+	funcDecl := FindFuncDecl(root, r.Func, r.Recv)
+	if funcDecl == nil {
+		return nil, false, nil
+	}
+
+	ok, err := FuncDeclMatchesFilters(funcDecl, r)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return funcDecl, true, nil
+}
+
 func ListFuncDecls(root *dst.File) []*dst.FuncDecl {
 	funcDecls := make([]*dst.FuncDecl, 0)
 	for _, decl := range root.Decls {
