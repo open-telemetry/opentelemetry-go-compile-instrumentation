@@ -393,6 +393,54 @@ func TestOneOf_Match_ShortCircuits(t *testing.T) {
 	}
 }
 
+func TestBuild_Not(t *testing.T) {
+	where := &rule.WhereDef{File: &rule.FilterDef{Not: &rule.FilterDef{HasStruct: "Mock"}}}
+	f, err := setup.Build(where)
+	if err != nil {
+		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
+	}
+	not, ok := f.(*setup.Not)
+	if !ok {
+		t.Fatalf("Build() returned %T, want *setup.Not", f)
+	}
+	if _, isStruct := not.Inner.(*setup.StructFilter); !isStruct {
+		t.Errorf("Not.Inner = %T, want *setup.StructFilter", not.Inner)
+	}
+}
+
+func TestBuild_Not_Nested(t *testing.T) {
+	// not wrapping a not (double negation) compiles to nested Not combinators.
+	where := &rule.WhereDef{File: &rule.FilterDef{Not: &rule.FilterDef{Not: &rule.FilterDef{HasFunc: "Foo"}}}}
+	f, err := setup.Build(where)
+	if err != nil {
+		t.Fatalf("Build(nested Not) error = %v, want nil", err)
+	}
+	outer, ok := f.(*setup.Not)
+	if !ok {
+		t.Fatalf("Build(nested) = %T, want *setup.Not", f)
+	}
+	if _, isNested := outer.Inner.(*setup.Not); !isNested {
+		t.Errorf("Not.Inner = %T, want nested *setup.Not", outer.Inner)
+	}
+}
+
+func TestBuild_Not_InvalidChild(t *testing.T) {
+	// An empty inner FilterDef has no active predicate and must fail the build.
+	where := &rule.WhereDef{File: &rule.FilterDef{Not: &rule.FilterDef{}}}
+	if _, err := setup.Build(where); err == nil {
+		t.Fatal("Build(Not with empty inner) error = nil, want error")
+	}
+}
+
+func TestNot_Match(t *testing.T) {
+	if (&setup.Not{Inner: stubFilter{result: true}}).Match(nil) {
+		t.Error("Not.Match() over a matching inner = true, want false")
+	}
+	if !(&setup.Not{Inner: stubFilter{result: false}}).Match(nil) {
+		t.Error("Not.Match() over a non-matching inner = false, want true")
+	}
+}
+
 type filterExpected struct {
 	Type   string `yaml:"type"`
 	Func   string `yaml:"func"`
@@ -507,6 +555,15 @@ func assertBuiltFilter(t *testing.T, name string, got setup.Filter, want filterE
 		for i := range oneOf {
 			assertBuiltFilter(t, name, oneOf[i], want.Children[i])
 		}
+	case "Not":
+		not, ok := got.(*setup.Not)
+		if !ok {
+			t.Fatalf("Build(%q) = %T, want *setup.Not", name, got)
+		}
+		if len(want.Children) != 1 {
+			t.Fatalf("Build(%q) Not expects exactly 1 child, got %d", name, len(want.Children))
+		}
+		assertBuiltFilter(t, name, not.Inner, want.Children[0])
 	default:
 		t.Fatalf("unexpected expected filter type %q", want.Type)
 	}

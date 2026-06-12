@@ -116,6 +116,13 @@ func (o OneOf) Match(ctx *MatchContext) bool {
 	return false
 }
 
+var _ Filter = (*Not)(nil)
+
+// Not matches when its inner filter does not match (logical negation).
+type Not struct{ Inner Filter }
+
+func (n *Not) Match(ctx *MatchContext) bool { return !n.Inner.Match(ctx) }
+
 // --- Build ---
 
 // Build constructs a runtime Filter from a structured where clause.
@@ -209,7 +216,13 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		return OneOf(children), nil
 	}
 	if def.Not != nil {
-		return nil, ex.Newf("where.file not predicate composition is not yet supported")
+		// not owns the composition for this node; reject sibling predicates.
+		// Sibling combinators are detected by non-nil presence (not len > 0), so
+		// an explicit empty all-of: [] / one-of: [] is also rejected here.
+		if hasLeafPredicate(def) || def.AllOf != nil || def.OneOf != nil {
+			return nil, ex.Newf("where.file.not cannot be combined with other predicates")
+		}
+		return buildNot(def.Not)
 	}
 
 	if def.HasRecv != "" && def.HasFunc == "" {
@@ -269,4 +282,18 @@ func buildChildren(defs []rule.FilterDef, label string) ([]Filter, error) {
 		filters = append(filters, f)
 	}
 	return filters, nil
+}
+
+// buildNot compiles a where.file.not predicate into a Not combinator that
+// negates its single inner predicate. The inner predicate is compiled with the
+// same buildFile rules.
+func buildNot(def *rule.FilterDef) (Filter, error) {
+	inner, err := buildFile(def)
+	if err != nil {
+		return nil, ex.Wrapf(err, "where.file.not")
+	}
+	if inner == nil {
+		return nil, ex.Newf("where.file.not produced no inner filter")
+	}
+	return &Not{Inner: inner}, nil
 }
