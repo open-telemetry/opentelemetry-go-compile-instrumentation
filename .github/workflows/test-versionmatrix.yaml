@@ -1,0 +1,44 @@
+name: VersionMatrix Tests
+on:
+  schedule:
+    - cron: "45 6 * * 1"
+  workflow_dispatch:
+# Declare default permissions as read only.
+permissions: read-all
+jobs:
+  test-versionmatrix:
+    name: VersionMatrix Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # ratchet:arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run VersionMatrix tests
+        run: make test-versionmatrix
+
+  notify-on-failure:
+    name: Open or update failure issue
+    needs: [test-versionmatrix]
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - name: Open or update failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: .github/scripts/versionmatrix-issue.sh
