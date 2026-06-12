@@ -1,0 +1,72 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package semconv
+
+import (
+	"net"
+	"strconv"
+
+	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+)
+
+type (
+	KafkaOperation   string
+	KafkaDestination string
+)
+
+const (
+	KafkaDestinationTopic KafkaDestination = "topic"
+	KafkaDestinationQueue KafkaDestination = "queue"
+)
+
+const (
+	KafkaOperationReceive KafkaOperation = "receive"
+	KafkaOperationProcess KafkaOperation = "process"
+)
+
+type KafkaRequest struct {
+	EndPoint           string
+	Destination        KafkaDestination
+	Operation          KafkaOperation
+	Partition          string
+	Offset             int
+	ConsumerGroupID    string
+	MessageKey         string
+	MessagePayloadSize int
+}
+
+func KafkaRequestTraceAttrs(req KafkaRequest) []attribute.KeyValue {
+	host, portStr, err := net.SplitHostPort(req.EndPoint)
+	if err != nil {
+		host = req.EndPoint
+	}
+	attrs := []attribute.KeyValue{
+		semconv.MessagingSystemKafka,
+		semconv.ServerAddress(host),
+		semconv.MessagingOperationName(string(req.Operation)),
+		semconv.MessagingDestinationName(string(req.Destination)),
+	}
+	if req.Partition != "" {
+		attrs = append(attrs, semconv.MessagingDestinationPartitionID(req.Partition))
+	}
+	if req.Offset != 0 {
+		attrs = append(attrs, semconv.MessagingKafkaOffset(req.Offset))
+	}
+	if req.ConsumerGroupID != "" {
+		attrs = append(attrs, semconv.MessagingConsumerGroupName(req.ConsumerGroupID))
+	}
+	if req.MessageKey != "" {
+		attrs = append(attrs, semconv.MessagingKafkaMessageKey(req.MessageKey))
+	}
+	if err == nil {
+		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
+			attrs = append(attrs, semconv.ServerPort(port))
+		}
+	}
+	if req.MessagePayloadSize > 0 {
+		attrs = append(attrs, semconv.MessagingMessageBodySize(req.MessagePayloadSize))
+	}
+	return attrs
+}
