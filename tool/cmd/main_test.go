@@ -24,11 +24,8 @@ func TestInitLogger(t *testing.T) {
 				&cli.StringFlag{Name: "work-dir", Value: util.GetOtelcWorkDir()},
 				&cli.BoolFlag{Name: "debug", Sources: cli.EnvVars(util.EnvOtelcDebug)},
 			},
+			Before: initLogger,
 			Action: func(ctx context.Context, cmd *cli.Command) error {
-				ctx, err := initLogger(ctx, cmd)
-				if err != nil {
-					return err
-				}
 				ctxCh <- ctx
 				return nil
 			},
