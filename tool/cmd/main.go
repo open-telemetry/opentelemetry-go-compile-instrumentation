@@ -33,7 +33,7 @@ func main() {
 				Aliases:   []string{"w"},
 				Usage:     "The path to a directory where working files will be written",
 				TakesFile: true,
-				Value:     util.GetBuildTempDir(),
+				Value:     util.GetOtelcWorkDir(),
 			},
 			&cli.BoolFlag{
 				Name:    "debug",
@@ -92,7 +92,9 @@ func main() {
 			}
 			return initStats(ctx, cmd)
 		},
-		After: stopProfiling,
+		After: func(ctx context.Context, cmd *cli.Command) error {
+			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
+		},
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -105,8 +107,16 @@ func main() {
 }
 
 func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-	buildTempDir := cmd.String("work-dir")
-	err := os.MkdirAll(buildTempDir, 0o755)
+	workDir, err := filepath.Abs(cmd.String("work-dir"))
+	if err != nil {
+		return ctx, ex.Wrapf(err, "failed to resolve work directory %q", cmd.String("work-dir"))
+	}
+	if err := os.Setenv(util.EnvOtelcWorkDir, workDir); err != nil {
+		return ctx, ex.Wrapf(err, "failed to set %s", util.EnvOtelcWorkDir)
+	}
+
+	buildTempDir := util.GetBuildTempDir()
+	err = os.MkdirAll(buildTempDir, 0o755)
 	if err != nil {
 		return ctx, ex.Wrapf(err, "failed to create work directory %q", buildTempDir)
 	}
@@ -138,8 +148,17 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	})
 	logger := slog.New(handler)
 	ctx = util.ContextWithLogger(ctx, logger)
+	ctx = util.ContextWithLogWriter(ctx, logFile)
 
 	return ctx, nil
+}
+
+func closeLogger(ctx context.Context) error {
+	writer := util.LogWriterFromContext(ctx)
+	if writer == nil {
+		return nil
+	}
+	return writer.Close()
 }
 
 func addLoggerPhaseAttribute(ctx context.Context, cmd *cli.Command) (context.Context, error) {
