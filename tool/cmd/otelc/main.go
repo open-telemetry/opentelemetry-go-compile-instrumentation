@@ -75,6 +75,7 @@ func main() {
 			},
 		},
 		Commands: []*cli.Command{
+			&commandPin,
 			&commandSetup,
 			&commandGo,
 			&commandCleanup,

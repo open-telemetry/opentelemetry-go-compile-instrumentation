@@ -32,14 +32,27 @@ func (sp *SetupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args
 func (sp *SetupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *SetupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
-// keepForDebug copies the file to the build temp directory for debugging
+// keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
-func (sp *SetupPhase) keepForDebug(srcPath string) {
-	base := filepath.Base(srcPath)
-	dstPath := filepath.Join(util.GetBuildTemp("debug"), "main", base)
-	err := util.CopyFile(srcPath, dstPath)
-	if err != nil {
-		sp.Warn("failed to record added file", "path", srcPath, "error", err)
+func keepForDebug(ctx context.Context, srcPath string) {
+	logger := util.LoggerFromContext(ctx)
+
+	escape := func(s string) string {
+		s = strings.ReplaceAll(s, "/", "_")
+		s = strings.ReplaceAll(s, ".", "_")
+		return s
+	}
+
+	var name string
+	if filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()) {
+		name = "main"
+	} else {
+		name = escape(filepath.Base(filepath.Dir(srcPath)))
+	}
+
+	dstPath := filepath.Join(util.GetBuildTemp("debug"), name, filepath.Base(srcPath))
+	if err := util.CopyFile(srcPath, dstPath); err != nil {
+		logger.WarnContext(ctx, "failed to record added file", "path", srcPath, "error", err)
 	}
 }
 
@@ -74,8 +87,6 @@ var flagsWithPathValues = map[string]bool{
 	"-tags":          true,
 	"-toolexec":      true,
 }
-
-const commandLineArgumentsPackage = "command-line-arguments"
 
 // GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
 // Returns a list of loaded packages. If no package patterns are found in args,
@@ -125,7 +136,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		// file-based builds use synthetic "command-line-arguments" packages
-		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage) {
+		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != pkgload.CommandLineArgumentsPackage) {
 			logger.DebugContext(ctx, "skipping package", "name", pkg.Name, "errors", pkg.Errors, "args", args)
 			continue
 		}
@@ -194,13 +205,6 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 	return pkgs, files, nil
 }
 
-func getPackageDir(pkg *packages.Package) string {
-	if len(pkg.GoFiles) > 0 {
-		return filepath.Dir(pkg.GoFiles[0])
-	}
-	return ""
-}
-
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
@@ -229,68 +233,57 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// Find all dependencies of the project being build
-	deps, err := sp.findDeps(ctx, args)
-	if err != nil {
-		return err
+	// Backup go.mod, go.sum and go.work.sum files before modifying them
+	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, pkgs)
+	if findModErr != nil {
+		return ex.Wrapf(findModErr, "finding module directories for build packages")
 	}
 
-	// Extract the embedded pkg module into local directory
-	err = sp.extract()
-	if err != nil {
-		return ex.Wrapf(err, "extracting embedded instrumentation pkg")
+	// Auto-pin generates/updates otel.instrumentation.go file
+	var deps []*Dependency
+	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
+		pinResult, pinCleanup, pinErr := AutoPin(ctx, moduleDirs, args)
+		if pinErr != nil {
+			return ex.Wrapf(pinErr, "auto-pinning dependencies")
+		}
+		defer pinCleanup()
+		deps = pinResult.AllDeps
+	}
+
+	if deps == nil {
+		// Find all dependencies of the project being build
+		deps, err = findDeps(ctx, args)
+		if err != nil {
+			return ex.Wrapf(err, "finding dependencies")
+		}
+
+		// Extract the embedded pkg module into local directory
+		err = extract()
+		if err != nil {
+			return ex.Wrapf(err, "extracting embedded instrumentation pkg")
+		}
 	}
 
 	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(ctx, deps)
+	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
 	if err != nil {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
 	// Generate otelc.runtime.go for all packages
-	moduleDirs := make(map[string]bool)
 	for _, pkg := range pkgs {
-		// file-based builds use synthetic "command-line-arguments" packages
-		if pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage {
-			sp.Warn("skipping package without module", "package", pkg.PkgPath)
-			continue
-		}
-
-		pkgDir := getPackageDir(pkg)
+		pkgDir := pkgload.GetPackageDir(pkg)
 		if pkgDir == "" {
 			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
 			continue
 		}
 
-		var moduleDir string
-		if pkg.Module != nil {
-			moduleDir = pkg.Module.Dir
-		} else {
-			if moduleDir, err = pkgload.ResolveModuleDir(ctx, pkgDir); err != nil {
-				return ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
-			}
-		}
-
-		// Introduce additional hook code by generating otelc.runtime.go
-		if err = sp.addDeps(matched, pkgDir); err != nil {
+		if err = sp.addDeps(ctx, matched, pkgDir); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
-		moduleDirs[moduleDir] = true
 	}
 
-	// Backup go.mod, go.sum and go.work.sum files before modifying them
-	if err = backupFiles(ctx, moduleDirs); err != nil {
-		return ex.Wrapf(err, "backing up files")
-	}
-
-	// Sync new dependencies to go.mod or vendor/modules.txt
-	for moduleDir := range moduleDirs {
-		if err = sp.syncDeps(ctx, matched, moduleDir); err != nil {
-			return ex.Wrapf(err, "syncing deps in module dir %s", moduleDir)
-		}
-	}
-
-	// Write the matched hook to matched.txt for further instrument phase
+	// Write the matched hook to matched.json for further instrument phase
 	return sp.store(matched)
 }
 
