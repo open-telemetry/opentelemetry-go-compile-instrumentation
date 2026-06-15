@@ -4,7 +4,7 @@
 services:
   # Jaeger - Distributed tracing backend (v2 with native OTLP support + SPM)
   jaeger:
-    image: jaegertracing/jaeger:2.13.0@sha256:d5e5fe1c2b2f663b07c28c6f7cc5a6e61aef076752dab8df8eeb6b0f5494c94b
+    image: jaegertracing/jaeger:2.19.0@sha256:ede4864215be4cd85bd8c3129a2fea6c5713c5653c7282c429dba123014bc68b
     container_name: jaeger
     command:
       - --config=/etc/jaeger/config.yaml
@@ -30,7 +30,7 @@ services:
 
   # Prometheus - Metrics backend with native OTLP support (v3)
   prometheus:
-    image: prom/prometheus:v3.8.0@sha256:d936808bdea528155c0154a922cd42fd75716b8bb7ba302641350f9f3eaeba09
+    image: prom/prometheus:v3.12.0@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
     container_name: prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -55,7 +55,7 @@ services:
 
   # OpenTelemetry Collector - Receives, processes, and exports telemetry
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.141.0@sha256:b14234c4bc1b7364629af272e564913bb57bdc9736d45b8b6db5ab3417dc75f9
+    image: otel/opentelemetry-collector-contrib:0.154.0@sha256:b3079f45e19bdb7326bf49cdddce6cf60dfd865138db39f2733ea48ab17bc4cb
     container_name: otel-collector
     command:
       - "--config=/etc/otelcol-contrib/config.yaml"
@@ -79,7 +79,7 @@ services:
 
   # Grafana - Visualization and dashboards
   grafana:
-    image: grafana/grafana:13.0.1@sha256:0f86bada30d65ef9d0183b90c1e2682ac92d53d95da8bed322b984ea78a4a73a
+    image: grafana/grafana:13.0.2@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2
     container_name: grafana
     ports:
       - "3000:3000"
@@ -184,7 +184,7 @@ services:
 
   # MySQL - Database backend for DB demo
   mysql:
-    image: mysql:9.6@sha256:c5df04bee1a42b74a5841c6409e669cf62126cd0416f00c1cea8ab933b9361b9
+    image: mysql:9.7@sha256:c11782aa2a96624c1efc121768641d96954faa136d6aa82751b032d8c426ffbc
     container_name: mysql
     environment:
       - MYSQL_ROOT_PASSWORD=root
@@ -230,7 +230,7 @@ services:
 
   # Redis - In-memory data store for Redis demo
   redis:
-    image: redis:8-alpine@sha256:2afba59292f25f5d1af200496db41bea2c6c816b059f57ae74703a50a03a27d0
+    image: redis:8-alpine@sha256:09160599abd229764c0fb44cb6be640294e1d360a54b19985ab4843dcf2d90f1
     container_name: redis
     ports:
       - "6379:6379"
