@@ -163,6 +163,52 @@ func WriteFile(filePath, content string) error {
 	return nil
 }
 
+// WriteFileAtomic writes data to a file atomically by first writing to a temporary file and then renaming it.
+// If the target file already exists, it preserves its permissions. Otherwise, it uses the provided permissions or defaults to 0644.
+func WriteFileAtomic(filePath string, data []byte, perm ...os.FileMode) error {
+	const defaultPerm = 0o644
+	mode := os.FileMode(defaultPerm)
+	if fi, statErr := os.Stat(filePath); statErr == nil {
+		mode = fi.Mode().Perm()
+	}
+	if len(perm) > 0 {
+		mode = perm[0]
+	}
+
+	tmp, createErr := os.CreateTemp(filepath.Dir(filePath), filepath.Base(filePath)+".tmp-*")
+	if createErr != nil {
+		return ex.Wrapf(createErr, "failed to create temporary file for %s", filePath)
+	}
+
+	tmpPath := tmp.Name()
+	defer func() {
+		// If Rename succeeds this will fail with ENOENT, which is fine.
+		_ = os.Remove(tmpPath)
+	}()
+
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		_ = tmp.Close()
+		return ex.Wrapf(writeErr, "failed to write temporary file %s", tmpPath)
+	}
+
+	if closeErr := tmp.Close(); closeErr != nil {
+		return ex.Wrapf(closeErr, "failed to close temporary file %s", tmpPath)
+	}
+
+	if chmodErr := os.Chmod(tmpPath, mode); chmodErr != nil {
+		return ex.Wrapf(chmodErr, "failed to set permissions on temporary file %s", tmpPath)
+	}
+
+	// Atomic replacement on Unix-like systems when source and destination are on
+	// the same filesystem. On non-Unix platforms, os.Rename may replace the file
+	// but the operation is not guaranteed to be atomic.
+	if renameErr := os.Rename(tmpPath, filePath); renameErr != nil {
+		return ex.Wrapf(renameErr, "failed to atomically replace %s", filePath)
+	}
+
+	return nil
+}
+
 func PathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

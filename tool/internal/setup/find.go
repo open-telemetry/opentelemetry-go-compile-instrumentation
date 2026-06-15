@@ -74,8 +74,10 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 
 // listBuildPlan lists the build plan by running `go build -a -x -n`
 // and then filtering the commands (cd, cgo, compile) from the build plan log.
-func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]string, error) {
+func listBuildPlan(ctx context.Context, cmdArgs []string) ([]string, error) {
 	const buildPlanLogName = "build-plan.log"
+
+	logger := util.LoggerFromContext(ctx)
 
 	// Create a build plan log file in the temporary directory
 	buildPlanLog, err := os.Create(util.GetBuildTemp(buildPlanLogName))
@@ -88,7 +90,7 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]st
 	args := make([]string, 0, len(prefix)+len(cmdArgs))
 	args = append(args, prefix...)
 	args = append(args, cmdArgs...) // args from original build/install or setup command
-	sp.Info("go build command", "args", args)
+	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
 	// This is a little anti-intuitive as the error message is not printed to
@@ -111,7 +113,7 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]st
 	if err != nil {
 		return nil, err
 	}
-	sp.Debug("Found compile commands", "compileCmds", compileCmds)
+	logger.DebugContext(ctx, "Found compile commands", "compileCmds", compileCmds)
 	return compileCmds, nil
 }
 
@@ -149,7 +151,9 @@ func findModVersion(path string) string {
 
 // findGoSources extracts Go source files from compile command arguments,
 // resolving CGO files using the provided objDir->sourceDir mapping.
-func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) (*Dependency, error) {
+func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]string) (*Dependency, error) {
+	logger := util.LoggerFromContext(ctx)
+
 	dep := &Dependency{
 		ImportPath: util.FindFlagValue(args, "-p"),
 		Sources:    make([]string, 0),
@@ -167,17 +171,17 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 			objDir := util.NormalizePath(filepath.Dir(arg))
 			sourceDir, ok := cgoObjDirs[objDir]
 			if !ok {
-				sp.Debug("Skip generated file - unknown objdir", "file", arg, "objDir", objDir)
+				logger.DebugContext(ctx, "Skip generated file - unknown objdir", "file", arg, "objDir", objDir)
 				continue
 			}
 			originalAbsFile, err := resolveCgoFile(arg, sourceDir)
 			if err != nil {
-				sp.Debug("Skip generated file", "file", arg, "error", err)
+				logger.DebugContext(ctx, "Skip generated file", "file", arg, "error", err)
 				continue
 			}
 			dep.CgoFiles[originalAbsFile] = filepath.Base(arg)
 			dep.Sources = append(dep.Sources, originalAbsFile)
-			sp.Debug("Resolved CGO source", "cgo", arg, "original", originalAbsFile)
+			logger.DebugContext(ctx, "Resolved CGO source", "cgo", arg, "original", originalAbsFile)
 			continue
 		}
 
@@ -196,8 +200,10 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 }
 
 // findDeps finds dependencies by listing the build plan.
-func (sp *SetupPhase) findDeps(ctx context.Context, cmdArgs []string) ([]*Dependency, error) {
-	buildPlan, err := sp.listBuildPlan(ctx, cmdArgs)
+func findDeps(ctx context.Context, cmdArgs []string) ([]*Dependency, error) {
+	logger := util.LoggerFromContext(ctx)
+
+	buildPlan, err := listBuildPlan(ctx, cmdArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -214,20 +220,19 @@ func (sp *SetupPhase) findDeps(ctx context.Context, cmdArgs []string) ([]*Depend
 			continue
 		}
 
-		if util.IsCompileCommandWithArgs(util.SplitCompileCmds(cmd)) {
-			args := util.SplitCompileCmds(cmd)
-			dep, err1 := findGoSources(sp, args, cgoObjDirs)
+		args := util.SplitCompileCmds(cmd)
+		if util.IsCompileCommandWithArgs(args) {
+			dep, err1 := findGoSources(ctx, args, cgoObjDirs)
 			if err1 != nil {
 				return nil, err1
 			}
 			deps = append(deps, dep)
-			sp.Info("Found dependency", "dep", dep)
+			logger.InfoContext(ctx, "Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {
-			args := util.SplitCompileCmds(cmd)
 			objDir := util.FindFlagValue(args, "-objdir")
 			util.Assert(objDir != "", "sanity check")
 			cgoObjDirs[util.NormalizePath(objDir)] = currentDir
-			sp.Debug("Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
+			logger.DebugContext(ctx, "Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
 		}
 	}
 	return deps, nil

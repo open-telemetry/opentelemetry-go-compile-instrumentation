@@ -3,7 +3,7 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/in
 go 1.25.0
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20251208011108-ac0fa4a155e3
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-00010101000000-000000000000
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared v0.0.0-00010101000000-000000000000
 	github.com/redis/go-redis/v9 v9.0.0
 	github.com/stretchr/testify v1.11.1

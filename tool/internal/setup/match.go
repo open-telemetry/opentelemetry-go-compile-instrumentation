@@ -83,29 +83,13 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 	return rules, nil
 }
 
-func loadDefaultRules() ([]rule.InstRule, error) {
-	// List all YAML files in the unzipped pkg directory, i.e. $BUILD_TEMP/pkg
-	files, err := util.ListFiles(util.GetBuildTemp(unzippedPkgDir))
-	if err != nil {
-		return nil, err
-	}
-	// Parse all YAML contents into rule instances
-	parsedRules := make([]rule.InstRule, 0)
-	for _, file := range files {
-		if !util.IsYamlFile(file) {
-			continue
-		}
-		content, err1 := os.ReadFile(file)
-		if err1 != nil {
-			return nil, ex.Wrapf(err1, "failed to read YAML file %s", file)
-		}
-		rs, err2 := parseRuleFromYaml(content)
-		if err2 != nil {
-			return nil, err2
-		}
-		parsedRules = append(parsedRules, rs...)
-	}
-	return parsedRules, nil
+// isRuleFile checks if the given file name matches the following patterns:
+// otelc.yml, otelc.yaml, *.otelc.yml, *.otelc.yaml
+func isRuleFile(name string) bool {
+	return (name == "otelc.yml" ||
+		name == "otelc.yaml" ||
+		strings.HasSuffix(name, ".otelc.yml") ||
+		strings.HasSuffix(name, ".otelc.yaml"))
 }
 
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
@@ -314,41 +298,20 @@ func (sp *SetupPhase) matchOneRule(
 	return nil
 }
 
-func ruleFromDir(path string) ([]string, error) {
-	ruleFilePatterns := []string{"*.otelc.yaml", "*.otelc.yml"}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to stat %s", path)
-	}
-
-	if !info.IsDir() {
-		return []string{path}, nil
-	}
-
+func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 	var filesToProcess []string
-
 	// Recursively traverse to each directories and include the rule files
-	err = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if d.IsDir() {
-			return nil
+		if skipSubmodules && d.IsDir() && p != path && util.PathExists(filepath.Join(p, "go.mod")) {
+			return filepath.SkipDir
 		}
 
-		var matched bool
-		for _, pat := range ruleFilePatterns {
-			matched, err = filepath.Match(pat, filepath.Base(p))
-			if err != nil {
-				return ex.Wrapf(err, "bad pattern %s", pat)
-			}
-
-			if matched {
-				filesToProcess = append(filesToProcess, p)
-				break
-			}
+		if !d.IsDir() && isRuleFile(d.Name()) {
+			filesToProcess = append(filesToProcess, p)
 		}
 
 		return nil
@@ -373,10 +336,21 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 		path = strings.TrimSpace(path)
 
 		// Get all rule files from path (file or directory)
-		files, err := ruleFromDir(path)
+		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return nil, ex.Wrapf(err, "failed to stat %s", path)
 		}
+
+		var files []string
+		if info.IsDir() {
+			files, err = rulesFromDir(path, false)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			files = []string{path}
+		}
+
 		for _, file := range files {
 			content, err = os.ReadFile(file)
 			if err != nil {
@@ -402,17 +376,42 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 	return slices.Concat(slices.Collect(maps.Values(ruleSet))...), nil
 }
 
-func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
+func loadRulesFromToolFiles(ctx context.Context, toolFiles []string) ([]rule.InstRule, error) {
+	ruleSet := make([]rule.InstRule, 0)
+	walkErr := walkInstrumentation(ctx, toolFiles, func(v *InstrumentationVisit) (bool, error) {
+		if v.Error != nil {
+			return false, v.Error
+		}
+
+		for _, file := range v.Config.RuleFiles {
+			content, readErr := os.ReadFile(file)
+			if readErr != nil {
+				return false, ex.Wrapf(readErr, "reading %s", file)
+			}
+
+			rules, parseErr := parseRuleFromYaml(content)
+			if parseErr != nil {
+				return false, parseErr
+			}
+
+			ruleSet = append(ruleSet, rules...)
+		}
+		return true, nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	return ruleSet, nil
+}
+
+func (sp *SetupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool) ([]rule.InstRule, error) {
 	// Load rules from environment variable OTELC_RULES if specified. It has the
 	// highest priority.
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
-		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
-		content, err := os.ReadFile(filepath.Clean(rulePath))
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to read %s from env variable", rulePath)
-		}
-		return parseRuleFromYaml(content)
+		sp.Debug("rules source: OTELC_RULES environment variable (%s)", rulePath)
+		return loadCustomRules(rulePath)
 	}
 
 	// Load custom rule(s) from config file if specified
@@ -421,14 +420,30 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 		return loadCustomRules(sp.ruleConfig)
 	}
 
-	// Load default rules from the unzipped pkg directory
-	sp.Debug("rules source: default rules")
-	return loadDefaultRules()
+	// Load rules from instrumentation config file (otel.instrumentation.go or otelc.tool.go) if exists in any of the loaded modules.
+	// If multiple config files are found across modules, rules from all files will be loaded.
+	util.Assert(len(moduleDirs) > 0, "no module directories found during rule loading")
+	toolFiles := make([]string, 0, len(moduleDirs))
+	for moduleDir := range moduleDirs {
+		toolFile, err := findToolFile(moduleDir)
+		if err != nil {
+			return nil, err
+		}
+		if toolFile != "" {
+			sp.Debug("rules source: instrumentation config file (%s)", toolFile)
+			toolFiles = append(toolFiles, toolFile)
+		}
+	}
+	return loadRulesFromToolFiles(ctx, toolFiles)
 }
 
-func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
-	// Construct the set of default allRules by parsing embedded data
-	allRules, err := sp.loadRules()
+func (sp *SetupPhase) matchDeps(
+	ctx context.Context,
+	deps []*Dependency,
+	moduleDirs map[string]bool,
+) ([]*rule.InstRuleSet, error) {
+	// Construct the set of default allRules to match against
+	allRules, err := sp.loadRules(ctx, moduleDirs)
 	if err != nil {
 		return nil, err
 	}
