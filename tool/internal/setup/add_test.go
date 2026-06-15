@@ -70,7 +70,7 @@ func TestAddDeps(t *testing.T) {
 			tmpDir := t.TempDir()
 			sp := newTestSetupPhase()
 
-			err := sp.addDeps(tt.matched, tmpDir)
+			err := sp.addDeps(t.Context(), tt.matched, tmpDir)
 			require.NoError(t, err)
 
 			runtimeFilePath := filepath.Join(tmpDir, OtelcRuntimeFile)
@@ -101,6 +101,6 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	invalidPath := filepath.Join(t.TempDir(), "nonexistent", "subdir")
 	sp := newTestSetupPhase()
 
-	err := sp.addDeps(matched, invalidPath)
+	err := sp.addDeps(t.Context(), matched, invalidPath)
 	assert.Error(t, err)
 }

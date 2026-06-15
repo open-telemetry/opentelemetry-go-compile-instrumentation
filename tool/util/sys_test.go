@@ -6,6 +6,7 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -442,5 +443,68 @@ func TestCopyFileSameFile(t *testing.T) {
 
 	if string(got) != string(content) {
 		t.Errorf("got %q, want %q", got, content)
+	}
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		initialData []byte
+		initialPerm os.FileMode
+		writePerm   []os.FileMode
+		wantPerm    os.FileMode
+	}{
+		{
+			name:      "new file uses default permissions",
+			writePerm: nil,
+			wantPerm:  0o644,
+		},
+		{
+			name:      "new file uses provided permissions",
+			writePerm: []os.FileMode{0o600},
+			wantPerm:  0o600,
+		},
+		{
+			name:        "existing file preserves permissions",
+			initialData: []byte("old"),
+			initialPerm: 0o755,
+			writePerm:   nil,
+			wantPerm:    0o755,
+		},
+		{
+			name:        "existing file uses provided permissions",
+			initialData: []byte("old"),
+			initialPerm: 0o755,
+			writePerm:   []os.FileMode{0o600},
+			wantPerm:    0o600,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "test.txt")
+
+			if tt.initialData != nil {
+				require.NoError(t,
+					os.WriteFile(path, tt.initialData, tt.initialPerm),
+				)
+			}
+
+			require.NoError(t,
+				WriteFileAtomic(path, []byte("new content"), tt.writePerm...),
+			)
+
+			got, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			require.Equal(t, []byte("new content"), got)
+
+			if runtime.GOOS != "windows" {
+				info, statErr := os.Stat(path)
+				require.NoError(t, statErr)
+				require.Equal(t, tt.wantPerm, info.Mode().Perm())
+			}
+
+			matches, matchesErr := filepath.Glob(filepath.Join(filepath.Dir(path), filepath.Base(path)+".tmp-*"))
+			require.NoError(t, matchesErr)
+			require.Empty(t, matches)
+		})
 	}
 }

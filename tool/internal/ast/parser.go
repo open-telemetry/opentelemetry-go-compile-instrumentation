@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"bytes"
 	"go/parser"
 	"go/token"
 	"os"
@@ -98,6 +99,18 @@ func WriteFile(filePath string, root *dst.File) error {
 		return ex.Wrapf(err, "failed to write to file %s", filePath)
 	}
 	return nil
+}
+
+// WriteFileAtomic writes the AST to a file atomically.
+func WriteFileAtomic(filePath string, root *dst.File) error {
+	var buf bytes.Buffer
+
+	r := decorator.NewRestorer()
+	if err := r.Fprint(&buf, root); err != nil {
+		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
+	}
+
+	return util.WriteFileAtomic(filePath, buf.Bytes())
 }
 
 // ParseFileOnlyPackage parses the AST from a file. Use it if you only need to

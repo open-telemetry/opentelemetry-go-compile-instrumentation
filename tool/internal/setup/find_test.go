@@ -379,8 +379,7 @@ echo nothing useful
 				return exec.Command("sh", "-c", script)
 			}
 
-			sp := newTestSetupPhase()
-			buildPlan, err := sp.listBuildPlan(t.Context(), tt.args)
+			buildPlan, err := listBuildPlan(t.Context(), tt.args)
 
 			if tt.wantErr {
 				require.Error(t, err)
