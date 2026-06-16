@@ -152,7 +152,7 @@ func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	}
 
 	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
 		return err
 	}
 
