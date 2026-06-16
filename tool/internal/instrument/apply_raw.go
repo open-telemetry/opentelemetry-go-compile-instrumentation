@@ -157,7 +157,7 @@ func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	}
 
 	// Insert the raw code into the target function
-	err := insertRaw(ctx, rule, funcDecl, root)
+	err = insertRaw(ctx, rule, funcDecl, root)
 	if err != nil {
 		return err
 	}

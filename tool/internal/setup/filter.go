@@ -70,7 +70,14 @@ type FuncFilter struct {
 }
 
 func (f *FuncFilter) Match(ctx *MatchContext) bool {
-	return ast.FindFuncDecl(ctx.AST, f.Func, f.Recv) != nil
+	// We create an `InstFuncRule`` because including `setup.FuncFilter` to
+	// `ast.FindFuncDecl` causes an import loop.
+	fr := &rule.InstFuncRule{
+		Func: f.Func,
+		Recv: f.Recv,
+	}
+	_, ok, _ := ast.FindFuncDecl(ctx.AST, fr)
+	return ok
 }
 
 // StructFilter matches source files that declare the named struct.

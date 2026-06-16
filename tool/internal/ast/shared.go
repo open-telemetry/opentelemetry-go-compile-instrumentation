@@ -120,7 +120,7 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 // false both when no declaration matches r's function name and receiver, and
 // when a declaration is found but does not satisfy r's signature filters. When
 // the bool is false, the returned function declaration is nil.
-func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule](root *dst.File, r *R) (*dst.FuncDecl, bool, error) {
+func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](root *dst.File, r *R) (*dst.FuncDecl, bool, error) {
 	var (
 		funcName       string
 		recv           string
