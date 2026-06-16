@@ -253,7 +253,8 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 	}
 	switch {
 	case def.HasFunc != "":
-		return ast.FindFuncDecl(tree, def.HasFunc, def.HasRecv) != nil
+		_, ok, _ := ast.FindFuncDecl(tree, def)
+		return ok
 	case def.HasStruct != "":
 		return ast.FindStructDecl(tree, def.HasStruct) != nil
 	default:

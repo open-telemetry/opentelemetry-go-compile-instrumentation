@@ -4,10 +4,36 @@
 package instrument
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
+
+func TestApplyFuncRuleSignatureFilterMismatchIsLookupMiss(t *testing.T) {
+	parser := ast.NewAstParser()
+	root, err := parser.ParseSource(`package main
+
+func Target(value string) error { return nil }
+`)
+	require.NoError(t, err)
+
+	sig := rule.FuncSignature{Args: []string{"int"}, Returns: []string{"error"}}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "mismatch"},
+		Func:         "Target",
+		Before:       "BeforeTarget",
+		Signature:    &sig,
+	}
+
+	err = newTestPhase().applyFuncRule(context.Background(), funcRule, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "can not find function Target")
+}
 
 func TestCollectArguments(t *testing.T) {
 	tests := []struct {
