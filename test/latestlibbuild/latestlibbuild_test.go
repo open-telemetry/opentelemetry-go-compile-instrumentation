@@ -29,12 +29,15 @@ func TestLatestLibBuild(t *testing.T) {
 		name := e.Name()
 		appDir := filepath.Join(appsRoot, name)
 		if _, err := os.Stat(filepath.Join(appDir, "go.mod")); err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("stat %s/go.mod: %v", appDir, err)
 		}
 		t.Run(name, func(t *testing.T) {
 			deps := testutil.DiscoverInstrumentedDeps(t, appDir, targets)
 			if len(deps) == 0 {
-				t.Skipf("%s has no instrumented third-party deps to bump", name)
+				t.Skipf("%s has no instrumented third-party deps with supported latest versions to bump", name)
 			}
 			testutil.BumpToLatest(t, appDir, deps...)
 			testutil.Build(t, appDir, "go", "build", "-a")

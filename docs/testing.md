@@ -2,7 +2,7 @@
 
 This document describes the testing strategy for the project, the different test categories, and when to use each.
 
-Tests are organized in four categories, each with a distinct purpose and scope.
+Tests are organized in five categories, each with a distinct purpose and scope.
 
 | Category | Location | Build Tag | Scope |
 | :------- | :------- | :-------- | :---- |
@@ -10,6 +10,7 @@ Tests are organized in four categories, each with a distinct purpose and scope.
 | Integration | `test/integration/` | `integration` | Instrumented binary against a local or in-process dependency. |
 | E2E | `test/e2e/` | `e2e` | Multiple processes (e.g. client + server). |
 | LatestLibBuild | `test/latestlibbuild/` | `latestlibbuild` | Compile instrumented app against `@latest` of each instrumented library. |
+| LatestLibRun | `test/latestlibrun/` | `latestlibrun` | Run integration suite after bumping each instrumented library to `@latest`. |
 
 ## Unit Tests
 
@@ -43,12 +44,11 @@ Use this convention when a testcase exercises call rules that reference wrapper 
 
 Integration tests build real binaries with the `otelc` tool and run them against **in-process** dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
 
-Each test follows the same pattern:
+All test apps are built once in `TestMain` before any test runs (via `otelc go build`). Each test follows the same pattern:
 
-1. Build the test application with compile-time instrumentation.
-2. Start an in-memory OTLP collector.
-3. Run the instrumented binary against a local dependency.
-4. Assert on the exported spans and their semantic conventions.
+1. Start an in-memory OTLP collector.
+2. Run the pre-built instrumented binary against a local dependency.
+3. Assert on the exported spans and their semantic conventions.
 
 ## E2E Tests
 
@@ -87,6 +87,9 @@ make test-e2e
 # LatestLibBuild tests (requires: make build; mutates test/apps/*/go.mod — run git restore test/apps afterwards)
 make test-latestlibbuild
 
+# LatestLibRun tests (requires: make build; mutates test/apps/*/go.mod — run git restore test/apps afterwards)
+make test-latestlibrun
+
 # Coverage
 make test-unit/coverage
 make test-integration/coverage
@@ -112,6 +115,23 @@ A failure means that the latest release of an upstream library introduced a **co
 
 1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file (e.g. change the version field from `v1.2.3` to `v1.2.3,v4.5.6`).
 2. Open a new rule entry covering `v4.5.6,` and implement the updated hook.
+
+## LatestLibRun Tests
+
+> [!IMPORTANT]
+> **What this test does.** For each app under `test/apps/`, the test bumps the app's instrumented direct dependencies to `@latest` (same mutation as LatestLibBuild), then runs the full integration suite against those bumped modules. It is a **compile + run + span-assertion** check. It runs on a weekly schedule and on demand via `workflow_dispatch`. When it fails on `main`, the CI workflow automatically opens or updates a GitHub issue labelled `latestlibrun-failure`.
+
+| Category | Location | Build Tag | Scope |
+| :------- | :------- | :-------- | :---- |
+| LatestLibRun | `test/latestlibrun/` | `latestlibrun` | Run integration suite after bumping each library to `@latest`. |
+
+### What a failure means
+
+A failure means that the latest release of an upstream library introduced a **runtime behavior change**, for example a removed function, a changed signature, or a dropped instrumentation hook point that breaks existing span assertions. The remediation is:
+
+1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file.
+2. Open a new rule entry covering the new version range and update the hook implementation.
+3. Close the auto-opened `latestlibrun-failure` issue once the fix lands on `main`.
 
 ## Writing New Tests
 

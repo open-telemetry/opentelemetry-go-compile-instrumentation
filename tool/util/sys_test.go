@@ -311,3 +311,118 @@ func TestListFiles_SkipsHiddenDirectories(t *testing.T) {
 		t.Fatalf("expected visible file to be returned")
 	}
 }
+
+func TestCopyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "src.txt")
+	dst := filepath.Join(tmpDir, "dst.txt")
+	content := []byte("hello world")
+
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatalf("failed to write src: %v", err)
+	}
+
+	if err := CopyFile(src, dst); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("failed to read dst: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("got content %q, want %q", string(got), string(content))
+	}
+}
+
+func TestCopyFileNestedDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "src_nested.txt")
+	dst := filepath.Join(tmpDir, "a", "b", "c", "dst_nested.txt")
+	content := []byte("nested hello")
+
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatalf("failed to write src: %v", err)
+	}
+
+	if err := CopyFile(src, dst); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("failed to read dst: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("got content %q, want %q", string(got), string(content))
+	}
+}
+
+func TestCopyFilePreservesPermissions(t *testing.T) {
+	if IsWindows() {
+		t.Skip("Skipping permission test on Windows")
+	}
+
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "src_perms.txt")
+	dst := filepath.Join(tmpDir, "dst_perms.txt")
+
+	if err := os.WriteFile(src, []byte("perms"), 0o700); err != nil {
+		t.Fatalf("failed to write src: %v", err)
+	}
+
+	if err := CopyFile(src, dst); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("failed to stat dst: %v", err)
+	}
+
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("got perm %o, want %o", info.Mode().Perm(), 0o700)
+	}
+}
+
+func TestCopyFileSourceDoesNotExist(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := CopyFile(
+		filepath.Join(tmpDir, "nonexistent"),
+		filepath.Join(tmpDir, "out"),
+	)
+
+	if err == nil {
+		t.Error("expected error for nonexistent source")
+	}
+}
+
+func TestCopyFileSameFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "same.txt")
+	content := []byte("hello")
+
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatalf("failed to write src: %v", err)
+	}
+
+	if err := CopyFile(src, src); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	got, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("failed to read src: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("got %q, want %q", got, content)
+	}
+}
