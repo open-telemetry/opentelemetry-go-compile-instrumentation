@@ -347,7 +347,7 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 }
 
 func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
-	funcDecl, ok, err := ast.FindFuncDeclForRule(root, rule)
+	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {
 		return err
 	}

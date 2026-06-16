@@ -231,7 +231,7 @@ func (sp *SetupPhase) matchOneRule(
 ) error {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		_, ok, err := ast.FindFuncDeclForRule(tree, rt)
+		_, ok, err := ast.FindFuncDecl(tree, rt)
 		if err != nil {
 			return err
 		}
@@ -246,8 +246,11 @@ func (sp *SetupPhase) matchOneRule(
 			sp.Info("Match struct rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstRawRule:
-		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
-		if funcDecl != nil {
+		_, ok, err := ast.FindFuncDecl(tree, rt)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			set.AddRawRule(source, rt)
 			sp.Info("Match raw rule", "rule", rt, "dep", dep)
 		}

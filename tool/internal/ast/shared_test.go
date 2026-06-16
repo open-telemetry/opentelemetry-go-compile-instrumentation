@@ -76,7 +76,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Signature: &sig,
 		}
 
-		fn, ok, err := FindFuncDeclForRule(file, r)
+		fn, ok, err := FindFuncDecl(file, r)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -90,7 +90,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Signature: &sig,
 		}
 
-		fn, ok, err := FindFuncDeclForRule(file, r)
+		fn, ok, err := FindFuncDecl(file, r)
 		require.NoError(t, err)
 		assert.False(t, ok)
 		assert.Nil(t, fn)
@@ -102,7 +102,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Param: "[]invalid",
 		}
 
-		fn, ok, err := FindFuncDeclForRule(file, r)
+		fn, ok, err := FindFuncDecl(file, r)
 		require.Error(t, err)
 		assert.False(t, ok)
 		assert.Nil(t, fn)

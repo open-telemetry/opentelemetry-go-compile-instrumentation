@@ -81,7 +81,7 @@ func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	return ""
 }
 
-func FindFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
+func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 	decls := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
 		// Receiver type is ignored, match func name only
 		name := funcDecl.Name.Name
@@ -113,20 +113,39 @@ func FindFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 	return decls[0]
 }
 
-// FindFuncDeclForRule finds the function declaration targeted by r, including
+// FindFuncDecl finds the function declaration targeted by r, including
 // name, receiver, and optional signature-filter matching.
 //
 // The returned bool reports whether a matching declaration was found. It is
 // false both when no declaration matches r's function name and receiver, and
 // when a declaration is found but does not satisfy r's signature filters. When
 // the bool is false, the returned function declaration is nil.
-func FindFuncDeclForRule(root *dst.File, r *rule.InstFuncRule) (*dst.FuncDecl, bool, error) {
-	funcDecl := FindFuncDecl(root, r.Func, r.Recv)
+func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule](root *dst.File, r *R) (*dst.FuncDecl, bool, error) {
+	var (
+		funcName       string
+		recv           string
+		matchSignature bool
+	)
+	switch rr := any(r).(type) {
+	case *rule.InstFuncRule:
+		funcName = rr.Func
+		recv = rr.Recv
+		matchSignature = true
+	case *rule.InstRawRule:
+		funcName = rr.Func
+		recv = rr.Recv
+	}
+
+	funcDecl := findFuncDecl(root, funcName, recv)
 	if funcDecl == nil {
 		return nil, false, nil
 	}
 
-	ok, err := FuncDeclMatchesFilters(funcDecl, r)
+	if !matchSignature {
+		return nil, false, nil
+	}
+
+	ok, err := funcDeclMatchesFilters(funcDecl, any(r).(*rule.InstFuncRule))
 	if err != nil {
 		return nil, false, err
 	}
@@ -288,7 +307,7 @@ func AddStructField(decl dst.Decl, name, t string) {
 	st.Fields.List = append(st.Fields.List, fd)
 }
 
-// FuncDeclMatchesFilters reports whether funcDecl satisfies all signature
+// funcDeclMatchesFilters reports whether funcDecl satisfies all signature
 // sub-filters in r.  Returns true when no sub-filters are set.
 //
 // All non-empty filters are evaluated and must match (AND semantics).  Any
@@ -298,7 +317,7 @@ func AddStructField(decl dst.Decl, name, t string) {
 // Matching uses structural comparison of dst.Expr nodes (no type checker).
 // For the scalar-type filters this means an exact type-name match rather than
 // full interface-satisfaction checking.
-func FuncDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool, error) {
+func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool, error) {
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
