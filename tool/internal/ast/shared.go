@@ -134,6 +134,9 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](root 
 	case *rule.InstRawRule:
 		funcName = rr.Func
 		recv = rr.Recv
+	case *rule.FilterDef:
+		funcName = rr.HasFunc
+		recv = rr.HasRecv
 	}
 
 	funcDecl := findFuncDecl(root, funcName, recv)
@@ -142,7 +145,7 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](root 
 	}
 
 	if !matchSignature {
-		return nil, false, nil
+		return funcDecl, true, nil
 	}
 
 	ok, err := funcDeclMatchesFilters(funcDecl, any(r).(*rule.InstFuncRule))

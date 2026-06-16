@@ -284,7 +284,7 @@ func (sp *SetupPhase) matchOneRule(
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if ok {
 			set.AddRawRule(source, rt)
 			sp.Info("Match raw rule", "rule", rt, "dep", dep)
 		}
