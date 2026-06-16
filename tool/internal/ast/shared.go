@@ -10,6 +10,7 @@ import (
 
 	"github.com/dave/dst"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -120,7 +121,10 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 // false both when no declaration matches r's function name and receiver, and
 // when a declaration is found but does not satisfy r's signature filters. When
 // the bool is false, the returned function declaration is nil.
-func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](root *dst.File, r *R) (*dst.FuncDecl, bool, error) {
+func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
+	root *dst.File,
+	r *R,
+) (*dst.FuncDecl, bool, error) {
 	var (
 		funcName       string
 		recv           string
@@ -148,7 +152,11 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](root 
 		return funcDecl, true, nil
 	}
 
-	ok, err := funcDeclMatchesFilters(funcDecl, any(r).(*rule.InstFuncRule))
+	rr, ok := any(r).(*rule.InstFuncRule)
+	if !ok {
+		return nil, false, ex.Newf("unexpected %T value", r)
+	}
+	ok, err := funcDeclMatchesFilters(funcDecl, rr)
 	if err != nil {
 		return nil, false, err
 	}
