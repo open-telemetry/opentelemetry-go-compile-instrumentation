@@ -62,20 +62,6 @@ type InstFuncRule struct {
 	Result            string         `json:"result,omitempty"             yaml:"result"`
 	LastResult        string         `json:"last_result,omitempty"        yaml:"last_result"`
 	Param             string         `json:"param,omitempty"              yaml:"param"`
-
-	// ApplicationIndex is the zero-based position of this rule within a do
-	// sequence (see rule.Normalize): it records which application of a modifier to
-	// the same target this rule represents, preserving the order of application so
-	// that hooks run in the sequence the user declared. It is not part of the
-	// user-facing schema.
-	//
-	// It is deliberately NOT part of Identity: trampoline/HookContext names are
-	// content-derived, and application order does not change what a rule does.
-	// Order is preserved by the sequence in which the expanded rules are applied,
-	// not by the generated name. The field is retained so that ordering is
-	// available to downstream and future operations without coupling it to name
-	// generation.
-	ApplicationIndex int `json:"application_index,omitempty" yaml:"application_index,omitempty"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
@@ -111,13 +97,16 @@ func (r *InstFuncRule) validate() error {
 // De-duplication: two rules that do the same thing share an identity, so they
 // collapse to a single generated artifact instead of redeclaring it. The only
 // remaining collision is between byte-identical rules, which are effectively the
-// same rule. Application order is intentionally excluded — it does not change
-// what a rule does, and it is preserved separately by the order in which the
-// expanded rules are applied (see ApplicationIndex), not by the generated name.
+// same rule. A rule's position in a do sequence is intentionally excluded — it
+// does not change what a rule does; do-sequence order is preserved by the order
+// in which the expanded rules are applied, not by the generated name.
 //
 // Deriving the identity from content (rather than a "name#index" string) closes
 // the collision in issue #560, where a rule literally named "name#index" at
 // application index 0 rendered the same string as "name" at index N.
+//
+// When adding a field to InstFuncRule that changes the generated instrumentation,
+// include it here so the identity stays faithful to what the rule does.
 //
 // The key is built with explicit length prefixes ("len:value") instead of a
 // delimiter, so it is injective for arbitrary field content. Type-name strings
