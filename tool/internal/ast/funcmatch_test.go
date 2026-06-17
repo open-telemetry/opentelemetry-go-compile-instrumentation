@@ -41,7 +41,7 @@ func selector(pkg, name string) *dst.SelectorExpr {
 
 func mustMatch(t *testing.T, decl *dst.FuncDecl, r *rule.InstFuncRule) bool {
 	t.Helper()
-	ok, err := FuncDeclMatchesFilters(decl, r)
+	ok, err := funcDeclMatchesFilters(decl, r)
 	require.NoError(t, err)
 	return ok
 }
@@ -233,12 +233,12 @@ func TestFuncDeclMatchesFilters_InvalidTypeReturnsError(t *testing.T) {
 		[]*dst.Field{field(ident("error"))},
 	)
 
-	_, err := FuncDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"})
+	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"})
 	require.Error(t, err)
 
-	_, err = FuncDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"})
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"})
 	require.Error(t, err)
 
-	_, err = FuncDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"})
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"})
 	require.Error(t, err)
 }

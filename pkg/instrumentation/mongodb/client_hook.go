@@ -52,7 +52,7 @@ func BeforeConnect(ictx inst.HookContext, ctx context.Context, opts ...*options.
 	initInstrumentation()
 
 	monitor := otelmongo.NewMonitor()
-	
+
 	// If no options were provided, create a default options struct
 	if len(opts) == 0 {
 		opts = []*options.ClientOptions{
@@ -80,7 +80,7 @@ func BeforeNewClient(ictx inst.HookContext, opts ...*options.ClientOptions) {
 	initInstrumentation()
 
 	monitor := otelmongo.NewMonitor()
-	
+
 	// If no options were provided, create a default options struct
 	if len(opts) == 0 {
 		opts = []*options.ClientOptions{
