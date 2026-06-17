@@ -347,18 +347,12 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 }
 
 func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
-	funcDecl := ast.FindFuncDecl(root, rule.Func, rule.Recv)
-	if funcDecl == nil {
-		return ex.Newf("can not find function %s", rule.Func)
-	}
-	ok, err := ast.FuncDeclMatchesFilters(funcDecl, rule)
+	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		ip.Warn("Skipping func rule: signature filters did not match",
-			"rule", rule.Name, "func", rule.Func)
-		return nil
+		return ex.Newf("can not find function %s", rule.Func)
 	}
 
 	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
