@@ -10,6 +10,7 @@ import (
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -81,8 +82,25 @@ func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 			return ex.Wrapf(err, "parsing file %s", file)
 		}
 
+		fileIgnored := ast.FileLeadHasDirective(root, directiveIgnore)
+		if fileIgnored {
+			ip.Debug("File-level //otelc:ignore found, only //otelc:instrument functions will be instrumented", "file", file)
+		}
+
 		// Apply the rules to the target file
 		for _, r := range rules {
+			if fileIgnored {
+				fr, isFuncRule := r.(*rule.InstFuncRule)
+				if !isFuncRule {
+					ip.Debug("Skip non-func rule due to file-level //otelc:ignore", "rule", r.GetName())
+					continue
+				}
+				funcDecl := ast.FindFuncDecl(root, fr.Func, fr.Recv)
+				if funcDecl == nil || !ast.FuncHasDirective(funcDecl, directiveInstrument) {
+					ip.Debug("Skip func rule due to file-level //otelc:ignore", "func", fr.Func, "rule", r.GetName())
+					continue
+				}
+			}
 			funcRule, err1 := ip.applyOneRule(ctx, r, root)
 			if err1 != nil {
 				return ex.Wrapf(err1, "applying rule %s", r.GetName())
