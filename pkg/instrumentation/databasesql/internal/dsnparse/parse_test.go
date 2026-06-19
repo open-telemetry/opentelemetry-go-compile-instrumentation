@@ -4,6 +4,7 @@
 package dsnparse
 
 import (
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -156,4 +157,53 @@ func TestParseDbName(t *testing.T) {
 			assert.Equal(t, tt.want, ParseDbName(tt.dsn))
 		})
 	}
+}
+
+func TestSanitizeURLError_RemovesURLFromURLError(t *testing.T) {
+	inner := &url.Error{
+		Op:  "parse",
+		URL: "postgres://user:supersecret@host:5432/mydb",
+		Err: assert.AnError,
+	}
+	sanitized := sanitizeURLError(inner)
+	assert.ErrorContains(t, sanitized, "parse")
+	assert.ErrorContains(t, sanitized, assert.AnError.Error())
+	assert.NotContains(t, sanitized.Error(), "supersecret")
+	assert.NotContains(t, sanitized.Error(), "user:supersecret")
+	assert.NotContains(t, sanitized.Error(), "postgres://")
+}
+
+func TestSanitizeURLError_PassesThroughNonURLError(t *testing.T) {
+	original := assert.AnError
+	sanitized := sanitizeURLError(original)
+	assert.Same(t, original, sanitized)
+}
+
+func TestSanitizeURLError_WithNilReturnsNil(t *testing.T) {
+	sanitized := sanitizeURLError(nil)
+	assert.Nil(t, sanitized)
+}
+
+func TestSanitizeURLError_ThroughPostgresParser(t *testing.T) {
+	_, err := ParseDSN("postgres", "postgres://user:supersecret@[invalid:addr]")
+	require.Error(t, err)
+	errMsg := err.Error()
+	assert.NotContains(t, errMsg, "supersecret", "error should not leak password")
+	assert.NotContains(t, errMsg, "user:supersecret", "error should not leak user:password")
+}
+
+func TestSanitizeURLError_ThroughClickHouseParser(t *testing.T) {
+	_, err := ParseDSN("clickhouse", "clickhouse://user:supersecret@[invalid:addr]")
+	require.Error(t, err)
+	errMsg := err.Error()
+	assert.NotContains(t, errMsg, "supersecret", "error should not leak password")
+	assert.NotContains(t, errMsg, "user:supersecret", "error should not leak user:password")
+}
+
+func TestSanitizeURLError_ThroughSQLServerParser(t *testing.T) {
+	_, err := ParseDSN("sqlserver", "sqlserver://user:supersecret@[invalid:addr]")
+	require.Error(t, err)
+	errMsg := err.Error()
+	assert.NotContains(t, errMsg, "supersecret", "error should not leak password")
+	assert.NotContains(t, errMsg, "user:supersecret", "error should not leak user:password")
 }
