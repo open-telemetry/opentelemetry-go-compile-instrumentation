@@ -14,8 +14,7 @@ func OptGood() {
 }
 func OptBad() {
 	//line <generated>:1
-	if hookContext166090657, skip166090657 := OtelBeforeTrampoline_OptBad166090657(); skip166090657 {
-		OtelAfterTrampoline_OptBad166090657(hookContext166090657)
+	if _, skip166090657 := OtelBeforeTrampoline_OptBad166090657(); skip166090657 {
 		return
 	} else {
 	}
@@ -124,22 +123,6 @@ func OtelBeforeTrampoline_OptBad166090657() (hookContext *HookContextImpl1660906
 		H6Before(hookContext)
 	}
 	return hookContext, hookContext.skipCall
-}
-
-func OtelAfterTrampoline_OptBad166090657(hookContext HookContext) {
-	defer func() {
-		if err := recover(); err != nil {
-			println("failed to exec After hook", "")
-			if e, ok := err.(error); ok {
-				println(e.Error())
-			}
-			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
-			if fetchStack != nil && printStack != nil {
-				printStack(fetchStack())
-			}
-		}
-	}()
-	hookContext.(*HookContextImpl166090657).returnVals = []interface{}{}
 }
 
 //go:linkname H6Before testdata/golden/opt-multiple-funcs.H6Before
@@ -356,22 +339,6 @@ func OtelBeforeTrampoline_OptGood3887151894() (hookContext *HookContextImpl38871
 		H5Before(hookContext)
 	}
 	return hookContext, hookContext.skipCall
-}
-
-func OtelAfterTrampoline_OptGood3887151894(hookContext HookContext) {
-	defer func() {
-		if err := recover(); err != nil {
-			println("failed to exec After hook", "")
-			if e, ok := err.(error); ok {
-				println(e.Error())
-			}
-			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
-			if fetchStack != nil && printStack != nil {
-				printStack(fetchStack())
-			}
-		}
-	}()
-	hookContext.(*HookContextImpl3887151894).returnVals = []interface{}{}
 }
 
 //go:linkname H5Before testdata/golden/opt-multiple-funcs.H5Before

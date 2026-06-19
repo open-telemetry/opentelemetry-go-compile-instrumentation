@@ -4,30 +4,28 @@
 package db
 
 import (
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql/internal/dsnparse"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/databasesql/dsnparse"
 )
 
-// DSNParser parses a driver-specific DSN and returns the server address (host:port).
-type DSNParser = dsnparse.DSNParser
+// DSNInfo is an alias for dsnparse.DSNInfo so callers that import the db
+// package can use the type without an additional import.
+type DSNInfo = dsnparse.DSNInfo
 
-// RegisterDSNParser registers a custom DSN parser for the given driver name.
-// Built-in parsers are registered automatically during package initialization.
-// Calling RegisterDSNParser for an already-registered name overwrites the previous parser.
-// It is safe to call from package init() functions.
-func RegisterDSNParser(driverName string, parser dsnparse.DSNParser) {
-	dsnparse.RegisterDSNParser(driverName, parser)
-}
-
-// RegisterDSNParsers registers multiple DSN parsers in a single lock acquisition.
-// Prefer this over repeated RegisterDSNParser calls when registering more than one parser.
-func RegisterDSNParsers(parsers map[string]dsnparse.DSNParser) {
-	dsnparse.RegisterDSNParsers(parsers)
-}
-
-func parseDSN(driverName, dsn string) (string, error) {
+// ParseDSN parses a driver-specific data source name and returns structured
+// connection information. It tries multiple well-known formats in order and
+// never panics. Unrecognised drivers return a zero-value DSNInfo.
+func ParseDSN(driverName, dsn string) DSNInfo {
 	return dsnparse.ParseDSN(driverName, dsn)
 }
 
-func parseDbName(dsn string) string {
+// ParseDbName extracts the database name from a generic DSN by finding the
+// last '/' and trimming any query-string suffix. Retained for backward
+// compatibility; prefer ParseDSN when the driver name is known.
+func ParseDbName(dsn string) string {
 	return dsnparse.ParseDbName(dsn)
+}
+
+// parseDSN is the package-internal adapter called by beforeOpenInstrumentation.
+func parseDSN(driverName, dsn string) (string, error) {
+	return dsnparse.LegacyParseDSN(driverName, dsn)
 }
