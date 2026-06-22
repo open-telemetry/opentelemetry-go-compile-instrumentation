@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunCmd(t *testing.T) {
@@ -310,6 +312,22 @@ func TestListFiles_SkipsHiddenDirectories(t *testing.T) {
 	if !foundVisible {
 		t.Fatalf("expected visible file to be returned")
 	}
+}
+
+func TestListFiles_HiddenRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	hiddenDir := filepath.Join(tmpDir, ".hidden")
+	require.NoError(t, os.MkdirAll(hiddenDir, 0o755))
+
+	file := filepath.Join(hiddenDir, "file.txt")
+	require.NoError(t, os.WriteFile(file, []byte("hello"), 0o644))
+
+	files, err := ListFiles(hiddenDir)
+	require.NoError(t, err)
+
+	require.Len(t, files, 1)
+	require.Equal(t, file, files[0])
 }
 
 func TestCopyFile(t *testing.T) {
