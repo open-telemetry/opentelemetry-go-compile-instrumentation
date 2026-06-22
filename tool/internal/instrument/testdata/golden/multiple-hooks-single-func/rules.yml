@@ -1,0 +1,11 @@
+multi_hook:
+  target: main
+  where:
+    func: Func1
+  do:
+    - inject_hooks:
+        before: H1Before
+        path: testdata/golden/multiple-hooks-single-func
+    - inject_hooks:
+        after: H2After
+        path: testdata/golden/multiple-hooks-single-func
