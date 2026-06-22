@@ -44,10 +44,12 @@ Use this convention when a testcase exercises call rules that reference wrapper 
 
 Integration tests build real binaries with the `otelc` tool and run them against **in-process** dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
 
-All test apps are built once in `TestMain` before any test runs (via `otelc go build`). Each test follows the same pattern:
+Test applications are built on demand by the tests that use them. Each top-level test builds its required application once (via `otelc go build`) and reuses the resulting binary across its subtests when applicable.
+
+Each test follows the same pattern:
 
 1. Start an in-memory OTLP collector.
-2. Run the pre-built instrumented binary against a local dependency.
+2. Run the instrumented binary against a local dependency.
 3. Assert on the exported spans and their semantic conventions.
 
 ## E2E Tests
