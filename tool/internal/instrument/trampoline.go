@@ -658,7 +658,7 @@ func (ip *InstrumentPhase) populateHookContext(before bool) bool {
 // renaming occurrences of HookContextImpl to HookContextImpl{suffix} in the
 // trampoline template
 func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
-	suffix := util.CRC32(t.String())
+	suffix := t.Identity()
 	structType := util.AssertType[*dst.TypeSpec](ip.hookCtxDecl.Specs[0])
 	util.Assert(structType.Name.Name == trampolineHookContextImplType,
 		"sanity check")

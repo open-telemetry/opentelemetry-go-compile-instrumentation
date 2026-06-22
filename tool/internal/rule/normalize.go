@@ -129,6 +129,10 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 		return nil, err
 	}
 
+	// Expand each do modifier into its own flat rule, preserving do-sequence
+	// order. Downstream application follows this order, which is the only
+	// ordering guarantee today. Explicit, controllable ordering is tracked in
+	// issue #583.
 	normalized := make([]map[string]any, 0, len(doItems))
 	for _, item := range doItems {
 		flat := maps.Clone(common)
