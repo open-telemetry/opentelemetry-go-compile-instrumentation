@@ -166,6 +166,12 @@ func (f *TestFixture) RequireSpansPerTrace(expected int) {
 	}
 }
 
+// WaitForSpans polls until at least minSpans spans arrive in the collector.
+func (f *TestFixture) WaitForSpans(minSpans int) {
+	f.t.Helper()
+	WaitForSpans(f.t, f.collector, minSpans)
+}
+
 // RequireSingleSpan asserts exactly 1 trace with 1 span and returns it.
 func (f *TestFixture) RequireSingleSpan() ptrace.Span {
 	f.RequireTraceCount(1)
