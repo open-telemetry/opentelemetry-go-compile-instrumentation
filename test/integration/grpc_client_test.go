@@ -20,6 +20,7 @@ import (
 
 func TestGRPCClient(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "grpcclient", "go", "build", "-a")
 
 	testCases := []struct {
 		name           string
