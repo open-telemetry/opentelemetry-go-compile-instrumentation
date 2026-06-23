@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb/pb"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/require"
