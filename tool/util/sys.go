@@ -125,7 +125,7 @@ func ListFiles(dir string) ([]string, error) {
 			return ex.Wrap(err)
 		}
 		// Don't list files under hidden directories
-		if strings.HasPrefix(info.Name(), ".") {
+		if path != dir && strings.HasPrefix(info.Name(), ".") {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
