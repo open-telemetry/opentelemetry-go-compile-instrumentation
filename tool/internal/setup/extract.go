@@ -18,17 +18,30 @@ import (
 )
 
 const (
-	unzippedPkgDir = "pkg"
+	unzippedPkgDir  = "pkg"
+	unzippedInstDir = "instrumentation"
+
+	pkgTempDir  = "pkg_temp"
+	instTempDir = "instrumentation_temp"
 )
 
 func normalizePath(name string) string {
-	const pkg, pkgTemp = unzippedPkgDir, "pkg_temp"
 	cleanName := filepath.ToSlash(filepath.Clean(name))
-	if strings.HasPrefix(cleanName, pkgTemp+"/") {
-		cleanName = strings.Replace(cleanName, pkgTemp+"/", pkg+"/", 1)
-	} else if cleanName == pkgTemp {
-		cleanName = pkg
+
+	replacements := map[string]string{
+		pkgTempDir:  unzippedPkgDir,
+		instTempDir: unzippedInstDir,
 	}
+
+	for from, to := range replacements {
+		if cleanName == from {
+			return to
+		}
+		if strings.HasPrefix(cleanName, from+"/") {
+			return to + strings.TrimPrefix(cleanName, from)
+		}
+	}
+
 	return cleanName
 }
 
@@ -63,13 +76,13 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 	return nil
 }
 
-func extractGZip(data []byte, targetDir string) error {
+func extractGZip(bundleReader io.Reader, targetDir string) error {
 	err0 := os.MkdirAll(targetDir, 0o755)
 	if err0 != nil {
 		return ex.Wrap(err0)
 	}
 
-	gzReader, err0 := gzip.NewReader(strings.NewReader(string(data)))
+	gzReader, err0 := gzip.NewReader(bundleReader)
 	if err0 != nil {
 		return ex.Wrap(err0)
 	}
@@ -128,14 +141,7 @@ func extractGZip(data []byte, targetDir string) error {
 }
 
 func (*SetupPhase) extract() error {
-	const embeddedInstPkgGzip = "otelc-pkg.gz"
-	// Read the instrumentation code from the embedded binary file
-	bs, err := data.ReadEmbedFile(embeddedInstPkgGzip)
-	if err != nil {
-		return err
-	}
-
 	// Extract the instrumentation code to the build temp directory
 	// for future instrumentation phase
-	return extractGZip(bs, util.GetBuildTempDir())
+	return extractGZip(data.GetBundleReader(), util.GetBuildTempDir())
 }

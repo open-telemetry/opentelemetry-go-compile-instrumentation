@@ -121,8 +121,8 @@ package main
 func OtelBeforeTrampoline(param0 *string, param1 *int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
 			hookSrc: `
 package testdata
-import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-func H1Before(ctx inst.HookContext, p1 string, p2 int) {}`,
+import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 string, p2 int) {}`,
 			before: true,
 		},
 		{
@@ -132,8 +132,8 @@ package main
 func OtelAfterTrampoline(hookContext *HookContext, ret0 *float32, ret1 *error) {}`,
 			hookSrc: `
 package testdata
-import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-func H1After(ctx inst.HookContext, r1 float32, r2 error) {}`,
+import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+func H1After(ctx hook.HookContext, r1 float32, r2 error) {}`,
 			before: false,
 		},
 		{
@@ -155,8 +155,8 @@ package main
 func OtelBeforeTrampoline(param0 *string, param1 *int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
 			hookSrc: `
 package testdata
-import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-func H1Before(ctx inst.HookContext, p1 string, p2 string) {}`,
+import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 string, p2 string) {}`,
 			before:      true,
 			expectError: true,
 			errorMsg:    "type mismatch",

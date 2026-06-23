@@ -1,0 +1,260 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
+)
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+// newGinContextWithRoute creates a *gin.Context that has FullPath() populated
+// by routing a real request through a minimal gin engine. The returned context
+// has the given span embedded in c.Request.Context().
+func newGinContextWithRoute(t *testing.T, method, routePattern, url string, span trace.Span) *gin.Context {
+	t.Helper()
+
+	var captured *gin.Context
+	r := gin.New()
+	r.Handle(method, routePattern, func(c *gin.Context) {
+		captured = c
+	})
+
+	req := httptest.NewRequest(method, url, nil)
+	if span != nil {
+		ctx := trace.ContextWithSpan(context.Background(), span)
+		req = req.WithContext(ctx)
+	}
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.NotNil(t, captured, "no handler was invoked; check route pattern and URL")
+	return captured
+}
+
+func setupContextTracer(t *testing.T) (*tracetest.SpanRecorder, trace.Tracer) {
+	t.Helper()
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+	})
+	return sr, tp.Tracer("test")
+}
+
+func TestBeforeNext_UpdatesSpanNameAndRoute(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	ended := sr.Ended()[0]
+
+	assert.Equal(t, "GET /users/:id", ended.Name(), "span name should include route pattern")
+
+	attrs := make(map[string]interface{})
+	for _, a := range ended.Attributes() {
+		attrs[string(a.Key)] = a.Value.AsInterface()
+	}
+	assert.Equal(t, "/users/:id", attrs["http.route"], "http.route attribute should be the pattern, not the URL")
+}
+
+func TestBeforeNext_EmptyRouteIsNoop(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+
+	// gin.CreateTestContext produces a context with no router match,
+	// so FullPath() returns "". BeforeNext should be a no-op.
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/does-not-exist", nil).
+		WithContext(trace.ContextWithSpan(context.Background(), span))
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+	span.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, "GET", sr.Ended()[0].Name(), "span name must not be modified when route is empty")
+}
+
+func TestBeforeNext_IdempotentOnMultipleNextCalls(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/items/:id", "/items/7", span)
+	ictx := hooktest.NewMockHookContext(c)
+
+	// Simulate multiple middleware calling c.Next().
+	BeforeNext(ictx, c)
+	BeforeNext(ictx, c)
+	BeforeNext(ictx, c)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+
+	// http.route should appear exactly once (not duplicated by repeated calls).
+	var routeAttrCount int
+	for _, a := range sr.Ended()[0].Attributes() {
+		if string(a.Key) == "http.route" {
+			routeAttrCount++
+		}
+	}
+	assert.Equal(
+		t,
+		1,
+		routeAttrCount,
+		"http.route should be set exactly once regardless of how many times Next is called",
+	)
+}
+
+func TestBeforeNext_NonRecordingSpanDoesNotBurnGate(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+
+	// First call: request context has no span attached, so trace.SpanFromContext
+	// returns a non-recording no-op span. The gate must NOT be set, because no
+	// span update happened.
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", nil)
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	// Second call: attach a recording span. Because the previous call did not
+	// burn the gate, this call must still enrich the span.
+	_, recording := tr.Start(context.Background(), "GET")
+	c.Request = c.Request.WithContext(
+		trace.ContextWithSpan(c.Request.Context(), recording),
+	)
+	BeforeNext(ictx, c)
+	recording.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, "GET /users/:id", sr.Ended()[0].Name(),
+		"recording span must be enriched even after a non-recording call ran first")
+
+	attrs := make(map[string]interface{})
+	for _, a := range sr.Ended()[0].Attributes() {
+		attrs[string(a.Key)] = a.Value.AsInterface()
+	}
+	assert.Equal(t, "/users/:id", attrs["http.route"])
+}
+
+func TestAfterNext_RecordsGinErrors(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	_ = c.Error(errors.New("db connection lost"))
+	_ = c.Error(errors.New("fallback failed"))
+
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	ended := sr.Ended()[0]
+
+	assert.Equal(t, codes.Error, ended.Status().Code)
+	assert.Contains(t, ended.Status().Description, "db connection lost")
+	assert.Contains(t, ended.Status().Description, "fallback failed")
+
+	events := ended.Events()
+	require.Len(t, events, 2)
+	assert.Equal(t, "exception", events[0].Name)
+	assert.Equal(t, "exception", events[1].Name)
+}
+
+func TestAfterNext_NoErrorsIsNoop(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/ping", "/ping", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Unset, sr.Ended()[0].Status().Code)
+	assert.Empty(t, sr.Ended()[0].Events())
+}
+
+func TestAfterNext_RecordsOnlyAtOutermostReturn(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/items/:id", "/items/7", span)
+	ictx := hooktest.NewMockHookContext(c)
+
+	// Simulate three nested middleware calling c.Next().
+	BeforeNext(ictx, c)
+	BeforeNext(ictx, c)
+	BeforeNext(ictx, c)
+
+	// Handler adds an error.
+	_ = c.Error(errors.New("handler error"))
+
+	// Inner two AfterNext calls — depth > 0, should not record.
+	AfterNext(ictx)
+	AfterNext(ictx)
+
+	// Middleware adds an error after its c.Next() returned.
+	_ = c.Error(errors.New("middleware cleanup error"))
+
+	// Outermost AfterNext — depth == 0, should record both errors.
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	ended := sr.Ended()[0]
+
+	assert.Equal(t, codes.Error, ended.Status().Code)
+	assert.Contains(t, ended.Status().Description, "handler error")
+	assert.Contains(t, ended.Status().Description, "middleware cleanup error")
+	require.Len(t, ended.Events(), 2,
+		"both errors must be recorded at the outermost return")
+}
+
+func TestAfterNext_NonRecordingSpanSkipsRecording(t *testing.T) {
+	sr, _ := setupContextTracer(t)
+
+	// No span attached — trace.SpanFromContext returns a non-recording no-op.
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", nil)
+	_ = c.Error(errors.New("should not be recorded"))
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+	AfterNext(ictx)
+
+	assert.Empty(t, sr.Ended(), "non-recording span must not produce any recorded spans")
+}

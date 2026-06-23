@@ -8,8 +8,8 @@ SHELL := /bin/bash
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
-        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/demo test-unit/helper \
-        test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
+        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
+        test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         test-integration/coverage test-e2e/coverage test-latestlibrun \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         adr-tools adr-new adr-list \
@@ -19,9 +19,10 @@ SHELL := /bin/bash
 BINARY_NAME := otelc
 PLATFORMS := darwin/amd64 linux/amd64 windows/amd64 darwin/arm64 linux/arm64
 TOOL_DIR := tool/cmd/otelc
-INST_PKG_GZIP = otelc-pkg.gz
-INST_PKG_TMP = pkg_temp
-API_SYNC_SOURCE = pkg/inst/context.go
+INST_BUNDLE_ARCHIVE = otelc-bundle.tgz
+INST_BUNDLE_PKG_TMP = pkg_temp
+INST_BUNDLE_INST_TMP = instrumentation_temp
+API_SYNC_SOURCE = pkg/hook/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
 GO_VERSION = 1.25
@@ -103,21 +104,32 @@ all: build format lint test
 build/pkg: ## Build all pkg modules to verify compilation
 	@echo "Building pkg modules..."
 	@set -euo pipefail
-	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \; | grep -v "pkg/instrumentation/runtime" | grep -v "pkg/instrumentation/databasesql"); \
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \;); \
 	for moddir in $$PKG_MODULES; do \
 		echo "Building $$moddir..."; \
 		(cd $$moddir && go mod tidy && go build ./...); \
 	done
 	@echo "All pkg modules built successfully"
 
-build: build/pkg package ## Build the instrumentation tool
+.ONESHELL:
+build/instrumentation: ## Build all instrumentation modules to verify compilation
+	@echo "Building instrumentation modules..."
+	@set -euo pipefail
+	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	for moddir in $$INSTR_MODULES; do \
+		echo "Building $$moddir..."; \
+		(cd $$moddir && go mod tidy && go build ./...); \
+	done
+	@echo "All instrumentation modules built successfully"
+
+build: build/pkg build/instrumentation package ## Build the instrumentation tool
 	@echo "Building instrumentation tool..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
 	@$(GO_BUILD_CMD) -o $(BINARY_NAME)$(EXT) ./$(TOOL_DIR)
 	@./$(BINARY_NAME)$(EXT) version
 
-build-all: build/pkg package ## Build the instrumentation tool for all platforms
+build-all: build/pkg build/instrumentation package ## Build the instrumentation tool for all platforms
 	@echo "Building instrumentation tool for all platforms..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
@@ -142,18 +154,24 @@ install: package ## Install otelc to $$GOPATH/bin (auto-packages instrumentation
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
 	@set -euo pipefail
-	@rm -rf $(INST_PKG_TMP)
+	@rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@if [ ! -d pkg ]; then \
 		echo "Error: pkg directory does not exist"; \
 		exit 1; \
 	fi
-	@cp -r pkg $(INST_PKG_TMP)
-	@(cd $(INST_PKG_TMP) && go mod tidy)
-	@tar -czf $(INST_PKG_GZIP) --exclude='*.log' $(INST_PKG_TMP)
+	@if [ ! -d instrumentation ]; then \
+		echo "Error: instrumentation directory does not exist"; \
+		exit 1; \
+	fi
+	@cp -r pkg $(INST_BUNDLE_PKG_TMP)
+	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
+	@(cd $(INST_BUNDLE_PKG_TMP) && go mod tidy)
+	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
+	@tar -czf $(INST_BUNDLE_ARCHIVE) --exclude='*.log' $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@mkdir -p tool/data/
-	@mv $(INST_PKG_GZIP) tool/data/
-	@rm -rf $(INST_PKG_TMP)
-	@echo "Package created successfully at tool/data/$(INST_PKG_GZIP)"
+	@mv $(INST_BUNDLE_ARCHIVE) tool/data/
+	@rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
+	@echo "Package created successfully at tool/data/$(INST_BUNDLE_ARCHIVE)"
 
 build-demo: ## Build all demos
 build-demo: build-demo-grpc build-demo-http
@@ -188,7 +206,7 @@ lint/action: $(ACTIONLINT) ratchet/check
 	$(ACTIONLINT)
 
 lint/go: ## Run golangci-lint on Go code
-lint/go: $(GOLANGCI_LINT)
+lint/go: $(GOLANGCI_LINT) package
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml
 
@@ -327,14 +345,14 @@ adr-list: ## List all ADRs
 
 check-embed: ## Verify that embedded files exist (required for tests)
 	@echo "Checking embedded files..."
-	@if [ ! -f tool/data/$(INST_PKG_GZIP) ]; then \
-		echo "Error: tool/data/$(INST_PKG_GZIP) does not exist"; \
+	@if [ ! -f tool/data/$(INST_BUNDLE_ARCHIVE) ]; then \
+		echo "Error: tool/data/$(INST_BUNDLE_ARCHIVE) does not exist"; \
 		echo "Run 'make package' to generate it"; \
 		exit 1; \
 	fi
 	@echo "All embedded files present"
 
-check-api-sync: ## Verify api.tmpl is in sync with pkg/inst/context.go
+check-api-sync: ## Verify api.tmpl is in sync with pkg/hook/context.go
 	@echo "Checking api.tmpl sync with $(API_SYNC_SOURCE)..."
 	@if ! diff -q $(API_SYNC_SOURCE) $(API_SYNC_TARGET) > /dev/null 2>&1; then \
 		echo "Error: $(API_SYNC_TARGET) is out of sync with $(API_SYNC_SOURCE)"; \
@@ -381,13 +399,13 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
-# uses //go:embed to embed otelc-pkg.gz at compile time. If the file doesn't exist
+# uses //go:embed to embed otelc-bundle.tgz at compile time. If the file doesn't exist
 # when Go compiles the test packages, the embed will fail.
 
 test: ## Run all tests (unit + integration + e2e)
 test: test-unit test-integration test-e2e
 
-test-unit: test-unit/tool test-unit/pkg test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
+test-unit: test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
@@ -405,29 +423,43 @@ test-unit/tool: build package $(GOTESTFMT) ## Run unit tests for tool modules on
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
 
-# Notes on test-unit/pkg implementation:
-# - Uses find -maxdepth 4 to discover modules at pkg/instrumentation/{name}/ and pkg/instrumentation/{name}/{sub} levels only.
-#   This naturally excludes client/ and server/ subdirectories (which will have link errors because it requires the parent module to be built).
-# - Excludes "runtime" and "databasesql" modules (have build errors because of compile-time field injection) and root "pkg" module (no tests).
+.ONESHELL:
+test-unit/pkg: package ## Run unit tests for pkg modules only
+	@echo "Running pkg unit tests..."
+	set -euo pipefail
+	rm -f ./gotest-unit-pkg.log
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \;); \
+	for moddir in $$PKG_MODULES; do \
+    	if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
+    		echo "Skipping $$moddir (no tests)..."; \
+    		continue; \
+    	fi; \
+		echo "Testing $$moddir..."; \
+		(cd "$$moddir" && go mod tidy); \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
+	done
+
+# Notes on test-unit/instrumentation implementation:
+# - Excludes "runtime" and "database/sql" modules (have build errors because of compile-time field injection).
 # - Skips modules without test files to avoid empty test output.
 # - Uses go test -C to run tests without changing directories (cleaner, more reliable).
 # - Does NOT use gotestfmt because v2.5.0 has a bug that causes panics when go test
 #   outputs build errors (JSON lines with ImportPath but no Package field).
 #   Standard go test -v output is readable enough without formatting.
 .ONESHELL:
-test-unit/pkg: package ## Run unit tests for pkg modules only
-	@echo "Running pkg unit tests..."
+test-unit/instrumentation: package ## Run unit tests for instrumentation modules only
+	@echo "Running instrumentation unit tests..."
 	set -euo pipefail
-	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
-	for moddir in $$PKG_MODULES; do \
+	rm -f ./gotest-unit-instrumentation.log
+	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	for moddir in $$INSTR_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
 			continue; \
 		fi; \
 		echo "Testing $$moddir..."; \
 		(cd "$$moddir" && go mod tidy); \
-		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
 
 .ONESHELL:
@@ -454,7 +486,7 @@ test-unit/demo: ## Run unit tests for demo applications
 	done
 
 
-test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage ## Run all unit tests with coverage
+test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage ## Run all unit tests with coverage
 
 .ONESHELL:
 test-unit/tool/coverage: package ## Run unit tests with coverage for tool modules only
@@ -462,14 +494,12 @@ test-unit/tool/coverage: package ## Run unit tests with coverage for tool module
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log
 
-# Same implementation as test-unit/pkg but with coverage flags.
-# Coverage files from each module are merged into a single coverage-pkg.txt file.
 .ONESHELL:
 test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules only
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
+	@PKG_MODULES=$$(find pkg -name "go.mod" -type f -exec dirname {} \;); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -484,6 +514,27 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 	@find pkg -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-pkg.txt 2>/dev/null || true
 	@find pkg -name "coverage.txt" -delete 2>/dev/null || true
 
+# Same implementation as test-unit/instrumentation but with coverage flags.
+# Coverage files from each module are merged into a single coverage-instrumentation.txt file.
+.ONESHELL:
+test-unit/instrumentation/coverage: package ## Run unit tests with coverage for instrumentation modules only
+	@echo "Running instrumentation unit tests with coverage..."
+	set -euo pipefail
+	rm -f ./gotest-unit-instrumentation.log
+	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	for moddir in $$INSTR_MODULES; do \
+		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
+			echo "Skipping $$moddir (no tests)..."; \
+			continue; \
+		fi; \
+		echo "Testing $$moddir with coverage..."; \
+		(cd "$$moddir" && go mod tidy); \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
+	done
+	@echo "Merging coverage files into coverage-instrumentation.txt..."
+	@echo "mode: atomic" > coverage-instrumentation.txt
+	@find instrumentation -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-instrumentation.txt 2>/dev/null || true
+	@find instrumentation -name "coverage.txt" -delete 2>/dev/null || true
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
@@ -572,7 +623,7 @@ clean: ## Clean build artifacts
 	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log \) -delete
+	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-unit-instrumentation.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log \) -delete
 
 .ONESHELL:
 tidy/test-apps: ## Run go mod tidy in all test app modules

@@ -114,7 +114,7 @@ jobs:
 
             comment += '**How to Update** (if desired):\n';
             comment += '1. Review the changes above to see if they\'re relevant to your use case\n';
-            comment += '2. Update Go imports in `pkg/instrumentation/**/semconv/` to the new semconv version\n';
+            comment += '2. Update Go imports in `instrumentation/**/semconv/` to the new semconv version\n';
             comment += '3. Update the version in `.semconv-version` file\n';
             comment += '4. Run `make registry-check` locally to validate\n\n';
 
