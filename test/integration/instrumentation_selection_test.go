@@ -21,6 +21,7 @@ import (
 
 func TestExplicitInstrumentationSelection(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "ginnethttp", "go", "build", "-a")
 
 	// Verify .otelc-build/matched.json only contains net/http but not gin instrumentation:
 	matched := filepath.Join("../", "apps", "ginnethttp", ".otelc-build", "matched.json")
@@ -31,12 +32,12 @@ func TestExplicitInstrumentationSelection(t *testing.T) {
 	require.Contains(
 		t,
 		string(matchedData),
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server",
+		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server",
 	)
 	require.NotContains(
 		t,
 		string(matchedData),
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/gin/server",
+		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/gin-gonic/gin",
 	)
 
 	f := testutil.NewTestFixture(t)

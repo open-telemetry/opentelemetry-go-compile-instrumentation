@@ -17,3 +17,5 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 )
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../

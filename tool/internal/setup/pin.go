@@ -184,7 +184,7 @@ type yamlRule struct {
 func loadMinimalRules() (map[string][]yamlRule, error) {
 	loaded := make(map[string][]yamlRule)
 
-	rulesRoot := filepath.Join(util.GetBuildTempDir(), unzippedPkgDir)
+	rulesRoot := filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
 	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -417,7 +417,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 		return nil, ex.Wrapf(findDepsErr, "finding dependencies")
 	}
 
-	extractErr := extractOtelcPkg()
+	extractErr := extractBundle()
 	if extractErr != nil {
 		return nil, ex.Wrapf(extractErr, "extracting otelc package")
 	}

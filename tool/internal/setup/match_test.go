@@ -594,7 +594,7 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	// Re-reading the same file must still dedupe the entry as a unit: the
 	// group is replaced, not appended, so the count stays at 2 (not 4).
 	sp = newTestSetupPhase()
-	require.NoError(t, extractOtelcPkg())
+	require.NoError(t, extractBundle())
 	sp.ruleConfig = p + "," + p
 
 	rules, err = sp.loadRules(t.Context(), nil)

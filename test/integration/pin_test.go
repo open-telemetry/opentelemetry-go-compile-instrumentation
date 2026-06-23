@@ -30,8 +30,21 @@ func copyTestApp(t *testing.T, app string) string {
 	src := filepath.Join("../", "apps", app)
 	dst := filepath.Join(t.TempDir(), app)
 
+	absRepoPath, err := filepath.Abs("../..")
+	require.NoError(t, err)
+
 	require.NoError(t, filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		require.NoError(t, err)
+		if err != nil {
+			return nil
+		}
+
+		base := filepath.Base(path)
+		if base == ".otelc-build" {
+			return filepath.SkipDir
+		}
+		if base == toolFileCanonical {
+			return nil
+		}
 
 		rel, relErr := filepath.Rel(src, path)
 		require.NoError(t, relErr)
@@ -41,13 +54,26 @@ func copyTestApp(t *testing.T, app string) string {
 			return os.MkdirAll(target, info.Mode())
 		}
 
-		in, openErr := os.Open(path)
-		require.NoError(t, openErr)
-		defer in.Close()
-
 		out, openTargetErr := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
 		require.NoError(t, openTargetErr)
 		defer out.Close()
+
+		if filepath.Base(path) == "go.mod" {
+			data, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+
+			content := string(data)
+			repoPathSlash := filepath.ToSlash(absRepoPath)
+			content = strings.ReplaceAll(content, "../../../", repoPathSlash+"/")
+			content = strings.ReplaceAll(content, repoPathSlash+"//", repoPathSlash+"/")
+
+			_, writeErr := out.Write([]byte(content))
+			return writeErr
+		}
+
+		in, openErr := os.Open(path)
+		require.NoError(t, openErr)
+		defer in.Close()
 
 		_, err = io.Copy(out, in)
 		return err
@@ -66,7 +92,10 @@ func runPin(t *testing.T, workDir string, args ...string) (string, error) {
 	cmd.Dir = workDir
 
 	out, outErr := cmd.CombinedOutput()
-	return string(out), outErr
+	if outErr != nil {
+		return string(out), fmt.Errorf("%w: %s", outErr, string(out))
+	}
+	return string(out), nil
 }
 
 func writeToolFile(t *testing.T, path string, imports ...string) {
@@ -147,7 +176,7 @@ func TestPin(t *testing.T) {
 		require.Contains(t, string(content), util.OtelcToolCmdRoot)
 
 		// Ensure http integration is imported in the tool file.
-		require.Contains(t, string(content), util.OtelcPkgRoot+"/instrumentation/nethttp/client")
+		require.Contains(t, string(content), util.OtelcRoot+"/instrumentation/net/http/client")
 
 		goMod, goModErr := os.ReadFile(filepath.Join(workDir, "go.mod"))
 		require.NoError(t, goModErr)
@@ -156,7 +185,7 @@ func TestPin(t *testing.T) {
 		require.Contains(t, string(goMod), util.OtelcRoot)
 
 		// Ensure the http integration is within the go.mod file, which ensures it is pinned as a dependency.
-		require.Contains(t, string(goMod), util.OtelcPkgRoot+"/instrumentation/nethttp/client")
+		require.Contains(t, string(goMod), util.OtelcRoot+"/instrumentation/net/http/client")
 	})
 
 	t.Run("prunes invalid imports", func(t *testing.T) {

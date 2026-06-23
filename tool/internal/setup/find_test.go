@@ -5,9 +5,11 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -370,6 +372,12 @@ echo nothing useful
 			) *exec.Cmd {
 				assert.Equal(t, "go", name)
 				assert.Equal(t, tt.expectedGoCmd, args)
+
+				if runtime.GOOS == "windows" {
+					escaped := strings.ReplaceAll(tt.buildPlan, "'", "''")
+					script := fmt.Sprintf("[Console]::Error.Write('%s'); if ($%t) { exit 1 }", escaped, tt.buildFails)
+					return exec.Command("powershell", "-Command", script)
+				}
 
 				script := "cat <<'EOF' >&2\n" + tt.buildPlan + "\nEOF\n"
 				if tt.buildFails {

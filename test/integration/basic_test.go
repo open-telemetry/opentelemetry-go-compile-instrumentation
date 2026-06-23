@@ -7,8 +7,10 @@ package test
 
 import (
 	"encoding/json"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,6 +21,12 @@ import (
 
 func TestBasic(t *testing.T) {
 	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		if _, err := exec.LookPath("gcc"); err != nil {
+			t.Skip("Skipping TestBasic on Windows because gcc was not found in PATH (CGO is required)")
+		}
+	}
 
 	appsDir := filepath.Join("..", "..", "demo", "app")
 	testutil.Build(t, appsDir, "basic", "go", "build", "-a")

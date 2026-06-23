@@ -2,19 +2,21 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/a
 
 go 1.25.0
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server => ../../../pkg/instrumentation/nethttp/server
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server => ../../../instrumentation/net/http/server
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client => ../../../pkg/instrumentation/nethttp/client
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client => ../../../instrumentation/net/http/client
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../pkg
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared => ../../../pkg/instrumentation/shared
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../pkg/runtime
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => ../../../instrumentation
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../
 
 require (
 	github.com/gin-gonic/gin v1.10.0
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server v0.0.0-00010101000000-000000000000
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server v0.0.0
 )
 
 require (
@@ -28,8 +30,9 @@ require (
 	github.com/grafana/regexp v0.0.0-20240518133315-a468a5bfb3bc // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation v0.0.0-00010101000000-000000000000 // indirect
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-20251208011108-ac0fa4a155e3 // indirect
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared v0.0.0-00010101000000-000000000000 // indirect
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime v0.0.0-00010101000000-000000000000 // indirect
 	github.com/prometheus/client_golang v1.23.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.65.0 // indirect

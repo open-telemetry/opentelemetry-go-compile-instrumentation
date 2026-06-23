@@ -140,7 +140,7 @@ func extractGZip(bundleReader io.Reader, targetDir string) error {
 	return nil
 }
 
-func extract() error {
+func extractBundle() error {
 	// Extract the instrumentation code to the build temp directory
 	// for future instrumentation phase
 	return extractGZip(data.GetBundleReader(), util.GetBuildTempDir())

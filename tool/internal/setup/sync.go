@@ -138,8 +138,8 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	for m := range modPaths {
 		if path, isEmbeddedPkg := strings.CutPrefix(m, util.OtelcPkgRoot+"/"); isEmbeddedPkg {
 			modules[m] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, path)
-		} else if path, isEmbeddedInst := strings.CutPrefix(m, util.OtelcRoot+"/instrumentation/"); isEmbeddedInst {
-			modules[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
+		} else if instPath, isEmbeddedInst := strings.CutPrefix(m, util.OtelcRoot+"/instrumentation/"); isEmbeddedInst {
+			modules[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, instPath)
 		} else {
 			modules[m] = ""
 		}
