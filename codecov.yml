@@ -1,0 +1,25 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Codecov configuration.
+# https://docs.codecov.com/docs/codecov-yaml
+
+coverage:
+  status:
+    project:
+      # tool/ module tree
+      tool:
+        flags:
+          - tool
+        target: 70%
+        # informational: true — report-only; does not block CI or PR merges.
+        # Flip to false once tool/ consistently meets the 70% target.
+        informational: true
+      # pkg/ module tree
+      pkg:
+        flags:
+          - pkg
+        target: 70%
+        # informational: true — report-only; does not block CI or PR merges.
+        # Flip to false once pkg/ consistently meets the 70% target.
+        informational: true

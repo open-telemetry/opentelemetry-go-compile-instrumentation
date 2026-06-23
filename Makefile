@@ -484,6 +484,7 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 	@find pkg -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-pkg.txt 2>/dev/null || true
 	@find pkg -name "coverage.txt" -delete 2>/dev/null || true
 
+
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
 test-integration: build build-demo
