@@ -6,12 +6,12 @@
 
 //go:build tools
 
-//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd pin --generate
+//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc pin --generate
 package tools
 
 // This app only uses net/http instrumentation, and excludes gin instrumentation.
 import (
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
 
 	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server"
 )

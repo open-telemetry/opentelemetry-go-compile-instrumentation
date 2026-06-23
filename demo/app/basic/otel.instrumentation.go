@@ -9,7 +9,7 @@
 package tools
 
 import (
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
 
 	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 )

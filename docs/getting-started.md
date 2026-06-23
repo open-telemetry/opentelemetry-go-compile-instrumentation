@@ -49,7 +49,7 @@ The file follows the standard Go `tools.go` pattern and contains blank imports f
 package tools
 
 import (
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
 
 	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client"
 	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server"

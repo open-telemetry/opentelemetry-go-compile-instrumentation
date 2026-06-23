@@ -3,11 +3,11 @@
 
 //go:build tools
 
-//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd pin --generate --prune=false --validate
+//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc pin --generate --prune=false --validate
 package tools
 
 import (
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
 
 	_ "example.com/instrumentation/bar"
 	_ "example.com/instrumentation/foo"
