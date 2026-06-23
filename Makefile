@@ -18,7 +18,7 @@ SHELL := /bin/bash
 # Constant variables
 BINARY_NAME := otelc
 PLATFORMS := darwin/amd64 linux/amd64 windows/amd64 darwin/arm64 linux/arm64
-TOOL_DIR := tool/cmd
+TOOL_DIR := tool/cmd/otelc
 INST_PKG_GZIP = otelc-pkg.gz
 INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
