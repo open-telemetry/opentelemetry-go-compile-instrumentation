@@ -122,6 +122,7 @@ func BuildAppAt(ctx context.Context, appDir string) error {
 func CleanupAppAt(appDir string) {
 	_ = os.Remove(filepath.Join(appDir, appOutputName()))
 }
+
 // Run runs the application and returns the output. It waits for the
 // application to complete. If env is nil, the parent process env is used.
 func Run(t *testing.T, appsDir, app string, env []string, args ...string) string {

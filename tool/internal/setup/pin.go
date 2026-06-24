@@ -366,13 +366,66 @@ func collectToolFileImports(toolFile string, prunedImports map[string]bool) (map
 	return imports, nil
 }
 
+func handleInstrumentationVisit(
+	ctx context.Context,
+	toolFiles map[string]map[string]bool,
+	opts PinOptions,
+	v *InstrumentationVisit,
+) (bool, error) {
+	logger := util.LoggerFromContext(ctx)
+	pruneImport := func(reason error) {
+		logger.WarnContext(ctx, "invalid instrumentation import",
+			"importPath", v.ImportPath,
+			"toolFile", v.ToolFile,
+			"reason", reason)
+		_, _ = fmt.Fprintf(
+			os.Stderr,
+			"Invalid instrumentation import %s from %s: %v\n",
+			v.ImportPath,
+			v.ToolFile,
+			reason,
+		)
+
+		if _, isRootToolFile := toolFiles[v.ToolFile]; opts.Prune && isRootToolFile {
+			toolFiles[v.ToolFile][v.ImportPath] = true
+		}
+	}
+
+	if v.Error != nil {
+		if errors.Is(v.Error, ErrNotInstrumentation) {
+			pruneImport(v.Error)
+			return false, nil
+		}
+
+		// Environment/module resolution problem.
+		return false, v.Error
+	}
+
+	// Also validate that all rule files in the import are valid.
+	if opts.Validate {
+		for _, ruleFile := range v.Config.RuleFiles {
+			content, readErr := os.ReadFile(ruleFile)
+			if readErr != nil {
+				pruneImport(ex.Wrapf(readErr, "reading %s", ruleFile))
+				return false, nil
+			}
+
+			if _, parseErr := parseRuleFromYaml(content); parseErr != nil {
+				pruneImport(parseErr)
+				return false, nil
+			}
+		}
+	}
+
+	// Always recurse into nested tool files when they exist.
+	return true, nil
+}
+
 func updatePinnedProjects(
 	ctx context.Context,
 	toolFiles map[string]map[string]bool,
 	opts PinOptions,
 ) (*PinResult, error) {
-	logger := util.LoggerFromContext(ctx)
-
 	for toolFile, prunedImports := range toolFiles {
 		imports, collectErr := collectToolFileImports(toolFile, prunedImports)
 		if collectErr != nil {
@@ -388,52 +441,7 @@ func updatePinnedProjects(
 		ctx,
 		slices.Collect(maps.Keys(toolFiles)),
 		func(v *InstrumentationVisit) (bool, error) {
-			pruneImport := func(reason error) {
-				logger.WarnContext(ctx, "invalid instrumentation import",
-					"importPath", v.ImportPath,
-					"toolFile", v.ToolFile,
-					"reason", reason)
-				_, _ = fmt.Fprintf(
-					os.Stderr,
-					"Invalid instrumentation import %s from %s: %v\n",
-					v.ImportPath,
-					v.ToolFile,
-					reason,
-				)
-
-				if _, isRootToolFile := toolFiles[v.ToolFile]; opts.Prune && isRootToolFile {
-					toolFiles[v.ToolFile][v.ImportPath] = true
-				}
-			}
-
-			if v.Error != nil {
-				if errors.Is(v.Error, ErrNotInstrumentation) {
-					pruneImport(v.Error)
-					return false, nil
-				}
-
-				// Environment/module resolution problem.
-				return false, v.Error
-			}
-
-			// Also validate that all rule files in the import are valid.
-			if opts.Validate {
-				for _, ruleFile := range v.Config.RuleFiles {
-					content, readErr := os.ReadFile(ruleFile)
-					if readErr != nil {
-						pruneImport(ex.Wrapf(readErr, "reading %s", ruleFile))
-						return false, nil
-					}
-
-					if _, parseErr := parseRuleFromYaml(content); parseErr != nil {
-						pruneImport(parseErr)
-						return false, nil
-					}
-				}
-			}
-
-			// Always recurse into nested tool files when they exist.
-			return true, nil
+			return handleInstrumentationVisit(ctx, toolFiles, opts, v)
 		},
 	)
 	if walkErr != nil {
