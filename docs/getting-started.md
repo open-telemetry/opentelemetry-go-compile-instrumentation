@@ -6,7 +6,7 @@ No manual code changes required.
 ## Why Use This Tool?
 
 - **Zero-code instrumentation** - Automatically instrument your entire application without modifying source code
-- **Third-party library support** - Instrument dependencies and libraries you don't control
+- **Third-party library support** - Instrument dependencies and libraries you don't control (HTTP, gRPC, database/sql, Redis, OpenAI, and more)
 - **Complete decoupling** - Keep your codebase free from instrumentation concerns
 - **Flexible deployment** - Integrate at development time or in your CI/CD pipeline
 
@@ -46,6 +46,21 @@ The tool uses compile-time instrumentation through:
 3. **Custom Toolchain Integration** - Intercepts compilation using `-toolexec` flag
 
 This approach provides dynamic instrumentation without runtime overhead or invasive code modifications.
+
+## Supported Libraries
+
+The following libraries are automatically instrumented:
+
+| Library | Semantic Conventions |
+|---|---|
+| `net/http` (client & server) | HTTP spans |
+| `google.golang.org/grpc` (client & server) | gRPC/RPC spans |
+| `database/sql` | DB client spans |
+| `github.com/gin-gonic/gin` | HTTP server spans |
+| `github.com/redis/go-redis/v9` | Redis DB spans |
+| `go.mongodb.org/mongo-driver` | MongoDB DB spans |
+| `k8s.io/client-go` | K8s resource spans |
+| `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
 
 ## Learn More
 
