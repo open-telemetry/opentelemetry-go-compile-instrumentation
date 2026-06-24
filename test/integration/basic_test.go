@@ -18,10 +18,11 @@ import (
 )
 
 func TestBasic(t *testing.T) {
-	appDir := filepath.Join("..", "..", "demo", "app", "basic")
+	t.Parallel()
 
-	testutil.Build(t, appDir, "go", "build", "-a")
-	output := testutil.Run(t, appDir)
+	appsDir := filepath.Join("..", "..", "demo", "app")
+	testutil.Build(t, appsDir, "basic", "go", "build", "-a")
+	output := testutil.Run(t, appsDir, "basic", nil)
 	expect := []string{
 		"Every1",
 		"Every3",
@@ -116,7 +117,7 @@ func verifyExportedHelloWorldSpan(t *testing.T, output string) {
 		"expected hello-world span ID to be non-zero",
 	)
 	require.Equal(t,
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld",
+		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic",
 		span.InstrumentationScope.Name,
 	)
 

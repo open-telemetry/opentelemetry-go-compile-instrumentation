@@ -25,6 +25,12 @@ var (
 
 func init() {
 	sql.Register("testdb", &testDriver{})
+	sql.Register("mysql", &testDriver{})
+	sql.Register("postgres", &testDriver{})
+	sql.Register("postgresql", &testDriver{})
+	sql.Register("sqlserver", &testDriver{})
+	sql.Register("mssql", &testDriver{})
+	sql.Register("sqlite3", &testDriver{})
 }
 
 func main() {

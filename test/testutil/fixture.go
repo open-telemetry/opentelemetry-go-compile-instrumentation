@@ -5,7 +5,8 @@ package testutil
 
 import (
 	"os"
-	"path/filepath"
+	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -16,10 +17,14 @@ import (
 type TestFixture struct {
 	t         *testing.T
 	collector *Collector
-	appsDir   string // Directory for self-contained test apps (test/apps/)
 
 	serviceName   string
 	skipCollector bool
+
+	// env holds per-fixture environment overrides (KEY=VALUE form). Applied
+	// when spawning processes via f.Start/f.Run so parallel tests do not
+	// race on os.Environ via t.Setenv.
+	env []string
 }
 
 type TestFixtureOption func(*TestFixture)
@@ -36,9 +41,10 @@ func WithoutCollector() TestFixtureOption {
 	}
 }
 
-// NewTestFixture creates a new test fixture.
-// It automatically starts the collector and sets up OTEL env vars.
-// Tests can override env vars after calling this if needed.
+// NewTestFixture creates a new test fixture. It starts a collector (unless
+// disabled) and configures OTEL env vars that will be applied to processes
+// spawned via this fixture. The env is fixture-local — it does not touch
+// os.Environ, which keeps the fixture safe for use under t.Parallel().
 func NewTestFixture(t *testing.T, opts ...TestFixtureOption) *TestFixture {
 	f := &TestFixture{
 		t:           t,
@@ -49,27 +55,47 @@ func NewTestFixture(t *testing.T, opts ...TestFixtureOption) *TestFixture {
 		opt(f)
 	}
 
-	pwd, err := os.Getwd()
-	require.NoError(t, err)
-	f.appsDir = filepath.Join(pwd, "..", "apps")
-
-	// Start collector unless skipped
 	if !f.skipCollector {
 		f.collector = StartCollector(t)
 
-		// Configure OTEL env vars (can be overridden by test after this)
-		// Clear signal-specific endpoints to ensure OTEL_EXPORTER_OTLP_ENDPOINT takes precedence
-		t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
-		t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
-		t.Setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "")
-		t.Setenv("OTEL_SERVICE_NAME", f.serviceName)
-		t.Setenv("OTEL_TRACES_EXPORTER", "otlp")
-		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", f.collector.URL)
-		t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
-		t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "true")
+		// Clear signal-specific endpoints so OTEL_EXPORTER_OTLP_ENDPOINT wins
+		f.SetEnv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+		f.SetEnv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
+		f.SetEnv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "")
+		f.SetEnv("OTEL_SERVICE_NAME", f.serviceName)
+		f.SetEnv("OTEL_TRACES_EXPORTER", "otlp")
+		f.SetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", f.collector.URL)
+		f.SetEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+		f.SetEnv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "true")
 	}
 
 	return f
+}
+
+// SetEnv adds (or replaces) an environment override for processes spawned by
+// this fixture. Unlike t.Setenv it does not modify os.Environ, so it is safe
+// under t.Parallel().
+func (f *TestFixture) SetEnv(key, value string) {
+	prefix := key + "="
+	entry := prefix + value
+	for i, e := range f.env {
+		if strings.HasPrefix(e, prefix) {
+			f.env[i] = entry
+			return
+		}
+	}
+	f.env = append(f.env, entry)
+}
+
+// Env returns the full environment to pass to a spawned subprocess:
+// os.Environ() merged with the fixture's overrides (overrides win on dup keys
+// because exec.Cmd respects the last occurrence).
+func (f *TestFixture) Env() []string {
+	base := os.Environ()
+	out := make([]string, 0, len(base)+len(f.env))
+	out = append(out, base...)
+	out = append(out, f.env...)
+	return out
 }
 
 // Traces returns the collected traces for assertions.
@@ -82,47 +108,38 @@ func (f *TestFixture) CollectorURL() string {
 	return f.collector.URL
 }
 
-// resolveAppPath converts an app name like "httpserver" to full path in test/apps/.
-func (f *TestFixture) resolveAppPath(appName string) string {
-	return filepath.Join(f.appsDir, appName)
-}
-
-// Build builds a test application from test/apps/ with the instrumentation tool.
-func (f *TestFixture) Build(appName string) {
-	Build(f.t, f.resolveAppPath(appName), "go", "build", "-a")
-}
-
 // Server represents a running server process.
 type Server struct {
 	t       *testing.T
 	appPath string
+
+	*exec.Cmd
 }
 
-// Start starts a test application from test/apps/ and waits for it to be ready.
+// Start starts a test application from test/apps/. The binary is
+// expected to be built using Build.
 func (f *TestFixture) Start(appName string, args ...string) *Server {
-	fullPath := f.resolveAppPath(appName)
-	Start(f.t, fullPath, args...)
-
-	return &Server{
-		t:       f.t,
-		appPath: appName,
-	}
+	cmd := Start(f.t, "", appName, f.Env(), args...)
+	return &Server{t: f.t, appPath: appName, Cmd: cmd}
 }
 
-// Run runs a test application from test/apps/ and waits for it to complete.
+// Run runs a application and returns its output. The binary is
+// expected to be built using Build.
 func (f *TestFixture) Run(appName string, args ...string) string {
-	return Run(f.t, f.resolveAppPath(appName), args...)
+	return Run(f.t, "", appName, f.Env(), args...)
 }
 
-// BuildAndStart builds and starts a test application
+// BuildAndStart builds the named app and then starts it. Kept for e2e test
+// backward compatibility. Integration tests build applications once and reuse them.
 func (f *TestFixture) BuildAndStart(appName string, args ...string) *Server {
-	f.Build(appName)
+	Build(f.t, "", appName, "go", "build", "-a")
 	return f.Start(appName, args...)
 }
 
-// BuildAndRun builds and runs a test application
+// BuildAndRun builds the named app and runs it, returning its output. Kept for
+// e2e test backward compatibility. Integration tests build applications once and reuse them.
 func (f *TestFixture) BuildAndRun(appName string, args ...string) string {
-	f.Build(appName)
+	Build(f.t, "", appName, "go", "build", "-a")
 	return f.Run(appName, args...)
 }
 

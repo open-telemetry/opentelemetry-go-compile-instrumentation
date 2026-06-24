@@ -19,6 +19,9 @@ import (
 )
 
 func TestGRPCClient(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "grpcclient", "go", "build", "-a")
+
 	testCases := []struct {
 		name           string
 		extraArgs      []string
@@ -45,7 +48,7 @@ func TestGRPCClient(t *testing.T) {
 			server := StartGRPCServer(t)
 
 			args := append([]string{"-addr=" + server.Addr}, tc.extraArgs...)
-			output := f.BuildAndRun("grpcclient", args...)
+			output := f.Run("grpcclient", args...)
 
 			require.Contains(t, output, tc.expectedOutput)
 			span := f.RequireSingleSpan()

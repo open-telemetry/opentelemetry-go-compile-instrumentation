@@ -1,0 +1,17 @@
+# Same rule as the match fixture: instrument Connect only in the driver
+# registration file (init + Driver). This source is a helper file without
+# those markers, so the all-of filter gates the rule out and the file is
+# left unchanged.
+instrument_driver_connect:
+  target: main
+  where:
+    func: Connect
+    file:
+      all-of:
+        - has_func: init
+        - has_struct: Driver
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        after: AfterConnect
+        path: testdata/golden/all-of-filter-no-match

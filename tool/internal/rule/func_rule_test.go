@@ -152,3 +152,72 @@ param: string
 		})
 	}
 }
+
+// ruleIdentity builds a func rule the way the setup phase does — marshal the
+// flat fields and run them through NewInstFuncRule — then returns its Identity.
+// This exercises the real path so the identity is computed exactly as in
+// production.
+func ruleIdentity(t *testing.T, name string, flat map[string]any) string {
+	t.Helper()
+	data, err := yaml.Marshal(flat)
+	require.NoError(t, err)
+	r, err := NewInstFuncRule(data, name)
+	require.NoError(t, err)
+	return r.Identity()
+}
+
+// TestInstFuncRule_Identity pins the content-derived identity used to generate
+// trampoline and HookContext names. It must (a) distinguish separate modifiers
+// of one do sequence, (b) never collide a rule named "<base>#<n>" with "<base>"
+// at do position n (issue #560), (c) collapse genuinely duplicate rules to one
+// identity (de-duplication), and (d) include signature filters.
+func TestInstFuncRule_Identity(t *testing.T) {
+	base := func() map[string]any {
+		return map[string]any{"target": "main", "func": "Func1", "path": "example.com/h"}
+	}
+
+	// (a) Separate modifiers of one do sequence differ by content.
+	before := base()
+	before["before"] = "H1"
+	after := base()
+	after["after"] = "H2"
+	assert.NotEqual(t, ruleIdentity(t, "multi_hook", before), ruleIdentity(t, "multi_hook", after),
+		"distinct do-sequence modifiers must have distinct identities")
+
+	// (b) #560: "my_hook" do[1] vs a rule literally named "my_hook#1" at do[0].
+	// Under the old "name#index" string identity these collided; content-derived
+	// identities do not, because the rule bodies differ.
+	myHookDo1 := base()
+	myHookDo1["after"] = "H1After"
+	namedClash := base()
+	namedClash["before"] = "H2Before"
+	namedClash["name"] = "my_hook#1"
+	assert.NotEqual(t, ruleIdentity(t, "my_hook", myHookDo1), ruleIdentity(t, "my_hook_1", namedClash),
+		"#560: a do-sequence modifier must not collide with a like-named rule")
+
+	// (c) De-duplication: identical content under different names is one identity.
+	dupA := base()
+	dupA["before"] = "H1"
+	dupB := base()
+	dupB["before"] = "H1"
+	assert.Equal(t, ruleIdentity(t, "alpha", dupA), ruleIdentity(t, "beta", dupB),
+		"identical rule content must share an identity regardless of name")
+
+	// (d) Signature filters participate in identity (and exercise the signature
+	// branch of Identity).
+	sigArgsCtx := map[string]any{"args": []any{"context.Context"}, "returns": []any{"error"}}
+	sigArgsStr := map[string]any{"args": []any{"string"}, "returns": []any{"error"}}
+	sigA := base()
+	sigA["before"] = "H1"
+	sigA["signature"] = sigArgsCtx
+	sigB := base()
+	sigB["before"] = "H1"
+	sigB["signature"] = sigArgsStr
+	assert.NotEqual(t, ruleIdentity(t, "sig", sigA), ruleIdentity(t, "sig", sigB),
+		"rules differing only in signature filter must have distinct identities")
+	sigC := base()
+	sigC["before"] = "H1"
+	sigC["signature"] = map[string]any{"args": []any{"context.Context"}, "returns": []any{"error"}}
+	assert.Equal(t, ruleIdentity(t, "sig", sigA), ruleIdentity(t, "sig", sigC),
+		"identical signature filters must yield identical identity")
+}

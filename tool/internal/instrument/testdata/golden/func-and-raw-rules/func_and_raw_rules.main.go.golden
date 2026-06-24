@@ -8,9 +8,9 @@ import _ "unsafe"
 func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	_ = 456
 	//line <generated>:1
-	if hookContext3460655653, _ := OtelBeforeTrampoline_Func13460655653(&p1, &p2); false {
+	if hookContext1981176556, _ := OtelBeforeTrampoline_Func11981176556(&p1, &p2); false {
 	} else {
-		defer OtelAfterTrampoline_Func13460655653(hookContext3460655653, &_unnamedRetVal0, &_unnamedRetVal1)
+		defer OtelAfterTrampoline_Func11981176556(hookContext1981176556, &_unnamedRetVal0, &_unnamedRetVal1)
 	}
 	//line main.go:7:2
 	println("Hello, World!")
@@ -19,7 +19,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 }
 
 //line <generated>:1
-type HookContextImpl3460655653 struct {
+type HookContextImpl1981176556 struct {
 	params      []interface{}
 	returnVals  []interface{}
 	skipCall    bool
@@ -28,25 +28,25 @@ type HookContextImpl3460655653 struct {
 	packageName string
 }
 
-func (c *HookContextImpl3460655653) SetSkipCall(skip bool)    { c.skipCall = skip }
-func (c *HookContextImpl3460655653) IsSkipCall() bool         { return c.skipCall }
-func (c *HookContextImpl3460655653) SetData(data interface{}) { c.data = data }
-func (c *HookContextImpl3460655653) GetData() interface{}     { return c.data }
-func (c *HookContextImpl3460655653) GetKeyData(key string) interface{} {
+func (c *HookContextImpl1981176556) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl1981176556) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl1981176556) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl1981176556) GetData() interface{}     { return c.data }
+func (c *HookContextImpl1981176556) GetKeyData(key string) interface{} {
 	if c.data == nil {
 		return nil
 	}
 	return c.data.(map[string]interface{})[key]
 }
 
-func (c *HookContextImpl3460655653) SetKeyData(key string, val interface{}) {
+func (c *HookContextImpl1981176556) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
 
-func (c *HookContextImpl3460655653) HasKeyData(key string) bool {
+func (c *HookContextImpl1981176556) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
 	}
@@ -54,7 +54,7 @@ func (c *HookContextImpl3460655653) HasKeyData(key string) bool {
 	return ok
 }
 
-func (c *HookContextImpl3460655653) GetParam(idx int) interface{} {
+func (c *HookContextImpl1981176556) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
 		return *(c.params[0].(*string))
@@ -64,7 +64,7 @@ func (c *HookContextImpl3460655653) GetParam(idx int) interface{} {
 	return nil
 }
 
-func (c *HookContextImpl3460655653) SetParam(idx int, val interface{}) {
+func (c *HookContextImpl1981176556) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
 		return
@@ -77,7 +77,7 @@ func (c *HookContextImpl3460655653) SetParam(idx int, val interface{}) {
 	}
 }
 
-func (c *HookContextImpl3460655653) GetReturnVal(idx int) interface{} {
+func (c *HookContextImpl1981176556) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
 		return *(c.returnVals[0].(*float32))
@@ -87,7 +87,7 @@ func (c *HookContextImpl3460655653) GetReturnVal(idx int) interface{} {
 	return nil
 }
 
-func (c *HookContextImpl3460655653) SetReturnVal(idx int, val interface{}) {
+func (c *HookContextImpl1981176556) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
 		return
@@ -99,13 +99,13 @@ func (c *HookContextImpl3460655653) SetReturnVal(idx int, val interface{}) {
 		*(c.returnVals[1].(*error)) = val.(error)
 	}
 }
-func (c *HookContextImpl3460655653) GetParamCount() int     { return len(c.params) }
-func (c *HookContextImpl3460655653) GetReturnValCount() int { return len(c.returnVals) }
-func (c *HookContextImpl3460655653) GetFuncName() string    { return c.funcName }
-func (c *HookContextImpl3460655653) GetPackageName() string { return c.packageName }
+func (c *HookContextImpl1981176556) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl1981176556) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl1981176556) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl1981176556) GetPackageName() string { return c.packageName }
 
 // Trampoline Template
-func OtelBeforeTrampoline_Func13460655653(param0 *string, param1 *int) (hookContext *HookContextImpl3460655653, skipCall bool) {
+func OtelBeforeTrampoline_Func11981176556(param0 *string, param1 *int) (hookContext *HookContextImpl1981176556, skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H1Before")
@@ -118,7 +118,7 @@ func OtelBeforeTrampoline_Func13460655653(param0 *string, param1 *int) (hookCont
 			}
 		}
 	}()
-	hookContext = &HookContextImpl3460655653{}
+	hookContext = &HookContextImpl1981176556{}
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
@@ -128,7 +128,7 @@ func OtelBeforeTrampoline_Func13460655653(param0 *string, param1 *int) (hookCont
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_Func13460655653(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func11981176556(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H1After")
@@ -141,7 +141,7 @@ func OtelAfterTrampoline_Func13460655653(hookContext HookContext, arg0 *float32,
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl3460655653).returnVals = []interface{}{arg0, arg1}
+	hookContext.(*HookContextImpl1981176556).returnVals = []interface{}{arg0, arg1}
 	if H1After != nil {
 		H1After(hookContext, *arg0, *arg1)
 	}

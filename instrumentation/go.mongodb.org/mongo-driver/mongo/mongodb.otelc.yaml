@@ -1,0 +1,17 @@
+mongodb_hook_connect:
+  target: go.mongodb.org/mongo-driver/mongo
+  where:
+    func: Connect
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/go.mongodb.org/mongo-driver/mongo"
+
+mongodb_hook_newclient:
+  target: go.mongodb.org/mongo-driver/mongo
+  where:
+    func: NewClient
+  do:
+    - inject_hooks:
+        before: BeforeNewClient
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/go.mongodb.org/mongo-driver/mongo"

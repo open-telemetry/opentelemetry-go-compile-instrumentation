@@ -4,9 +4,11 @@
 package rule
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -85,4 +87,52 @@ func (r *InstFuncRule) validate() error {
 		return ex.Newf("before or after must be set")
 	}
 	return nil
+}
+
+// Identity returns a content-derived key used to generate trampoline and
+// HookContext names. It is a function purely of what the rule does — its
+// target, function/receiver, before/after hooks, hook path, and signature
+// filters — never of the rule's name or its position in a do sequence.
+//
+// De-duplication: two rules that do the same thing share an identity, so they
+// collapse to a single generated artifact instead of redeclaring it. The only
+// remaining collision is between byte-identical rules, which are effectively the
+// same rule. A rule's position in a do sequence is intentionally excluded — it
+// does not change what a rule does; do-sequence order is preserved by the order
+// in which the expanded rules are applied, not by the generated name.
+//
+// Deriving the identity from content (rather than a "name#index" string) closes
+// the collision in issue #560, where a rule literally named "name#index" at
+// application index 0 rendered the same string as "name" at index N.
+//
+// When adding a field to InstFuncRule that changes the generated instrumentation,
+// include it here so the identity stays faithful to what the rule does.
+//
+// The key is built with explicit length prefixes ("len:value") instead of a
+// delimiter, so it is injective for arbitrary field content. Type-name strings
+// may legitimately contain any character — commas in function types, "|" in
+// type constraints — so no printable separator is truly reserved; the length
+// prefix marks where each value ends without relying on its content.
+func (r *InstFuncRule) Identity() string {
+	enc := func(s string) string { return strconv.Itoa(len(s)) + ":" + s }
+	encList := func(xs []string) string {
+		encs := make([]string, len(xs))
+		for i, x := range xs {
+			encs[i] = enc(x)
+		}
+		return strconv.Itoa(len(xs)) + ";" + strings.Join(encs, "")
+	}
+	encSig := func(s *FuncSignature) string {
+		if s == nil {
+			return "-" // absent: distinct from a present-but-empty signature
+		}
+		return "+" + encList(s.Args) + encList(s.Returns)
+	}
+	parts := []string{
+		enc(r.Target), enc(r.Version), enc(r.Func), enc(r.Recv),
+		enc(r.Before), enc(r.After), enc(r.Path),
+		enc(r.Result), enc(r.LastResult), enc(r.Param),
+		encSig(r.Signature), encSig(r.SignatureContains),
+	}
+	return util.CRC32(strings.Join(parts, ""))
 }

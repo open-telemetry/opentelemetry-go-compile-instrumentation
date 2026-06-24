@@ -1,0 +1,82 @@
+func1_first_match:
+  target: main
+  where:
+    func: func1
+    pattern: "^println\\(\", World!\"\\)$"
+  do:
+    - inject_code:
+        raw: "print(\"Hello\")"
+
+
+func2_inside_goroutine:
+  target: main
+  where:
+    func: func2
+    pattern: "^println\\(\"goroutine!\"\\)$"
+  do:
+    - inject_code:
+        raw: "print(\"Inside goroutine\")"
+
+func2_before_go:
+  target: main
+  where:
+    func: func2
+    pattern: "^go func\\(\\) \\{"
+  do:
+    - inject_code:
+        raw: "print(\"Before go func\")"
+
+func3_before_select:
+  target: main
+  where:
+    func: func3
+    pattern: "^select \\{"
+  do:
+    - inject_code:
+        raw: "print(\"Before select\")"
+
+func4_if_block:
+  target: main
+  where:
+    func: func4
+    pattern: "^println\\(\"IF BLOCK\"\\)$"
+  do:
+    - inject_code:
+        raw: "print(\"Inside if\")"
+
+func5_loop_match:
+  target: main
+  where:
+    func: func5
+    pattern: "^println\\(\"loop\"\\)$"
+  do:
+    - inject_code:
+        raw: "print(\"Loop hit\")"
+
+func6_multiline_statement:
+  target: main
+  where:
+    func: func6
+    pattern: "fmt\\.Println"
+  do:
+    - inject_code:
+        raw: "print(\"Multiline match\")"
+
+func7_similar_but_not_exact:
+  target: main
+  where:
+    func: func7
+    pattern: "^println\\(\"exact\"\\)$"
+  do:
+    - inject_code:
+        raw: "print(\"Exact only\")"
+
+func8_placement_after:
+  target: main
+  where:
+    func: func8
+    pattern: "^println\\(\"after this\"\\)$"
+    placement: after
+  do:
+    - inject_code:
+        raw: "print(\"Insert After\")"

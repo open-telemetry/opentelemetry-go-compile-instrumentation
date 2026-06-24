@@ -21,6 +21,9 @@ import (
 //   - otel trace SpanFromContext hook (spanFromContextOnExit reads from GLS)
 //   - net/http server instrumentation (creates the span)
 func TestOtelSDKSpanFromContext(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "otelsdk", "go", "build", "-a")
+
 	f := testutil.NewTestFixture(t)
 
 	var output string
@@ -29,7 +32,7 @@ func TestOtelSDKSpanFromContext(t *testing.T) {
 			t.Logf("otelsdk output:\n%s", output)
 		}
 	}()
-	output = f.BuildAndRun("otelsdk")
+	output = f.Run("otelsdk")
 	require.Contains(t, output, "OTEL_SDK_TEST: span valid",
 		"SpanFromContext(context.Background()) should return a valid span from GLS")
 	require.Contains(t, output, "traceID=")
