@@ -22,7 +22,7 @@ import (
 // calls rebuild every app after the bump.
 func TestBumpAppsToLatest(t *testing.T) {
 	appsRoot := filepath.Join("..", "apps")
-	rulesRoot := filepath.Join("..", "..", "pkg", "instrumentation")
+	rulesRoot := filepath.Join("..", "..", "instrumentation")
 	targets := testutil.InstrumentedTargets(t, rulesRoot)
 
 	entries, err := os.ReadDir(appsRoot)

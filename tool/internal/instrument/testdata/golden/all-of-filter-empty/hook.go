@@ -6,11 +6,11 @@ package testdata
 import (
 	_ "unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
 )
 
-func BeforeOpen(ctx inst.HookContext, dsn string) {
+func BeforeOpen(ctx hook.HookContext, dsn string) {
 	println("BeforeOpen")
 }
 
-func AfterOpen(ctx inst.HookContext, r1 error) {}
+func AfterOpen(ctx hook.HookContext, r1 error) {}

@@ -39,8 +39,8 @@ Use this convention when a testcase exercises call rules that reference wrapper 
 > [!IMPORTANT]
 > **When to write an integration test.**
 >
-> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `pkg/instrumentation/basic/` and validates the foundational hook machinery that all other instrumentations rely on.
-> - **Instrumentation package changes.** Every package in `pkg/instrumentation/` must have a corresponding integration test. If you add or modify a hook, there should be an integration test that builds an instrumented binary and asserts on the exported spans for that component.
+> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `instrumentation/basic/` and validates the foundational hook machinery that all other instrumentations rely on.
+> - **Instrumentation package changes.** Every package in `instrumentation/` must have a corresponding integration test. If you add or modify a hook, there should be an integration test that builds an instrumented binary and asserts on the exported spans for that component.
 
 Integration tests build real binaries with the `otelc` tool and run them against **in-process** dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
 
@@ -140,7 +140,7 @@ CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (
 
 A failure means that the latest release of an upstream library introduced a **compile-time API break** that is incompatible with the current instrumentation hook. The remediation is:
 
-1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file (e.g. change the version field from `v1.2.3` to `v1.2.3,v4.5.6`).
+1. Cap the existing rule's version range in the relevant `instrumentation/.../*.yaml` file (e.g. change the version field from `v1.2.3` to `v1.2.3,v4.5.6`).
 2. Open a new rule entry covering `v4.5.6,` and implement the updated hook.
 
 ## LatestLibRun Tests
@@ -156,7 +156,7 @@ A failure means that the latest release of an upstream library introduced a **co
 
 A failure means that the latest release of an upstream library introduced a **runtime behavior change**, for example a removed function, a changed signature, or a dropped instrumentation hook point that breaks existing span assertions. The remediation is:
 
-1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file.
+1. Cap the existing rule's version range in the relevant `instrumentation/.../*.yaml` file.
 2. Open a new rule entry covering the new version range and update the hook implementation.
 3. Close the auto-opened `latestlibrun-failure` issue once the fix lands on `main`.
 
