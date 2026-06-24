@@ -247,9 +247,14 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 		}
 		return true
 	}
+	// not is unary: it negates its single inner predicate (mirrors setup.Not).
+	if def.Not != nil {
+		return !fileFilterMatches(t, def.Not, tree)
+	}
 	switch {
 	case def.HasFunc != "":
-		return ast.FindFuncDecl(tree, def.HasFunc, def.HasRecv) != nil
+		_, ok, _ := ast.FindFuncDecl(tree, def)
+		return ok
 	case def.HasStruct != "":
 		return ast.FindStructDecl(tree, def.HasStruct) != nil
 	default:

@@ -1,7 +1,7 @@
 *.log
 opentelemetry-go-compile-instrumentation
-otelc
-otelc.exe
+/otelc
+/otelc.exe
 demo/basic/basic
 .idea
 tmp
@@ -11,7 +11,7 @@ tmp
 demo/demo
 
 otelc.runtime.go
-otelc-pkg.gz
+otelc-bundle.tgz
 pkg_temp
 coverage.txt
 

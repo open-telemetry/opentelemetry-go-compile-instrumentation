@@ -39,15 +39,17 @@ Use this convention when a testcase exercises call rules that reference wrapper 
 > [!IMPORTANT]
 > **When to write an integration test.**
 >
-> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `pkg/instrumentation/basic/` and validates the foundational hook machinery that all other instrumentations rely on.
-> - **Instrumentation package changes.** Every package in `pkg/instrumentation/` must have a corresponding integration test. If you add or modify a hook, there should be an integration test that builds an instrumented binary and asserts on the exported spans for that component.
+> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `instrumentation/basic/` and validates the foundational hook machinery that all other instrumentations rely on.
+> - **Instrumentation package changes.** Every package in `instrumentation/` must have a corresponding integration test. If you add or modify a hook, there should be an integration test that builds an instrumented binary and asserts on the exported spans for that component.
 
 Integration tests build real binaries with the `otelc` tool and run them against **in-process** dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
 
-All test apps are built once in `TestMain` before any test runs (via `otelc go build`). Each test follows the same pattern:
+Test applications are built on demand by the tests that use them. Each top-level test builds its required application once (via `otelc go build`) and reuses the resulting binary across its subtests when applicable.
+
+Each test follows the same pattern:
 
 1. Start an in-memory OTLP collector.
-2. Run the pre-built instrumented binary against a local dependency.
+2. Run the instrumented binary against a local dependency.
 3. Assert on the exported spans and their semantic conventions.
 
 ## E2E Tests
@@ -96,6 +98,31 @@ make test-integration/coverage
 make test-e2e/coverage
 ```
 
+## Coverage
+
+> [!NOTE]
+> The project targets a **≥70% unit-test coverage** goal for both the `tool/` and `pkg/` module trees.
+> This is an **aspirational target** currently being worked toward. The CI step reports coverage
+> for both trees but does **not yet block merges** when coverage is below the threshold.
+> Once the target is consistently met, the gate will be promoted to enforcement.
+
+### Coverage target rationale
+
+The 70% floor is the minimum bar agreed in [issue #569](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/569)
+(tracked under the release 1.0.0 roadmap). Coverage is tracked **per module tree** — `tool/` and
+`pkg/` are checked independently so that one area cannot mask regression in the other.
+
+### CI behaviour
+
+The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
+
+1. Runs `make test-unit/coverage` to generate `coverage-tool.txt` and `coverage-pkg.txt`.
+2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
+
+Codecov evaluates each flag against the 70% target defined in `codecov.yml` and posts the result
+as an **informational** status check — a coverage shortfall is visible in the PR but does **not**
+block merges. Flip `informational: false` in `codecov.yml` once the target is consistently met.
+
 All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
 
 CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (arm64), and Windows (amd64). See `.github/workflows/test-*.yaml` for details.
@@ -113,7 +140,7 @@ CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (
 
 A failure means that the latest release of an upstream library introduced a **compile-time API break** that is incompatible with the current instrumentation hook. The remediation is:
 
-1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file (e.g. change the version field from `v1.2.3` to `v1.2.3,v4.5.6`).
+1. Cap the existing rule's version range in the relevant `instrumentation/.../*.yaml` file (e.g. change the version field from `v1.2.3` to `v1.2.3,v4.5.6`).
 2. Open a new rule entry covering `v4.5.6,` and implement the updated hook.
 
 ## LatestLibRun Tests
@@ -129,7 +156,7 @@ A failure means that the latest release of an upstream library introduced a **co
 
 A failure means that the latest release of an upstream library introduced a **runtime behavior change**, for example a removed function, a changed signature, or a dropped instrumentation hook point that breaks existing span assertions. The remediation is:
 
-1. Cap the existing rule's version range in the relevant `pkg/instrumentation/.../*.yaml` file.
+1. Cap the existing rule's version range in the relevant `instrumentation/.../*.yaml` file.
 2. Open a new rule entry covering the new version range and update the hook implementation.
 3. Close the auto-opened `latestlibrun-failure` issue once the fix lands on `main`.
 

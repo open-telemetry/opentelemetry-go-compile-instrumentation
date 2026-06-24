@@ -143,18 +143,21 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 // of the function.
 func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
 	// Find the target function to be instrumented
-	funcDecl := ast.FindFuncDecl(root, rule.Func, rule.Recv)
-	if funcDecl == nil {
+	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
 	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
 		return err
 	}
 
 	// Insert the raw code into the target function
-	err := insertRaw(ctx, rule, funcDecl, root)
+	err = insertRaw(ctx, rule, funcDecl, root)
 	if err != nil {
 		return err
 	}

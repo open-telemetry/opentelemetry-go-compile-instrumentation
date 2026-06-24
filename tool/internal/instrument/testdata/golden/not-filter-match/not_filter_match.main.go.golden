@@ -1,0 +1,149 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+// This file is the real Connect implementation. The not filter instruments
+// Connect everywhere EXCEPT files that declare a MockConn test double, so that
+// hooks never wrap the in-memory mock. This file has no MockConn, so the
+// negation holds and Connect IS instrumented here.
+package main
+
+import _ "unsafe"
+
+func Connect(dsn string) (_unnamedRetVal0 error) {
+	//line <generated>:1
+	if hookContext297295154, _ := OtelBeforeTrampoline_Connect297295154(&dsn); false {
+	} else {
+		defer OtelAfterTrampoline_Connect297295154(hookContext297295154, &_unnamedRetVal0)
+	}
+	//line main.go:11:2
+	println("connecting " + dsn)
+	//line main.go:12:2
+	return nil
+}
+
+//line <generated>:1
+type HookContextImpl297295154 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl297295154) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl297295154) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl297295154) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl297295154) GetData() interface{}     { return c.data }
+func (c *HookContextImpl297295154) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl297295154) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl297295154) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl297295154) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*string))
+	}
+	return nil
+}
+
+func (c *HookContextImpl297295154) SetParam(idx int, val interface{}) {
+	if val == nil {
+		c.params[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.params[0].(*string)) = val.(string)
+	}
+}
+
+func (c *HookContextImpl297295154) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl297295154) SetReturnVal(idx int, val interface{}) {
+	if val == nil {
+		c.returnVals[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.returnVals[0].(*error)) = val.(error)
+	}
+}
+func (c *HookContextImpl297295154) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl297295154) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl297295154) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl297295154) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_Connect297295154(param0 *string) (hookContext *HookContextImpl297295154, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "BeforeConnect")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl297295154{}
+	hookContext.params = []interface{}{param0}
+	hookContext.funcName = "Connect"
+	hookContext.packageName = "main"
+	if BeforeConnect != nil {
+		BeforeConnect(hookContext, *param0)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_Connect297295154(hookContext HookContext, arg0 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "AfterConnect")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl297295154).returnVals = []interface{}{arg0}
+	if AfterConnect != nil {
+		AfterConnect(hookContext, *arg0)
+	}
+}
+
+//go:linkname BeforeConnect testdata/golden/not-filter-match.BeforeConnect
+func BeforeConnect(hookContext HookContext, param0 string)
+
+//go:linkname AfterConnect testdata/golden/not-filter-match.AfterConnect
+func AfterConnect(hookContext HookContext, arg0 error)

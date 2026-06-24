@@ -20,6 +20,7 @@ import (
 
 func TestGinServer(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "ginserver", "go", "build", "-a")
 
 	testCases := []struct {
 		name       string

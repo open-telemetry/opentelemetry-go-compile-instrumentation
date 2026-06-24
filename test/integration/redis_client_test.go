@@ -16,6 +16,7 @@ import (
 
 func TestRedisClient(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "redisclient", "go", "build", "-a")
 
 	testCases := []struct {
 		name string
