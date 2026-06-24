@@ -7,8 +7,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
 )
 
 const (
@@ -17,18 +17,16 @@ const (
 	spanIdKey          = "span_id"
 )
 
-// logEnabler controls whether log instrumentation is enabled
 type logEnabler struct{}
 
 func (l logEnabler) Enable() bool {
-	return shared.Instrumented(instrumentationKey)
+	return runtime.Instrumented(instrumentationKey)
 }
 
 var enabler = logEnabler{}
 
-// BeforeLogOutput is called before (*Logger).output() to inject trace context into log message
 func BeforeLogOutput(
-	ictx inst.HookContext,
+	ictx hook.HookContext,
 	logger *log.Logger,
 	pc uintptr,
 	calldepth int,
@@ -38,19 +36,17 @@ func BeforeLogOutput(
 		return
 	}
 
-	// Wrap the appendOutput function to inject trace context
 	newAppendOutput := func(b []byte) []byte {
 		b = appendOutput(b)
 		if len(b) == 0 {
 			return b
 		}
 
-		// Check if trace context is already in the output
 		if strings.Contains(string(b), traceIdKey) {
 			return b
 		}
 
-		traceId, spanId := shared.GetTraceAndSpanId()
+		traceId, spanId := runtime.GetTraceAndSpanId()
 		if traceId == "" {
 			return b
 		}
@@ -70,8 +66,6 @@ func BeforeLogOutput(
 
 		traceSuffix := sb.String()
 
-		// Insert trace/span before trailing line breaks to avoid creating a new line
-		// containing only trace/span.
 		idx := len(b)
 		for idx > 0 && (b[idx-1] == '\n' || b[idx-1] == '\r') {
 			idx--

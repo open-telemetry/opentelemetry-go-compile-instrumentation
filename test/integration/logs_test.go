@@ -6,7 +6,6 @@
 package test
 
 import (
-	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -17,12 +16,12 @@ import (
 
 // TestLogsSlog tests slog and log instrumentation
 func TestLogsSlog(t *testing.T) {
-	appDir := filepath.Join("..", "..", "test", "apps", "logslog")
+	t.Parallel()
+	testutil.Build(t, "", "logslog", "go", "build", "-a")
 
-	testutil.Build(t, appDir, "go", "build", "-a")
-	output := testutil.Run(t, appDir)
+	f := testutil.NewTestFixture(t, testutil.WithoutCollector())
+	output := f.Run("logslog")
 
-	// Verify slog messages are present
 	slogMessages := []string{
 		"slog info message with context",
 		"slog warn message with context",
@@ -34,7 +33,6 @@ func TestLogsSlog(t *testing.T) {
 		require.Contains(t, output, msg, "Expected slog message: %s", msg)
 	}
 
-	// Verify standard log messages are present
 	logMessages := []string{
 		"standard log message 1",
 		"standard log message 2 with format",
@@ -44,12 +42,10 @@ func TestLogsSlog(t *testing.T) {
 		require.Contains(t, output, msg, "Expected log message: %s", msg)
 	}
 
-	// Verify trace context is injected into slog messages (via trace_id key)
 	traceIDPattern := regexp.MustCompile(`trace_id=[a-f0-9]{32}`)
 	matches := traceIDPattern.FindAllString(output, -1)
 	require.NotEmpty(t, matches, "Expected trace_id to be injected into log messages")
 
-	// Verify span context is present
 	spanIDPattern := regexp.MustCompile(`span_id=[a-f0-9]{16}`)
 	spanMatches := spanIDPattern.FindAllString(output, -1)
 	require.NotEmpty(t, spanMatches, "Expected span_id to be injected into log messages")
@@ -57,12 +53,12 @@ func TestLogsSlog(t *testing.T) {
 
 // TestLogsLogrus tests logrus instrumentation
 func TestLogsLogrus(t *testing.T) {
-	appDir := filepath.Join("..", "..", "test", "apps", "logslogrus")
+	t.Parallel()
+	testutil.Build(t, "", "logslogrus", "go", "build", "-a")
 
-	testutil.Build(t, appDir, "go", "build", "-a")
-	output := testutil.Run(t, appDir)
+	f := testutil.NewTestFixture(t, testutil.WithoutCollector())
+	output := f.Run("logslogrus")
 
-	// Verify logrus messages are present
 	logrusMessages := []string{
 		"logrus info message from New logger",
 		"logrus info with field",
@@ -75,13 +71,10 @@ func TestLogsLogrus(t *testing.T) {
 		require.Contains(t, output, msg, "Expected logrus message: %s", msg)
 	}
 
-	// Verify trace context is injected into logrus messages
-	// logrus uses JSON format, so we look for trace_id field
 	traceIDPattern := regexp.MustCompile(`"trace_id":"[a-f0-9]{32}"`)
 	matches := traceIDPattern.FindAllString(output, -1)
 	require.NotEmpty(t, matches, "Expected trace_id to be injected into logrus messages")
 
-	// Verify span context is present
 	spanIDPattern := regexp.MustCompile(`"span_id":"[a-f0-9]{16}"`)
 	spanMatches := spanIDPattern.FindAllString(output, -1)
 	require.NotEmpty(t, spanMatches, "Expected span_id to be injected into logrus messages")

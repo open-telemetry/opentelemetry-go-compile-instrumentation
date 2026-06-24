@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
 )
 
 func TestLogEnabler_Enable(t *testing.T) {
@@ -58,20 +58,20 @@ func TestLogEnabler_Enable(t *testing.T) {
 func TestBeforeLogOutput_Disabled(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/log")
 
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	appendOutput := func(b []byte) []byte { return b }
 	BeforeLogOutput(ictx, nil, 0, 0, appendOutput)
-	// Should return early without modifying params
-	assert.Equal(t, appendOutput, ictx.GetParam(3))
+	assert.Nil(t, ictx.GetParam(3))
 }
 
 func TestBeforeLogOutput_WrapsAppendOutput(t *testing.T) {
-	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/log")
-
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	originalAppend := func(b []byte) []byte { return append(b, []byte("original")...) }
 	BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
 
-	// When disabled, the function should return early without wrapping
-	assert.Equal(t, originalAppend, ictx.GetParam(3))
+	wrappedFn := ictx.GetParam(3)
+	assert.NotNil(t, wrappedFn)
+	wrapped := wrappedFn.(func([]byte) []byte)
+	result := wrapped([]byte{})
+	assert.Contains(t, string(result), "original")
 }

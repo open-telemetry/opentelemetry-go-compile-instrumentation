@@ -9,7 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
 )
 
 func TestLogEnabler_Enable(t *testing.T) {
@@ -65,46 +65,41 @@ func TestTraceHook_Levels(t *testing.T) {
 func TestAfterLogrusNew_Disabled(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/logrus")
 
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	logger := logrus.New()
 	AfterLogrusNew(ictx, logger)
-	// Should return early without adding hook
 	assert.Empty(t, logger.Hooks)
 }
 
 func TestAfterLogrusNew_NilLogger(t *testing.T) {
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	AfterLogrusNew(ictx, nil)
-	// Should return early without panic
 }
 
 func TestAfterLogrusWithField_Disabled(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/logrus")
 
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	logger := logrus.New()
 	entry := &logrus.Entry{Logger: logger}
 	AfterLogrusWithField(ictx, entry)
-	// Should return early without adding hook
 	assert.Empty(t, logger.Hooks)
 }
 
 func TestBeforeLogrusEntryLog_Disabled(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/logrus")
 
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	entry := &logrus.Entry{}
 	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel, "test")
-	// Should return early without modifying params
 	assert.Nil(t, ictx.GetParam(2))
 }
 
 func TestBeforeLogrusEntryLog_NilArgs(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/logrus")
 
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	entry := &logrus.Entry{}
 	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel)
-	// Should return early without modifying params
 	assert.Nil(t, ictx.GetParam(2))
 }

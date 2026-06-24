@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst/insttest"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
 )
 
 func TestLogEnabler_Enable(t *testing.T) {
@@ -54,7 +54,6 @@ func TestLogEnabler_Enable(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", tt.disabledList)
 			}
 
-			// Create a new enabler to pick up the environment variables
 			e := logEnabler{}
 			result := e.Enable()
 			assert.Equal(t, tt.expected, result)
@@ -65,27 +64,23 @@ func TestLogEnabler_Enable(t *testing.T) {
 func TestBeforeSlogLog_Disabled(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/slog")
 
-	ictx := insttest.NewMockHookContext()
-	logger := nil // logger is not used when disabled
-	BeforeSlogLog(ictx, logger, nil, 0, "test message")
-	// Should return early without modifying params
+	ictx := hooktest.NewMockHookContext()
+	BeforeSlogLog(ictx, nil, nil, 0, "test message")
 	assert.Nil(t, ictx.GetParam(4))
 }
 
 func TestBeforeSlogLog_EmptyMessage(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/slog")
 
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	BeforeSlogLog(ictx, nil, nil, 0, "")
-	// Should return early without modifying params
 	assert.Nil(t, ictx.GetParam(4))
 }
 
 func TestBeforeSlogLog_AlreadyContainsTraceID(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/slog")
 
-	ictx := insttest.NewMockHookContext()
+	ictx := hooktest.NewMockHookContext()
 	BeforeSlogLog(ictx, nil, nil, 0, "message with trace_id=abc123")
-	// Should return early without modifying params
 	assert.Nil(t, ictx.GetParam(4))
 }

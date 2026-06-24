@@ -9,9 +9,13 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	_ "unsafe"
 
 	trace "go.opentelemetry.io/otel/trace"
 )
+
+//go:linkname registerTraceAndSpanIdFunc github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime.RegisterTraceAndSpanIdFunc
+func registerTraceAndSpanIdFunc(f func() (string, string))
 
 const defaultGLSMaxSpans = 1000
 
@@ -24,6 +28,7 @@ func init() {
 			otelGLSMaxSpans = parsed
 		}
 	}
+	registerTraceAndSpanIdFunc(GetTraceAndSpanId)
 }
 
 type traceContext struct {

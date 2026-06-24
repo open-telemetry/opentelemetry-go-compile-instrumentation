@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/shared"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
 )
 
 const (
@@ -18,18 +18,16 @@ const (
 	spanIdKey          = "span_id"
 )
 
-// logEnabler controls whether slog instrumentation is enabled
 type logEnabler struct{}
 
 func (l logEnabler) Enable() bool {
-	return shared.Instrumented(instrumentationKey)
+	return runtime.Instrumented(instrumentationKey)
 }
 
 var enabler = logEnabler{}
 
-// BeforeSlogLog is called before (*Logger).log() to inject trace context into log message
 func BeforeSlogLog(
-	ictx inst.HookContext,
+	ictx hook.HookContext,
 	logger *slog.Logger,
 	ctx context.Context,
 	level slog.Level,
@@ -44,17 +42,15 @@ func BeforeSlogLog(
 		return
 	}
 
-	// Check if trace context is already in the message
 	if strings.Contains(msg, traceIdKey) {
 		return
 	}
 
-	traceId, spanId := shared.GetTraceAndSpanId()
+	traceId, spanId := runtime.GetTraceAndSpanId()
 	if traceId == "" {
 		return
 	}
 
-	// Append trace context to message
 	var sb strings.Builder
 	sb.WriteString(msg)
 	sb.WriteString(" ")
@@ -72,13 +68,12 @@ func BeforeSlogLog(
 	ictx.SetParam(4, sb.String())
 }
 
-// AfterSlogNewRecord is called after NewRecord to add trace attributes to the record
-func AfterSlogNewRecord(ictx inst.HookContext, r slog.Record) {
+func AfterSlogNewRecord(ictx hook.HookContext, r slog.Record) {
 	if !enabler.Enable() {
 		return
 	}
 
-	traceId, spanId := shared.GetTraceAndSpanId()
+	traceId, spanId := runtime.GetTraceAndSpanId()
 	if traceId == "" {
 		return
 	}
