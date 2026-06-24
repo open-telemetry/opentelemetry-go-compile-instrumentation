@@ -1,0 +1,8 @@
+openai_v1_new_client:
+  target: github.com/openai/openai-go
+  where:
+    func: NewClient
+  do:
+    - inject_hooks:
+        before: BeforeNewClient
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go/v1"
