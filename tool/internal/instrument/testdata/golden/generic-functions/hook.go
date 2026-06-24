@@ -6,13 +6,13 @@ package testdata
 import (
 	_ "unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
 )
 
-func GenericFuncBefore(ctx inst.HookContext, p1 interface{}, p2 int) {}
+func GenericFuncBefore(ctx hook.HookContext, p1 interface{}, p2 int) {}
 
-func GenericFuncAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
+func GenericFuncAfter(ctx hook.HookContext, r1 interface{}, r2 error) {}
 
-func GenericMethodBefore(ctx inst.HookContext, recv interface{}, p1 interface{}, p2 string) {}
+func GenericMethodBefore(ctx hook.HookContext, recv interface{}, p1 interface{}, p2 string) {}
 
-func GenericMethodAfter(ctx inst.HookContext, r1 interface{}, r2 error) {}
+func GenericMethodAfter(ctx hook.HookContext, r1 interface{}, r2 error) {}

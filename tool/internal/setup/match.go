@@ -84,8 +84,8 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 }
 
 func loadDefaultRules() ([]rule.InstRule, error) {
-	// List all YAML files in the unzipped pkg directory, i.e. $BUILD_TEMP/pkg
-	files, err := util.ListFiles(util.GetBuildTemp(unzippedPkgDir))
+	// List all YAML files in the unzipped pkg directory, i.e. $BUILD_TEMP/instrumentation
+	files, err := util.ListFiles(util.GetBuildTemp(unzippedInstDir))
 	if err != nil {
 		return nil, err
 	}
