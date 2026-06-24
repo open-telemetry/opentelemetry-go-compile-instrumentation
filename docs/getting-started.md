@@ -52,7 +52,7 @@ This approach provides dynamic instrumentation without runtime overhead or invas
 The following libraries are automatically instrumented:
 
 | Library | Semantic Conventions |
-|---|---|
+| --- | --- |
 | `net/http` (client & server) | HTTP spans |
 | `google.golang.org/grpc` (client & server) | gRPC/RPC spans |
 | `database/sql` | DB client spans |

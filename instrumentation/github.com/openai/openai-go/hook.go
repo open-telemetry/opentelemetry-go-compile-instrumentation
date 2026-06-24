@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	instrumentationName = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go/v1"
+	instrumentationName = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go"
 	instrumentationKey  = "OPENAI"
 )
 

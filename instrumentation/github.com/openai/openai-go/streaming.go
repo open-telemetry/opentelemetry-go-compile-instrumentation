@@ -12,7 +12,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go/v1/semconv"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go/semconv"
 )
 
 type streamingReader struct {

@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go/v1
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go
 
 go 1.25.0
 
@@ -64,6 +64,6 @@ require (
 )
 
 replace (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../../../pkg
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../../../pkg/runtime
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../../pkg
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../../pkg/runtime
 )
