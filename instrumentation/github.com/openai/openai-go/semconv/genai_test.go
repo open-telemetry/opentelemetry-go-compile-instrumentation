@@ -69,3 +69,45 @@ func TestGenAIRequestPresencePenalty(t *testing.T) {
 	assert.Equal(t, attribute.Key("gen_ai.request.presence_penalty"), kv.Key)
 	assert.Equal(t, 0.8, kv.Value.AsFloat64())
 }
+
+func TestGenAIResponseModel(t *testing.T) {
+	kv := GenAIResponseModel("gpt-4-0125")
+	assert.Equal(t, attribute.Key("gen_ai.response.model"), kv.Key)
+	assert.Equal(t, "gpt-4-0125", kv.Value.AsString())
+}
+
+func TestGenAIResponseID(t *testing.T) {
+	kv := GenAIResponseID("chatcmpl-abc123")
+	assert.Equal(t, attribute.Key("gen_ai.response.id"), kv.Key)
+	assert.Equal(t, "chatcmpl-abc123", kv.Value.AsString())
+}
+
+func TestGenAIUsageTotalTokens(t *testing.T) {
+	kv := GenAIUsageTotalTokens(150)
+	assert.Equal(t, attribute.Key("gen_ai.usage.total_tokens"), kv.Key)
+	assert.Equal(t, int64(150), kv.Value.AsInt64())
+}
+
+func TestGenAIRequestMaxTokens(t *testing.T) {
+	kv := GenAIRequestMaxTokens(4096)
+	assert.Equal(t, attribute.Key("gen_ai.request.max_tokens"), kv.Key)
+	assert.Equal(t, int64(4096), kv.Value.AsInt64())
+}
+
+func TestGenAIRequestTemperature(t *testing.T) {
+	kv := GenAIRequestTemperature(0.7)
+	assert.Equal(t, attribute.Key("gen_ai.request.temperature"), kv.Key)
+	assert.Equal(t, 0.7, kv.Value.AsFloat64())
+}
+
+func TestGenAIRequestTopP(t *testing.T) {
+	kv := GenAIRequestTopP(0.95)
+	assert.Equal(t, attribute.Key("gen_ai.request.top_p"), kv.Key)
+	assert.Equal(t, 0.95, kv.Value.AsFloat64())
+}
+
+func TestGenAIResponseTimeToFirstToken(t *testing.T) {
+	kv := GenAIResponseTimeToFirstToken(12345)
+	assert.Equal(t, attribute.Key("gen_ai.response.time_to_first_token"), kv.Key)
+	assert.Equal(t, int64(12345), kv.Value.AsInt64())
+}

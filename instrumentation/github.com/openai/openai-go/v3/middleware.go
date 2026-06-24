@@ -17,7 +17,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go/v3/semconv"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
 )
 
 const (
@@ -145,7 +144,6 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			trace.WithSpanKind(trace.SpanKindInternal),
 			trace.WithAttributes(spanAttrs...),
 		)
-		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 		req = req.WithContext(ctx)
 
 		resp, err := next(req)
