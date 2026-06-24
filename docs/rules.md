@@ -380,7 +380,7 @@ hook_helloworld:
     - inject_hooks:
         before: MyHookBefore
         after: MyHookAfter
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 ```
 
 This rule will inject `MyHookBefore` at the start of the `Example` function in the `main` package, and `MyHookAfter` at the end. The hook functions are located in the specified `path`.

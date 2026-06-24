@@ -18,6 +18,26 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
+const localReplaceVersion = "v0.0.0-00010101000000-000000000000"
+
+func localVersionForPath(modulePath string) string {
+	idx := strings.LastIndex(modulePath, "/v")
+	if idx != -1 && idx < len(modulePath)-2 {
+		suffix := modulePath[idx+2:]
+		allDigits := true
+		for _, r := range suffix {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits && len(suffix) > 0 {
+			return "v" + suffix + ".0.0-00010101000000-000000000000"
+		}
+	}
+	return localReplaceVersion
+}
+
 func parseGoMod(gomod string) (*modfile.File, error) {
 	data, err := os.ReadFile(gomod)
 	if err != nil {
@@ -59,6 +79,24 @@ func addReplace(modfile *modfile.File, oldPath, newPath string) (bool, error) {
 		err := modfile.AddReplace(oldPath, "", newPath, "")
 		if err != nil {
 			return false, ex.Wrapf(err, "failed to add replace directive")
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func addRequire(modfile *modfile.File, modulePath string) (bool, error) {
+	hasRequire := false
+	for _, req := range modfile.Require {
+		if req.Mod.Path == modulePath {
+			hasRequire = true
+			break
+		}
+	}
+	if !hasRequire {
+		version := localVersionForPath(modulePath)
+		if err := modfile.AddRequire(modulePath, version); err != nil {
+			return false, ex.Wrapf(err, "failed to add require directive")
 		}
 		return true, nil
 	}
@@ -166,6 +204,16 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		// If newPath is empty, it means the module is not embedded and we don't need to add replace directive for it.
 		if newPath == "" {
 			continue
+		}
+
+		required, reqErr := addRequire(modfile, oldPath)
+		if reqErr != nil {
+			return reqErr
+		}
+		changed = changed || required
+		if required {
+			version := localVersionForPath(oldPath)
+			logger.InfoContext(ctx, "Require dependency", "module", oldPath, "version", version)
 		}
 
 		added, addErr := addReplace(modfile, oldPath, newPath)

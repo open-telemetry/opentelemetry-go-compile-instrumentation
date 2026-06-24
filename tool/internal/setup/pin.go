@@ -336,12 +336,53 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 	return nil
 }
 
+func collectToolFileImports(toolFile string, prunedImports map[string]bool) (map[string]bool, error) {
+	p := ast.NewAstParser()
+	f, parseErr := p.Parse(toolFile, parser.ImportsOnly)
+	if parseErr != nil {
+		return nil, ex.Wrapf(parseErr, "parsing tool file %s", toolFile)
+	}
+
+	imports := make(map[string]bool)
+	for _, imp := range f.Imports {
+		if imp.Name == nil || imp.Name.Name != ast.IdentIgnore {
+			continue
+		}
+
+		importPath, unquoteErr := strconv.Unquote(imp.Path.Value)
+		if unquoteErr != nil {
+			return nil, ex.Wrapf(unquoteErr, "failed to unquote import path %s in %s", imp.Path.Value, toolFile)
+		}
+		if importPath == util.OtelcToolCmdRoot {
+			continue
+		}
+		if prunedImports != nil && prunedImports[importPath] {
+			continue
+		}
+
+		imports[importPath] = true
+	}
+
+	return imports, nil
+}
+
 func updatePinnedProjects(
 	ctx context.Context,
 	toolFiles map[string]map[string]bool,
 	opts PinOptions,
 ) (*PinResult, error) {
 	logger := util.LoggerFromContext(ctx)
+
+	for toolFile, prunedImports := range toolFiles {
+		imports, collectErr := collectToolFileImports(toolFile, prunedImports)
+		if collectErr != nil {
+			return nil, collectErr
+		}
+
+		if syncErr := syncDeps(ctx, imports, filepath.Dir(toolFile)); syncErr != nil {
+			return nil, ex.Wrapf(syncErr, "syncing dependencies in %s", filepath.Dir(toolFile))
+		}
+	}
 
 	walkErr := walkInstrumentation(
 		ctx,
@@ -417,11 +458,6 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 		return nil, ex.Wrapf(findDepsErr, "finding dependencies")
 	}
 
-	extractErr := extractBundle()
-	if extractErr != nil {
-		return nil, ex.Wrapf(extractErr, "extracting otelc package")
-	}
-
 	ruleset, err := loadMinimalRules()
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading instrumentation rules")
@@ -453,6 +489,12 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 		}
 
 		keepForDebug(ctx, path)
+	}
+
+	// Re-load dependencies after syncDeps has updated go.mod.
+	deps, findDepsErr = findDeps(ctx, opts.Args)
+	if findDepsErr != nil {
+		return nil, ex.Wrapf(findDepsErr, "finding dependencies after sync")
 	}
 
 	return &PinResult{AllDeps: deps}, nil
@@ -487,6 +529,11 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	toolFiles, findToolErr := findPinnedToolFiles(moduleDirs)
 	if findToolErr != nil {
 		return nil, findToolErr
+	}
+
+	extractErr := extractBundle()
+	if extractErr != nil {
+		return nil, ex.Wrapf(extractErr, "extracting otelc package")
 	}
 
 	// Existing otel.instrumentation.go / otelc.tool.go files found?

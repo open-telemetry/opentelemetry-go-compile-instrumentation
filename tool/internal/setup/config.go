@@ -9,6 +9,7 @@ import (
 	"go/parser"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"golang.org/x/tools/go/packages"
 
@@ -59,10 +60,35 @@ func findToolFile(moduleDir string) (string, error) {
 }
 
 func resolveInstrumentationConfig(ctx context.Context, moduleDir, importPath string) (*InstrumentationConfig, error) {
+	goModPath := filepath.Join(moduleDir, "go.mod")
+	modFile, modErr := parseGoMod(goModPath)
+	if modErr != nil {
+		return nil, ex.Wrapf(modErr, "preparing go.mod for instrumentation package %s", importPath)
+	}
+
+	isLocal := false
+	if modFile.Module != nil {
+		modulePath := modFile.Module.Mod.Path
+		isLocal = importPath == modulePath || strings.HasPrefix(importPath, modulePath+"/")
+	}
+
+	if !isLocal {
+		required, reqErr := addRequire(modFile, importPath)
+		if reqErr != nil {
+			return nil, ex.Wrapf(reqErr, "ensuring instrumentation package %s is required", importPath)
+		}
+		if required {
+			if writeErr := writeGoMod(goModPath, modFile); writeErr != nil {
+				return nil, ex.Wrapf(writeErr, "writing updated go.mod for instrumentation package %s", importPath)
+			}
+		}
+	}
+
 	pkgs, loadErr := packages.Load(&packages.Config{
-		Mode:    packages.NeedFiles,
-		Context: ctx,
-		Dir:     moduleDir,
+		Mode:       packages.NeedFiles,
+		Context:    ctx,
+		Dir:        moduleDir,
+		BuildFlags: []string{"-mod=mod"},
 	}, importPath)
 	if loadErr != nil {
 		return nil, ex.Wrapf(loadErr, "failed to load package for import %s", importPath)
@@ -83,7 +109,7 @@ func resolveInstrumentationConfig(ctx context.Context, moduleDir, importPath str
 	}
 
 	// Instrumentation packages must be module roots.
-	goModPath := filepath.Join(pkgDir, "go.mod")
+	goModPath = filepath.Join(pkgDir, "go.mod")
 	if !util.PathExists(goModPath) {
 		return nil, ex.Wrapf(ErrNotInstrumentation, "instrumentation package %s does not contain a go.mod", importPath)
 	}
