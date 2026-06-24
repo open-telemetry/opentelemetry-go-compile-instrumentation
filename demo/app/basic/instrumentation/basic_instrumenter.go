@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	instrumentationName    = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+	instrumentationName    = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 	instrumentationVersion = "0.1.0"
 )
 

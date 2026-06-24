@@ -125,7 +125,7 @@ func verifyExportedHelloWorldSpan(t *testing.T, output string) {
 		"expected hello-world span ID to be non-zero",
 	)
 	require.Equal(t,
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic",
+		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation",
 		span.InstrumentationScope.Name,
 	)
 
