@@ -1,0 +1,8 @@
+wrap_default_transport:
+  target: main
+  where:
+    kind: var
+    identifier: DefaultTransport
+  do:
+    - assign_value:
+        wrap: "wrapTransport({{ . }})"

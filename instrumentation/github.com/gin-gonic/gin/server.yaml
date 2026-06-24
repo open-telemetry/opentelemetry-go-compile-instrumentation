@@ -1,0 +1,10 @@
+gin_context_next_hook:
+  target: github.com/gin-gonic/gin
+  where:
+    func: Next
+    recv: "*Context"
+  do:
+    - inject_hooks:
+        before: BeforeNext
+        after: AfterNext
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/gin-gonic/gin"

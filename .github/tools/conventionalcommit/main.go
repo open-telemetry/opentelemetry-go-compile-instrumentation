@@ -33,6 +33,7 @@ var (
 		"fix":      "scope:fix",
 		"release":  "scope:chore",
 		"refactor": "scope:refactor",
+		"test":     "scope:chore",
 	}
 	titleRegexp = regexp.MustCompile(fmt.Sprintf(`^(%s)(?:\(.+\))?!?: .*$`, strings.Join(slices.Collect(maps.Keys(conventionalLabels)), "|")))
 )
@@ -156,7 +157,7 @@ func cleanupOldComments(ctx context.Context, client *github.Client, pr *github.P
 
 	return func() {
 		repo := pr.GetBase().GetRepo()
-		prOwner := repo.GetOwner().GetLocation()
+		prOwner := repo.GetOwner().GetLogin()
 		prRepo := repo.GetName()
 		for _, comment := range oldComments {
 			client.Issues.DeleteComment(ctx, prOwner, prRepo, comment.GetID())
@@ -168,7 +169,7 @@ func findExistingToolComments(ctx context.Context, client *github.Client, pr *gi
 	opts := &github.IssueListCommentsOptions{}
 
 	repo := pr.GetBase().GetRepo()
-	prOwner := repo.GetOwner().GetLocation()
+	prOwner := repo.GetOwner().GetLogin()
 	prRepo := repo.GetName()
 	prNumber := pr.GetNumber()
 

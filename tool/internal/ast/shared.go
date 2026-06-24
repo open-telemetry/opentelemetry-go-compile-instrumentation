@@ -10,14 +10,10 @@ import (
 
 	"github.com/dave/dst"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
-
-// -----------------------------------------------------------------------------
-// AST Shared Utilities
-//
-// This file contains shared utility functions for AST traversal and manipulation.
-// It provides common operations for finding, filtering, and processing AST nodes
 
 func findFuncDecls(root *dst.File, lambda func(*dst.FuncDecl) bool) []*dst.FuncDecl {
 	funcDecls := ListFuncDecls(root)
@@ -86,7 +82,7 @@ func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	return ""
 }
 
-func FindFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
+func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 	decls := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
 		// Receiver type is ignored, match func name only
 		name := funcDecl.Name.Name
@@ -116,6 +112,58 @@ func FindFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 		return nil
 	}
 	return decls[0]
+}
+
+// FindFuncDecl finds the function declaration targeted by r, including
+// name, receiver, and optional signature-filter matching.
+//
+// The returned bool reports whether a matching declaration was found. It is
+// false both when no declaration matches r's function name and receiver, and
+// when a declaration is found but does not satisfy r's signature filters. When
+// the bool is false, the returned function declaration is nil.
+func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
+	root *dst.File,
+	r *R,
+) (*dst.FuncDecl, bool, error) {
+	var (
+		funcName       string
+		recv           string
+		matchSignature bool
+	)
+	switch rr := any(r).(type) {
+	case *rule.InstFuncRule:
+		funcName = rr.Func
+		recv = rr.Recv
+		matchSignature = true
+	case *rule.InstRawRule:
+		funcName = rr.Func
+		recv = rr.Recv
+	case *rule.FilterDef:
+		funcName = rr.HasFunc
+		recv = rr.HasRecv
+	}
+
+	funcDecl := findFuncDecl(root, funcName, recv)
+	if funcDecl == nil {
+		return nil, false, nil
+	}
+
+	if !matchSignature {
+		return funcDecl, true, nil
+	}
+
+	rr, ok := any(r).(*rule.InstFuncRule)
+	if !ok {
+		return nil, false, ex.Newf("unexpected %T value", r)
+	}
+	ok, err := funcDeclMatchesFilters(funcDecl, rr)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return funcDecl, true, nil
 }
 
 func ListFuncDecls(root *dst.File) []*dst.FuncDecl {
@@ -268,6 +316,149 @@ func AddStructField(decl dst.Decl, name, t string) {
 	ty := util.AssertType[*dst.TypeSpec](gen.Specs[0])
 	st := util.AssertType[*dst.StructType](ty.Type)
 	st.Fields.List = append(st.Fields.List, fd)
+}
+
+// funcDeclMatchesFilters reports whether funcDecl satisfies all signature
+// sub-filters in r.  Returns true when no sub-filters are set.
+//
+// All non-empty filters are evaluated and must match (AND semantics).  Any
+// combination of sub-filters is valid; they are checked in declaration order
+// and evaluation stops at the first failure.
+//
+// Matching uses structural comparison of dst.Expr nodes (no type checker).
+// For the scalar-type filters this means an exact type-name match rather than
+// full interface-satisfaction checking.
+func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool, error) {
+	ft := funcDecl.Type
+
+	if r.Signature != nil {
+		ok, err := matchesExactSignature(ft, r.Signature)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	if r.SignatureContains != nil {
+		ok, err := matchesSignatureContains(ft, r.SignatureContains)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	if r.Result != "" {
+		ok, err := fieldListContainsType(ft.Results, r.Result)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	if r.LastResult != "" {
+		ok, err := matchesLastResult(ft.Results, r.LastResult)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	if r.Param != "" {
+		ok, err := fieldListContainsType(ft.Params, r.Param)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// matchesExactSignature returns true when funcType has exactly the parameter
+// and result types listed in sig, compared field-by-field in order.
+func matchesExactSignature(ft *dst.FuncType, sig *rule.FuncSignature) (bool, error) {
+	ok, err := matchesFieldList(sig.Args, ft.Params)
+	if err != nil || !ok {
+		return ok, err
+	}
+	return matchesFieldList(sig.Returns, ft.Results)
+}
+
+// matchesFieldList returns true when expected type strings match the types in
+// fields exactly (same count, same order).
+// Multi-name fields (e.g. "a, b int") are expanded inline so each name maps
+// to exactly one type slot — without cloning AST nodes.
+func matchesFieldList(expected []string, fields *dst.FieldList) (bool, error) {
+	if len(expected) == 0 {
+		return fields == nil || len(fields.List) == 0, nil
+	}
+	var types []dst.Expr
+	if fields != nil {
+		for _, f := range fields.List {
+			if len(f.Names) == 0 {
+				types = append(types, f.Type)
+			} else {
+				for range f.Names {
+					types = append(types, f.Type)
+				}
+			}
+		}
+	}
+	if len(expected) != len(types) {
+		return false, nil
+	}
+	for i, typeStr := range expected {
+		tn, err := parseTypeName(typeStr)
+		if err != nil {
+			return false, err
+		}
+		if !tn.matches(types[i]) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// matchesSignatureContains returns true when funcType contains any of the
+// expected argument types among its parameters OR any of the expected return
+// types among its results.
+func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature) (bool, error) {
+	for _, expected := range sig.Args {
+		ok, err := fieldListContainsType(ft.Params, expected)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	for _, expected := range sig.Returns {
+		ok, err := fieldListContainsType(ft.Results, expected)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// matchesLastResult returns true when the last entry in fields matches typeStr.
+func matchesLastResult(fields *dst.FieldList, typeStr string) (bool, error) {
+	if fields == nil || len(fields.List) == 0 {
+		return false, nil
+	}
+	tn, err := parseTypeName(typeStr)
+	if err != nil {
+		return false, err
+	}
+	return tn.matches(fields.List[len(fields.List)-1].Type), nil
 }
 
 // SplitMultiNameFields splits fields that have multiple names into separate fields.

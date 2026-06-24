@@ -1,0 +1,68 @@
+name: Compile-Time Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+permissions: read-all
+
+jobs:
+  # CodSpeed posts PR comments by comparing the PR head to the most recent main
+  # baseline.
+  codspeed:
+    name: CodSpeed Benchmarks
+    runs-on: oracle-bare-metal-64cpu-1024gb-x86-64-ubuntu-24
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Build otelc
+        # Route GOTMPDIR through RUNNER_TEMP, which the runner empties at the
+        # start and end of every job.
+        env:
+          GOTMPDIR: ${{ runner.temp }}
+        run: make build
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd  # ratchet:CodSpeedHQ/action@v4.15.1
+        # Route TMPDIR through RUNNER_TEMP so benchmark temp files do not pile
+        # up in the shared host /tmp.
+        env:
+          TMPDIR: ${{ runner.temp }}
+        with:
+          mode: walltime
+          run: make benchmark/codspeed BENCH_TIME=5x
+      # Clean up CodSpeed FIFOs to avoid disk exhaustion on the shared runner.
+      # Note that CodSpeed could change or add more FIFOs in the future.
+      # If we see more disk exhaustion, we should revisit this.
+      # See https://github.com/CodSpeedHQ/codspeed/blob/main/crates/runner-shared/src/fifo.rs
+      - name: Clean up CodSpeed FIFOs
+        if: always()
+        run: rm -f /tmp/runner.ctl.fifo /tmp/runner.ack.fifo
+
+  # Fails if any scenario's otelc overhead exceeds 150% of the plain baseline.
+  overhead-threshold:
+    name: Overhead Threshold Check
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Build otelc
+        run: make build
+      - name: Check overhead ceiling
+        run: make benchmark/threshold

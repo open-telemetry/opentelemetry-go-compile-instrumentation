@@ -12,7 +12,7 @@ COPY go.mod go.sum ./
 COPY . .
 
 # Build the otelc tool
-RUN go build -o /otelc ./tool/cmd
+RUN go build -o /otelc ./tool/cmd/otelc
 
 # Stage 2: Build the Redis client with instrumentation
 FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS app-builder
@@ -53,8 +53,8 @@ RUN addgroup -g 1000 appuser && \
 USER appuser
 
 # Environment variables for OpenTelemetry
-ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
-    OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
+    OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
     OTEL_SERVICE_NAME=redis-client \
     OTEL_RESOURCE_ATTRIBUTES="service.namespace=demo,service.version=1.0.0" \
     OTEL_LOG_LEVEL=info

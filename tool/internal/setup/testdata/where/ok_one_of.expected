@@ -1,0 +1,7 @@
+type: OneOf
+children:
+  - type: FuncFilter
+    func: init
+    recv:
+  - type: StructFilter
+    struct: Driver

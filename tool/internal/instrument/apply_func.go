@@ -29,7 +29,7 @@ func makeName(r *rule.InstFuncRule, funcDecl *dst.FuncDecl, isBefore bool) strin
 		prefix = trampolineBeforeName
 	}
 	return fmt.Sprintf("%s_%s%s",
-		prefix, funcDecl.Name.Name, util.CRC32(r.String()))
+		prefix, funcDecl.Name.Name, r.Identity())
 }
 
 func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
@@ -133,7 +133,7 @@ func createTrampArgs(names []string) []dst.Expr {
 func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	args, retVals []string,
 ) *dst.IfStmt {
-	funcSuffix := util.CRC32(t.String())
+	funcSuffix := t.Identity()
 	argsToBefore := createTrampArgs(args)
 	argsToAfter := createTrampArgs(retVals)
 	argHookContext := ast.Ident(trampolineHookContextName + funcSuffix)
@@ -347,21 +347,39 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 }
 
 func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
-	funcDecl := ast.FindFuncDecl(root, rule.Func, rule.Recv)
-	// No function found for the rule, skip
-	if funcDecl == nil {
-		return ex.Newf("can not find function %s", rule.Func)
-	}
-
-	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
-		return err
-	}
-
-	err := ip.insertTJump(rule, funcDecl)
+	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {
 		return err
 	}
+	if !ok {
+		return ex.Newf("can not find function %s", rule.Func)
+	}
+
+	// Apply imports for every matching rule, including ones de-duplicated below:
+	// two rules with the same content identity may still declare different
+	// imports, and skipping them could drop an import the hook code needs.
+	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+		return err
+	}
+
+	// De-duplicate trampoline/HookContext emission for rules that resolve to the
+	// same content identity: emitting again would redeclare byte-identical
+	// declarations. Distinct do-sequence modifiers differ by content or by
+	// application index, so this only collapses genuinely duplicate rules.
+	id := rule.Identity()
+	if _, seen := ip.appliedFuncIdentities[id]; seen {
+		ip.Debug("Skipping duplicate func rule trampoline (imports already applied)",
+			"rule", rule.Name, "func", rule.Func)
+		return nil
+	}
+
+	if err = ip.insertTJump(rule, funcDecl); err != nil {
+		return err
+	}
+	if ip.appliedFuncIdentities == nil {
+		ip.appliedFuncIdentities = make(map[string]struct{})
+	}
+	ip.appliedFuncIdentities[id] = struct{}{}
 	ip.Info("Apply func rule", "rule", rule)
 	return nil
 }

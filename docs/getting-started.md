@@ -33,7 +33,7 @@ No manual code changes required.
    ./otelc go build -o myapp .
 
    # Option 2: Install as tool dependency (Go 1.24+)
-   go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/cmd/otelc
+   go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc
    go tool otelc go build -o myapp .
    ```
 

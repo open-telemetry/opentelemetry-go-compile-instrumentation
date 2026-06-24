@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"context"
 	"go/token"
 	"testing"
 
@@ -14,79 +15,90 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 )
 
-func TestWrapCall_Success(t *testing.T) {
-	// Create a rule with a simple template
-	r := &rule.InstCallRule{
-		Template: "wrapper({{ . }})",
+// makeCallFile builds a minimal *dst.File containing a single function whose
+// body consists of a single expression statement holding the given call.
+func makeCallFile(call *dst.CallExpr) *dst.File {
+	return &dst.File{
+		Name: &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{
+			&dst.FuncDecl{
+				Name: &dst.Ident{Name: "f"},
+				Type: &dst.FuncType{Params: &dst.FieldList{}},
+				Body: &dst.BlockStmt{
+					List: []dst.Stmt{
+						&dst.ExprStmt{X: call},
+					},
+				},
+			},
+		},
 	}
+}
 
-	// Create a call expression
-	call := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "original"},
+func httpGetCall() *dst.CallExpr {
+	return &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "http", Path: "net/http"},
+			Sel: &dst.Ident{Name: "Get"},
+		},
+		Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"url"`}},
 	}
+}
 
-	// Wrap it
-	err := wrapCall(call, r)
+func httpGetRule(replace string) *rule.InstCallRule {
+	return &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      replace,
+	}
+}
 
-	// Verify - the call expression is modified in place
+// --- applyCallRule tests ---
+
+func TestApplyCallRule_Success(t *testing.T) {
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("traced({{ . }})")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
 	require.NoError(t, err)
-	// After wrapping, the outer call is now "wrapper"
-	wrapperIdent, ok := call.Fun.(*dst.Ident)
+	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
+	outerCall, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	fn, ok := outerCall.Fun.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "wrapper", wrapperIdent.Name)
-	// Should have exactly one argument (the original call)
-	require.Len(t, call.Args, 1)
-	// Verify the argument is a call expression (structure preserved)
-	_, ok = call.Args[0].(*dst.CallExpr)
+	assert.Equal(t, "traced", fn.Name)
+	require.Len(t, outerCall.Args, 1)
+	_, ok = outerCall.Args[0].(*dst.CallExpr)
 	require.True(t, ok, "expected inner argument to be a call expression")
 }
 
-func TestWrapCall_EmptyTemplate(t *testing.T) {
-	r := &rule.InstCallRule{
-		Template: "", // Empty template
-	}
+func TestApplyCallRule_NonCallExprResult(t *testing.T) {
+	// Replace produces a selector expression, not a call expression.
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("{{ . }}.Response")
 
-	call := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "test"},
-	}
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
 
-	err := wrapCall(call, r)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to compile template")
+	require.NoError(t, err)
+	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
+	_, ok := stmt.X.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr after wrap, got %T", stmt.X)
 }
 
-func TestWrapCall_TemplateCompilationError(t *testing.T) {
-	// Create a rule with a template that produces invalid Go syntax
-	r := &rule.InstCallRule{
-		Template: "func {{ . }}", // "func" keyword without proper syntax
-	}
+func TestApplyCallRule_InvalidTemplate(t *testing.T) {
+	// An unclosed template tag fails fasttemplate parsing in newCallTemplate.
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("wrapper({{")
 
-	call := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "test"},
-	}
-
-	err := wrapCall(call, r)
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to compile template")
+	assert.Contains(t, err.Error(), "rule has no compiled replacement template")
 }
 
-func TestWrapCall_NonCallExpressionResult(t *testing.T) {
-	// Create a template that produces a non-call expression
-	r := &rule.InstCallRule{
-		Template: "{{ . }}.Field",
-	}
-
-	call := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "test"},
-	}
-
-	err := wrapCall(call, r)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "template output must be a call expression")
-}
+// --- matchesCallRule tests ---
 
 func TestMatchesCallRule_QualifiedCallMatches(t *testing.T) {
 	r := &rule.InstCallRule{
@@ -215,6 +227,193 @@ func TestMatchesCallRule_ImportAliasFromVersionSuffix(t *testing.T) {
 	assert.True(t, matches)
 }
 
+func TestAppendCallArgs_Empty(t *testing.T) {
+	r := &rule.InstCallRule{}
+	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.NoError(t, err)
+	assert.False(t, modified)
+	assert.Empty(t, call.Args)
+}
+
+func TestAppendCallArgs_SimpleAppend(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs: []string{"42", "true"},
+	}
+	call := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	assert.Len(t, call.Args, 3)
+}
+
+func TestAppendCallArgs_EllipsisNoVariadicType(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs: []string{"42"},
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{&dst.Ident{Name: "opts"}},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "variadic_type")
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_EllipsisWithVariadicType(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs:   []string{"42"},
+		VariadicType: "int",
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{&dst.Ident{Name: "opts"}},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	// The outer call still has Ellipsis=true
+	assert.True(t, call.Ellipsis)
+	// The last arg is now an IIFE call
+	require.Len(t, call.Args, 1)
+	iifeCall, ok := call.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected IIFE call expression")
+	// The IIFE's function is a FuncLit
+	_, ok = iifeCall.Fun.(*dst.FuncLit)
+	assert.True(t, ok, "expected FuncLit as IIFE function")
+}
+
+func TestAppendCallArgs_EllipsisNoArgs(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs:   []string{"42"},
+		VariadicType: "int",
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no arguments")
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_InvalidVariadicType(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs:   []string{"42"},
+		VariadicType: "func {{{",
+	}
+	call := &dst.CallExpr{
+		Fun:      &dst.Ident{Name: "f"},
+		Args:     []dst.Expr{&dst.Ident{Name: "opts"}},
+		Ellipsis: true,
+	}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse variadic_type")
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_InvalidExpr(t *testing.T) {
+	r := &rule.InstCallRule{
+		AppendArgs: []string{"func {{{"},
+	}
+	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
+
+	modified, err := appendCallArgs(call, r)
+
+	require.Error(t, err)
+	assert.False(t, modified)
+}
+
+func TestAppendCallArgs_WithReplace(t *testing.T) {
+	// Both append_args and replace: args appended first, then replace wraps.
+	call := httpGetCall()
+	file := makeCallFile(call)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		AppendArgs:   []string{"42"},
+		Replace:      "wrapper({{ . }})",
+	}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	require.NoError(t, err)
+
+	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
+	outerCall, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	// Outer call is "wrapper"
+	wrapperIdent, ok := outerCall.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "wrapper", wrapperIdent.Name)
+	// Inner call has 2 args (original + appended 42)
+	require.Len(t, outerCall.Args, 1)
+	innerCall, ok := outerCall.Args[0].(*dst.CallExpr)
+	require.True(t, ok)
+	assert.Len(t, innerCall.Args, 2)
+}
+
+func TestBuildEllipsisIIFE_Structure(t *testing.T) {
+	varType := &dst.Ident{Name: "int"}
+	spreadArg := &dst.Ident{Name: "opts"}
+	newArgs := []dst.Expr{&dst.BasicLit{Value: "42"}}
+
+	iife := buildEllipsisIIFE(spreadArg, varType, newArgs)
+
+	// Outer call: funcLit(opts...)
+	assert.True(t, iife.Ellipsis)
+	require.Len(t, iife.Args, 1)
+	assert.Equal(t, spreadArg, iife.Args[0])
+
+	funcLit, ok := iife.Fun.(*dst.FuncLit)
+	require.True(t, ok)
+
+	// Param: v ...int
+	require.Len(t, funcLit.Type.Params.List, 1)
+	param := funcLit.Type.Params.List[0]
+	assert.Equal(t, "v", param.Names[0].Name)
+	_, ok = param.Type.(*dst.Ellipsis)
+	assert.True(t, ok)
+
+	// Return: []int
+	require.Len(t, funcLit.Type.Results.List, 1)
+	retType, ok := funcLit.Type.Results.List[0].Type.(*dst.ArrayType)
+	require.True(t, ok)
+	assert.Equal(t, "int", retType.Elt.(*dst.Ident).Name)
+
+	// Body: return append(v, 42)
+	require.Len(t, funcLit.Body.List, 1)
+	retStmt, ok := funcLit.Body.List[0].(*dst.ReturnStmt)
+	require.True(t, ok)
+	require.Len(t, retStmt.Results, 1)
+	appendCall, ok := retStmt.Results[0].(*dst.CallExpr)
+	require.True(t, ok)
+	assert.Equal(t, "append", appendCall.Fun.(*dst.Ident).Name)
+	assert.Len(t, appendCall.Args, 2)
+}
+
 func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 	r := &rule.InstCallRule{
 		ImportPath: "gopkg.in/yaml.v3",
@@ -245,4 +444,41 @@ func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
+}
+
+func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
+	// A file with no matching calls should cause applyCallAppendArgs to
+	// return false so the assertion in applyCallRule can detect unmatched rules.
+	file := makeCallFile(&dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "fmt", Path: "fmt"},
+			Sel: &dst.Ident{Name: "Println"},
+		},
+		Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"hello"`}},
+	})
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "no_match"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		AppendArgs:   []string{"ctx"},
+	}
+
+	ip := newTestPhase()
+	importAliases := collectImportAliases(file)
+	result := ip.applyCallAppendArgs(r, file, importAliases)
+
+	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
+}
+
+func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
+	// Template parses but generates invalid Go when applied to the matched call.
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("not a valid expression {{ . }}")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to wrap")
 }

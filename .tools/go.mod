@@ -6,7 +6,7 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tools
 go 1.25.0
 
 require (
-	github.com/campoy/embedmd v1.0.0
+	github.com/campoy/embedmd/v2 v2.0.0
 	github.com/checkmake/checkmake v0.3.2
 	github.com/golangci/golangci-lint/v2 v2.11.3
 	github.com/google/yamlfmt v0.21.0
@@ -56,6 +56,7 @@ require (
 	github.com/breml/errchkjson v0.4.1 // indirect
 	github.com/butuzov/ireturn v0.4.0 // indirect
 	github.com/butuzov/mirror v1.3.0 // indirect
+	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/catenacyber/perfsprint v0.10.1 // indirect
 	github.com/ccojocar/zxcvbn-go v1.0.4 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

@@ -5,10 +5,12 @@ package util
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -18,6 +20,9 @@ const (
 	// EnvOtelcStats enables per-toolexec timing stats when set to "1".
 	// Set automatically when --stats is used; propagated to child processes.
 	EnvOtelcStats = "OTELC_STATS"
+	// EnvOtelcDebug enables debug-level logging when set to "1".
+	// Set automatically when --debug is used; propagated to child processes.
+	EnvOtelcDebug = "OTELC_DEBUG"
 	BuildTempDir  = ".otelc-build"
 	OtelcRoot     = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
 )
@@ -59,26 +64,6 @@ func GetBuildTemp(name string) string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
 }
 
-func copyBackupFiles(names []string, src, dst string) error {
-	var err error
-	for _, name := range names {
-		srcFile := filepath.Join(src, name)
-		dstFile := filepath.Join(dst, name)
-		err = errors.Join(err, CopyFile(srcFile, dstFile))
-	}
-	return err
-}
-
-// BackupFile backups the source file to $BUILD_TEMP/backup/name.
-func BackupFile(names []string) error {
-	return copyBackupFiles(names, ".", GetBuildTemp("backup"))
-}
-
-// RestoreFile restores the source file from $BUILD_TEMP/backup/name.
-func RestoreFile(names []string) error {
-	return copyBackupFiles(names, GetBuildTemp("backup"), ".")
-}
-
 // GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.
 // The flags are stored as a JSON-encoded string array to preserve arguments that contain spaces.
 // Returns nil if not set or on decode error.
@@ -106,4 +91,25 @@ func EncodeBuildFlags(flags []string) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// VersionInRange checks if a given version is within a specified version range.
+// The version range can be in one of the following formats:
+// - "" (empty string): means all versions are supported.
+// - "v0.11.0": means all versions >= v0.11.0 are supported.
+// - "v0.11.0,v0.12.0": means versions >= v0.11.0 and < v0.12.0 are supported.
+func VersionInRange(version, versionRange string) bool {
+	// No version specified, so it's always applicable
+	if versionRange == "" {
+		return true
+	}
+
+	// Version range? i.e. "v0.11.0,v0.12.0"
+	if startInclusive, endExclusive, ok := strings.Cut(versionRange, ","); ok {
+		return semver.Compare(version, startInclusive) >= 0 &&
+			semver.Compare(version, endExclusive) < 0
+	}
+
+	// Minimal version only? i.e. "v0.11.0"
+	return semver.Compare(version, versionRange) >= 0
 }

@@ -12,28 +12,40 @@ The process consists of three main steps:
 
 ## 1. Define Rules
 
-Rules are defined in YAML format and stored in `pkg/instrumentation/<library-name>/<library-name>.yaml`. This file tells `otelc` which functions to instrument.
+Rules are defined in YAML format and stored under `instrumentation/<import_path>/`. This file tells `otelc` which functions to instrument.
 
-Create a new file `pkg/instrumentation/<library-name>/<library-name>.yaml`. Below is an example configuration for instrumenting a function `NewServer`:
+Create a new file under `instrumentation/<import_path>/.../*.yaml`, where `<import_path>` is the Go import path of the library being instrumented.
+
+For example, the gRPC instrumentation stores its rules under:
+
+```text
+instrumentation/google.golang.org/grpc/
+```
+
+Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
 inject_to_grpc_newserver:
   target: google.golang.org/grpc
   version: v1.63.0,v1.70.0
-  func: NewServer
-  before: BeforeNewServer
-  after: AfterNewServer
-  path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/server
+  where:
+    func: NewServer
+  do:
+    - inject_hooks:
+        before: BeforeNewServer
+        after: AfterNewServer
+        path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/server
 ```
 
-* `target`: Import path of the package to instrument.
-* `version`: Version range to match. The left bound is inclusive, the right bound is exclusive. If version is not specified, the rule is applicable to all versions.
-* `func`: Name of the function to hook.
-* `before` / `after`: Names of the hook functions.
-* `path`: Import path where the hook functions are defined.
+- `target`: Import path of the package to instrument.
+- `version`: Version range to match. The left bound is inclusive, the right bound is exclusive. If version is not specified, the rule is applicable to all versions.
+- `where`: Non-package selectors. `func` names the function to hook.
+- `do`: Ordered list of modifiers. `inject_hooks` declares this rule type and carries:
+  - `before` / `after`: names of the hook functions.
+  - `path`: import path where the hook functions are defined.
 
 > [!NOTE]
-> In addition to function rules, there are other types of rules available. For detailed information on these, refer to [rules.md](rules.md).
+> The 2-tier `where`/`do` schema and all other rule types are documented in [rules.md](rules.md). The schema invariants are recorded in [ADR-0003](adr/0003-structured-rule-schema.md).
 
 ## 2. Implement Hooks
 
@@ -41,10 +53,10 @@ Hook functions are standard Go functions. We place them in the package specified
 
 ### Hook Definition
 
-The first parameter must always be `inst.HookContext`.
+The first parameter must always be `hook.HookContext`.
 
-* **Before Hook**: Parameters match the target function's arguments.
-* **After Hook**: Parameters match the target function's return values.
+- **Before Hook**: Parameters match the target function's arguments.
+- **After Hook**: Parameters match the target function's return values.
 
 Target function:
 
@@ -58,17 +70,17 @@ Hook implementation:
 package server
 
 import (
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
 	"google.golang.org/grpc"
 )
 
 // BeforeNewServer matches the arguments of NewServer
-func BeforeNewServer(ictx inst.HookContext, opts ...grpc.ServerOption) {
+func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
 	// Logic to execute before the original function
 }
 
 // AfterNewServer matches the return value of NewServer
-func AfterNewServer(ictx inst.HookContext, server *grpc.Server) {
+func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
 	// Logic to execute after the original function
 }
 ```
@@ -80,11 +92,11 @@ If we cannot import a specific type (e.g., it is unexported), we can use `interf
 When implementing hooks, we must adhere to certain limitations:
 
 1. **Restricted Imports**: If we are instrumenting a library (e.g., `github.com/foo/bar`), our hook code can only import from:
-    * The Target Library (`github.com/foo/bar`)
-    * OpenTelemetry packages
-    * Standard Library packages
+   - The Target Library (`github.com/foo/bar`)
+   - OpenTelemetry packages
+   - Standard Library packages
 
-    Importing other third-party libraries is not allowed.
+   Importing other third-party libraries is not allowed.
 
 2. **Generic Functions**: If the target function is generic, we cannot use `HookContext` APIs to modify parameters or return values (e.g., `SetParam`, `SetReturnVal`).
 
@@ -116,7 +128,7 @@ At runtime:
 
 ##### 1) Runtime GLS accessors
 
-`pkg/instrumentation/runtime/runtime_gls.go` provides low-level accessors:
+`instrumentation/runtime/runtime_gls.go` provides low-level accessors:
 
 - `GetTraceContextFromGLS()`
 - `SetTraceContextToGLS(interface{})`
@@ -127,7 +139,7 @@ It also defines `OtelContextCloner` for goroutine propagation logic.
 
 ##### 2) Injected trace context holder
 
-`pkg/instrumentation/otel/sdk/trace/otel_trace_context.go` defines an internal linked-list based trace context container in GLS:
+`instrumentation/go.opentelemetry.io/otel/sdk/trace/otel_trace_context.go` defines an internal linked-list based trace context container in GLS:
 
 - add span to current goroutine context
 - delete span when ended
@@ -141,7 +153,7 @@ The max chain size is configurable:
 
 ##### 3) Hook integration points
 
-Configured in `pkg/instrumentation/otel/hook/otel.yaml` and implemented in `pkg/instrumentation/otel/hook/`:
+Configured in `instrumentation/go.opentelemetry.io/otel/hook/hooks.yaml` and implemented in `instrumentation/go.opentelemetry.io/otel/hook/`:
 
 - `tracer_setup.go`: add span to GLS after span creation
 - `span_setup.go`: remove span from GLS before span end
@@ -172,7 +184,7 @@ We verify the instrumentation through unit and integration tests.
 Create standard Go tests (`*_test.go`) alongside the hook functions to verify logic.
 
 ```bash
-go test ./pkg/instrumentation/<library>/...
+go test ./instrumentation/<import_path>/...
 ```
 
 ### Integration Tests
@@ -181,9 +193,9 @@ Integration tests run the instrumented code to ensure hooks are triggered correc
 
 We should:
 
-* Build the test app with the `otelc` tool and run the produced binary. The binary must live under `test/apps/<name>/...`
-* Assert exported telemetry (traces/spans).
-* Validate semantic conventions (required + recommended attributes) for the spans created by the instrumentation.
+- Build the test app with the `otelc` tool and run the produced binary. The binary must live under `test/apps/<name>/...`
+- Assert exported telemetry (traces/spans).
+- Validate semantic conventions (required + recommended attributes) for the spans created by the instrumentation.
 
 To run integration tests:
 
@@ -193,9 +205,9 @@ make test-integration
 
 ## 4. Verify
 
-Check that your instrumentation package have following elements:
+Check that your instrumentation package has the following elements:
 
-* A rule YAML `pkg/instrumentation/<library-name>/<library-name>.yaml` with a correct `target` and version range.
-* Hook implementation under `pkg/instrumentation/<library>/...`
-* Unit tests alongside the hooks for logic-level behavior.
-* Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
+- A rule YAML under `instrumentation/<import_path>/.../*.yaml` with a correct `target` and version range.
+- Hook implementation under `instrumentation/<import_path>/...`
+- Unit tests alongside the hooks for logic-level behavior.
+- Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
