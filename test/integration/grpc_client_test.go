@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb/pb"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
