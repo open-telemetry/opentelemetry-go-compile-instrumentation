@@ -228,3 +228,52 @@ func TestSetupOpenTelemetry(t *testing.T) {
 		otel.SetMeterProvider(otel.GetMeterProvider())
 	})
 }
+
+func TestSetupOpenTelemetry_Errors(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "invalid-protocol")
+
+	cfg := Config{
+		ServiceName:            "test-service-errors",
+		ServiceVersion:         "1.0.0",
+		InstrumentationName:    "test-inst",
+		InstrumentationVersion: "2.0.0",
+	}
+
+	err := setupOpenTelemetry(cfg)
+	assert.NoError(t, err) // setupOpenTelemetry swallows exporter errors and returns nil
+
+	t.Cleanup(func() {
+		tracerProvider = nil
+		meterProvider = nil
+		otel.SetTracerProvider(otel.GetTracerProvider())
+		otel.SetMeterProvider(otel.GetMeterProvider())
+	})
+}
+
+func TestInitialize_PanicRecovery(t *testing.T) {
+	// Save the original logger and restore at end
+	origLogger := logger
+	defer func() {
+		logger = origLogger
+		initOnce = sync.Once{}
+	}()
+
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+
+	cfg := Config{
+		ServiceName:            "test-service-panic",
+		ServiceVersion:         "1.0.0",
+		InstrumentationName:    "test-inst",
+		InstrumentationVersion: "2.0.0",
+	}
+
+	// Trigger panic by setting logger to nil
+	logger = nil
+	initOnce = sync.Once{}
+
+	assert.NotPanics(t, func() {
+		Initialize(cfg)
+	})
+}
+

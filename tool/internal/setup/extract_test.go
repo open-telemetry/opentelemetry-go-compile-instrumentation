@@ -403,3 +403,39 @@ func TestExtractGZip_MkdirAllError(t *testing.T) {
 	err = extractGZip(bytes.NewReader(nil), filepath.Join(conflictPath, "subdir"))
 	require.Error(t, err)
 }
+
+func TestExtractGZip_ExtractError(t *testing.T) {
+	tmpDir := t.TempDir()
+	var tarBuf bytes.Buffer
+	gz := gzip.NewWriter(&tarBuf)
+	tw := tar.NewWriter(gz)
+
+	// First write a regular file
+	err := tw.WriteHeader(&tar.Header{
+		Name:     "pkg_temp/conflict",
+		Mode:     0o644,
+		Size:     4,
+		Typeflag: tar.TypeReg,
+	})
+	require.NoError(t, err)
+	_, err = tw.Write([]byte("data"))
+	require.NoError(t, err)
+
+	// Now try to write a file inside that path as if it were a directory,
+	// which will trigger MkdirAll error in extract()
+	err = tw.WriteHeader(&tar.Header{
+		Name:     "pkg_temp/conflict/nested",
+		Mode:     0o644,
+		Size:     4,
+		Typeflag: tar.TypeReg,
+	})
+	require.NoError(t, err)
+	_, err = tw.Write([]byte("data"))
+	require.NoError(t, err)
+
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	err = extractGZip(&tarBuf, tmpDir)
+	require.Error(t, err)
+}

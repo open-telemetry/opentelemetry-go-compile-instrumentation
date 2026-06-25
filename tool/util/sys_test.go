@@ -508,3 +508,19 @@ func TestWriteFileAtomic(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteFileAtomic_Errors(t *testing.T) {
+	t.Run("CreateTemp error on nonexistent directory", func(t *testing.T) {
+		err := WriteFileAtomic("/nonexistent-dir-12345/file.txt", []byte("data"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to create temporary file for")
+	})
+
+	t.Run("Rename error when path is a directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// Target path is the directory itself
+		err := WriteFileAtomic(tmpDir, []byte("data"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to atomically replace")
+	})
+}
