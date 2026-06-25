@@ -245,7 +245,13 @@ To add instrumentation for a new library:
 1. Create a new directory under `instrumentation/<import_path>`, where `import_path` is the Go import path of the library being instrumented.
 2. Implement Before/After hook functions.
 3. Create semantic convention helpers in a `semconv` subdirectory.
-4. Define rules in `instrumentation/<import_path>/.../*.yaml`.
+4. Define rules in `instrumentation/<import_path>/.../otelc.yaml`.
+Rule files must be named either:
+
+- `otelc.yaml`
+- `*.otelc.yaml`
+
+All matching rule files within an instrumentation package are discovered and loaded automatically.
 5. Add tests and documentation.
 
 Examples:
