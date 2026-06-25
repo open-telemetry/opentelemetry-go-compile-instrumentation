@@ -407,6 +407,44 @@ func extractBuildFlags(args []string) []string {
 	return append(valueFlags, enabledBoolFlags...)
 }
 
+// findModuleRoot walks up from dir to the nearest directory containing go.mod,
+// or returns "" if there is none.
+func findModuleRoot(dir string) string {
+	for dir != "" {
+		if util.PathExists(filepath.Join(dir, "go.mod")) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// vendoringActive reports whether the main module vendors its dependencies. It
+// checks for vendor/modules.txt directly rather than calling `go`: setup has
+// already edited go.mod without updating modules.txt, so `go` would itself fail
+// the vendor consistency check.
+func vendoringActive(workDir string) bool {
+	root := findModuleRoot(workDir)
+	if root == "" {
+		return false
+	}
+	return util.PathExists(filepath.Join(root, "vendor", "modules.txt"))
+}
+
+// goflagsSelectsModMode reports whether GOFLAGS already sets a -mod module mode.
+func goflagsSelectsModMode() bool {
+	for _, f := range strings.Fields(os.Getenv("GOFLAGS")) {
+		if f == "-mod" || strings.HasPrefix(f, "-mod=") {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildWithToolexec builds the project with the toolexec mode
 func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
@@ -445,6 +483,19 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	pwd := util.GetOtelcWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcWorkDir, pwd))
+
+	// Vendored projects fail the vendor consistency check here: setup edited
+	// go.mod for the injected hook modules but not vendor/modules.txt. Build in
+	// module mode via GOFLAGS (so the toolexec `go list` calls ignore vendoring
+	// too), leaving the user's vendor directory untouched.
+	if vendoringActive(util.GetOtelcWorkDir()) && !goflagsSelectsModMode() {
+		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
+		goflags := os.Getenv("GOFLAGS")
+		if goflags != "" {
+			goflags += " "
+		}
+		env = append(env, "GOFLAGS="+goflags+"-mod=mod")
+	}
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
