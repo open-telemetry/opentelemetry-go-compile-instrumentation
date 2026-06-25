@@ -49,6 +49,7 @@ const (
 	goldenDir          = "golden"
 	sourceFileName     = "source.go"
 	rulesFileName      = "rules.yml"
+	importPathFileName = "importpath"
 	mainGoFileName     = "main.go"
 	mainPackage        = "main"
 	buildID            = "foo/bar"
@@ -85,13 +86,14 @@ func runTest(t *testing.T, testName string) {
 	require.NoError(t, util.CopyFile(testSpecificSource, sourceFile),
 		"missing source.go for test %q at %s", testName, testSpecificSource)
 
-	ruleSet := loadRulesYAML(t, testName, sourceFile)
+	importPath := testImportPath(t, testName)
+	ruleSet := loadRulesYAML(t, testName, sourceFile, importPath)
 	writeMatchedJSON(ruleSet)
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
 
-	args := compileArgs(tempDir, sourceFile, helpers)
+	args := compileArgs(tempDir, sourceFile, helpers, importPath)
 	err := Toolexec(ctx, args)
 
 	if testName == invalidReceiver {
@@ -104,7 +106,7 @@ func runTest(t *testing.T, testName string) {
 	verifyGoldenFiles(t, tempDir, testName)
 }
 
-func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet {
+func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string) *rule.InstRuleSet {
 	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
 	require.NoError(t, err)
 
@@ -118,8 +120,12 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	require.NoError(t, parseErr)
 
 	ruleSet := &rule.InstRuleSet{
-		PackageName:    mainPackage,
-		ModulePath:     mainPackage,
+		// PackageName is the Go package identifier (from the source clause);
+		// ModulePath is the compile-time import path, which Toolexec equality-
+		// checks against the -p flag before applying the set. They coincide for
+		// the default "main" fixtures but differ for a deep-path glob fixture.
+		PackageName:    sourceTree.Name.Name,
+		ModulePath:     importPath,
 		FuncRules:      make(map[string][]*rule.InstFuncRule),
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),
@@ -151,11 +157,11 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 				continue
 			}
 
-			// Mirror the setup-phase target-glob gate: a glob target only
-			// applies when it matches the package import path. Exact targets
-			// (the common case) always pass through. This lets golden fixtures
-			// prove glob match vs no-match end to end.
-			if !targetMatches(props, mainPackage) {
+			// Mirror the setup-phase package gate: a rule applies only when its
+			// target selects this fixture's import path (exact equality or glob
+			// match). This lets golden fixtures prove glob match vs no-match
+			// against realistic deep import paths, not just "main".
+			if !targetMatches(props, importPath) {
 				continue
 			}
 
@@ -295,7 +301,7 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 	util.WriteFile(matchedFile, string(matchedJSON))
 }
 
-func compileArgs(tempDir, sourceFile string, helpers []helperPkg) []string {
+func compileArgs(tempDir, sourceFile string, helpers []helperPkg, importPath string) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
 
 	// Create importcfg file for the test
@@ -305,7 +311,7 @@ func compileArgs(tempDir, sourceFile string, helpers []helperPkg) []string {
 	return []string{
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
-		"-p", mainPackage,
+		"-p", importPath,
 		"-complete",
 		"-buildid", buildID,
 		"-importcfg", importCfgPath,
@@ -408,6 +414,22 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		actual, _ := os.ReadFile(filepath.Join(tempDir, actualFile))
 		golden.Assert(t, string(actual), filepath.Join(goldenDir, testName, entry.Name()))
 	}
+}
+
+// testImportPath returns the compile-time import path for a fixture. A fixture
+// overrides the default "main" by placing a single-line "importpath" file in its
+// golden directory, letting glob fixtures exercise realistic deep import paths
+// (e.g. "example.com/acme/svc/users" matched by target "example.com/acme/**")
+// instead of the trivial single-segment "main".
+func testImportPath(t *testing.T, testName string) string {
+	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, importPathFileName))
+	if os.IsNotExist(err) {
+		return mainPackage
+	}
+	require.NoError(t, err)
+	p := strings.TrimSpace(string(data))
+	require.NotEmpty(t, p, "importpath file for %q must not be empty", testName)
+	return p
 }
 
 func actualFileFromGolden(t *testing.T, goldenName string) string {

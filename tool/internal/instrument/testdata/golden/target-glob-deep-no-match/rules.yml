@@ -1,0 +1,14 @@
+# The glob targets the example.com/acme/** family, but the package under
+# instrumentation is example.com/other/svc/orders, which is outside that
+# family. The glob must not match, so no instrumentation is applied and the
+# resulting main.go is byte-identical to source.go. This proves a deep,
+# realistic import path is not over-matched by an unrelated family glob.
+hook_glob_deep:
+  target: "example.com/acme/**"
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata/golden/target-glob-deep-no-match
