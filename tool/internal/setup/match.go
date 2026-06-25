@@ -92,7 +92,6 @@ func isRuleFile(name string) bool {
 		strings.HasSuffix(name, ".otelc.yaml"))
 }
 
-
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
