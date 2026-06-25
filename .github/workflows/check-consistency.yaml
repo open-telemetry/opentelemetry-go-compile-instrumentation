@@ -31,7 +31,7 @@ jobs:
               - '**/*.go'
               - '**/go.mod'
               - '**/go.sum'
-              - 'pkg/inst/context.go'
+              - 'pkg/hook/context.go'
               - 'tool/internal/instrument/api.tmpl'
               - 'tool/internal/instrument/testdata/**'
               - '.github/workflows/check-consistency.yaml'
@@ -44,7 +44,7 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
-      - name: Verify api.tmpl matches pkg/inst/context.go
+      - name: Verify api.tmpl matches pkg/hook/context.go
         run: make check-api-sync
 
   check-golden-files:

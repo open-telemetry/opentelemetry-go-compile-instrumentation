@@ -386,6 +386,31 @@ func TestRemoveBeforeTrampolineCall(t *testing.T) {
 	assert.Len(t, tjump.ifStmt.Body.List, 1)
 }
 
+func TestRemoveAfterTrampolineDecl(t *testing.T) {
+	funcSrc := `package main
+	func testFunc(param1 string) {}`
+
+	targetFunc := parseFunc(t, funcSrc)
+	tjump := &TJump{
+		target: targetFunc,
+		rule: &rule.InstFuncRule{
+			Func:   targetFunc.Name.Name,
+			Before: "beforeHook",
+		},
+	}
+	afterFuncName := makeName(tjump.rule, tjump.target, false)
+	fileSrc := fmt.Sprintf(`package main
+	func testFunc(param1 string) {}
+	func %s() {}`, afterFuncName)
+	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
+	require.NoError(t, err)
+	require.NotNil(t, ast.FindFuncDeclWithoutRecv(targetFile, afterFuncName))
+
+	err = removeAfterTrampolineDecl(targetFile, tjump)
+	require.NoError(t, err)
+	assert.Nil(t, ast.FindFuncDeclWithoutRecv(targetFile, afterFuncName))
+}
+
 func TestFlattenTJump(t *testing.T) {
 	tests := []struct {
 		name          string

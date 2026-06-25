@@ -1,0 +1,10 @@
+server_hook:
+  target: net/http
+  where:
+    func: ServeHTTP
+    recv: serverHandler
+  do:
+    - inject_hooks:
+        before: BeforeServeHTTP
+        after: AfterServeHTTP
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server"

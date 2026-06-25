@@ -22,6 +22,7 @@ import (
 //   - net/http server instrumentation (creates the span)
 func TestOtelSDKSpanFromContext(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "otelsdk", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
 
