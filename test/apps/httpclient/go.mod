@@ -5,17 +5,14 @@ go 1.25.0
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation v0.0.0-00010101000000-000000000000
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client v0.0.0-00010101000000-000000000000
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server v0.0.0-00010101000000-000000000000
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime v0.0.0-00010101000000-000000000000
 )
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/dave/dst v0.27.3 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -30,9 +27,6 @@ require (
 	github.com/prometheus/common v0.65.0 // indirect
 	github.com/prometheus/otlptranslator v0.0.2 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
-	github.com/urfave/cli/v3 v3.6.1 // indirect
-	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasttemplate v1.2.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/prometheus v0.63.0 // indirect
 	go.opentelemetry.io/contrib/exporters/autoexport v0.63.0 // indirect
@@ -56,27 +50,23 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.7.1 // indirect
-	golang.org/x/mod v0.32.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260120221211-b8f7ae30c516 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime => D:\opentelemetry-go-compile-instrumentation\test\apps\httpclient\.otelc-build\instrumentation\runtime
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime => ../../../instrumentation/runtime
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client => D:\opentelemetry-go-compile-instrumentation\test\apps\httpclient\.otelc-build\instrumentation\net\http\client
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client => ../../../instrumentation/net/http/client
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server => D:\opentelemetry-go-compile-instrumentation\test\apps\httpclient\.otelc-build\instrumentation\net\http\server
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server => ../../../instrumentation/net/http/server
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => D:\opentelemetry-go-compile-instrumentation\test\apps\httpclient\.otelc-build\pkg
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../pkg
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => D:\opentelemetry-go-compile-instrumentation\test\apps\httpclient\.otelc-build\pkg\runtime
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../pkg/runtime
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => D:\opentelemetry-go-compile-instrumentation\test\apps\httpclient\.otelc-build\instrumentation
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => ../../../instrumentation
