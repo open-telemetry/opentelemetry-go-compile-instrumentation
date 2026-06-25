@@ -72,16 +72,16 @@ require (
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/go.mongodb.org/mongo-driver/mongo => D:\opentelemetry-go-compile-instrumentation\test\apps\mongoclient\.otelc-build\instrumentation\go.mongodb.org\mongo-driver\mongo
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/go.mongodb.org/mongo-driver/mongo => ../../../instrumentation/go.mongodb.org/mongo-driver/mongo
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => D:\opentelemetry-go-compile-instrumentation\test\apps\mongoclient\.otelc-build\pkg
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../pkg
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => D:\opentelemetry-go-compile-instrumentation\test\apps\mongoclient\.otelc-build\pkg\runtime
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../pkg/runtime
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => D:\opentelemetry-go-compile-instrumentation\test\apps\mongoclient\.otelc-build\instrumentation
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => ../../../instrumentation
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime => D:\opentelemetry-go-compile-instrumentation\test\apps\mongoclient\.otelc-build\instrumentation\runtime
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime => ../../../instrumentation/runtime
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client => D:\opentelemetry-go-compile-instrumentation\test\apps\mongoclient\.otelc-build\instrumentation\net\http\client
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client => ../../../instrumentation/net/http/client
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server => D:\opentelemetry-go-compile-instrumentation\test\apps\mongoclient\.otelc-build\instrumentation\net\http\server
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server => ../../../instrumentation/net/http/server
