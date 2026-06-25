@@ -1,0 +1,11 @@
+./batch.go
+./doc.go
+./exporter.go
+./filter_processor.go
+./logger.go
+./processor.go
+./provider.go
+./record.go
+./ring.go
+./setting.go
+./simple.go

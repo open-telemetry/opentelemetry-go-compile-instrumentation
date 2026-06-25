@@ -1,0 +1,11 @@
+./doc.go
+./encoder.go
+./filter.go
+./hash.go
+./iterator.go
+./key.go
+./kv.go
+./rawhelpers.go
+./set.go
+./type_string.go
+./value.go

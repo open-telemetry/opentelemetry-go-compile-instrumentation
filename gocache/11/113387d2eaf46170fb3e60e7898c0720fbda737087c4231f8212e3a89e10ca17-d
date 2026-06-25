@@ -1,0 +1,15 @@
+./apply_call.go
+./apply_call_helpers.go
+./apply_decl.go
+./apply_directive.go
+./apply_file.go
+./apply_func.go
+./apply_raw.go
+./apply_struct.go
+./call_template.go
+./imports.go
+./instrument.go
+./match.go
+./optimize.go
+./toolexec.go
+./trampoline.go

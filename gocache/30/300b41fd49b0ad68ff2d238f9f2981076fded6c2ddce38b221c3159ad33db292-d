@@ -1,0 +1,7 @@
+./bootstrap.go
+./client.go
+./docker_host.go
+./docker_rootless.go
+./docker_socket.go
+./images.go
+./labels.go

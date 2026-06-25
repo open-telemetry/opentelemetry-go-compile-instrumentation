@@ -1,0 +1,3 @@
+./auth.go
+./config.go
+./load.go

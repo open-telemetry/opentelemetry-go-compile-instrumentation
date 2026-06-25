@@ -1,0 +1,8 @@
+./doc.go
+./keyvalue.go
+./kind_string.go
+./logger.go
+./provider.go
+./record.go
+./severity.go
+./severity_string.go

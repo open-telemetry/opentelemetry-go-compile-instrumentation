@@ -1,0 +1,17 @@
+./archive.go
+./archive_other.go
+./archive_windows.go
+./changes.go
+./changes_other.go
+./changes_windows.go
+./copy.go
+./copy_windows.go
+./diff.go
+./diff_windows.go
+./path.go
+./path_windows.go
+./time.go
+./time_windows.go
+./whiteouts.go
+./wrap.go
+./xattr_unsupported.go

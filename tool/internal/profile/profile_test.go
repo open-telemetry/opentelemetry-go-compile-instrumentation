@@ -256,8 +256,8 @@ func TestMerge(t *testing.T) {
 	}
 	defer destFile.Close()
 
-	if _, err := io.Copy(destFile, srcFile); err != nil {
-		t.Fatalf("copy profile content: %v", err)
+	if _, copyErr := io.Copy(destFile, srcFile); copyErr != nil {
+		t.Fatalf("copy profile content: %v", copyErr)
 	}
 	_ = destFile.Sync()
 	_ = destFile.Close()
@@ -265,8 +265,8 @@ func TestMerge(t *testing.T) {
 
 	// 3. Merge them
 	ctx := context.Background()
-	if err := Merge(ctx, dir, []Type{CPU}); err != nil {
-		t.Fatalf("Merge() error: %v", err)
+	if mergeErr := Merge(ctx, dir, []Type{CPU}); mergeErr != nil {
+		t.Fatalf("Merge() error: %v", mergeErr)
 	}
 
 	// 4. Verify merged file exists
@@ -274,10 +274,10 @@ func TestMerge(t *testing.T) {
 	assertFileExists(t, mergedPath)
 
 	// 5. Verify originals are deleted
-	if _, err := os.Stat(origPath); !os.IsNotExist(err) {
+	if _, statErr1 := os.Stat(origPath); !os.IsNotExist(statErr1) {
 		t.Errorf("expected original file %q to be deleted, but it exists", origPath)
 	}
-	if _, err := os.Stat(dupPath); !os.IsNotExist(err) {
+	if _, statErr2 := os.Stat(dupPath); !os.IsNotExist(statErr2) {
 		t.Errorf("expected duplicate file %q to be deleted, but it exists", dupPath)
 	}
 }
@@ -298,15 +298,14 @@ func TestMergeTraceIgnored(t *testing.T) {
 	assertFileExists(t, origPath)
 
 	ctx := context.Background()
-	if err := Merge(ctx, dir, []Type{Trace}); err != nil {
-		t.Fatalf("Merge() error: %v", err)
+	if mergeErr := Merge(ctx, dir, []Type{Trace}); mergeErr != nil {
+		t.Fatalf("Merge() error: %v", mergeErr)
 	}
 
 	// Trace files should NOT be merged/deleted
 	assertFileExists(t, origPath)
 	mergedPath := filepath.Join(dir, "otelc.trace")
-	if _, err := os.Stat(mergedPath); !os.IsNotExist(err) {
+	if _, statErr := os.Stat(mergedPath); !os.IsNotExist(statErr) {
 		t.Errorf("expected merged trace file to not exist, but it does")
 	}
 }
-

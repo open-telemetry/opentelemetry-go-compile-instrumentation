@@ -1,0 +1,6 @@
+./common.go
+./coretype.go
+./free.go
+./normalize.go
+./termlist.go
+./typeterm.go

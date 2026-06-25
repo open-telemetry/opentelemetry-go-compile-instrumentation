@@ -1,0 +1,3 @@
+./process.go
+./process_windows.go
+./process_windows_64bit.go

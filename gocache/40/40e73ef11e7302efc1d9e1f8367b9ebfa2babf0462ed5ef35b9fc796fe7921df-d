@@ -1,0 +1,3 @@
+./guid.go
+./guid_windows.go
+./variant_string.go

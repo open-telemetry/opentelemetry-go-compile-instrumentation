@@ -1,0 +1,9 @@
+./decorator-fragment-generated.go
+./decorator-fragment.go
+./decorator-node-generated.go
+./decorator.go
+./helpers.go
+./load.go
+./map.go
+./restorer-generated.go
+./restorer.go

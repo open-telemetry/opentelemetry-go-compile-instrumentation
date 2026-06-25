@@ -1,0 +1,16 @@
+./alert.go
+./fingerprinting.go
+./fnv.go
+./labels.go
+./labelset.go
+./labelset_string.go
+./metadata.go
+./metric.go
+./model.go
+./signature.go
+./silence.go
+./time.go
+./value.go
+./value_float.go
+./value_histogram.go
+./value_type.go

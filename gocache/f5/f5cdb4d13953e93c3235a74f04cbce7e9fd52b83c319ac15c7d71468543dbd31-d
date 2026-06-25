@@ -1,0 +1,7 @@
+./inmem_socket.go
+./proxy.go
+./sockets.go
+./sockets_windows.go
+./tcp_socket.go
+./unix_socket.go
+./unix_socket_windows.go

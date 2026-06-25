@@ -1,0 +1,10 @@
+./cmd_cleanup.go
+./cmd_go.go
+./cmd_pin.go
+./cmd_setup.go
+./cmd_toolexec.go
+./cmd_version.go
+./main.go
+./profiling.go
+./stats.go
+./main_test.go

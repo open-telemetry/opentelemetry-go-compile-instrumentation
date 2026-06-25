@@ -1,0 +1,4 @@
+./authconfig.go
+./authenticate.go
+./registry.go
+./search.go

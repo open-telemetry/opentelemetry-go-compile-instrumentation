@@ -1,0 +1,11 @@
+./clone-generated.go
+./clone.go
+./decorations-node-generated.go
+./decorations-types-generated.go
+./decorations.go
+./dst.go
+./print.go
+./readme.go
+./resolve.go
+./scope.go
+./walk.go

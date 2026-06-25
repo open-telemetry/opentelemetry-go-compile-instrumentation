@@ -1,0 +1,5 @@
+./algorithm.go
+./digest.go
+./digester.go
+./doc.go
+./verifiers.go

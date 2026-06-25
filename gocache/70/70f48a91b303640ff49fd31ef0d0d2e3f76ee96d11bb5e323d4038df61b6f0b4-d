@@ -1,0 +1,11 @@
+./aggregate.go
+./atomic.go
+./doc.go
+./drop.go
+./exemplar.go
+./exponential_histogram.go
+./filtered_reservoir.go
+./histogram.go
+./lastvalue.go
+./limit.go
+./sum.go

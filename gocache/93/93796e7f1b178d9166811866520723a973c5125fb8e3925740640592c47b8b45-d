@@ -1,0 +1,12 @@
+./auto.go
+./config.go
+./context.go
+./doc.go
+./hex.go
+./nonrecording.go
+./noop.go
+./provider.go
+./span.go
+./trace.go
+./tracer.go
+./tracestate.go

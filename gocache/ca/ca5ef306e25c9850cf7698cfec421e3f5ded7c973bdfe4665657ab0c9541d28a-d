@@ -1,0 +1,8 @@
+./doc.go
+./exemplar.go
+./filter.go
+./fixed_size_reservoir.go
+./histogram_reservoir.go
+./reservoir.go
+./storage.go
+./value.go

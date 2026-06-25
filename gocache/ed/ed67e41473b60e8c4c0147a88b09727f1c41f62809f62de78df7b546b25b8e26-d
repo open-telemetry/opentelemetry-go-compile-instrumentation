@@ -1,0 +1,5 @@
+./compressed.go
+./hyperloglog.go
+./registers.go
+./sparse.go
+./utils.go

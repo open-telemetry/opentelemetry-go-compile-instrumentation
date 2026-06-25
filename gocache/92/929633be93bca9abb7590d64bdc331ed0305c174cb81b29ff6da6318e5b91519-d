@@ -1,0 +1,3 @@
+./logs_service.pb.go
+./logs_service.pb.gw.go
+./logs_service_grpc.pb.go

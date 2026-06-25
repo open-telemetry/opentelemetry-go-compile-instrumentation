@@ -1,0 +1,8 @@
+./delete_response.go
+./disk_usage.go
+./image.go
+./image_history.go
+./image_inspect.go
+./manifest.go
+./opts.go
+./summary.go

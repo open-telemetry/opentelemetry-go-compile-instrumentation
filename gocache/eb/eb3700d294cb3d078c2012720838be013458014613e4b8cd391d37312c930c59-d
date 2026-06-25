@@ -1,0 +1,5 @@
+./helpers.go
+./normalize.go
+./reference.go
+./regexp.go
+./sort.go

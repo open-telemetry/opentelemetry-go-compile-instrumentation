@@ -9,11 +9,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestGetLogger(t *testing.T) {
@@ -228,5 +228,3 @@ func TestSetupOpenTelemetry(t *testing.T) {
 		otel.SetMeterProvider(otel.GetMeterProvider())
 	})
 }
-
-

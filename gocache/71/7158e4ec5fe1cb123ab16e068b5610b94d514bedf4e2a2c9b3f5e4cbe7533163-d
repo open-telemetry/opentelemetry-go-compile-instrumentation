@@ -1,0 +1,7 @@
+./annotations.go
+./config.go
+./descriptor.go
+./index.go
+./layout.go
+./manifest.go
+./mediatype.go

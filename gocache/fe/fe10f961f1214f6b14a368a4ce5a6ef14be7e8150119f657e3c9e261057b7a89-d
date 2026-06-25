@@ -1,0 +1,12 @@
+./backup.go
+./doc.go
+./ea.go
+./file.go
+./fileinfo.go
+./hvsock.go
+./pipe.go
+./privilege.go
+./reparse.go
+./sd.go
+./syscall.go
+./zsyscall_windows.go
