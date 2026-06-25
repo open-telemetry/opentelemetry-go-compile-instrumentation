@@ -203,7 +203,7 @@ go 1.21
 		InstBaseRule: rule.InstBaseRule{
 			Name: "test-rule",
 		},
-		Path: util.OtelcRoot + "/pkg/instrumentation/nethttp",
+		Path: util.OtelcRoot + "/instrumentation/net/http/client",
 	}
 
 	ruleSet := &rule.InstRuleSet{

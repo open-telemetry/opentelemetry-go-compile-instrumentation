@@ -11,6 +11,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 //nolint:gochecknoglobals // Implementation of a CLI command
@@ -25,20 +26,20 @@ var commandVersion = cli.Command{
 	},
 	Before: addLoggerPhaseAttribute,
 	Action: func(_ context.Context, cmd *cli.Command) error {
-		_, err := fmt.Fprintf(cmd.Writer, "otelc version %s", Version)
+		_, err := fmt.Fprintf(cmd.Writer, "otelc version %s", util.Version)
 		if err != nil {
 			return ex.Wrapf(err, "failed to print version")
 		}
 
-		if CommitHash != "unknown" {
-			_, err = fmt.Fprintf(cmd.Writer, "+%s", CommitHash)
+		if util.CommitHash != "unknown" {
+			_, err = fmt.Fprintf(cmd.Writer, "+%s", util.CommitHash)
 			if err != nil {
 				return ex.Wrapf(err, "failed to print commit hash")
 			}
 		}
 
-		if BuildTime != "unknown" {
-			_, err = fmt.Fprintf(cmd.Writer, " (%s)", BuildTime)
+		if util.BuildTime != "unknown" {
+			_, err = fmt.Fprintf(cmd.Writer, " (%s)", util.BuildTime)
 			if err != nil {
 				return ex.Wrapf(err, "failed to print build time")
 			}

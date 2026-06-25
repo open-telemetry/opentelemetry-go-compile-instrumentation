@@ -4,12 +4,12 @@ go 1.25.0
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ..
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver => ./apps/grpcserver
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb => ./shared/grpcpb
 
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation v0.0.0
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver v0.0.0
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation v0.0.0-00010101000000-000000000000
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/k3s v0.41.0
