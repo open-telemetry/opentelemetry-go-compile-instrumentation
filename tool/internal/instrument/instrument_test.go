@@ -272,16 +272,20 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 	}
 }
 
-// targetMatches reports whether a rule's target applies to importPath. Exact
-// (non-glob) targets always apply in this harness because rule selection by
-// import path happens in the setup phase; only glob targets are evaluated here
-// so that golden fixtures can demonstrate the glob match/no-match split.
+// targetMatches reports whether a rule's target selects importPath, mirroring
+// setup-phase package selection: a glob target matches via MatchGlobTarget, an
+// exact target matches only on equality. A missing, non-string, or empty target
+// never matches, so an invalid fixture fails the golden test instead of silently
+// being applied.
 func targetMatches(props map[string]any, importPath string) bool {
 	target, ok := props["target"].(string)
-	if !ok || !rule.IsGlobTarget(target) {
-		return true
+	if !ok || strings.TrimSpace(target) == "" {
+		return false
 	}
-	return rule.MatchGlobTarget(target, importPath)
+	if rule.IsGlobTarget(target) {
+		return rule.MatchGlobTarget(target, importPath)
+	}
+	return target == importPath
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
