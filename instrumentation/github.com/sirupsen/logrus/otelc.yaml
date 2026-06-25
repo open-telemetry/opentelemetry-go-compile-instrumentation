@@ -1,0 +1,34 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Instrumentation for github.com/sirupsen/logrus to inject trace context into log fields
+
+hook_logrus_new:
+  target: github.com/sirupsen/logrus
+  version: "v1.4.2"
+  where:
+    func: New
+  do:
+    - inject_hooks:
+        after: AfterLogrusNew
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/sirupsen/logrus"
+
+hook_logrus_with_field:
+  target: github.com/sirupsen/logrus
+  version: "v1.4.2"
+  where:
+    func: WithField
+  do:
+    - inject_hooks:
+        after: AfterLogrusWithField
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/sirupsen/logrus"
+
+hook_logrus_set_formatter:
+  target: github.com/sirupsen/logrus
+  version: "v1.4.2"
+  where:
+    func: SetFormatter
+  do:
+    - inject_hooks:
+        after: AfterLogrusSetFormatter
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/sirupsen/logrus"
