@@ -4,6 +4,8 @@
 package setup
 
 import (
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +17,7 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -421,3 +424,33 @@ func TestExtractBuildFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestIsSetup(t *testing.T) {
+	assert.False(t, isSetup())
+}
+
+func TestSetupPhaseStore(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+
+	sp := &SetupPhase{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	matched := []*rule.InstRuleSet{
+		{
+			PackageName: "foo",
+			ModulePath:  "example.com/foo",
+		},
+	}
+
+	err := os.MkdirAll(filepath.Dir(util.GetMatchedRuleFile()), 0o755)
+	require.NoError(t, err)
+
+	err = sp.store(matched)
+	require.NoError(t, err)
+
+	// Verify file was written
+	require.FileExists(t, util.GetMatchedRuleFile())
+}
+

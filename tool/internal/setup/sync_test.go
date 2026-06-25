@@ -386,3 +386,34 @@ go 1.25.0
 
 	assert.Empty(t, buf.String())
 }
+
+func TestLocalVersionForPath(t *testing.T) {
+	tests := []struct {
+		modulePath string
+		expected   string
+	}{
+		{
+			modulePath: "example.com/foo",
+			expected:   localReplaceVersion,
+		},
+		{
+			modulePath: "example.com/foo/v2",
+			expected:   "v2.0.0-00010101000000-000000000000",
+		},
+		{
+			modulePath: "example.com/foo/v12",
+			expected:   "v12.0.0-00010101000000-000000000000",
+		},
+		{
+			modulePath: "example.com/foo/v2x",
+			expected:   localReplaceVersion,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modulePath, func(t *testing.T) {
+			assert.Equal(t, tt.expected, localVersionForPath(tt.modulePath))
+		})
+	}
+}
+

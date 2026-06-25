@@ -228,6 +228,9 @@ func loadMinimalRules() (map[string][]yamlRule, error) {
 }
 
 func ensureOtelcRequire(moduleDir, version string) (bool, error) {
+	if !semver.IsValid(version) {
+		return false, nil
+	}
 	if module.IsPseudoVersion(version) {
 		// Let go mod tidy handle pseudo-versions.
 		return false, nil

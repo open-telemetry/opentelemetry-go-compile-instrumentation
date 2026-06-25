@@ -737,3 +737,104 @@ func TestHandleInstrumentationVisit(t *testing.T) {
 		require.True(t, toolFiles["otel.instrumentation.go"]["example.com/foo"])
 	})
 }
+
+func TestLoadMinimalRules(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+
+	// Create rulesRoot
+	rulesRoot := filepath.Join(tmpDir, util.BuildTempDir, unzippedInstDir)
+	require.NoError(t, os.MkdirAll(rulesRoot, 0o755))
+
+	// Write rules yaml in a subdirectory
+	subDir := filepath.Join(rulesRoot, "example.com/instrumentation/foo")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+
+	ruleYaml := `
+rule1:
+  target: example.com/foo
+  version: v1.2.3
+`
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "otelc.yaml"), []byte(ruleYaml), 0o644))
+
+	// Write go.mod in the same subdirectory
+	goModContent := `module example.com/instrumentation/foo
+
+go 1.25
+`
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "go.mod"), []byte(goModContent), 0o644))
+
+	rules, err := loadMinimalRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	require.Contains(t, rules, "example.com/instrumentation/foo")
+	require.Equal(t, "example.com/foo", rules["example.com/instrumentation/foo"][0].Target)
+	require.Equal(t, "v1.2.3", rules["example.com/instrumentation/foo"][0].VersionRange)
+}
+
+func TestCollectToolFileImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolFile := filepath.Join(tmpDir, "otel.instrumentation.go")
+
+	content := `package tools
+
+import (
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
+	_ "example.com/instrumentation/foo"
+	_ "example.com/instrumentation/bar"
+	"fmt"
+)
+`
+	require.NoError(t, os.WriteFile(toolFile, []byte(content), 0o644))
+
+	// case 1: no pruned imports
+	imports, err := collectToolFileImports(toolFile, nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{
+		"example.com/instrumentation/foo": true,
+		"example.com/instrumentation/bar": true,
+	}, imports)
+
+	// case 2: with pruned imports
+	imports, err = collectToolFileImports(toolFile, map[string]bool{"example.com/instrumentation/foo": true})
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{
+		"example.com/instrumentation/bar": true,
+	}, imports)
+}
+
+func TestUpdateToolFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolFile := filepath.Join(tmpDir, "otel.instrumentation.go")
+
+	content := `package tools
+
+import (
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
+	_ "example.com/instrumentation/foo"
+)
+`
+	require.NoError(t, os.WriteFile(toolFile, []byte(content), 0o644))
+
+	goModContent := fmt.Sprintf(`module example.com/test
+
+go 1.25
+
+require %s %s
+`, util.OtelcRoot, util.Version)
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0o644))
+
+	trueValue := true
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	err := updateToolFile(context.Background(), toolFile, nil, opts)
+	require.NoError(t, err)
+
+	updatedContent, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Contains(t, string(updatedContent), "//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc pin --generate")
+}
+
