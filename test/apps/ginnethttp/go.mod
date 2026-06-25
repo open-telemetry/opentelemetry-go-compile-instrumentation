@@ -16,8 +16,6 @@ replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ..
 
 require (
 	github.com/gin-gonic/gin v1.10.0
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/gin-gonic/gin v0.0.0-20260625124055-4615b40860db
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client v0.0.0-00010101000000-000000000000
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server v0.0.0
 )
 

@@ -63,6 +63,7 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 
 		_, err = io.CopyN(file, tarReader, header.Size)
 		if err != nil {
+			_ = file.Close()
 			return ex.Wrap(err)
 		}
 		err = file.Close()

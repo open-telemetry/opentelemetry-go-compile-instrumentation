@@ -276,3 +276,130 @@ func TestExtractGZip_SkipsZipSlip(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractGZip_InvalidGZip(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := extractGZip(bytes.NewReader([]byte("not a gzip")), tmpDir)
+	require.Error(t, err)
+}
+
+func TestExtractGZip_InvalidTar(t *testing.T) {
+	tmpDir := t.TempDir()
+	var tarBuf bytes.Buffer
+	gz := gzip.NewWriter(&tarBuf)
+	_, err := gz.Write([]byte("not a tar file at all"))
+	require.NoError(t, err)
+	require.NoError(t, gz.Close())
+
+	err = extractGZip(&tarBuf, tmpDir)
+	require.Error(t, err)
+}
+
+func TestExtractGZip_SkipsHiddenFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	var tarBuf bytes.Buffer
+	gz := gzip.NewWriter(&tarBuf)
+	tw := tar.NewWriter(gz)
+
+	err := tw.WriteHeader(&tar.Header{
+		Name:     ".hidden_file",
+		Mode:     0o644,
+		Size:     0,
+		Typeflag: tar.TypeReg,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	err = extractGZip(&tarBuf, tmpDir)
+	require.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(tmpDir, ".hidden_file"))
+	require.True(t, os.IsNotExist(err))
+}
+
+func TestExtractGZip_SkipsDotAndDotDot(t *testing.T) {
+	tmpDir := t.TempDir()
+	var tarBuf bytes.Buffer
+	gz := gzip.NewWriter(&tarBuf)
+	tw := tar.NewWriter(gz)
+
+	err := tw.WriteHeader(&tar.Header{
+		Name:     ".",
+		Mode:     0o755,
+		Typeflag: tar.TypeDir,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	err = extractGZip(&tarBuf, tmpDir)
+	require.NoError(t, err)
+}
+
+func TestExtractBundle(t *testing.T) {
+	err := extractBundle()
+	require.NoError(t, err)
+}
+
+func TestExtract_OpenFileError(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "dir_conflict")
+	err := os.Mkdir(targetPath, 0o755)
+	require.NoError(t, err)
+
+	header := &tar.Header{
+		Name:     "dir_conflict",
+		Typeflag: tar.TypeReg,
+		Mode:     0o644,
+		Size:     10,
+	}
+
+	err = extract(nil, header, targetPath)
+	require.Error(t, err)
+}
+
+func TestExtract_MkdirAllError(t *testing.T) {
+	tmpDir := t.TempDir()
+	conflictPath := filepath.Join(tmpDir, "file_conflict")
+	err := os.WriteFile(conflictPath, []byte("content"), 0o644)
+	require.NoError(t, err)
+
+	header := &tar.Header{
+		Name:     "file_conflict/subdir",
+		Typeflag: tar.TypeDir,
+		Mode:     0o755,
+	}
+
+	err = extract(nil, header, filepath.Join(conflictPath, "subdir"))
+	require.Error(t, err)
+}
+
+func TestExtract_CopyError(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "somefile")
+
+	header := &tar.Header{
+		Name:     "somefile",
+		Typeflag: tar.TypeReg,
+		Mode:     0o644,
+		Size:     100,
+	}
+
+	tr := tar.NewReader(bytes.NewReader(nil))
+
+	err := extract(tr, header, targetPath)
+	require.Error(t, err)
+}
+
+func TestExtractGZip_MkdirAllError(t *testing.T) {
+	tmpDir := t.TempDir()
+	conflictPath := filepath.Join(tmpDir, "file_conflict")
+	err := os.WriteFile(conflictPath, []byte("content"), 0o644)
+	require.NoError(t, err)
+
+	err = extractGZip(bytes.NewReader(nil), filepath.Join(conflictPath, "subdir"))
+	require.Error(t, err)
+}

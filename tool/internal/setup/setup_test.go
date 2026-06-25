@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -420,4 +421,16 @@ func TestExtractBuildFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsSetup(t *testing.T) {
+	assert.False(t, isSetup())
+}
+
+func TestSetupPhaseLogger(t *testing.T) {
+	sp := &SetupPhase{logger: slog.New(slog.NewJSONHandler(os.Stderr, nil))}
+	sp.Info("info message")
+	sp.Error("error message")
+	sp.Warn("warn message")
+	sp.Debug("debug message")
 }
