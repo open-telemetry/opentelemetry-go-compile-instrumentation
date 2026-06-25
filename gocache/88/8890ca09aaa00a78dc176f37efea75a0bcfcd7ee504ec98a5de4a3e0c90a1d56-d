@@ -1,5 +1,0 @@
-./common.go
-./common_windows.go
-./endian.go
-./sleep.go
-./warnings.go

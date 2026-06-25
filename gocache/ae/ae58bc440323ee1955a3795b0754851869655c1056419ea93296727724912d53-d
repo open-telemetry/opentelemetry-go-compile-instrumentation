@@ -1,7 +1,0 @@
-./collector.go
-./fixture.go
-./infra.go
-./latestlib.go
-./readiness.go
-./semconv.go
-./spans.go

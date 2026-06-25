@@ -1,5 +1,0 @@
-./ast.go
-./expr.go
-./misc.go
-./stmt.go
-./token.go

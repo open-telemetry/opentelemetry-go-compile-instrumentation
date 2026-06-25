@@ -112,7 +112,7 @@ The 70% floor is the minimum bar agreed in [issue #569](https://github.com/open-
 (tracked under the release 1.0.0 roadmap). Coverage is tracked **per module tree** — `tool/` and
 `pkg/` are checked independently so that one area cannot mask regression in the other.
 
-### CI behaviour
+### CI behavior
 
 The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 

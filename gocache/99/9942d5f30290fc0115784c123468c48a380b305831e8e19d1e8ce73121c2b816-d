@@ -1,5 +1,0 @@
-./errors_not_enabled.go
-./mongocrypt_context_not_enabled.go
-./mongocrypt_kms_context_not_enabled.go
-./mongocrypt_not_enabled.go
-./state.go

@@ -1,5 +1,0 @@
-./almost_equal.go
-./difflib.go
-./go_collector_options.go
-./go_runtime_metrics.go
-./metric.go

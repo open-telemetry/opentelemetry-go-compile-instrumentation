@@ -1,4 +1,0 @@
-./invoke.go
-./invoke_notunix.go
-./vendor.go
-./version.go

@@ -1,5 +1,0 @@
-./doc.go
-./limit.go
-./span.go
-./tracer.go
-./tracer_provider.go

@@ -1,8 +1,0 @@
-./bimport.go
-./exportdata.go
-./gcimporter.go
-./iexport.go
-./iimport.go
-./predeclared.go
-./support.go
-./ureader_yes.go

@@ -1,5 +1,0 @@
-./directive.go
-./parser.go
-./primitives.go
-./shared.go
-./typename.go

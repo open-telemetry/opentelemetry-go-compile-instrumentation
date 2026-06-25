@@ -1,8 +1,0 @@
-./constants.go
-./doc.go
-./label_namer.go
-./metric_namer.go
-./metric_type.go
-./strategy.go
-./strconv.go
-./unit_namer.go

@@ -1,8 +1,0 @@
-./decode.go
-./doc.go
-./integrate.go
-./lex.go
-./load.go
-./parser.go
-./properties.go
-./rangecheck.go

@@ -1,9 +1,0 @@
-./client.go
-./common.go
-./config.go
-./doc.go
-./handler.go
-./labeler.go
-./transport.go
-./version.go
-./wrap.go

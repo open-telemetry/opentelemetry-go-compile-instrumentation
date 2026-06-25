@@ -1,6 +1,0 @@
-./client_session.go
-./cluster_clock.go
-./doc.go
-./options.go
-./server_session.go
-./session_pool.go

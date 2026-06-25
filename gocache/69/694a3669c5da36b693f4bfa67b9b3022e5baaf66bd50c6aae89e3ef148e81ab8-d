@@ -1,6 +1,0 @@
-./ascii.go
-./doc.go
-./proxy.go
-./term.go
-./term_windows.go
-./termios_windows.go

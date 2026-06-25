@@ -1,4 +1,0 @@
-./batch_span_processor.go
-./doc.go
-./simple_span_processor.go
-./tracer.go

@@ -1,5 +1,0 @@
-./bazel.go
-./defers.go
-./source.go
-./update.go
-./version.go

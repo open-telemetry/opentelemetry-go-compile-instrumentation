@@ -1,5 +1,0 @@
-./binarylog.go
-./binarylog_testutil.go
-./env_config.go
-./method_logger.go
-./sink.go
