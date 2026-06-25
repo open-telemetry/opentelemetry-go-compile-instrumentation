@@ -4,9 +4,14 @@
 package runtime
 
 import (
+	"context"
+	"log/slog"
 	"sync"
 	"testing"
 
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -143,3 +148,85 @@ func TestStartRuntimeMetrics_Idempotent(t *testing.T) {
 		assert.Equal(t, err1, err, "concurrent call %d must return the same cached error", i)
 	}
 }
+
+func TestLogLevel(t *testing.T) {
+	tests := []struct {
+		envVal   string
+		expected slog.Level
+	}{
+		{envVal: "debug", expected: slog.LevelDebug},
+		{envVal: "info", expected: slog.LevelInfo},
+		{envVal: "warn", expected: slog.LevelWarn},
+		{envVal: "error", expected: slog.LevelError},
+		{envVal: "", expected: slog.LevelInfo},
+		{envVal: "unknown", expected: slog.LevelInfo},
+	}
+
+	for _, tt := range tests {
+		t.Run("OTEL_LOG_LEVEL="+tt.envVal, func(t *testing.T) {
+			t.Setenv("OTEL_LOG_LEVEL", tt.envVal)
+			assert.Equal(t, tt.expected, logLevel())
+		})
+	}
+}
+
+func TestInitialize(t *testing.T) {
+	// Initialize is executed with sync.Once, so calling it here is safe.
+	cfg := Config{
+		ServiceName:            "test-service",
+		ServiceVersion:         "1.0.0",
+		InstrumentationName:    "test-inst",
+		InstrumentationVersion: "2.0.0",
+	}
+
+	// Should not panic
+	assert.NotPanics(t, func() {
+		Initialize(cfg)
+	})
+}
+
+func TestShutdown(t *testing.T) {
+	ctx := context.Background()
+
+	// If both are nil, Shutdown should return nil
+	tracerProvider = nil
+	meterProvider = nil
+	err := Shutdown(ctx)
+	assert.NoError(t, err)
+
+	// Set them to some instances
+	tracerProvider = sdktrace.NewTracerProvider()
+	meterProvider = sdkmetric.NewMeterProvider()
+
+	err = Shutdown(ctx)
+	assert.NoError(t, err)
+
+	// Clean up
+	tracerProvider = nil
+	meterProvider = nil
+}
+
+func TestSetupOpenTelemetry(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+
+	cfg := Config{
+		ServiceName:            "test-service-opentelemetry",
+		ServiceVersion:         "1.0.0",
+		InstrumentationName:    "test-inst",
+		InstrumentationVersion: "2.0.0",
+	}
+
+	err := setupOpenTelemetry(cfg)
+	assert.NoError(t, err)
+
+	// Clean up global providers so they don't affect other tests
+	t.Cleanup(func() {
+		tracerProvider = nil
+		meterProvider = nil
+		otel.SetTracerProvider(otel.GetTracerProvider())
+		otel.SetMeterProvider(otel.GetMeterProvider())
+	})
+}
+
+
