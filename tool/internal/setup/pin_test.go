@@ -4,6 +4,8 @@
 package setup
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"go/token"
 	"os"
@@ -641,4 +643,97 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestHandleInstrumentationVisit(t *testing.T) {
+	errDummy := errors.New("dummy error")
+
+	t.Run("nil error and validate false", func(t *testing.T) {
+		toolFiles := map[string]map[string]bool{
+			"otel.instrumentation.go": {},
+		}
+		opts := PinOptions{Prune: true, Validate: false}
+		v := &InstrumentationVisit{
+			ImportPath: "example.com/foo",
+			ToolFile:   "otel.instrumentation.go",
+			Error:      nil,
+		}
+		recurse, err := handleInstrumentationVisit(context.Background(), toolFiles, opts, v)
+		require.NoError(t, err)
+		require.True(t, recurse)
+		require.Empty(t, toolFiles["otel.instrumentation.go"])
+	})
+
+	t.Run("ErrNotInstrumentation with prune true", func(t *testing.T) {
+		toolFiles := map[string]map[string]bool{
+			"otel.instrumentation.go": {},
+		}
+		opts := PinOptions{Prune: true, Validate: false}
+		v := &InstrumentationVisit{
+			ImportPath: "example.com/foo",
+			ToolFile:   "otel.instrumentation.go",
+			Error:      ErrNotInstrumentation,
+		}
+		recurse, err := handleInstrumentationVisit(context.Background(), toolFiles, opts, v)
+		require.NoError(t, err)
+		require.False(t, recurse)
+		require.True(t, toolFiles["otel.instrumentation.go"]["example.com/foo"])
+	})
+
+	t.Run("generic error", func(t *testing.T) {
+		toolFiles := map[string]map[string]bool{
+			"otel.instrumentation.go": {},
+		}
+		opts := PinOptions{Prune: true, Validate: false}
+		v := &InstrumentationVisit{
+			ImportPath: "example.com/foo",
+			ToolFile:   "otel.instrumentation.go",
+			Error:      errDummy,
+		}
+		recurse, err := handleInstrumentationVisit(context.Background(), toolFiles, opts, v)
+		require.ErrorIs(t, err, errDummy)
+		require.False(t, recurse)
+	})
+
+	t.Run("validate true file does not exist", func(t *testing.T) {
+		toolFiles := map[string]map[string]bool{
+			"otel.instrumentation.go": {},
+		}
+		opts := PinOptions{Prune: true, Validate: true}
+		v := &InstrumentationVisit{
+			ImportPath: "example.com/foo",
+			ToolFile:   "otel.instrumentation.go",
+			Error:      nil,
+			Config: &InstrumentationConfig{
+				RuleFiles: []string{"nonexistent-file.yaml"},
+			},
+		}
+		recurse, err := handleInstrumentationVisit(context.Background(), toolFiles, opts, v)
+		require.NoError(t, err)
+		require.False(t, recurse)
+		require.True(t, toolFiles["otel.instrumentation.go"]["example.com/foo"])
+	})
+
+	t.Run("validate true invalid yaml", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		invalidYamlPath := filepath.Join(tmpDir, "invalid.yaml")
+		require.NoError(t, os.WriteFile(invalidYamlPath, []byte("invalid: : yaml"), 0o644))
+
+		toolFiles := map[string]map[string]bool{
+			"otel.instrumentation.go": {},
+		}
+		opts := PinOptions{Prune: true, Validate: true}
+		v := &InstrumentationVisit{
+			ImportPath: "example.com/foo",
+			ToolFile:   "otel.instrumentation.go",
+			Error:      nil,
+			Config: &InstrumentationConfig{
+				RuleFiles: []string{invalidYamlPath},
+			},
+		}
+		recurse, err := handleInstrumentationVisit(context.Background(), toolFiles, opts, v)
+		require.NoError(t, err)
+		require.False(t, recurse)
+		require.True(t, toolFiles["otel.instrumentation.go"]["example.com/foo"])
+	})
 }
