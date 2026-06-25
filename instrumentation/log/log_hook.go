@@ -13,8 +13,8 @@ import (
 
 const (
 	instrumentationKey = "logs/log"
-	traceIdKey         = "trace_id"
-	spanIdKey          = "span_id"
+	traceIDKey         = "trace_id"
+	spanIDKey          = "span_id"
 )
 
 type logEnabler struct{}
@@ -42,26 +42,26 @@ func BeforeLogOutput(
 			return b
 		}
 
-		if strings.Contains(string(b), traceIdKey) {
+		if strings.Contains(string(b), traceIDKey) {
 			return b
 		}
 
-		traceId, spanId := runtime.GetTraceAndSpanId()
-		if traceId == "" {
+		traceID, spanID := runtime.GetTraceAndSpanID()
+		if traceID == "" {
 			return b
 		}
 
 		var sb strings.Builder
 		sb.WriteString(" ")
-		sb.WriteString(traceIdKey)
+		sb.WriteString(traceIDKey)
 		sb.WriteString("=")
-		sb.WriteString(traceId)
+		sb.WriteString(traceID)
 
-		if spanId != "" {
+		if spanID != "" {
 			sb.WriteString(" ")
-			sb.WriteString(spanIdKey)
+			sb.WriteString(spanIDKey)
 			sb.WriteString("=")
-			sb.WriteString(spanId)
+			sb.WriteString(spanID)
 		}
 
 		traceSuffix := sb.String()

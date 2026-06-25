@@ -4,7 +4,6 @@
 package logrus
 
 import (
-	"strings"
 	"sync"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
@@ -14,8 +13,8 @@ import (
 
 const (
 	instrumentationKey = "logs/logrus"
-	traceIdKey         = "trace_id"
-	spanIdKey          = "span_id"
+	traceIDKey         = "trace_id"
+	spanIDKey          = "span_id"
 )
 
 type logEnabler struct{}
@@ -44,12 +43,12 @@ func (h *traceHook) Fire(entry *logrus.Entry) error {
 		return nil
 	}
 
-	traceId, spanId := runtime.GetTraceAndSpanId()
-	if traceId != "" {
-		entry.Data[traceIdKey] = traceId
+	traceID, spanID := runtime.GetTraceAndSpanID()
+	if traceID != "" {
+		entry.Data[traceIDKey] = traceID
 	}
-	if spanId != "" {
-		entry.Data[spanIdKey] = spanId
+	if spanID != "" {
+		entry.Data[spanIDKey] = spanID
 	}
 	return nil
 }
@@ -105,32 +104,4 @@ func AfterLogrusSetFormatter(ictx hook.HookContext) {
 	std := logrus.StandardLogger()
 	std.AddHook(&traceHook{})
 	formatterInit = true
-}
-
-func BeforeLogrusEntryLog(ictx hook.HookContext, entry *logrus.Entry, level logrus.Level, args ...interface{}) {
-	if !enabler.Enable() || args == nil {
-		return
-	}
-
-	traceId, spanId := runtime.GetTraceAndSpanId()
-
-	var newArgs []interface{}
-	if traceId != "" {
-		newArgs = append(newArgs, " "+traceIdKey+":", traceId)
-	}
-	if spanId != "" {
-		newArgs = append(newArgs, " "+spanIdKey+":", spanId)
-	}
-
-	if len(newArgs) > 0 {
-		for _, arg := range args {
-			if str, ok := arg.(string); ok {
-				if strings.Contains(str, traceIdKey) {
-					return
-				}
-			}
-		}
-		args = append(args, newArgs...)
-		ictx.SetParam(2, args)
-	}
 }

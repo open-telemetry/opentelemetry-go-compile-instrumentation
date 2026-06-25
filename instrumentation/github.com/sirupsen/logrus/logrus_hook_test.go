@@ -82,10 +82,10 @@ func TestTraceHook_Fire_Disabled(t *testing.T) {
 }
 
 func TestTraceHook_Fire_WithTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123traceId", "def456spanId"
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -97,11 +97,11 @@ func TestTraceHook_Fire_WithTraceContext(t *testing.T) {
 	assert.Equal(t, "def456spanId", entry.Data["span_id"])
 }
 
-func TestTraceHook_Fire_WithTraceIdOnly(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+func TestTraceHook_Fire_WithTraceIDOnly(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123traceId", ""
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -110,12 +110,12 @@ func TestTraceHook_Fire_WithTraceIdOnly(t *testing.T) {
 	err := h.Fire(entry)
 	assert.NoError(t, err)
 	assert.Equal(t, "abc123traceId", entry.Data["trace_id"])
-	_, hasSpanId := entry.Data["span_id"]
-	assert.False(t, hasSpanId)
+	_, hasSpanID := entry.Data["span_id"]
+	assert.False(t, hasSpanID)
 }
 
 func TestTraceHook_Fire_NoTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -278,96 +278,4 @@ func TestAfterLogrusSetFormatter_Idempotent(t *testing.T) {
 	}
 
 	assert.Equal(t, countAfterFirst, countAfterSecond)
-}
-
-func TestBeforeLogrusEntryLog_Disabled(t *testing.T) {
-	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/logrus")
-
-	ictx := hooktest.NewMockHookContext()
-	entry := &logrus.Entry{}
-	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel, "test")
-	assert.Nil(t, ictx.GetParam(2))
-}
-
-func TestBeforeLogrusEntryLog_NilArgs(t *testing.T) {
-	ictx := hooktest.NewMockHookContext()
-	entry := &logrus.Entry{}
-	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel)
-	assert.Nil(t, ictx.GetParam(2))
-}
-
-func TestBeforeLogrusEntryLog_WithTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "abc123traceId", "def456spanId"
-	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "", ""
-	})
-
-	ictx := hooktest.NewMockHookContext()
-	entry := &logrus.Entry{}
-	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel, "test message")
-
-	result := ictx.GetParam(2)
-	assert.NotNil(t, result)
-	args := result.([]interface{})
-	assert.Contains(t, args, "test message")
-
-	found := false
-	for _, arg := range args {
-		if str, ok := arg.(string); ok && str == "abc123traceId" {
-			found = true
-		}
-	}
-	assert.True(t, found)
-}
-
-func TestBeforeLogrusEntryLog_NoTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "", ""
-	})
-
-	ictx := hooktest.NewMockHookContext()
-	entry := &logrus.Entry{}
-	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel, "test message")
-	assert.Nil(t, ictx.GetParam(2))
-}
-
-func TestBeforeLogrusEntryLog_AlreadyContainsTraceId(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "abc123", "def456"
-	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "", ""
-	})
-
-	ictx := hooktest.NewMockHookContext()
-	entry := &logrus.Entry{}
-	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel, "msg with trace_id=existing")
-	assert.Nil(t, ictx.GetParam(2))
-}
-
-func TestBeforeLogrusEntryLog_WithTraceIdOnly(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "abc123traceId", ""
-	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "", ""
-	})
-
-	ictx := hooktest.NewMockHookContext()
-	entry := &logrus.Entry{}
-	BeforeLogrusEntryLog(ictx, entry, logrus.InfoLevel, "test message")
-
-	result := ictx.GetParam(2)
-	assert.NotNil(t, result)
-	args := result.([]interface{})
-
-	hasSpanId := false
-	for _, arg := range args {
-		if str, ok := arg.(string); ok && str == " span_id:" {
-			hasSpanId = true
-		}
-	}
-	assert.False(t, hasSpanId)
 }

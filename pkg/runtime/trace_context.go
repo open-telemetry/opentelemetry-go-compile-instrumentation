@@ -3,16 +3,16 @@
 
 package runtime
 
-var traceAndSpanIdFunc = defaultTraceAndSpanId
+var traceAndSpanIDFunc = defaultTraceAndSpanID
 
-func defaultTraceAndSpanId() (string, string) {
+func defaultTraceAndSpanID() (string, string) {
 	return "", ""
 }
 
-func GetTraceAndSpanId() (string, string) {
-	return traceAndSpanIdFunc()
+func GetTraceAndSpanID() (string, string) {
+	return traceAndSpanIDFunc()
 }
 
-func RegisterTraceAndSpanIdFunc(f func() (string, string)) {
-	traceAndSpanIdFunc = f
+func RegisterTraceAndSpanIDFunc(f func() (string, string)) {
+	traceAndSpanIDFunc = f
 }

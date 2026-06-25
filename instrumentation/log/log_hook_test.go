@@ -78,10 +78,10 @@ func TestBeforeLogOutput_WrapsAppendOutput(t *testing.T) {
 }
 
 func TestBeforeLogOutput_WithTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123traceId", "def456spanId"
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -98,11 +98,11 @@ func TestBeforeLogOutput_WithTraceContext(t *testing.T) {
 	assert.Contains(t, result, "span_id=def456spanId")
 }
 
-func TestBeforeLogOutput_WithTraceIdOnly(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+func TestBeforeLogOutput_WithTraceIDOnly(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123traceId", ""
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -118,7 +118,7 @@ func TestBeforeLogOutput_WithTraceIdOnly(t *testing.T) {
 }
 
 func TestBeforeLogOutput_NoTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -133,11 +133,11 @@ func TestBeforeLogOutput_NoTraceContext(t *testing.T) {
 	assert.NotContains(t, result, "trace_id=")
 }
 
-func TestBeforeLogOutput_AlreadyContainsTraceId(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+func TestBeforeLogOutput_AlreadyContainsTraceID(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123", "def456"
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -155,10 +155,10 @@ func TestBeforeLogOutput_AlreadyContainsTraceId(t *testing.T) {
 }
 
 func TestBeforeLogOutput_EmptyOutput(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123", "def456"
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -173,10 +173,10 @@ func TestBeforeLogOutput_EmptyOutput(t *testing.T) {
 }
 
 func TestBeforeLogOutput_PreservesNewline(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123", "def456"
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 

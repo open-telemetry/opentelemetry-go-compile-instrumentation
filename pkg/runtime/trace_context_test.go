@@ -9,35 +9,35 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestDefaultTraceAndSpanId(t *testing.T) {
-	traceAndSpanIdFunc = defaultTraceAndSpanId
-	traceId, spanId := GetTraceAndSpanId()
-	assert.Equal(t, "", traceId)
-	assert.Equal(t, "", spanId)
+func TestDefaultTraceAndSpanID(t *testing.T) {
+	traceAndSpanIDFunc = defaultTraceAndSpanID
+	traceID, spanID := GetTraceAndSpanID()
+	assert.Equal(t, "", traceID)
+	assert.Equal(t, "", spanID)
 }
 
-func TestRegisterTraceAndSpanIdFunc(t *testing.T) {
-	original := traceAndSpanIdFunc
-	defer func() { traceAndSpanIdFunc = original }()
+func TestRegisterTraceAndSpanIDFunc(t *testing.T) {
+	original := traceAndSpanIDFunc
+	defer func() { traceAndSpanIDFunc = original }()
 
-	RegisterTraceAndSpanIdFunc(func() (string, string) {
+	RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123", "def456"
 	})
 
-	traceId, spanId := GetTraceAndSpanId()
-	assert.Equal(t, "abc123", traceId)
-	assert.Equal(t, "def456", spanId)
+	traceID, spanID := GetTraceAndSpanID()
+	assert.Equal(t, "abc123", traceID)
+	assert.Equal(t, "def456", spanID)
 }
 
-func TestRegisterTraceAndSpanIdFunc_TraceOnly(t *testing.T) {
-	original := traceAndSpanIdFunc
-	defer func() { traceAndSpanIdFunc = original }()
+func TestRegisterTraceAndSpanIDFunc_TraceOnly(t *testing.T) {
+	original := traceAndSpanIDFunc
+	defer func() { traceAndSpanIDFunc = original }()
 
-	RegisterTraceAndSpanIdFunc(func() (string, string) {
+	RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123", ""
 	})
 
-	traceId, spanId := GetTraceAndSpanId()
-	assert.Equal(t, "abc123", traceId)
-	assert.Equal(t, "", spanId)
+	traceID, spanID := GetTraceAndSpanID()
+	assert.Equal(t, "abc123", traceID)
+	assert.Equal(t, "", spanID)
 }

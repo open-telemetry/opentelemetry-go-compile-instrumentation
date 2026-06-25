@@ -64,80 +64,6 @@ func TestLogEnabler_Enable(t *testing.T) {
 	}
 }
 
-func TestBeforeSlogLog_Disabled(t *testing.T) {
-	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/slog")
-
-	ictx := hooktest.NewMockHookContext()
-	BeforeSlogLog(ictx, nil, nil, 0, "test message")
-	assert.Nil(t, ictx.GetParam(4))
-}
-
-func TestBeforeSlogLog_EmptyMessage(t *testing.T) {
-	ictx := hooktest.NewMockHookContext()
-	BeforeSlogLog(ictx, nil, nil, 0, "")
-	assert.Nil(t, ictx.GetParam(4))
-}
-
-func TestBeforeSlogLog_AlreadyContainsTraceID(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "abc123", "def456"
-	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "", ""
-	})
-
-	ictx := hooktest.NewMockHookContext()
-	BeforeSlogLog(ictx, nil, nil, 0, "message with trace_id=abc123")
-	assert.Nil(t, ictx.GetParam(4))
-}
-
-func TestBeforeSlogLog_WithTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "abc123traceId", "def456spanId"
-	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "", ""
-	})
-
-	ictx := hooktest.NewMockHookContext()
-	BeforeSlogLog(ictx, nil, nil, 0, "hello world")
-
-	result := ictx.GetParam(4)
-	assert.NotNil(t, result)
-	msg := result.(string)
-	assert.Contains(t, msg, "hello world")
-	assert.Contains(t, msg, "trace_id=abc123traceId")
-	assert.Contains(t, msg, "span_id=def456spanId")
-}
-
-func TestBeforeSlogLog_WithTraceIdOnly(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "abc123traceId", ""
-	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "", ""
-	})
-
-	ictx := hooktest.NewMockHookContext()
-	BeforeSlogLog(ictx, nil, nil, 0, "hello world")
-
-	result := ictx.GetParam(4)
-	assert.NotNil(t, result)
-	msg := result.(string)
-	assert.Contains(t, msg, "trace_id=abc123traceId")
-	assert.NotContains(t, msg, "span_id=")
-}
-
-func TestBeforeSlogLog_NoTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
-		return "", ""
-	})
-
-	ictx := hooktest.NewMockHookContext()
-	BeforeSlogLog(ictx, nil, nil, 0, "hello world")
-	assert.Nil(t, ictx.GetParam(4))
-}
-
 func TestAfterSlogNewRecord_Disabled(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/slog")
 
@@ -148,10 +74,10 @@ func TestAfterSlogNewRecord_Disabled(t *testing.T) {
 }
 
 func TestAfterSlogNewRecord_WithTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123traceId", "def456spanId"
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -176,11 +102,11 @@ func TestAfterSlogNewRecord_WithTraceContext(t *testing.T) {
 	assert.Equal(t, "def456spanId", attrs[1].Value.String())
 }
 
-func TestAfterSlogNewRecord_WithTraceIdOnly(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+func TestAfterSlogNewRecord_WithTraceIDOnly(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123traceId", ""
 	})
-	defer runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
@@ -204,7 +130,7 @@ func TestAfterSlogNewRecord_WithTraceIdOnly(t *testing.T) {
 }
 
 func TestAfterSlogNewRecord_NoTraceContext(t *testing.T) {
-	runtime.RegisterTraceAndSpanIdFunc(func() (string, string) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "", ""
 	})
 
