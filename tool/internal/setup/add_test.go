@@ -1,8 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build !windows
-
 // Package setup tests verify that the addDeps function generates
 // the expected otelc.runtime.go file by comparing against golden files.
 //
