@@ -214,11 +214,6 @@ func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
 }
 
-func IsYamlFile(path string) bool {
-	return strings.HasSuffix(strings.ToLower(path), ".yaml") ||
-		strings.HasSuffix(strings.ToLower(path), ".yml")
-}
-
 func NewFileScanner(file *os.File, size int) (*bufio.Scanner, error) {
 	if _, err := file.Seek(0, 0); err != nil {
 		return nil, ex.Wrapf(err, "failed to seek file")

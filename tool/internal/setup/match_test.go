@@ -589,6 +589,29 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	require.Len(t, rules, 2)
 }
 
+func TestIsRuleFile(t *testing.T) {
+	tests := []struct {
+		filename string
+		expected bool
+	}{
+		{"otelc.yaml", true},
+		{"otelc.yml", true},
+		{"client.otelc.yaml", true},
+		{"server.otelc.yml", true},
+		{"rules.yaml", false},
+		{"otelc.client.yaml", false},
+		{"otelc", false},
+		{"otelc.txt", false},
+		{"otelc.yaml.bak", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isRuleFile(tt.filename))
+		})
+	}
+}
+
 func TestLoadDefaultRules(t *testing.T) {
 	// Write custom rules to temporary files
 	content1 := `h1:
