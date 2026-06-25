@@ -25,7 +25,7 @@ func (InvalidFormatError) Error() string {
 
 func (InvalidFormatError) ReviewComment() string {
 	return "The title of this pull request does not match the [conventional commits][cc-spec] format.\n" +
-		"Please update the title, as apprioriate.\n\n" +
+		"Please update the title, as appropriate.\n\n" +
 		"Refer to the [CONTRIBUTING.md][contributing] file for more information.\n\n" +
 		"[cc-spec]: https://www.conventionalcommits.org/en/v1.0.0/\n" +
 		"[contributing]: https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/blob/main/CONTRIBUTING.md#conventional-commits\n"
