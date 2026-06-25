@@ -117,8 +117,6 @@ const (
 	subcmdTest    = "test"
 )
 
-const commandLineArgumentsPackage = "command-line-arguments"
-
 // GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
 // Returns a list of loaded packages. If no package patterns are found in args,
 // defaults to loading the current directory package.
@@ -167,7 +165,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		// file-based builds use synthetic "command-line-arguments" packages
-		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage) {
+		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != pkgload.CommandLineArgumentsPackage) {
 			logger.DebugContext(ctx, "skipping package", "name", pkg.Name, "errors", pkg.Errors, "args", args)
 			continue
 		}
@@ -242,52 +240,27 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 	return pkgs, files, nil
 }
 
-func getPackageDir(pkg *packages.Package) string {
-	if len(pkg.GoFiles) > 0 {
-		return filepath.Dir(pkg.GoFiles[0])
-	}
-	return ""
-}
-
 // generateRuntimePerPackage generates the injected hook code (otelc.runtime.go)
-// for every buildable package and returns the set of module directories that
-// were touched, so their go.mod/go.sum can later be backed up and synced.
+// for every buildable package.
 func (sp *SetupPhase) generateRuntimePerPackage(
 	ctx context.Context,
 	pkgs []*packages.Package,
 	matched []*rule.InstRuleSet,
-) (map[string]bool, error) {
-	moduleDirs := make(map[string]bool)
+) error {
 	for _, pkg := range pkgs {
-		// file-based builds use synthetic "command-line-arguments" packages
-		if pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage {
-			sp.Warn("skipping package without module", "package", pkg.PkgPath)
-			continue
-		}
-
-		pkgDir := getPackageDir(pkg)
+		pkgDir := pkgload.GetPackageDir(pkg)
 		if pkgDir == "" {
 			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
 			continue
 		}
 
-		var moduleDir string
-		if pkg.Module != nil {
-			moduleDir = pkg.Module.Dir
-		} else {
-			var err error
-			if moduleDir, err = pkgload.ResolveModuleDir(ctx, pkgDir); err != nil {
-				return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
-			}
-		}
-
 		// Introduce additional hook code by generating otelc.runtime.go
 		if err := sp.addDeps(ctx, matched, pkgDir); err != nil {
-			return nil, ex.Wrapf(err, "adding deps for package at %s", pkgDir)
+			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
-		moduleDirs[moduleDir] = true
 	}
-	return moduleDirs, nil
+
+	return nil
 }
 
 // Setup prepares the environment for further instrumentation.
@@ -332,8 +305,14 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(err, "extracting embedded instrumentation pkg")
 	}
 
+	// Find the module directories for the build packages
+	moduleDirs, err := pkgload.FindModuleDirs(ctx, pkgs)
+	if err != nil {
+		return ex.Wrapf(err, "finding module dirs")
+	}
+
 	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(ctx, deps)
+	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
 	if err != nil {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
@@ -353,8 +332,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Generate otelc.runtime.go for all packages
-	moduleDirs, err := sp.generateRuntimePerPackage(ctx, pkgs, matched)
-	if err != nil {
+	if err = sp.generateRuntimePerPackage(ctx, pkgs, matched); err != nil {
 		return err
 	}
 

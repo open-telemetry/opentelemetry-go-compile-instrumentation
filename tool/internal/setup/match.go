@@ -396,13 +396,17 @@ func (sp *SetupPhase) matchOneRule(
 	return nil
 }
 
-func rulesFromDir(path string) ([]string, error) {
+func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 	var filesToProcess []string
 
 	// Recursively traverse to each directories and include the rule files
 	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+
+		if skipSubmodules && d.IsDir() && p != path && util.PathExists(filepath.Join(p, "go.mod")) {
+			return filepath.SkipDir
 		}
 
 		if !d.IsDir() && isRuleFile(d.Name()) {
@@ -438,7 +442,7 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 
 		var files []string
 		if info.IsDir() {
-			files, err = rulesFromDir(path)
+			files, err = rulesFromDir(path, false)
 			if err != nil {
 				return nil, err
 			}
@@ -470,7 +474,36 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 	return slices.Concat(slices.Collect(maps.Values(ruleSet))...), nil
 }
 
-func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
+func loadRulesFromToolFiles(ctx context.Context, toolFiles []string) ([]rule.InstRule, error) {
+	ruleSet := make([]rule.InstRule, 0)
+	walkErr := walkInstrumentation(ctx, toolFiles, func(v *InstrumentationVisit) (bool, error) {
+		if v.Error != nil {
+			return false, v.Error
+		}
+
+		for _, file := range v.Config.RuleFiles {
+			content, readErr := os.ReadFile(file)
+			if readErr != nil {
+				return false, ex.Wrapf(readErr, "reading %s", file)
+			}
+
+			rules, parseErr := parseRuleFromYaml(content)
+			if parseErr != nil {
+				return false, parseErr
+			}
+
+			ruleSet = append(ruleSet, rules...)
+		}
+		return true, nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	return ruleSet, nil
+}
+
+func (sp *SetupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool) ([]rule.InstRule, error) {
 	// Load rules from environment variable OTELC_RULES if specified. It has the
 	// highest priority.
 	rulePath := os.Getenv(util.EnvOtelcRules)
@@ -485,14 +518,28 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 		return loadCustomRules(sp.ruleConfig)
 	}
 
+	// Load rules from tool files if available
+	toolFiles, err := findToolFiles(moduleDirs)
+	if err != nil {
+		return nil, err
+	}
+	if len(toolFiles) > 0 {
+		sp.Debug("rules source: tool files", "toolFiles", toolFiles)
+		return loadRulesFromToolFiles(ctx, toolFiles)
+	}
+
 	// Load default rules from the unzipped pkg directory
 	sp.Debug("rules source: default rules")
 	return loadDefaultRules()
 }
 
-func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
+func (sp *SetupPhase) matchDeps(
+	ctx context.Context,
+	deps []*Dependency,
+	moduleDirs map[string]bool,
+) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
-	allRules, err := sp.loadRules()
+	allRules, err := sp.loadRules(ctx, moduleDirs)
 	if err != nil {
 		return nil, err
 	}
