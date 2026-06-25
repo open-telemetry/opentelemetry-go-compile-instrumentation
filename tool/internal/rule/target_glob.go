@@ -77,33 +77,50 @@ func MatchGlobTarget(pattern, importPath string) bool {
 	return matchSegments(strings.Split(pattern, "/"), strings.Split(importPath, "/"))
 }
 
-// matchSegments recursively matches pattern segments pat against path segments
-// segs. A "**" segment branches: it consumes 0..len(segs) segments, trying each
-// suffix until one matches.
+// matchSegments reports whether pattern segments pat match path segments segs.
+// A "**" segment matches zero or more whole segments; every other segment is a
+// single-segment path.Match pattern.
+//
+// It uses the classic iterative wildcard algorithm with a single backtrack
+// point: the most recent "**" remembers where it started absorbing, and on a
+// later mismatch it absorbs one more segment. That bounds the work at
+// O(len(pat) * len(segs)) even for patterns with several "**" segments, so a
+// pathological target such as "**/**/**" cannot trigger exponential recursion.
 func matchSegments(pat, segs []string) bool {
-	for {
-		if len(pat) == 0 {
-			return len(segs) == 0
-		}
-		if pat[0] == multiSegment {
-			pat = pat[1:]
-			for i := 0; i <= len(segs); i++ {
-				if matchSegments(pat, segs[i:]) {
-					return true
-				}
-			}
+	pi, si := 0, 0
+	starPat, starSeg := -1, -1
+	for si < len(segs) {
+		switch {
+		case pi < len(pat) && pat[pi] == multiSegment:
+			// Open a "**": record its position and the first segment it may
+			// absorb, then try matching the rest with it absorbing nothing.
+			starPat, starSeg = pi, si
+			pi++
+		case pi < len(pat) && segmentMatches(pat[pi], segs[si]):
+			pi++
+			si++
+		case starPat >= 0:
+			// Mismatch under an open "**": let it absorb one more segment.
+			pi = starPat + 1
+			starSeg++
+			si = starSeg
+		default:
 			return false
 		}
-		if len(segs) == 0 {
-			return false
-		}
-		// A malformed pattern is impossible here: ValidateTarget rejects bad
-		// segments at load time, so path.Match cannot return ErrBadPattern.
-		ok, err := path.Match(pat[0], segs[0])
-		if err != nil || !ok {
-			return false
-		}
-		pat = pat[1:]
-		segs = segs[1:]
 	}
+	// Any leftover pattern must be "**" segments only, each matching zero
+	// remaining path segments.
+	for pi < len(pat) && pat[pi] == multiSegment {
+		pi++
+	}
+	return pi == len(pat)
+}
+
+// segmentMatches reports whether a single non-"**" pattern segment matches one
+// path segment. ValidateTarget rejects malformed patterns at load time, so
+// path.Match cannot return ErrBadPattern here; a stray error is treated as no
+// match, consistent with stdlib glob.
+func segmentMatches(pat, seg string) bool {
+	ok, err := path.Match(pat, seg)
+	return err == nil && ok
 }

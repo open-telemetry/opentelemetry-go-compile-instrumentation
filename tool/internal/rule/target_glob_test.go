@@ -100,6 +100,18 @@ func TestMatchGlobTarget(t *testing.T) {
 		{"example.com/**/handler", "example.com/a/b/c/handler", true}, // ** matches 3
 		{"example.com/**/handler", "example.com/a/b/c/other", false},
 
+		// Multiple and adjacent ** segments match linearly, no exponential
+		// backtracking. The pathological case (many ** before a failing tail)
+		// must still terminate quickly; if it timed out, the matcher regressed.
+		{"**/svc/**", "example.com/acme/svc/users/v2", true},
+		{"**/svc/**", "example.com/acme/api/users", false},
+		{"a/**/b/**/c", "a/x/y/b/z/c", true},
+		{"a/**/b/**/c", "a/b/c", true},
+		{"a/**/b/**/c", "a/x/b/z/d", false},
+		{"example.com/**/**/**", "example.com/a/b/c/d", true},
+		{"example.com/**/**", "example.com", true},
+		{"**/**/**/**/**/**/**/**/x", "a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/y", false},
+
 		// Bare ** matches everything including the empty path.
 		{"**", "anything/at/all", true},
 		{"**", "", true},

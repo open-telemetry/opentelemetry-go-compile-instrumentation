@@ -150,18 +150,26 @@ func (sp *SetupPhase) runMatch(
 	relevantRules := exactRules[dep.ImportPath]
 
 	// Glob path: a rule applies when its glob target matches this dependency's
-	// import path. The slice is shared read-only across goroutines, so a fresh
-	// slice is built per dependency to avoid aliasing the exact-match slice.
+	// import path. The combined slice is built lazily, on the first glob match,
+	// so a dependency that matches no glob rule (the common case) stays
+	// allocation-free. When built, it is a fresh slice to avoid aliasing the
+	// exact-match slice shared read-only across goroutines.
 	if len(globRules) > 0 {
-		matched := make([]rule.InstRule, 0, len(relevantRules)+len(globRules))
-		matched = append(matched, relevantRules...)
+		var matched []rule.InstRule
 		for _, r := range globRules {
-			if rule.MatchGlobTarget(r.GetTarget(), dep.ImportPath) {
-				matched = append(matched, r)
-				sp.Debug("Match glob target", "rule", r.GetName(), "target", r.GetTarget(), "dep", dep.ImportPath)
+			if !rule.MatchGlobTarget(r.GetTarget(), dep.ImportPath) {
+				continue
 			}
+			if matched == nil {
+				matched = make([]rule.InstRule, 0, len(relevantRules)+1)
+				matched = append(matched, relevantRules...)
+			}
+			matched = append(matched, r)
+			sp.Debug("Match glob target", "rule", r.GetName(), "target", r.GetTarget(), "dep", dep.ImportPath)
 		}
-		relevantRules = matched
+		if matched != nil {
+			relevantRules = matched
+		}
 	}
 
 	if len(relevantRules) == 0 {
