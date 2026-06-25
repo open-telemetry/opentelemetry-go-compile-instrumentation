@@ -584,8 +584,8 @@ test-e2e/coverage: build build-demo
 
 .PHONY: crosslink
 crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
-	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
-	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
+	@# Clean .otel-build and .otelc-build directories before generating go.work to avoid parsing generated go.mod
+	@find . -type d \( -name ".otel-build" -o -name ".otelc-build" \) -exec rm -rf {} + 2>/dev/null || true
 	@echo "Updating intra-repository dependencies in all go modules" \
 		&& $(CROSSLINK) --root=$(CURDIR)
 
