@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"errors"
 	"fmt"
 	"go/token"
 	"os"
@@ -641,4 +642,134 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestLoadMinimalRules(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+
+	// Create rules directory structure: .otelc-build/instrumentation/nethttp
+	instDir := filepath.Join(tmpDir, ".otelc-build", unzippedInstDir, "nethttp")
+	require.NoError(t, os.MkdirAll(instDir, 0o755))
+
+	// Write go.mod
+	goModContent := "module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp\n\ngo 1.25\n"
+	require.NoError(t, os.WriteFile(filepath.Join(instDir, "go.mod"), []byte(goModContent), 0o644))
+
+	// Write otelc.yaml
+	yamlContent := `
+rule1:
+  target: "net/http"
+  version: "v1.22.0"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(instDir, "otelc.yaml"), []byte(yamlContent), 0o644))
+
+	rules, err := loadMinimalRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+
+	nethttpRules, exists := rules["github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"]
+	require.True(t, exists)
+	require.Len(t, nethttpRules, 1)
+	require.Equal(t, "net/http", nethttpRules[0].Target)
+	require.Equal(t, "v1.22.0", nethttpRules[0].VersionRange)
+}
+
+func TestCollectToolFileImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolFile := filepath.Join(tmpDir, "otel.instrumentation.go")
+
+	content := `package main
+
+import (
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/database"
+)
+`
+	require.NoError(t, os.WriteFile(toolFile, []byte(content), 0o644))
+
+	// Collect all imports except the pruned ones
+	pruned := map[string]bool{
+		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/database": true,
+	}
+
+	imports, err := collectToolFileImports(toolFile, pruned)
+	require.NoError(t, err)
+	require.Len(t, imports, 1)
+	require.True(
+		t,
+		imports["github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"],
+	)
+	require.False(t, imports["github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"])
+}
+
+func TestUpdateToolFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolFile := filepath.Join(tmpDir, "otel.instrumentation.go")
+
+	initialContent := `package main
+
+import (
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp"
+)
+`
+	require.NoError(t, os.WriteFile(toolFile, []byte(initialContent), 0o644))
+
+	// Write a simple go.mod
+	goModContent := "module example.com/test\n\ngo 1.25\n\nrequire github.com/open-telemetry/opentelemetry-go-compile-instrumentation v0.0.0\n"
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0o644))
+
+	opts := PinOptions{}
+
+	ctx := t.Context()
+	err := updateToolFile(ctx, toolFile, nil, opts)
+	require.NoError(t, err)
+
+	// Verify the file was updated and still contains nethttp because pruned was nil
+	data, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "nethttp")
+}
+
+func TestHandleInstrumentationVisit(t *testing.T) {
+	ctx := t.Context()
+
+	// 1. Visit with Error == ErrNotInstrumentation
+	toolFiles := map[string]map[string]bool{
+		"main.go": {},
+	}
+	opts := PinOptions{Prune: true}
+	v := &InstrumentationVisit{
+		ToolFile:   "main.go",
+		ImportPath: "example.com/not-inst",
+		Error:      ErrNotInstrumentation,
+	}
+	recurse, err := handleInstrumentationVisit(ctx, toolFiles, opts, v)
+	require.NoError(t, err)
+	require.False(t, recurse)
+	require.True(t, toolFiles["main.go"]["example.com/not-inst"])
+
+	// 2. Visit with general error
+	generalErr := errors.New("some other error")
+	v = &InstrumentationVisit{
+		Error: generalErr,
+	}
+	_, err = handleInstrumentationVisit(ctx, toolFiles, opts, v)
+	require.ErrorIs(t, err, generalErr)
+
+	// 3. Visit with opts.Validate = true, but config rule files do not exist
+	opts.Validate = true
+	v = &InstrumentationVisit{
+		ToolFile:   "main.go",
+		ImportPath: "example.com/inst",
+		Config: &InstrumentationConfig{
+			RuleFiles: []string{"nonexistent.yaml"},
+		},
+	}
+	recurse, err = handleInstrumentationVisit(ctx, toolFiles, opts, v)
+	require.NoError(t, err)
+	require.False(t, recurse)
+	require.True(t, toolFiles["main.go"]["example.com/inst"])
 }
