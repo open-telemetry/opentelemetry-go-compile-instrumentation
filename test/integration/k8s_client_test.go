@@ -21,6 +21,9 @@ func TestK8SClient(t *testing.T) {
 		t.Skip("k3s not supported on windows")
 	}
 
+	t.Parallel()
+	testutil.Build(t, "", "k8sclient", "go", "build", "-a")
+
 	f := testutil.NewTestFixture(t)
 	StartK3sCluster(t, f)
 

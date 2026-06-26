@@ -589,6 +589,29 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	require.Len(t, rules, 2)
 }
 
+func TestIsRuleFile(t *testing.T) {
+	tests := []struct {
+		filename string
+		expected bool
+	}{
+		{"otelc.yaml", true},
+		{"otelc.yml", true},
+		{"client.otelc.yaml", true},
+		{"server.otelc.yml", true},
+		{"rules.yaml", false},
+		{"otelc.client.yaml", false},
+		{"otelc", false},
+		{"otelc.txt", false},
+		{"otelc.yaml.bak", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isRuleFile(tt.filename))
+		})
+	}
+}
+
 func TestLoadDefaultRules(t *testing.T) {
 	// Write custom rules to temporary files
 	content1 := `h1:
@@ -706,6 +729,84 @@ func TestPreciseMatching_WhereFileAllOf(t *testing.T) {
 	require.NotContains(t, result.FuncRules, noMatchFile)
 }
 
+func TestPreciseMatching_WhereFileOneOf(t *testing.T) {
+	// one-of matches the file when it declares EITHER backend driver. The match
+	// file declares PostgresDriver (one of the two), so Open is selected; the
+	// no-match file declares neither, so it is gated out.
+	matchFile := writeGoSource(t, "match.go", "package main\n\ntype PostgresDriver struct{}\n\nfunc Open() {}\n")
+	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\nfunc Open() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-where-file-one-of",
+			Target: "example.com/svc",
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{
+					OneOf: []rule.FilterDef{
+						{HasStruct: "MySQLDriver"},
+						{HasStruct: "PostgresDriver"},
+					},
+				},
+			},
+		},
+		Func:   "Open",
+		Before: "BeforeOpen",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.FuncRules, 1)
+	require.Contains(t, result.FuncRules, matchFile)
+	require.NotContains(t, result.FuncRules, noMatchFile)
+}
+
+func TestPreciseMatching_WhereFileNot(t *testing.T) {
+	// not negates the inner predicate: the rule applies to files that do NOT
+	// declare MockConn. The match file defines Connect but no MockConn, so the
+	// negation holds and Connect is selected; the no-match file declares a
+	// MockConn test double, so the negation fails and the rule is gated out.
+	matchFile := writeGoSource(t, "match.go", "package main\n\nfunc Connect() {}\n")
+	noMatchFile := writeGoSource(t, "nomatch.go", "package main\n\ntype MockConn struct{}\n\nfunc Connect() {}\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/svc",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-where-file-not",
+			Target: "example.com/svc",
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{
+					Not: &rule.FilterDef{HasStruct: "MockConn"},
+				},
+			},
+		},
+		Func:   "Connect",
+		Before: "BeforeConnect",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.FuncRules, 1)
+	require.Contains(t, result.FuncRules, matchFile)
+	require.NotContains(t, result.FuncRules, noMatchFile)
+}
+
 func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
 
@@ -798,6 +899,50 @@ target: example.com/mypkg
 
 	assert.Equal(t, "mypkg", set.PackageName)
 	assert.False(t, set.IsEmpty(), "rule set must contain the file rule")
+}
+
+func TestRunMatch_FuncRuleSignatureFilters(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "mypkg.go")
+	err := os.WriteFile(srcFile, []byte(`package mypkg
+
+func Target(value string) error { return nil }
+`), 0o644)
+	require.NoError(t, err)
+
+	const importPath = "example.com/mypkg"
+	matchingSig := rule.FuncSignature{Args: []string{"string"}, Returns: []string{"error"}}
+	nonMatchingSig := rule.FuncSignature{Args: []string{"int"}, Returns: []string{"error"}}
+	matchingRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "matching", Target: importPath},
+		Func:         "Target",
+		Before:       "BeforeTarget",
+		Signature:    &matchingSig,
+	}
+	nonMatchingRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "non-matching", Target: importPath},
+		Func:         "Target",
+		Before:       "BeforeTarget",
+		Signature:    &nonMatchingSig,
+	}
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {matchingRule, nonMatchingRule},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+
+	matchedFuncRules := set.AllFuncRules()
+	require.Len(t, matchedFuncRules, 1)
+	assert.Equal(t, "matching", matchedFuncRules[0].Name)
 }
 
 func TestRunMatch_EmptyRules(t *testing.T) {

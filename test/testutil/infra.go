@@ -4,8 +4,8 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,9 +61,18 @@ func appOutputName() string {
 	return appBinName
 }
 
+// appsPath returns the path to the test apps directory.
+func appsPath() (string, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(pwd, "..", "apps"), nil
+}
+
 // Build builds the application with the instrumentation tool. The built binary
 // is registered for cleanup via t.Cleanup.
-func Build(t *testing.T, appDir string, args ...string) {
+func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
 	otelc, err := otelcPath()
 	require.NoError(t, err)
@@ -72,67 +81,73 @@ func Build(t *testing.T, appDir string, args ...string) {
 	args = append(args, "-o", output)
 	args = append([]string{otelc}, args...)
 
+	if appsDir == "" {
+		var err error
+		appsDir, err = appsPath()
+		require.NoError(t, err)
+	}
+	appDir := filepath.Join(appsDir, app)
+
 	cmd := newCmd(t.Context(), appDir, nil, args...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 	t.Cleanup(func() {
 		_ = os.Remove(filepath.Join(appDir, output))
+		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
 	})
-}
-
-// BuildAppAt builds the app at the given directory using context ctx. Intended
-// for use from TestMain where no *testing.T is available. The caller is
-// responsible for cleaning up the built binary via CleanupAppAt.
-func BuildAppAt(ctx context.Context, appDir string) error {
-	otelc, err := otelcPath()
-	if err != nil {
-		return fmt.Errorf("locate otelc: %w", err)
-	}
-
-	output := appOutputName()
-	args := []string{otelc, "go", "build", "-a", "-o", output}
-
-	cmd := newCmd(ctx, appDir, nil, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("otelc build in %s: %w\n%s", appDir, err, string(out))
-	}
-	return nil
-}
-
-// CleanupAppAt removes the binary that BuildAppAt produced in appDir.
-func CleanupAppAt(appDir string) {
-	_ = os.Remove(filepath.Join(appDir, appOutputName()))
 }
 
 // Run runs the application and returns the output. It waits for the
 // application to complete. If env is nil, the parent process env is used.
-func Run(t *testing.T, dir string, env []string, args ...string) string {
+func Run(t *testing.T, appsDir, app string, env []string, args ...string) string {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
 		appName += ".exe"
 	}
-	cmd := newCmd(t.Context(), dir, env, append([]string{appName}, args...)...)
+	if appsDir == "" {
+		var err error
+		appsDir, err = appsPath()
+		require.NoError(t, err)
+	}
+	appDir := filepath.Join(appsDir, app)
+	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 	return string(out)
 }
 
 // Start starts the application but does not wait for it to complete. If env
-// is nil, the parent process env is used.
-func Start(t *testing.T, dir string, env []string, args ...string) {
+// is nil, the parent process env is used. Stdout and stderr are captured and
+// logged when the test fails, so that app crashes are visible in CI output.
+func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exec.Cmd {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
 		appName += ".exe"
 	}
-	cmd := newCmd(t.Context(), dir, env, append([]string{appName}, args...)...)
-	cmd.Stderr = cmd.Stdout // redirect stderr to stdout for easier debugging
+	if appsDir == "" {
+		var err error
+		appsDir, err = appsPath()
+		require.NoError(t, err)
+	}
+	appDir := filepath.Join(appsDir, app)
+	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
+			_ = cmd.Wait() // ensure all output is flushed
+		}
+		if t.Failed() && buf.Len() > 0 {
+			t.Logf("app output:\n%s", buf.String())
 		}
 	})
+
+	return cmd
 }

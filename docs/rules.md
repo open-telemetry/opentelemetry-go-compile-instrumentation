@@ -156,6 +156,46 @@ register_driver:
         path: github.com/example/sqldriver/otel
 ```
 
+`one-of` matches when **at least one** nested predicate matches (logical OR);
+an empty `one-of: []` never matches (vacuously false).
+
+```yaml
+# Instrument Exec in the files that hold the driver's statement-execution
+# code — those declaring either a `Conn` or a `Stmt` type.
+trace_exec:
+  target: github.com/example/sqldriver
+  where:
+    func: Exec
+    file:
+      one-of:
+        - has_struct: Conn
+        - has_struct: Stmt
+  do:
+    - inject_hooks:
+        before: BeforeExec
+        path: github.com/example/sqldriver/otel
+```
+
+`not` matches when its single nested predicate does **not** match (logical
+negation). Unlike `all-of`/`one-of`, `not` is unary — it wraps exactly one
+predicate, so there is no list and thus no empty-set case.
+
+```yaml
+# Instrument Connect everywhere except the in-memory mock file — the source
+# file that declares a `MockConn` type, which must not be wrapped.
+trace_connect:
+  target: github.com/example/sqldriver
+  where:
+    func: Connect
+    file:
+      not:
+        has_struct: MockConn
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        path: github.com/example/sqldriver/otel
+```
+
 ### `do` semantics
 
 `do` accepts two YAML shapes; both normalize to the same ordered internal list:
@@ -301,7 +341,7 @@ hook_helloworld:
     - inject_hooks:
         before: MyHookBefore
         after: MyHookAfter
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
 ```
 
 This rule will inject `MyHookBefore` at the start of the `Example` function in the `main` package, and `MyHookAfter` at the end. The hook functions are located in the specified `path`.

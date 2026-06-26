@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-const eventTimeout = 60 * time.Second
+const eventTimeout = 10 * time.Second
 
 func main() {
 	kubeConfigYaml := os.Getenv("KUBECONFIG_YAML")
@@ -151,7 +151,9 @@ func main() {
 	}
 
 	// delete the pod
-	err = clientset.CoreV1().Pods(corev1.NamespaceDefault).Delete(ctx, pod.Name, metav1.DeleteOptions{})
+	err = clientset.CoreV1().Pods(corev1.NamespaceDefault).Delete(ctx, pod.Name, metav1.DeleteOptions{
+		GracePeriodSeconds: new(int64),
+	})
 	if err != nil {
 		log.Fatalf("Failed to delete pod: %v", err)
 	}
