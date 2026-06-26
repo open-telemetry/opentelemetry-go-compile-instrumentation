@@ -401,3 +401,136 @@ echo nothing useful
 		})
 	}
 }
+
+func TestFindGoSources_RegularGoFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a real .go file
+	goFile := filepath.Join(tmpDir, "main.go")
+	require.NoError(t, os.WriteFile(goFile, []byte("package main\n"), 0o644))
+
+	args := []string{
+		"/usr/local/go/pkg/tool/linux_amd64/compile",
+		"-o", "/tmp/out.a",
+		"-p", "main",
+		"-buildid", "abc",
+		goFile,
+	}
+
+	dep, err := findGoSources(t.Context(), args, nil)
+	require.NoError(t, err)
+	require.NotNil(t, dep)
+	assert.Equal(t, "main", dep.ImportPath)
+	assert.Len(t, dep.Sources, 1)
+}
+
+func TestFindGoSources_CgoFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Simulate a CGO source file (original .go in tmpDir)
+	origFile := filepath.Join(tmpDir, "handler.go")
+	require.NoError(t, os.WriteFile(origFile, []byte("package main\n"), 0o644))
+
+	// The CGO-generated file path (doesn't actually exist)
+	cgoFile := filepath.Join("/tmp/work/b001", "handler.cgo1.go")
+
+	// objDir → sourceDir mapping
+	cgoObjDirs := map[string]string{
+		util.NormalizePath("/tmp/work/b001"): tmpDir,
+	}
+
+	args := []string{
+		"/usr/local/go/pkg/tool/linux_amd64/compile",
+		"-o", "/tmp/out.a",
+		"-p", "pkg/cgo",
+		"-buildid", "abc",
+		cgoFile,
+	}
+
+	dep, err := findGoSources(t.Context(), args, cgoObjDirs)
+	require.NoError(t, err)
+	require.NotNil(t, dep)
+	assert.Equal(t, "pkg/cgo", dep.ImportPath)
+}
+
+func TestFindGoSources_SkipsNonExistentFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// A file that does NOT exist and has no CGO objdir mapping
+	args := []string{
+		"/usr/local/go/pkg/tool/linux_amd64/compile",
+		"-o", "/tmp/out.a",
+		"-p", "main",
+		"-buildid", "abc",
+		filepath.Join(tmpDir, "nonexistent.go"),
+	}
+
+	dep, err := findGoSources(t.Context(), args, nil)
+	require.NoError(t, err)
+	require.NotNil(t, dep)
+	// No sources should be added since the file doesn't exist
+	assert.Empty(t, dep.Sources)
+}
+
+func TestFindDeps_Basic(t *testing.T) {
+	oldExec := execCommandContext
+	defer func() {
+		execCommandContext = oldExec
+	}()
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, util.BuildTempDir), 0o755))
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+
+	// Create a real Go source file for the compile command to reference
+	goFile := filepath.Join(tmpDir, "main.go")
+	require.NoError(t, os.WriteFile(goFile, []byte("package main\n"), 0o644))
+
+	buildPlan := fmt.Sprintf(
+		"/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/out.a -p main -buildid abc %s\n",
+		filepath.ToSlash(goFile),
+	)
+
+	execCommandContext = func(_ context.Context, name string, _ ...string) *exec.Cmd {
+		assert.Equal(t, "go", name)
+		if runtime.GOOS == "windows" {
+			escaped := strings.ReplaceAll(buildPlan, "'", "''")
+			script := fmt.Sprintf("[Console]::Error.Write('%s')", escaped)
+			return exec.Command("powershell", "-Command", script)
+		}
+		script := "cat <<'EOF' >&2\n" + buildPlan + "\nEOF\n"
+		return exec.Command("sh", "-c", script)
+	}
+
+	deps, err := findDeps(t.Context(), []string{"./..."})
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "main", deps[0].ImportPath)
+}
+
+func TestFindModVersion(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{
+			path: "/go/pkg/mod/github.com/example/foo@v1.2.3/main.go",
+			want: "v1.2.3",
+		},
+		{
+			path: "/go/pkg/mod/github.com/example/foo@v0.0.1-alpha/main.go",
+			want: "v0.0.1-alpha",
+		},
+		{
+			path: "/home/user/project/main.go",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := findModVersion(tt.path)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

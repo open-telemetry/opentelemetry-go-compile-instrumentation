@@ -434,3 +434,38 @@ func TestSetupPhaseLogger(t *testing.T) {
 	sp.Warn("warn message")
 	sp.Debug("debug message")
 }
+
+func TestKeepForDebug_NonMainDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+
+	// Create the debug output directory so CopyFile has somewhere to write.
+	require.NoError(t, os.MkdirAll(util.GetBuildTemp("debug"), 0o755))
+
+	// Write a source file in a subdirectory (not the work-dir root).
+	subDir := filepath.Join(tmpDir, "mymodule")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	srcFile := filepath.Join(subDir, "go.mod")
+	require.NoError(t, os.WriteFile(srcFile, []byte("module example.com/mymodule\n\ngo 1.25\n"), 0o644))
+
+	// keepForDebug should copy the file without panicking.
+	// We can't check the destination path directly (it's computed from the source),
+	// but we can verify the function doesn't panic or log a fatal error.
+	keepForDebug(t.Context(), srcFile)
+}
+
+func TestKeepForDebug_MainDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+
+	// Create the debug output directory.
+	require.NoError(t, os.MkdirAll(util.GetBuildTemp("debug"), 0o755))
+
+	// Write a source file directly in the work dir (simulates "main" case).
+	srcFile := filepath.Join(util.GetOtelcWorkDir(), "otel.instrumentation.go")
+	require.NoError(t, os.WriteFile(srcFile, []byte("package tools\n"), 0o644))
+
+	// keepForDebug should copy the file with name "main".
+	keepForDebug(t.Context(), srcFile)
+}
+

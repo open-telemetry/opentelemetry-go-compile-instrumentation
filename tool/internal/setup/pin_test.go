@@ -773,3 +773,170 @@ func TestHandleInstrumentationVisit(t *testing.T) {
 	require.False(t, recurse)
 	require.True(t, toolFiles["main.go"]["example.com/inst"])
 }
+
+func TestPin_Basic(t *testing.T) {
+	origVersion := util.Version
+	util.Version = "v0.5.0"
+	defer func() {
+		util.Version = origVersion
+	}()
+
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+	t.Setenv("GOWORK", "off")
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot := filepath.Join(cwd, "..", "..", "..")
+
+	// Create a dummy Go module
+	dummyModDir := filepath.Join(tmpDir, "dummy")
+	require.NoError(t, os.MkdirAll(dummyModDir, 0o755))
+
+	// Write go.mod with replace directive pointing to local repo
+	goModContent := fmt.Sprintf("module example.com/dummy\n\ngo 1.25\n\nreplace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n", filepath.ToSlash(repoRoot))
+	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "go.mod"), []byte(goModContent), 0o644))
+
+	// Write a simple main.go
+	mainContent := `package main
+import "fmt"
+func main() {
+	fmt.Println("hello")
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "main.go"), []byte(mainContent), 0o644))
+
+	origDir, getErr := os.Getwd()
+	require.NoError(t, getErr)
+	defer func() {
+		_ = os.Chdir(origDir)
+	}()
+	require.NoError(t, os.Chdir(dummyModDir))
+
+	ctx := t.Context()
+	opts := PinOptions{
+		Prune:    true,
+		Validate: true,
+		Args:     []string{"."},
+	}
+
+	// Call Pin. It should run successfully (even if no matches, it returns successfully).
+	res, err := Pin(ctx, opts)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+}
+
+func TestAutoPin_Basic(t *testing.T) {
+	origVersion := util.Version
+	util.Version = "v0.5.0"
+	defer func() {
+		util.Version = origVersion
+	}()
+
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+	t.Setenv("GOWORK", "off")
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot := filepath.Join(cwd, "..", "..", "..")
+
+	// Create a dummy Go module
+	dummyModDir := filepath.Join(tmpDir, "dummy")
+	require.NoError(t, os.MkdirAll(dummyModDir, 0o755))
+
+	// Write go.mod with replace directive pointing to local repo
+	goModContent := fmt.Sprintf("module example.com/dummy\n\ngo 1.25\n\nreplace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n", filepath.ToSlash(repoRoot))
+	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "go.mod"), []byte(goModContent), 0o644))
+
+	// Write a simple main.go
+	mainContent := `package main
+import "fmt"
+func main() {
+	fmt.Println("hello")
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "main.go"), []byte(mainContent), 0o644))
+
+	origDir, getErr := os.Getwd()
+	require.NoError(t, getErr)
+	defer func() {
+		_ = os.Chdir(origDir)
+	}()
+	require.NoError(t, os.Chdir(dummyModDir))
+
+	ctx := t.Context()
+	moduleDirs := map[string]bool{".": true}
+
+	res, cleanup, err := AutoPin(ctx, moduleDirs, []string{"."})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NotNil(t, cleanup)
+	cleanup()
+}
+
+func TestPin_Update(t *testing.T) {
+	origVersion := util.Version
+	util.Version = "v0.5.0"
+	defer func() {
+		util.Version = origVersion
+	}()
+
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+	t.Setenv("GOWORK", "off")
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot := filepath.Join(cwd, "..", "..", "..")
+
+	// Create a dummy Go module
+	dummyModDir := filepath.Join(tmpDir, "dummy")
+	require.NoError(t, os.MkdirAll(dummyModDir, 0o755))
+
+	// Write go.mod with replace directive pointing to local repo
+	goModContent := fmt.Sprintf("module example.com/dummy\n\ngo 1.25\n\nreplace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n", filepath.ToSlash(repoRoot))
+	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "go.mod"), []byte(goModContent), 0o644))
+
+	// Write a simple main.go
+	mainContent := `package main
+import "fmt"
+func main() {
+	fmt.Println("hello")
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "main.go"), []byte(mainContent), 0o644))
+
+	// Write a dummy otel.instrumentation.go file
+	toolFileContent := `package main
+
+import (
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
+)
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, ToolFileCanonical), []byte(toolFileContent), 0o644))
+
+	origDir, getErr := os.Getwd()
+	require.NoError(t, getErr)
+	defer func() {
+		_ = os.Chdir(origDir)
+	}()
+	require.NoError(t, os.Chdir(dummyModDir))
+
+	ctx := t.Context()
+	opts := PinOptions{
+		Prune:    true,
+		Validate: true,
+		Args:     []string{"."},
+	}
+
+	// Call Pin. It should find the existing tool file and run updatePinnedProjects.
+	res, err := Pin(ctx, opts)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+}
+
+
+
+
+

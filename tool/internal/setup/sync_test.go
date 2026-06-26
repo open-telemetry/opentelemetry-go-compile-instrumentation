@@ -386,3 +386,91 @@ go 1.25.0
 
 	assert.Empty(t, buf.String())
 }
+
+func TestLocalVersionForPath(t *testing.T) {
+	tests := []struct {
+		modulePath string
+		want       string
+	}{
+		{
+			// Path without major version suffix → returns generic local version
+			modulePath: "github.com/example/foo",
+			want:       localReplaceVersion,
+		},
+		{
+			// Path with /v2 suffix → returns v2.0.0-... local version
+			modulePath: "github.com/example/foo/v2",
+			want:       "v2.0.0-00010101000000-000000000000",
+		},
+		{
+			// Path with /v10 suffix
+			modulePath: "github.com/example/foo/v10",
+			want:       "v10.0.0-00010101000000-000000000000",
+		},
+		{
+			// Path ending in /v but no digits → generic
+			modulePath: "github.com/example/foo/vnotdigit",
+			want:       localReplaceVersion,
+		},
+		{
+			// No /v at all
+			modulePath: "example.com/simple",
+			want:       localReplaceVersion,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modulePath, func(t *testing.T) {
+			got := localVersionForPath(tt.modulePath)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAddRequire(t *testing.T) {
+	t.Run("adds require when missing", func(t *testing.T) {
+		content := "module example.com/test\n\ngo 1.21\n"
+		mf, err := modfile.Parse("go.mod", []byte(content), nil)
+		require.NoError(t, err)
+
+		added, err := addRequire(mf, "github.com/example/lib")
+		require.NoError(t, err)
+		assert.True(t, added)
+		require.Len(t, mf.Require, 1)
+		assert.Equal(t, "github.com/example/lib", mf.Require[0].Mod.Path)
+	})
+
+	t.Run("skips require when already present", func(t *testing.T) {
+		content := "module example.com/test\n\ngo 1.21\n\nrequire github.com/example/lib v1.0.0\n"
+		mf, err := modfile.Parse("go.mod", []byte(content), nil)
+		require.NoError(t, err)
+
+		added, err := addRequire(mf, "github.com/example/lib")
+		require.NoError(t, err)
+		assert.False(t, added)
+	})
+}
+
+func TestAddReplace(t *testing.T) {
+	t.Run("adds replace when missing", func(t *testing.T) {
+		content := "module example.com/test\n\ngo 1.21\n"
+		mf, err := modfile.Parse("go.mod", []byte(content), nil)
+		require.NoError(t, err)
+
+		added, err := addReplace(mf, "github.com/example/lib", "../local/lib")
+		require.NoError(t, err)
+		assert.True(t, added)
+		require.Len(t, mf.Replace, 1)
+		assert.Equal(t, "github.com/example/lib", mf.Replace[0].Old.Path)
+	})
+
+	t.Run("skips replace when already present", func(t *testing.T) {
+		content := "module example.com/test\n\ngo 1.21\n\nrequire github.com/example/lib v1.0.0\n\nreplace github.com/example/lib => ../local/lib\n"
+		mf, err := modfile.Parse("go.mod", []byte(content), nil)
+		require.NoError(t, err)
+
+		added, err := addReplace(mf, "github.com/example/lib", "../other/lib")
+		require.NoError(t, err)
+		assert.False(t, added)
+	})
+}

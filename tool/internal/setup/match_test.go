@@ -1110,3 +1110,77 @@ func TestMatchDeps_NoMatchesWarning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, matched)
 }
+
+
+func TestRulesFromDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a mix of rule and non-rule files
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "otelc.yml"), []byte("{}"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "foo.otelc.yaml"), []byte("{}"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "not-a-rule.go"), []byte("package main"), 0o644))
+
+	files, err := rulesFromDir(tmpDir, false)
+	require.NoError(t, err)
+	require.Len(t, files, 2)
+
+	names := make([]string, 0, len(files))
+	for _, f := range files {
+		names = append(names, filepath.Base(f))
+	}
+	assert.ElementsMatch(t, []string{"otelc.yml", "foo.otelc.yaml"}, names)
+}
+
+func TestRulesFromDir_SkipsSubmodules(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "otelc.yml"), []byte("{}"), 0o644))
+
+	// Create a submodule directory with a rule file
+	subDir := filepath.Join(tmpDir, "sub")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "go.mod"), []byte("module example.com/sub\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "bar.otelc.yml"), []byte("{}"), 0o644))
+
+	files, err := rulesFromDir(tmpDir, true)
+	require.NoError(t, err)
+	require.Len(t, files, 1, "submodule rule file should be skipped")
+	assert.Equal(t, "otelc.yml", filepath.Base(files[0]))
+}
+
+func TestLoadCustomRules_FromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	ruleFile := filepath.Join(tmpDir, "test.otelc.yml")
+	require.NoError(t, os.WriteFile(ruleFile, []byte(`
+myrule:
+  target: net/http
+  func: ServeHTTP
+  before: BeforeHook
+  path: github.com/example/pkg
+`), 0o644))
+
+	rules, err := loadCustomRules(ruleFile)
+	require.NoError(t, err)
+	require.NotEmpty(t, rules)
+}
+
+func TestLoadCustomRules_FromDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	ruleFile := filepath.Join(tmpDir, "rules.otelc.yml")
+	require.NoError(t, os.WriteFile(ruleFile, []byte(`
+myrule:
+  target: net/http
+  func: ServeHTTP
+  before: BeforeHook
+  path: github.com/example/pkg
+`), 0o644))
+
+	rules, err := loadCustomRules(tmpDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, rules)
+}
+
+func TestLoadCustomRules_NonExistent(t *testing.T) {
+	_, err := loadCustomRules("/nonexistent/path")
+	require.Error(t, err)
+}
