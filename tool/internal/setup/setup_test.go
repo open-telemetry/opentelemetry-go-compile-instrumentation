@@ -13,8 +13,28 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
 )
+
+func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no subcommand", args: []string{"go"}},
+		{name: "unsupported subcommand run", args: []string{"go", "run", "./..."}},
+		{name: "unsupported subcommand vet", args: []string{"go", "vet", "./..."}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: GoBuild}
+			err := cmd.Run(t.Context(), tt.args)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "supported")
+		})
+	}
+}
 
 func TestGetPackages(t *testing.T) {
 	setupTestModule(t, []string{"cmd", "foo/demo"})
@@ -104,11 +124,12 @@ func TestGetPackages(t *testing.T) {
 
 func TestSplitBuildTargets(t *testing.T) {
 	tests := []struct {
-		name        string
-		targets     []string
-		pkgTargets  []string
-		fileTargets []string
-		expectError bool
+		name          string
+		targets       []string
+		pkgTargets    []string
+		fileTargets   []string
+		notPkgTargets []string // must NOT be parsed as packages (e.g. flag values)
+		expectError   bool
 	}{
 		{
 			name:        "all package targets",
@@ -138,6 +159,54 @@ func TestSplitBuildTargets(t *testing.T) {
 			fileTargets: nil,
 			expectError: true,
 		},
+		{
+			name:          "go test -run value is not a package",
+			targets:       []string{"-run", "TestX", "./pkg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"TestX"},
+			expectError:   false,
+		},
+		{
+			name:        "go test joined -count=1 leaves package",
+			targets:     []string{"-count=1", "./pkg"},
+			pkgTargets:  []string{"./pkg"},
+			expectError: false,
+		},
+		{
+			name:          "go test -run value with no package target",
+			targets:       []string{"-run", "TestX"},
+			pkgTargets:    nil,
+			notPkgTargets: []string{"TestX"},
+			expectError:   false,
+		},
+		{
+			name:          "go test package before -run flag",
+			targets:       []string{"./pkg", "-run", "TestX"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"TestX"},
+			expectError:   false,
+		},
+		{
+			name:          "go test package before joined -count",
+			targets:       []string{"./...", "-count=1"},
+			pkgTargets:    []string{"./..."},
+			notPkgTargets: []string{"-count=1"},
+			expectError:   false,
+		},
+		{
+			name:          "go test -args tail is not a package",
+			targets:       []string{"./pkg", "-args", "serverarg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"serverarg"},
+			expectError:   false,
+		},
+		{
+			name:          "go test -vet value is not a package",
+			targets:       []string{"-vet", "off", "./pkg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"off"},
+			expectError:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -154,6 +223,10 @@ func TestSplitBuildTargets(t *testing.T) {
 				}
 				for _, exp := range tt.fileTargets {
 					assert.Contains(t, fileTargets, exp, "Expected file target %q not found in %v", exp, fileTargets)
+				}
+				for _, notExp := range tt.notPkgTargets {
+					assert.NotContains(t, pkgTargets, notExp,
+						"Flag value %q must not be parsed as a package (got %v)", notExp, pkgTargets)
 				}
 			}
 		})
