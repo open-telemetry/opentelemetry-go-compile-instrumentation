@@ -38,3 +38,5 @@ replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../pkg
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime => ../../../instrumentation/runtime
