@@ -835,5 +835,9 @@ require %s %s
 
 	updatedContent, err := os.ReadFile(toolFile)
 	require.NoError(t, err)
-	require.Contains(t, string(updatedContent), "//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc pin --generate")
+	require.Contains(
+		t,
+		string(updatedContent),
+		"//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc pin --generate",
+	)
 }
