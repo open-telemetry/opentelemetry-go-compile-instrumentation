@@ -837,4 +837,3 @@ require %s %s
 	require.NoError(t, err)
 	require.Contains(t, string(updatedContent), "//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc pin --generate")
 }
-

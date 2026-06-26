@@ -453,4 +453,3 @@ func TestSetupPhaseStore(t *testing.T) {
 	// Verify file was written
 	require.FileExists(t, util.GetMatchedRuleFile())
 }
-
