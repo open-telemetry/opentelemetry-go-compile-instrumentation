@@ -48,8 +48,10 @@ const (
 	testdataDir        = "testdata"
 	goldenDir          = "golden"
 	sourceFileName     = "source.go"
+	sourceTestFileName = "source_test.go"
 	rulesFileName      = "rules.yml"
 	mainGoFileName     = "main.go"
+	mainTestFileName   = "main_test.go"
 	mainPackage        = "main"
 	buildID            = "foo/bar"
 	compiledOutput     = "_pkg_.a"
@@ -79,13 +81,24 @@ func runTest(t *testing.T, testName string) {
 		slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	)
 
-	sourceFile := filepath.Join(tempDir, mainGoFileName)
-	// Each test case must provide its own source.go in its golden directory.
-	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, sourceFileName)
-	require.NoError(t, util.CopyFile(testSpecificSource, sourceFile),
-		"missing source.go for test %q at %s", testName, testSpecificSource)
+	// Each test case provides its source as source.go (a normal build) or
+	// source_test.go (a test build — a file the Go toolchain only compiles
+	// under `go test`). The chosen name is preserved into the temp dir so the
+	// compiled unit is genuinely a _test.go file, which is what is_test gates
+	// on. This mirrors setup.isTestBuild: test-ness is a source-set property,
+	// not an import-path suffix.
+	srcName, compiledName := sourceFileName, mainGoFileName
+	if testSrc := filepath.Join(testdataDir, goldenDir, testName, sourceTestFileName); util.PathExists(testSrc) {
+		srcName, compiledName = sourceTestFileName, mainTestFileName
+	}
+	isTest := strings.HasSuffix(compiledName, "_test.go")
 
-	ruleSet := loadRulesYAML(t, testName, sourceFile)
+	sourceFile := filepath.Join(tempDir, compiledName)
+	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, srcName)
+	require.NoError(t, util.CopyFile(testSpecificSource, sourceFile),
+		"missing %s for test %q at %s", srcName, testName, testSpecificSource)
+
+	ruleSet := loadRulesYAML(t, testName, sourceFile, isTest)
 	writeMatchedJSON(ruleSet)
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
@@ -104,7 +117,7 @@ func runTest(t *testing.T, testName string) {
 	verifyGoldenFiles(t, tempDir, testName)
 }
 
-func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet {
+func loadRulesYAML(t *testing.T, testName, sourceFile string, isTest bool) *rule.InstRuleSet {
 	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
 	require.NoError(t, err)
 
@@ -147,7 +160,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 			// that setup.preciseMatching would evaluate is applied inline here.
 			// A rule whose file predicate does not match the source is skipped,
 			// exactly as it would be gated out during matching.
-			if !whereFileMatches(t, ruleData, sourceTree) {
+			if !whereFileMatches(t, ruleData, isTest, sourceTree) {
 				continue
 			}
 
@@ -186,7 +199,11 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 // builds the matched rule set by hand (no setup phase), so this keeps fixtures
 // honest: a rule whose file filter does not match is gated out and produces no
 // instrumentation. The caller parses the tree once and shares it across rules.
-func whereFileMatches(t *testing.T, ruleData []byte, tree *dst.File) bool {
+//
+// isTest reports whether the fixture is a test build (its source is a
+// source_test.go file), mirroring setup.isTestBuild; the is_test predicate is
+// evaluated against it.
+func whereFileMatches(t *testing.T, ruleData []byte, isTest bool, tree *dst.File) bool {
 	t.Helper()
 
 	var probe struct {
@@ -197,20 +214,23 @@ func whereFileMatches(t *testing.T, ruleData []byte, tree *dst.File) bool {
 		return true
 	}
 
-	return fileFilterMatches(t, probe.Where.File, tree)
+	return fileFilterMatches(t, probe.Where.File, isTest, tree)
 }
 
 // fileFilterMatches reports whether a where.file predicate matches the parsed
-// source. It covers the predicates exercised by golden fixtures: all-of and
-// one-of composition plus has_func / has_struct leaves. Filter compilation and
-// match semantics are unit-tested in tool/internal/setup; this is a lightweight
-// stand-in for the golden harness only.
+// source. It covers the predicates exercised by golden fixtures: all-of, one-of
+// and not composition, the has_func / has_struct leaves, and is_test. Filter
+// compilation and match semantics are unit-tested in tool/internal/setup; this
+// is a lightweight stand-in for the golden harness only.
+//
+// isTest reports whether the fixture is a test build, against which the is_test
+// predicate is evaluated (mirrors setup.MatchContext.IsTest).
 //
 // Any predicate this evaluator does not model is rejected with t.Fatalf rather
 // than silently treated as a match: setup.buildFile errors on such predicates,
 // so silently matching here would let a fixture certify instrumentation output
 // that production could never produce.
-func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
+func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst.File) bool {
 	t.Helper()
 	// Mirror setup.buildFile's exclusivity rule: a combinator owns the node, so
 	// combining it with a sibling leaf or another combinator is a build-time
@@ -222,10 +242,18 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 			combinators++
 		}
 	}
-	leaf := def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" || def.HasDirective != ""
+	leaf := def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
+		def.HasDirective != "" || def.IsTest != nil
 	if combinators > 1 || (combinators == 1 && leaf) {
 		t.Fatalf("golden fixture combines a where.file combinator with sibling "+
 			"predicates (%+v); setup.buildFile rejects this at build time", def)
+	}
+	// Mirror setup.buildFile's has_recv-requires-has_func rule: has_recv on its
+	// own is a build-time error in production, so reject it here too rather than
+	// letting it fall through to a less specific failure.
+	if def.HasRecv != "" && def.HasFunc == "" {
+		t.Fatalf("golden fixture sets where.file.has_recv without has_func (%+v); "+
+			"setup.buildFile rejects this at build time", def)
 	}
 	// Mirror setup.buildFile's presence semantics: a non-nil combinator slice
 	// (including an explicit empty one-of: [] / all-of: []) is present and owns
@@ -233,7 +261,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 	// matches vacuously true — the loop is skipped in each case.
 	if def.OneOf != nil {
 		for i := range def.OneOf {
-			if fileFilterMatches(t, &def.OneOf[i], tree) {
+			if fileFilterMatches(t, &def.OneOf[i], isTest, tree) {
 				return true
 			}
 		}
@@ -241,7 +269,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 	}
 	if def.AllOf != nil {
 		for i := range def.AllOf {
-			if !fileFilterMatches(t, &def.AllOf[i], tree) {
+			if !fileFilterMatches(t, &def.AllOf[i], isTest, tree) {
 				return false
 			}
 		}
@@ -249,7 +277,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 	}
 	// not is unary: it negates its single inner predicate (mirrors setup.Not).
 	if def.Not != nil {
-		return !fileFilterMatches(t, def.Not, tree)
+		return !fileFilterMatches(t, def.Not, isTest, tree)
 	}
 	switch {
 	case def.HasFunc != "":
@@ -257,6 +285,8 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 		return ok
 	case def.HasStruct != "":
 		return ast.FindStructDecl(tree, def.HasStruct) != nil
+	case def.IsTest != nil:
+		return *def.IsTest == isTest
 	default:
 		t.Fatalf("golden fixture uses a where.file predicate the harness cannot "+
 			"evaluate (%+v); extend fileFilterMatches to mirror setup.buildFile", def)
