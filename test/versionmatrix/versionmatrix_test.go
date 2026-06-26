@@ -60,10 +60,11 @@ func bumpApps(t *testing.T, bounds func(*testing.T, string, map[string][]string)
 		}
 		t.Run(name, func(t *testing.T) {
 			rangedDeps := testutil.DiscoverRangedDeps(t, appDir, targets)
-			if len(rangedDeps) == 0 {
-				t.Skipf("%s has no instrumented deps with a declared version range", name)
+			depVersions := bounds(t, appDir, rangedDeps)
+			if len(depVersions) == 0 {
+				t.Skipf("%s has no instrumented deps to pin for this bound", name)
 			}
-			testutil.BumpToVersions(t, appDir, bounds(t, appDir, rangedDeps))
+			testutil.BumpToVersions(t, appDir, depVersions)
 		})
 	}
 }

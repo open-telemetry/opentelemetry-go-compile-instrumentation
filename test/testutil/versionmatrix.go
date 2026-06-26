@@ -61,9 +61,10 @@ func LowerBounds(rangedDeps map[string][]string) map[string]string {
 
 // UpperBounds maps each dep to the highest published release covered by any
 // of its declared version ranges. Ranges are half-open (the cap is the first
-// unsupported version), so the upper bound of "v0.34.0,v0.36.0" is the
-// newest release below v0.36.0, and the upper bound of an open-ended range
-// is the latest release.
+// unsupported version), so the upper bound of "v0.34.0,v0.36.0" is the newest
+// release below v0.36.0. A dep whose upper bound is the latest release (an
+// open-ended range) is omitted: LatestLibRun already exercises that version,
+// and testing it here would open a duplicate failure issue.
 func UpperBounds(t *testing.T, appDir string, rangedDeps map[string][]string) map[string]string {
 	bounds := make(map[string]string, len(rangedDeps))
 	for dep, ranges := range rangedDeps {
@@ -76,10 +77,14 @@ func UpperBounds(t *testing.T, appDir string, rangedDeps map[string][]string) ma
 		require.NotEmpty(t, fields, "go list -m -versions %s returned no output in %s", dep, appDir)
 
 		// The first field is the module path, the rest are published versions.
-		highest := highestCovered(fields[1:], ranges)
+		versions := fields[1:]
+		highest := highestCovered(versions, ranges)
 		require.NotEmpty(t, highest,
 			"no published release of %s is covered by its declared ranges %v: the ranges are incorrect",
 			dep, ranges)
+		if highest == latestRelease(versions) {
+			continue
+		}
 		bounds[dep] = highest
 	}
 	return bounds
@@ -105,6 +110,21 @@ func highestCovered(versions, ranges []string) string {
 		}
 	}
 	return highest
+}
+
+// latestRelease returns the highest plain release (no prerelease suffix)
+// among versions, or "" if there is none.
+func latestRelease(versions []string) string {
+	latest := ""
+	for _, v := range versions {
+		if semver.Prerelease(v) != "" {
+			continue
+		}
+		if latest == "" || semver.Compare(v, latest) > 0 {
+			latest = v
+		}
+	}
+	return latest
 }
 
 // BumpToVersions runs "go get <dep>@<version>" for each dep in appDir,

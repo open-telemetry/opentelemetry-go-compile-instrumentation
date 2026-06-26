@@ -106,6 +106,41 @@ func TestHighestCovered(t *testing.T) {
 	}
 }
 
+func TestLatestRelease(t *testing.T) {
+	tests := []struct {
+		name     string
+		versions []string
+		want     string
+	}{
+		{
+			name:     "highest release",
+			versions: []string{"v1.39.0", "v1.42.0", "v1.43.0"},
+			want:     "v1.43.0",
+		},
+		{
+			name:     "prereleases ignored",
+			versions: []string{"v1.43.0", "v1.44.0-rc.1"},
+			want:     "v1.43.0",
+		},
+		{
+			name:     "unsorted",
+			versions: []string{"v0.35.0", "v0.34.0", "v0.35.5"},
+			want:     "v0.35.5",
+		},
+		{
+			name:     "no release",
+			versions: []string{"v1.44.0-rc.1"},
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, latestRelease(tt.versions))
+		})
+	}
+}
+
 func TestDiscoverRangedDeps(t *testing.T) {
 	appDir := t.TempDir()
 	goMod := `module example.com/app
