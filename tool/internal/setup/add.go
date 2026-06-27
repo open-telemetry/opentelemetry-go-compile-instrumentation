@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -103,7 +104,7 @@ func buildOtelcRuntimeAst(decls []dst.Decl) *dst.File {
 
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
-func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) error {
+func (sp *SetupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, packagePath string) error {
 	rules := make([]*rule.InstFuncRule, 0, len(matched))
 	for _, m := range matched {
 		funcRules := m.AllFuncRules()
@@ -119,10 +120,14 @@ func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) e
 	varDecls := genVarDecl(rules)
 	// Build the ast
 	root := buildOtelcRuntimeAst(append(importDecls, varDecls...))
-	// Write the ast to file
 	otelcRuntimeFilePath := filepath.Join(packagePath, OtelcRuntimeFile)
-	err := ast.WriteFile(otelcRuntimeFilePath, root)
-	if err != nil {
+	// Track file in state manager
+	stateManager, _ := StateManagerFromContext(ctx)
+	if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
+		return err
+	}
+	// Write the ast to file
+	if err := ast.WriteFile(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
 	sp.keepForDebug(otelcRuntimeFilePath)
