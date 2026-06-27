@@ -233,3 +233,27 @@ func TestResolveModuleDir(t *testing.T) {
 		})
 	}
 }
+
+func TestModuleDir(t *testing.T) {
+	t.Run("resolves the module dir", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		dir, err := ModuleDir(t.Context(), root)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+	})
+	t.Run("resolves from a subdirectory", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		sub := filepath.Join(root, "a", "b")
+		require.NoError(t, os.MkdirAll(sub, 0o755))
+		dir, err := ModuleDir(t.Context(), sub)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+	})
+	t.Run("empty outside a module", func(t *testing.T) {
+		dir, err := ModuleDir(t.Context(), t.TempDir())
+		require.NoError(t, err)
+		assert.Empty(t, dir)
+	})
+}
