@@ -17,6 +17,7 @@ import (
 
 func TestHTTPServer(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "httpserver", "go", "build", "-a")
 
 	testCases := []struct {
 		name   string

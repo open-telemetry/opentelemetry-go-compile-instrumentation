@@ -224,7 +224,7 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 
 // baseTypeName returns the unqualified type name, stripping pointers and package prefixes.
 // This is needed because trampolines use pointer types (*string) while hooks use value types (string),
-// and hooks may use package-qualified types (inst.HookContext) while trampolines use local types (HookContext).
+// and hooks may use package-qualified types (hook.HookContext) while trampolines use local types (HookContext).
 // Examples: *int → int, pkg.Type → Type, *pkg.Type → Type, interface{} → interface{}, []int → int, ...string → string
 func baseTypeName(expr dst.Expr) string {
 	switch t := expr.(type) {
@@ -658,7 +658,7 @@ func (ip *InstrumentPhase) populateHookContext(before bool) bool {
 // renaming occurrences of HookContextImpl to HookContextImpl{suffix} in the
 // trampoline template
 func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
-	suffix := util.CRC32(t.String())
+	suffix := t.Identity()
 	structType := util.AssertType[*dst.TypeSpec](ip.hookCtxDecl.Specs[0])
 	util.Assert(structType.Name.Name == trampolineHookContextImplType,
 		"sanity check")
@@ -932,16 +932,44 @@ func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 		// Preserve variadic syntax. This maintains variadic semantics in the
 		// generated hook signatures
 		return ast.Ellipsis(replaceTypeParamsWithAny(tType.Elt, typeParams))
+	case *dst.FuncType:
+		newFuncType := &dst.FuncType{}
+		if tType.Params != nil {
+			newFuncType.Params = &dst.FieldList{
+				List: processFieldList(tType.Params.List, typeParams),
+			}
+		}
+		if tType.Results != nil {
+			newFuncType.Results = &dst.FieldList{
+				List: processFieldList(tType.Results.List, typeParams),
+			}
+		}
+		return newFuncType
 	case *dst.Ident, *dst.SelectorExpr, *dst.InterfaceType:
 		// Base types without type parameters, return as-is
 		return t
 	default:
 		// Unsupported cases:
-		// - *dst.FuncType (function types with type parameters)
 		// - Other uncommon type expressions
 		util.Unimplemented(fmt.Sprintf("unexpected generic type: %T", tType))
 		return t
 	}
+}
+
+func processFieldList(fields []*dst.Field, typeParams *dst.FieldList) []*dst.Field {
+	result := make([]*dst.Field, len(fields))
+	for i, field := range fields {
+		newField := &dst.Field{}
+		if field.Names != nil {
+			newField.Names = make([]*dst.Ident, len(field.Names))
+			for j, name := range field.Names {
+				newField.Names[j] = dst.NewIdent(name.Name)
+			}
+		}
+		newField.Type = replaceTypeParamsWithAny(field.Type, typeParams)
+		result[i] = newField
+	}
+	return result
 }
 
 func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {

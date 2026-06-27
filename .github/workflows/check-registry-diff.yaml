@@ -3,13 +3,13 @@ name: Check Semantic Convention Registry
 on:
   pull_request:
     paths:
-      - 'pkg/instrumentation/**/semconv/**'
+      - 'instrumentation/**/semconv/**'
       - '.semconv-version'
   push:
     branches:
       - main
     paths:
-      - 'pkg/instrumentation/**/semconv/**'
+      - 'instrumentation/**/semconv/**'
       - '.semconv-version'
 
 permissions:
@@ -46,7 +46,7 @@ jobs:
       - name: Validate code uses correct semconv version
         run: |
           # Detect the semconv version used in the Go code imports
-          DETECTED_VERSION=$(grep -r "semconv/v" pkg/instrumentation/ --include="*.go" | \
+          DETECTED_VERSION=$(grep -r "semconv/v" instrumentation/ --include="*.go" | \
             grep -o "semconv/v[0-9]*\.[0-9]*\.[0-9]*" | \
             sort -u | \
             head -1 | \
@@ -55,7 +55,7 @@ jobs:
           EXPECTED_VERSION="${{ steps.read-version.outputs.current_version }}"
 
           if [ -z "$DETECTED_VERSION" ]; then
-            echo "::error::No semconv version detected in Go imports in pkg/instrumentation/**/semconv/"
+            echo "::error::No semconv version detected in Go imports in instrumentation/**/semconv/"
             exit 1
           fi
 

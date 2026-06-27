@@ -163,13 +163,22 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 		newVersion: "",
 	})
 
-	// Add replace directive for special shared module
-	// shared module initializes the OpenTelemetry SDK. It is required by all
+	// Add replace directive for special runtime module
+	// runtime module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
 	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelcRoot + "/pkg/instrumentation/shared",
+		oldPath:    util.OtelcRoot + "/pkg/runtime",
 		oldVersion: "",
-		newPath:    filepath.Join(util.GetBuildTempDir(), "pkg/instrumentation/shared"),
+		newPath:    filepath.Join(util.GetBuildTempDir(), unzippedPkgDir+"/runtime"),
+		newVersion: "",
+	})
+
+	// Add replace directive for instrumentation module
+	// instrumentation module contains shared semconv packages.
+	replaces = append(replaces, &replaceDirective{
+		oldPath:    util.OtelcRoot + "/instrumentation",
+		oldVersion: "",
+		newPath:    filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
 		newVersion: "",
 	})
 

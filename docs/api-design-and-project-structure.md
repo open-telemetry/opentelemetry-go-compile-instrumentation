@@ -3,20 +3,27 @@
 The project structure is as follows:
 
 - `demo`: Demo applications showing instrumentation in action
-- `pkg`: Public API and instrumentation implementations
-  - `inst`: Core instrumentation context and hook interface
-  - `instrumentation`: Instrumentation implementations for each protocol/library
-    - `nethttp`: HTTP client and server instrumentation
-      - `client`: HTTP client hooks
-      - `server`: HTTP server hooks
-      - `semconv`: Semantic conventions for HTTP
-    - `grpc`: gRPC instrumentation
-    - `redis`: redis instrumentation
-    - `k8s-client-go`: Kubernetes client-go informers instrumentation
-    - `helloworld`: Example instrumentation
-    - `runtime`: Runtime context management
-    - `shared`: Shared utilities and OTel SDK setup
-  - `otelsetup`: OpenTelemetry SDK initialization
+- `pkg`: Public APIs used by instrumentation packages
+  - `hook`: Core instrumentation context and hook interface
+  - `runtime`: Shared runtime utilities and OTel SDK setup
+- `instrumentation`: Instrumentation implementations for each protocol/library
+  - `basic`: Example instrumentation
+  - `database/sql`: `database/sql` instrumentation
+  - `github.com/`:
+    - `gin-gonic/gin`: Gin instrumentation
+    - `go-redis/redis/v9`: Redis instrumentation
+  - `go.mongodb.org/mongo-driver/mongo`: MongoDB instrumentation
+  - `go.opentelemetry.io/otel`: OpenTelemetry SDK instrumentation
+  - `google.golang.org/grpc`: gRPC instrumentation
+    - `client`: gRPC client hooks
+    - `server`: gRPC server hooks
+    - `semconv`: Semantic conventions for gRPC
+  - `k8s.io/client-go`: Kubernetes client-go informers instrumentation
+  - `net/http`: HTTP client and server instrumentation
+    - `client`: HTTP client hooks
+    - `server`: HTTP server hooks
+    - `semconv`: Semantic conventions for HTTP
+  - `runtime`: Runtime instrumentation
 - `tool`: Compile-time instrumentation tool
   - `internal/setup`: Setup phase, prepares the environment for instrumentation
   - `internal/instrument`: Instrument phase, applies actual instrumentation
@@ -57,7 +64,7 @@ The instrumentation follows a consistent pattern across all implementations:
 
 ```go
 // Before hook: Start span, inject context
-func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http.Request) {
+func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http.Request) {
     // 1. Check if instrumentation is enabled
     if !clientEnabler.Enable() {
         return
@@ -84,7 +91,7 @@ func BeforeRoundTrip(ictx inst.HookContext, transport *http.Transport, req *http
 }
 
 // After hook: Record results, end span
-func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
+func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
     // 1. Retrieve data from Before hook
     span, ok := ictx.GetKeyData("span").(trace.Span)
     if !ok || span == nil {
@@ -114,7 +121,7 @@ func AfterRoundTrip(ictx inst.HookContext, res *http.Response, err error) {
 
 ```go
 // Before hook: Extract context, start span, wrap response writer
-func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
+func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
     // 1. Extract trace context from incoming request
     ctx := propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 
@@ -139,7 +146,7 @@ func BeforeServeHTTP(ictx inst.HookContext, recv interface{}, w http.ResponseWri
 }
 
 // After hook: Extract status, finalize span
-func AfterServeHTTP(ictx inst.HookContext) {
+func AfterServeHTTP(ictx hook.HookContext) {
     span, ok := ictx.GetKeyData("span").(trace.Span)
     if !ok || span == nil {
         return
@@ -235,16 +242,31 @@ The instrumentation respects standard OpenTelemetry environment variables:
 
 To add instrumentation for a new library:
 
-1. Create a new directory under `pkg/instrumentation/<library>`
-2. Implement Before/After hook functions
-3. Create semantic convention helpers in a `semconv` subdirectory
-4. Define rules in `pkg/instrumentation/<library>/.../*.yaml`
-5. Add tests and documentation
+1. Create a new directory under `instrumentation/<import_path>`, where `import_path` is the Go import path of the library being instrumented.
+2. Implement Before/After hook functions.
+3. Create semantic convention helpers in a `semconv` subdirectory.
+4. Define rules in `instrumentation/<import_path>/.../otelc.yaml`.
+Rule files must be named either:
+
+- `otelc.yaml`
+- `*.otelc.yaml`
+
+All matching rule files within an instrumentation package are discovered and loaded automatically.
+5. Add tests and documentation.
+
+Examples:
+
+```text
+instrumentation/net/http/
+instrumentation/google.golang.org/grpc/
+instrumentation/github.com/gin-gonic/gin/
+instrumentation/github.com/go-redis/redis/v9/
+```
 
 Example structure:
 
 ```text
-pkg/instrumentation/mylibrary/
+instrumentation/mylibrary/
 ├── client/
 │   ├── client_hook.go       # Before/After hooks
 │   └── client_hook_test.go

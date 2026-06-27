@@ -14,12 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb/pb"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
 )
 
 func TestGRPCClient(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "grpcclient", "go", "build", "-a")
 
 	testCases := []struct {
 		name           string

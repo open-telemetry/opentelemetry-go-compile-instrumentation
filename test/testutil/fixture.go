@@ -5,7 +5,7 @@ package testutil
 
 import (
 	"os"
-	"path/filepath"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -17,7 +17,6 @@ import (
 type TestFixture struct {
 	t         *testing.T
 	collector *Collector
-	appsDir   string // Directory for self-contained test apps (test/apps/)
 
 	serviceName   string
 	skipCollector bool
@@ -55,10 +54,6 @@ func NewTestFixture(t *testing.T, opts ...TestFixtureOption) *TestFixture {
 	for _, opt := range opts {
 		opt(f)
 	}
-
-	pwd, err := os.Getwd()
-	require.NoError(t, err)
-	f.appsDir = filepath.Join(pwd, "..", "apps")
 
 	if !f.skipCollector {
 		f.collector = StartCollector(t)
@@ -113,40 +108,38 @@ func (f *TestFixture) CollectorURL() string {
 	return f.collector.URL
 }
 
-// resolveAppPath converts an app name like "httpserver" to full path in test/apps/.
-func (f *TestFixture) resolveAppPath(appName string) string {
-	return filepath.Join(f.appsDir, appName)
-}
-
 // Server represents a running server process.
 type Server struct {
 	t       *testing.T
 	appPath string
+
+	*exec.Cmd
 }
 
-// Start starts a pre-built test application from test/apps/. The binary is
-// expected to exist (TestMain pre-builds all apps).
+// Start starts a test application from test/apps/. The binary is
+// expected to be built using Build.
 func (f *TestFixture) Start(appName string, args ...string) *Server {
-	Start(f.t, f.resolveAppPath(appName), f.Env(), args...)
-	return &Server{t: f.t, appPath: appName}
+	cmd := Start(f.t, "", appName, f.Env(), args...)
+	return &Server{t: f.t, appPath: appName, Cmd: cmd}
 }
 
-// Run runs a pre-built test application and returns its output.
+// Run runs a application and returns its output. The binary is
+// expected to be built using Build.
 func (f *TestFixture) Run(appName string, args ...string) string {
-	return Run(f.t, f.resolveAppPath(appName), f.Env(), args...)
+	return Run(f.t, "", appName, f.Env(), args...)
 }
 
 // BuildAndStart builds the named app and then starts it. Kept for e2e test
-// backward compatibility — integration tests use pre-built binaries from TestMain.
+// backward compatibility. Integration tests build applications once and reuse them.
 func (f *TestFixture) BuildAndStart(appName string, args ...string) *Server {
-	Build(f.t, f.resolveAppPath(appName), "go", "build", "-a")
+	Build(f.t, "", appName, "go", "build", "-a")
 	return f.Start(appName, args...)
 }
 
 // BuildAndRun builds the named app and runs it, returning its output. Kept for
-// e2e test backward compatibility — integration tests use pre-built binaries.
+// e2e test backward compatibility. Integration tests build applications once and reuse them.
 func (f *TestFixture) BuildAndRun(appName string, args ...string) string {
-	Build(f.t, f.resolveAppPath(appName), "go", "build", "-a")
+	Build(f.t, "", appName, "go", "build", "-a")
 	return f.Run(appName, args...)
 }
 
