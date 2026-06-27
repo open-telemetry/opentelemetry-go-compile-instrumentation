@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
@@ -33,11 +34,10 @@ type streamingReader struct {
 	opName        string
 	provider      string
 	op            operationType
-	ctx           context.Context
-	done          bool
+	done          atomic.Bool
 }
 
-func newStreamingReader(body io.ReadCloser, span trace.Span, start time.Time, model, opName, provider string, op operationType, ctx context.Context) *streamingReader {
+func newStreamingReader(body io.ReadCloser, span trace.Span, start time.Time, model, opName, provider string, op operationType, _ context.Context) *streamingReader {
 	return &streamingReader{
 		reader:   body,
 		start:    start,
@@ -46,7 +46,6 @@ func newStreamingReader(body io.ReadCloser, span trace.Span, start time.Time, mo
 		opName:   opName,
 		provider: provider,
 		op:       op,
-		ctx:      ctx,
 	}
 }
 
@@ -63,8 +62,7 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 		r.processSSELines()
 	}
 
-	if err != nil && !r.done {
-		r.done = true
+	if err != nil && r.done.CompareAndSwap(false, true) {
 		r.finalize()
 	}
 
@@ -72,8 +70,7 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 }
 
 func (r *streamingReader) Close() error {
-	if !r.done {
-		r.done = true
+	if r.done.CompareAndSwap(false, true) {
 		r.finalize()
 	}
 	if r.reader != nil {

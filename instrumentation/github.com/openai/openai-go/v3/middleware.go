@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/openai/openai-go/v3/semconv"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
 )
 
 const (
@@ -111,12 +112,18 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		provider := getProviderName(req.URL.Host)
 		opName := operationName(op)
 
-		bodyBytes, err := io.ReadAll(io.LimitReader(req.Body, maxRequestBodySize))
+		// Read a bounded copy for attribute parsing, but preserve the full body for the SDK.
+		var buf bytes.Buffer
+		tee := io.TeeReader(req.Body, &buf)
+		bodyBytes, err := io.ReadAll(io.LimitReader(tee, maxRequestBodySize))
 		if err != nil {
 			return next(req)
 		}
-		req.Body.Close()
-		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		// Reassemble: buffered bytes + remaining unread body.
+		req.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(&buf, req.Body), req.Body}
 
 		var model string
 		var spanAttrs []attribute.KeyValue
@@ -132,7 +139,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		spanName := opName + " " + model
 		baseAttrs := []attribute.KeyValue{
-			semconv.GenAISystem("openai"),
+			semconv.GenAISystem(provider),
 			semconv.GenAIOperationName(opName),
 			semconv.GenAIRequestModel(model),
 			semconv.GenAIProviderName(provider),
@@ -141,9 +148,10 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		ctx := req.Context()
 		ctx, span := tracer.Start(ctx, spanName,
-			trace.WithSpanKind(trace.SpanKindInternal),
+			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(spanAttrs...),
 		)
+		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 		req = req.WithContext(ctx)
 
 		resp, err := next(req)
@@ -153,6 +161,13 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			span.RecordError(err)
 			span.End()
 			return resp, err
+		}
+
+		if resp.StatusCode >= 400 {
+			span.SetStatus(codes.Error, resp.Status)
+			span.SetAttributes(attribute.String("error.type", resp.Status))
+			span.End()
+			return resp, nil
 		}
 
 		contentType := resp.Header.Get("Content-Type")
@@ -172,12 +187,18 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 func handleNonStreamingResponse(_ context.Context, resp *http.Response, span trace.Span, _ time.Time, op operationType) {
 	defer span.End()
 
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+	// Read a bounded preview for parsing, but reassemble the full body for callers.
+	var buf bytes.Buffer
+	tee := io.TeeReader(resp.Body, &buf)
+	bodyBytes, err := io.ReadAll(io.LimitReader(tee, maxResponseBodySize))
 	if err != nil {
 		return
 	}
-	resp.Body.Close()
-	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	// Reassemble: preview bytes + remaining unread body.
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(&buf, resp.Body), resp.Body}
 
 	switch op {
 	case opChat:
