@@ -1,6 +1,5 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 // An empty all-of matches every file (vacuous truth): every condition in an
 // empty set is trivially satisfied, so the where.file.all-of: [] predicate
 // gates nothing out and Open below IS instrumented.
@@ -42,14 +41,12 @@ func (c *HookContextImpl3522809524) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl3522809524) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl3522809524) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -57,7 +54,6 @@ func (c *HookContextImpl3522809524) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl3522809524) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -65,7 +61,6 @@ func (c *HookContextImpl3522809524) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl3522809524) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -76,7 +71,6 @@ func (c *HookContextImpl3522809524) SetParam(idx int, val interface{}) {
 		*(c.params[0].(*string)) = val.(string)
 	}
 }
-
 func (c *HookContextImpl3522809524) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -84,7 +78,6 @@ func (c *HookContextImpl3522809524) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl3522809524) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -123,7 +116,6 @@ func OtelBeforeTrampoline_Open3522809524(param0 *string) (hookContext *HookConte
 	}
 	return hookContext, hookContext.skipCall
 }
-
 func OtelAfterTrampoline_Open3522809524(hookContext HookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {

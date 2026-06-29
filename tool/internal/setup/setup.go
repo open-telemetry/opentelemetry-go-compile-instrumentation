@@ -309,11 +309,7 @@ func SetupWithCleanup(ctx context.Context, cmd *cli.Command) (func(), error) {
 		}
 
 		if err = sp.addDeps(ctx, matched, pkgDir); err != nil {
-			for _, f := range generatedRuntimeFiles {
-				if rmErr := os.Remove(f); rmErr != nil {
-					logger.WarnContext(ctx, "failed to remove generated runtime file", "path", f, "error", rmErr)
-				}
-			}
+			removeRuntimeFiles(ctx, logger, generatedRuntimeFiles)
 			return nil, ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
@@ -321,24 +317,24 @@ func SetupWithCleanup(ctx context.Context, cmd *cli.Command) (func(), error) {
 	// Write the matched hook to matched.json for further instrument phase
 	err = sp.store(matched)
 	if err != nil {
-		for _, f := range generatedRuntimeFiles {
-			if rmErr := os.Remove(f); rmErr != nil {
-				logger.WarnContext(ctx, "failed to remove generated runtime file", "path", f, "error", rmErr)
-			}
-		}
+		removeRuntimeFiles(ctx, logger, generatedRuntimeFiles)
 		return nil, err
 	}
 
 	cleanupWithRuntime := func() {
 		cleanup()
-		for _, f := range generatedRuntimeFiles {
-			if rmErr := os.Remove(f); rmErr != nil {
-				logger.WarnContext(ctx, "failed to remove generated runtime file", "path", f, "error", rmErr)
-			}
-		}
+		removeRuntimeFiles(ctx, logger, generatedRuntimeFiles)
 	}
 
 	return cleanupWithRuntime, nil
+}
+
+func removeRuntimeFiles(ctx context.Context, logger *slog.Logger, files []string) {
+	for _, f := range files {
+		if rmErr := os.Remove(f); rmErr != nil {
+			logger.WarnContext(ctx, "failed to remove generated runtime file", "path", f, "error", rmErr)
+		}
+	}
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.

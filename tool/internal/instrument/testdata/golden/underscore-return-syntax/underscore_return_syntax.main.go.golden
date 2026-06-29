@@ -1,6 +1,5 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import _ "unsafe"
@@ -14,7 +13,6 @@ func UnderscoreReturnFunc() (_ignoredParam0 int, _ignoredParam1 error) {
 	//line main.go:7:2
 	return 0, nil
 }
-
 func main() {}
 
 //line <generated>:1
@@ -37,14 +35,12 @@ func (c *HookContextImpl2035128499) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl2035128499) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl2035128499) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -52,13 +48,11 @@ func (c *HookContextImpl2035128499) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl2035128499) GetParam(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2035128499) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -67,7 +61,6 @@ func (c *HookContextImpl2035128499) SetParam(idx int, val interface{}) {
 	switch idx {
 	}
 }
-
 func (c *HookContextImpl2035128499) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -77,7 +70,6 @@ func (c *HookContextImpl2035128499) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2035128499) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -94,7 +86,6 @@ func (c *HookContextImpl2035128499) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl2035128499) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl2035128499) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl2035128499) GetPackageName() string { return c.packageName }
-
 func OtelAfterTrampoline_UnderscoreReturnFunc2035128499(hookContext HookContext, arg0 *int, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {

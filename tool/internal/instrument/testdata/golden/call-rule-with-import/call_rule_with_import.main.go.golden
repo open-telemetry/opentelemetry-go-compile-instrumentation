@@ -1,11 +1,9 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import (
 	"unsafe"
-
 	"fmt"
 )
 
@@ -14,7 +12,6 @@ func CallSizeof() {
 	size := (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(x) })()
 	_ = size
 }
-
 func main() {
 	y := "hello"
 	_ = (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(y) })()

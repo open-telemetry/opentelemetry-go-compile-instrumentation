@@ -1,6 +1,5 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import _ "unsafe"
@@ -51,14 +50,12 @@ func (c *HookContextImpl2498065262) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl2498065262) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl2498065262) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -66,13 +63,11 @@ func (c *HookContextImpl2498065262) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl2498065262) GetParam(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2498065262) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -81,13 +76,11 @@ func (c *HookContextImpl2498065262) SetParam(idx int, val interface{}) {
 	switch idx {
 	}
 }
-
 func (c *HookContextImpl2498065262) GetReturnVal(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2498065262) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -148,14 +141,12 @@ func (c *HookContextImpl619637533) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl619637533) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl619637533) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -163,13 +154,11 @@ func (c *HookContextImpl619637533) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl619637533) GetParam(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl619637533) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -178,13 +167,11 @@ func (c *HookContextImpl619637533) SetParam(idx int, val interface{}) {
 	switch idx {
 	}
 }
-
 func (c *HookContextImpl619637533) GetReturnVal(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl619637533) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -221,7 +208,6 @@ func OtelBeforeTrampoline_OptBad2619637533() (hookContext *HookContextImpl619637
 	}
 	return hookContext, hookContext.skipCall
 }
-
 func OtelAfterTrampoline_OptBad2619637533(hookContext HookContext) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -267,14 +253,12 @@ func (c *HookContextImpl2195172342) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl2195172342) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl2195172342) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -282,13 +266,11 @@ func (c *HookContextImpl2195172342) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl2195172342) GetParam(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2195172342) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -297,13 +279,11 @@ func (c *HookContextImpl2195172342) SetParam(idx int, val interface{}) {
 	switch idx {
 	}
 }
-
 func (c *HookContextImpl2195172342) GetReturnVal(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2195172342) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil

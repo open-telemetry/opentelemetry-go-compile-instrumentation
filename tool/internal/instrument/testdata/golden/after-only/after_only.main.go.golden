@@ -1,6 +1,5 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import _ "unsafe"
@@ -16,7 +15,6 @@ func (t *T) Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 e
 	//line main.go:9:2
 	return 0.0, nil
 }
-
 func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	//line <generated>:1
 	if false {
@@ -49,14 +47,12 @@ func (c *HookContextImpl1681024588) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl1681024588) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl1681024588) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -64,7 +60,6 @@ func (c *HookContextImpl1681024588) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl1681024588) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -74,7 +69,6 @@ func (c *HookContextImpl1681024588) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl1681024588) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -87,7 +81,6 @@ func (c *HookContextImpl1681024588) SetParam(idx int, val interface{}) {
 		*(c.params[1].(*int)) = val.(int)
 	}
 }
-
 func (c *HookContextImpl1681024588) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -97,7 +90,6 @@ func (c *HookContextImpl1681024588) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl1681024588) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -114,7 +106,6 @@ func (c *HookContextImpl1681024588) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl1681024588) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl1681024588) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl1681024588) GetPackageName() string { return c.packageName }
-
 func OtelAfterTrampoline_Func11681024588(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -157,14 +148,12 @@ func (c *HookContextImpl3865747808) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl3865747808) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl3865747808) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -172,7 +161,6 @@ func (c *HookContextImpl3865747808) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl3865747808) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -184,7 +172,6 @@ func (c *HookContextImpl3865747808) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl3865747808) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -199,7 +186,6 @@ func (c *HookContextImpl3865747808) SetParam(idx int, val interface{}) {
 		*(c.params[2].(*int)) = val.(int)
 	}
 }
-
 func (c *HookContextImpl3865747808) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -209,7 +195,6 @@ func (c *HookContextImpl3865747808) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl3865747808) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -226,7 +211,6 @@ func (c *HookContextImpl3865747808) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl3865747808) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl3865747808) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl3865747808) GetPackageName() string { return c.packageName }
-
 func OtelAfterTrampoline_Func13865747808(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {

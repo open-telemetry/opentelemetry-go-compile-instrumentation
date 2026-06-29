@@ -27,11 +27,3 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => D:\opentelemetry-go-compile-instrumentation\tool\internal\setup\.otelc-build\pkg
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => D:\opentelemetry-go-compile-instrumentation\tool\internal\setup\.otelc-build\pkg\runtime
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => D:\opentelemetry-go-compile-instrumentation\tool\internal\setup\.otelc-build\instrumentation
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime => D:\opentelemetry-go-compile-instrumentation\tool\internal\setup\.otelc-build\instrumentation\runtime
