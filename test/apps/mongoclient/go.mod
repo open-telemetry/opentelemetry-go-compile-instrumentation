@@ -17,19 +17,3 @@ require (
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 )
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/go.mongodb.org/mongo-driver/mongo => ../../../instrumentation/go.mongodb.org/mongo-driver/mongo
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../pkg
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../pkg/runtime
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => ../../../instrumentation
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime => ../../../instrumentation/runtime
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client => ../../../instrumentation/net/http/client
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server => ../../../instrumentation/net/http/server

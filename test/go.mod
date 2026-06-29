@@ -6,10 +6,6 @@ replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ..
 
 replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb => ./shared/grpcpb
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/logslog => ./apps/logslog
-
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/logslogrus => ./apps/logslogrus
-
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation v0.0.0-00010101000000-000000000000

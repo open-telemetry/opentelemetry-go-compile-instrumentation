@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -158,6 +159,9 @@ func writeInstrumentationModule(
 }
 
 func TestPin(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 
 	t.Run("generates new tool file", func(t *testing.T) {
 		workDir := copyTestApp(t, "httpclient")

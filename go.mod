@@ -8,6 +8,7 @@ go 1.25.0
 require (
 	github.com/dave/dst v0.27.3
 	github.com/google/go-cmp v0.7.0
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime v0.0.0-20260625124055-4615b40860db
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.6.1
 	github.com/valyala/fasttemplate v1.2.2
@@ -26,3 +27,11 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => D:\opentelemetry-go-compile-instrumentation\tool\internal\setup\.otelc-build\pkg
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => D:\opentelemetry-go-compile-instrumentation\tool\internal\setup\.otelc-build\pkg\runtime
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => D:\opentelemetry-go-compile-instrumentation\tool\internal\setup\.otelc-build\instrumentation
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime => D:\opentelemetry-go-compile-instrumentation\tool\internal\setup\.otelc-build\instrumentation\runtime

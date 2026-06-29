@@ -310,7 +310,9 @@ func SetupWithCleanup(ctx context.Context, cmd *cli.Command) (func(), error) {
 
 		if err = sp.addDeps(ctx, matched, pkgDir); err != nil {
 			for _, f := range generatedRuntimeFiles {
-				_ = os.Remove(f)
+				if rmErr := os.Remove(f); rmErr != nil {
+					logger.WarnContext(ctx, "failed to remove generated runtime file", "path", f, "error", rmErr)
+				}
 			}
 			return nil, ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
@@ -320,7 +322,9 @@ func SetupWithCleanup(ctx context.Context, cmd *cli.Command) (func(), error) {
 	err = sp.store(matched)
 	if err != nil {
 		for _, f := range generatedRuntimeFiles {
-			_ = os.Remove(f)
+			if rmErr := os.Remove(f); rmErr != nil {
+				logger.WarnContext(ctx, "failed to remove generated runtime file", "path", f, "error", rmErr)
+			}
 		}
 		return nil, err
 	}
@@ -336,7 +340,6 @@ func SetupWithCleanup(ctx context.Context, cmd *cli.Command) (func(), error) {
 
 	return cleanupWithRuntime, nil
 }
-
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
 // This prevents cache pollution when modifying core packages via //go:linkname while
