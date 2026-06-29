@@ -208,7 +208,7 @@ make test-integration
 
 ## 4. Register the Instrumentation
 
-If applicable, create a PR to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.
+If your PR adds a new user-facing instrumentation, create a PR to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.
 
 Follow the [OpenTelemetry Registry contribution guide](https://opentelemetry.io/ecosystem/registry/adding/).
 
