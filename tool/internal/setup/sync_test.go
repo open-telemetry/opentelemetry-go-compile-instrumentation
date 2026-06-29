@@ -5,16 +5,17 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/mod/modfile"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 func TestParseGoMod(t *testing.T) {
@@ -118,8 +119,8 @@ func TestWriteGoMod(t *testing.T) {
 
 	// Create a modfile
 	mf := &modfile.File{}
-	mf.AddModuleStmt("example.com/test")
-	mf.AddGoStmt("1.21")
+	_ = mf.AddModuleStmt("example.com/test")
+	_ = mf.AddGoStmt("1.21")
 	err := mf.AddRequire("github.com/stretchr/testify", "v1.8.4")
 	require.NoError(t, err)
 
@@ -158,13 +159,9 @@ go 1.21
 	}
 }
 
-func TestSyncDeps_NoRules(t *testing.T) {
+func TestSyncDeps_NoMods(t *testing.T) {
 	tempDir := t.TempDir()
-	sp := &SetupPhase{
-		logger: slog.Default(),
-	}
-
-	err := sp.syncDeps(t.Context(), []*rule.InstRuleSet{}, tempDir)
+	err := syncDeps(t.Context(), nil, tempDir)
 	assert.NoError(t, err)
 }
 
@@ -191,28 +188,13 @@ go 1.21
 	err = os.MkdirAll(pkgDir, 0o755)
 	require.NoError(t, err)
 	pkgGoMod := filepath.Join(pkgDir, "go.mod")
-	err = os.WriteFile(pkgGoMod, []byte("module "+util.OtelcRoot+"/pkg\ngo 1.21\n"), 0o644)
+	err = os.WriteFile(pkgGoMod, []byte("module "+util.OtelcPkgRoot+"\ngo 1.21\n"), 0o644)
 	require.NoError(t, err)
 
-	sp := &SetupPhase{
-		logger: slog.Default(),
+	modPaths := map[string]bool{
+		util.OtelcPkgRoot + "/instrumentation/nethttp": true,
 	}
-
-	// Create a mock rule with a path
-	funcRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{
-			Name: "test-rule",
-		},
-		Path: util.OtelcRoot + "/instrumentation/net/http/client",
-	}
-
-	ruleSet := &rule.InstRuleSet{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"test.go": {funcRule},
-		},
-	}
-
-	err = sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir)
+	err = syncDeps(t.Context(), modPaths, tempDir)
 	// This will likely fail due to missing instrumentation directories,
 	// but we're testing that it attempts to add replaces
 	if err != nil {
@@ -227,10 +209,10 @@ go 1.21
 	assert.Contains(t, string(content), "replace")
 }
 
-func warnCapture() (*SetupPhase, *bytes.Buffer) {
+func warnCapture(ctx context.Context) (context.Context, *bytes.Buffer) {
 	var buf bytes.Buffer
 	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
-	return &SetupPhase{logger: slog.New(handler)}, &buf
+	return util.ContextWithLogger(ctx, slog.New(handler)), &buf
 }
 
 func TestSnapshotVersion(t *testing.T) {
@@ -303,7 +285,7 @@ require (
 `
 			require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
 
-			sp, buf := warnCapture()
+			ctx, buf := warnCapture(t.Context())
 			before := versionSnapshot{
 				goVersion: test.goVersion,
 				deps: map[string]string{
@@ -311,11 +293,12 @@ require (
 				},
 			}
 
-			require.NoError(t, sp.warnVersion(gomodPath, before))
+			require.NoError(t, warnVersion(ctx, gomodPath, before))
 
 			logged := buf.String()
-			assert.Contains(t, logged, "Bumped go version")
-			assert.Contains(t, logged, test.goVersion+" -> 1.25.0")
+			assert.Contains(t, logged, "bumped go version")
+			assert.Contains(t, logged, "old="+test.goVersion)
+			assert.Contains(t, logged, "new=1.25.0")
 		})
 	}
 }
@@ -333,7 +316,7 @@ require (
 `
 	require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
 
-	sp, buf := warnCapture()
+	ctx, buf := warnCapture(t.Context())
 	before := versionSnapshot{
 		goVersion: "1.22.0",
 		deps: map[string]string{
@@ -341,11 +324,13 @@ require (
 		},
 	}
 
-	require.NoError(t, sp.warnVersion(gomodPath, before))
+	require.NoError(t, warnVersion(ctx, gomodPath, before))
 
 	logged := buf.String()
-	assert.Contains(t, logged, "Bumped dependency go.opentelemetry.io/otel")
-	assert.Contains(t, logged, "v1.38.0 -> v1.43.0")
+	assert.Contains(t, logged, "bumped dependency")
+	assert.Contains(t, logged, "module=go.opentelemetry.io/otel")
+	assert.Contains(t, logged, "old=v1.38.0")
+	assert.Contains(t, logged, "new=v1.43.0")
 }
 
 func TestWarnVersion_NoChange(t *testing.T) {
@@ -361,7 +346,7 @@ require (
 `
 	require.NoError(t, os.WriteFile(gomodPath, []byte(content), 0o644))
 
-	sp, buf := warnCapture()
+	ctx, buf := warnCapture(t.Context())
 	before := versionSnapshot{
 		goVersion: "1.22.0",
 		deps: map[string]string{
@@ -369,16 +354,14 @@ require (
 		},
 	}
 
-	require.NoError(t, sp.warnVersion(gomodPath, before))
+	require.NoError(t, warnVersion(ctx, gomodPath, before))
 
 	assert.Empty(t, buf.String())
 }
 
 func TestWarnVersion_MissingFile(t *testing.T) {
-	sp, _ := warnCapture()
 	before := versionSnapshot{goVersion: "1.22.0", deps: map[string]string{}}
-
-	err := sp.warnVersion("/nonexistent/go.mod", before)
+	err := warnVersion(t.Context(), "/nonexistent/go.mod", before)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unable to check for version bumps")
@@ -393,13 +376,13 @@ go 1.25.0
 `
 	require.NoError(t, os.WriteFile(gomodPath, []byte(afterContent), 0o644))
 
-	sp, buf := warnCapture()
+	ctx, buf := warnCapture(t.Context())
 	before := versionSnapshot{
 		goVersion: "",
 		deps:      map[string]string{},
 	}
 
-	require.NoError(t, sp.warnVersion(gomodPath, before))
+	require.NoError(t, warnVersion(ctx, gomodPath, before))
 
 	assert.Empty(t, buf.String())
 }

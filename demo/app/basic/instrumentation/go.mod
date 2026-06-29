@@ -1,8 +1,8 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation
 
 go 1.25.0
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../pkg
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../../pkg
 
 require (
 	github.com/google/uuid v1.6.0

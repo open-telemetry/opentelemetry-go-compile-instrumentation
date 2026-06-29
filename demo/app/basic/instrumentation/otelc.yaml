@@ -5,7 +5,7 @@ hook_helloworld:
   do:
     - inject_hooks:
         before: MyHookBefore
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 add_new_field:
   target: main
@@ -46,7 +46,7 @@ hook_recv:
     - inject_hooks:
         before: MyHook1Before
         after: MyHook1After
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 hook_no_recv:
   target: main
@@ -56,7 +56,7 @@ hook_no_recv:
   do:
     - inject_hooks:
         before: MyHook2Before
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 version_range:
   target: golang.org/x/time/rate
@@ -101,7 +101,7 @@ only_after:
   do:
     - inject_hooks:
         after: MyHookAfter
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 underscore_param:
   target: main
@@ -110,7 +110,7 @@ underscore_param:
   do:
     - inject_hooks:
         before: BeforeUnderscore
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 hook_generic:
   target: main
@@ -120,7 +120,7 @@ hook_generic:
     - inject_hooks:
         before: MyHookGenericBefore
         after: MyHookGenericAfter
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 hook_generic_recv:
   target: main
@@ -131,7 +131,7 @@ hook_generic_recv:
     - inject_hooks:
         before: MyHookRecvBefore
         after: MyHookRecvAfter
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 hook_ellipsis:
   target: main
@@ -140,7 +140,7 @@ hook_ellipsis:
   do:
     - inject_hooks:
         before: MyHookEllipsisBefore
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 hook_function_a:
   target: main
@@ -149,7 +149,7 @@ hook_function_a:
   do:
     - inject_hooks:
         before: FunctionABefore
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 hook_function_b:
   target: main
@@ -158,7 +158,7 @@ hook_function_b:
   do:
     - inject_hooks:
         before: FunctionBBefore
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 hook_auto_detect:
   target: main
@@ -167,7 +167,7 @@ hook_auto_detect:
   do:
     - inject_hooks:
         before: AutoDetectBefore
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"
 
 hook_unnamed:
   target: main
@@ -177,4 +177,4 @@ hook_unnamed:
   do:
     - inject_hooks:
         before: UnnamedBefore
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/basic/instrumentation"

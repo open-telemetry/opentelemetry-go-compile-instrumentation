@@ -448,6 +448,29 @@ func validateCreatedRule(t *testing.T, createdRule rule.InstRule, ruleName strin
 	}
 }
 
+func TestIsRuleFile(t *testing.T) {
+	tests := []struct {
+		filename string
+		expected bool
+	}{
+		{"otelc.yaml", true},
+		{"otelc.yml", true},
+		{"client.otelc.yaml", true},
+		{"server.otelc.yml", true},
+		{"rules.yaml", false},
+		{"otelc.client.yaml", false},
+		{"otelc", false},
+		{"otelc.txt", false},
+		{"otelc.yaml.bak", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isRuleFile(tt.filename))
+		})
+	}
+}
+
 func writeCustomRules(t *testing.T, name, content string) string {
 	path := filepath.Join(t.TempDir(), name)
 	err := os.WriteFile(path, []byte(content), 0o644)
@@ -481,12 +504,9 @@ func TestRuleFilesFromDir(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 
 	sp := newTestSetupPhase()
-	err = sp.extract()
-	require.NoError(t, err)
-
 	sp.ruleConfig = dir
 
-	rules, err := sp.loadRules()
+	rules, err := sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
 }
@@ -507,12 +527,9 @@ func TestMultipleRuleFiles(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 
 	sp := newTestSetupPhase()
-	err := sp.extract()
-	require.NoError(t, err)
-
 	sp.ruleConfig = p1 + "," + p2
 
-	rules, err := sp.loadRules()
+	rules, err := sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
 	names := []string{
@@ -524,12 +541,9 @@ func TestMultipleRuleFiles(t *testing.T) {
 
 	// Check for duplicate rule by name
 	sp = newTestSetupPhase()
-	err = sp.extract()
-	require.NoError(t, err)
-
 	sp.ruleConfig = p1 + "," + p1
 
-	rules, err = sp.loadRules()
+	rules, err = sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 1)
 	require.Equal(t, "h1", rules[0].GetName())
@@ -554,10 +568,9 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 
 	sp := newTestSetupPhase()
-	require.NoError(t, sp.extract())
 	sp.ruleConfig = p
 
-	rules, err := sp.loadRules()
+	rules, err := sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
 	for _, r := range rules {
@@ -581,38 +594,85 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	// Re-reading the same file must still dedupe the entry as a unit: the
 	// group is replaced, not appended, so the count stays at 2 (not 4).
 	sp = newTestSetupPhase()
-	require.NoError(t, sp.extract())
+	require.NoError(t, extractOtelcPkg())
 	sp.ruleConfig = p + "," + p
 
-	rules, err = sp.loadRules()
+	rules, err = sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
 }
 
-func TestIsRuleFile(t *testing.T) {
-	tests := []struct {
-		filename string
-		expected bool
-	}{
-		{"otelc.yaml", true},
-		{"otelc.yml", true},
-		{"client.otelc.yaml", true},
-		{"server.otelc.yml", true},
-		{"rules.yaml", false},
-		{"otelc.client.yaml", false},
-		{"otelc", false},
-		{"otelc.txt", false},
-		{"otelc.yaml.bak", false},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.filename, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isRuleFile(tt.filename))
+func TestLoadRulesFromToolFiles(t *testing.T) {
+	t.Run("loads rules from tool files", func(t *testing.T) {
+		tmp := t.TempDir()
+
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/foo": filepath.Join(tmp, "foo"),
 		})
-	}
+		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
+
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		require.Equal(t, "dummyrule", rules[0].GetName())
+	})
+
+	t.Run("loads nested tool files recursively", func(t *testing.T) {
+		tmp := t.TempDir()
+
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/foo": filepath.Join(tmp, "foo"),
+		})
+		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", false, map[string]string{
+			"example.com/bar": filepath.Join(tmp, "bar"),
+		})
+		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
+
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		require.Equal(t, "dummyrule", rules[0].GetName())
+	})
+
+	t.Run("duplicate rule names from different packages are preserved", func(t *testing.T) {
+		tmp := t.TempDir()
+
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/foo": filepath.Join(tmp, "foo"),
+			"example.com/bar": filepath.Join(tmp, "bar"),
+		})
+
+		// foo and bar both define a rule with the same name.
+		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
+		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
+
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.NoError(t, err)
+		require.Len(t, rules, 2)
+		require.Equal(t, "dummyrule", rules[0].GetName())
+		require.Equal(t, "dummyrule", rules[1].GetName())
+	})
+
+	t.Run("returns instrumentation walk errors", func(t *testing.T) {
+		tmp := t.TempDir()
+
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/notinstrumentation": filepath.Join(tmp, "notinstrumentation"),
+		})
+
+		// Valid module, but not an instrumentation package.
+		writeInstrumentationModule(t, filepath.Join(tmp, "notinstrumentation"), "example.com/notinstrumentation",
+			false, nil)
+
+		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.ErrorIs(t, err, ErrNotInstrumentation)
+	})
 }
 
 func TestLoadDefaultRules(t *testing.T) {
+	tmp := t.TempDir()
+
 	// Write custom rules to temporary files
 	content1 := `h1:
   target: main
@@ -624,17 +684,20 @@ func TestLoadDefaultRules(t *testing.T) {
   raw: "_ = 1"`
 	p1 := writeCustomRules(t, "r1.yaml", content1)
 	p2 := writeCustomRules(t, "r2.yaml", content2)
-	t.Setenv(util.EnvOtelcRules, p1)
+
+	writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+		"example.com/foo": filepath.Join(tmp, "foo"),
+	})
+	writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 
 	// Prepare setup phase and set custom rules via environment variable and flag
 	sp := newTestSetupPhase()
-	err := sp.extract()
-	require.NoError(t, err)
+	t.Setenv(util.EnvOtelcRules, p1)
 	sp.ruleConfig = p2
 
 	// Verify that the custom rule specified by environment variable has
 	// higher priority than the custom rule specified by flag
-	rules, err := sp.loadRules()
+	rules, err := sp.loadRules(t.Context(), map[string]bool{tmp: true})
 	require.NoError(t, err)
 	require.NotEmpty(t, rules)
 	require.Len(t, rules, 1)
@@ -643,20 +706,21 @@ func TestLoadDefaultRules(t *testing.T) {
 	// Verify that the custom rule specified by flag has higher priority than
 	// default rules
 	t.Setenv(util.EnvOtelcRules, "")
-	rules, err = sp.loadRules()
+	rules, err = sp.loadRules(t.Context(), map[string]bool{tmp: true})
 	require.NoError(t, err)
 	require.NotEmpty(t, rules)
 	require.Len(t, rules, 1)
 	require.Equal(t, "h2", rules[0].GetName())
 
-	// Verify that the default rules are loaded
+	// Verify that when both custom rule specified by environment variable and flag are empty,
+	// rules are loaded from otel.instrumentation.go/otelc.tool.go file.
 	t.Setenv(util.EnvOtelcRules, "")
 	sp.ruleConfig = ""
-
-	rules, err = sp.loadRules()
+	rules, err = sp.loadRules(t.Context(), map[string]bool{tmp: true})
 	require.NoError(t, err)
 	require.NotEmpty(t, rules)
-	require.Greater(t, len(rules), 1, "default rules should be more than 1")
+	require.Len(t, rules, 1)
+	require.Equal(t, "dummyrule", rules[0].GetName())
 }
 
 func TestPreciseMatching_WhereFileFilter(t *testing.T) {
@@ -1043,7 +1107,7 @@ func TestMatchDeps_NoMatchesWarning(t *testing.T) {
 		},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps)
+	matched, err := sp.matchDeps(t.Context(), deps, nil)
 	require.NoError(t, err)
 	assert.Empty(t, matched)
 }
