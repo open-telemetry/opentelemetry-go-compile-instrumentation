@@ -258,7 +258,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		}
 
 		// Extract the embedded pkg module into local directory
-		err = extract()
+		err = extractOtelcPkg()
 		if err != nil {
 			return ex.Wrapf(err, "extracting embedded instrumentation pkg")
 		}

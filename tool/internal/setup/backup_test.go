@@ -124,7 +124,7 @@ func TestRestoreBackupFiles(t *testing.T) {
 		mustWriteFile(t, f.path, f.original)
 	}
 
-	backupFiles(t.Context(), map[string]bool{
+	_ = backupFiles(t.Context(), map[string]bool{
 		filepath.Join(tmp, "pkgA"): true,
 		filepath.Join(tmp, "pkgB"): true,
 	})

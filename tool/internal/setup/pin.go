@@ -103,7 +103,7 @@ func updateGenerateDirective(f *dst.File, opts PinOptions) {
 	for _, comment := range f.Decs.Start.All() {
 		// Drop any existing otelc pin directive. We will either
 		// regenerate it or remove it entirely.
-		const goGenerateDirectivePrefix = "//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd pin"
+		const goGenerateDirectivePrefix = "//go:generate go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc pin"
 		if strings.HasPrefix(comment, goGenerateDirectivePrefix) {
 			continue
 		}

@@ -8,6 +8,7 @@ go 1.25.0
 require (
 	github.com/dave/dst v0.27.3
 	github.com/google/go-cmp v0.7.0
+	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/runtime v0.0.0-20260629135821-de1948de40a6
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.6.1
 	github.com/valyala/fasttemplate v1.2.2

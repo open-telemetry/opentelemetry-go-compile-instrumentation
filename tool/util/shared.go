@@ -26,7 +26,7 @@ const (
 	BuildTempDir     = ".otelc-build"
 	OtelcRoot        = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
 	OtelcPkgRoot     = OtelcRoot + "/pkg"
-	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd"
+	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"
 )
 
 func GetMatchedRuleFile() string {

@@ -299,11 +299,7 @@ func (sp *SetupPhase) matchOneRule(
 	return nil
 }
 
-<<<<<<< HEAD
-func rulesFromDir(path string) ([]string, error) {
-=======
 func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
->>>>>>> f131e0c (feat(tool): add import-based instrumentation configuration support)
 	var filesToProcess []string
 	// Recursively traverse to each directories and include the rule files
 	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
@@ -311,13 +307,9 @@ func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 			return err
 		}
 
-<<<<<<< HEAD
-=======
 		if skipSubmodules && d.IsDir() && p != path && util.PathExists(filepath.Join(p, "go.mod")) {
 			return filepath.SkipDir
 		}
-
->>>>>>> f131e0c (feat(tool): add import-based instrumentation configuration support)
 		if !d.IsDir() && isRuleFile(d.Name()) {
 			filesToProcess = append(filesToProcess, p)
 		}
@@ -347,19 +339,7 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 		info, err := os.Stat(path)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to stat %s", path)
-<<<<<<< HEAD
-		}
 
-		var files []string
-		if info.IsDir() {
-			files, err = rulesFromDir(path)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			files = []string{path}
-=======
->>>>>>> f131e0c (feat(tool): add import-based instrumentation configuration support)
 		}
 
 		var files []string

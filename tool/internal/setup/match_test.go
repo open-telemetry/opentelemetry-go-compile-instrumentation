@@ -602,28 +602,6 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	require.Len(t, rules, 2)
 }
 
-func TestIsRuleFile(t *testing.T) {
-	tests := []struct {
-		filename string
-		expected bool
-	}{
-		{"otelc.yaml", true},
-		{"otelc.yml", true},
-		{"client.otelc.yaml", true},
-		{"server.otelc.yml", true},
-		{"rules.yaml", false},
-		{"otelc.client.yaml", false},
-		{"otelc", false},
-		{"otelc.txt", false},
-		{"otelc.yaml.bak", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.filename, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isRuleFile(tt.filename))
-		})
-	}
-}
 
 func TestLoadRulesFromToolFiles(t *testing.T) {
 	t.Run("loads rules from tool files", func(t *testing.T) {
@@ -690,7 +668,6 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
 		require.ErrorIs(t, err, ErrNotInstrumentation)
 	})
-}
 }
 
 func TestLoadDefaultRules(t *testing.T) {
