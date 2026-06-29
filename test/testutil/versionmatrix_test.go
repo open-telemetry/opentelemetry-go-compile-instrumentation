@@ -11,39 +11,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLowerBounds(t *testing.T) {
+func TestBoundVersionSet(t *testing.T) {
+	versions := []string{"v0.34.0", "v0.34.1", "v0.35.0", "v0.35.6", "v0.36.0", "v0.36.2"}
 	tests := []struct {
-		name       string
-		rangedDeps map[string][]string
-		want       map[string]string
+		name     string
+		versions []string
+		ranges   []string
+		want     []string
 	}{
 		{
-			name:       "no deps",
-			rangedDeps: map[string][]string{},
-			want:       map[string]string{},
+			name:     "open-ended range keeps only the lower bound (upper is latest)",
+			versions: []string{"v1.39.0", "v1.42.0", "v1.43.0"},
+			ranges:   []string{"v1.39.0"},
+			want:     []string{"v1.39.0"},
 		},
 		{
-			name:       "open-ended range",
-			rangedDeps: map[string][]string{"go.opentelemetry.io/otel": {"v1.39.0"}},
-			want:       map[string]string{"go.opentelemetry.io/otel": "v1.39.0"},
+			name:     "half-open range keeps lower and in-range upper",
+			versions: versions,
+			ranges:   []string{"v0.34.0,v0.36.0"},
+			want:     []string{"v0.34.0", "v0.35.6"},
 		},
 		{
-			name:       "half-open range",
-			rangedDeps: map[string][]string{"k8s.io/client-go": {"v0.34.0,v0.36.0"}},
-			want:       map[string]string{"k8s.io/client-go": "v0.34.0"},
+			name:     "two rules contribute their own lower bounds, shared upper de-duplicated",
+			versions: versions,
+			ranges:   []string{"v0.34.0,v0.36.0", "v0.35.0,v0.36.0"},
+			want:     []string{"v0.34.0", "v0.35.0", "v0.35.6"},
 		},
 		{
-			name: "lowest across multiple ranges",
-			rangedDeps: map[string][]string{
-				"k8s.io/client-go": {"v0.34.0,v0.36.0", "v0.35.0,v0.36.0"},
-			},
-			want: map[string]string{"k8s.io/client-go": "v0.34.0"},
+			name:     "upper equal to latest is dropped",
+			versions: []string{"v1.0.0", "v1.1.0", "v2.0.0"},
+			ranges:   []string{"v1.0.0,v3.0.0"},
+			want:     []string{"v1.0.0"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, LowerBounds(tt.rangedDeps))
+			require.Equal(t, tt.want, boundVersionSet(tt.versions, tt.ranges))
 		})
 	}
 }

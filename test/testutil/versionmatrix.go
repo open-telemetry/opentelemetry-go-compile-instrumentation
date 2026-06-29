@@ -41,53 +41,54 @@ func DiscoverRangedDeps(t *testing.T, appDir string, targets map[string][]string
 	return deps
 }
 
-// LowerBounds maps each dep to the smallest lower bound across its declared
-// version ranges. Supported range forms are "v1.2.3" (open-ended) and
-// "v1.2.3,v4.5.6" (half-open), per util.VersionInRange.
-func LowerBounds(rangedDeps map[string][]string) map[string]string {
-	bounds := make(map[string]string, len(rangedDeps))
+// publishedVersions returns the versions of dep known to the module proxy,
+// as reported by "go list -m -versions".
+func publishedVersions(t *testing.T, appDir, dep string) []string {
+	cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-versions", dep)
+	cmd.Dir = appDir
+	out, err := cmd.Output()
+	require.NoError(t, err, "go list -m -versions %s failed in %s", dep, appDir)
+
+	fields := strings.Fields(string(out))
+	require.NotEmpty(t, fields, "go list -m -versions %s returned no output in %s", dep, appDir)
+	// The first field is the module path, the rest are published versions.
+	return fields[1:]
+}
+
+// BoundVersions maps each dep to the sorted, de-duplicated set of versions the
+// matrix should exercise for it: the lower and upper bound of every declared
+// range, taken per rule rather than aggregated per dependency.
+func BoundVersions(t *testing.T, appDir string, rangedDeps map[string][]string) map[string][]string {
+	bounds := make(map[string][]string, len(rangedDeps))
 	for dep, ranges := range rangedDeps {
-		lowest := ""
-		for _, vr := range ranges {
-			lower, _, _ := strings.Cut(vr, ",")
-			if lowest == "" || semver.Compare(lower, lowest) < 0 {
-				lowest = lower
-			}
-		}
-		bounds[dep] = lowest
+		bounds[dep] = boundVersionSet(publishedVersions(t, appDir, dep), ranges)
 	}
 	return bounds
 }
 
-// UpperBounds maps each dep to the highest published release covered by any
-// of its declared version ranges. Ranges are half-open (the cap is the first
-// unsupported version), so the upper bound of "v0.34.0,v0.36.0" is the newest
-// release below v0.36.0. A dep whose upper bound is the latest release (an
-// open-ended range) is omitted: LatestLibRun already exercises that version,
-// and testing it here would open a duplicate failure issue.
-func UpperBounds(t *testing.T, appDir string, rangedDeps map[string][]string) map[string]string {
-	bounds := make(map[string]string, len(rangedDeps))
-	for dep, ranges := range rangedDeps {
-		cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-versions", dep)
-		cmd.Dir = appDir
-		out, err := cmd.Output()
-		require.NoError(t, err, "go list -m -versions %s failed in %s", dep, appDir)
-
-		fields := strings.Fields(string(out))
-		require.NotEmpty(t, fields, "go list -m -versions %s returned no output in %s", dep, appDir)
-
-		// The first field is the module path, the rest are published versions.
-		versions := fields[1:]
-		highest := highestCovered(versions, ranges)
-		require.NotEmpty(t, highest,
-			"no published release of %s is covered by its declared ranges %v: the ranges are incorrect",
-			dep, ranges)
-		if highest == latestRelease(versions) {
-			continue
+// boundVersionSet returns the sorted, de-duplicated bound versions for a single
+// dependency: each range's lower bound (its declared start) plus its highest
+// covered release. Ranges are half-open (the cap is the first unsupported
+// version), so the upper bound of "v0.34.0,v0.36.0" is the newest release below
+// v0.36.0. An upper bound equal to the latest release is dropped because
+// LatestLibRun already exercises it and a shared failure would open a duplicate
+// issue.
+func boundVersionSet(versions, ranges []string) []string {
+	latest := latestRelease(versions)
+	set := map[string]bool{}
+	for _, vr := range ranges {
+		lower, _, _ := strings.Cut(vr, ",")
+		set[lower] = true
+		if upper := highestCovered(versions, []string{vr}); upper != "" && upper != latest {
+			set[upper] = true
 		}
-		bounds[dep] = highest
 	}
-	return bounds
+	out := make([]string, 0, len(set))
+	for v := range set {
+		out = append(out, v)
+	}
+	semver.Sort(out)
+	return out
 }
 
 // highestCovered returns the highest version among versions that is a plain

@@ -562,22 +562,21 @@ test-latestlibrun: build ## Run LatestLibRun tests (bump apps to @latest then ru
 	$(MAKE) test-integration
 
 .ONESHELL:
-test-versionmatrix: build ## Run VersionMatrix tests (pin apps to each declared range bound then run integration suite)
-	@echo "Pinning test apps to declared lower-bound versions..."
+test-versionmatrix: build ## Run VersionMatrix tests (pin apps to each rule's bounds then run integration suite, once per tier)
+	@echo "Computing version matrix tiers..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags versionmatrix -run 'TestBumpAppsToLowerBound$$' ./versionmatrix/... 2>&1 | tee ./gotest-versionmatrix.log
-	$(MAKE) tidy/test-apps
-	@echo "Syncing test module with pinned apps..."
-	go -C "test" mod tidy
-	@echo "Running integration suite against lower-bound deps..."
-	$(MAKE) test-integration
-	@echo "Pinning test apps to declared upper-bound versions..."
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags versionmatrix -run 'TestBumpAppsToUpperBound$$' ./versionmatrix/... 2>&1 | tee -a ./gotest-versionmatrix.log
-	$(MAKE) tidy/test-apps
-	@echo "Syncing test module with pinned apps..."
-	go -C "test" mod tidy
-	@echo "Running integration suite against upper-bound deps..."
-	$(MAKE) test-integration
+	rm -f ./gotest-versionmatrix.log
+	tiers=$$(go -C "test" test -v -count=1 -tags versionmatrix -run '^TestVersionMatrixTierCount$$' ./versionmatrix/... 2>&1 | grep -oE 'VERSIONMATRIX_TIERS=[0-9]+' | tail -1 | cut -d= -f2)
+	echo "Version matrix needs $$tiers tier(s)"
+	for (( tier=0; tier<tiers; tier++ )); do
+		echo "Pinning test apps to per-rule bound tier $$tier..."
+		VERSIONMATRIX_TIER=$$tier go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags versionmatrix -run '^TestVersionMatrixBump$$' ./versionmatrix/... 2>&1 | tee -a ./gotest-versionmatrix.log
+		$(MAKE) tidy/test-apps
+		echo "Syncing test module with pinned apps..."
+		go -C "test" mod tidy
+		echo "Running integration suite against bound tier $$tier..."
+		$(MAKE) test-integration
+	done
 
 .ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
@@ -642,11 +641,7 @@ clean: ## Clean build artifacts
 	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
-<<<<<<< HEAD
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-unit-instrumentation.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log \) -delete
-=======
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log -o -name gotest-versionmatrix.log \) -delete
->>>>>>> 8dfb5f7 (test: add versionmatrix)
+	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-unit-instrumentation.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log -o -name gotest-versionmatrix.log \) -delete
 
 .ONESHELL:
 tidy/test-apps: ## Run go mod tidy in all test app modules
