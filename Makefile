@@ -168,7 +168,7 @@ package: ## Package the instrumentation code into binary
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
 	@(cd $(INST_BUNDLE_PKG_TMP) && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
-	@tar -czf $(INST_BUNDLE_ARCHIVE) --exclude='*.log' $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
+	@tar -czf $(INST_BUNDLE_ARCHIVE) --exclude='*.log' --exclude='coverage*.txt' --exclude='*.exe' $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@mkdir -p tool/data/
 	@mv $(INST_BUNDLE_ARCHIVE) tool/data/
 	@rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)

@@ -17,6 +17,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
@@ -135,9 +136,12 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
+		if len(pkg.Errors) > 0 {
+			logger.DebugContext(ctx, "package has errors", "name", pkg.Name, "errors", pkg.Errors)
+		}
 		// file-based builds use synthetic "command-line-arguments" packages
-		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != pkgload.CommandLineArgumentsPackage) {
-			logger.DebugContext(ctx, "skipping package", "name", pkg.Name, "errors", pkg.Errors, "args", args)
+		if pkg.Module == nil && pkg.PkgPath != pkgload.CommandLineArgumentsPackage {
+			logger.DebugContext(ctx, "skipping package with no module", "name", pkg.Name, "args", args)
 			continue
 		}
 
@@ -207,6 +211,12 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
+	_, err := SetupWithCleanup(ctx, cmd)
+	return err
+}
+
+// SetupWithCleanup prepares the environment and returns a cleanup function to restore changes.
+func SetupWithCleanup(ctx context.Context, cmd *cli.Command) (func(), error) {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
 	args := cmd.Args().Slice()
@@ -218,7 +228,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 
 	if isSetup() {
 		logger.InfoContext(ctx, "Setup has already been completed, skipping setup.")
-		return nil
+		return func() {}, nil
 	}
 
 	sp := &SetupPhase{
@@ -230,46 +240,56 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	// Use GetPackage to determine the build target directory
 	pkgs, err := getBuildPackages(ctx, args)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Backup go.mod, go.sum and go.work.sum files before modifying them
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, pkgs)
 	if findModErr != nil {
-		return ex.Wrapf(findModErr, "finding module directories for build packages")
+		return nil, ex.Wrapf(findModErr, "finding module directories for build packages")
 	}
 
 	// Auto-pin generates/updates otel.instrumentation.go file
 	var deps []*Dependency
+	var cleanups []func()
 	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
 		pinResult, pinCleanup, pinErr := AutoPin(ctx, moduleDirs, args)
 		if pinErr != nil {
-			return ex.Wrapf(pinErr, "auto-pinning dependencies")
+			return nil, ex.Wrapf(pinErr, "auto-pinning dependencies")
 		}
-		defer pinCleanup()
+		if pinCleanup != nil {
+			cleanups = append(cleanups, pinCleanup)
+		}
 		deps = pinResult.AllDeps
+	}
+
+	cleanup := func() {
+		for _, f := range cleanups {
+			f()
+		}
 	}
 
 	if deps == nil {
 		// Find all dependencies of the project being build
 		deps, err = findDeps(ctx, args)
 		if err != nil {
-			return ex.Wrapf(err, "finding dependencies")
+			return nil, ex.Wrapf(err, "finding dependencies")
 		}
 
 		// Extract the embedded pkg module into local directory
 		err = extractBundle()
 		if err != nil {
-			return ex.Wrapf(err, "extracting embedded instrumentation pkg")
+			return nil, ex.Wrapf(err, "extracting embedded instrumentation pkg")
 		}
 	}
 
 	// Match the hook code with these dependencies
 	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
 	if err != nil {
-		return ex.Wrapf(err, "matching dependencies to hook rules")
+		return nil, ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
+	var generatedRuntimeFiles []string
 	// Generate otelc.runtime.go for all packages
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.GetPackageDir(pkg)
@@ -278,14 +298,45 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 			continue
 		}
 
+		// check if addDeps will actually generate the file
+		rules := make([]*rule.InstFuncRule, 0, len(matched))
+		for _, m := range matched {
+			rules = append(rules, m.AllFuncRules()...)
+		}
+		if len(rules) > 0 {
+			runtimeFile := filepath.Join(pkgDir, OtelcRuntimeFile)
+			generatedRuntimeFiles = append(generatedRuntimeFiles, runtimeFile)
+		}
+
 		if err = sp.addDeps(ctx, matched, pkgDir); err != nil {
-			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
+			for _, f := range generatedRuntimeFiles {
+				_ = os.Remove(f)
+			}
+			return nil, ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
 
 	// Write the matched hook to matched.json for further instrument phase
-	return sp.store(matched)
+	err = sp.store(matched)
+	if err != nil {
+		for _, f := range generatedRuntimeFiles {
+			_ = os.Remove(f)
+		}
+		return nil, err
+	}
+
+	cleanupWithRuntime := func() {
+		cleanup()
+		for _, f := range generatedRuntimeFiles {
+			if rmErr := os.Remove(f); rmErr != nil {
+				logger.WarnContext(ctx, "failed to remove generated runtime file", "path", f, "error", rmErr)
+			}
+		}
+	}
+
+	return cleanupWithRuntime, nil
 }
+
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
 // This prevents cache pollution when modifying core packages via //go:linkname while
@@ -482,9 +533,12 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
 
 	setupStart := time.Now()
-	err := Setup(ctx, cmd)
+	cleanup, err := SetupWithCleanup(ctx, cmd)
 	if err != nil {
 		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 	if statsEnabled {
 		logger.InfoContext(ctx, "setup stats", "duration", time.Since(setupStart))

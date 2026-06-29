@@ -276,3 +276,35 @@ func TestExtractGZip_SkipsZipSlip(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractGZip_CreatesDirectoriesAutomatically(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	var tarBuf bytes.Buffer
+	gz := gzip.NewWriter(&tarBuf)
+	tw := tar.NewWriter(gz)
+
+	content := []byte("hello")
+
+	// Notice we do NOT write a directory header for pkg_temp/some/nested/dir
+	err := tw.WriteHeader(&tar.Header{
+		Name:     "pkg_temp/some/nested/dir/test.yaml",
+		Mode:     0o644,
+		Size:     int64(len(content)),
+		Typeflag: tar.TypeReg,
+	})
+	require.NoError(t, err)
+
+	_, err = tw.Write(content)
+	require.NoError(t, err)
+
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	err = extractGZip(&tarBuf, tmpDir)
+	require.NoError(t, err)
+
+	bs, err := os.ReadFile(filepath.Join(tmpDir, "pkg", "some", "nested", "dir", "test.yaml"))
+	require.NoError(t, err)
+	require.Equal(t, content, bs)
+}

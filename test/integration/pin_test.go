@@ -158,7 +158,6 @@ func writeInstrumentationModule(
 }
 
 func TestPin(t *testing.T) {
-	t.Parallel()
 
 	t.Run("generates new tool file", func(t *testing.T) {
 		workDir := copyTestApp(t, "httpclient")
