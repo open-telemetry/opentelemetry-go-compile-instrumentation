@@ -129,3 +129,11 @@ func TestInitLogger(t *testing.T) {
 		}
 	})
 }
+
+func TestCloseLoggerNoWriter(t *testing.T) {
+	// When initLogger never ran (e.g. it failed early), the context holds no log
+	// writer and closeLogger must be a no-op rather than panic.
+	if err := closeLogger(context.Background()); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}

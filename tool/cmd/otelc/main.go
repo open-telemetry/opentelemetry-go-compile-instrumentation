@@ -111,8 +111,8 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	if err != nil {
 		return ctx, ex.Wrapf(err, "failed to resolve work directory %q", cmd.String("work-dir"))
 	}
-	if err := os.Setenv(util.EnvOtelcWorkDir, workDir); err != nil {
-		return ctx, ex.Wrapf(err, "failed to set %s", util.EnvOtelcWorkDir)
+	if setErr := os.Setenv(util.EnvOtelcWorkDir, workDir); setErr != nil {
+		return ctx, ex.Wrapf(setErr, "failed to set %s", util.EnvOtelcWorkDir)
 	}
 
 	buildTempDir := util.GetBuildTempDir()

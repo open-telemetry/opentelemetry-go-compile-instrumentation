@@ -9,8 +9,10 @@ import (
 	"log/slog"
 )
 
-type contextKeyLogger struct{}
-type contextKeyLogWriter struct{}
+type (
+	contextKeyLogger    struct{}
+	contextKeyLogWriter struct{}
+)
 
 func ContextWithLogger(ctx context.Context, logger *slog.Logger) context.Context {
 	return context.WithValue(ctx, contextKeyLogger{}, logger)
