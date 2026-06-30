@@ -27,6 +27,76 @@ type SetupPhase struct {
 	ruleConfig string
 }
 
+type buildDirPlacement int
+
+const (
+	buildDirPlacementNone buildDirPlacement = iota
+	buildDirPlacementBeforeSubcommand
+	buildDirPlacementAfterSubcommand
+)
+
+type buildInvocation struct {
+	command          string
+	buildDir         string
+	buildDirPosition buildDirPlacement
+	args             []string
+}
+
+func (inv buildInvocation) appendGoCommand(args []string) []string {
+	args = append(args, "go")
+	if inv.buildDirPosition == buildDirPlacementBeforeSubcommand && inv.buildDir != "" {
+		args = append(args, "-C", inv.buildDir)
+	}
+	args = append(args, inv.command)
+	if inv.buildDirPosition == buildDirPlacementAfterSubcommand && inv.buildDir != "" {
+		args = append(args, "-C", inv.buildDir)
+	}
+	return args
+}
+
+// minArgsForCFlag is the minimum number of arguments required when the first
+// argument is "-C": the flag itself, the directory, and the subcommand.
+const minArgsForCFlag = 3
+
+func parseGoInvocation(args []string) (buildInvocation, error) {
+	if len(args) == 0 {
+		return buildInvocation{}, ex.Newf("no command provided. Only 'go build' and 'go install' are supported")
+	}
+
+	invocation := buildInvocation{buildDirPosition: buildDirPlacementNone}
+	switch args[0] {
+	case "build", "install":
+		invocation.command = args[0]
+		invocation.args = args[1:]
+		if len(invocation.args) >= 2 && invocation.args[0] == "-C" {
+			invocation.buildDir = invocation.args[1]
+			invocation.buildDirPosition = buildDirPlacementAfterSubcommand
+			invocation.args = invocation.args[2:]
+		}
+		return invocation, nil
+	case "-C":
+		if len(args) < minArgsForCFlag {
+			return buildInvocation{}, ex.Newf("no command provided. Only 'go build' and 'go install' are supported")
+		}
+		if args[2] != "build" && args[2] != "install" {
+			return buildInvocation{}, ex.Newf(
+				"unsupported command: %s. Only 'go build' and 'go install' are supported",
+				args[2],
+			)
+		}
+		invocation.command = args[2]
+		invocation.buildDir = args[1]
+		invocation.buildDirPosition = buildDirPlacementBeforeSubcommand
+		invocation.args = args[3:]
+		return invocation, nil
+	default:
+		return buildInvocation{}, ex.Newf(
+			"unsupported command: %s. Only 'go build' and 'go install' are supported",
+			args[0],
+		)
+	}
+}
+
 func (sp *SetupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
 func (sp *SetupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
 func (sp *SetupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
@@ -77,6 +147,27 @@ var flagsWithPathValues = map[string]bool{
 
 const commandLineArgumentsPackage = "command-line-arguments"
 
+func absBuildPath(buildDir, target string) (string, error) {
+	if filepath.IsAbs(target) {
+		return filepath.Clean(target), nil
+	}
+	if buildDir != "" {
+		target = filepath.Join(buildDir, target)
+	}
+	return filepath.Abs(target)
+}
+
+func resolveDirRelativeToBuild(buildDir, dir string) string {
+	if buildDir == "" || filepath.IsAbs(dir) || strings.HasPrefix(dir, "$") {
+		return dir
+	}
+	absDir, err := absBuildPath(buildDir, dir)
+	if err != nil {
+		return dir
+	}
+	return absDir
+}
+
 // GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
 // Returns a list of loaded packages. If no package patterns are found in args,
 // defaults to loading the current directory package.
@@ -87,11 +178,11 @@ const commandLineArgumentsPackage = "command-line-arguments"
 //   - args ["-a", "cmd"] returns packages for the "cmd" package in the module
 //   - args ["-a", ".", "./cmd"] returns packages for both "." and "./cmd"
 //   - args [] returns packages for "."
-func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
+func getBuildPackages(ctx context.Context, buildDir string, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
 
-	pkgTargets, fileTargets, err := splitBuildTargets(args)
+	pkgTargets, fileTargets, err := splitBuildTargets(buildDir, args)
 	if err != nil {
 		return nil, ex.Wrapf(err, "splitting build targets")
 	}
@@ -102,7 +193,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	)
 	switch {
 	case len(fileTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, fileTargets...)
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, fileTargets...)
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for files %v", fileTargets)
 		}
@@ -111,12 +202,12 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 			return nil, ex.New("multiple packages found for file targets")
 		}
 	case len(pkgTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, pkgTargets...)
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, pkgTargets...)
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for patterns %v", pkgTargets)
 		}
 	default:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, ".")
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, ".")
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for pattern .")
 		}
@@ -141,7 +232,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
-func splitBuildTargets(args []string) ([]string, []string, error) {
+func splitBuildTargets(buildDir string, args []string) ([]string, []string, error) {
 	var pkgs, files []string
 
 	for i := len(args) - 1; i >= 0; i-- {
@@ -174,13 +265,13 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 	if len(files) > 0 {
 		// files are collected in reverse order due to reverse argument traversal.
 		// files[0] is therefore the last .go file from the original CLI args.
-		dir, err := filepath.Abs(filepath.Dir(files[0]))
+		dir, err := absBuildPath(buildDir, filepath.Dir(files[0]))
 		if err != nil {
 			return nil, nil, ex.Wrapf(err, "failed to get absolute path for directory containing files")
 		}
 
 		for _, f := range files[1:] {
-			fdir, err2 := filepath.Abs(filepath.Dir(f))
+			fdir, err2 := absBuildPath(buildDir, filepath.Dir(f))
 			if err2 != nil {
 				return nil, nil, ex.Wrapf(err2, "failed to get absolute path for directory containing file %s", f)
 			}
@@ -202,14 +293,7 @@ func getPackageDir(pkg *packages.Package) string {
 }
 
 // Setup prepares the environment for further instrumentation.
-func Setup(ctx context.Context, cmd *cli.Command) error {
-	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
-	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
-	args := cmd.Args().Slice()
-	if cmd.Name == "go" {
-		args = cmd.Args().Tail() // trim build/install
-	}
-
+func Setup(ctx context.Context, cmd *cli.Command, invocation buildInvocation) error {
 	logger := util.LoggerFromContext(ctx)
 
 	if isSetup() {
@@ -224,13 +308,13 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
-	pkgs, err := getBuildPackages(ctx, args)
+	pkgs, err := getBuildPackages(ctx, invocation.buildDir, invocation.args)
 	if err != nil {
 		return err
 	}
 
 	// Find all dependencies of the project being build
-	deps, err := sp.findDeps(ctx, args)
+	deps, err := sp.findDeps(ctx, invocation)
 	if err != nil {
 		return err
 	}
@@ -292,6 +376,15 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 
 	// Write the matched hook to matched.txt for further instrument phase
 	return sp.store(matched)
+}
+
+// SetupCommand is the CLI entrypoint for `otelc setup`.
+func SetupCommand(ctx context.Context, cmd *cli.Command) error {
+	invocation, err := parseGoInvocation(cmd.Args().Slice())
+	if err != nil {
+		return err
+	}
+	return Setup(ctx, cmd, invocation)
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
@@ -408,8 +501,7 @@ func extractBuildFlags(args []string) []string {
 }
 
 // BuildWithToolexec builds the project with the toolexec mode
-func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
-	args := cmd.Args().Slice()
+func BuildWithToolexec(ctx context.Context, _ *cli.Command, invocation buildInvocation) error {
 	logger := util.LoggerFromContext(ctx)
 
 	// Add -toolexec=otelc to the original build command and run it
@@ -418,20 +510,19 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
 	insert := "-toolexec=" + execPath + " toolexec"
-	const additionalCount = 2
-	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
-	// Add "go build"
-	newArgs = append(newArgs, "go")
-	newArgs = append(newArgs, args[:1]...)
+	newArgs := invocation.appendGoCommand(nil)
 	// Add "-work" to give us a chance to debug instrumented code if needed
 	newArgs = append(newArgs, "-work")
 	// Add "-toolexec=..."
 	newArgs = append(newArgs, insert)
 	// Add the rest
-	restArgs := args[1:]
-	if _, fileTargets, err2 := splitBuildTargets(restArgs); err2 == nil && len(fileTargets) > 0 {
+	restArgs := invocation.args
+	if _, fileTargets, err2 := splitBuildTargets(invocation.buildDir, restArgs); err2 == nil && len(fileTargets) > 0 {
 		// add otelc.runtime.go manually to command line for file targets
-		dir := filepath.Dir(fileTargets[0])
+		dir, dirErr := absBuildPath(invocation.buildDir, filepath.Dir(fileTargets[0]))
+		if dirErr != nil {
+			return ex.Wrapf(dirErr, "resolving runtime file directory")
+		}
 		otelcRuntimePath := filepath.Join(dir, OtelcRuntimeFile)
 		if util.PathExists(otelcRuntimePath) {
 			restArgs = append(restArgs, otelcRuntimePath)
@@ -448,7 +539,7 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
-	if buildFlags := extractBuildFlags(args); len(buildFlags) > 0 {
+	if buildFlags := extractBuildFlags(invocation.args); len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)
 		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))
 		logger.DebugContext(ctx, "forwarding build flags", "flags", buildFlags)
@@ -470,18 +561,15 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
 
-	if !cmd.Args().Present() {
-		return ex.Newf("no command provided. Only 'go build' and 'go install' are supported")
-	}
-
-	if cmd.Args().First() != "build" && cmd.Args().First() != "install" {
-		return ex.Newf("unsupported command: %s. Only 'go build' and 'go install' are supported", cmd.Args().First())
+	invocation, err := parseGoInvocation(cmd.Args().Slice())
+	if err != nil {
+		return err
 	}
 
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
 		// Users can run `otelc cleanup` to remove it explicitly.
-		if cleanErr := Cleanup(ctx, cmd.Args().Tail(), false); cleanErr != nil {
+		if cleanErr := Cleanup(ctx, invocation.buildDir, invocation.args, false); cleanErr != nil {
 			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()
@@ -489,7 +577,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
 
 	setupStart := time.Now()
-	err := Setup(ctx, cmd)
+	err = Setup(ctx, cmd, invocation)
 	if err != nil {
 		return err
 	}
@@ -499,7 +587,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	logger.InfoContext(ctx, "Setup completed successfully")
 
 	buildStart := time.Now()
-	err = BuildWithToolexec(ctx, cmd)
+	err = BuildWithToolexec(ctx, cmd, invocation)
 	if err != nil {
 		return err
 	}

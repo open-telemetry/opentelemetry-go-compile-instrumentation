@@ -14,5 +14,5 @@ var commandSetup = cli.Command{
 	Name:        "setup",
 	Description: "Set up the environment for instrumentation",
 	Before:      addLoggerPhaseAttribute,
-	Action:      setup.Setup,
+	Action:      setup.SetupCommand,
 }

@@ -76,7 +76,7 @@ func TestCleanup(t *testing.T) {
 
 			tt.setup(t, tmpDir)
 
-			err := Cleanup(t.Context(), nil, true)
+			err := Cleanup(t.Context(), "", nil, true)
 			if err != nil {
 				t.Fatalf("Cleanup() returned unexpected error: %v", err)
 			}
@@ -113,7 +113,7 @@ func TestCleanupRestoresBackup(t *testing.T) {
 	)
 	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, backupStateFile), string(backupJSONContent))
 
-	if err = Cleanup(t.Context(), nil, true); err != nil {
+	if err = Cleanup(t.Context(), "", nil, true); err != nil {
 		t.Fatalf("Cleanup() returned unexpected error: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestCleanupRestoresMultiModBackup(t *testing.T) {
 	}
 	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, backupStateFile), string(backupJSONContent))
 
-	if err = Cleanup(t.Context(), nil, false); err != nil {
+	if err = Cleanup(t.Context(), "", nil, false); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestCleanupKeepsBuildDir(t *testing.T) {
 	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "matched.json"), "{}")
 	mustWriteFile(t, filepath.Join(tmpDir, OtelcRuntimeFile), "package main \n\n// dummy runtime file")
 
-	err = Cleanup(t.Context(), nil, false)
+	err = Cleanup(t.Context(), "", nil, false)
 	if err != nil {
 		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestCleanupKeepsBuildDirNoArtifacts(t *testing.T) {
 	t.Chdir(tmpDir)
 
 	// No artifacts exist — Cleanup(cleanAll=false) should not panic or fail.
-	err := Cleanup(t.Context(), nil, false)
+	err := Cleanup(t.Context(), "", nil, false)
 	if err != nil {
 		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
 	}

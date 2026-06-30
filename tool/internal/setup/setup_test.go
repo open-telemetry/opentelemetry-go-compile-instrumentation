@@ -86,7 +86,7 @@ func TestGetPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgs, err := getBuildPackages(t.Context(), tt.args)
+			pkgs, err := getBuildPackages(t.Context(), "", tt.args)
 			if tt.expectError {
 				require.Error(t, err)
 			} else {
@@ -142,7 +142,7 @@ func TestSplitBuildTargets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgTargets, fileTargets, err := splitBuildTargets(tt.targets)
+			pkgTargets, fileTargets, err := splitBuildTargets("", tt.targets)
 			if tt.expectError {
 				require.Error(t, err)
 				assert.Nil(t, pkgTargets)
@@ -158,6 +158,77 @@ func TestSplitBuildTargets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseGoInvocation(t *testing.T) {
+	tests := []struct {
+		name                string
+		args                []string
+		expectedCommand     string
+		expectedBuildDir    string
+		expectedBuildDirPos buildDirPlacement
+		expectedArgs        []string
+	}{
+		{
+			name:                "build command with -C after subcommand",
+			args:                []string{"build", "-C", "./somedir", "./..."},
+			expectedCommand:     "build",
+			expectedBuildDir:    "./somedir",
+			expectedBuildDirPos: buildDirPlacementAfterSubcommand,
+			expectedArgs:        []string{"./..."},
+		},
+		{
+			name:                "build command with -C before subcommand",
+			args:                []string{"-C", "./somedir", "build", "./..."},
+			expectedCommand:     "build",
+			expectedBuildDir:    "./somedir",
+			expectedBuildDirPos: buildDirPlacementBeforeSubcommand,
+			expectedArgs:        []string{"./..."},
+		},
+		{
+			name:                "ignores -C in unsupported position",
+			args:                []string{"build", "-a", "-C", "./somedir", "./..."},
+			expectedCommand:     "build",
+			expectedBuildDir:    "",
+			expectedBuildDirPos: buildDirPlacementNone,
+			expectedArgs:        []string{"-a", "-C", "./somedir", "./..."},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			invocation, err := parseGoInvocation(tt.args)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedCommand, invocation.command)
+			assert.Equal(t, tt.expectedBuildDir, invocation.buildDir)
+			assert.Equal(t, tt.expectedBuildDirPos, invocation.buildDirPosition)
+			assert.Equal(t, tt.expectedArgs, invocation.args)
+		})
+	}
+}
+
+func TestGetPackagesWithBuildDir(t *testing.T) {
+	rootDir := t.TempDir()
+	projectDir := filepath.Join(rootDir, "project")
+	require.NoError(t, os.MkdirAll(projectDir, 0o755))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module testmodule\n\ngo 1.21\n"), 0o644),
+	)
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(projectDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644),
+	)
+
+	outDir := filepath.Join(rootDir, "outside")
+	require.NoError(t, os.MkdirAll(outDir, 0o755))
+	t.Chdir(outDir)
+
+	pkgs, err := getBuildPackages(t.Context(), projectDir, []string{"."})
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, "main", pkgs[0].Name)
+	assert.Equal(t, "testmodule", pkgs[0].PkgPath)
 }
 
 func extractPackageIDs(pkgs []*packages.Package) []string {
