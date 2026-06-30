@@ -246,9 +246,6 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 			_ = os.Remove(filepath.Join(pkgDir, OtelcRuntimeFile))
 		}
 	}
-	for moduleDir := range moduleDirs {
-		_ = os.Remove(filepath.Join(moduleDir, ToolFileCanonical))
-	}
 
 	// Auto-pin generates/updates otel.instrumentation.go file
 	var deps []*Dependency
