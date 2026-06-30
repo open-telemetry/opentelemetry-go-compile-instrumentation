@@ -74,7 +74,7 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 
 // listBuildPlan lists the build plan by running `go build -a -x -n`
 // and then filtering the commands (cd, cgo, compile) from the build plan log.
-func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]string, error) {
+func (sp *SetupPhase) listBuildPlan(ctx context.Context, invocation buildInvocation) ([]string, error) {
 	const buildPlanLogName = "build-plan.log"
 
 	// Create a build plan log file in the temporary directory
@@ -83,11 +83,13 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]st
 		return nil, ex.Wrapf(err, "failed to create build plan log file")
 	}
 	defer buildPlanLog.Close()
-	// The full build command is: "go build/install -a -x -n  {...}"
-	prefix := []string{"build", "-a", "-x", "-n"}
-	args := make([]string, 0, len(prefix)+len(cmdArgs))
-	args = append(args, prefix...)
-	args = append(args, cmdArgs...) // args from original build/install or setup command
+	// The full build command is: "go build/install -a -x -n {...}"
+	// appendGoCommand returns ["go", subcommand, ...], but execCommandContext
+	// already takes "go" as the name argument, so we skip the first element.
+	fullCmd := invocation.appendGoCommand(nil)
+	args := fullCmd[1:] // strip leading "go" to avoid passing it twice
+	args = append(args, "-a", "-x", "-n")
+	args = append(args, invocation.args...)
 	sp.Info("go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
@@ -149,7 +151,7 @@ func findModVersion(path string) string {
 
 // findGoSources extracts Go source files from compile command arguments,
 // resolving CGO files using the provided objDir->sourceDir mapping.
-func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) (*Dependency, error) {
+func findGoSources(sp *SetupPhase, buildDir string, args []string, cgoObjDirs map[string]string) (*Dependency, error) {
 	dep := &Dependency{
 		ImportPath: util.FindFlagValue(args, "-p"),
 		Sources:    make([]string, 0),
@@ -182,7 +184,7 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 		}
 
 		// This is a Go source file, add it to the dependency sources
-		abs, err := filepath.Abs(arg)
+		abs, err := absBuildPath(buildDir, arg)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to get absolute path of source file %s", arg)
 		}
@@ -196,8 +198,8 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 }
 
 // findDeps finds dependencies by listing the build plan.
-func (sp *SetupPhase) findDeps(ctx context.Context, cmdArgs []string) ([]*Dependency, error) {
-	buildPlan, err := sp.listBuildPlan(ctx, cmdArgs)
+func (sp *SetupPhase) findDeps(ctx context.Context, invocation buildInvocation) ([]*Dependency, error) {
+	buildPlan, err := sp.listBuildPlan(ctx, invocation)
 	if err != nil {
 		return nil, err
 	}
@@ -210,13 +212,13 @@ func (sp *SetupPhase) findDeps(ctx context.Context, cmdArgs []string) ([]*Depend
 
 	for _, cmd := range buildPlan {
 		if dir, ok := parseCdDir(cmd); ok {
-			currentDir = dir
+			currentDir = resolveDirRelativeToBuild(invocation.buildDir, dir)
 			continue
 		}
 
 		if util.IsCompileCommandWithArgs(util.SplitCompileCmds(cmd)) {
 			args := util.SplitCompileCmds(cmd)
-			dep, err1 := findGoSources(sp, args, cgoObjDirs)
+			dep, err1 := findGoSources(sp, invocation.buildDir, args, cgoObjDirs)
 			if err1 != nil {
 				return nil, err1
 			}
