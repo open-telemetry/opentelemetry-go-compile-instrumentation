@@ -282,7 +282,7 @@ func TestListBuildPlan(t *testing.T) {
 	tests := []struct {
 		name          string
 		buildPlan     string
-		args          []string
+		invocation    buildInvocation
 		expected      []string
 		wantErr       bool
 		buildFails    bool
@@ -296,7 +296,7 @@ cd /project/pkg
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 echo ignored
 `,
-			args: []string{"./..."},
+			invocation: buildInvocation{command: "build", args: []string{"./..."}},
 			expected: []string{
 				"cd /project/pkg",
 				".../cgo -objdir /tmp/b001 -importpath pkg/cgo",
@@ -311,14 +311,37 @@ echo ignored
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 `,
-			args: []string{"-tags=integration", "./cmd"},
+			invocation: buildInvocation{
+				command:          "build",
+				buildDir:         "/project",
+				buildDirPosition: buildDirPlacementAfterSubcommand,
+				args:             []string{"-tags=integration", "./cmd"},
+			},
 			expected: []string{
 				".../compile -o /tmp/out.a -buildid abc -p main main.go",
 			},
 			expectedGoCmd: []string{
-				"build", "-a", "-x", "-n",
+				"build", "-C", "/project", "-a", "-x", "-n",
 				"-tags=integration",
 				"./cmd",
+			},
+		},
+		{
+			name: "preserves -C before subcommand",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			invocation: buildInvocation{
+				command:          "build",
+				buildDir:         "/project",
+				buildDirPosition: buildDirPlacementBeforeSubcommand,
+				args:             []string{"./cmd"},
+			},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{
+				"-C", "/project", "build", "-a", "-x", "-n", "./cmd",
 			},
 		},
 		{
@@ -326,7 +349,7 @@ echo ignored
 			buildPlan: `
 go: module example.com missing
 `,
-			args:       []string{"./bad"},
+			invocation: buildInvocation{command: "build", args: []string{"./bad"}},
 			buildFails: true,
 			wantErr:    true,
 			expectedGoCmd: []string{
@@ -338,7 +361,7 @@ go: module example.com missing
 			buildPlan: `
 echo nothing useful
 `,
-			args: []string{"./..."},
+			invocation: buildInvocation{command: "build", args: []string{"./..."}},
 			expectedGoCmd: []string{
 				"build", "-a", "-x", "-n", "./...",
 			},
@@ -349,7 +372,7 @@ echo nothing useful
 .../compile foo
 .../cgo blah
 `,
-			args:          []string{"./..."},
+			invocation:    buildInvocation{command: "build", args: []string{"./..."}},
 			expected:      nil,
 			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./..."},
 		},
@@ -380,7 +403,7 @@ echo nothing useful
 			}
 
 			sp := newTestSetupPhase()
-			buildPlan, err := sp.listBuildPlan(t.Context(), tt.args)
+			buildPlan, err := sp.listBuildPlan(t.Context(), tt.invocation)
 
 			if tt.wantErr {
 				require.Error(t, err)

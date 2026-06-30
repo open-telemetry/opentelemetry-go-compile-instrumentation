@@ -14,11 +14,41 @@ import (
 )
 
 func TestLoadPackages(t *testing.T) {
-	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, "fmt")
+	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, "", "fmt")
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "fmt", pkgs[0].Name)
 	assert.Equal(t, "fmt", pkgs[0].PkgPath)
+}
+
+func TestLoadPackagesWithDir(t *testing.T) {
+	rootDir := t.TempDir()
+	moduleDir := filepath.Join(rootDir, "module")
+	require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte("module testmodule\n\ngo 1.21\n"), 0o644),
+	)
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(moduleDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644),
+	)
+
+	outDir := filepath.Join(rootDir, "outside")
+	require.NoError(t, os.MkdirAll(outDir, 0o755))
+	t.Chdir(outDir)
+
+	pkgs, err := LoadPackages(
+		t.Context(),
+		packages.NeedName|packages.NeedFiles|packages.NeedModule,
+		nil,
+		moduleDir,
+		".",
+	)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, "main", pkgs[0].Name)
+	assert.Equal(t, "testmodule", pkgs[0].PkgPath)
 }
 
 func TestResolvePackageName(t *testing.T) {
