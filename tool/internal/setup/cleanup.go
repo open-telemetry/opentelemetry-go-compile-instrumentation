@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/urfave/cli/v3"
 )
 
 // Cleanup removes artifacts created by the setup and build phases.
@@ -18,7 +19,7 @@ import (
 // When cleanAll is false, backed-up files are restored and the generated runtime
 // file is removed, but .otelc-build/ is kept for debugging. When cleanAll is
 // true, .otelc-build/ is also removed.
-func Cleanup(ctx context.Context, args []string, cleanAll bool) error {
+func Cleanup(ctx context.Context, buildDir string, args []string, cleanAll bool) error {
 	logger := util.LoggerFromContext(ctx)
 
 	err := restoreBackupFiles()
@@ -27,7 +28,7 @@ func Cleanup(ctx context.Context, args []string, cleanAll bool) error {
 	}
 
 	// Remove otelc.runtime.go from each instrumented package directory.
-	pkgs, pkgErr := getBuildPackages(ctx, args)
+	pkgs, pkgErr := getBuildPackages(ctx, buildDir, args)
 	if pkgErr != nil {
 		logger.DebugContext(ctx, "failed to get build packages", "error", pkgErr)
 	}
@@ -53,4 +54,13 @@ func Cleanup(ctx context.Context, args []string, cleanAll bool) error {
 	}
 
 	return nil
+}
+
+// CleanupCommand is the CLI entrypoint for `otelc cleanup`.
+func CleanupCommand(ctx context.Context, cmd *cli.Command, cleanAll bool) error {
+	invocation, err := parseGoInvocation(cmd.Args().Slice())
+	if err != nil {
+		return err
+	}
+	return Cleanup(ctx, invocation.buildDir, invocation.args, cleanAll)
 }
