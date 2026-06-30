@@ -239,6 +239,17 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(findModErr, "finding module directories for build packages")
 	}
 
+	// Clean up any stale files from previous failed/interrupted builds
+	for _, pkg := range pkgs {
+		pkgDir := pkgload.GetPackageDir(pkg)
+		if pkgDir != "" {
+			_ = os.Remove(filepath.Join(pkgDir, OtelcRuntimeFile))
+		}
+	}
+	for moduleDir := range moduleDirs {
+		_ = os.Remove(filepath.Join(moduleDir, ToolFileCanonical))
+	}
+
 	// Auto-pin generates/updates otel.instrumentation.go file
 	var deps []*Dependency
 	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
