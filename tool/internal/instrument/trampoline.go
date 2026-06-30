@@ -126,11 +126,10 @@ func (ip *InstrumentPhase) materializeTemplate() error {
 		}
 		// Materialize variable declarations
 		if decl, ok := node.(*dst.GenDecl); ok {
-			// No further processing for variable declarations, just append them
-			switch decl.Tok { //nolint:exhaustive // tok is token.Token, not all tokens are declarations
-			case token.VAR:
+			switch int(decl.Tok) {
+			case int(token.VAR):
 				ip.varDecls = append(ip.varDecls, decl)
-			case token.TYPE:
+			case int(token.TYPE):
 				ip.hookCtxDecl = decl
 				ip.addDecl(decl)
 			default:
