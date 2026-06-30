@@ -83,7 +83,11 @@ func TestCleanup(t *testing.T) {
 
 			ctx := tt.setup(t, tmpDir)
 
+<<<<<<< HEAD
+			err := Cleanup(ctx, true)
+=======
 			err := Cleanup(t.Context(), "", nil, true)
+>>>>>>> 734a27f (tool/setup: add tests for -C flag parsing and buildDir propagation)
 			if err != nil {
 				t.Fatalf("Cleanup() returned unexpected error: %v", err)
 			}
@@ -123,7 +127,11 @@ func TestCleanupRestoresState(t *testing.T) {
 	)
 	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, stateFileName), string(stateJSONContent))
 
+<<<<<<< HEAD
+	if err = Cleanup(t.Context(), true); err != nil {
+=======
 	if err = Cleanup(t.Context(), "", nil, true); err != nil {
+>>>>>>> 734a27f (tool/setup: add tests for -C flag parsing and buildDir propagation)
 		t.Fatalf("Cleanup() returned unexpected error: %v", err)
 	}
 
@@ -205,7 +213,11 @@ func TestCleanupRestoresMultiModState(t *testing.T) {
 	}
 	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, stateFileName), string(stateJSONContent))
 
+<<<<<<< HEAD
+	if err = Cleanup(t.Context(), false); err != nil {
+=======
 	if err = Cleanup(t.Context(), "", nil, false); err != nil {
+>>>>>>> 734a27f (tool/setup: add tests for -C flag parsing and buildDir propagation)
 		t.Fatalf("Cleanup() error = %v", err)
 	}
 
@@ -253,7 +265,11 @@ func TestCleanupKeepsBuildDir(t *testing.T) {
 	mustWriteFile(t, filepath.Join(tmpDir, util.BuildTempDir, "matched.json"), "{}")
 	mustWriteFile(t, otelcRuntimeGoPath, "package main \n\n// dummy runtime file")
 
+<<<<<<< HEAD
+	err = Cleanup(t.Context(), false)
+=======
 	err = Cleanup(t.Context(), "", nil, false)
+>>>>>>> 734a27f (tool/setup: add tests for -C flag parsing and buildDir propagation)
 	if err != nil {
 		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
 	}
@@ -283,7 +299,11 @@ func TestCleanupKeepsBuildDirNoArtifacts(t *testing.T) {
 	t.Chdir(tmpDir)
 
 	// No artifacts exist — Cleanup(cleanAll=false) should not panic or fail.
+<<<<<<< HEAD
+	err := Cleanup(t.Context(), false)
+=======
 	err := Cleanup(t.Context(), "", nil, false)
+>>>>>>> 734a27f (tool/setup: add tests for -C flag parsing and buildDir propagation)
 	if err != nil {
 		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
 	}

@@ -284,6 +284,7 @@ func TestListBuildPlan(t *testing.T) {
 		subcommand    string // defaults to "build" when empty
 		buildPlan     string
 		invocation    buildInvocation
+		invocation    buildInvocation
 		expected      []string
 		wantErr       bool
 		buildFails    bool
