@@ -468,4 +468,3 @@ func TestKeepForDebug_MainDir(t *testing.T) {
 	// keepForDebug should copy the file with name "main".
 	keepForDebug(t.Context(), srcFile)
 }
-

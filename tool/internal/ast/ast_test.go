@@ -87,4 +87,3 @@ func TestFindPosition(t *testing.T) {
 	pos := p.FindPosition(f)
 	_ = pos
 }
-

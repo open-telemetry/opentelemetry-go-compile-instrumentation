@@ -45,4 +45,3 @@ func init() {
 func SetVersion(version string) {
 	Version = version
 }
-

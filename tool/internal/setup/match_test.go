@@ -1111,7 +1111,6 @@ func TestMatchDeps_NoMatchesWarning(t *testing.T) {
 	assert.Empty(t, matched)
 }
 
-
 func TestRulesFromDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -1139,7 +1138,11 @@ func TestRulesFromDir_SkipsSubmodules(t *testing.T) {
 	// Create a submodule directory with a rule file
 	subDir := filepath.Join(tmpDir, "sub")
 	require.NoError(t, os.MkdirAll(subDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(subDir, "go.mod"), []byte("module example.com/sub\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(subDir, "go.mod"),
+		[]byte("module example.com/sub\n\ngo 1.25\n"),
+		0o644,
+	))
 	require.NoError(t, os.WriteFile(filepath.Join(subDir, "bar.otelc.yml"), []byte("{}"), 0o644))
 
 	files, err := rulesFromDir(tmpDir, true)
