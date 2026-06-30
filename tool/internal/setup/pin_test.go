@@ -776,9 +776,9 @@ func TestHandleInstrumentationVisit(t *testing.T) {
 
 func TestPin_Basic(t *testing.T) {
 	origVersion := util.Version
-	util.Version = "v0.5.0"
+	util.SetVersion("v0.5.0")
 	defer func() {
-		util.Version = origVersion
+		util.SetVersion(origVersion)
 	}()
 
 	tmpDir := t.TempDir()
@@ -794,7 +794,11 @@ func TestPin_Basic(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dummyModDir, 0o755))
 
 	// Write go.mod with replace directive pointing to local repo
-	goModContent := fmt.Sprintf("module example.com/dummy\n\ngo 1.25\n\nreplace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n", filepath.ToSlash(repoRoot))
+	goModContent := fmt.Sprintf(
+		"module example.com/dummy\n\ngo 1.25\n\n"+
+			"replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n",
+		filepath.ToSlash(repoRoot),
+	)
 	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "go.mod"), []byte(goModContent), 0o644))
 
 	// Write a simple main.go
@@ -806,12 +810,7 @@ func main() {
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "main.go"), []byte(mainContent), 0o644))
 
-	origDir, getErr := os.Getwd()
-	require.NoError(t, getErr)
-	defer func() {
-		_ = os.Chdir(origDir)
-	}()
-	require.NoError(t, os.Chdir(dummyModDir))
+	t.Chdir(dummyModDir)
 
 	ctx := t.Context()
 	opts := PinOptions{
@@ -828,9 +827,9 @@ func main() {
 
 func TestAutoPin_Basic(t *testing.T) {
 	origVersion := util.Version
-	util.Version = "v0.5.0"
+	util.SetVersion("v0.5.0")
 	defer func() {
-		util.Version = origVersion
+		util.SetVersion(origVersion)
 	}()
 
 	tmpDir := t.TempDir()
@@ -846,7 +845,11 @@ func TestAutoPin_Basic(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dummyModDir, 0o755))
 
 	// Write go.mod with replace directive pointing to local repo
-	goModContent := fmt.Sprintf("module example.com/dummy\n\ngo 1.25\n\nreplace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n", filepath.ToSlash(repoRoot))
+	goModContent := fmt.Sprintf(
+		"module example.com/dummy\n\ngo 1.25\n\n"+
+			"replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n",
+		filepath.ToSlash(repoRoot),
+	)
 	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "go.mod"), []byte(goModContent), 0o644))
 
 	// Write a simple main.go
@@ -858,12 +861,7 @@ func main() {
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "main.go"), []byte(mainContent), 0o644))
 
-	origDir, getErr := os.Getwd()
-	require.NoError(t, getErr)
-	defer func() {
-		_ = os.Chdir(origDir)
-	}()
-	require.NoError(t, os.Chdir(dummyModDir))
+	t.Chdir(dummyModDir)
 
 	ctx := t.Context()
 	moduleDirs := map[string]bool{".": true}
@@ -877,9 +875,9 @@ func main() {
 
 func TestPin_Update(t *testing.T) {
 	origVersion := util.Version
-	util.Version = "v0.5.0"
+	util.SetVersion("v0.5.0")
 	defer func() {
-		util.Version = origVersion
+		util.SetVersion(origVersion)
 	}()
 
 	tmpDir := t.TempDir()
@@ -895,7 +893,11 @@ func TestPin_Update(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dummyModDir, 0o755))
 
 	// Write go.mod with replace directive pointing to local repo
-	goModContent := fmt.Sprintf("module example.com/dummy\n\ngo 1.25\n\nreplace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n", filepath.ToSlash(repoRoot))
+	goModContent := fmt.Sprintf(
+		"module example.com/dummy\n\ngo 1.25\n\n"+
+			"replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => %s\n",
+		filepath.ToSlash(repoRoot),
+	)
 	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, "go.mod"), []byte(goModContent), 0o644))
 
 	// Write a simple main.go
@@ -916,12 +918,7 @@ import (
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dummyModDir, ToolFileCanonical), []byte(toolFileContent), 0o644))
 
-	origDir, getErr := os.Getwd()
-	require.NoError(t, getErr)
-	defer func() {
-		_ = os.Chdir(origDir)
-	}()
-	require.NoError(t, os.Chdir(dummyModDir))
+	t.Chdir(dummyModDir)
 
 	ctx := t.Context()
 	opts := PinOptions{
@@ -935,8 +932,3 @@ import (
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }
-
-
-
-
-
