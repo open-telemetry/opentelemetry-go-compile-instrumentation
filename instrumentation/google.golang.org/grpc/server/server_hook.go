@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/internal/otlpfilter"
 	grpcsemconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/semconv"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
@@ -175,7 +176,7 @@ func newServerStatsHandler() stats.Handler {
 // TagRPC is called at the beginning of an RPC to create a context
 func (h *serverStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
 	// Skip instrumentation for OTLP exporter endpoints to prevent infinite recursion
-	if grpcsemconv.IsOTELExporterPath(info.FullMethodName) {
+	if otlpfilter.IsExporterPath(info.FullMethodName) {
 		return ctx
 	}
 

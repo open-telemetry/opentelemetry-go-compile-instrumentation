@@ -74,7 +74,7 @@ func TestBeforeNewClient(t *testing.T) {
 			target:        "",
 			opts:          []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 			enabledEnv:    true,
-			expectHandler: true,
+			expectHandler: false,
 		},
 		{
 			name:                    "oltp exporter endpoint target",

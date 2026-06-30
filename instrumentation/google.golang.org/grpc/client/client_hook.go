@@ -5,9 +5,7 @@ package client
 
 import (
 	"context"
-	"os"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +22,7 @@ import (
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/internal/otlpfilter"
 	grpcsemconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/semconv"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
@@ -143,14 +142,13 @@ func BeforeNewClient(ictx hook.HookContext, target string, opts ...grpc.DialOpti
 		return
 	}
 
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
-		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+	if target == "" {
+		logger.Debug("BeforeNewClient called with empty target, skipping instrumentation")
+		return
 	}
 
-	// Skip instrumentation for OTLP exporter endpoints to prevent deadlock/infinite recursion
-	if target != "" && strings.Contains(endpoint, target) {
-		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target, "endpoint", endpoint)
+	if otlpfilter.IsExporterTarget(target) {
+		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target)
 		return
 	}
 
@@ -180,6 +178,16 @@ func AfterNewClient(ictx hook.HookContext, conn *grpc.ClientConn, err error) {
 func BeforeDialContext(ictx hook.HookContext, ctx context.Context, target string, opts ...grpc.DialOption) {
 	if !clientEnabler.Enable() {
 		logger.Debug("gRPC client instrumentation disabled")
+		return
+	}
+
+	if target == "" {
+		logger.Debug("BeforeDialContext called with empty target, skipping instrumentation")
+		return
+	}
+
+	if otlpfilter.IsExporterTarget(target) {
+		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target)
 		return
 	}
 
@@ -223,7 +231,7 @@ func newClientStatsHandler() stats.Handler {
 // TagRPC is called at the beginning of an RPC to create a context
 func (h *clientStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
 	// Skip instrumentation for OTLP exporter endpoints to prevent infinite recursion
-	if grpcsemconv.IsOTELExporterPath(info.FullMethodName) {
+	if otlpfilter.IsExporterPath(info.FullMethodName) {
 		return ctx
 	}
 

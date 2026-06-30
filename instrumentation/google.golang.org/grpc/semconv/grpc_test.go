@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	grpc_codes "google.golang.org/grpc/codes"
@@ -268,60 +267,6 @@ func TestClientAddrAttrs(t *testing.T) {
 			if tt.expectedPort > 0 {
 				assert.Contains(t, attrs, semconv.ClientPort(tt.expectedPort))
 			}
-		})
-	}
-}
-
-func TestIsOTELExporterPath(t *testing.T) {
-	tests := []struct {
-		name       string
-		fullMethod string
-		expected   bool
-	}{
-		{
-			name:       "trace exporter path",
-			fullMethod: OTELExporterTracePath,
-			expected:   true,
-		},
-		{
-			name:       "metric exporter path",
-			fullMethod: OTELExporterMetricPath,
-			expected:   true,
-		},
-		{
-			name:       "log exporter path",
-			fullMethod: OTELExporterLogPath,
-			expected:   true,
-		},
-		{
-			name:       "regular method",
-			fullMethod: "/grpc.testing.TestService/UnaryCall",
-			expected:   false,
-		},
-		{
-			name:       "health check",
-			fullMethod: "/grpc.health.v1.Health/Check",
-			expected:   false,
-		},
-		{
-			name:       "empty path",
-			fullMethod: "",
-			expected:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsOTELExporterPath(tt.fullMethod)
-			require.Equal(
-				t,
-				tt.expected,
-				result,
-				"IsOTELExporterPath(%q) = %v, want %v",
-				tt.fullMethod,
-				result,
-				tt.expected,
-			)
 		})
 	}
 }

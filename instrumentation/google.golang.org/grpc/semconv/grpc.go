@@ -13,15 +13,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	// OTELExporterTracePath is the gRPC method for OTLP trace export
-	OTELExporterTracePath = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
-	// OTELExporterMetricPath is the gRPC method for OTLP metric export
-	OTELExporterMetricPath = "/opentelemetry.proto.collector.metrics.v1.MetricsService/Export"
-	// OTELExporterLogPath is the gRPC method for OTLP log export
-	OTELExporterLogPath = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
-)
-
 // ParseFullMethod returns a span name and attributes based on a gRPC's FullMethod.
 // Parsing is consistent with grpc-go implementation.
 // Format: /package.service/method
@@ -131,12 +122,4 @@ func ClientAddrAttrs(addr string) []attribute.KeyValue {
 		attrs = append(attrs, semconv.ClientPort(port))
 	}
 	return attrs
-}
-
-// IsOTELExporterPath returns true if the method is an OpenTelemetry exporter endpoint.
-// These methods should be excluded from instrumentation to prevent infinite recursion.
-func IsOTELExporterPath(fullMethod string) bool {
-	return fullMethod == OTELExporterTracePath ||
-		fullMethod == OTELExporterMetricPath ||
-		fullMethod == OTELExporterLogPath
 }
