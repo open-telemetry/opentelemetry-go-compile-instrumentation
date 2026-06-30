@@ -42,7 +42,7 @@ func copyTestApp(t *testing.T, app string) string {
 		if base == ".otelc-build" {
 			return filepath.SkipDir
 		}
-		if base == toolFileCanonical {
+		if base == toolFileCanonical || base == "otelc.runtime.go" {
 			return nil
 		}
 
