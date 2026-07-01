@@ -26,6 +26,8 @@ var requiredImports = map[string]string{
 	"runtime/debug": "_otel_debug", // The getstack function depends on runtime/debug
 	"log":           "_otel_log",   // The printstack function depends on log
 	"unsafe":        "_",           // The golinkname tag depends on unsafe
+	// This is needed in go.mod for OTel SDK initialization
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/go.opentelemetry.io/otel/init": "_",
 }
 
 func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []dst.Decl {

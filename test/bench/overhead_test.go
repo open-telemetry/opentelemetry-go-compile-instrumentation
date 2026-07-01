@@ -66,8 +66,18 @@ func TestOverheadCeiling(t *testing.T) {
 
 		t.Logf("%s: plain=%.3fs  otelc=%.3fs  overhead=%+.1f%%", name, plain, otelcTime, pct)
 
-		if pct > maxPct {
-			t.Errorf("%s: overhead %.1f%% exceeds ceiling %.1f%%", name, pct, maxPct)
+		// The baseline scenario intentionally has no matched instrumentation rules.
+		// However, otelc now always injects the OTel SDK initialization package, so
+		// even an otherwise uninstrumented build incurs the one-time cost of compiling
+		// the SDK and its dependencies. Allow a higher ceiling for this scenario while
+		// keeping the default threshold for all others.
+		scenarioMaxPct := maxPct
+		if name == "baseline" {
+			scenarioMaxPct = 500
+		}
+
+		if pct > scenarioMaxPct {
+			t.Errorf("%s: overhead %.1f%% exceeds ceiling %.1f%%", name, pct, scenarioMaxPct)
 		}
 	}
 }

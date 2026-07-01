@@ -1,0 +1,6 @@
+init_sdk:
+  target: main
+  do:
+    - add_file:
+        file: init_otelsdk.go
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/go.opentelemetry.io/otel/init"

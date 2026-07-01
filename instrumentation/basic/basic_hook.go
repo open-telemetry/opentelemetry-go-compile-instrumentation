@@ -9,31 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
-	"go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
 )
-
-func init() {
-	setupOpenTelemetry()
-}
-
-func setupOpenTelemetry() {
-	fmt.Println("=setupOpenTelemetry=")
-	// Print all the signal to stdout
-	spanExporter, _ := stdouttrace.New()
-	stdoutTraceProvider := trace.NewTracerProvider(trace.WithSpanProcessor(trace.NewSimpleSpanProcessor(spanExporter)))
-	otel.SetTracerProvider(stdoutTraceProvider)
-	metricExporter, _ := stdoutmetric.New()
-	stdoutMeterProvider := metric.NewMeterProvider(
-		metric.WithReader(metric.NewPeriodicReader(metricExporter, metric.WithInterval(1*time.Second))),
-	)
-	otel.SetMeterProvider(stdoutMeterProvider)
-}
 
 func MyHookBefore(ictx hook.HookContext) {
 	// Use direct tracer to create span - simpler pattern
