@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Redis client with OpenTelemetry compile-time instrumentation
 # Stage 1: Build the otelc tool
-FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS otelc-builder
+FROM golang:1.26-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS otelc-builder
 
 WORKDIR /build
 
@@ -15,7 +15,7 @@ COPY . .
 RUN go build -o /otelc ./tool/cmd/otelc
 
 # Stage 2: Build the Redis client with instrumentation
-FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS app-builder
+FROM golang:1.26-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS app-builder
 
 WORKDIR /app
 
@@ -35,7 +35,7 @@ RUN go mod download
 RUN otelc go build -o client .
 
 # Stage 3: Runtime image
-FROM alpine:3.23@sha256:51183f2cfa6320055da30872f211093f9ff1d3cf06f39a0bdb212314c5dc7375
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
 # Install ca-certificates for TLS and timezone data
 RUN apk --no-cache add ca-certificates tzdata
