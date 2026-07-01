@@ -4,3 +4,5 @@
 module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/bench/scenarios/baseline
 
 go 1.25.0
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../../

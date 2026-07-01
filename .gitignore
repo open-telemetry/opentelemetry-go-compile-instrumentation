@@ -35,3 +35,21 @@ coverage.out
 
 profiles
 .pprof
+
+# Go build cache
+gocache/
+
+# Log files
+go-test-root.log
+
+# Coverage outputs
+coverage
+coverage-*
+test/coverage-integration
+tool/internal/profile/coverage
+
+# PR templates / files
+pr.md
+
+# Executables in test apps
+test/apps/*/*.exe

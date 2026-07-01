@@ -6,6 +6,7 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -20,12 +21,12 @@ func TestRunCmd(t *testing.T) {
 	}{
 		{
 			name:      "simple echo command",
-			args:      []string{"echo", "hello"},
+			args:      []string{"go", "version"},
 			expectErr: false,
 		},
 		{
 			name:      "command with multiple arguments",
-			args:      []string{"echo", "hello", "world"},
+			args:      []string{"go", "help", "version"},
 			expectErr: false,
 		},
 		{
@@ -443,4 +444,83 @@ func TestCopyFileSameFile(t *testing.T) {
 	if string(got) != string(content) {
 		t.Errorf("got %q, want %q", got, content)
 	}
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		initialData []byte
+		initialPerm os.FileMode
+		writePerm   []os.FileMode
+		wantPerm    os.FileMode
+	}{
+		{
+			name:      "new file uses default permissions",
+			writePerm: nil,
+			wantPerm:  0o644,
+		},
+		{
+			name:      "new file uses provided permissions",
+			writePerm: []os.FileMode{0o600},
+			wantPerm:  0o600,
+		},
+		{
+			name:        "existing file preserves permissions",
+			initialData: []byte("old"),
+			initialPerm: 0o755,
+			writePerm:   nil,
+			wantPerm:    0o755,
+		},
+		{
+			name:        "existing file uses provided permissions",
+			initialData: []byte("old"),
+			initialPerm: 0o755,
+			writePerm:   []os.FileMode{0o600},
+			wantPerm:    0o600,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "test.txt")
+
+			if tt.initialData != nil {
+				require.NoError(t,
+					os.WriteFile(path, tt.initialData, tt.initialPerm),
+				)
+			}
+
+			require.NoError(t,
+				WriteFileAtomic(path, []byte("new content"), tt.writePerm...),
+			)
+
+			got, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			require.Equal(t, []byte("new content"), got)
+
+			if runtime.GOOS != "windows" {
+				info, statErr := os.Stat(path)
+				require.NoError(t, statErr)
+				require.Equal(t, tt.wantPerm, info.Mode().Perm())
+			}
+
+			matches, matchesErr := filepath.Glob(filepath.Join(filepath.Dir(path), filepath.Base(path)+".tmp-*"))
+			require.NoError(t, matchesErr)
+			require.Empty(t, matches)
+		})
+	}
+}
+
+func TestWriteFileAtomic_Errors(t *testing.T) {
+	t.Run("CreateTemp error on nonexistent directory", func(t *testing.T) {
+		err := WriteFileAtomic("/nonexistent-dir-12345/file.txt", []byte("data"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to create temporary file for")
+	})
+
+	t.Run("Rename error when path is a directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// Target path is the directory itself
+		err := WriteFileAtomic(tmpDir, []byte("data"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to atomically replace")
+	})
 }

@@ -6,6 +6,7 @@
 package test
 
 import (
+	"os/exec"
 	"runtime"
 	"testing"
 
@@ -19,6 +20,11 @@ import (
 func TestK8SClient(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("k3s not supported on windows")
+	}
+
+	// Check if docker is available and running
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skip("Docker is not available or not running, skipping k3s integration test")
 	}
 
 	t.Parallel()

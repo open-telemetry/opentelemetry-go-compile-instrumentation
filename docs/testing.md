@@ -39,7 +39,7 @@ Use this convention when a testcase exercises call rules that reference wrapper 
 > [!IMPORTANT]
 > **When to write an integration test.**
 >
-> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `instrumentation/basic/` and validates the foundational hook machinery that all other instrumentations rely on.
+> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `demo/app/basic/instrumentation/` and validates the foundational hook machinery that all other instrumentations rely on.
 > - **Instrumentation package changes.** Every package in `instrumentation/` must have a corresponding integration test. If you add or modify a hook, there should be an integration test that builds an instrumented binary and asserts on the exported spans for that component.
 
 Integration tests build real binaries with the `otelc` tool and run them against **in-process** dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
@@ -112,7 +112,7 @@ The 70% floor is the minimum bar agreed in [issue #569](https://github.com/open-
 (tracked under the release 1.0.0 roadmap). Coverage is tracked **per module tree** — `tool/` and
 `pkg/` are checked independently so that one area cannot mask regression in the other.
 
-### CI behaviour
+### CI behavior
 
 The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 

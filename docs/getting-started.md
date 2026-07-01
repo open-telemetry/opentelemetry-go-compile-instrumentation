@@ -37,6 +37,35 @@ No manual code changes required.
    go tool otelc go build -o myapp .
    ```
 
+## Managing Instrumentations
+
+Instrumentations are declared through an `otel.instrumentation.go` file located next to the application's `go.mod` file. The alternate filename `otelc.tool.go` is also accepted and behaves identically.
+
+The file follows the standard Go `tools.go` pattern and contains blank imports for the instrumentation packages that should be enabled:
+
+```go
+//go:build tools
+
+package tools
+
+import (
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc"
+
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/client"
+	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/nethttp/server"
+)
+```
+
+The file can be created and maintained automatically using:
+
+```bash
+otelc pin
+```
+
+The `pin` command discovers applicable instrumentations, creates the file if it does not already exist, updates imports, synchronizes dependencies, and runs validation checks.
+
+If no instrumentation file exists, `otelc go build` automatically analyzes the application's dependency graph and generates a temporary instrumentation configuration for the duration of the build. This ensures a zero-configuration workflow while allowing projects to adopt a persistent, source-controlled configuration when desired.
+
 ## How It Works
 
 The tool uses compile-time instrumentation through:

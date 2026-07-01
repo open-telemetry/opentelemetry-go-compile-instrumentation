@@ -40,3 +40,8 @@ func init() {
 		}
 	}
 }
+
+// SetVersion sets the Version variable for testing purposes.
+func SetVersion(version string) {
+	Version = version
+}

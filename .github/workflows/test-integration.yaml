@@ -52,6 +52,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     strategy:
+      fail-fast: false
       matrix:
         platform:
           - os: ubuntu-latest
@@ -88,9 +89,11 @@ jobs:
     steps:
       - name: Check result
         run: |
-          result="${{ needs.test-integration.result }}"
-          echo "Test result: $result"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
+          integration_result="${{ needs.test-integration.result }}"
+          coverage_result="${{ needs.test-integration-coverage.result }}"
+          echo "Integration Test result: $integration_result"
+          echo "Coverage Test result: $coverage_result"
+          if [[ ("$integration_result" == "success" || "$integration_result" == "skipped") && ("$coverage_result" == "success" || "$coverage_result" == "skipped") ]]; then
             echo "✅ Tests passed or were skipped"
             exit 0
           else

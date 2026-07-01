@@ -63,6 +63,7 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 
 		_, err = io.CopyN(file, tarReader, header.Size)
 		if err != nil {
+			_ = file.Close()
 			return ex.Wrap(err)
 		}
 		err = file.Close()
@@ -140,7 +141,7 @@ func extractGZip(bundleReader io.Reader, targetDir string) error {
 	return nil
 }
 
-func (*SetupPhase) extract() error {
+func extractBundle() error {
 	// Extract the instrumentation code to the build temp directory
 	// for future instrumentation phase
 	return extractGZip(data.GetBundleReader(), util.GetBuildTempDir())

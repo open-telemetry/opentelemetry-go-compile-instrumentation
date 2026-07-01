@@ -4,16 +4,19 @@
 package setup
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/go/packages"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 func TestGetPackages(t *testing.T) {
@@ -51,7 +54,7 @@ func TestGetPackages(t *testing.T) {
 			name:             "file as a target",
 			args:             []string{"./cmd/main.go"},
 			expectedCount:    1,
-			expectedPackages: []string{commandLineArgumentsPackage},
+			expectedPackages: []string{pkgload.CommandLineArgumentsPackage},
 			expectError:      false,
 		},
 		{
@@ -212,56 +215,6 @@ func setupTestModule(t *testing.T, subDirs []string) {
 	}
 
 	t.Chdir(tmpDir)
-}
-
-func TestGetPackageDir(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	tests := []struct {
-		name    string
-		goFiles []string
-	}{
-		{
-			name:    "package with single go file",
-			goFiles: []string{filepath.Join("path_to_project", "main.go")},
-		},
-		{
-			name:    "package with multiple go files",
-			goFiles: []string{filepath.Join("path_to_project", "main.go"), filepath.Join("path_to_project", "util.go")},
-		},
-		{
-			name:    "package with nested path",
-			goFiles: []string{filepath.Join("path_to_project", "cmd", "server", "main.go")},
-		},
-		{
-			name:    "package with absolute path",
-			goFiles: []string{filepath.Join(tmpDir, "main.go")},
-		},
-		{
-			name:    "package with no go files",
-			goFiles: nil,
-		},
-		{
-			name:    "package with empty go files slice",
-			goFiles: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var expected string
-			if len(tt.goFiles) > 0 {
-				expected = filepath.Dir(tt.goFiles[0])
-			}
-
-			pkg := &packages.Package{}
-			pkg.GoFiles = tt.goFiles
-			result := getPackageDir(pkg)
-			if result != expected {
-				t.Errorf("getPackageDir() = %q, expected %q", result, expected)
-			}
-		})
-	}
 }
 
 func TestSetupGoCache(t *testing.T) {
@@ -468,4 +421,50 @@ func TestExtractBuildFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsSetup(t *testing.T) {
+	assert.False(t, isSetup())
+}
+
+func TestSetupPhaseLogger(t *testing.T) {
+	sp := &SetupPhase{logger: slog.New(slog.NewJSONHandler(os.Stderr, nil))}
+	sp.Info("info message")
+	sp.Error("error message")
+	sp.Warn("warn message")
+	sp.Debug("debug message")
+}
+
+func TestKeepForDebug_NonMainDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+
+	// Create the debug output directory so CopyFile has somewhere to write.
+	require.NoError(t, os.MkdirAll(util.GetBuildTemp("debug"), 0o755))
+
+	// Write a source file in a subdirectory (not the work-dir root).
+	subDir := filepath.Join(tmpDir, "mymodule")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	srcFile := filepath.Join(subDir, "go.mod")
+	require.NoError(t, os.WriteFile(srcFile, []byte("module example.com/mymodule\n\ngo 1.25\n"), 0o644))
+
+	// keepForDebug should copy the file without panicking.
+	// We can't check the destination path directly (it's computed from the source),
+	// but we can verify the function doesn't panic or log a fatal error.
+	keepForDebug(t.Context(), srcFile)
+}
+
+func TestKeepForDebug_MainDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmpDir)
+
+	// Create the debug output directory.
+	require.NoError(t, os.MkdirAll(util.GetBuildTemp("debug"), 0o755))
+
+	// Write a source file directly in the work dir (simulates "main" case).
+	srcFile := filepath.Join(util.GetOtelcWorkDir(), "otel.instrumentation.go")
+	require.NoError(t, os.WriteFile(srcFile, []byte("package tools\n"), 0o644))
+
+	// keepForDebug should copy the file with name "main".
+	keepForDebug(t.Context(), srcFile)
 }

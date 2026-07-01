@@ -6,6 +6,7 @@ package testutil
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,9 +40,9 @@ func newCmd(ctx context.Context, dir string, env []string, args ...string) *exec
 	return cmd
 }
 
-// otelcPath returns the absolute path to the otelc binary, assuming the
+// OtelcPath returns the absolute path to the otelc binary, assuming the
 // caller's working directory is a sibling of the repo's otelc output.
-func otelcPath() (string, error) {
+func OtelcPath() (string, error) {
 	binName := otelcBinName
 	if util.IsWindows() {
 		binName += ".exe"
@@ -74,7 +75,7 @@ func appsPath() (string, error) {
 // is registered for cleanup via t.Cleanup.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
-	otelc, err := otelcPath()
+	otelc, err := OtelcPath()
 	require.NoError(t, err)
 
 	output := appOutputName()
@@ -95,6 +96,31 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 		_ = os.Remove(filepath.Join(appDir, output))
 		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
 	})
+}
+
+// BuildAppAt builds the app at the given directory using context ctx. Intended
+// for use from TestMain where no *testing.T is available. The caller is
+// responsible for cleaning up the built binary via CleanupAppAt.
+func BuildAppAt(ctx context.Context, appDir string) error {
+	otelc, err := OtelcPath()
+	if err != nil {
+		return fmt.Errorf("locate otelc: %w", err)
+	}
+
+	output := appOutputName()
+	args := []string{otelc, "go", "build", "-a", "-o", output}
+
+	cmd := newCmd(ctx, appDir, nil, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("otelc build in %s: %w\n%s", appDir, err, string(out))
+	}
+	return nil
+}
+
+// CleanupAppAt removes the binary that BuildAppAt produced in appDir.
+func CleanupAppAt(appDir string) {
+	_ = os.Remove(filepath.Join(appDir, appOutputName()))
 }
 
 // Run runs the application and returns the output. It waits for the

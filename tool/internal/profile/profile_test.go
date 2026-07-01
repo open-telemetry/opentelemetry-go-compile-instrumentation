@@ -4,7 +4,9 @@
 package profile
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -221,5 +223,89 @@ func assertFileExists(t *testing.T, path string) {
 	}
 	if info.Size() == 0 {
 		t.Errorf("expected file %q to be non-empty", path)
+	}
+}
+
+func TestMerge(t *testing.T) {
+	dir := t.TempDir()
+	pid := os.Getpid()
+
+	// 1. Generate a valid CPU profile
+	s, err := Start(dir, []Type{CPU})
+	if err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	if stopErr := s.Stop(); stopErr != nil {
+		t.Fatalf("Stop() error: %v", stopErr)
+	}
+
+	origPath := filepath.Join(dir, fmt.Sprintf("otelc-cpu-%d.pprof", pid))
+	assertFileExists(t, origPath)
+
+	// 2. Duplicate it to simulate multiple process runs
+	dupPath := filepath.Join(dir, "otelc-cpu-99999.pprof")
+	srcFile, err := os.Open(origPath)
+	if err != nil {
+		t.Fatalf("open original profile: %v", err)
+	}
+	defer srcFile.Close()
+
+	destFile, err := os.Create(dupPath)
+	if err != nil {
+		t.Fatalf("create duplicate profile: %v", err)
+	}
+	defer destFile.Close()
+
+	if _, copyErr := io.Copy(destFile, srcFile); copyErr != nil {
+		t.Fatalf("copy profile content: %v", copyErr)
+	}
+	_ = destFile.Sync()
+	_ = destFile.Close()
+	_ = srcFile.Close()
+
+	// 3. Merge them
+	ctx := context.Background()
+	if mergeErr := Merge(ctx, dir, []Type{CPU}); mergeErr != nil {
+		t.Fatalf("Merge() error: %v", mergeErr)
+	}
+
+	// 4. Verify merged file exists
+	mergedPath := filepath.Join(dir, "otelc-cpu.pprof")
+	assertFileExists(t, mergedPath)
+
+	// 5. Verify originals are deleted
+	if _, statErr1 := os.Stat(origPath); !os.IsNotExist(statErr1) {
+		t.Errorf("expected original file %q to be deleted, but it exists", origPath)
+	}
+	if _, statErr2 := os.Stat(dupPath); !os.IsNotExist(statErr2) {
+		t.Errorf("expected duplicate file %q to be deleted, but it exists", dupPath)
+	}
+}
+
+func TestMergeTraceIgnored(t *testing.T) {
+	dir := t.TempDir()
+	pid := os.Getpid()
+
+	s, err := Start(dir, []Type{Trace})
+	if err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	if stopErr := s.Stop(); stopErr != nil {
+		t.Fatalf("Stop() error: %v", stopErr)
+	}
+
+	origPath := filepath.Join(dir, fmt.Sprintf("otelc-%d.trace", pid))
+	assertFileExists(t, origPath)
+
+	ctx := context.Background()
+	if mergeErr := Merge(ctx, dir, []Type{Trace}); mergeErr != nil {
+		t.Fatalf("Merge() error: %v", mergeErr)
+	}
+
+	// Trace files should NOT be merged/deleted
+	assertFileExists(t, origPath)
+	mergedPath := filepath.Join(dir, "otelc.trace")
+	if _, statErr := os.Stat(mergedPath); !os.IsNotExist(statErr) {
+		t.Errorf("expected merged trace file to not exist, but it does")
 	}
 }

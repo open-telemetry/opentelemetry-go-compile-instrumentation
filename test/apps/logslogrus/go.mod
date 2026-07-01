@@ -2,6 +2,8 @@ module logslogrus
 
 go 1.25.0
 
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../
+
 require (
 	github.com/sirupsen/logrus v1.9.3
 	go.opentelemetry.io/otel v1.43.0

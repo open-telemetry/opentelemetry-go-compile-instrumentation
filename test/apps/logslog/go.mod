@@ -2,6 +2,8 @@ module logslog
 
 go 1.25.0
 
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ../../../
+
 require (
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.43.0

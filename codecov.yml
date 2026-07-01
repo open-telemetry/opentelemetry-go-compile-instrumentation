@@ -14,7 +14,7 @@ coverage:
         target: 70%
         # informational: true — report-only; does not block CI or PR merges.
         # Flip to false once tool/ consistently meets the 70% target.
-        informational: true
+        informational: false
       # pkg/ module tree
       pkg:
         flags:
