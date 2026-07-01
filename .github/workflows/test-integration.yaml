@@ -52,6 +52,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     strategy:
+      fail-fast: false
       matrix:
         platform:
           - os: ubuntu-latest
