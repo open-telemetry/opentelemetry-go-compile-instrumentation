@@ -155,7 +155,6 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		req = req.WithContext(ctx)
 
 		resp, err := next(req)
-
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
@@ -184,7 +183,13 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 	}
 }
 
-func handleNonStreamingResponse(_ context.Context, resp *http.Response, span trace.Span, _ time.Time, op operationType) {
+func handleNonStreamingResponse(
+	_ context.Context,
+	resp *http.Response,
+	span trace.Span,
+	_ time.Time,
+	op operationType,
+) {
 	defer span.End()
 
 	// Read a bounded preview for parsing, but reassemble the full body for callers.

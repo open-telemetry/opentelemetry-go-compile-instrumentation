@@ -55,7 +55,16 @@ func TestStreamingReader_CompletionChunks(t *testing.T) {
 	streamData := "data: {\"id\":\"cmpl-xyz\",\"model\":\"gpt-3.5-turbo-instruct\",\"choices\":[{\"text\":\"Hello\",\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":10,\"total_tokens\":14}}\n\ndata: [DONE]\n\n"
 
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := newStreamingReader(body, span, time.Now(), "gpt-3.5-turbo-instruct", "text_completion", "openai", opCompletion, ctx)
+	reader := newStreamingReader(
+		body,
+		span,
+		time.Now(),
+		"gpt-3.5-turbo-instruct",
+		"text_completion",
+		"openai",
+		opCompletion,
+		ctx,
+	)
 
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -171,10 +180,10 @@ func TestStreamingReader_FirstTokenLatency(t *testing.T) {
 
 func TestParseSSELine(t *testing.T) {
 	tests := []struct {
-		name     string
-		line     []byte
-		payload  []byte
-		isDone   bool
+		name    string
+		line    []byte
+		payload []byte
+		isDone  bool
 	}{
 		{"data line", []byte("data: {\"id\":\"1\"}"), []byte("{\"id\":\"1\"}"), false},
 		{"done signal", []byte("data: [DONE]"), nil, true},

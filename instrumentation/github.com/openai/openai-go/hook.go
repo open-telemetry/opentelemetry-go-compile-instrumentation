@@ -4,7 +4,6 @@
 package v1
 
 import (
-	"runtime/debug"
 	"sync"
 
 	"github.com/openai/openai-go/option"
@@ -34,32 +33,12 @@ func (o openaiEnabler) Enable() bool {
 
 var enabler = openaiEnabler{}
 
-func moduleVersion() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "dev"
-	}
-	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		return bi.Main.Version
-	}
-	return "dev"
-}
-
 func initInstrumentation() {
 	initOnce.Do(func() {
-		version := moduleVersion()
-		if err := runtime.SetupOTelSDK(instrumentationName, version); err != nil {
-			logger.Error("failed to setup OTel SDK", "error", err)
-		}
 		tracer = otel.GetTracerProvider().Tracer(
 			instrumentationName,
-			trace.WithInstrumentationVersion(version),
+			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
-
-		if err := runtime.StartRuntimeMetrics(); err != nil {
-			logger.Error("failed to start runtime metrics", "error", err)
-		}
-
 		logger.Info("OpenAI v1 instrumentation initialized")
 	})
 }

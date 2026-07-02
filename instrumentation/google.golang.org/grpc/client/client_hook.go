@@ -5,9 +5,6 @@ package client
 
 import (
 	"context"
-	"os"
-	"runtime/debug"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,31 +53,9 @@ var (
 	clientResponsesPerRPC rpcconv.ClientResponsesPerRPC
 )
 
-// moduleVersion extracts the version from the Go module system.
-// Falls back to "dev" if version cannot be determined.
-func moduleVersion() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "dev"
-	}
-
-	// Return the main module version
-	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		return bi.Main.Version
-	}
-
-	return "dev"
-}
-
 func initInstrumentation() {
 	initOnce.Do(func() {
-		version := moduleVersion()
-		if err := runtime.SetupOTelSDK(
-			"go.opentelemetry.io/compile-instrumentation/google.golang.org/grpc/client",
-			version,
-		); err != nil {
-			logger.Error("failed to setup OTel SDK", "error", err)
-		}
+		version := runtime.ModuleVersion()
 		tracer = otel.GetTracerProvider().Tracer(
 			instrumentationName,
 			trace.WithInstrumentationVersion(version),
@@ -118,11 +93,6 @@ func initInstrumentation() {
 			logger.Error("failed to create client responses per RPC metric", "error", err)
 		}
 
-		// Start runtime metrics (respects OTEL_GO_ENABLED/DISABLED_INSTRUMENTATIONS)
-		if err := runtime.StartRuntimeMetrics(); err != nil {
-			logger.Error("failed to start runtime metrics", "error", err)
-		}
-
 		logger.Info("gRPC client instrumentation initialized")
 	})
 }
@@ -140,17 +110,6 @@ var clientEnabler = grpcClientEnabler{}
 func BeforeNewClient(ictx hook.HookContext, target string, opts ...grpc.DialOption) {
 	if !clientEnabler.Enable() {
 		logger.Debug("gRPC client instrumentation disabled")
-		return
-	}
-
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
-		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-	}
-
-	// Skip instrumentation for OTLP exporter endpoints to prevent deadlock/infinite recursion
-	if target != "" && strings.Contains(endpoint, target) {
-		logger.Debug("Skipping instrumentation for OTLP exporter endpoint", "target", target, "endpoint", endpoint)
 		return
 	}
 

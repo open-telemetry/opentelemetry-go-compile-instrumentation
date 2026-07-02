@@ -100,12 +100,6 @@ func TestInstrumentationConstants(t *testing.T) {
 	assert.Equal(t, "K8S_CLIENT_GO", instrumentationKey)
 }
 
-func TestModuleVersion(t *testing.T) {
-	version := moduleVersion()
-	// In test mode, version should be "dev" since there's no proper build info
-	assert.NotEmpty(t, version)
-}
-
 func TestBeforeProcessDeltas(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
