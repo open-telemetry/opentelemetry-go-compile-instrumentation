@@ -1,0 +1,11 @@
+instrument_by_package_name:
+  target: main
+  where:
+    func: ProcessRequest
+    file:
+      has_package: otherpkg
+  do:
+    - inject_hooks:
+        before: BeforeProcessRequest
+        after: AfterProcessRequest
+        path: testdata/golden/has-package-no-match

@@ -115,9 +115,16 @@ instrument_sql_exec:
 
 ### `where.file` semantics
 
-- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`, `is_test`.
-  Combinator keys: `all-of`, `one-of`, `not`.
+- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`,
+  `has_package`, `is_test`. Combinator keys: `all-of`, `one-of`, `not`.
 - `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
+- `has_package` matches source files whose **declared `package` clause** equals
+  the given name. This is the `package foo` line in the source file, not the
+  import path (use `target` for that) and not the build's test-ness (use
+  `is_test` for that). Files in the same package share one declared name; an
+  external test file may declare a different name (e.g. `foo_test`). Combine
+  with `is_test` via `all-of` to scope a rule to external test files only — see
+  the example below.
 - `is_test` is a tri-state boolean that gates on whether the file belongs to a
   test build — a compilation the Go toolchain produces only under `go test` (a
   package augmented with its `_test.go` files, an external `xxx_test` package,
@@ -130,10 +137,34 @@ instrument_sql_exec:
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
 - During the setup phase, leaf predicates (`has_func`, `has_recv`,
-  `has_struct`, `is_test`) and the `where.file` combinators documented below are
-  executed. `has_directive`, and combinators placed at the top level of
-  `where` (outside `where.file`), are validated but return a descriptive
-  "not yet supported" error at build time.
+  `has_struct`, `has_package`, `is_test`) and the `where.file` combinators
+  documented below are executed. `has_directive`, and combinators placed at the
+  top level of `where` (outside `where.file`), are validated but return a
+  descriptive "not yet supported" error at build time.
+
+**`has_package` example — scope a rule to external test files only:**
+
+`is_test` matches the entire test build, but cannot distinguish `package foo`
+from `package foo_test` within that build. `has_package` provides that
+distinction. Use `all-of` to combine the two (a single node holds at most one
+leaf predicate):
+
+```yaml
+# Apply only to external test files (package foo_test) — not to the package's
+# own internal _test.go files (package foo) even within the same test build.
+trace_external_test:
+  target: example.com/foo
+  where:
+    func: TestHelper
+    file:
+      all-of:
+        - is_test: true
+        - has_package: foo_test
+  do:
+    - inject_hooks:
+        before: BeforeTestHelper
+        path: example.com/foo/otel
+```
 
 #### Combining `where.file` predicates
 
