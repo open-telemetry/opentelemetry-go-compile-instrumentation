@@ -5,8 +5,6 @@ package mongodb
 
 import (
 	"context"
-	"runtime/debug"
-	"sync"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
@@ -24,35 +22,13 @@ func (g mongoEnabler) Enable() bool {
 	return runtime.Instrumented(instrumentationKey)
 }
 
-var (
-	enabler  = mongoEnabler{}
-	initOnce sync.Once
-)
-
-func initInstrumentation() {
-	initOnce.Do(func() {
-		bi, ok := debug.ReadBuildInfo()
-		version := "dev"
-		if ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-			version = bi.Main.Version
-		}
-
-		if err := runtime.SetupOTelSDK(
-			"go.opentelemetry.io/compile-instrumentation/github.com/mongodb/mongo-go-driver/mongo",
-			version,
-		); err != nil {
-			runtime.Logger().Error("failed to setup OTel SDK", "error", err)
-		}
-	})
-}
+var enabler = mongoEnabler{}
 
 // BeforeConnect intercepts mongo.Connect and injects the OTel command monitor
 func BeforeConnect(ictx hook.HookContext, ctx context.Context, opts ...*options.ClientOptions) {
 	if !enabler.Enable() {
 		return
 	}
-
-	initInstrumentation()
 
 	monitor := otelmongo.NewMonitor()
 
@@ -79,8 +55,6 @@ func BeforeNewClient(ictx hook.HookContext, opts ...*options.ClientOptions) {
 	if !enabler.Enable() {
 		return
 	}
-
-	initInstrumentation()
 
 	monitor := otelmongo.NewMonitor()
 

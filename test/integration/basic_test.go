@@ -37,7 +37,6 @@ func TestBasic(t *testing.T) {
 		"GenericRecvExample after hook",
 		"traceID: 123, spanID: 456",
 		"[MyHook]",
-		"=setupOpenTelemetry=",
 		"RawCode",
 		"funcName:Example",
 		"packageName:main",

@@ -7,20 +7,9 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"sync"
 )
 
-var setupOnce sync.Once
-
-// SetupOTelSDK initializes the OpenTelemetry SDK if not already initialized.
-// This function is idempotent and safe to call multiple times.
-// Returns error only on first initialization failure.
-//
-// Parameters:
-//   - instrumentationName: The scoped name of the instrumentation
-//     (e.g., "go.opentelemetry.io/compile-instrumentation/google.golang.org/grpc/client")
-//   - instrumentationVersion: The version of the instrumentation module
-//     (typically obtained from runtime/debug.ReadBuildInfo())
+// SetupOTelSDK initializes the OpenTelemetry SDK.
 //
 // The SDK automatically configures exporters based on environment variables
 // following the OpenTelemetry specification:
@@ -47,16 +36,12 @@ var setupOnce sync.Once
 //	if err := runtime.SetupOTelSDK("go.opentelemetry.io/compile-instrumentation/google.golang.org/grpc/client", version); err != nil {
 //	    logger.Error("failed to setup OTel SDK", "error", err)
 //	}
-func SetupOTelSDK(instrumentationName, instrumentationVersion string) error {
-	setupOnce.Do(func() {
-		// Initialize OpenTelemetry SDK with defensive error handling
-		Initialize(Config{
-			ServiceName:            "otelc-instrumentation",
-			InstrumentationName:    instrumentationName,
-			InstrumentationVersion: instrumentationVersion,
-		})
+func SetupOTelSDK() {
+	// Initialize OpenTelemetry SDK with defensive error handling
+	Initialize(Config{
+		InstrumentationName:    "go.opentelemetry.io/compile-instrumentation",
+		InstrumentationVersion: ModuleVersion(),
 	})
-	return nil
 }
 
 // Instrumented checks if instrumentation is enabled via environment variables.
