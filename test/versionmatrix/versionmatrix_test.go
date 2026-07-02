@@ -19,7 +19,7 @@ import (
 // Apps with no ranged dependencies are omitted.
 func appBoundVersions(t *testing.T) map[string]map[string][]string {
 	appsRoot := filepath.Join("..", "apps")
-	rulesRoot := filepath.Join("..", "..", "pkg", "instrumentation")
+	rulesRoot := filepath.Join("..", "..", "instrumentation")
 	targets := testutil.InstrumentedTargets(t, rulesRoot)
 
 	entries, err := os.ReadDir(appsRoot)
