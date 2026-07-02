@@ -247,6 +247,20 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
+	// Track generated & modified files with state manager
+	stateManager, found := StateManagerFromContext(ctx)
+	if !found {
+		// save this state manager in the context
+		ctx = ContextWithStateManager(ctx, stateManager)
+		// We only need to commit the state to disk if it was not found in the context
+		// i.e., it was created by this setup invocation
+		defer func() {
+			if err = stateManager.Commit(); err != nil {
+				logger.Error("failed to commit state", "error", err)
+			}
+		}()
+	}
+
 	// Generate otelc.runtime.go for all packages
 	moduleDirs := make(map[string]bool)
 	for _, pkg := range pkgs {
@@ -272,15 +286,19 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err = sp.addDeps(matched, pkgDir); err != nil {
+		if err = sp.addDeps(ctx, matched, pkgDir); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 		moduleDirs[moduleDir] = true
 	}
 
 	// Backup go.mod, go.sum and go.work.sum files before modifying them
-	if err = backupFiles(ctx, moduleDirs); err != nil {
-		return ex.Wrapf(err, "backing up files")
+	backupFiles, err := getBackupFiles(ctx, moduleDirs)
+	if err != nil {
+		return ex.Wrapf(err, "finding files to backup")
+	}
+	if err = stateManager.TrackAll(backupFiles...); err != nil {
+		return ex.Wrapf(err, "tracking backup files")
 	}
 
 	// Sync new dependencies to go.mod or vendor/modules.txt
@@ -290,8 +308,8 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	// Write the matched hook to matched.txt for further instrument phase
-	return sp.store(matched)
+	// Write the matched ruleset to matched.json for further instrument phase
+	return sp.store(ctx, matched, moduleDirs)
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
@@ -465,6 +483,7 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 
 func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	logger := util.LoggerFromContext(ctx)
+	ctx = ContextWithStateManager(ctx, NewStateManager())
 
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
@@ -481,7 +500,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
 		// Users can run `otelc cleanup` to remove it explicitly.
-		if cleanErr := Cleanup(ctx, cmd.Args().Tail(), false); cleanErr != nil {
+		if cleanErr := Cleanup(ctx, false); cleanErr != nil {
 			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()

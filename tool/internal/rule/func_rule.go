@@ -49,11 +49,14 @@ type FuncSignature struct {
 type InstFuncRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Func   string `json:"func"   yaml:"func"`   // The name of the target func to be instrumented
-	Recv   string `json:"recv"   yaml:"recv"`   // The name of the receiver type
-	Before string `json:"before" yaml:"before"` // The function we inject at the target function entry
-	After  string `json:"after"  yaml:"after"`  // The function we inject at the target function exit
-	Path   string `json:"path"   yaml:"path"`   // The module path where hook code is located
+	Func       string `json:"func"   yaml:"func"`   // The name of the target func to be instrumented
+	Recv       string `json:"recv"   yaml:"recv"`   // The name of the receiver type
+	Before     string `json:"before" yaml:"before"` // The function we inject at the target function entry
+	After      string `json:"after"  yaml:"after"`  // The function we inject at the target function exit
+	Path       string `json:"path"   yaml:"path"`   // The import path where hook code is located
+	ModulePath string `json:"-"      yaml:"module"` // The module path where hook code is located
+
+	ResolvedPath string `json:"resolved_path" yaml:"-"` // The local path of the package directory resolved from import path
 
 	// Optional signature sub-filters (all non-empty filters must match; combined
 	// with AND logic so any combination is allowed).
@@ -73,6 +76,9 @@ func NewInstFuncRule(data []byte, name string) (*InstFuncRule, error) {
 	if r.Name == "" {
 		r.Name = name
 	}
+	if r.ModulePath == "" {
+		r.ModulePath = r.Path
+	}
 	if err := r.validate(); err != nil {
 		return nil, ex.Wrapf(err, "invalid func rule %q", name)
 	}
@@ -85,6 +91,12 @@ func (r *InstFuncRule) validate() error {
 	}
 	if strings.TrimSpace(r.Before) == "" && strings.TrimSpace(r.After) == "" {
 		return ex.Newf("before or after must be set")
+	}
+	if strings.TrimSpace(r.Path) == "" {
+		return ex.Newf("path cannot be empty")
+	}
+	if r.Path != r.ModulePath && !strings.HasPrefix(r.Path, r.ModulePath+"/") {
+		return ex.Newf("import path %q is not part of module path %q", r.Path, r.ModulePath)
 	}
 	return nil
 }

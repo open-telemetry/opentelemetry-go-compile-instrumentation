@@ -24,6 +24,7 @@ func TestNewInstFuncRule(t *testing.T) {
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
+path: example.com/pkg
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
 				assert.Equal(t, "MyFunc", r.Func)
@@ -37,6 +38,7 @@ before: MyBefore
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
+path: example.com/pkg
 signature:
   args: [context.Context, string]
   returns: [error]
@@ -53,6 +55,7 @@ signature:
 func: MyFunc
 target: example.com/pkg
 after: MyAfter
+path: example.com/pkg
 signature_contains:
   args: [context.Context]
 `,
@@ -68,6 +71,7 @@ signature_contains:
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
+path: example.com/pkg
 result: error
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
@@ -80,6 +84,7 @@ result: error
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
+path: example.com/pkg
 last_result: error
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
@@ -92,6 +97,7 @@ last_result: error
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
+path: example.com/pkg
 param: context.Context
 `,
 			check: func(t *testing.T, r *InstFuncRule) {
@@ -104,6 +110,7 @@ param: context.Context
 func: MyFunc
 target: example.com/pkg
 before: MyBefore
+path: example.com/pkg
 signature:
   args: [string]
   returns: [error]
@@ -129,6 +136,38 @@ param: string
 		{
 			name:    "missing before and after",
 			yaml:    `func: MyFunc\ntarget: example.com/pkg`,
+			wantErr: true,
+		},
+		{
+			name:    "missing path field",
+			yaml:    `func: MyFunc\ntarget: example.com/pkg\nbefore: MyBefore`,
+			wantErr: true,
+		},
+		{
+			name: "module defaults to path",
+			yaml: `
+func: MyFunc
+target: example.com/pkg
+before: MyBefore
+path: github.com/example/instrumentation/net/http/client
+`,
+			check: func(t *testing.T, r *InstFuncRule) {
+				assert.Equal(t,
+					"github.com/example/instrumentation/net/http/client",
+					r.Path,
+				)
+				assert.Equal(t, r.Path, r.ModulePath)
+			},
+		},
+		{
+			name: "import path not part of module path",
+			yaml: `
+func: MyFunc
+target: example.com/pkg
+before: MyBefore
+path: github.com/example/instrumentation/net/http/client
+module: github.com/example/pkg
+`,
 			wantErr: true,
 		},
 	}

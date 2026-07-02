@@ -6,8 +6,8 @@ import _otel_log "log"
 import _otel_debug "runtime/debug"
 import _ "unsafe"
 
-//go:linkname _getstatck0 github.com/example/pkg.OtelGetStackImpl
-var _getstatck0 = _otel_debug.Stack
+//go:linkname _getstack0 github.com/example/pkg.OtelGetStackImpl
+var _getstack0 = _otel_debug.Stack
 
 //go:linkname _printstack0 github.com/example/pkg.OtelPrintStackImpl
 var _printstack0 = func(bt []byte) { _otel_log.Printf(string(bt)) }
