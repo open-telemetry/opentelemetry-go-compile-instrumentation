@@ -61,6 +61,7 @@ The following libraries are automatically instrumented:
 | `go.mongodb.org/mongo-driver` | MongoDB DB spans |
 | `k8s.io/client-go` | K8s resource spans |
 | `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
+| `github.com/segmentio/kafka-go` | Kafka messaging spans |
 
 ## Learn More
 
