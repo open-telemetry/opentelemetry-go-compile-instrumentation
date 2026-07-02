@@ -1,5 +1,5 @@
 # The otel SDK floor tracks the version the injected instrumentation modules
-# require (pkg/instrumentation/shared); raise it together with those modules.
+# require (instrumentation/shared); raise it together with those modules.
 trace_context:
   target: go.opentelemetry.io/otel/sdk/trace
   version: "v1.43.0"

@@ -181,7 +181,7 @@ Per [ADR-0004](adr/0004-instrumentation-ownership-and-compatibility.md), the sup
 
 A failure means a declared version range does **not** actually work at one of its bounds: the bound cannot be installed (another module in the build graph, such as the instrumentation hook's own `go.mod`, forces a newer version), no published release is covered by the range at all, or the integration suite fails against the pinned version. The remediation is:
 
-1. Fix the rule's range in the relevant `pkg/instrumentation/.../*.yaml` file: raise the lower bound to the oldest version that actually works, or cap the range below the first version that breaks.
+1. Fix the rule's range in the relevant `instrumentation/.../*.yaml` file: raise the lower bound to the oldest version that actually works, or cap the range below the first version that breaks.
 2. If the wider range should stay supported, split the rule instead and add an implementation covering the versions the current hook cannot handle.
 3. Close the auto-opened `versionmatrix-failure` issue once the fix lands on `main`.
 

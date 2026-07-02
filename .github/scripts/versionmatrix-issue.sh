@@ -41,12 +41,12 @@ else
     --body "$(cat <<EOF
 The [VersionMatrix workflow](${RUN_URL}) failed on \`main\`.
 
-This means a declared version range in \`pkg/instrumentation/.../*.yaml\` does **not** work at one of its bounds: either the instrumented library version cannot be installed (another module in the build graph forces a different version) or the integration suite fails against it.
+This means a declared version range in \`instrumentation/.../*.yaml\` does **not** work at one of its bounds: either the instrumented library version cannot be installed (another module in the build graph forces a different version) or the integration suite fails against it.
 
 ## Remediation
 
 1. Identify the failing test and the library version that caused the break.
-2. Fix the rule's version range in the relevant \`pkg/instrumentation/.../*.yaml\` file: raise the lower bound to the oldest version that actually works, or cap the range below the first version that breaks.
+2. Fix the rule's version range in the relevant \`instrumentation/.../*.yaml\` file: raise the lower bound to the oldest version that actually works, or cap the range below the first version that breaks.
 3. If a wider range should stay supported, split the rule and add an implementation for the versions the current hook cannot handle.
 4. Close this issue once the fix lands on \`main\`.
 
