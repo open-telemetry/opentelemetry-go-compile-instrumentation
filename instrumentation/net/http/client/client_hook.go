@@ -89,6 +89,10 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 		return
 	}
 
+	if runtime.IsHTTPClientInstrumentationSuppressed(req.Context()) {
+		return
+	}
+
 	// Filter out OTel exporter requests to prevent infinite loops
 	ua := req.Header.Get("User-Agent")
 	if strings.HasPrefix(ua, otelExporterPrefix) || strings.HasPrefix(ua, "OTel Go OTLP") ||
