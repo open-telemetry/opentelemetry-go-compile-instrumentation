@@ -308,8 +308,8 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	// Write the matched hook to matched.txt for further instrument phase
-	return sp.store(matched)
+	// Write the matched ruleset to matched.json for further instrument phase
+	return sp.store(ctx, matched, moduleDirs)
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.

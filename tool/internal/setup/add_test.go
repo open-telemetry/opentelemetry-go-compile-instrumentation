@@ -37,15 +37,27 @@ func TestAddDeps(t *testing.T) {
 			matched: []*rule.InstRuleSet{
 				newTestRuleSet(
 					"github.com/example/pkg",
-					newTestFuncRule("github.com/example/pkg", "github.com/example/pkg"),
+					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg", "github.com/example/pkg")},
+					nil,
 				),
 			},
 			goldenFile: "single_func_rule.otelc.runtime.go.golden",
 		},
 		{
-			name: "no_func_rules",
+			name: "single_file_rule",
 			matched: []*rule.InstRuleSet{
-				newTestRuleSet("github.com/example/pkg"),
+				newTestRuleSet(
+					"github.com/example/pkg",
+					nil,
+					[]*rule.InstFileRule{newTestFileRule("github.com/example/pkg", "github.com/example/pkg")},
+				),
+			},
+			goldenFile: "single_file_rule.otelc.runtime.go.golden",
+		},
+		{
+			name: "no_rules",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet("github.com/example/pkg", nil, nil),
 			},
 			goldenFile: "",
 		},
@@ -54,11 +66,13 @@ func TestAddDeps(t *testing.T) {
 			matched: []*rule.InstRuleSet{
 				newTestRuleSet(
 					"github.com/example/pkg1",
-					newTestFuncRule("github.com/example/pkg1", "github.com/example/pkg1"),
+					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg1", "github.com/example/pkg1")},
+					[]*rule.InstFileRule{newTestFileRule("github.com/example/pkg2", "github.com/example/pkg2")},
 				),
 				newTestRuleSet(
 					"github.com/example/pkg2",
-					newTestFuncRule("github.com/example/pkg2", "github.com/example/pkg2"),
+					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg3", "github.com/example/pkg3")},
+					[]*rule.InstFileRule{newTestFileRule("github.com/example/pkg4", "github.com/example/pkg4")},
 				),
 			},
 			goldenFile: "multiple_rule_sets.otelc.runtime.go.golden",
@@ -98,7 +112,8 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	matched := []*rule.InstRuleSet{
 		newTestRuleSet(
 			"github.com/example/pkg",
-			newTestFuncRule("github.com/example/pkg", "github.com/example/pkg"),
+			[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg", "github.com/example/pkg")},
+			nil,
 		),
 	}
 
