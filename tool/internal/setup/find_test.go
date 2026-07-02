@@ -281,6 +281,7 @@ func TestListBuildPlan(t *testing.T) {
 
 	tests := []struct {
 		name          string
+		subcommand    string // defaults to "build" when empty
 		buildPlan     string
 		invocation    buildInvocation
 		expected      []string
@@ -375,6 +376,21 @@ echo nothing useful
 			invocation:    buildInvocation{command: "build", args: []string{"./..."}},
 			expected:      nil,
 			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./..."},
+		},
+		{
+			// The test subcommand must list a `go test` plan, which surfaces the
+			// test-augmented, external test, and test-main compiles that is_test
+			// gates on. A `go build` plan would never contain them.
+			name:       "test subcommand lists a go test plan",
+			subcommand: "test",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"./..."},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{"test", "-a", "-x", "-n", "./..."},
 		},
 	}
 

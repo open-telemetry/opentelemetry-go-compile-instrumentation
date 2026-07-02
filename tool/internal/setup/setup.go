@@ -145,6 +145,47 @@ var flagsWithPathValues = map[string]bool{
 	"-toolexec":      true,
 }
 
+// testFlagsWithValues contains `go test` flags that take a separate value
+// argument. Their values are not packages, so splitBuildTargets skips them when
+// scanning for package targets (e.g. `go test -run TestX ./pkg` — TestX is the
+// value of -run, not a package). `-args` is handled separately by
+// splitBuildTargets, which stops scanning at it.
+//
+//nolint:gochecknoglobals // private lookup table
+var testFlagsWithValues = map[string]bool{
+	"-bench":                true,
+	"-benchtime":            true,
+	"-blockprofile":         true,
+	"-blockprofilerate":     true,
+	"-count":                true,
+	"-coverprofile":         true,
+	"-cpu":                  true,
+	"-cpuprofile":           true,
+	"-fuzz":                 true,
+	"-fuzzminimizetime":     true,
+	"-fuzztime":             true,
+	"-list":                 true,
+	"-memprofile":           true,
+	"-memprofilerate":       true,
+	"-mutexprofile":         true,
+	"-mutexprofilefraction": true,
+	"-outputdir":            true,
+	"-parallel":             true,
+	"-run":                  true,
+	"-shuffle":              true,
+	"-skip":                 true,
+	"-timeout":              true,
+	"-trace":                true,
+	"-vet":                  true,
+}
+
+// Go subcommands that otelc wraps with toolexec instrumentation.
+const (
+	subcmdBuild   = "build"
+	subcmdInstall = "install"
+	subcmdTest    = "test"
+)
+
 const commandLineArgumentsPackage = "command-line-arguments"
 
 func absBuildPath(buildDir, target string) (string, error) {
@@ -235,20 +276,26 @@ func getBuildPackages(ctx context.Context, buildDir string, args []string) ([]*p
 func splitBuildTargets(buildDir string, args []string) ([]string, []string, error) {
 	var pkgs, files []string
 
-	for i := len(args) - 1; i >= 0; i-- {
+	// Scan forward and classify each argument. Packages and flags may interleave:
+	// `go build` conventionally puts flags first, but `go test` is commonly
+	// invoked as `go test ./pkg -run TestX`, so a position-based scan would miss
+	// the package. A flag in separated form consumes the next argument as its
+	// value (e.g. "-o out", "-run TestX"); skipping it keeps the value from being
+	// mistaken for a package. Joined form ("-tags=x") carries its own value.
+	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// If preceded by a flag that takes a path value, this is a flag value
-		// We want to avoid scenarios like "go build -o ./tmp ./app" where tmp also contains Go files,
-		// as it would be treated as a package.
-		if i > 0 && flagsWithPathValues[args[i-1]] {
+		// Everything after `-args` is passed to the test binary, not the go
+		// command, so it can contain neither packages nor go flags.
+		if arg == "-args" {
 			break
 		}
 
-		// If we hit a flag, stop. Packages come after all flags
-		// go build [-o output] [build flags] [packages]
 		if strings.HasPrefix(arg, "-") {
-			break
+			if !strings.Contains(arg, "=") && (flagsWithPathValues[arg] || testFlagsWithValues[arg]) {
+				i++ // skip this flag's separate value
+			}
+			continue
 		}
 
 		if filepath.Ext(arg) == ".go" {
@@ -580,9 +627,16 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
 
-	invocation, err := parseGoInvocation(cmd.Args().Slice())
-	if err != nil {
-		return err
+	if !cmd.Args().Present() {
+		return ex.Newf("no command provided. Only 'go build', 'go install' and 'go test' are supported")
+	}
+
+	switch cmd.Args().First() {
+	case subcmdBuild, subcmdInstall, subcmdTest:
+		// supported
+	default:
+		return ex.Newf("unsupported command: %s. Only 'go build', 'go install' and 'go test' are supported",
+			cmd.Args().First())
 	}
 
 	defer func() {

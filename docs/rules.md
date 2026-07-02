@@ -114,13 +114,22 @@ instrument_sql_exec:
 
 ### `where.file` semantics
 
-- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`.
+- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`, `is_test`.
   Combinator keys: `all-of`, `one-of`, `not`.
 - `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
+- `is_test` is a tri-state boolean that gates on whether the file belongs to a
+  test build — a compilation the Go toolchain produces only under `go test` (a
+  package augmented with its `_test.go` files, an external `xxx_test` package,
+  or the generated test-main runner). `is_test: true` matches only test builds,
+  `is_test: false` only non-test builds, and omitting it applies no filter. It
+  takes effect when building through `otelc go test`; a plain `otelc go build`
+  never produces test builds. Production code in a package whose tests are all
+  external (`package xxx_test`, no in-package `_test.go`) shares a single
+  compile with normal builds, so `is_test` cannot gate that code.
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
 - During the setup phase, leaf predicates (`has_func`, `has_recv`,
-  `has_struct`) and the `where.file` combinators documented below are
+  `has_struct`, `is_test`) and the `where.file` combinators documented below are
   executed. `has_directive`, and combinators placed at the top level of
   `where` (outside `where.file`), are validated but return a descriptive
   "not yet supported" error at build time.
