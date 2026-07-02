@@ -11,6 +11,7 @@
   - [`do` semantics](#do-semantics)
   - [Modifier names → rule types](#modifier-names--rule-types)
   - [Special `target` values](#special-target-values)
+  - [Glob targets](#glob-targets)
   - [Valid and invalid shapes](#valid-and-invalid-shapes)
 - [Rule Types](#rule-types)
   - [1. Function Hook Rule](#1-function-hook-rule)
@@ -56,7 +57,7 @@ rule_name:
 
 | Key       | Required | Meaning                                                            |
 | --------- | -------- | ------------------------------------------------------------------ |
-| `target`  | yes      | Package import path. Exact match against compile-time `-p` flag.   |
+| `target`  | yes      | Package import path or glob, matched against the `-p` flag.        |
 | `version` | no       | Version range `start_inclusive,end_exclusive`. Omit to match all.  |
 | `where`   | no       | Non-package selectors and file-level predicates.                   |
 | `do`      | yes      | Ordered modifier list. Modifier name declares the rule type.       |
@@ -65,7 +66,7 @@ rule_name:
 
 Field notes:
 
-- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package.
+- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package. May also be a glob to match a package family — see [Glob targets](#glob-targets).
 - `version` (string, optional): Specifies a version range for the target package using the format `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` matches versions ≥ `v0.11.0` and < `v0.12.0`. Omit to match all versions.
 - `where` (map, optional): Non-package selectors. Flat selector keys inside `where` are an implicit `all-of`. File-level predicates live under `where.file`. See [ADR-0003](adr/0003-structured-rule-schema.md#where-semantics) for the full list of selector keys and the qualifier composition (`all-of`, `one-of`, `not`).
 - `do` (sequence, required): Ordered list of modifier entries. Each entry is a single-key map whose key names the modifier (`inject_hooks`, `inject_code`, `add_struct_fields`, `add_file`, `wrap_call`, `expand_directive`, `assign_value`). A single-modifier rule may also use map form (`do: <modifier>: …`), but the canonical form is the sequence form.
@@ -248,8 +249,34 @@ Rules:
 
 - `target: main` — matches the compile-time package named `main`.
 - `target: test_main` — not currently supported; reserved for future work.
-- Wildcards in `target` are out of scope for this release and are tracked
-  separately.
+- An empty or whitespace-only `target` is rejected at load time: `target` is
+  the sole package selector, so a rule without one can never match.
+
+### Glob targets
+
+`target` accepts glob syntax so a single rule can instrument a whole package
+family instead of one exact import path. A target is treated as a glob when it
+contains any of `*`, `?`, `[`, or `{`; otherwise it stays an exact match and
+keeps the fast map-lookup path.
+
+Glob matching uses [`bmatcuk/doublestar`](https://github.com/bmatcuk/doublestar#patterns);
+`/` is the segment delimiter:
+
+| Pattern | Matches | Does **not** match |
+| --- | --- | --- |
+| `example.com/svc/*` | `example.com/svc/users` | `example.com/svc`, `example.com/svc/users/v2` |
+| `example.com/svc/**` | `example.com/svc` and every descendant (`example.com/svc/users/v2`) | `example.com/other` |
+
+- `*` matches within a single segment and never crosses `/`. `?`, `[...]`
+  character classes, and `{alt1,alt2}` alternation also work per doublestar.
+- `**` matches zero or more whole segments (`example.com/svc/**` matches both
+  `example.com/svc` and `example.com/svc/users/v2`). Per doublestar, a `**`
+  fused into a segment (`foo**`, `**bar`) is treated as a single-segment `*`.
+- A malformed pattern (for example an unclosed `[`) is rejected at load time. A
+  reversed range such as `[z-a]` is **not** an error; it simply never matches.
+
+See the [doublestar pattern reference](https://github.com/bmatcuk/doublestar#patterns)
+for the full grammar.
 
 ### Valid and invalid shapes
 

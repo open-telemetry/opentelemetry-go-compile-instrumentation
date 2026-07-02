@@ -1,0 +1,13 @@
+# A multi-segment glob "**" matches a real, deep package import path
+# (example.com/acme/svc/users) that lives under the targeted family
+# example.com/acme/**. This proves the evaluated glob path instruments a
+# realistic non-main library package, not just the single-segment "main".
+hook_glob_deep:
+  target: "example.com/acme/**"
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata/golden/target-glob-deep-match

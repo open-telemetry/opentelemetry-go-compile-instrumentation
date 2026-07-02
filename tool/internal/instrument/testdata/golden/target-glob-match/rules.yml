@@ -1,0 +1,12 @@
+# Instrument every package compiled into the binary (including main) by using
+# the multi-segment glob "**". This proves a glob target matches the package
+# under instrumentation, exercising the evaluated (non-exact) matching path.
+hook_glob:
+  target: "**"
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata/golden/target-glob-match
