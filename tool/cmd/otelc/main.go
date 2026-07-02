@@ -106,13 +106,18 @@ func main() {
 	}
 }
 
-func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+func initLogger(ctx context.Context, cmd *cli.Command) (_ context.Context, retErr error) {
 	workDir, err := filepath.Abs(cmd.String("work-dir"))
 	if err != nil {
 		return ctx, ex.Wrapf(err, "failed to resolve work directory %q", cmd.String("work-dir"))
 	}
 	if setErr := os.Setenv(util.EnvOtelcWorkDir, workDir); setErr != nil {
 		return ctx, ex.Wrapf(setErr, "failed to set %s", util.EnvOtelcWorkDir)
+	}
+
+	// Skip filesystem setup for lightweight subcommands that don't produce artifacts.
+	if cmd.Args().First() == "version" {
+		return ctx, nil
 	}
 
 	buildTempDir := util.GetBuildTempDir()
@@ -126,6 +131,11 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	if err != nil {
 		return ctx, ex.Wrapf(err, "failed to open log file %q", logFilename)
 	}
+	defer func() {
+		if retErr != nil {
+			_ = logFile.Close()
+		}
+	}()
 
 	level := slog.LevelInfo
 	if cmd.Bool("debug") {
@@ -148,6 +158,9 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	})
 	logger := slog.New(handler)
 	ctx = util.ContextWithLogger(ctx, logger)
+	// closeLogger is safe to call from the After hook: cli/v3 After is a defer
+	// closure that captures the ctx variable by reference, so the updated ctx
+	// from Before is visible when After runs.
 	ctx = util.ContextWithLogWriter(ctx, logFile)
 
 	return ctx, nil
