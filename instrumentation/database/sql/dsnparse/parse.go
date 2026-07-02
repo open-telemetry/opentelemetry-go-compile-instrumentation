@@ -6,6 +6,7 @@ package dsnparse
 import (
 	nurl "net/url"
 	"strings"
+	"sync"
 )
 
 // DSNInfo holds the parsed server address components and database name from a
@@ -27,23 +28,105 @@ func (d DSNInfo) Addr() string {
 	return d.Host + ":" + d.Port
 }
 
+// DSNParser parses a driver-specific data source name into structured
+// connection information. Implementations must never panic; they return a
+// zero-value DSNInfo when the DSN cannot be understood.
+type DSNParser interface {
+	Parse(dsn string) DSNInfo
+}
+
+// DSNParserFunc is an adapter that lets an ordinary function satisfy DSNParser.
+type DSNParserFunc func(dsn string) DSNInfo
+
+// Parse calls f(dsn).
+func (f DSNParserFunc) Parse(dsn string) DSNInfo { return f(dsn) }
+
+// registry holds DSNParser implementations indexed by driver name. It is safe
+// for concurrent use, so parsers may be registered from init() functions while
+// ParseDSN runs inside instrumentation hooks.
+type registry struct {
+	mu      sync.RWMutex
+	parsers map[string]DSNParser
+}
+
+func (r *registry) register(driverName string, parser DSNParser) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.parsers[driverName] = parser
+}
+
+func (r *registry) registerAll(parsers map[string]DSNParser) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, p := range parsers {
+		r.parsers[name] = p
+	}
+}
+
+func (r *registry) lookup(driverName string) (DSNParser, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	p, ok := r.parsers[driverName]
+	return p, ok
+}
+
+// defaultRegistry maps the built-in driver names to their parsers. Aliases that
+// share a wire format (e.g. pgx and lib/pq both speak the PostgreSQL DSN
+// format) point at the same parser.
+var defaultRegistry = &registry{
+	parsers: map[string]DSNParser{
+		"postgres":   DSNParserFunc(parsePostgresDSN),
+		"postgresql": DSNParserFunc(parsePostgresDSN),
+		"pgx":        DSNParserFunc(parsePostgresDSN),
+		"lib/pq":     DSNParserFunc(parsePostgresDSN),
+		"mysql":      DSNParserFunc(parseMySQLDSN),
+		"mariadb":    DSNParserFunc(parseMySQLDSN),
+		"sqlite3":    DSNParserFunc(parseSQLiteDSN),
+		"sqlite":     DSNParserFunc(parseSQLiteDSN),
+		"sqlserver":  DSNParserFunc(parseSQLServerDSN),
+		"mssql":      DSNParserFunc(parseSQLServerDSN),
+		"clickhouse": DSNParserFunc(parseClickHouseDSN),
+		"godror":     DSNParserFunc(parseOracleDSN),
+		"oracle":     DSNParserFunc(parseOracleDSN),
+		"oci8":       DSNParserFunc(parseOracleDSN),
+		"go-oci8":    DSNParserFunc(parseOracleDSN),
+	},
+}
+
+// RegisterDSNParser registers a custom DSN parser for driverName. Built-in
+// parsers are registered automatically; registering an already-known name
+// overwrites the previous parser. It is safe to call from init().
+func RegisterDSNParser(driverName string, parser DSNParser) {
+	defaultRegistry.register(driverName, parser)
+}
+
+// RegisterDSNParsers registers multiple DSN parsers under a single lock. Prefer
+// it over repeated RegisterDSNParser calls when registering several at once.
+func RegisterDSNParsers(parsers map[string]DSNParser) {
+	defaultRegistry.registerAll(parsers)
+}
+
 // ParseDSN parses a driver-specific data source name and returns structured
-// connection information. It tries multiple well-known formats in order and
-// never panics. Unrecognised drivers return a zero-value DSNInfo.
+// connection information. Registered drivers use their dedicated parser;
+// unregistered drivers fall back to a best-effort URL parse rather than
+// silently yielding an empty address. It never panics.
 func ParseDSN(driverName, dsn string) DSNInfo {
-	switch driverName {
-	case "postgres", "pgx", "postgresql":
-		return parsePostgresDSN(dsn)
-	case "mysql":
-		return parseMySQLDSN(dsn)
-	case "sqlite3", "sqlite":
-		return parseSQLiteDSN(dsn)
-	case "sqlserver", "mssql":
-		return parseSQLServerDSN(dsn)
-	case "clickhouse":
-		return parseClickHouseDSN(dsn)
-	case "godror", "oracle", "oci8", "go-oci8":
-		return parseOracleDSN(dsn)
+	if parser, ok := defaultRegistry.lookup(driverName); ok {
+		return parser.Parse(dsn)
+	}
+	return bestEffortParse(dsn)
+}
+
+// bestEffortParse extracts connection info from a DSN using standard URL
+// parsing. It is the fallback for drivers without a registered parser and
+// returns a zero-value DSNInfo when the DSN is not URL-shaped.
+func bestEffortParse(dsn string) DSNInfo {
+	if u, err := nurl.Parse(dsn); err == nil && u.Host != "" {
+		return DSNInfo{
+			Host:   u.Hostname(),
+			Port:   u.Port(),
+			DBName: strings.TrimPrefix(u.Path, "/"),
+		}
 	}
 	return DSNInfo{}
 }
