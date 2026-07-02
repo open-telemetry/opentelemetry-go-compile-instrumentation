@@ -137,3 +137,33 @@ func TestCloseLoggerNoWriter(t *testing.T) {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 }
+
+func TestCleanupSubcommand(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, "")
+	workDir := t.TempDir()
+
+	// Pre-create the workspace structure that setup would leave behind.
+	buildTemp := filepath.Join(workDir, util.BuildTempDir)
+	if err := os.MkdirAll(buildTemp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &cli.Command{
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "work-dir", Value: util.GetOtelcWorkDir()},
+		},
+		Before:   initLogger,
+		Commands: []*cli.Command{&commandCleanup},
+		After: func(ctx context.Context, _ *cli.Command) error {
+			return closeLogger(ctx)
+		},
+	}
+	args := []string{"otelc", "--work-dir", workDir, "cleanup"}
+	if err := app.Run(context.Background(), args); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(buildTemp); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be removed, stat err: %v", buildTemp, err)
+	}
+}
