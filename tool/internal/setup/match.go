@@ -96,16 +96,25 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 	return rules, nil
 }
 
+// isRuleFile checks if the given file name matches the following patterns:
+// otelc.yml, otelc.yaml, *.otelc.yml, *.otelc.yaml
+func isRuleFile(name string) bool {
+	return (name == "otelc.yml" ||
+		name == "otelc.yaml" ||
+		strings.HasSuffix(name, ".otelc.yml") ||
+		strings.HasSuffix(name, ".otelc.yaml"))
+}
+
 func loadDefaultRules() ([]rule.InstRule, error) {
-	// List all YAML files in the unzipped pkg directory, i.e. $BUILD_TEMP/instrumentation
+	// List all files in the unzipped pkg directory, i.e. $BUILD_TEMP/instrumentation
 	files, err := util.ListFiles(util.GetBuildTemp(unzippedInstDir))
 	if err != nil {
 		return nil, err
 	}
-	// Parse all YAML contents into rule instances
+	// Parse all rule YAML files
 	parsedRules := make([]rule.InstRule, 0)
 	for _, file := range files {
-		if !util.IsYamlFile(file) {
+		if !isRuleFile(filepath.Base(file)) {
 			continue
 		}
 		content, err1 := os.ReadFile(file)
@@ -256,6 +265,10 @@ func (sp *SetupPhase) preciseMatching(
 		ruleFilters = append(ruleFilters, ruleFilter{rule: r, where: f})
 	}
 
+	// IsTest is a property of the whole compile (every file in a test build
+	// shares it), so compute it once and reuse it across each file's context.
+	isTest := isTestBuild(dep.Sources)
+
 	for _, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -279,7 +292,7 @@ func (sp *SetupPhase) preciseMatching(
 		// evaluated against that file. All fields are constant for a given
 		// source file, so no updates are needed inside the inner loop.
 		mctx := MatchContext{
-			ImportPath: dep.ImportPath,
+			IsTest:     isTest,
 			SourceFile: source,
 			AST:        tree,
 		}
@@ -296,6 +309,31 @@ func (sp *SetupPhase) preciseMatching(
 		}
 	}
 	return set, nil
+}
+
+// isTestBuild reports whether a compile invocation is part of a `go test` run.
+// The Go toolchain only ever feeds these inputs to the compiler while building
+// a test binary: a package augmented with its in-package _test.go files, the
+// external xxx_test package (whose sources are also _test.go files), and the
+// generated _testmain.go runner. None of them appear in a normal `go build`,
+// so their presence in the source set is the signal. There is no dedicated
+// "is test" compiler flag — verified against the toolchain — so the source set
+// is the only thing to key on.
+//
+// ponytail: known gap, no fix possible at compile granularity. A package whose
+// tests live only in an external xxx_test package (no in-package _test.go) is
+// compiled once and shared between normal and test builds — the toolchain emits
+// no test-only variant of it — so is_test cannot gate that package's production
+// code. The external xxx_test package and any in-package _test.go files are
+// still detected.
+func isTestBuild(sources []string) bool {
+	for _, src := range sources {
+		base := filepath.Base(src)
+		if base == "_testmain.go" || strings.HasSuffix(base, "_test.go") {
+			return true
+		}
+	}
+	return false
 }
 
 // matchOneRule performs precise AST matching for a single rule against a parsed
@@ -358,41 +396,17 @@ func (sp *SetupPhase) matchOneRule(
 	return nil
 }
 
-func ruleFromDir(path string) ([]string, error) {
-	ruleFilePatterns := []string{"*.otelc.yaml", "*.otelc.yml"}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to stat %s", path)
-	}
-
-	if !info.IsDir() {
-		return []string{path}, nil
-	}
-
+func rulesFromDir(path string) ([]string, error) {
 	var filesToProcess []string
 
 	// Recursively traverse to each directories and include the rule files
-	err = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if d.IsDir() {
-			return nil
-		}
-
-		var matched bool
-		for _, pat := range ruleFilePatterns {
-			matched, err = filepath.Match(pat, filepath.Base(p))
-			if err != nil {
-				return ex.Wrapf(err, "bad pattern %s", pat)
-			}
-
-			if matched {
-				filesToProcess = append(filesToProcess, p)
-				break
-			}
+		if !d.IsDir() && isRuleFile(d.Name()) {
+			filesToProcess = append(filesToProcess, p)
 		}
 
 		return nil
@@ -417,9 +431,19 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 		path = strings.TrimSpace(path)
 
 		// Get all rule files from path (file or directory)
-		files, err := ruleFromDir(path)
+		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return nil, ex.Wrapf(err, "failed to stat %s", path)
+		}
+
+		var files []string
+		if info.IsDir() {
+			files, err = rulesFromDir(path)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			files = []string{path}
 		}
 		for _, file := range files {
 			content, err = os.ReadFile(file)
@@ -452,11 +476,7 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
 		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
-		content, err := os.ReadFile(filepath.Clean(rulePath))
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to read %s from env variable", rulePath)
-		}
-		return parseRuleFromYaml(content)
+		return loadCustomRules(rulePath)
 	}
 
 	// Load custom rule(s) from config file if specified

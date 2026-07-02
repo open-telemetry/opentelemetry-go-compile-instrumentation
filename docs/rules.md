@@ -115,13 +115,22 @@ instrument_sql_exec:
 
 ### `where.file` semantics
 
-- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`.
+- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`, `is_test`.
   Combinator keys: `all-of`, `one-of`, `not`.
 - `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
+- `is_test` is a tri-state boolean that gates on whether the file belongs to a
+  test build — a compilation the Go toolchain produces only under `go test` (a
+  package augmented with its `_test.go` files, an external `xxx_test` package,
+  or the generated test-main runner). `is_test: true` matches only test builds,
+  `is_test: false` only non-test builds, and omitting it applies no filter. It
+  takes effect when building through `otelc go test`; a plain `otelc go build`
+  never produces test builds. Production code in a package whose tests are all
+  external (`package xxx_test`, no in-package `_test.go`) shares a single
+  compile with normal builds, so `is_test` cannot gate that code.
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
 - During the setup phase, leaf predicates (`has_func`, `has_recv`,
-  `has_struct`) and the `where.file` combinators documented below are
+  `has_struct`, `is_test`) and the `where.file` combinators documented below are
   executed. `has_directive`, and combinators placed at the top level of
   `where` (outside `where.file`), are validated but return a descriptive
   "not yet supported" error at build time.
@@ -356,6 +365,7 @@ This is the most common rule type. It injects function calls at the beginning (`
 - `before` (string, optional): The name of the function to be called at the entry of the target function.
 - `after` (string, optional): The name of the function to be called just before the target function returns.
 - `path` (string, required): The import path for the package containing the `before` and `after` hook functions.
+- `module` (string, optional): The module path where the hook functions are located. This is needed for built-in packages if import path is not a module root. Not required for external instrumentation packages.
 
 **Example:**
 
@@ -927,6 +937,9 @@ This rule adds a new Go source file to the target package.
 
 - `file` (string, required): The name of the new file to be added (e.g., `newfile.go`).
 - `path` (string, required): The import path of the package where the content of the new file is located. The instrumentation tool will find the file within this package.
+
+  The package referenced by `path` must be importable by `go/packages`. If the implementation files are marked with `//go:build ignore` (for example because they rely on otelc compile-time transformations), include a small buildable stub file so the package remains importable during rule resolution.
+- `module` (string, optional): The module path where the file is located. This is needed for built-in packages if import path is not a module root. Not required for external instrumentation packages.
 
 **Example:**
 

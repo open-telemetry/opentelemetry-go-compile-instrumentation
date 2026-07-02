@@ -1,0 +1,3 @@
+# Error: is_test combined with has_func — explicit composition required
+is_test: true
+has_func: TestMain

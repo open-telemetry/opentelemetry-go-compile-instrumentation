@@ -74,7 +74,7 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 
 // listBuildPlan lists the build plan by running `go build -a -x -n`
 // and then filtering the commands (cd, cgo, compile) from the build plan log.
-func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]string, error) {
+func (sp *SetupPhase) listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]string, error) {
 	const buildPlanLogName = "build-plan.log"
 
 	// Create a build plan log file in the temporary directory
@@ -83,8 +83,16 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, cmdArgs []string) ([]st
 		return nil, ex.Wrapf(err, "failed to create build plan log file")
 	}
 	defer buildPlanLog.Close()
-	// The full build command is: "go build/install -a -x -n  {...}"
-	prefix := []string{"build", "-a", "-x", "-n"}
+	// The dry run lists the compile commands the toolchain would issue. `go test`
+	// needs its own plan because only it surfaces the test-augmented, external
+	// test, and test-main compiles that is_test gates on. `go install` shares
+	// `go build`'s compile plan, so it stays on the build verb.
+	planVerb := subcmdBuild
+	if subcommand == subcmdTest {
+		planVerb = subcmdTest
+	}
+	// The full command is: "go build/test -a -x -n {...}"
+	prefix := []string{planVerb, "-a", "-x", "-n"}
 	args := make([]string, 0, len(prefix)+len(cmdArgs))
 	args = append(args, prefix...)
 	args = append(args, cmdArgs...) // args from original build/install or setup command
@@ -196,8 +204,8 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 }
 
 // findDeps finds dependencies by listing the build plan.
-func (sp *SetupPhase) findDeps(ctx context.Context, cmdArgs []string) ([]*Dependency, error) {
-	buildPlan, err := sp.listBuildPlan(ctx, cmdArgs)
+func (sp *SetupPhase) findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Dependency, error) {
+	buildPlan, err := sp.listBuildPlan(ctx, subcommand, cmdArgs)
 	if err != nil {
 		return nil, err
 	}

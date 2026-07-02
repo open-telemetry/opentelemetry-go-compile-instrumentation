@@ -307,6 +307,7 @@ target: github.com/example/lib
 func: TestFunc
 target: github.com/example/lib
 before: MyHook1Before
+path: github.com/example/lib
 `,
 			ruleName:     "test-func-rule",
 			expectError:  false,
@@ -317,6 +318,7 @@ before: MyHook1Before
 			yamlContent: `
 file: test.go
 target: github.com/example/lib
+path: github.com/example/lib
 `,
 			ruleName:     "test-file-rule",
 			expectError:  false,
@@ -589,6 +591,29 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	require.Len(t, rules, 2)
 }
 
+func TestIsRuleFile(t *testing.T) {
+	tests := []struct {
+		filename string
+		expected bool
+	}{
+		{"otelc.yaml", true},
+		{"otelc.yml", true},
+		{"client.otelc.yaml", true},
+		{"server.otelc.yml", true},
+		{"rules.yaml", false},
+		{"otelc.client.yaml", false},
+		{"otelc", false},
+		{"otelc.txt", false},
+		{"otelc.yaml.bak", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isRuleFile(tt.filename))
+		})
+	}
+}
+
 func TestLoadDefaultRules(t *testing.T) {
 	// Write custom rules to temporary files
 	content1 := `h1:
@@ -784,6 +809,87 @@ func TestPreciseMatching_WhereFileNot(t *testing.T) {
 	require.NotContains(t, result.FuncRules, noMatchFile)
 }
 
+func TestPreciseMatching_IsTestFilter(t *testing.T) {
+	// A test build is identified by _test.go files in the compile's source set —
+	// what `go test` feeds the compiler — not by the import path. is_test:true
+	// matches every file in such a build, including the production handler.go;
+	// is_test:false matches only non-test builds. Handle lives in handler.go, so
+	// adding handler_test.go to the source set is what flips the build to a test
+	// build without moving the matched function.
+	prodSrc := writeGoSource(t, "handler.go", "package main\n\nfunc Handle() {}\n")
+	testSrc := writeGoSource(t, "handler_test.go",
+		"package main\n\nimport \"testing\"\n\nfunc TestHandle(t *testing.T) { Handle() }\n")
+
+	tests := []struct {
+		name        string
+		shouldMatch bool // where.file.is_test
+		sources     []string
+		wantMatched bool
+	}{
+		{
+			name:        "is_test=true matches a test build",
+			shouldMatch: true,
+			sources:     []string{prodSrc, testSrc},
+			wantMatched: true,
+		},
+		{
+			name:        "is_test=true does not match a non-test build",
+			shouldMatch: true,
+			sources:     []string{prodSrc},
+			wantMatched: false,
+		},
+		{
+			name:        "is_test=false matches a non-test build",
+			shouldMatch: false,
+			sources:     []string{prodSrc},
+			wantMatched: true,
+		},
+		{
+			name:        "is_test=false does not match a test build",
+			shouldMatch: false,
+			sources:     []string{prodSrc, testSrc},
+			wantMatched: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shouldMatch := tt.shouldMatch
+			funcRule := &rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:   "test-is-test-filter",
+					Target: "example.com/svc",
+					Where: &rule.WhereDef{
+						File: &rule.FilterDef{IsTest: &shouldMatch},
+					},
+				},
+				Func:   "Handle",
+				Before: "BeforeHandle",
+				Path:   "example.com/hooks",
+			}
+
+			dep := &Dependency{
+				ImportPath: "example.com/svc",
+				Sources:    tt.sources,
+			}
+
+			sp := newTestSetupPhase()
+			set := rule.NewInstRuleSet(dep.ImportPath)
+
+			result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+			require.NoError(t, err)
+
+			if tt.wantMatched {
+				require.Len(t, result.FuncRules, 1,
+					"is_test=%v with sources %v: expected rule to match", tt.shouldMatch, tt.sources)
+			} else {
+				require.Empty(t, result.FuncRules,
+					"is_test=%v with sources %v: expected rule not to match", tt.shouldMatch, tt.sources)
+			}
+		})
+	}
+}
+
 func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 	srcFile := writeGoSource(t, "src.go", "package main\n\nfunc Foo() {}\n")
 
@@ -828,11 +934,27 @@ func newTestFuncRule(path, target string) *rule.InstFuncRule {
 	}
 }
 
-func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.InstRuleSet {
+func newTestFileRule(path, target string) *rule.InstFileRule {
+	return &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Target: target,
+		},
+		Path: path,
+	}
+}
+
+func newTestRuleSet(
+	modulePath string,
+	funcRules []*rule.InstFuncRule,
+	fileRules []*rule.InstFileRule,
+) *rule.InstRuleSet {
 	rs := rule.NewInstRuleSet(modulePath)
 	fakeFilePath := filepath.Join(os.TempDir(), "file.go")
 	for _, fr := range funcRules {
 		rs.AddFuncRule(fakeFilePath, fr)
+	}
+	for _, fr := range fileRules {
+		rs.AddFileRule(fr)
 	}
 	return rs
 }
@@ -855,6 +977,7 @@ func TestRunMatch_FileRuleOnlySetsPackageName(t *testing.T) {
 	yamlContent := []byte(`
 file: hook.go
 target: example.com/mypkg
+path: example.com/mypkg
 `)
 	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
 	require.NoError(t, err)
@@ -947,6 +1070,7 @@ func TestRunMatch_FileRuleInvalidSource(t *testing.T) {
 	yamlContent := []byte(`
 file: hook.go
 target: example.com/mypkg
+path: example.com/mypkg
 `)
 	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
 	require.NoError(t, err)
@@ -972,6 +1096,7 @@ func TestRunMatch_FileRuleNoSources(t *testing.T) {
 	yamlContent := []byte(`
 file: hook.go
 target: example.com/mypkg
+path: example.com/mypkg
 `)
 	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
 	require.NoError(t, err)

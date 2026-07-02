@@ -5,16 +5,19 @@ package setup
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/mod/modfile"
+
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
 func TestParseGoMod(t *testing.T) {
@@ -168,63 +171,186 @@ func TestSyncDeps_NoRules(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestSyncDeps_WithRules(t *testing.T) {
+//nolint:revive // if we add named returns then nonamedreturns will complain
+func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, string, string) {
 	tempDir := t.TempDir()
 
-	// Create a go.mod in temp directory
-	gomodPath := filepath.Join(tempDir, "go.mod")
-	gomodContent := `module example.com/test
+	goModPath := filepath.Join(tempDir, "go.mod")
+	require.NoError(t, os.WriteFile(goModPath, []byte(goMod), 0o644))
+
+	t.Chdir(tempDir)
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	buildTempDir := util.GetBuildTempDir()
+
+	pkgDir := filepath.Join(buildTempDir, unzippedPkgDir)
+	pkgRuntimeDir := filepath.Join(pkgDir, "runtime")
+	instDir := filepath.Join(buildTempDir, unzippedInstDir)
+
+	require.NoError(t, os.MkdirAll(pkgRuntimeDir, 0o755))
+	require.NoError(t, os.MkdirAll(instDir, 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pkgDir, "go.mod"),
+		[]byte("module "+util.OtelcPkgRoot+"\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(instDir, "go.mod"),
+		[]byte("module "+util.OtelcInstRoot+"\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pkgRuntimeDir, "go.mod"),
+		[]byte("module "+util.OtelcPkgRoot+"/runtime\ngo 1.21\n"),
+		0o644,
+	))
+
+	for _, path := range instPaths {
+		instPath := filepath.Join(instDir, path)
+		require.NoError(t, os.MkdirAll(instPath, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(instPath, "go.mod"),
+			[]byte("module "+util.OtelcInstRoot+"/"+path+"\ngo 1.21\n"),
+			0o644,
+		))
+	}
+
+	return tempDir, buildTempDir, goModPath
+}
+
+func TestSyncDeps_WithRules(t *testing.T) {
+	tests := []struct {
+		name      string
+		funcRules []*rule.InstFuncRule
+		fileRules []*rule.InstFileRule
+		instPaths []string
+	}{
+		{
+			name: "func rule",
+			funcRules: []*rule.InstFuncRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "func"},
+				ModulePath:   util.OtelcInstRoot + "/net/http/client",
+			}},
+			instPaths: []string{"net/http/client"},
+		},
+		{
+			name: "file rule",
+			fileRules: []*rule.InstFileRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "file"},
+				ModulePath:   util.OtelcInstRoot + "/runtime",
+			}},
+			instPaths: []string{"runtime"},
+		},
+		{
+			name: "func and file rule",
+			funcRules: []*rule.InstFuncRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "func"},
+				ModulePath:   util.OtelcInstRoot + "/net/http/client",
+			}},
+			fileRules: []*rule.InstFileRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "file"},
+				ModulePath:   util.OtelcInstRoot + "/runtime",
+			}},
+			instPaths: []string{"net/http/client", "runtime"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			goMod := `module example.com/test
 
 go 1.21
 `
-	err := os.WriteFile(gomodPath, []byte(gomodContent), 0o644)
-	require.NoError(t, err)
+			tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, tt.instPaths)
 
-	// Change to temp directory
-	t.Chdir(tempDir)
+			sp := &SetupPhase{
+				logger: slog.Default(),
+			}
 
-	// Set environment variable to override build temp dir
-	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+			ruleSet := &rule.InstRuleSet{
+				FileRules: tt.fileRules,
+			}
+			if len(tt.funcRules) > 0 {
+				ruleSet.FuncRules = map[string][]*rule.InstFuncRule{
+					"test.go": tt.funcRules,
+				}
+			}
 
-	// Create the pkg directory structure
-	pkgDir := filepath.Join(tempDir, "pkg")
-	err = os.MkdirAll(pkgDir, 0o755)
-	require.NoError(t, err)
-	pkgGoMod := filepath.Join(pkgDir, "go.mod")
-	err = os.WriteFile(pkgGoMod, []byte("module "+util.OtelcRoot+"/pkg\ngo 1.21\n"), 0o644)
-	require.NoError(t, err)
+			require.NoError(t, sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir))
+
+			content, err := os.ReadFile(goModPath)
+			require.NoError(t, err)
+			got := string(content)
+
+			assert.Contains(t, got, "replace "+util.OtelcPkgRoot+" => "+filepath.Join(buildTempDir, unzippedPkgDir))
+			assert.Contains(
+				t,
+				got,
+				"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(buildTempDir, unzippedPkgDir, "runtime"),
+			)
+			assert.Contains(t, got, "replace "+util.OtelcInstRoot+" => "+filepath.Join(buildTempDir, unzippedInstDir))
+			for _, path := range tt.instPaths {
+				assert.Contains(t, got,
+					"replace "+util.OtelcInstRoot+"/"+path+" => "+filepath.Join(buildTempDir, unzippedInstDir, path))
+			}
+		})
+	}
+}
+
+func TestSyncDeps_ExistingReplace(t *testing.T) {
+	goMod := fmt.Sprintf(`module example.com/test
+
+go 1.21
+
+replace %s => /already/there
+`, util.OtelcInstRoot+"/net/http/client")
+
+	tempDir, buildTempDir, goModPath := setupSyncDepsTest(
+		t,
+		goMod,
+		[]string{"net/http/client"},
+	)
 
 	sp := &SetupPhase{
 		logger: slog.Default(),
 	}
 
-	// Create a mock rule with a path
-	funcRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{
-			Name: "test-rule",
-		},
-		Path: util.OtelcRoot + "/instrumentation/net/http/client",
-	}
-
 	ruleSet := &rule.InstRuleSet{
 		FuncRules: map[string][]*rule.InstFuncRule{
-			"test.go": {funcRule},
+			"test.go": {
+				{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "func",
+					},
+					ModulePath: util.OtelcInstRoot + "/net/http/client",
+				},
+			},
 		},
 	}
 
-	err = sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir)
-	// This will likely fail due to missing instrumentation directories,
-	// but we're testing that it attempts to add replaces
-	if err != nil {
-		t.Logf("syncDeps failed (expected in test): %v", err)
-	}
+	require.NoError(t, sp.syncDeps(t.Context(), []*rule.InstRuleSet{ruleSet}, tempDir))
 
-	// Read back the go.mod and check if replaces were added
-	content, err := os.ReadFile(gomodPath)
+	content, err := os.ReadFile(goModPath)
 	require.NoError(t, err)
+	got := string(content)
 
-	// At minimum, the pkg replace should be added
-	assert.Contains(t, string(content), "replace")
+	assert.Contains(t, got,
+		"replace "+util.OtelcInstRoot+"/net/http/client => /already/there")
+
+	assert.NotContains(
+		t,
+		got,
+		"replace "+util.OtelcInstRoot+"/net/http/client => "+filepath.Join(
+			buildTempDir,
+			unzippedInstDir,
+			"net/http/client",
+		),
+	)
+
+	assert.Equal(t, 1,
+		strings.Count(got,
+			"replace "+util.OtelcInstRoot+"/net/http/client"))
 }
 
 func warnCapture() (*SetupPhase, *bytes.Buffer) {
@@ -314,8 +440,9 @@ require (
 			require.NoError(t, sp.warnVersion(gomodPath, before))
 
 			logged := buf.String()
-			assert.Contains(t, logged, "Bumped go version")
-			assert.Contains(t, logged, test.goVersion+" -> 1.25.0")
+			assert.Contains(t, logged, "bumped go version")
+			assert.Contains(t, logged, "old="+test.goVersion)
+			assert.Contains(t, logged, "new=1.25.0")
 		})
 	}
 }
@@ -344,8 +471,10 @@ require (
 	require.NoError(t, sp.warnVersion(gomodPath, before))
 
 	logged := buf.String()
-	assert.Contains(t, logged, "Bumped dependency go.opentelemetry.io/otel")
-	assert.Contains(t, logged, "v1.38.0 -> v1.43.0")
+	assert.Contains(t, logged, "bumped dependency")
+	assert.Contains(t, logged, "module=go.opentelemetry.io/otel")
+	assert.Contains(t, logged, "old=v1.38.0")
+	assert.Contains(t, logged, "new=v1.43.0")
 }
 
 func TestWarnVersion_NoChange(t *testing.T) {
