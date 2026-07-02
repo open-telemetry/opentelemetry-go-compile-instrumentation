@@ -6,11 +6,15 @@ package pkgload
 
 import (
 	"context"
+	"path/filepath"
 
 	"golang.org/x/tools/go/packages"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
+
+const CommandLineArgumentsPackage = "command-line-arguments"
 
 // LoadPackages wraps packages.Load with context and build flags.
 func LoadPackages(
@@ -106,8 +110,15 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 	return result, nil
 }
 
-// ResolveModuleDir returns the module directory for a given package directory.
-func ResolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
+func GetPackageDir(pkg *packages.Package) string {
+	if len(pkg.GoFiles) > 0 {
+		return filepath.Dir(pkg.GoFiles[0])
+	}
+	return ""
+}
+
+// resolveModuleDir returns the module directory for a given package directory.
+func resolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
 	pkgs, err := LoadPackages(ctx, packages.NeedModule, nil, pkgDir)
 	if err != nil {
 		return "", err
@@ -127,4 +138,39 @@ func ResolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
 	}
 
 	return pkg.Module.Dir, nil
+}
+
+func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) (map[string]bool, error) {
+	logger := util.LoggerFromContext(ctx)
+
+	moduleDirs := make(map[string]bool)
+	for _, pkg := range pkgs {
+		// file-based builds use synthetic "command-line-arguments" packages
+		if pkg.Module == nil && pkg.PkgPath != CommandLineArgumentsPackage {
+			logger.WarnContext(ctx, "skipping package without module", "package", pkg.PkgPath)
+			continue
+		}
+
+		var moduleDir string
+		if pkg.Module != nil {
+			moduleDir = pkg.Module.Dir
+		} else {
+			pkgDir := GetPackageDir(pkg)
+			if pkgDir == "" {
+				logger.WarnContext(ctx, "skipping package without Go files", "package", pkg.PkgPath)
+				continue
+			}
+
+			modDir, err := resolveModuleDir(ctx, pkgDir)
+			if err != nil {
+				return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
+			}
+
+			moduleDir = modDir
+		}
+
+		moduleDirs[moduleDir] = true
+	}
+
+	return moduleDirs, nil
 }

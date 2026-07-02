@@ -13,6 +13,8 @@
   - [Special `target` values](#special-target-values)
   - [Glob targets](#glob-targets)
   - [Valid and invalid shapes](#valid-and-invalid-shapes)
+- [Loading Rules](#loading-rules)
+  - [Rule Source Precedence](#rule-source-precedence)
 - [Rule Types](#rule-types)
   - [1. Function Hook Rule](#1-function-hook-rule)
   - [2. Struct Field Injection Rule](#2-struct-field-injection-rule)
@@ -30,6 +32,8 @@
 This document explains the different types of instrumentation rules used by the Go compile-time instrumentation tool. These rules, defined in YAML files, allow for the injection of code into target Go packages.
 
 The schema is the 2-tier `target` / `version` + `where` / `do` surface decided in [ADR-0003](adr/0003-structured-rule-schema.md). `where` carries non-package selectors, `do` carries modifiers, and the modifier name in `do` declares the rule type.
+
+Rules are typically distributed as `*.otelc.yml` files within instrumentation packages. Instrumentation packages may also contain an `otel.instrumentation.go` (or `otelc.tool.go`) file that composes other instrumentation packages through blank imports.
 
 ## Schema Reference
 
@@ -338,6 +342,35 @@ invalid_where_file_shape:
         file: helpers.go
         path: github.com/example/helpers
 ```
+
+---
+
+## Loading Rules
+
+Rules are normally distributed through instrumentation packages and enabled using `otel.instrumentation.go` (or `otelc.tool.go`) or `.otel.yml` config files.
+
+For development and debugging, rules may also be loaded directly using the `--rules` (or `OTELC_RULES` environment variable) flag.
+
+### Rule Source Precedence
+
+When multiple rule sources are present, `otelc` resolves them using the following precedence order (highest to lowest):
+
+1. `OTELC_RULES` environment variable
+2. `--rules` flag
+3. `otel.instrumentation.go` / `otelc.tool.go`
+4. `.otel.yml`
+
+Only the highest-precedence source that is present is used.
+
+For example:
+
+- If `OTELC_RULES` is set, all other rule sources are ignored.
+- If `--rules` is provided, discovery through tool files and `.otel.yml`
+  is skipped.
+- If an `otel.instrumentation.go` (or `otelc.tool.go`) file exists, automatic
+  rule discovery from `.otel.yml` is not used.
+- `.otel.yml` is only considered when no higher-precedence rule source is
+  available.
 
 ---
 

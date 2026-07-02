@@ -10,9 +10,10 @@ matures, and receives user feedback.
 ## Intended Purpose
 
 The OpenTelemetry Go compile-time instrumentation tool allows users to
-instrument their full application automatically, without having to perform any
-significant code change beyond adding simple, well-defined configuration that
-may be as simple as adding the relevant tool dependencies.
+instrument their applications automatically, without requiring manual
+instrumentation code changes. Users may explicitly declare instrumentations
+through simple, source-controlled configuration, or rely on automatic
+instrumentation discovery for a zero-configuration experience.
 
 The main value proposition is:
 
@@ -164,16 +165,11 @@ tool at various steps in the software development lifecycle:
 To allow for this, the `otelc` tool allows managing configuration in several
 ways:
 
-1. Using `tool` dependencies (requires `go1.24` or newer) allows the tool to be
-   used by the simpler invocation `go tool otelc`, and has all instrumentation
-   configuration made available by `tool` dependencies, without requiring the
-   addition of any new `.go` or `.yml` file;
+1. Using an `otel.instrumentation.go` file (or the equivalent compatibility
+   alias `otelc.tool.go`) allows instrumentation packages to be declared
+   explicitly in source control and managed as normal Go module dependencies.
 
-2. Using a `otel.instrumentation.go` file is an alternate strategy that is
-   fully supported by `go1.23`, and allows more direct control over what
-   instrumentation is included in the projects' configuration;
-
-3. The `.otel.yml` file allows injecting configuration directly within the
+2. The `.otel.yml` file allows injecting configuration directly within the
    CI/CD pipeline without persisting any change to the project's source code
    &ndash; but has the disadvantage of making hermetic or reproducible builds
    more difficult (the `go.mod` and `go.sum` files ought to be considered as
@@ -220,34 +216,64 @@ otelc go build -o /bin ./myapp1 ./myapp2
 All packages specified in the build command will be instrumented with the same
 configuration, ensuring consistent observability across your application.
 
+#### Building Multiple Modules in a Go Workspace
+
+When multiple modules are built in a single invocation, `otelc` computes a
+single instrumentation rule set for the entire build.
+
+If multiple modules provide `otel.instrumentation.go` (or `otelc.tool.go`)
+files, the resulting rule set is the union of the instrumentations declared by
+all participating modules. As a result, an instrumentation enabled by one
+module may also be applied to binaries produced from another module in the same
+build if both binaries depend on matching libraries.
+
+For example, if `module-a` enables instrumentation package `X` and `module-b`
+does not, building both modules together may still cause instrumentation `X`
+to be applied to code compiled for `module-b` if matching dependencies are
+present.
+
+Similarly, if at least one module participating in the build provides an
+explicit instrumentation configuration file, `otelc` will use the discovered
+instrumentation packages to construct the build-wide rule set. Modules without
+an instrumentation file will not receive an independently generated temporary
+configuration.
+
+Users building multiple modules within a `go.work` workspace should therefore
+take care when mixing modules with different instrumentation requirements. When
+isolation is required, build the modules in separate `otelc` invocations.
+
 ### Ongoing Maintenance
 
-Since the tool and configuration are registered in the `go.mod` file, users are
-able to keep these dependencies up-to-date using the standard tools and
-processes they use for any other dependency.
+Instrumentation packages are tracked as normal Go module dependencies and can be
+updated using the same dependency management workflows as any other Go module.
 
-They are also able to modify what configuration gets applied by changing the
-configuration according to their set up style, either:
+Users can modify which instrumentations are enabled by adding or removing blank
+imports in `otel.instrumentation.go` (or `otelc.tool.go`).
 
-- directly in the `go.mod` file by adding or removing `tool` dependencies,
-- in the `otel.instrumentation.go` file by adding or removing `import`
-  declarations.
+Standard Go tooling such as `go get`, `go mod tidy`, and dependency update
+automation can be used to keep instrumentation packages up to date.
 
 ### Custom Configuration
 
-Users may wish to add their own, application-specific automatic instrumentation
-configuration. This is achieved by adding a `.otel.yml` file in the same
-directory as the application's `go.mod` file. Such instructions will be used
-only when building packages in this module's context (and not when the module's
-packages are dependencies of an automatically-instrumented application).
+Users may wish to add their own application-specific instrumentation in
+addition to the instrumentations provided by third-party instrumentation
+packages.
 
-The contents of such configuration files uses the same schema as the
-[instrumentation packages](#instrumentation-packages) definitions file.
+`otelc` supports three mechanisms for supplying instrumentation
+configuration:
+
+- `otel.instrumentation.go` (or the compatibility alias `otelc.tool.go`),
+  which declares instrumentation packages through Go imports;
+- `.otel.yml`, which provides module-local instrumentation configuration;
+- `--rules`, which allows an explicit rule set to be supplied at build time.
+
+All rule files use the same schema described in the
+[instrumentation packages](#instrumentation-packages) section.
 
 ### Clean-Room Usage
 
 Some users want to be able to apply compile-time instrumentation to a codebase
-without many _any_ modification to it.
+without making _any_ modification to it.
 
 To support these users, the `otelc` tool can be used without making any
 persistent modifications to the codebase: when using `otelc go build` without
@@ -267,7 +293,7 @@ the explicit set-up procedure.
 
 Removing auto-instrumentation configuration is as simple as removing the related
 tool dependencies from `go.mod` and removing the `otel.instrumentation.go`
-file.
+(or `otelc.tool.go`) file.
 
 ## Instrumentation Packages
 
@@ -275,11 +301,14 @@ A majority of users of the OpenTelemetry compile-time instrumentation tool will
 rely on instrumentation packages to instrument their application. These are
 standard Go packages that are part of a Go module and contain either (or both):
 
-- a `otel.instrumentation.yml` file that declares all instrumentation
-  configuration that is vended by this package (using the schema defined in the
-  next section);
-- a `otel.instrumentation.go` file that imports at least one valid
-  instrumentation package:
+- one or more `*.otelc.yml` rule files that declare instrumentation
+  configuration (using the schema described in the next section);
+- an `otel.instrumentation.go` file (or `otelc.tool.go`) that imports
+  one or more instrumentation packages.
+
+Instrumentation packages may compose other instrumentation packages by importing them from
+their tool file. These imports are resolved recursively, allowing larger instrumentation
+distributions to be assembled from smaller, reusable packages.
 
   ```go
   //go:build tools
@@ -291,11 +320,15 @@ standard Go packages that are part of a Go module and contain either (or both):
   )
   ```
 
+> [!NOTE]
+> Tool files are module-scoped, not package-scoped. They must be placed next
+> to the module's `go.mod` file. For example, if an instrumentation package has import
+> path `github.com/example/foo/bar` but the module root is `github.com/example/foo`,
+> the tool file must live in `github.com/example/foo`.
+
 ### Schema
 
-The schema of the `otel.instrumentation.yml` file (as well as `.otel.yml`
-files, which are used by project-specific instrumentation settings) is described
-by the following document:
+The following schema describes the conceptual instrumentation model:
 
 ```yml
 %YAML 1.2
@@ -350,11 +383,9 @@ instrumentation: # Required with at least 1 item
 Supported _pointcuts_ and _advice_ types are dependent on the version of the
 tool used to apply the configuration. Instrumentation packages can declare the
 minimum required version of the `otelc` tool by including it in their `go.mod`
-files; for example by including a blank import of
-`github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/sdk`
-to their `otel.instrumentation.go` file. The Go toolchain's Minimum Version
-Selection algorithm will then ensure the version requirement is satisfied for
-any user.
+files; for example by including a blank import in their `otel.instrumentation.go`
+(or `otelc.tool.go`) file. The Go toolchain's Minimum Version Selection algorithm
+will then ensure the version requirement is satisfied for any user.
 
 ##### Examples
 
@@ -373,14 +404,16 @@ advice:
 
 ### Configuration Re-use
 
-Instrumentation packages can re-use configuration defined in other packages by
-containing a `otel.instrumentation.go` file, which contains `import` directives
-for each of the instrumentation packages it re-uses:
+Instrumentation packages can re-use and compose configuration defined in other packages by
+containing an `otel.instrumentation.go` file (or `otelc.tool.go`) with blank imports for the
+instrumentation packages they depend on:
 
 ```go
 // Within github.com/open-telemetry/open-telemetry-go/otel/all
 
-package all
+//go:build tools
+
+package tools
 
 import (
    _ "github.com/open-telemetry/opentelemetry-go/otel/instrumentation/net-http"
