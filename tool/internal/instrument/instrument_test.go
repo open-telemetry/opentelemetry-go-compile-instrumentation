@@ -265,6 +265,20 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, tree *dst.File) bool {
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
+	// Before writing we want to ensure r.ResolvedPath is set
+	// otherwise ip.instrument() would not know where to look for files.
+	for _, r := range ruleSet.AllFuncRules() {
+		if r.Path != "" {
+			r.ResolvedPath = r.Path
+		}
+	}
+
+	for _, r := range ruleSet.FileRules {
+		if r.Path != "" {
+			r.ResolvedPath = r.Path
+		}
+	}
+
 	matchedJSON, _ := json.Marshal([]*rule.InstRuleSet{ruleSet})
 	matchedFile := util.GetMatchedRuleFile()
 	os.MkdirAll(filepath.Dir(matchedFile), 0o755)

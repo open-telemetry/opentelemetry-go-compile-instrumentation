@@ -392,8 +392,8 @@ func Setup(ctx context.Context, cmd *cli.Command, invocation buildInvocation) er
 		}
 	}
 
-	// Write the matched hook to matched.txt for further instrument phase
-	return sp.store(matched)
+	// Write the matched ruleset to matched.json for further instrument phase
+	return sp.store(ctx, matched, moduleDirs)
 }
 
 // SetupCommand is the CLI entrypoint for `otelc setup`.

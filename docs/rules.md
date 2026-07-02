@@ -329,6 +329,7 @@ This is the most common rule type. It injects function calls at the beginning (`
 - `before` (string, optional): The name of the function to be called at the entry of the target function.
 - `after` (string, optional): The name of the function to be called just before the target function returns.
 - `path` (string, required): The import path for the package containing the `before` and `after` hook functions.
+- `module` (string, optional): The module path where the hook functions are located. This is needed for built-in packages if import path is not a module root. Not required for external instrumentation packages.
 
 **Example:**
 
@@ -900,6 +901,9 @@ This rule adds a new Go source file to the target package.
 
 - `file` (string, required): The name of the new file to be added (e.g., `newfile.go`).
 - `path` (string, required): The import path of the package where the content of the new file is located. The instrumentation tool will find the file within this package.
+
+  The package referenced by `path` must be importable by `go/packages`. If the implementation files are marked with `//go:build ignore` (for example because they rely on otelc compile-time transformations), include a small buildable stub file so the package remains importable during rule resolution.
+- `module` (string, optional): The module path where the file is located. This is needed for built-in packages if import path is not a module root. Not required for external instrumentation packages.
 
 **Example:**
 

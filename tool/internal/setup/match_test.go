@@ -307,6 +307,7 @@ target: github.com/example/lib
 func: TestFunc
 target: github.com/example/lib
 before: MyHook1Before
+path: github.com/example/lib
 `,
 			ruleName:     "test-func-rule",
 			expectError:  false,
@@ -317,6 +318,7 @@ before: MyHook1Before
 			yamlContent: `
 file: test.go
 target: github.com/example/lib
+path: github.com/example/lib
 `,
 			ruleName:     "test-file-rule",
 			expectError:  false,
@@ -851,11 +853,27 @@ func newTestFuncRule(path, target string) *rule.InstFuncRule {
 	}
 }
 
-func newTestRuleSet(modulePath string, funcRules ...*rule.InstFuncRule) *rule.InstRuleSet {
+func newTestFileRule(path, target string) *rule.InstFileRule {
+	return &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Target: target,
+		},
+		Path: path,
+	}
+}
+
+func newTestRuleSet(
+	modulePath string,
+	funcRules []*rule.InstFuncRule,
+	fileRules []*rule.InstFileRule,
+) *rule.InstRuleSet {
 	rs := rule.NewInstRuleSet(modulePath)
 	fakeFilePath := filepath.Join(os.TempDir(), "file.go")
 	for _, fr := range funcRules {
 		rs.AddFuncRule(fakeFilePath, fr)
+	}
+	for _, fr := range fileRules {
+		rs.AddFileRule(fr)
 	}
 	return rs
 }
@@ -878,6 +896,7 @@ func TestRunMatch_FileRuleOnlySetsPackageName(t *testing.T) {
 	yamlContent := []byte(`
 file: hook.go
 target: example.com/mypkg
+path: example.com/mypkg
 `)
 	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
 	require.NoError(t, err)
@@ -970,6 +989,7 @@ func TestRunMatch_FileRuleInvalidSource(t *testing.T) {
 	yamlContent := []byte(`
 file: hook.go
 target: example.com/mypkg
+path: example.com/mypkg
 `)
 	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
 	require.NoError(t, err)
@@ -995,6 +1015,7 @@ func TestRunMatch_FileRuleNoSources(t *testing.T) {
 	yamlContent := []byte(`
 file: hook.go
 target: example.com/mypkg
+path: example.com/mypkg
 `)
 	fileRule, err := rule.NewInstFileRule(yamlContent, "test-file-rule")
 	require.NoError(t, err)
