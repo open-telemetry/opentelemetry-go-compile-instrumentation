@@ -17,6 +17,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
@@ -74,6 +75,47 @@ var flagsWithPathValues = map[string]bool{
 	"-tags":          true,
 	"-toolexec":      true,
 }
+
+// testFlagsWithValues contains `go test` flags that take a separate value
+// argument. Their values are not packages, so splitBuildTargets skips them when
+// scanning for package targets (e.g. `go test -run TestX ./pkg` — TestX is the
+// value of -run, not a package). `-args` is handled separately by
+// splitBuildTargets, which stops scanning at it.
+//
+//nolint:gochecknoglobals // private lookup table
+var testFlagsWithValues = map[string]bool{
+	"-bench":                true,
+	"-benchtime":            true,
+	"-blockprofile":         true,
+	"-blockprofilerate":     true,
+	"-count":                true,
+	"-coverprofile":         true,
+	"-cpu":                  true,
+	"-cpuprofile":           true,
+	"-fuzz":                 true,
+	"-fuzzminimizetime":     true,
+	"-fuzztime":             true,
+	"-list":                 true,
+	"-memprofile":           true,
+	"-memprofilerate":       true,
+	"-mutexprofile":         true,
+	"-mutexprofilefraction": true,
+	"-outputdir":            true,
+	"-parallel":             true,
+	"-run":                  true,
+	"-shuffle":              true,
+	"-skip":                 true,
+	"-timeout":              true,
+	"-trace":                true,
+	"-vet":                  true,
+}
+
+// Go subcommands that otelc wraps with toolexec instrumentation.
+const (
+	subcmdBuild   = "build"
+	subcmdInstall = "install"
+	subcmdTest    = "test"
+)
 
 const commandLineArgumentsPackage = "command-line-arguments"
 
@@ -144,20 +186,26 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 func splitBuildTargets(args []string) ([]string, []string, error) {
 	var pkgs, files []string
 
-	for i := len(args) - 1; i >= 0; i-- {
+	// Scan forward and classify each argument. Packages and flags may interleave:
+	// `go build` conventionally puts flags first, but `go test` is commonly
+	// invoked as `go test ./pkg -run TestX`, so a position-based scan would miss
+	// the package. A flag in separated form consumes the next argument as its
+	// value (e.g. "-o out", "-run TestX"); skipping it keeps the value from being
+	// mistaken for a package. Joined form ("-tags=x") carries its own value.
+	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// If preceded by a flag that takes a path value, this is a flag value
-		// We want to avoid scenarios like "go build -o ./tmp ./app" where tmp also contains Go files,
-		// as it would be treated as a package.
-		if i > 0 && flagsWithPathValues[args[i-1]] {
+		// Everything after `-args` is passed to the test binary, not the go
+		// command, so it can contain neither packages nor go flags.
+		if arg == "-args" {
 			break
 		}
 
-		// If we hit a flag, stop. Packages come after all flags
-		// go build [-o output] [build flags] [packages]
 		if strings.HasPrefix(arg, "-") {
-			break
+			if !strings.Contains(arg, "=") && (flagsWithPathValues[arg] || testFlagsWithValues[arg]) {
+				i++ // skip this flag's separate value
+			}
+			continue
 		}
 
 		if filepath.Ext(arg) == ".go" {
@@ -172,8 +220,8 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 	}
 
 	if len(files) > 0 {
-		// files are collected in reverse order due to reverse argument traversal.
-		// files[0] is therefore the last .go file from the original CLI args.
+		// All named .go files must live in one directory; compare each against
+		// the first.
 		dir, err := filepath.Abs(filepath.Dir(files[0]))
 		if err != nil {
 			return nil, nil, ex.Wrapf(err, "failed to get absolute path for directory containing files")
@@ -201,13 +249,56 @@ func getPackageDir(pkg *packages.Package) string {
 	return ""
 }
 
+// generateRuntimePerPackage generates the injected hook code (otelc.runtime.go)
+// for every buildable package and returns the set of module directories that
+// were touched, so their go.mod/go.sum can later be backed up and synced.
+func (sp *SetupPhase) generateRuntimePerPackage(
+	ctx context.Context,
+	pkgs []*packages.Package,
+	matched []*rule.InstRuleSet,
+) (map[string]bool, error) {
+	moduleDirs := make(map[string]bool)
+	for _, pkg := range pkgs {
+		// file-based builds use synthetic "command-line-arguments" packages
+		if pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage {
+			sp.Warn("skipping package without module", "package", pkg.PkgPath)
+			continue
+		}
+
+		pkgDir := getPackageDir(pkg)
+		if pkgDir == "" {
+			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
+			continue
+		}
+
+		var moduleDir string
+		if pkg.Module != nil {
+			moduleDir = pkg.Module.Dir
+		} else {
+			var err error
+			if moduleDir, err = pkgload.ResolveModuleDir(ctx, pkgDir); err != nil {
+				return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
+			}
+		}
+
+		// Introduce additional hook code by generating otelc.runtime.go
+		if err := sp.addDeps(ctx, matched, pkgDir); err != nil {
+			return nil, ex.Wrapf(err, "adding deps for package at %s", pkgDir)
+		}
+		moduleDirs[moduleDir] = true
+	}
+	return moduleDirs, nil
+}
+
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
 	args := cmd.Args().Slice()
+	subcommand := subcmdBuild
 	if cmd.Name == "go" {
-		args = cmd.Args().Tail() // trim build/install
+		subcommand = cmd.Args().First() // build / install / test
+		args = cmd.Args().Tail()        // trim the subcommand
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -230,7 +321,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Find all dependencies of the project being build
-	deps, err := sp.findDeps(ctx, args)
+	deps, err := sp.findDeps(ctx, subcommand, args)
 	if err != nil {
 		return err
 	}
@@ -247,40 +338,33 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
-	// Generate otelc.runtime.go for all packages
-	moduleDirs := make(map[string]bool)
-	for _, pkg := range pkgs {
-		// file-based builds use synthetic "command-line-arguments" packages
-		if pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage {
-			sp.Warn("skipping package without module", "package", pkg.PkgPath)
-			continue
-		}
-
-		pkgDir := getPackageDir(pkg)
-		if pkgDir == "" {
-			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
-			continue
-		}
-
-		var moduleDir string
-		if pkg.Module != nil {
-			moduleDir = pkg.Module.Dir
-		} else {
-			if moduleDir, err = pkgload.ResolveModuleDir(ctx, pkgDir); err != nil {
-				return ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
+	// Track generated & modified files with state manager
+	stateManager, found := StateManagerFromContext(ctx)
+	if !found {
+		// save this state manager in the context
+		ctx = ContextWithStateManager(ctx, stateManager)
+		// We only need to commit the state to disk if it was not found in the context
+		// i.e., it was created by this setup invocation
+		defer func() {
+			if err = stateManager.Commit(); err != nil {
+				logger.Error("failed to commit state", "error", err)
 			}
-		}
+		}()
+	}
 
-		// Introduce additional hook code by generating otelc.runtime.go
-		if err = sp.addDeps(matched, pkgDir); err != nil {
-			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
-		}
-		moduleDirs[moduleDir] = true
+	// Generate otelc.runtime.go for all packages
+	moduleDirs, err := sp.generateRuntimePerPackage(ctx, pkgs, matched)
+	if err != nil {
+		return err
 	}
 
 	// Backup go.mod, go.sum and go.work.sum files before modifying them
-	if err = backupFiles(ctx, moduleDirs); err != nil {
-		return ex.Wrapf(err, "backing up files")
+	backupFiles, err := getBackupFiles(ctx, moduleDirs)
+	if err != nil {
+		return ex.Wrapf(err, "finding files to backup")
+	}
+	if err = stateManager.TrackAll(backupFiles...); err != nil {
+		return ex.Wrapf(err, "tracking backup files")
 	}
 
 	// Sync new dependencies to go.mod or vendor/modules.txt
@@ -290,8 +374,8 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	// Write the matched hook to matched.txt for further instrument phase
-	return sp.store(matched)
+	// Write the matched ruleset to matched.json for further instrument phase
+	return sp.store(ctx, matched, moduleDirs)
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
@@ -500,23 +584,28 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 
 func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	logger := util.LoggerFromContext(ctx)
+	ctx = ContextWithStateManager(ctx, NewStateManager())
 
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
 
 	if !cmd.Args().Present() {
-		return ex.Newf("no command provided. Only 'go build' and 'go install' are supported")
+		return ex.Newf("no command provided. Only 'go build', 'go install' and 'go test' are supported")
 	}
 
-	if cmd.Args().First() != "build" && cmd.Args().First() != "install" {
-		return ex.Newf("unsupported command: %s. Only 'go build' and 'go install' are supported", cmd.Args().First())
+	switch cmd.Args().First() {
+	case subcmdBuild, subcmdInstall, subcmdTest:
+		// supported
+	default:
+		return ex.Newf("unsupported command: %s. Only 'go build', 'go install' and 'go test' are supported",
+			cmd.Args().First())
 	}
 
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
 		// Users can run `otelc cleanup` to remove it explicitly.
-		if cleanErr := Cleanup(ctx, cmd.Args().Tail(), false); cleanErr != nil {
+		if cleanErr := Cleanup(ctx, false); cleanErr != nil {
 			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()

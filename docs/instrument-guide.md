@@ -206,11 +206,20 @@ To run integration tests:
 make test-integration
 ```
 
-## 4. Verify
+## 4. Register the Instrumentation
+
+If your PR adds a new user-facing instrumentation, create a PR to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.
+
+Follow the [OpenTelemetry Registry contribution guide](https://opentelemetry.io/ecosystem/registry/adding/).
+
+Not every instrumentation package should be listed. Internal helper packages (for example, `basic`, `runtime`, or packages that only provide implementation details for other instrumentations) generally do not need registry entries.
+
+## 5. Verify
 
 Check that your instrumentation package has the following elements:
 
 - A rule YAML under `instrumentation/<import_path>/.../otelc..yaml` with a correct `target` and version range.
-- Hook implementation under `instrumentation/<import_path>/...`
+- Hook implementation under `instrumentation/<import_path>/...`.
 - Unit tests alongside the hooks for logic-level behavior.
 - Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
+- If applicable, a PR has been opened to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.

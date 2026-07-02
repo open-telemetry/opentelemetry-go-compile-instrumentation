@@ -281,6 +281,7 @@ func TestListBuildPlan(t *testing.T) {
 
 	tests := []struct {
 		name          string
+		subcommand    string // defaults to "build" when empty
 		buildPlan     string
 		args          []string
 		expected      []string
@@ -353,6 +354,21 @@ echo nothing useful
 			expected:      nil,
 			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./..."},
 		},
+		{
+			// The test subcommand must list a `go test` plan, which surfaces the
+			// test-augmented, external test, and test-main compiles that is_test
+			// gates on. A `go build` plan would never contain them.
+			name:       "test subcommand lists a go test plan",
+			subcommand: "test",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"./..."},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{"test", "-a", "-x", "-n", "./..."},
+		},
 	}
 
 	for _, tt := range tests {
@@ -380,7 +396,11 @@ echo nothing useful
 			}
 
 			sp := newTestSetupPhase()
-			buildPlan, err := sp.listBuildPlan(t.Context(), tt.args)
+			subcommand := tt.subcommand
+			if subcommand == "" {
+				subcommand = "build"
+			}
+			buildPlan, err := sp.listBuildPlan(t.Context(), subcommand, tt.args)
 
 			if tt.wantErr {
 				require.Error(t, err)

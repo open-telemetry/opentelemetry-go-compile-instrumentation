@@ -17,19 +17,6 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-func listRuleFiles(path string) ([]string, error) {
-	// If the path is a local path, use it directly, otherwise, it's a module
-	// path, we need to convert it to a local path and find the module files
-	var p string
-	if util.PathExists(path) {
-		p = path
-	} else {
-		p = strings.TrimPrefix(path, util.OtelcRoot)
-		p = filepath.Join(util.GetBuildTempDir(), p)
-	}
-	return util.ListFiles(p)
-}
-
 func stripBuildIgnoreTag(content string) string {
 	return strings.ReplaceAll(content, "//go:build ignore", "")
 }
@@ -37,9 +24,10 @@ func stripBuildIgnoreTag(content string) string {
 // applyFileRule introduces the new file to the target package at compile time.
 func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
 	// List all files in the rule module path
-	files, err := listRuleFiles(rule.Path)
+	files, err := util.ListFiles(rule.ResolvedPath)
 	if err != nil {
-		return ex.Wrapf(err, "listing files for rule %s at path %s", rule.Name, rule.Path)
+		return ex.Wrapf(err, "listing files for rule %s in dir %s (import path %s)",
+			rule.Name, rule.ResolvedPath, rule.Path)
 	}
 
 	// Find the new file we want to introduce

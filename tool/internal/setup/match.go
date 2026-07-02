@@ -77,6 +77,19 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 			if err2 != nil {
 				return nil, err2
 			}
+			// target is the sole package selector and is required (docs/rules.md).
+			// An empty or whitespace-only target would land under exactRules[""]
+			// and silently never match any real import path, so reject it loudly
+			// at load time instead.
+			if strings.TrimSpace(r.GetTarget()) == "" {
+				return nil, ex.Newf("rule %q has an empty target; target is required", name)
+			}
+			// Reject ambiguous/invalid glob targets at load time so a bad rule
+			// fails loudly during parsing rather than silently matching nothing
+			// during the setup phase.
+			if err3 := rule.ValidateTarget(r.GetTarget()); err3 != nil {
+				return nil, ex.Wrapf(err3, "rule %q", name)
+			}
 			rules = append(rules, r)
 		}
 	}
@@ -122,11 +135,18 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 }
 
 // runMatch performs precise matching of rules against the dependency's source code.
-// It parses source files and matches rules by examining AST nodes
+// It parses source files and matches rules by examining AST nodes.
+//
+// Rules reach this function through two paths:
+//   - exactRules is the rule index keyed by exact target import path. The fast
+//     path is a single map lookup on dep.ImportPath.
+//   - globRules are rules whose target uses glob syntax; each one's pattern is
+//     evaluated against dep.ImportPath because they cannot be pre-indexed by key.
 func (sp *SetupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
-	rulesByTarget map[string][]rule.InstRule,
+	exactRules map[string][]rule.InstRule,
+	globRules []rule.InstRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
@@ -135,8 +155,32 @@ func (sp *SetupPhase) runMatch(
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
 	}
 
-	// Filter rules by target
-	relevantRules := rulesByTarget[dep.ImportPath]
+	// Fast path: exact-target rules via a single map lookup.
+	relevantRules := exactRules[dep.ImportPath]
+
+	// Glob path: a rule applies when its glob target matches this dependency's
+	// import path. The combined slice is built lazily, on the first glob match,
+	// so a dependency that matches no glob rule (the common case) stays
+	// allocation-free. When built, it is a fresh slice to avoid aliasing the
+	// exact-match slice shared read-only across goroutines.
+	if len(globRules) > 0 {
+		var matched []rule.InstRule
+		for _, r := range globRules {
+			if !rule.MatchGlobTarget(r.GetTarget(), dep.ImportPath) {
+				continue
+			}
+			if matched == nil {
+				matched = make([]rule.InstRule, 0, len(relevantRules)+1)
+				matched = append(matched, relevantRules...)
+			}
+			matched = append(matched, r)
+			sp.Debug("Match glob target", "rule", r.GetName(), "target", r.GetTarget(), "dep", dep.ImportPath)
+		}
+		if matched != nil {
+			relevantRules = matched
+		}
+	}
+
 	if len(relevantRules) == 0 {
 		return set, nil
 	}
@@ -221,6 +265,10 @@ func (sp *SetupPhase) preciseMatching(
 		ruleFilters = append(ruleFilters, ruleFilter{rule: r, where: f})
 	}
 
+	// IsTest is a property of the whole compile (every file in a test build
+	// shares it), so compute it once and reuse it across each file's context.
+	isTest := isTestBuild(dep.Sources)
+
 	for _, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -244,7 +292,7 @@ func (sp *SetupPhase) preciseMatching(
 		// evaluated against that file. All fields are constant for a given
 		// source file, so no updates are needed inside the inner loop.
 		mctx := MatchContext{
-			ImportPath: dep.ImportPath,
+			IsTest:     isTest,
 			SourceFile: source,
 			AST:        tree,
 		}
@@ -261,6 +309,31 @@ func (sp *SetupPhase) preciseMatching(
 		}
 	}
 	return set, nil
+}
+
+// isTestBuild reports whether a compile invocation is part of a `go test` run.
+// The Go toolchain only ever feeds these inputs to the compiler while building
+// a test binary: a package augmented with its in-package _test.go files, the
+// external xxx_test package (whose sources are also _test.go files), and the
+// generated _testmain.go runner. None of them appear in a normal `go build`,
+// so their presence in the source set is the signal. There is no dedicated
+// "is test" compiler flag — verified against the toolchain — so the source set
+// is the only thing to key on.
+//
+// ponytail: known gap, no fix possible at compile granularity. A package whose
+// tests live only in an external xxx_test package (no in-package _test.go) is
+// compiled once and shared between normal and test builds — the toolchain emits
+// no test-only variant of it — so is_test cannot gate that package's production
+// code. The external xxx_test package and any in-package _test.go files are
+// still detected.
+func isTestBuild(sources []string) bool {
+	for _, src := range sources {
+		base := filepath.Base(src)
+		if base == "_testmain.go" || strings.HasSuffix(base, "_test.go") {
+			return true
+		}
+	}
+	return false
 }
 
 // matchOneRule performs precise AST matching for a single rule against a parsed
@@ -428,11 +501,19 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, nil
 	}
 
-	// Pre-index rules by target
-	rulesByTarget := make(map[string][]rule.InstRule)
+	// Split rules into two matching tiers. Exact-target rules are pre-indexed
+	// by import path so each dependency resolves them with one map lookup
+	// (unchanged fast path). Glob-target rules cannot be keyed, so they are
+	// kept in a flat slice and evaluated against every dependency's import path.
+	exactRules := make(map[string][]rule.InstRule)
+	globRules := make([]rule.InstRule, 0)
 	for _, r := range allRules {
 		target := r.GetTarget()
-		rulesByTarget[target] = append(rulesByTarget[target], r)
+		if rule.IsGlobTarget(target) {
+			globRules = append(globRules, r)
+			continue
+		}
+		exactRules[target] = append(exactRules[target], r)
 	}
 
 	// Match the default rules with the found dependencies
@@ -443,7 +524,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			m, err1 := sp.runMatch(gCtx, dep, rulesByTarget)
+			m, err1 := sp.runMatch(gCtx, dep, exactRules, globRules)
 			if err1 != nil {
 				return err1
 			}

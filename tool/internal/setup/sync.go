@@ -47,24 +47,16 @@ func runModTidy(ctx context.Context, moduleDir string) error {
 	return util.RunCmdInDir(ctx, moduleDir, "go", "mod", "tidy")
 }
 
-type replaceDirective struct {
-	oldPath    string
-	oldVersion string
-	newPath    string
-	newVersion string
-}
-
-func addReplace(modfile *modfile.File, replace *replaceDirective) (bool, error) {
+func addReplace(modfile *modfile.File, oldPath, newPath string) (bool, error) {
 	hasReplace := false
 	for _, r := range modfile.Replace {
-		if r.Old.Path == replace.oldPath {
+		if r.Old.Path == oldPath {
 			hasReplace = true
 			break
 		}
 	}
 	if !hasReplace {
-		err := modfile.AddReplace(replace.oldPath, replace.oldVersion,
-			replace.newPath, replace.newVersion)
+		err := modfile.AddReplace(oldPath, "", newPath, "")
 		if err != nil {
 			return false, ex.Wrapf(err, "failed to add replace directive")
 		}
@@ -103,14 +95,25 @@ func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) erro
 	// Go directives use Go toolchain syntax ("1.21"), not module semver.
 	if after.Go != nil && before.goVersion != "" {
 		if goversion.Compare("go"+after.Go.Version, "go"+before.goVersion) > 0 {
-			sp.Warn(fmt.Sprintf("Bumped go version (%s -> %s)", before.goVersion, after.Go.Version))
+			_, _ = fmt.Fprintf(os.Stdout, "Bumped go version (%s -> %s)\n", before.goVersion, after.Go.Version)
+			sp.Warn("bumped go version", "old", before.goVersion, "new", after.Go.Version)
 		}
 	}
 
 	for _, req := range after.Require {
 		if oldVer, tracked := before.deps[req.Mod.Path]; tracked {
 			if semver.Compare(req.Mod.Version, oldVer) > 0 {
-				sp.Warn(fmt.Sprintf("Bumped dependency %s (%s -> %s)", req.Mod.Path, oldVer, req.Mod.Version))
+				_, _ = fmt.Fprintf(
+					os.Stdout,
+					"Bumped dependency %s (%s -> %s)\n",
+					req.Mod.Path,
+					oldVer,
+					req.Mod.Version,
+				)
+				sp.Warn("bumped dependency",
+					"module", req.Mod.Path,
+					"old", oldVer,
+					"new", req.Mod.Version)
 			}
 		}
 	}
@@ -118,12 +121,13 @@ func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) erro
 }
 
 func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
-	rules := make([]*rule.InstFuncRule, 0, len(matched))
+	funcRules := []*rule.InstFuncRule{}
+	fileRules := []*rule.InstFileRule{}
 	for _, m := range matched {
-		funcRules := m.AllFuncRules()
-		rules = append(rules, funcRules...)
+		funcRules = append(funcRules, m.AllFuncRules()...)
+		fileRules = append(fileRules, m.FileRules...)
 	}
-	if len(rules) == 0 {
+	if len(funcRules) == 0 && len(fileRules) == 0 {
 		return nil
 	}
 
@@ -138,60 +142,43 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	}
 
 	before := snapshotVersion(modfile)
-	replaces := make([]*replaceDirective, 0)
-	for _, m := range rules {
-		util.Assert(strings.HasPrefix(m.Path, util.OtelcRoot), "sanity check")
-		oldPath := m.Path
-		newPath := strings.TrimPrefix(oldPath, util.OtelcRoot)
-		newPath = filepath.Join(util.GetBuildTempDir(), newPath)
-		replaces = append(replaces, &replaceDirective{
-			oldPath:    oldPath,
-			oldVersion: "",
-			newPath:    newPath,
-			newVersion: "",
-		})
+	replaces := make(map[string]string)
+	for _, m := range funcRules {
+		if path, isEmbedded := strings.CutPrefix(m.ModulePath, util.OtelcInstRoot+"/"); isEmbedded {
+			replaces[m.ModulePath] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
+		}
+	}
+	for _, m := range fileRules {
+		if path, isEmbedded := strings.CutPrefix(m.ModulePath, util.OtelcInstRoot+"/"); isEmbedded {
+			replaces[m.ModulePath] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
+		}
 	}
 
 	// Add replace directive for special pkg module
 	// TODO: Since we haven't published the instrumentation packages yet,
 	// we need to add the replace directive to the local path.
 	// Once the instrumentation packages are published, we can remove this.
-	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelcRoot + "/pkg",
-		oldVersion: "",
-		newPath:    filepath.Join(util.GetBuildTempDir(), unzippedPkgDir),
-		newVersion: "",
-	})
+	replaces[util.OtelcPkgRoot] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir)
 
 	// Add replace directive for special runtime module
 	// runtime module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
-	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelcRoot + "/pkg/runtime",
-		oldVersion: "",
-		newPath:    filepath.Join(util.GetBuildTempDir(), unzippedPkgDir+"/runtime"),
-		newVersion: "",
-	})
+	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
 
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
-	replaces = append(replaces, &replaceDirective{
-		oldPath:    util.OtelcRoot + "/instrumentation",
-		oldVersion: "",
-		newPath:    filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
-		newVersion: "",
-	})
+	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
 
 	// Okay, now add all the replace directives to go.mod
 	changed := false
-	for _, replace := range replaces {
-		added, addErr := addReplace(modfile, replace)
+	for oldPath, newPath := range replaces {
+		added, addErr := addReplace(modfile, oldPath, newPath)
 		if addErr != nil {
 			return addErr
 		}
 		changed = changed || added
-		if changed {
-			sp.Info("Replace dependency", "old", replace.oldPath, "new", replace.newPath)
+		if added {
+			sp.Info("Replace dependency", "old", oldPath, "new", newPath)
 		}
 	}
 

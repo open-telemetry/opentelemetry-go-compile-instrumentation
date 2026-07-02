@@ -6,7 +6,6 @@ package setup
 import (
 	"context"
 	"os"
-	"path/filepath"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -18,24 +17,20 @@ import (
 // When cleanAll is false, backed-up files are restored and the generated runtime
 // file is removed, but .otelc-build/ is kept for debugging. When cleanAll is
 // true, .otelc-build/ is also removed.
-func Cleanup(ctx context.Context, args []string, cleanAll bool) error {
+func Cleanup(ctx context.Context, cleanAll bool) error {
 	logger := util.LoggerFromContext(ctx)
-
-	err := restoreBackupFiles()
-	if err != nil {
-		logger.WarnContext(ctx, "failed to restore backup files", "error", err)
+	stateManager, found := StateManagerFromContext(ctx)
+	if !found {
+		var err error
+		stateManager, err = LoadStateManager()
+		if err != nil {
+			return err
+		}
 	}
 
-	// Remove otelc.runtime.go from each instrumented package directory.
-	pkgs, pkgErr := getBuildPackages(ctx, args)
-	if pkgErr != nil {
-		logger.DebugContext(ctx, "failed to get build packages", "error", pkgErr)
-	}
-	for _, pkg := range pkgs {
-		path := filepath.Join(pkg.Dir, OtelcRuntimeFile)
-		if err = os.RemoveAll(path); err != nil {
-			logger.DebugContext(ctx, "failed to remove generated file from package",
-				"file", path, "error", err)
+	if stateManager != nil {
+		if err := stateManager.Revert(); err != nil {
+			logger.WarnContext(ctx, "failed to revert state", "error", err)
 		}
 	}
 
@@ -43,7 +38,7 @@ func Cleanup(ctx context.Context, args []string, cleanAll bool) error {
 		// Remove the entire .otelc-build/ temp directory last.
 		// The extracted instrumentation package lives inside .otelc-build/pkg/,
 		// so this also covers removing it.
-		if err = os.RemoveAll(util.GetBuildTempDir()); err != nil {
+		if err := os.RemoveAll(util.GetBuildTempDir()); err != nil {
 			logger.WarnContext(ctx, "failed to remove build temp dir", "error", err)
 		}
 	} else {
