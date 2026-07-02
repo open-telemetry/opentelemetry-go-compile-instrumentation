@@ -469,3 +469,182 @@ func TestExtractBuildFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestConsumeCFlagPositional(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		expectedDir  string
+		expectedArgs []string
+	}{
+		{
+			name:         "space-separated form",
+			args:         []string{"-C", "/some/dir", "./..."},
+			expectedDir:  "/some/dir",
+			expectedArgs: []string{"./..."},
+		},
+		{
+			name:         "equals form",
+			args:         []string{"-C=/some/dir", "./..."},
+			expectedDir:  "/some/dir",
+			expectedArgs: []string{"./..."},
+		},
+		{
+			name:         "double-dash space-separated form",
+			args:         []string{"--C", "/some/dir", "./..."},
+			expectedDir:  "/some/dir",
+			expectedArgs: []string{"./..."},
+		},
+		{
+			name:         "double-dash equals form",
+			args:         []string{"--C=/some/dir", "./..."},
+			expectedDir:  "/some/dir",
+			expectedArgs: []string{"./..."},
+		},
+		{
+			name:         "--C at end with no value - not consumed",
+			args:         []string{"--C"},
+			expectedDir:  "",
+			expectedArgs: []string{"--C"},
+		},
+		{
+			name:         "not at position 0 - not consumed",
+			args:         []string{"-v", "-C", "/some/dir", "./..."},
+			expectedDir:  "",
+			expectedArgs: []string{"-v", "-C", "/some/dir", "./..."},
+		},
+		{
+			name:         "not present",
+			args:         []string{"./..."},
+			expectedDir:  "",
+			expectedArgs: []string{"./..."},
+		},
+		{
+			name:         "empty args",
+			args:         []string{},
+			expectedDir:  "",
+			expectedArgs: []string{},
+		},
+		{
+			name:         "-C at end with no value - not consumed",
+			args:         []string{"-C"},
+			expectedDir:  "",
+			expectedArgs: []string{"-C"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, rest := consumeCFlagPositional(tt.args)
+			if dir != tt.expectedDir {
+				t.Errorf("dir = %q, want %q", dir, tt.expectedDir)
+			}
+			if !slices.Equal(rest, tt.expectedArgs) {
+				t.Errorf("rest = %v, want %v", rest, tt.expectedArgs)
+			}
+		})
+	}
+}
+
+func TestStripCFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "no -C",
+			args: []string{"build", "-v", "./..."},
+			want: []string{"build", "-v", "./..."},
+		},
+		{
+			name: "-C before build",
+			args: []string{"-C", "/dir", "build", "-v", "./..."},
+			want: []string{"build", "-v", "./..."},
+		},
+		{
+			name: "-C after build",
+			args: []string{"build", "-C", "/dir", "-v", "./..."},
+			want: []string{"build", "-v", "./..."},
+		},
+		{
+			name: "-C=dir before build",
+			args: []string{"-C=/dir", "build", "./..."},
+			want: []string{"build", "./..."},
+		},
+		{
+			name: "-C=dir after build",
+			args: []string{"build", "-C=/dir", "./..."},
+			want: []string{"build", "./..."},
+		},
+		{
+			name: "-C in non-positional spot - left alone",
+			args: []string{"build", "-v", "-C", "/dir", "./..."},
+			want: []string{"build", "-v", "-C", "/dir", "./..."},
+		},
+		{
+			name: "empty",
+			args: []string{},
+			want: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripCFlag(tt.args)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("stripCFlag(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetPackagesWithCFlag(t *testing.T) {
+	// Create a Go module in a separate temp directory.
+	moduleDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(moduleDir, "cmd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "cmd", "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "go.mod"),
+		[]byte("module cflagmodule\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate what Setup() does: consume -C, chdir, strip from args.
+	args := []string{"-C", moduleDir, "./cmd"}
+	dir, rest := consumeCFlagPositional(args)
+	if dir == "" {
+		t.Fatal("expected -C to be consumed")
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(orig) //nolint:errcheck
+
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir failed: %v", err)
+	}
+
+	pkgs, err := getBuildPackages(t.Context(), rest)
+	if err != nil {
+		t.Fatalf("getBuildPackages failed: %v", err)
+	}
+	if len(pkgs) == 0 {
+		t.Fatal("expected at least one package")
+	}
+
+	found := false
+	for _, pkg := range pkgs {
+		if strings.Contains(pkg.ID, "cflagmodule/cmd") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("cflagmodule/cmd not found in packages: %v", pkgs)
+	}
+}
