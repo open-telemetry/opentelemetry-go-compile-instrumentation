@@ -1,0 +1,149 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import _ "unsafe"
+
+// ProcessRequest lives in a _test.go file, so the Go toolchain compiles it only
+// as part of `go test`. The is_test: true rule matches that test build and the
+// golden captures the injected trampolines — the positive counterpart to
+// is-test-filter-no-match, where the same rule is gated out of a normal build.
+func ProcessRequest(req string) (_unnamedRetVal0 error) {
+	//line <generated>:1
+	if hookContext2587785677, _ := OtelBeforeTrampoline_ProcessRequest2587785677(&req); false {
+	} else {
+		defer OtelAfterTrampoline_ProcessRequest2587785677(hookContext2587785677, &_unnamedRetVal0)
+	}
+	//line main_test.go:11:2
+	println("processing:", req)
+	//line main_test.go:12:2
+	return nil
+}
+
+//line <generated>:1
+type HookContextImpl2587785677 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl2587785677) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl2587785677) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl2587785677) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl2587785677) GetData() interface{}     { return c.data }
+func (c *HookContextImpl2587785677) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl2587785677) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl2587785677) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl2587785677) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*string))
+	}
+	return nil
+}
+
+func (c *HookContextImpl2587785677) SetParam(idx int, val interface{}) {
+	if val == nil {
+		c.params[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.params[0].(*string)) = val.(string)
+	}
+}
+
+func (c *HookContextImpl2587785677) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl2587785677) SetReturnVal(idx int, val interface{}) {
+	if val == nil {
+		c.returnVals[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.returnVals[0].(*error)) = val.(error)
+	}
+}
+func (c *HookContextImpl2587785677) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl2587785677) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl2587785677) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl2587785677) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_ProcessRequest2587785677(param0 *string) (hookContext *HookContextImpl2587785677, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "BeforeProcessRequest")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl2587785677{}
+	hookContext.params = []interface{}{param0}
+	hookContext.funcName = "ProcessRequest"
+	hookContext.packageName = "main"
+	if BeforeProcessRequest != nil {
+		BeforeProcessRequest(hookContext, *param0)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_ProcessRequest2587785677(hookContext HookContext, arg0 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "AfterProcessRequest")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl2587785677).returnVals = []interface{}{arg0}
+	if AfterProcessRequest != nil {
+		AfterProcessRequest(hookContext, *arg0)
+	}
+}
+
+//go:linkname BeforeProcessRequest testdata/golden/is-test-filter-true-match.BeforeProcessRequest
+func BeforeProcessRequest(hookContext HookContext, param0 string)
+
+//go:linkname AfterProcessRequest testdata/golden/is-test-filter-true-match.AfterProcessRequest
+func AfterProcessRequest(hookContext HookContext, arg0 error)

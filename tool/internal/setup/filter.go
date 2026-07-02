@@ -44,9 +44,12 @@ type Filter interface {
 // passed to all filters associated with the rules being evaluated for that
 // file.
 type MatchContext struct {
-	// ImportPath is the Go import path of the package containing the source
-	// file.
-	ImportPath string
+	// IsTest reports whether the source file is part of a test build — a
+	// compilation the Go toolchain produces only while building a test binary
+	// (a package augmented with its _test.go files, an external xxx_test
+	// package, or the generated _testmain.go runner). It is a property of the
+	// whole compile, so it is identical for every file in a given package.
+	IsTest bool
 
 	// SourceFile is the absolute path to the source file being evaluated.
 	SourceFile string
@@ -61,6 +64,7 @@ type MatchContext struct {
 var (
 	_ Filter = (*FuncFilter)(nil)
 	_ Filter = (*StructFilter)(nil)
+	_ Filter = (*IsTestFilter)(nil)
 )
 
 // FuncFilter matches source files that declare the named function or method.
@@ -87,6 +91,24 @@ type StructFilter struct {
 
 func (f *StructFilter) Match(ctx *MatchContext) bool {
 	return ast.FindStructDecl(ctx.AST, f.Struct) != nil
+}
+
+// IsTestFilter selects or excludes test builds — compilations the Go toolchain
+// produces only as part of `go test` (see MatchContext.IsTest).
+//
+// ShouldMatch == true  → match only test builds
+// ShouldMatch == false → match only non-test builds
+//
+// The predicate is tri-state at the schema level: a nil *bool in FilterDef
+// means "unset" (no filtering), while true/false express explicit intent.
+// This filter is only constructed when the field is explicitly set, so
+// ShouldMatch is never ambiguous once an IsTestFilter exists.
+type IsTestFilter struct {
+	ShouldMatch bool
+}
+
+func (f *IsTestFilter) Match(ctx *MatchContext) bool {
+	return f.ShouldMatch == ctx.IsTest
 }
 
 // --- Combinators ---
@@ -181,7 +203,7 @@ func Build(where *rule.WhereDef) (Filter, error) {
 // predicate that sits as a sibling of a combinator on the same node.
 func hasLeafPredicate(def *rule.FilterDef) bool {
 	return def.HasFunc != "" || def.HasRecv != "" ||
-		def.HasStruct != "" || def.HasDirective != ""
+		def.HasStruct != "" || def.HasDirective != "" || def.IsTest != nil
 }
 
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
@@ -246,6 +268,9 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 	if def.HasDirective != "" {
 		active++
 	}
+	if def.IsTest != nil {
+		active++
+	}
 
 	if active == 0 {
 		return nil, ex.Newf("where.file has no active predicate")
@@ -261,6 +286,8 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		return &StructFilter{Struct: def.HasStruct}, nil
 	case def.HasDirective != "":
 		return nil, ex.Newf("where.file.has_directive is not yet supported")
+	case def.IsTest != nil:
+		return &IsTestFilter{ShouldMatch: *def.IsTest}, nil
 	default:
 		// The active-predicate counter above proves at least one leaf is set;
 		// matching the convention in match.go / instrument.go / trampoline.go,

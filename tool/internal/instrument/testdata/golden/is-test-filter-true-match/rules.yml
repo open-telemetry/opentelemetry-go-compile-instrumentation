@@ -1,0 +1,11 @@
+instrument_test_only:
+  target: main
+  where:
+    func: ProcessRequest
+    file:
+      is_test: true
+  do:
+    - inject_hooks:
+        before: BeforeProcessRequest
+        after: AfterProcessRequest
+        path: testdata/golden/is-test-filter-true-match
