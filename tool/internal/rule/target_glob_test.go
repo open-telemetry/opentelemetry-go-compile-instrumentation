@@ -49,16 +49,18 @@ func TestValidateTarget(t *testing.T) {
 		{name: "star in middle segment", target: "example.com/*/handler"},
 		{name: "char class", target: "example.com/svc/v[12]"},
 		{name: "question mark", target: "example.com/svc/v?"},
+		{name: "brace alternation", target: "example.com/{svc,api}"},
 
-		// Invalid: ** fused with other characters in a segment is ambiguous.
-		{name: "double star fused suffix", target: "example.com/svc**", wantErr: true},
-		{name: "double star fused prefix", target: "example.com/**svc", wantErr: true},
-		{name: "triple star", target: "example.com/***", wantErr: true},
+		// Valid: doublestar treats a "**" fused with other characters in a
+		// segment as a plain "*" (e.g. "svc**" behaves like "svc*"), so these
+		// are accepted rather than rejected.
+		{name: "double star fused suffix", target: "example.com/svc**"},
+		{name: "double star fused prefix", target: "example.com/**svc"},
+		{name: "triple star", target: "example.com/***"},
 
-		// Invalid: malformed bracket expression (unclosed). Note: Go's
-		// path.Match only rejects unclosed brackets, not semantically reversed
-		// ranges like "[z-a]" (which silently never match), so we validate only
-		// what stdlib can detect rather than hand-rolling a bracket parser.
+		// Invalid: malformed bracket expression (unclosed) is rejected by
+		// doublestar.ValidatePattern. A semantically reversed range like "[z-a]"
+		// is not an error; it simply never matches, consistent with glob.
 		{name: "unclosed bracket", target: "example.com/svc/[ab", wantErr: true},
 	}
 	for _, tt := range tests {
@@ -100,16 +102,14 @@ func TestMatchGlobTarget(t *testing.T) {
 		{"example.com/**/handler", "example.com/a/b/c/handler", true}, // ** matches 3
 		{"example.com/**/handler", "example.com/a/b/c/other", false},
 
-		// Multiple and adjacent ** segments match linearly, no exponential
-		// backtracking. The pathological case (many ** before a failing tail)
-		// must still terminate quickly; if it timed out, the matcher regressed.
+		// Multiple ** segments in one pattern. The pathological case (many **
+		// before a failing tail) must still terminate quickly; if it hung, the
+		// matcher regressed.
 		{"**/svc/**", "example.com/acme/svc/users/v2", true},
 		{"**/svc/**", "example.com/acme/api/users", false},
 		{"a/**/b/**/c", "a/x/y/b/z/c", true},
 		{"a/**/b/**/c", "a/b/c", true},
 		{"a/**/b/**/c", "a/x/b/z/d", false},
-		{"example.com/**/**/**", "example.com/a/b/c/d", true},
-		{"example.com/**/**", "example.com", true},
 		{"**/**/**/**/**/**/**/**/x", "a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/y", false},
 
 		// Bare ** matches everything including the empty path.

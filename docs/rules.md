@@ -247,25 +247,27 @@ Rules:
 
 `target` accepts glob syntax so a single rule can instrument a whole package
 family instead of one exact import path. A target is treated as a glob when it
-contains any of `*`, `?`, or `[`; otherwise it stays an exact match and keeps
-the fast map-lookup path.
+contains any of `*`, `?`, `[`, or `{`; otherwise it stays an exact match and
+keeps the fast map-lookup path.
 
-Matching is segment-wise, with `/` as the segment delimiter:
+Glob matching uses [`bmatcuk/doublestar`](https://github.com/bmatcuk/doublestar#patterns);
+`/` is the segment delimiter:
 
 | Pattern | Matches | Does **not** match |
 | --- | --- | --- |
 | `example.com/svc/*` | `example.com/svc/users` | `example.com/svc`, `example.com/svc/users/v2` |
 | `example.com/svc/**` | `example.com/svc` and every descendant (`example.com/svc/users/v2`) | `example.com/other` |
 
-- `*` matches exactly one segment and never crosses `/`. `?` and `[...]`
-  character classes also work within a single segment (delegated to
-  [`path.Match`](https://pkg.go.dev/path#Match)).
-- `**` is a whole-segment wildcard matching zero or more segments. It is only
-  valid as a complete segment; a fused fragment such as `foo**` or `**bar` is
-  ambiguous and rejected at load time.
-- A syntactically malformed pattern (for example an unclosed `[`) is rejected at
-  load time. A reversed range such as `[z-a]` is **not** an error — consistent
-  with stdlib glob behaviour it simply never matches.
+- `*` matches within a single segment and never crosses `/`. `?`, `[...]`
+  character classes, and `{alt1,alt2}` alternation also work per doublestar.
+- `**` matches zero or more whole segments (`example.com/svc/**` matches both
+  `example.com/svc` and `example.com/svc/users/v2`). Per doublestar, a `**`
+  fused into a segment (`foo**`, `**bar`) is treated as a single-segment `*`.
+- A malformed pattern (for example an unclosed `[`) is rejected at load time. A
+  reversed range such as `[z-a]` is **not** an error; it simply never matches.
+
+See the [doublestar pattern reference](https://github.com/bmatcuk/doublestar#patterns)
+for the full grammar.
 
 ### Valid and invalid shapes
 

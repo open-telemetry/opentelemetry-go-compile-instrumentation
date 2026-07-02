@@ -1123,12 +1123,12 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 }
 
 func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
-	// An ambiguous glob target ("**" fused into a segment) must fail loudly at
-	// load time rather than silently matching nothing.
+	// A malformed glob target (unclosed bracket) must fail loudly at load time
+	// rather than silently matching nothing during the setup phase.
 	dir := t.TempDir()
 	ruleFile := filepath.Join(dir, "bad.yaml")
 	err := os.WriteFile(ruleFile, []byte(`bad_hook:
-  target: example.com/svc**
+  target: example.com/[svc
   func: Handler
   before: BeforeHandler
   path: "example.com/hooks"
@@ -1144,7 +1144,7 @@ func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
 
 	_, err = sp.matchDeps(context.Background(), deps)
 	require.Error(t, err)
-	require.ErrorContains(t, err, "whole path segment")
+	require.ErrorContains(t, err, "not a valid glob pattern")
 }
 
 func TestMatchDeps_EmptyTargetRejected(t *testing.T) {

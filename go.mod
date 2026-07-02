@@ -6,6 +6,7 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation
 go 1.25.0
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/dave/dst v0.27.3
 	github.com/google/go-cmp v0.7.0
 	github.com/stretchr/testify v1.11.1
