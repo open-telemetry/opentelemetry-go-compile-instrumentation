@@ -425,6 +425,28 @@ func extractBuildFlags(args []string) []string {
 	return append(valueFlags, enabledBoolFlags...)
 }
 
+// vendoringActive reports whether the main module vendors its dependencies. It
+// resolves the module via go env GOMOD rather than `go list`, which would fail
+// the vendor consistency check while go.mod is mid-edit, then checks for
+// vendor/modules.txt.
+func vendoringActive(ctx context.Context, workDir string) bool {
+	root, err := pkgload.ModuleDir(ctx, workDir)
+	if err != nil || root == "" {
+		return false
+	}
+	return util.PathExists(filepath.Join(root, "vendor", "modules.txt"))
+}
+
+// goflagsSelectsModMode reports whether GOFLAGS already sets a -mod module mode.
+func goflagsSelectsModMode() bool {
+	for _, f := range strings.Fields(os.Getenv("GOFLAGS")) {
+		if f == "-mod" || strings.HasPrefix(f, "-mod=") {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildWithToolexec builds the project with the toolexec mode
 func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
@@ -463,6 +485,19 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	pwd := util.GetOtelcWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcWorkDir, pwd))
+
+	// Vendored projects fail the vendor consistency check here: setup edited
+	// go.mod for the injected hook modules but not vendor/modules.txt. Build in
+	// module mode via GOFLAGS (so the toolexec `go list` calls ignore vendoring
+	// too), leaving the user's vendor directory untouched.
+	if vendoringActive(ctx, pwd) && !goflagsSelectsModMode() {
+		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
+		goflags := os.Getenv("GOFLAGS")
+		if goflags != "" {
+			goflags += " "
+		}
+		env = append(env, "GOFLAGS="+goflags+"-mod=mod")
+	}
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build

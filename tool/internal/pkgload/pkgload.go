@@ -6,6 +6,10 @@ package pkgload
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/tools/go/packages"
 
@@ -29,6 +33,24 @@ func LoadPackages(
 		return nil, ex.Wrapf(err, "loading packages %v", patterns)
 	}
 	return pkgs, nil
+}
+
+// ModuleDir returns the directory of dir's main module via `go env GOMOD`.
+// Unlike ResolveModuleDir it doesn't load packages, so it works when the vendor
+// tree is temporarily inconsistent. Returns "" outside a module.
+func ModuleDir(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "go", "env", "GOMOD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ex.Wrapf(err, "running go env GOMOD in %s", dir)
+	}
+	goMod := strings.TrimSpace(string(out))
+	// go env GOMOD prints os.DevNull when dir is not inside a module.
+	if goMod == "" || goMod == os.DevNull {
+		return "", nil
+	}
+	return filepath.Dir(goMod), nil
 }
 
 // ResolvePackageName returns the declared package name for an import path.
