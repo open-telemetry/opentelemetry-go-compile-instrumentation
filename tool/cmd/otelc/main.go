@@ -106,7 +106,7 @@ func main() {
 	}
 }
 
-func initLogger(ctx context.Context, cmd *cli.Command) (_ context.Context, retErr error) {
+func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 	workDir, err := filepath.Abs(cmd.String("work-dir"))
 	if err != nil {
 		return ctx, ex.Wrapf(err, "failed to resolve work directory %q", cmd.String("work-dir"))
@@ -115,8 +115,10 @@ func initLogger(ctx context.Context, cmd *cli.Command) (_ context.Context, retEr
 		return ctx, ex.Wrapf(setErr, "failed to set %s", util.EnvOtelcWorkDir)
 	}
 
-	// Skip filesystem setup for lightweight subcommands that don't produce artifacts.
-	if cmd.Args().First() == "version" {
+	// Skip filesystem setup for subcommands that don't produce artifacts or
+	// that remove .otelc-build/ (opening a file there would prevent deletion on Windows).
+	switch cmd.Args().First() {
+	case "version", "cleanup":
 		return ctx, nil
 	}
 
@@ -131,16 +133,12 @@ func initLogger(ctx context.Context, cmd *cli.Command) (_ context.Context, retEr
 	if err != nil {
 		return ctx, ex.Wrapf(err, "failed to open log file %q", logFilename)
 	}
-	defer func() {
-		if retErr != nil {
-			_ = logFile.Close()
-		}
-	}()
 
 	level := slog.LevelInfo
 	if cmd.Bool("debug") {
 		level = slog.LevelDebug
 		if setErr := os.Setenv(util.EnvOtelcDebug, "1"); setErr != nil {
+			_ = logFile.Close()
 			return ctx, ex.Wrapf(setErr, "set %s", util.EnvOtelcDebug)
 		}
 	}
