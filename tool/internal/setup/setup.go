@@ -17,6 +17,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/tools/go/packages"
@@ -248,6 +249,47 @@ func getPackageDir(pkg *packages.Package) string {
 	return ""
 }
 
+// generateRuntimePerPackage generates the injected hook code (otelc.runtime.go)
+// for every buildable package and returns the set of module directories that
+// were touched, so their go.mod/go.sum can later be backed up and synced.
+func (sp *SetupPhase) generateRuntimePerPackage(
+	ctx context.Context,
+	pkgs []*packages.Package,
+	matched []*rule.InstRuleSet,
+) (map[string]bool, error) {
+	moduleDirs := make(map[string]bool)
+	for _, pkg := range pkgs {
+		// file-based builds use synthetic "command-line-arguments" packages
+		if pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage {
+			sp.Warn("skipping package without module", "package", pkg.PkgPath)
+			continue
+		}
+
+		pkgDir := getPackageDir(pkg)
+		if pkgDir == "" {
+			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
+			continue
+		}
+
+		var moduleDir string
+		if pkg.Module != nil {
+			moduleDir = pkg.Module.Dir
+		} else {
+			var err error
+			if moduleDir, err = pkgload.ResolveModuleDir(ctx, pkgDir); err != nil {
+				return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
+			}
+		}
+
+		// Introduce additional hook code by generating otelc.runtime.go
+		if err := sp.addDeps(ctx, matched, pkgDir); err != nil {
+			return nil, ex.Wrapf(err, "adding deps for package at %s", pkgDir)
+		}
+		moduleDirs[moduleDir] = true
+	}
+	return moduleDirs, nil
+}
+
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
@@ -311,34 +353,9 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Generate otelc.runtime.go for all packages
-	moduleDirs := make(map[string]bool)
-	for _, pkg := range pkgs {
-		// file-based builds use synthetic "command-line-arguments" packages
-		if pkg.Module == nil && pkg.PkgPath != commandLineArgumentsPackage {
-			sp.Warn("skipping package without module", "package", pkg.PkgPath)
-			continue
-		}
-
-		pkgDir := getPackageDir(pkg)
-		if pkgDir == "" {
-			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
-			continue
-		}
-
-		var moduleDir string
-		if pkg.Module != nil {
-			moduleDir = pkg.Module.Dir
-		} else {
-			if moduleDir, err = pkgload.ResolveModuleDir(ctx, pkgDir); err != nil {
-				return ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
-			}
-		}
-
-		// Introduce additional hook code by generating otelc.runtime.go
-		if err = sp.addDeps(ctx, matched, pkgDir); err != nil {
-			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
-		}
-		moduleDirs[moduleDir] = true
+	moduleDirs, err := sp.generateRuntimePerPackage(ctx, pkgs, matched)
+	if err != nil {
+		return err
 	}
 
 	// Backup go.mod, go.sum and go.work.sum files before modifying them
