@@ -9,7 +9,7 @@ replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/r
 require (
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-00010101000000-000000000000
 	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime v0.0.0-00010101000000-000000000000
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 )
 
