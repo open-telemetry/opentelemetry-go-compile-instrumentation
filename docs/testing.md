@@ -105,10 +105,8 @@ make test-e2e/coverage
 ## Coverage
 
 > [!NOTE]
-> The project targets a **≥70% unit-test coverage** goal for both the `tool/` and `pkg/` module trees.
-> This is an **aspirational target** currently being worked toward. The CI step reports coverage
-> for both trees but does **not yet block merges** when coverage is below the threshold.
-> Once the target is consistently met, the gate will be promoted to enforcement.
+> The project enforces a **≥70% unit-test coverage** floor for both the `tool/` and `pkg/` module trees.
+> Codecov checks each tree against the target and **blocks the PR** when coverage drops below it.
 
 ### Coverage target rationale
 
@@ -124,8 +122,8 @@ The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
 
 Codecov evaluates each flag against the 70% target defined in `codecov.yml` and posts the result
-as an **informational** status check — a coverage shortfall is visible in the PR but does **not**
-block merges. Flip `informational: false` in `codecov.yml` once the target is consistently met.
+as an **enforcing** status check (`informational: false`): a coverage shortfall below the target
+fails the check and blocks the PR.
 
 All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
 
