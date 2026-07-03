@@ -2,7 +2,7 @@ module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/a
 
 go 1.25.0
 
-require github.com/segmentio/kafka-go v0.4.50
+require github.com/segmentio/kafka-go v0.4.51
 
 require (
 	github.com/klauspost/compress v1.15.9 // indirect
