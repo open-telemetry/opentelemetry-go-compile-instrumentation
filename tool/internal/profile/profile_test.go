@@ -4,6 +4,7 @@
 package profile
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -204,6 +205,51 @@ func TestStartInvalidDir(t *testing.T) {
 	_, err := Start(filepath.Join(f.Name(), "subdir"), []Type{Heap})
 	if err == nil {
 		t.Fatal("Start() with invalid dir returned nil error, want error")
+	}
+}
+
+func TestMerge(t *testing.T) {
+	dir := t.TempDir()
+
+	// Produce a real PID-stamped heap profile to merge.
+	s, err := Start(dir, []Type{Heap})
+	if err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	if stopErr := s.Stop(); stopErr != nil {
+		t.Fatalf("Stop() error: %v", stopErr)
+	}
+	pidFile := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
+	assertFileExists(t, pidFile)
+
+	if mergeErr := Merge(context.Background(), dir, []Type{Heap}); mergeErr != nil {
+		t.Fatalf("Merge() error: %v", mergeErr)
+	}
+
+	// The merged file is written and the PID-stamped input is removed.
+	assertFileExists(t, filepath.Join(dir, "otelc-heap.pprof"))
+	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
+		t.Errorf("expected PID-stamped file %q to be removed after merge", pidFile)
+	}
+}
+
+func TestMergeTraceSkipped(t *testing.T) {
+	dir := t.TempDir()
+
+	// Trace profiles cannot be merged, so Merge is a no-op for them and must not
+	// create a merged trace file.
+	if err := Merge(context.Background(), dir, []Type{Trace}); err != nil {
+		t.Fatalf("Merge() error: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "otelc-trace.pprof")); !os.IsNotExist(statErr) {
+		t.Error("Merge() must not create a merged trace file")
+	}
+}
+
+func TestMergeNoFiles(t *testing.T) {
+	// With no matching profile files present, Merge succeeds without writing anything.
+	if err := Merge(context.Background(), t.TempDir(), []Type{Heap, CPU}); err != nil {
+		t.Fatalf("Merge() error: %v", err)
 	}
 }
 
