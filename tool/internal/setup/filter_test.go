@@ -164,7 +164,7 @@ func TestPackageNameFilter_Match(t *testing.T) {
 			f := &setup.PackageNameFilter{Name: tt.filterName}
 			if got := f.Match(ctx); got != tt.want {
 				t.Fatalf("PackageNameFilter{Name:%q}.Match(package %q) = %v, want %v",
-					tt.filterName, tt.src, got, tt.want)
+					tt.filterName, ctx.AST.Name.Name, got, tt.want)
 			}
 		})
 	}
