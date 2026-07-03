@@ -320,8 +320,15 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	// A CLI -mod=vendor beats the GOFLAGS=-mod=mod that GoBuild sets, so the
+	// Phase-1 build-plan dry run would still resolve vendor/ paths. findDeps
+	// rewrites it to module mode when vendoring is active so both phases agree
+	// on where dependency source lives. Recomputed here (rather than threaded)
+	// because Setup is also a standalone command action (otelc setup).
+	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
+
 	// Find all dependencies of the project being build
-	deps, err := sp.findDeps(ctx, subcommand, args)
+	deps, err := sp.findDeps(ctx, subcommand, args, vendored)
 	if err != nil {
 		return err
 	}
@@ -503,18 +510,58 @@ func vendoringActive(ctx context.Context, workDir string) bool {
 	return util.PathExists(filepath.Join(root, "vendor", "modules.txt"))
 }
 
-// goflagsSelectsModMode reports whether GOFLAGS already sets a -mod module mode.
-func goflagsSelectsModMode() bool {
-	for _, f := range strings.Fields(os.Getenv("GOFLAGS")) {
-		if f == "-mod" || strings.HasPrefix(f, "-mod=") {
-			return true
+// modMod forces module mode, so the build ignores the vendor directory.
+const modMod = "-mod=mod"
+
+// forceModMod returns goflags adjusted so the build ignores the vendor
+// directory. GOFLAGS holds space-separated single tokens, so only the
+// -mod=value form occurs here. Every -mod=vendor is rewritten to -mod=mod
+// (Go applies last-wins for repeated flags, so all occurrences must change);
+// -mod=mod and -mod=readonly are left as-is (both already ignore vendoring, so
+// we respect the user's intent). -mod=mod is appended only when no -mod token
+// is present at all.
+func forceModMod(goflags string) string {
+	fields := strings.Fields(goflags)
+	hasMod := false
+	for i, f := range fields {
+		switch {
+		case f == "-mod=vendor":
+			fields[i] = modMod
+			hasMod = true
+		case f == "-mod" || strings.HasPrefix(f, "-mod="):
+			hasMod = true
 		}
 	}
-	return false
+	if !hasMod {
+		fields = append(fields, modMod)
+	}
+	return strings.Join(fields, " ")
 }
 
-// BuildWithToolexec builds the project with the toolexec mode
-func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
+// rewriteModVendor returns a copy of args with an explicit -mod=vendor (single
+// token) or -mod vendor (two tokens) rewritten to module mode, leaving
+// -mod=readonly and -mod=mod untouched. A CLI flag beats GOFLAGS, so this
+// neutralizes a vendor selection that setting GOFLAGS alone cannot override.
+func rewriteModVendor(args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i := 0; i < len(out); i++ {
+		switch {
+		case out[i] == "-mod=vendor":
+			out[i] = modMod
+		case out[i] == "-mod" && i+1 < len(out) && out[i+1] == "vendor":
+			out[i+1] = "mod"
+			i++
+		}
+	}
+	return out
+}
+
+// BuildWithToolexec builds the project with the toolexec mode. vendored is
+// computed once by GoBuild: GoBuild already forced GOFLAGS=-mod=mod, but a CLI
+// -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
+// args and forwarded flags below.
+func BuildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
 	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
@@ -535,6 +582,9 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	newArgs = append(newArgs, insert)
 	// Add the rest
 	restArgs := args[1:]
+	if vendored {
+		restArgs = rewriteModVendor(restArgs)
+	}
 	if _, fileTargets, err2 := splitBuildTargets(restArgs); err2 == nil && len(fileTargets) > 0 {
 		// add otelc.runtime.go manually to command line for file targets
 		dir := filepath.Dir(fileTargets[0])
@@ -552,22 +602,13 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcWorkDir, pwd))
 
-	// Vendored projects fail the vendor consistency check here: setup edited
-	// go.mod for the injected hook modules but not vendor/modules.txt. Build in
-	// module mode via GOFLAGS (so the toolexec `go list` calls ignore vendoring
-	// too), leaving the user's vendor directory untouched.
-	if vendoringActive(ctx, pwd) && !goflagsSelectsModMode() {
-		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
-		goflags := os.Getenv("GOFLAGS")
-		if goflags != "" {
-			goflags += " "
-		}
-		env = append(env, "GOFLAGS="+goflags+"-mod=mod")
-	}
-
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
-	if buildFlags := extractBuildFlags(args); len(buildFlags) > 0 {
+	buildFlags := extractBuildFlags(args)
+	if vendored {
+		buildFlags = rewriteModVendor(buildFlags)
+	}
+	if len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)
 		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))
 		logger.DebugContext(ctx, "forwarding build flags", "flags", buildFlags)
@@ -612,6 +653,22 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 
 	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
 
+	// Vendored projects fail the vendor consistency check: setup edits go.mod
+	// for the injected hook modules but not vendor/modules.txt. Force module
+	// mode so both build phases resolve dependency sources from the module cache
+	// (matching versions and paths) instead of vendor/, leaving the user's
+	// vendor directory untouched. This must run before Setup so the Phase 1
+	// build-plan dry run also ignores vendoring.
+	pwd := util.GetOtelcWorkDir()
+	vendored := vendoringActive(ctx, pwd)
+	if vendored {
+		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
+		// go.work workspaces are out of scope (Go forbids -mod=mod in workspace mode).
+		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
+			return ex.Wrapf(err, "forcing module mode for vendored build")
+		}
+	}
+
 	setupStart := time.Now()
 	err := Setup(ctx, cmd)
 	if err != nil {
@@ -623,7 +680,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	logger.InfoContext(ctx, "Setup completed successfully")
 
 	buildStart := time.Now()
-	err = BuildWithToolexec(ctx, cmd)
+	err = BuildWithToolexec(ctx, cmd, vendored)
 	if err != nil {
 		return err
 	}

@@ -18,10 +18,27 @@ import (
 
 // TestVendoredBuild builds the basic demo from a vendored copy. setup edits
 // go.mod for the hook modules but not vendor/modules.txt, so the build must use
-// -mod=mod or it fails the vendor consistency check. The copy lives in a temp dir
-// to keep the committed demo vendor-free and clear of TestBasic.
+// -mod=mod or it fails the vendor consistency check.
 func TestVendoredBuild(t *testing.T) {
 	t.Parallel()
+	buildVendoredBasic(t, "go", "build", "-a")
+}
+
+// TestVendoredBuildModVendor covers the flag-precedence path: an explicit
+// -mod=vendor on the CLI beats the GOFLAGS=-mod=mod otelc sets, so without
+// rewriting it every phase runs in vendor mode again — the consistency check
+// fails and the version-constrained x/time/rate rules go unmatched.
+func TestVendoredBuildModVendor(t *testing.T) {
+	t.Parallel()
+	buildVendoredBasic(t, "go", "build", "-a", "-mod=vendor")
+}
+
+// buildVendoredBasic vendors a temp copy of the basic demo (kept out of the
+// committed tree and clear of TestBasic), builds it with the given otelc args,
+// and asserts both the hello-world span and the version-constrained x/time/rate
+// instrumentation fired, and that the vendor directory was left untouched.
+func buildVendoredBasic(t *testing.T, args ...string) {
+	t.Helper()
 
 	appsDir := t.TempDir()
 	app := filepath.Join(appsDir, "basic")
@@ -33,10 +50,18 @@ func TestVendoredBuild(t *testing.T) {
 	before, err := os.ReadFile(modulesTxt)
 	require.NoError(t, err)
 
-	testutil.Build(t, appsDir, "basic", "go", "build", "-a")
+	testutil.Build(t, appsDir, "basic", args...)
 	output := testutil.Run(t, appsDir, "basic", nil)
 
 	verifyExportedHelloWorldSpan(t, output)
+
+	// golang.org/x/time/rate is a vendored third-party dependency instrumented
+	// by version-constrained rules. Under -mod=vendor its source path carries no
+	// @version, so those rules silently fail to match; asserting Every1/Every3
+	// fired proves the vendored build resolved the dependency (and its version)
+	// from the module cache rather than vendor/.
+	require.Contains(t, output, "Every1")
+	require.Contains(t, output, "Every3")
 
 	after, err := os.ReadFile(modulesTxt)
 	require.NoError(t, err)

@@ -204,7 +204,17 @@ func findGoSources(sp *SetupPhase, args []string, cgoObjDirs map[string]string) 
 }
 
 // findDeps finds dependencies by listing the build plan.
-func (sp *SetupPhase) findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Dependency, error) {
+func (sp *SetupPhase) findDeps(
+	ctx context.Context,
+	subcommand string,
+	cmdArgs []string,
+	vendored bool,
+) ([]*Dependency, error) {
+	if vendored {
+		// A CLI -mod=vendor would run the dry run in vendor mode (vendor/ paths
+		// without an @version), defeating the GOFLAGS=-mod=mod set upstream.
+		cmdArgs = rewriteModVendor(cmdArgs)
+	}
 	buildPlan, err := sp.listBuildPlan(ctx, subcommand, cmdArgs)
 	if err != nil {
 		return nil, err
