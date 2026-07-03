@@ -121,10 +121,10 @@ instrument_sql_exec:
 - `has_package` matches source files whose **declared `package` clause** equals
   the given name. This is the `package foo` line in the source file, not the
   import path (use `target` for that) and not the build's test-ness (use
-  `is_test` for that). Files in the same package share one declared name; an
-  external test file may declare a different name (e.g. `foo_test`). Combine
-  with `is_test` via `all-of` to scope a rule to external test files only — see
-  the example below.
+  `is_test` for that). Its main use case is with a glob target that spans
+  multiple compiles: `example.com/foo*` matches both `example.com/foo` and
+  `example.com/foo_test`; `has_package` then selects which declared name to
+  instrument. See the example below.
 - `is_test` is a tri-state boolean that gates on whether the file belongs to a
   test build — a compilation the Go toolchain produces only under `go test` (a
   package augmented with its `_test.go` files, an external `xxx_test` package,
@@ -142,18 +142,18 @@ instrument_sql_exec:
   top level of `where` (outside `where.file`), are validated but return a
   descriptive "not yet supported" error at build time.
 
-**`has_package` example — scope a rule to external test files only:**
+**`has_package` example — filter within a glob-matched package family:**
 
-`is_test` matches the entire test build, but cannot distinguish `package foo`
-from `package foo_test` within that build. `has_package` provides that
-distinction. Use `all-of` to combine the two (a single node holds at most one
-leaf predicate):
+`target` selects by import path. An exact target already distinguishes
+`example.com/foo` from `example.com/foo_test` — they compile under distinct
+import paths. `has_package` adds value with a glob target that covers both:
 
 ```yaml
-# Apply only to external test files (package foo_test) — not to the package's
-# own internal _test.go files (package foo) even within the same test build.
+# Apply only to external test files (package foo_test) within the foo* family.
+# The glob target matches both example.com/foo and example.com/foo_test;
+# has_package narrows to the external test package, is_test guards test builds.
 trace_external_test:
-  target: example.com/foo
+  target: example.com/foo*
   where:
     func: TestHelper
     file:

@@ -1,0 +1,147 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main_test
+
+import _ "unsafe"
+
+// ExternalHelper lives in an external test package (package main_test). The
+// rule uses a glob target (main*) that covers both the main and main_test
+// compiles, then narrows to this package via all-of: [is_test: true,
+// has_package: main_test]. This is the realistic discriminating case: the
+// external test package compiles at import path main_test, the internal test
+// package at main — has_package selects one when the glob matches both.
+func ExternalHelper() (_unnamedRetVal0 error) {
+	//line <generated>:1
+	if hookContext2215449730, _ := OtelBeforeTrampoline_ExternalHelper2215449730(); false {
+	} else {
+		defer OtelAfterTrampoline_ExternalHelper2215449730(hookContext2215449730, &_unnamedRetVal0)
+	}
+	//line main_test.go:13:2
+	println("external helper")
+	//line main_test.go:14:2
+	return nil
+}
+
+//line <generated>:1
+type HookContextImpl2215449730 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl2215449730) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl2215449730) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl2215449730) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl2215449730) GetData() interface{}     { return c.data }
+func (c *HookContextImpl2215449730) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl2215449730) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl2215449730) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl2215449730) GetParam(idx int) interface{} {
+	switch idx {
+	}
+	return nil
+}
+
+func (c *HookContextImpl2215449730) SetParam(idx int, val interface{}) {
+	if val == nil {
+		c.params[idx] = nil
+		return
+	}
+	switch idx {
+	}
+}
+
+func (c *HookContextImpl2215449730) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl2215449730) SetReturnVal(idx int, val interface{}) {
+	if val == nil {
+		c.returnVals[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.returnVals[0].(*error)) = val.(error)
+	}
+}
+func (c *HookContextImpl2215449730) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl2215449730) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl2215449730) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl2215449730) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_ExternalHelper2215449730() (hookContext *HookContextImpl2215449730, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "BeforeExternalHelper")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl2215449730{}
+	hookContext.params = []interface{}{}
+	hookContext.funcName = "ExternalHelper"
+	hookContext.packageName = "main_test"
+	if BeforeExternalHelper != nil {
+		BeforeExternalHelper(hookContext)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "AfterExternalHelper")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl2215449730).returnVals = []interface{}{arg0}
+	if AfterExternalHelper != nil {
+		AfterExternalHelper(hookContext, *arg0)
+	}
+}
+
+//go:linkname BeforeExternalHelper testdata/golden/has-package-combo-match.BeforeExternalHelper
+func BeforeExternalHelper(hookContext HookContext)
+
+//go:linkname AfterExternalHelper testdata/golden/has-package-combo-match.AfterExternalHelper
+func AfterExternalHelper(hookContext HookContext, arg0 error)

@@ -4,6 +4,8 @@
 package setup
 
 import (
+	"strings"
+
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -219,7 +221,7 @@ func Build(where *rule.WhereDef) (Filter, error) {
 func hasLeafPredicate(def *rule.FilterDef) bool {
 	return def.HasFunc != "" || def.HasRecv != "" ||
 		def.HasStruct != "" || def.HasDirective != "" ||
-		def.HasPackage != "" || def.IsTest != nil
+		strings.TrimSpace(def.HasPackage) != "" || def.IsTest != nil
 }
 
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
@@ -284,7 +286,7 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 	if def.HasDirective != "" {
 		active++
 	}
-	if def.HasPackage != "" {
+	if strings.TrimSpace(def.HasPackage) != "" {
 		active++
 	}
 	if def.IsTest != nil {
@@ -305,8 +307,8 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		return &StructFilter{Struct: def.HasStruct}, nil
 	case def.HasDirective != "":
 		return nil, ex.Newf("where.file.has_directive is not yet supported")
-	case def.HasPackage != "":
-		return &PackageNameFilter{Name: def.HasPackage}, nil
+	case strings.TrimSpace(def.HasPackage) != "":
+		return &PackageNameFilter{Name: strings.TrimSpace(def.HasPackage)}, nil
 	case def.IsTest != nil:
 		return &IsTestFilter{ShouldMatch: *def.IsTest}, nil
 	default:

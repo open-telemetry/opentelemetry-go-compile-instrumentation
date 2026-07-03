@@ -348,6 +348,17 @@ func TestBuild_ErrorCases(t *testing.T) {
 			}},
 		},
 		{
+			// Explicit regression for the primary use case of has_package: combining
+			// it with is_test as siblings (without all-of) must be rejected.
+			name:  "has_package combined with is_test",
+			where: &rule.WhereDef{File: &rule.FilterDef{HasPackage: "foo_test", IsTest: boolPtr(true)}},
+		},
+		{
+			// Whitespace-only has_package must not count as an active predicate.
+			name:  "has_package whitespace only",
+			where: &rule.WhereDef{File: &rule.FilterDef{HasPackage: "   "}},
+		},
+		{
 			name:  "where one-of unsupported",
 			where: &rule.WhereDef{OneOf: []rule.WhereDef{{Func: "Foo"}, {Func: "Bar"}}},
 		},
