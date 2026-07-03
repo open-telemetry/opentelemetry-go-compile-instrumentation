@@ -33,7 +33,11 @@ func TestOtelMiddleware_ChatCompletion(t *testing.T) {
 	middleware := OtelMiddleware()
 
 	reqBody := `{"model":"gpt-4","max_tokens":100,"temperature":0.7,"top_p":0.9,"frequency_penalty":0.5,"presence_penalty":0.3}`
-	req, _ := http.NewRequest("POST", "http://api.openai.com/v1/chat/completions", io.NopCloser(bytes.NewReader([]byte(reqBody))))
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
 
 	respBody := `{"id":"chatcmpl-123","model":"gpt-4","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`
 	next := func(r *http.Request) (*http.Response, error) {
@@ -77,7 +81,11 @@ func TestOtelMiddleware_Completion(t *testing.T) {
 	middleware := OtelMiddleware()
 
 	reqBody := `{"model":"gpt-3.5-turbo-instruct","max_tokens":50,"temperature":0.5}`
-	req, _ := http.NewRequest("POST", "http://api.openai.com/v1/completions", io.NopCloser(bytes.NewReader([]byte(reqBody))))
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
 
 	respBody := `{"id":"cmpl-456","model":"gpt-3.5-turbo-instruct","choices":[{"finish_reason":"length"}],"usage":{"prompt_tokens":5,"completion_tokens":50,"total_tokens":55}}`
 	next := func(r *http.Request) (*http.Response, error) {
@@ -113,7 +121,11 @@ func TestOtelMiddleware_Embedding(t *testing.T) {
 	middleware := OtelMiddleware()
 
 	reqBody := `{"model":"text-embedding-ada-002","input":"hello world"}`
-	req, _ := http.NewRequest("POST", "http://api.openai.com/v1/embeddings", io.NopCloser(bytes.NewReader([]byte(reqBody))))
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/embeddings",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
 
 	respBody := `{"model":"text-embedding-ada-002","usage":{"prompt_tokens":2,"total_tokens":2}}`
 	next := func(r *http.Request) (*http.Response, error) {
@@ -196,7 +208,11 @@ func TestOtelMiddleware_NextError(t *testing.T) {
 	middleware := OtelMiddleware()
 
 	reqBody := `{"model":"gpt-4"}`
-	req, _ := http.NewRequest("POST", "http://api.openai.com/v1/chat/completions", io.NopCloser(bytes.NewReader([]byte(reqBody))))
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
 
 	next := func(r *http.Request) (*http.Response, error) {
 		return nil, assert.AnError
@@ -231,7 +247,11 @@ func TestOtelMiddleware_ProviderDetection(t *testing.T) {
 			middleware := OtelMiddleware()
 
 			reqBody := `{"model":"test-model"}`
-			req, _ := http.NewRequest("POST", "http://"+tt.host+"/v1/chat/completions", io.NopCloser(bytes.NewReader([]byte(reqBody))))
+			req, _ := http.NewRequest(
+				"POST",
+				"http://"+tt.host+"/v1/chat/completions",
+				io.NopCloser(bytes.NewReader([]byte(reqBody))),
+			)
 
 			respBody := `{"id":"test","model":"test-model","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
 			next := func(r *http.Request) (*http.Response, error) {
@@ -258,7 +278,11 @@ func TestOtelMiddleware_StreamingResponse(t *testing.T) {
 	middleware := OtelMiddleware()
 
 	reqBody := `{"model":"gpt-4","stream":true}`
-	req, _ := http.NewRequest("POST", "http://api.openai.com/v1/chat/completions", io.NopCloser(bytes.NewReader([]byte(reqBody))))
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
 
 	streamData := "data: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\ndata: [DONE]\n\n"
 	next := func(r *http.Request) (*http.Response, error) {
@@ -301,7 +325,11 @@ func TestOtelMiddleware_AzurePath(t *testing.T) {
 	middleware := OtelMiddleware()
 
 	reqBody := `{"model":"gpt-4"}`
-	req, _ := http.NewRequest("POST", "http://myendpoint.azure.com/openai/deployments/gpt-4/chat/completions", io.NopCloser(bytes.NewReader([]byte(reqBody))))
+	req, _ := http.NewRequest(
+		"POST",
+		"http://myendpoint.azure.com/openai/deployments/gpt-4/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
 
 	respBody := `{"id":"azure-123","model":"gpt-4","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`
 	next := func(r *http.Request) (*http.Response, error) {

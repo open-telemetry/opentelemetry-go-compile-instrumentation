@@ -5,7 +5,6 @@ package client
 
 import (
 	"net/http"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -34,42 +33,13 @@ var (
 	initOnce   sync.Once
 )
 
-// moduleVersion extracts the version from the Go module system.
-// Falls back to "dev" if version cannot be determined.
-func moduleVersion() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "dev"
-	}
-
-	// Return the main module version
-	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		return bi.Main.Version
-	}
-
-	return "dev"
-}
-
 func initInstrumentation() {
 	initOnce.Do(func() {
-		version := moduleVersion()
-		if err := runtime.SetupOTelSDK(
-			"go.opentelemetry.io/compile-instrumentation/net/http/client",
-			version,
-		); err != nil {
-			logger.Error("failed to setup OTel SDK", "error", err)
-		}
 		tracer = otel.GetTracerProvider().Tracer(
 			instrumentationName,
-			trace.WithInstrumentationVersion(version),
+			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
 		propagator = otel.GetTextMapPropagator()
-
-		// Start runtime metrics (respects OTEL_GO_ENABLED/DISABLED_INSTRUMENTATIONS)
-		if err := runtime.StartRuntimeMetrics(); err != nil {
-			logger.Error("failed to start runtime metrics", "error", err)
-		}
-
 		logger.Info("HTTP client instrumentation initialized")
 	})
 }
