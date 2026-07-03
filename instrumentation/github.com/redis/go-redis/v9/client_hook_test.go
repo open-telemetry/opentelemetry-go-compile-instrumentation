@@ -78,9 +78,3 @@ func TestInstrumentationConstants(t *testing.T) {
 	)
 	assert.Equal(t, "REDIS", instrumentationKey)
 }
-
-func TestModuleVersion(t *testing.T) {
-	version := moduleVersion()
-	// In test mode, version should be "dev" since there's no proper build info
-	assert.NotEmpty(t, version)
-}

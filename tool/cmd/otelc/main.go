@@ -115,6 +115,13 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 		return ctx, ex.Wrapf(setErr, "failed to set %s", util.EnvOtelcWorkDir)
 	}
 
+	// Skip filesystem setup for subcommands that don't produce artifacts or
+	// that remove .otelc-build/ (opening a file there would prevent deletion on Windows).
+	switch cmd.Args().First() {
+	case "version", "cleanup":
+		return ctx, nil
+	}
+
 	buildTempDir := util.GetBuildTempDir()
 	err = os.MkdirAll(buildTempDir, 0o755)
 	if err != nil {
@@ -131,6 +138,7 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	if cmd.Bool("debug") {
 		level = slog.LevelDebug
 		if setErr := os.Setenv(util.EnvOtelcDebug, "1"); setErr != nil {
+			_ = logFile.Close()
 			return ctx, ex.Wrapf(setErr, "set %s", util.EnvOtelcDebug)
 		}
 	}
@@ -148,6 +156,9 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	})
 	logger := slog.New(handler)
 	ctx = util.ContextWithLogger(ctx, logger)
+	// closeLogger is safe to call from the After hook: cli/v3 After is a defer
+	// closure that captures the ctx variable by reference, so the updated ctx
+	// from Before is visible when After runs.
 	ctx = util.ContextWithLogWriter(ctx, logFile)
 
 	return ctx, nil

@@ -37,7 +37,14 @@ type streamingReader struct {
 	done          atomic.Bool
 }
 
-func newStreamingReader(body io.ReadCloser, span trace.Span, start time.Time, model, opName, provider string, op operationType, _ context.Context) *streamingReader {
+func newStreamingReader(
+	body io.ReadCloser,
+	span trace.Span,
+	start time.Time,
+	model, opName, provider string,
+	op operationType,
+	_ context.Context,
+) *streamingReader {
 	return &streamingReader{
 		reader:   body,
 		start:    start,

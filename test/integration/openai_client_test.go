@@ -44,16 +44,16 @@ func TestOpenAIClient(t *testing.T) {
 			testutil.RequireGenAIClientSemconv(
 				t,
 				span,
-				"openai",       // system
-				"chat",         // operationName
-				tc.model,       // requestModel
-				"local",        // providerName (localhost maps to "local")
+				"openai",            // system
+				"chat",              // operationName
+				tc.model,            // requestModel
+				"local",             // providerName (localhost maps to "local")
 				"chatcmpl-test-123", // responseID
-				tc.model,       // responseModel
-				[]string{"stop"}, // finishReasons
-				10,             // inputTokens
-				20,             // outputTokens
-				30,             // totalTokens
+				tc.model,            // responseModel
+				[]string{"stop"},    // finishReasons
+				10,                  // inputTokens
+				20,                  // outputTokens
+				30,                  // totalTokens
 			)
 		})
 	}
@@ -76,9 +76,9 @@ func startMockOpenAIServer(t *testing.T) *httptest.Server {
 
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]any{
-			"id":      "chatcmpl-test-123",
-			"object":  "chat.completion",
-			"model":   reqBody.Model,
+			"id":     "chatcmpl-test-123",
+			"object": "chat.completion",
+			"model":  reqBody.Model,
 			"choices": []map[string]any{
 				{
 					"index": 0,

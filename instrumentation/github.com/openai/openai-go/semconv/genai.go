@@ -8,23 +8,23 @@ import (
 )
 
 const (
-	GenAISystemKey                    = attribute.Key("gen_ai.system")
-	GenAIOperationNameKey             = attribute.Key("gen_ai.operation.name")
-	GenAIRequestModelKey              = attribute.Key("gen_ai.request.model")
-	GenAIResponseModelKey             = attribute.Key("gen_ai.response.model")
-	GenAIResponseIDKey                = attribute.Key("gen_ai.response.id")
-	GenAIResponseFinishReasonsKey     = attribute.Key("gen_ai.response.finish_reasons")
-	GenAIUsageInputTokensKey          = attribute.Key("gen_ai.usage.input_tokens")
-	GenAIUsageOutputTokensKey         = attribute.Key("gen_ai.usage.output_tokens")
-	GenAIUsageTotalTokensKey          = attribute.Key("gen_ai.usage.total_tokens")
-	GenAIProviderNameKey              = attribute.Key("gen_ai.provider.name")
-	GenAIRequestMaxTokensKey          = attribute.Key("gen_ai.request.max_tokens")
-	GenAIRequestTemperatureKey        = attribute.Key("gen_ai.request.temperature")
-	GenAIRequestTopPKey               = attribute.Key("gen_ai.request.top_p")
-	GenAIRequestFrequencyPenaltyKey   = attribute.Key("gen_ai.request.frequency_penalty")
-	GenAIRequestPresencePenaltyKey    = attribute.Key("gen_ai.request.presence_penalty")
-	GenAIRequestIsStreamKey           = attribute.Key("gen_ai.request.is_stream")
-	GenAIResponseTimeToFirstTokenKey  = attribute.Key("gen_ai.response.time_to_first_token")
+	GenAISystemKey                   = attribute.Key("gen_ai.system")
+	GenAIOperationNameKey            = attribute.Key("gen_ai.operation.name")
+	GenAIRequestModelKey             = attribute.Key("gen_ai.request.model")
+	GenAIResponseModelKey            = attribute.Key("gen_ai.response.model")
+	GenAIResponseIDKey               = attribute.Key("gen_ai.response.id")
+	GenAIResponseFinishReasonsKey    = attribute.Key("gen_ai.response.finish_reasons")
+	GenAIUsageInputTokensKey         = attribute.Key("gen_ai.usage.input_tokens")
+	GenAIUsageOutputTokensKey        = attribute.Key("gen_ai.usage.output_tokens")
+	GenAIUsageTotalTokensKey         = attribute.Key("gen_ai.usage.total_tokens")
+	GenAIProviderNameKey             = attribute.Key("gen_ai.provider.name")
+	GenAIRequestMaxTokensKey         = attribute.Key("gen_ai.request.max_tokens")
+	GenAIRequestTemperatureKey       = attribute.Key("gen_ai.request.temperature")
+	GenAIRequestTopPKey              = attribute.Key("gen_ai.request.top_p")
+	GenAIRequestFrequencyPenaltyKey  = attribute.Key("gen_ai.request.frequency_penalty")
+	GenAIRequestPresencePenaltyKey   = attribute.Key("gen_ai.request.presence_penalty")
+	GenAIRequestIsStreamKey          = attribute.Key("gen_ai.request.is_stream")
+	GenAIResponseTimeToFirstTokenKey = attribute.Key("gen_ai.response.time_to_first_token")
 )
 
 func GenAISystem(val string) attribute.KeyValue {
@@ -94,4 +94,3 @@ func GenAIRequestIsStream(val bool) attribute.KeyValue {
 func GenAIResponseTimeToFirstToken(microseconds int64) attribute.KeyValue {
 	return GenAIResponseTimeToFirstTokenKey.Int64(microseconds)
 }
-

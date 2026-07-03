@@ -66,10 +66,9 @@ func InstrumentedTargets(t *testing.T, rulesRoot string) map[string][]string {
 	return targets
 }
 
-// DiscoverInstrumentedDeps returns the direct, non-replaced third-party
-// requires of the go.mod at appDir that are covered by at least one
-// instrumentation rule target + supported version range.
-func DiscoverInstrumentedDeps(t *testing.T, appDir string, targets map[string][]string) []string {
+// directNonReplacedRequires returns the direct requires of the go.mod at
+// appDir, excluding modules replaced by a local path.
+func directNonReplacedRequires(t *testing.T, appDir string) []string {
 	cmd := exec.CommandContext(t.Context(), "go", "mod", "edit", "-json")
 	cmd.Dir = appDir
 	out, err := cmd.Output()
@@ -85,24 +84,34 @@ func DiscoverInstrumentedDeps(t *testing.T, appDir string, targets map[string][]
 		}
 	}
 
-	var deps []string
+	var requires []string
 	for _, req := range mod.Require {
 		if req.Indirect || localReplaces[req.Path] {
 			continue
 		}
+		requires = append(requires, req.Path)
+	}
+	return requires
+}
 
-		versionRanges := findMatchingVersionRanges(req.Path, targets)
+// DiscoverInstrumentedDeps returns the direct, non-replaced third-party
+// requires of the go.mod at appDir that are covered by at least one
+// instrumentation rule target + supported version range.
+func DiscoverInstrumentedDeps(t *testing.T, appDir string, targets map[string][]string) []string {
+	var deps []string
+	for _, reqPath := range directNonReplacedRequires(t, appDir) {
+		versionRanges := findMatchingVersionRanges(reqPath, targets)
 		if len(versionRanges) == 0 {
 			continue
 		}
 
-		cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Version}}", req.Path+"@latest")
+		cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Version}}", reqPath+"@latest")
 		out, err := cmd.Output()
-		require.NoError(t, err, "go list -m -f {{.Version}} %s@latest failed in %s", req.Path, appDir)
+		require.NoError(t, err, "go list -m -f {{.Version}} %s@latest failed in %s", reqPath, appDir)
 
 		latestVersion := strings.TrimSpace(string(out))
 		if coversAnyVersionRange(latestVersion, versionRanges) {
-			deps = append(deps, req.Path)
+			deps = append(deps, reqPath)
 		}
 	}
 	return deps
