@@ -16,7 +16,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
-//nolint:gochecknoglobals // Shared between Before/After hooks; cli/v3 After cannot receive modified context.
+//nolint:gochecknoglobals // Profiling session is shared between Before/After hooks.
 var activeSession *profile.Session
 
 // initProfiling starts profiling if --profile-path and --profile flags are set.

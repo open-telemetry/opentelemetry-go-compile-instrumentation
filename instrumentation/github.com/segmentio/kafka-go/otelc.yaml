@@ -1,0 +1,21 @@
+kafka_writer_writemessages:
+  target: github.com/segmentio/kafka-go
+  where:
+    func: WriteMessages
+    recv: "*Writer"
+  do:
+    - inject_hooks:
+        before: BeforeWriteMessages
+        after: AfterWriteMessages
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/segmentio/kafka-go"
+
+kafka_reader_readmessage:
+  target: github.com/segmentio/kafka-go
+  where:
+    func: ReadMessage
+    recv: "*Reader"
+  do:
+    - inject_hooks:
+        before: BeforeReadMessage
+        after: AfterReadMessage
+        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/segmentio/kafka-go"

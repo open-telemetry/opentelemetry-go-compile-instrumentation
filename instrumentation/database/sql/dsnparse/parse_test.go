@@ -450,6 +450,61 @@ func TestParseDSN_UnknownDriver(t *testing.T) {
 	assert.Equal(t, "", got.Addr())
 }
 
+func TestParseDSN_BestEffortUnknownDriver(t *testing.T) {
+	// An unregistered driver with a URL-shaped DSN falls back to a best-effort
+	// parse instead of silently returning an empty address.
+	got := ParseDSN("exoticdb", "exoticdb://dbhost:9999/mydb")
+	assert.Equal(t, "dbhost", got.Host)
+	assert.Equal(t, "9999", got.Port)
+	assert.Equal(t, "mydb", got.DBName)
+	assert.Equal(t, "dbhost:9999", got.Addr())
+}
+
+func TestRegisterDSNParser(t *testing.T) {
+	// A custom parser registered for a new driver name is used by ParseDSN.
+	RegisterDSNParser("customdriver", DSNParserFunc(func(string) DSNInfo {
+		return DSNInfo{Host: "custom-host", Port: "1234", DBName: "customdb"}
+	}))
+	got := ParseDSN("customdriver", "anything")
+	assert.Equal(t, "custom-host:1234", got.Addr())
+	assert.Equal(t, "customdb", got.DBName)
+}
+
+func TestRegisterDSNParser_OverridesBuiltin(t *testing.T) {
+	// Registering an already-known driver name overwrites the built-in parser.
+	// Restore the built-in afterwards so other tests are unaffected.
+	t.Cleanup(func() {
+		RegisterDSNParser("mysql", DSNParserFunc(parseMySQLDSN))
+	})
+	RegisterDSNParser("mysql", DSNParserFunc(func(string) DSNInfo {
+		return DSNInfo{Host: "overridden", Port: "1"}
+	}))
+	got := ParseDSN("mysql", "user:pass@tcp(127.0.0.1:3306)/db")
+	assert.Equal(t, "overridden:1", got.Addr())
+}
+
+func TestRegisterDSNParsers(t *testing.T) {
+	// Batch registration makes every provided parser available.
+	RegisterDSNParsers(map[string]DSNParser{
+		"batchdriver1": DSNParserFunc(func(string) DSNInfo { return DSNInfo{Host: "h1", Port: "11"} }),
+		"batchdriver2": DSNParserFunc(func(string) DSNInfo { return DSNInfo{Host: "h2", Port: "22"} }),
+	})
+	assert.Equal(t, "h1:11", ParseDSN("batchdriver1", "x").Addr())
+	assert.Equal(t, "h2:22", ParseDSN("batchdriver2", "x").Addr())
+}
+
+func TestParseDSN_PostgresAliases(t *testing.T) {
+	// pgx and lib/pq share the PostgreSQL DSN format and resolve identically.
+	for _, driver := range []string{"postgres", "postgresql", "pgx", "lib/pq"} {
+		t.Run(driver, func(t *testing.T) {
+			got := ParseDSN(driver, "postgres://user:pass@pghost:5432/mydb")
+			assert.Equal(t, "pghost", got.Host)
+			assert.Equal(t, "5432", got.Port)
+			assert.Equal(t, "mydb", got.DBName)
+		})
+	}
+}
+
 func TestDSNInfo_Addr(t *testing.T) {
 	tests := []struct {
 		info DSNInfo

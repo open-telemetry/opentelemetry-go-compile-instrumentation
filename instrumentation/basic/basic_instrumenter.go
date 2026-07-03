@@ -6,8 +6,9 @@ package basic
 import (
 	"context"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -30,10 +31,11 @@ type HelloWorldResponse struct {
 var tracer trace.Tracer
 
 func init() {
-	tracer = otel.GetTracerProvider().Tracer(
-		instrumentationName,
-		trace.WithInstrumentationVersion(instrumentationVersion),
+	spanExporter, _ := stdouttrace.New()
+	tracerProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(spanExporter)),
 	)
+	tracer = tracerProvider.Tracer(instrumentationName, trace.WithInstrumentationVersion(instrumentationVersion))
 }
 
 // StartInstrumentation starts a span for the hello world operation

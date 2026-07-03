@@ -180,7 +180,7 @@ func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 }
 
 func findHookFile(rule *rule.InstFuncRule) (string, error) {
-	files, err0 := listRuleFiles(rule.Path)
+	files, err0 := util.ListFiles(rule.ResolvedPath)
 	if err0 != nil {
 		return "", err0
 	}
