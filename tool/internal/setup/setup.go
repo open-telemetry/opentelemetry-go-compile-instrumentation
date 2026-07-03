@@ -303,6 +303,23 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 
 	logger := util.LoggerFromContext(ctx)
 
+	// Vendored projects fail the vendor consistency check: setup edits go.mod
+	// for the injected hook modules but not vendor/modules.txt. Force module
+	// mode so both build phases resolve dependency sources from the module cache
+	// (matching versions and paths) instead of vendor/, leaving the user's
+	// vendor directory untouched. This must run before isSetup() and
+	// getBuildPackages() below so a cached-setup `otelc go build` still sets
+	// GOFLAGS for the later BuildWithToolexec, and before the findDeps dry run
+	// further down. Computed here rather than threaded in because Setup is also
+	// a standalone command action (otelc setup).
+	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
+	if vendored {
+		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
+		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
+			return ex.Wrapf(err, "forcing module mode for vendored build")
+		}
+	}
+
 	if isSetup() {
 		logger.InfoContext(ctx, "Setup has already been completed, skipping setup.")
 		return nil
@@ -320,14 +337,10 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// A CLI -mod=vendor beats the GOFLAGS=-mod=mod that GoBuild sets, so the
-	// Phase-1 build-plan dry run would still resolve vendor/ paths. findDeps
-	// rewrites it to module mode when vendoring is active so both phases agree
-	// on where dependency source lives. Recomputed here (rather than threaded)
-	// because Setup is also a standalone command action (otelc setup).
-	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
-
-	// Find all dependencies of the project being build
+	// Find all dependencies of the project being build. A CLI -mod=vendor beats
+	// the GOFLAGS=-mod=mod forced above, so the Phase-1 build-plan dry run would
+	// still resolve vendor/ paths; findDeps rewrites it to module mode when
+	// vendoring is active so both phases agree on where dependency source lives.
 	deps, err := sp.findDeps(ctx, subcommand, args, vendored)
 	if err != nil {
 		return err
@@ -501,10 +514,26 @@ func extractBuildFlags(args []string) []string {
 // vendoringActive reports whether the main module vendors its dependencies. It
 // resolves the module via go env GOMOD rather than `go list`, which would fail
 // the vendor consistency check while go.mod is mid-edit, then checks for
-// vendor/modules.txt.
+// vendor/modules.txt. Returns false in workspace mode: Go forbids -mod=mod
+// there, so forcing it would turn a build that worked into a hard failure.
 func vendoringActive(ctx context.Context, workDir string) bool {
+	logger := util.LoggerFromContext(ctx)
+
+	workspace, err := pkgload.WorkspaceActive(ctx, workDir)
+	if err != nil {
+		logger.WarnContext(ctx, "failed to detect workspace mode; proceeding as non-workspace",
+			"dir", workDir, "error", err)
+	} else if workspace {
+		return false
+	}
+
 	root, err := pkgload.ModuleDir(ctx, workDir)
-	if err != nil || root == "" {
+	if err != nil {
+		logger.WarnContext(ctx, "failed to resolve module dir; building as non-vendored",
+			"dir", workDir, "error", err)
+		return false
+	}
+	if root == "" {
 		return false
 	}
 	return util.PathExists(filepath.Join(root, "vendor", "modules.txt"))
@@ -513,22 +542,42 @@ func vendoringActive(ctx context.Context, workDir string) bool {
 // modMod forces module mode, so the build ignores the vendor directory.
 const modMod = "-mod=mod"
 
+// isModFlag reports whether tok is a bare -mod/--mod flag; Go's flag parser
+// treats the double-dash form the same as the single-dash one. The value, if
+// any, is the next argument.
+func isModFlag(tok string) bool {
+	return tok == "-mod" || tok == "--mod"
+}
+
+// isModVendorToken reports whether tok is a joined -mod=vendor/--mod=vendor
+// flag.
+func isModVendorToken(tok string) bool {
+	return tok == "-mod=vendor" || tok == "--mod=vendor"
+}
+
+// isModToken reports whether tok is any form of the -mod/--mod flag: bare
+// (-mod, --mod) or joined with a value (-mod=value, --mod=value).
+func isModToken(tok string) bool {
+	return isModFlag(tok) || strings.HasPrefix(tok, "-mod=") || strings.HasPrefix(tok, "--mod=")
+}
+
 // forceModMod returns goflags adjusted so the build ignores the vendor
 // directory. GOFLAGS holds space-separated single tokens, so only the
-// -mod=value form occurs here. Every -mod=vendor is rewritten to -mod=mod
-// (Go applies last-wins for repeated flags, so all occurrences must change);
-// -mod=mod and -mod=readonly are left as-is (both already ignore vendoring, so
-// we respect the user's intent). -mod=mod is appended only when no -mod token
-// is present at all.
+// -mod=value form (single- or double-dash: -mod=vendor, --mod=vendor) occurs
+// here. Every -mod=vendor/--mod=vendor is rewritten to -mod=mod (Go applies
+// last-wins for repeated flags, so all occurrences must change); -mod=mod and
+// -mod=readonly (either dash form) are left as-is (both already ignore
+// vendoring, so we respect the user's intent). -mod=mod is appended only when
+// no -mod/--mod token is present at all.
 func forceModMod(goflags string) string {
 	fields := strings.Fields(goflags)
 	hasMod := false
 	for i, f := range fields {
 		switch {
-		case f == "-mod=vendor":
+		case isModVendorToken(f):
 			fields[i] = modMod
 			hasMod = true
-		case f == "-mod" || strings.HasPrefix(f, "-mod="):
+		case isModToken(f):
 			hasMod = true
 		}
 	}
@@ -538,18 +587,19 @@ func forceModMod(goflags string) string {
 	return strings.Join(fields, " ")
 }
 
-// rewriteModVendor returns a copy of args with an explicit -mod=vendor (single
-// token) or -mod vendor (two tokens) rewritten to module mode, leaving
-// -mod=readonly and -mod=mod untouched. A CLI flag beats GOFLAGS, so this
-// neutralizes a vendor selection that setting GOFLAGS alone cannot override.
+// rewriteModVendor returns a copy of args with an explicit -mod=vendor/
+// --mod=vendor (single token) or -mod vendor/--mod vendor (two tokens)
+// rewritten to module mode, leaving -mod=readonly and -mod=mod untouched. A
+// CLI flag beats GOFLAGS, so this neutralizes a vendor selection that setting
+// GOFLAGS alone cannot override.
 func rewriteModVendor(args []string) []string {
 	out := make([]string, len(args))
 	copy(out, args)
 	for i := 0; i < len(out); i++ {
 		switch {
-		case out[i] == "-mod=vendor":
+		case isModVendorToken(out[i]):
 			out[i] = modMod
-		case out[i] == "-mod" && i+1 < len(out) && out[i+1] == "vendor":
+		case isModFlag(out[i]) && i+1 < len(out) && out[i+1] == "vendor":
 			out[i+1] = "mod"
 			i++
 		}
@@ -558,7 +608,7 @@ func rewriteModVendor(args []string) []string {
 }
 
 // BuildWithToolexec builds the project with the toolexec mode. vendored is
-// computed once by GoBuild: GoBuild already forced GOFLAGS=-mod=mod, but a CLI
+// passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
 // -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
 // args and forwarded flags below.
 func BuildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
@@ -653,21 +703,12 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 
 	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
 
-	// Vendored projects fail the vendor consistency check: setup edits go.mod
-	// for the injected hook modules but not vendor/modules.txt. Force module
-	// mode so both build phases resolve dependency sources from the module cache
-	// (matching versions and paths) instead of vendor/, leaving the user's
-	// vendor directory untouched. This must run before Setup so the Phase 1
-	// build-plan dry run also ignores vendoring.
+	// Setup forces GOFLAGS=-mod=mod for a vendored project (needed for both
+	// entry points, otelc setup and otelc go build). vendored is still computed
+	// here too so BuildWithToolexec can rewrite an explicit CLI -mod=vendor,
+	// which beats GOFLAGS.
 	pwd := util.GetOtelcWorkDir()
 	vendored := vendoringActive(ctx, pwd)
-	if vendored {
-		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
-		// go.work workspaces are out of scope (Go forbids -mod=mod in workspace mode).
-		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
-			return ex.Wrapf(err, "forcing module mode for vendored build")
-		}
-	}
 
 	setupStart := time.Now()
 	err := Setup(ctx, cmd)

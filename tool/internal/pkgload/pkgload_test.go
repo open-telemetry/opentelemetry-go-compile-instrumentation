@@ -257,3 +257,35 @@ func TestModuleDir(t *testing.T) {
 		assert.Empty(t, dir)
 	})
 }
+
+func TestWorkspaceActive(t *testing.T) {
+	t.Run("false outside a workspace", func(t *testing.T) {
+		active, err := WorkspaceActive(t.Context(), t.TempDir())
+		require.NoError(t, err)
+		assert.False(t, active)
+	})
+	t.Run("true inside a workspace", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		active, err := WorkspaceActive(t.Context(), root)
+		require.NoError(t, err)
+		assert.True(t, active)
+	})
+	t.Run("true from a subdirectory of a workspace", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		sub := filepath.Join(root, "a", "b")
+		require.NoError(t, os.MkdirAll(sub, 0o755))
+		active, err := WorkspaceActive(t.Context(), sub)
+		require.NoError(t, err)
+		assert.True(t, active)
+	})
+	t.Run("false when explicitly disabled", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		t.Setenv("GOWORK", "off")
+		active, err := WorkspaceActive(t.Context(), root)
+		require.NoError(t, err)
+		assert.False(t, active)
+	})
+}

@@ -53,6 +53,20 @@ func ModuleDir(ctx context.Context, dir string) (string, error) {
 	return filepath.Dir(goMod), nil
 }
 
+// WorkspaceActive reports whether dir is inside an active go.work workspace,
+// via `go env GOWORK`. GOWORK is the path to the resolved go.work file, "off"
+// when workspace mode is explicitly disabled, or empty when none applies.
+func WorkspaceActive(ctx context.Context, dir string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "go", "env", "GOWORK")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return false, ex.Wrapf(err, "running go env GOWORK in %s", dir)
+	}
+	gowork := strings.TrimSpace(string(out))
+	return gowork != "" && gowork != "off", nil
+}
+
 // ResolvePackageName returns the declared package name for an import path.
 // Panics via ex.Fatalf on failure (matches existing behavior during toolexec).
 func ResolvePackageName(ctx context.Context, importPath string, buildFlags ...string) string {

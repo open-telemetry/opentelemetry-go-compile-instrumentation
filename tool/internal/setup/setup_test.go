@@ -570,6 +570,17 @@ func TestVendoringActive(t *testing.T) {
 	t.Run("no module", func(t *testing.T) {
 		assert.False(t, vendoringActive(t.Context(), t.TempDir()))
 	})
+	t.Run("vendor present but in a workspace", func(t *testing.T) {
+		root := writeVendoredModule(t)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, "go.work"),
+			[]byte("go 1.25.0\n\nuse .\n"),
+			0o644,
+		))
+		// -mod=mod is forbidden in workspace mode, so a leftover vendor/modules.txt
+		// must not make this report true.
+		assert.False(t, vendoringActive(t.Context(), root))
+	})
 }
 
 func TestForceModMod(t *testing.T) {
@@ -593,6 +604,11 @@ func TestForceModMod(t *testing.T) {
 		// A -mod substring in another flag is not a -mod token, so -mod=mod is appended.
 		{"modcacherw is not a mod flag", "-modcacherw=true", "-modcacherw=true -mod=mod"},
 		{"mod substring in another value", "-ldflags=-X=v=-mod=x", "-ldflags=-X=v=-mod=x -mod=mod"},
+		// Go's flag parser treats the double-dash form the same as single-dash.
+		{"double-dash vendor overridden", "--mod=vendor", "-mod=mod"},
+		{"double-dash mod left unchanged, no append", "--mod=mod", "--mod=mod"},
+		{"double-dash readonly left unchanged, no append", "--mod=readonly", "--mod=readonly"},
+		{"bare double-dash mod left as is, no append", "--mod", "--mod"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -625,6 +641,22 @@ func TestRewriteModVendor(t *testing.T) {
 		},
 		// A positional "vendor" not preceded by -mod is a build target, not a flag.
 		{"positional vendor left alone", []string{"build", "vendor"}, []string{"build", "vendor"}},
+		// Go's flag parser treats the double-dash form the same as single-dash.
+		{
+			"double-dash vendor single token",
+			[]string{"build", "--mod=vendor", "./..."},
+			[]string{"build", "-mod=mod", "./..."},
+		},
+		{
+			"double-dash vendor two token",
+			[]string{"build", "--mod", "vendor", "./..."},
+			[]string{"build", "--mod", "mod", "./..."},
+		},
+		{
+			"double-dash readonly untouched",
+			[]string{"build", "--mod=readonly", "./..."},
+			[]string{"build", "--mod=readonly", "./..."},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
