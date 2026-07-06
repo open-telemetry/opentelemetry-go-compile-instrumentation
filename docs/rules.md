@@ -119,9 +119,16 @@ instrument_sql_exec:
 
 ### `where.file` semantics
 
-- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`, `is_test`.
-  Combinator keys: `all-of`, `one-of`, `not`.
+- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`,
+  `has_package`, `is_test`. Combinator keys: `all-of`, `one-of`, `not`.
 - `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
+- `has_package` matches source files whose **declared `package` clause** equals
+  the given name. This is the `package foo` line in the source file, not the
+  import path (use `target` for that) and not the build's test-ness (use
+  `is_test` for that). Its main use case is with a glob target that spans
+  multiple compiles: `example.com/foo*` matches both `example.com/foo` and
+  `example.com/foo_test`; `has_package` then selects which declared name to
+  instrument. See the example below.
 - `is_test` is a tri-state boolean that gates on whether the file belongs to a
   test build — a compilation the Go toolchain produces only under `go test` (a
   package augmented with its `_test.go` files, an external `xxx_test` package,
@@ -134,10 +141,34 @@ instrument_sql_exec:
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
 - During the setup phase, leaf predicates (`has_func`, `has_recv`,
-  `has_struct`, `is_test`) and the `where.file` combinators documented below are
-  executed. `has_directive`, and combinators placed at the top level of
-  `where` (outside `where.file`), are validated but return a descriptive
-  "not yet supported" error at build time.
+  `has_struct`, `has_package`, `is_test`) and the `where.file` combinators
+  documented below are executed. `has_directive`, and combinators placed at the
+  top level of `where` (outside `where.file`), are validated but return a
+  descriptive "not yet supported" error at build time.
+
+**`has_package` example — filter within a glob-matched package family:**
+
+`target` selects by import path. An exact target already distinguishes
+`example.com/foo` from `example.com/foo_test` — they compile under distinct
+import paths. `has_package` adds value with a glob target that covers both:
+
+```yaml
+# Apply only to external test files (package foo_test) within the foo* family.
+# The glob target matches both example.com/foo and example.com/foo_test;
+# has_package narrows to the external test package, is_test guards test builds.
+trace_external_test:
+  target: example.com/foo*
+  where:
+    func: TestHelper
+    file:
+      all-of:
+        - is_test: true
+        - has_package: foo_test
+  do:
+    - inject_hooks:
+        before: BeforeTestHelper
+        path: example.com/foo/otel
+```
 
 #### Combining `where.file` predicates
 

@@ -257,7 +257,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 		}
 	}
 	leaf := def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
-		def.HasDirective != "" || def.IsTest != nil
+		def.HasDirective != "" || strings.TrimSpace(def.HasPackage) != "" || def.IsTest != nil
 	if combinators > 1 || (combinators == 1 && leaf) {
 		t.Fatalf("golden fixture combines a where.file combinator with sibling "+
 			"predicates (%+v); setup.buildFile rejects this at build time", def)
@@ -299,6 +299,12 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 		return ok
 	case def.HasStruct != "":
 		return ast.FindStructDecl(tree, def.HasStruct) != nil
+	case strings.TrimSpace(def.HasPackage) != "":
+		// Mirror setup.PackageNameFilter: compare the declared package clause,
+		// not the import path (target) and not the build's test-ness (is_test).
+		// TrimSpace mirrors the production guard so whitespace-only values are
+		// treated as absent, consistent with setup.buildFile.
+		return tree.Name.Name == strings.TrimSpace(def.HasPackage)
 	case def.IsTest != nil:
 		return *def.IsTest == isTest
 	default:

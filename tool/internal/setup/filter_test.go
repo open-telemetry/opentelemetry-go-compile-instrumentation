@@ -125,6 +125,51 @@ func NotAStruct() {}
 	}
 }
 
+func TestPackageNameFilter_Match(t *testing.T) {
+	tests := []struct {
+		name       string
+		src        string
+		filterName string
+		want       bool
+	}{
+		{
+			name:       "declared name matches",
+			src:        "package main\n",
+			filterName: "main",
+			want:       true,
+		},
+		{
+			name:       "declared name does not match",
+			src:        "package main\n",
+			filterName: "other",
+			want:       false,
+		},
+		{
+			name:       "external test package name matches",
+			src:        "package main_test\n",
+			filterName: "main_test",
+			want:       true,
+		},
+		{
+			name:       "external test package does not match internal name",
+			src:        "package main_test\n",
+			filterName: "main",
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := parseSource(t, tt.src)
+			f := &setup.PackageNameFilter{Name: tt.filterName}
+			if got := f.Match(ctx); got != tt.want {
+				t.Fatalf("PackageNameFilter{Name:%q}.Match(package %q) = %v, want %v",
+					tt.filterName, ctx.AST.Name.Name, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Build ---
 
 func TestBuild_NilWhere(t *testing.T) {
@@ -216,6 +261,21 @@ func TestBuild_IsTestFilter(t *testing.T) {
 	})
 }
 
+func TestBuild_PackageNameFilter(t *testing.T) {
+	where := &rule.WhereDef{File: &rule.FilterDef{HasPackage: "main"}}
+	f, err := setup.Build(where)
+	if err != nil {
+		t.Fatalf("Build(HasPackage=%q) error = %v, want nil", "main", err)
+	}
+	pnf, ok := f.(*setup.PackageNameFilter)
+	if !ok {
+		t.Fatalf("Build() returned %T, want *setup.PackageNameFilter", f)
+	}
+	if pnf.Name != "main" {
+		t.Errorf("PackageNameFilter.Name = %q, want %q", pnf.Name, "main")
+	}
+}
+
 func TestBuild_ErrorCases(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -259,6 +319,44 @@ func TestBuild_ErrorCases(t *testing.T) {
 				Not:    &rule.FilterDef{HasFunc: "Foo"},
 				IsTest: boolPtr(false),
 			}},
+		},
+		{
+			name:  "has_package combined with another predicate",
+			where: &rule.WhereDef{File: &rule.FilterDef{HasPackage: "main", HasFunc: "Foo"}},
+		},
+		{
+			// A combinator owns the node: has_package as a sibling must be
+			// rejected, not silently ignored (regression guard for hasLeafPredicate).
+			name: "has_package sibling of all-of",
+			where: &rule.WhereDef{File: &rule.FilterDef{
+				AllOf:      []rule.FilterDef{{HasFunc: "Foo"}},
+				HasPackage: "main",
+			}},
+		},
+		{
+			name: "has_package sibling of one-of",
+			where: &rule.WhereDef{File: &rule.FilterDef{
+				OneOf:      []rule.FilterDef{{HasFunc: "Foo"}},
+				HasPackage: "main",
+			}},
+		},
+		{
+			name: "has_package sibling of not",
+			where: &rule.WhereDef{File: &rule.FilterDef{
+				Not:        &rule.FilterDef{HasFunc: "Foo"},
+				HasPackage: "main",
+			}},
+		},
+		{
+			// Explicit regression for the primary use case of has_package: combining
+			// it with is_test as siblings (without all-of) must be rejected.
+			name:  "has_package combined with is_test",
+			where: &rule.WhereDef{File: &rule.FilterDef{HasPackage: "foo_test", IsTest: boolPtr(true)}},
+		},
+		{
+			// Whitespace-only has_package must not count as an active predicate.
+			name:  "has_package whitespace only",
+			where: &rule.WhereDef{File: &rule.FilterDef{HasPackage: "   "}},
 		},
 		{
 			name:  "where one-of unsupported",
@@ -550,6 +648,7 @@ type filterExpected struct {
 	Func        string `yaml:"func"`
 	Recv        string `yaml:"recv"`
 	Struct      string `yaml:"struct"`
+	Package     string `yaml:"package"`
 	ShouldMatch *bool  `yaml:"should_match"`
 	// Children describes the expected sub-filters for combinator types
 	// (e.g. AllOf). It is nil for leaf filters.
@@ -637,6 +736,14 @@ func assertBuiltFilter(t *testing.T, name string, got setup.Filter, want filterE
 		}
 		if structFilter.Struct != want.Struct {
 			t.Fatalf("Build(%q) = %+v, want struct=%q", name, structFilter, want.Struct)
+		}
+	case "PackageNameFilter":
+		pnf, ok := got.(*setup.PackageNameFilter)
+		if !ok {
+			t.Fatalf("Build(%q) = %T, want *setup.PackageNameFilter", name, got)
+		}
+		if pnf.Name != want.Package {
+			t.Fatalf("Build(%q) PackageNameFilter.Name = %q, want %q", name, pnf.Name, want.Package)
 		}
 	case "IsTestFilter":
 		itf, ok := got.(*setup.IsTestFilter)
