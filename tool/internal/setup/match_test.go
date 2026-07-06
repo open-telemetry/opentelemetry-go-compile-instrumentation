@@ -488,7 +488,7 @@ func TestRuleFilesFromDir(t *testing.T) {
 
 	sp.ruleConfig = dir
 
-	rules, err := sp.loadRules()
+	rules, err := sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
 }
@@ -514,7 +514,7 @@ func TestMultipleRuleFiles(t *testing.T) {
 
 	sp.ruleConfig = p1 + "," + p2
 
-	rules, err := sp.loadRules()
+	rules, err := sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
 	names := []string{
@@ -531,7 +531,7 @@ func TestMultipleRuleFiles(t *testing.T) {
 
 	sp.ruleConfig = p1 + "," + p1
 
-	rules, err = sp.loadRules()
+	rules, err = sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 1)
 	require.Equal(t, "h1", rules[0].GetName())
@@ -559,7 +559,7 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	require.NoError(t, sp.extract())
 	sp.ruleConfig = p
 
-	rules, err := sp.loadRules()
+	rules, err := sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
 	for _, r := range rules {
@@ -586,7 +586,7 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	require.NoError(t, sp.extract())
 	sp.ruleConfig = p + "," + p
 
-	rules, err = sp.loadRules()
+	rules, err = sp.loadRules(t.Context(), nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 2)
 }
@@ -614,7 +614,76 @@ func TestIsRuleFile(t *testing.T) {
 	}
 }
 
+func TestLoadRulesFromToolFiles(t *testing.T) {
+	t.Run("loads rules from tool files", func(t *testing.T) {
+		tmp := t.TempDir()
+
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/foo": filepath.Join(tmp, "foo"),
+		})
+		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
+
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		require.Equal(t, "dummyrule", rules[0].GetName())
+	})
+
+	t.Run("loads nested tool files recursively", func(t *testing.T) {
+		tmp := t.TempDir()
+
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/foo": filepath.Join(tmp, "foo"),
+		})
+		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", false, map[string]string{
+			"example.com/bar": filepath.Join(tmp, "bar"),
+		})
+		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
+
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		require.Equal(t, "dummyrule", rules[0].GetName())
+	})
+
+	t.Run("duplicate rule names from different packages are preserved", func(t *testing.T) {
+		tmp := t.TempDir()
+
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/foo": filepath.Join(tmp, "foo"),
+			"example.com/bar": filepath.Join(tmp, "bar"),
+		})
+
+		// foo and bar both define a rule with the same name.
+		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
+		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
+
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.NoError(t, err)
+		require.Len(t, rules, 2)
+		require.Equal(t, "dummyrule", rules[0].GetName())
+		require.Equal(t, "dummyrule", rules[1].GetName())
+	})
+
+	t.Run("returns instrumentation walk errors", func(t *testing.T) {
+		tmp := t.TempDir()
+
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/notinstrumentation": filepath.Join(tmp, "notinstrumentation"),
+		})
+
+		// Valid module, but not an instrumentation package.
+		writeInstrumentationModule(t, filepath.Join(tmp, "notinstrumentation"), "example.com/notinstrumentation",
+			false, nil)
+
+		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.ErrorIs(t, err, ErrNotInstrumentation)
+	})
+}
+
 func TestLoadDefaultRules(t *testing.T) {
+	tmp := t.TempDir()
+
 	// Write custom rules to temporary files
 	content1 := `h1:
   target: main
@@ -626,17 +695,22 @@ func TestLoadDefaultRules(t *testing.T) {
   raw: "_ = 1"`
 	p1 := writeCustomRules(t, "r1.yaml", content1)
 	p2 := writeCustomRules(t, "r2.yaml", content2)
-	t.Setenv(util.EnvOtelcRules, p1)
+	writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+		"example.com/foo": filepath.Join(tmp, "foo"),
+	})
+	writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
+	moduleDirs := map[string]bool{tmp: true}
 
 	// Prepare setup phase and set custom rules via environment variable and flag
 	sp := newTestSetupPhase()
 	err := sp.extract()
 	require.NoError(t, err)
+	t.Setenv(util.EnvOtelcRules, p1)
 	sp.ruleConfig = p2
 
 	// Verify that the custom rule specified by environment variable has
 	// higher priority than the custom rule specified by flag
-	rules, err := sp.loadRules()
+	rules, err := sp.loadRules(t.Context(), moduleDirs)
 	require.NoError(t, err)
 	require.NotEmpty(t, rules)
 	require.Len(t, rules, 1)
@@ -645,17 +719,25 @@ func TestLoadDefaultRules(t *testing.T) {
 	// Verify that the custom rule specified by flag has higher priority than
 	// default rules
 	t.Setenv(util.EnvOtelcRules, "")
-	rules, err = sp.loadRules()
+	rules, err = sp.loadRules(t.Context(), moduleDirs)
 	require.NoError(t, err)
 	require.NotEmpty(t, rules)
 	require.Len(t, rules, 1)
 	require.Equal(t, "h2", rules[0].GetName())
 
-	// Verify that the default rules are loaded
+	// Verify that when both custom rule specified by environment variable and flag are empty,
+	// rules are loaded from otel.instrumentation.go/otelc.tool.go file
 	t.Setenv(util.EnvOtelcRules, "")
 	sp.ruleConfig = ""
+	rules, err = sp.loadRules(t.Context(), moduleDirs)
+	require.NoError(t, err)
+	require.NotEmpty(t, rules)
+	require.Len(t, rules, 1)
+	require.Equal(t, "dummyrule", rules[0].GetName()) // writeInstrumentationModule adds a rule named "dummyrule"
 
-	rules, err = sp.loadRules()
+	// Verify that the default rules are loaded
+	os.Remove(filepath.Join(tmp, ToolFileCanonical))
+	rules, err = sp.loadRules(t.Context(), moduleDirs)
 	require.NoError(t, err)
 	require.NotEmpty(t, rules)
 	require.Greater(t, len(rules), 1, "default rules should be more than 1")
@@ -1235,7 +1317,7 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 		{ImportPath: "example.com/other", Sources: []string{unrelatedSrc}, CgoFiles: map[string]string{}},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps)
+	matched, err := sp.matchDeps(context.Background(), deps, nil)
 	require.NoError(t, err)
 
 	matchedPaths := make(map[string]bool)
@@ -1267,7 +1349,7 @@ func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
 		{ImportPath: "example.com/svc/users", Sources: []string{}, CgoFiles: map[string]string{}},
 	}
 
-	_, err = sp.matchDeps(context.Background(), deps)
+	_, err = sp.matchDeps(context.Background(), deps, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "not a valid glob pattern")
 }
@@ -1293,7 +1375,7 @@ func TestMatchDeps_EmptyTargetRejected(t *testing.T) {
 		{ImportPath: "example.com/svc/users", Sources: []string{}, CgoFiles: map[string]string{}},
 	}
 
-	_, err = sp.matchDeps(context.Background(), deps)
+	_, err = sp.matchDeps(context.Background(), deps, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "empty target")
 }
@@ -1323,7 +1405,7 @@ func TestMatchDeps_NoMatchesWarning(t *testing.T) {
 		},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps)
+	matched, err := sp.matchDeps(context.Background(), deps, map[string]bool{})
 	require.NoError(t, err)
 	assert.Empty(t, matched)
 }
