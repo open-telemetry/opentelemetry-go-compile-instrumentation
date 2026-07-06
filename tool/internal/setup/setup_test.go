@@ -107,7 +107,7 @@ func TestGetPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgs, err := getBuildPackages(t.Context(), tt.args)
+			pkgs, err := getBuildPackages(t.Context(), "", tt.args)
 			if tt.expectError {
 				require.Error(t, err)
 			} else {
@@ -235,7 +235,7 @@ func TestSplitBuildTargets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgTargets, fileTargets, err := splitBuildTargets(tt.targets)
+			pkgTargets, fileTargets, err := splitBuildTargets("", tt.targets)
 			if tt.expectError {
 				require.Error(t, err)
 				assert.Nil(t, pkgTargets)
@@ -546,4 +546,138 @@ func TestExtractBuildFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseGoInvocation(t *testing.T) {
+	tests := []struct {
+		name             string
+		args             []string
+		expectedCommand  string
+		expectedBuildDir string
+		expectedPosition buildDirPlacement
+		expectedArgs     []string
+		expectError      bool
+		errorContains    string
+	}{
+		{
+			name:             "-C after subcommand",
+			args:             []string{"build", "-C", "./dir", "./..."},
+			expectedCommand:  "build",
+			expectedBuildDir: "./dir",
+			expectedPosition: buildDirPlacementAfterSubcommand,
+			expectedArgs:     []string{"./..."},
+		},
+		{
+			name:             "-C before subcommand",
+			args:             []string{"-C", "./dir", "build", "./..."},
+			expectedCommand:  "build",
+			expectedBuildDir: "./dir",
+			expectedPosition: buildDirPlacementBeforeSubcommand,
+			expectedArgs:     []string{"./..."},
+		},
+		{
+			name:             "no -C flag",
+			args:             []string{"build", "./..."},
+			expectedCommand:  "build",
+			expectedBuildDir: "",
+			expectedPosition: buildDirPlacementNone,
+			expectedArgs:     []string{"./..."},
+		},
+		{
+			name:             "-C in unsupported position is left in args",
+			args:             []string{"build", "-a", "-C", "./dir", "./..."},
+			expectedCommand:  "build",
+			expectedBuildDir: "",
+			expectedPosition: buildDirPlacementNone,
+			expectedArgs:     []string{"-a", "-C", "./dir", "./..."},
+		},
+		{
+			name:             "install with -C before subcommand",
+			args:             []string{"-C", "/project", "install"},
+			expectedCommand:  "install",
+			expectedBuildDir: "/project",
+			expectedPosition: buildDirPlacementBeforeSubcommand,
+			expectedArgs:     []string{},
+		},
+		{
+			name:          "unsupported command",
+			args:          []string{"vet"},
+			expectError:   true,
+			errorContains: "supported",
+		},
+		{
+			name:          "empty args",
+			args:          []string{},
+			expectError:   true,
+			errorContains: "supported",
+		},
+		{
+			name:          "-C with unsupported command",
+			args:          []string{"-C", "./dir", "vet"},
+			expectError:   true,
+			errorContains: "supported",
+		},
+		{
+			name:          "-C with no command",
+			args:          []string{"-C", "./dir"},
+			expectError:   true,
+			errorContains: "supported",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inv, err := parseGoInvocation(tt.args)
+			if tt.expectError {
+				require.Error(t, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedCommand, inv.command)
+			assert.Equal(t, tt.expectedBuildDir, inv.buildDir)
+			assert.Equal(t, tt.expectedPosition, inv.buildDirPosition)
+			assert.Equal(t, tt.expectedArgs, inv.args)
+		})
+	}
+}
+
+func TestGetPackagesWithBuildDir(t *testing.T) {
+	// Create a Go module in a subdirectory, cd to a different directory,
+	// and verify getBuildPackages resolves packages correctly using buildDir.
+	rootDir := t.TempDir()
+	projectDir := filepath.Join(rootDir, "project")
+
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(projectDir, "go.mod"),
+		[]byte("module testproject\n\ngo 1.21\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("failed to create go.mod: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(projectDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("failed to create main.go: %v", err)
+	}
+
+	// Change to a different directory
+	outsideDir := filepath.Join(rootDir, "outside")
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatalf("failed to create outside dir: %v", err)
+	}
+	t.Chdir(outsideDir)
+
+	pkgs, err := getBuildPackages(t.Context(), projectDir, []string{"."})
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, "testproject", pkgs[0].PkgPath)
 }
