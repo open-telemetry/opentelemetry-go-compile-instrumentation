@@ -36,6 +36,210 @@ func (sp *SetupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args
 func (sp *SetupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *SetupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
+type buildDirPlacement int
+
+const (
+	buildDirPlacementNone             buildDirPlacement = iota
+	buildDirPlacementBeforeSubcommand                   // go -C dir build
+	buildDirPlacementAfterSubcommand                    // go build -C dir
+)
+
+type buildInvocation struct {
+	command          string            // "build", "install" or "test"
+	buildDir         string            // the -C directory, if any
+	buildDirPosition buildDirPlacement // where -C appeared
+	args             []string          // remaining args with -C stripped
+}
+
+// appendGoCommand reconstructs the `go` command with `-C` in its original
+// position and appends it to the provided slice.
+func (inv buildInvocation) appendGoCommand(args []string) []string {
+	args = append(args, "go")
+	if inv.buildDirPosition == buildDirPlacementBeforeSubcommand && inv.buildDir != "" {
+		args = append(args, "-C", inv.buildDir)
+	}
+	args = append(args, inv.command)
+	if inv.buildDirPosition == buildDirPlacementAfterSubcommand && inv.buildDir != "" {
+		args = append(args, "-C", inv.buildDir)
+	}
+	return args
+}
+
+// minArgsForCFlag is the minimum number of arguments required when the first
+// argument is "-C": the flag itself, the directory, and the subcommand.
+const minArgsForCFlag = 3
+
+func parseGoInvocation(args []string) (buildInvocation, error) {
+	if len(args) == 0 {
+		return buildInvocation{}, ex.Newf(
+			"no command provided. Only 'go build' and 'go install' are supported",
+		)
+	}
+
+	invocation := buildInvocation{buildDirPosition: buildDirPlacementNone}
+	switch args[0] {
+	case subcmdBuild, subcmdInstall, subcmdTest:
+		invocation.command = args[0]
+		invocation.args = args[1:]
+		// Check for -C immediately after the subcommand: `build -C dir`
+		if len(invocation.args) >= 2 && invocation.args[0] == "-C" {
+			invocation.buildDir = invocation.args[1]
+			invocation.buildDirPosition = buildDirPlacementAfterSubcommand
+			invocation.args = invocation.args[2:]
+		}
+		return invocation, nil
+	case "-C":
+		// -C before the subcommand: `-C dir build`
+		if len(args) < minArgsForCFlag {
+			return buildInvocation{}, ex.Newf(
+				"no command provided. Only 'go build' and 'go install' are supported",
+			)
+		}
+		switch args[2] {
+		case subcmdBuild, subcmdInstall, subcmdTest:
+			// supported
+		default:
+			return buildInvocation{}, ex.Newf(
+				"unsupported command: %s. Only 'go build' and 'go install' are supported",
+				args[2],
+			)
+		}
+		invocation.command = args[2]
+		invocation.buildDir = args[1]
+		invocation.buildDirPosition = buildDirPlacementBeforeSubcommand
+		invocation.args = args[3:]
+		return invocation, nil
+	default:
+		return buildInvocation{}, ex.Newf(
+			"unsupported command: %s. Only 'go build' and 'go install' are supported",
+			args[0],
+		)
+	}
+}
+
+func absBuildPath(buildDir, target string) (string, error) {
+	if filepath.IsAbs(target) {
+		return filepath.Clean(target), nil
+	}
+	if buildDir != "" {
+		target = filepath.Join(buildDir, target)
+	}
+	return filepath.Abs(target)
+}
+
+func resolveDirRelativeToBuild(buildDir, dir string) string {
+	if buildDir == "" || filepath.IsAbs(dir) || strings.HasPrefix(dir, "$") {
+		return dir
+	}
+	absDir, err := absBuildPath(buildDir, dir)
+	if err != nil {
+		return dir
+	}
+	return absDir
+}
+
+type buildDirPlacement int
+
+const (
+	buildDirPlacementNone             buildDirPlacement = iota
+	buildDirPlacementBeforeSubcommand                   // go -C dir build
+	buildDirPlacementAfterSubcommand                    // go build -C dir
+)
+
+type buildInvocation struct {
+	command          string            // "build", "install" or "test"
+	buildDir         string            // the -C directory, if any
+	buildDirPosition buildDirPlacement // where -C appeared
+	args             []string          // remaining args with -C stripped
+}
+
+// appendGoCommand reconstructs the `go` command with `-C` in its original
+// position and appends it to the provided slice.
+func (inv buildInvocation) appendGoCommand(args []string) []string {
+	args = append(args, "go")
+	if inv.buildDirPosition == buildDirPlacementBeforeSubcommand && inv.buildDir != "" {
+		args = append(args, "-C", inv.buildDir)
+	}
+	args = append(args, inv.command)
+	if inv.buildDirPosition == buildDirPlacementAfterSubcommand && inv.buildDir != "" {
+		args = append(args, "-C", inv.buildDir)
+	}
+	return args
+}
+
+// minArgsForCFlag is the minimum number of arguments required when the first
+// argument is "-C": the flag itself, the directory, and the subcommand.
+const minArgsForCFlag = 3
+
+func parseGoInvocation(args []string) (buildInvocation, error) {
+	if len(args) == 0 {
+		return buildInvocation{}, ex.Newf(
+			"no command provided. Only 'go build' and 'go install' are supported",
+		)
+	}
+
+	invocation := buildInvocation{buildDirPosition: buildDirPlacementNone}
+	switch args[0] {
+	case subcmdBuild, subcmdInstall, subcmdTest:
+		invocation.command = args[0]
+		invocation.args = args[1:]
+		// Check for -C immediately after the subcommand: `build -C dir`
+		if len(invocation.args) >= 2 && invocation.args[0] == "-C" {
+			invocation.buildDir = invocation.args[1]
+			invocation.buildDirPosition = buildDirPlacementAfterSubcommand
+			invocation.args = invocation.args[2:]
+		}
+		return invocation, nil
+	case "-C":
+		// -C before the subcommand: `-C dir build`
+		if len(args) < minArgsForCFlag {
+			return buildInvocation{}, ex.Newf(
+				"no command provided. Only 'go build' and 'go install' are supported",
+			)
+		}
+		switch args[2] {
+		case subcmdBuild, subcmdInstall, subcmdTest:
+			// supported
+		default:
+			return buildInvocation{}, ex.Newf(
+				"unsupported command: %s. Only 'go build' and 'go install' are supported",
+				args[2],
+			)
+		}
+		invocation.command = args[2]
+		invocation.buildDir = args[1]
+		invocation.buildDirPosition = buildDirPlacementBeforeSubcommand
+		invocation.args = args[3:]
+		return invocation, nil
+	default:
+		return buildInvocation{}, ex.Newf(
+			"unsupported command: %s. Only 'go build' and 'go install' are supported",
+			args[0],
+		)
+	}
+}
+
+func absBuildPath(buildDir, target string) (string, error) {
+	if filepath.IsAbs(target) {
+		return filepath.Clean(target), nil
+	}
+	if buildDir != "" {
+		target = filepath.Join(buildDir, target)
+	}
+	return filepath.Abs(target)
+}
+
+func resolveDirRelativeToBuild(buildDir, dir string) string {
+	if buildDir == "" || filepath.IsAbs(dir) || strings.HasPrefix(dir, "$") {
+		return dir
+	}
+	absDir, err := absBuildPath(buildDir, dir)
+	if err != nil {
+		return dir
+	}
+	return absDir
+}
+
 // keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
 func keepForDebug(ctx context.Context, srcPath string) {
@@ -143,11 +347,11 @@ const (
 //   - args ["-a", "cmd"] returns packages for the "cmd" package in the module
 //   - args ["-a", ".", "./cmd"] returns packages for both "." and "./cmd"
 //   - args [] returns packages for "."
-func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
+func getBuildPackages(ctx context.Context, buildDir string, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
 
-	pkgTargets, fileTargets, err := splitBuildTargets(args)
+	pkgTargets, fileTargets, err := splitBuildTargets(buildDir, args)
 	if err != nil {
 		return nil, ex.Wrapf(err, "splitting build targets")
 	}
@@ -198,7 +402,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
-func splitBuildTargets(args []string) ([]string, []string, error) {
+func splitBuildTargets(buildDir string, args []string) ([]string, []string, error) {
 	var pkgs, files []string
 
 	// Scan forward and classify each argument. Packages and flags may interleave:
@@ -237,13 +441,13 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 	if len(files) > 0 {
 		// All named .go files must live in one directory; compare each against
 		// the first.
-		dir, err := filepath.Abs(filepath.Dir(files[0]))
+		dir, err := absBuildPath(buildDir, filepath.Dir(files[0]))
 		if err != nil {
 			return nil, nil, ex.Wrapf(err, "failed to get absolute path for directory containing files")
 		}
 
 		for _, f := range files[1:] {
-			fdir, err2 := filepath.Abs(filepath.Dir(f))
+			fdir, err2 := absBuildPath(buildDir, filepath.Dir(f))
 			if err2 != nil {
 				return nil, nil, ex.Wrapf(err2, "failed to get absolute path for directory containing file %s", f)
 			}
@@ -302,17 +506,18 @@ func (sp *SetupPhase) generateRuntimePerPackage(
 	return nil
 }
 
-// Setup prepares the environment for further instrumentation.
-func Setup(ctx context.Context, cmd *cli.Command) error {
-	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
-	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
-	args := cmd.Args().Slice()
-	subcommand := subcmdBuild
-	if cmd.Name == "go" {
-		subcommand = cmd.Args().First() // build / install / test
-		args = cmd.Args().Tail()        // trim the subcommand
+// SetupCommand is the CLI entry point for `otelc setup`.
+// It parses the go invocation from the CLI args and delegates to Setup.
+func SetupCommand(ctx context.Context, cmd *cli.Command) error {
+	invocation, err := parseGoInvocation(cmd.Args().Slice())
+	if err != nil {
+		return err
 	}
+	return Setup(ctx, cmd, invocation)
+}
 
+// Setup prepares the environment for further instrumentation.
+func Setup(ctx context.Context, cmd *cli.Command, invocation buildInvocation) error {
 	logger := util.LoggerFromContext(ctx)
 
 	// Vendored projects fail the vendor consistency check: setup edits go.mod
@@ -353,7 +558,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
-	pkgs, err := getBuildPackages(ctx, args)
+	pkgs, err := getBuildPackages(ctx, invocation.buildDir, invocation.args)
 	if err != nil {
 		return err
 	}
@@ -534,11 +739,8 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		return ex.Wrapf(err, "failed to get executable path")
 	}
 	insert := "-toolexec=" + execPath + " toolexec"
-	const additionalCount = 2
-	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
-	// Add "go build"
-	newArgs = append(newArgs, "go")
-	newArgs = append(newArgs, args[:1]...)
+	// Reconstruct the go command with -C in its original position
+	newArgs := invocation.appendGoCommand(nil)
 	// Add "-work" to give us a chance to debug instrumented code if needed
 	newArgs = append(newArgs, "-work")
 	// Add "-toolexec=..."
@@ -598,18 +800,15 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 		return ex.Newf("no command provided. Only 'go build', 'go install' and 'go test' are supported")
 	}
 
-	switch cmd.Args().First() {
-	case subcmdBuild, subcmdInstall, subcmdTest:
-		// supported
-	default:
-		return ex.Newf("unsupported command: %s. Only 'go build', 'go install' and 'go test' are supported",
-			cmd.Args().First())
+	invocation, err := parseGoInvocation(cmd.Args().Slice())
+	if err != nil {
+		return err
 	}
 
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
 		// Users can run `otelc cleanup` to remove it explicitly.
-		if cleanErr := Cleanup(ctx, false); cleanErr != nil {
+		if cleanErr := Cleanup(ctx, invocation.buildDir, invocation.args, false); cleanErr != nil {
 			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
 		}
 	}()
@@ -624,7 +823,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	vendored := vendoringActive(ctx, pwd)
 
 	setupStart := time.Now()
-	err := Setup(ctx, cmd)
+	err = Setup(ctx, cmd, invocation)
 	if err != nil {
 		return err
 	}

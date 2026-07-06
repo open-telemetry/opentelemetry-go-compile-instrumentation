@@ -89,9 +89,9 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	// needs its own plan because only it surfaces the test-augmented, external
 	// test, and test-main compiles that is_test gates on. `go install` shares
 	// `go build`'s compile plan, so it stays on the build verb.
-	planVerb := subcmdBuild
-	if subcommand == subcmdTest {
-		planVerb = subcmdTest
+	planVerb := invocation.command
+	if planVerb != subcmdTest {
+		planVerb = subcmdBuild
 	}
 	// The full command is: "go build/test -a -x -n {...}"
 	prefix := []string{planVerb, "-a", "-x", "-n"}
@@ -194,7 +194,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		}
 
 		// This is a Go source file, add it to the dependency sources
-		abs, err := filepath.Abs(arg)
+		abs, err := absBuildPath(buildDir, arg)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to get absolute path of source file %s", arg)
 		}
@@ -224,7 +224,7 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 
 	for _, cmd := range buildPlan {
 		if dir, ok := parseCdDir(cmd); ok {
-			currentDir = dir
+			currentDir = resolveDirRelativeToBuild(invocation.buildDir, dir)
 			continue
 		}
 
