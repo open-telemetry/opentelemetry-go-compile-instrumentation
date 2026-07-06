@@ -63,6 +63,9 @@ make test
 - [Semantic Conventions](./docs/semantic-conventions.md) - Managing semantic conventions
 - [Instrumentation Guide](./docs/instrument-guide.md) - Add instrumentation hook for new libraries
 - [Instrumentation Rules](./docs/rules.md) - Rule types and YAML format reference
+- [Configuration and Fine-Tuning](./docs/configuration.md) - Scope, filter, and tune instrumentation
+- [Troubleshooting](./docs/troubleshooting.md) - Diagnose why instrumentation was not applied
+- [External Configuration Sources](./docs/external-configuration.md) - Declare instrumentations via `otel.instrumentation.go`
 - [Testing](./docs/testing.md) - Testing strategy, categories, and how to run tests
 
 ### Video Talks

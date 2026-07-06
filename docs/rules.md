@@ -402,6 +402,11 @@ For example:
 - Default embedded rules are only used when no higher-precedence rule source is
   available.
 
+For task-oriented guidance on choosing between these sources and verifying your
+configuration, see [Configuration and Fine-Tuning](configuration.md). For the full
+protocol of the tool-file mechanism (how imports are resolved, how rule files are
+discovered), see [External Configuration Sources](external-configuration.md).
+
 ---
 
 ## Rule Types
