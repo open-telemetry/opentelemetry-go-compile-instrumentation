@@ -43,26 +43,28 @@ func LoadPackages(
 // `go env GOMOD`/`GOWORK` rather than go list, which would fail the vendor
 // consistency check while go.mod is mid-edit. moduleDir is empty when dir is
 // outside any module.
-func ModuleAndWorkspace(ctx context.Context, dir string) (moduleDir string, workspace bool, err error) {
+func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
 	cmd := exec.CommandContext(ctx, "go", "env", "GOMOD", "GOWORK")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false, ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
 	}
-	lines := strings.Split(string(out), "\n")
-	if len(lines) < 2 {
+	// go env prints one line per requested var, in order: GOMOD then GOWORK.
+	goModLine, goWorkLine, ok := strings.Cut(string(out), "\n")
+	if !ok {
 		return "", false, ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
 	}
-	goMod := strings.TrimSpace(lines[0])
-	goWork := strings.TrimSpace(lines[1])
+	goMod := strings.TrimSpace(goModLine)
+	goWork := strings.TrimSpace(goWorkLine)
 	// go env GOMOD prints os.DevNull when dir is not inside a module.
+	var moduleDir string
 	if goMod != "" && goMod != os.DevNull {
 		moduleDir = filepath.Dir(goMod)
 	}
 	// GOWORK is the path to the resolved go.work file, "off" when workspace
 	// mode is explicitly disabled, or empty when none applies.
-	workspace = goWork != "" && goWork != "off"
+	workspace := goWork != "" && goWork != "off"
 	return moduleDir, workspace, nil
 }
 
