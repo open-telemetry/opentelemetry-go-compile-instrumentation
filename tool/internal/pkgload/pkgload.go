@@ -38,36 +38,32 @@ func LoadPackages(
 	return pkgs, nil
 }
 
-// ModuleDir returns the directory of dir's main module via `go env GOMOD`.
-// Unlike ResolveModuleDir it doesn't load packages, so it works when the vendor
-// tree is temporarily inconsistent. Returns "" outside a module.
-func ModuleDir(ctx context.Context, dir string) (string, error) {
-	cmd := exec.CommandContext(ctx, "go", "env", "GOMOD")
+// ModuleAndWorkspace resolves, in a single `go env` call, dir's main module
+// directory and whether dir is inside an active go.work workspace. It uses
+// `go env GOMOD`/`GOWORK` rather than go list, which would fail the vendor
+// consistency check while go.mod is mid-edit. moduleDir is empty when dir is
+// outside any module.
+func ModuleAndWorkspace(ctx context.Context, dir string) (moduleDir string, workspace bool, err error) {
+	cmd := exec.CommandContext(ctx, "go", "env", "GOMOD", "GOWORK")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return "", ex.Wrapf(err, "running go env GOMOD in %s", dir)
+		return "", false, ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
 	}
-	goMod := strings.TrimSpace(string(out))
+	lines := strings.Split(string(out), "\n")
+	if len(lines) < 2 {
+		return "", false, ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
+	}
+	goMod := strings.TrimSpace(lines[0])
+	goWork := strings.TrimSpace(lines[1])
 	// go env GOMOD prints os.DevNull when dir is not inside a module.
-	if goMod == "" || goMod == os.DevNull {
-		return "", nil
+	if goMod != "" && goMod != os.DevNull {
+		moduleDir = filepath.Dir(goMod)
 	}
-	return filepath.Dir(goMod), nil
-}
-
-// WorkspaceActive reports whether dir is inside an active go.work workspace,
-// via `go env GOWORK`. GOWORK is the path to the resolved go.work file, "off"
-// when workspace mode is explicitly disabled, or empty when none applies.
-func WorkspaceActive(ctx context.Context, dir string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "go", "env", "GOWORK")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return false, ex.Wrapf(err, "running go env GOWORK in %s", dir)
-	}
-	gowork := strings.TrimSpace(string(out))
-	return gowork != "" && gowork != "off", nil
+	// GOWORK is the path to the resolved go.work file, "off" when workspace
+	// mode is explicitly disabled, or empty when none applies.
+	workspace = goWork != "" && goWork != "off"
+	return moduleDir, workspace, nil
 }
 
 // ResolvePackageName returns the declared package name for an import path.

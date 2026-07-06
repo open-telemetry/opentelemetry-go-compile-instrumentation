@@ -492,25 +492,21 @@ func extractBuildFlags(args []string) []string {
 }
 
 // vendoringActive reports whether the main module vendors its dependencies. It
-// resolves the module via go env GOMOD rather than `go list`, which would fail
-// the vendor consistency check while go.mod is mid-edit, then checks for
-// vendor/modules.txt. Returns false in workspace mode: Go forbids -mod=mod
-// there, so forcing it would turn a build that worked into a hard failure.
+// resolves the module via a single go env GOMOD/GOWORK call rather than
+// `go list`, which would fail the vendor consistency check while go.mod is
+// mid-edit, then checks for vendor/modules.txt. Returns false in workspace
+// mode: Go forbids -mod=mod there, so forcing it would turn a build that
+// worked into a hard failure.
 func vendoringActive(ctx context.Context, workDir string) bool {
 	logger := util.LoggerFromContext(ctx)
 
-	workspace, err := pkgload.WorkspaceActive(ctx, workDir)
+	root, workspace, err := pkgload.ModuleAndWorkspace(ctx, workDir)
 	if err != nil {
-		logger.WarnContext(ctx, "failed to detect workspace mode; proceeding as non-workspace",
+		logger.WarnContext(ctx, "failed to resolve module/workspace state; building as non-vendored",
 			"dir", workDir, "error", err)
-	} else if workspace {
 		return false
 	}
-
-	root, err := pkgload.ModuleDir(ctx, workDir)
-	if err != nil {
-		logger.WarnContext(ctx, "failed to resolve module dir; building as non-vendored",
-			"dir", workDir, "error", err)
+	if workspace {
 		return false
 	}
 	if root == "" {
