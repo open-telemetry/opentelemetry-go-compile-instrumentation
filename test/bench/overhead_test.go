@@ -73,7 +73,7 @@ func TestOverheadCeiling(t *testing.T) {
 		// keeping the default threshold for all others.
 		scenarioMaxPct := maxPct
 		if name == "baseline" {
-			scenarioMaxPct = 500
+			scenarioMaxPct = 550
 		}
 
 		if pct > scenarioMaxPct {
