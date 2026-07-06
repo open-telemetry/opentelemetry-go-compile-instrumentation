@@ -288,6 +288,8 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
 	if vendored {
 		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
+		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
+		// CLI; a second in-process GoBuild would inherit this -mod=mod.
 		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
 			return ex.Wrapf(err, "forcing module mode for vendored build")
 		}
