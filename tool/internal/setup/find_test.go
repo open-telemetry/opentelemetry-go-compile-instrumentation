@@ -284,7 +284,6 @@ func TestListBuildPlan(t *testing.T) {
 		subcommand    string // defaults to "build" when empty
 		buildPlan     string
 		invocation    buildInvocation
-		invocation    buildInvocation
 		expected      []string
 		wantErr       bool
 		buildFails    bool
@@ -382,12 +381,11 @@ echo nothing useful
 			// The test subcommand must list a `go test` plan, which surfaces the
 			// test-augmented, external test, and test-main compiles that is_test
 			// gates on. A `go build` plan would never contain them.
-			name:       "test subcommand lists a go test plan",
-			subcommand: "test",
+			name: "test subcommand lists a go test plan",
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 `,
-			args: []string{"./..."},
+			invocation: buildInvocation{command: "test", args: []string{"./..."}},
 			expected: []string{
 				".../compile -o /tmp/out.a -buildid abc -p main main.go",
 			},

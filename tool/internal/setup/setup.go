@@ -180,15 +180,6 @@ var testFlagsWithValues = map[string]bool{
 	"-vet":                  true,
 }
 
-// Go subcommands that otelc wraps with toolexec instrumentation.
-const (
-	subcmdBuild   = "build"
-	subcmdInstall = "install"
-	subcmdTest    = "test"
-)
-
-const commandLineArgumentsPackage = "command-line-arguments"
-
 func absBuildPath(buildDir, target string) (string, error) {
 	if filepath.IsAbs(target) {
 		return filepath.Clean(target), nil
@@ -236,7 +227,6 @@ func getBuildPackages(ctx context.Context, buildDir string, args []string) ([]*p
 	switch {
 	case len(fileTargets) > 0:
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, fileTargets...)
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, fileTargets...)
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for files %v", fileTargets)
 		}
@@ -246,12 +236,10 @@ func getBuildPackages(ctx context.Context, buildDir string, args []string) ([]*p
 		}
 	case len(pkgTargets) > 0:
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, pkgTargets...)
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, pkgTargets...)
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for patterns %v", pkgTargets)
 		}
 	default:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, ".")
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, buildDir, ".")
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for pattern .")
@@ -277,7 +265,6 @@ func getBuildPackages(ctx context.Context, buildDir string, args []string) ([]*p
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
-func splitBuildTargets(buildDir string, args []string) ([]string, []string, error) {
 func splitBuildTargets(buildDir string, args []string) ([]string, []string, error) {
 	var pkgs, files []string
 
@@ -318,15 +305,11 @@ func splitBuildTargets(buildDir string, args []string) ([]string, []string, erro
 		// files are collected in reverse order due to reverse argument traversal.
 		// files[0] is therefore the last .go file from the original CLI args.
 		dir, err := absBuildPath(buildDir, filepath.Dir(files[0]))
-		// files are collected in reverse order due to reverse argument traversal.
-		// files[0] is therefore the last .go file from the original CLI args.
-		dir, err := absBuildPath(buildDir, filepath.Dir(files[0]))
 		if err != nil {
 			return nil, nil, ex.Wrapf(err, "failed to get absolute path for directory containing files")
 		}
 
 		for _, f := range files[1:] {
-			fdir, err2 := absBuildPath(buildDir, filepath.Dir(f))
 			fdir, err2 := absBuildPath(buildDir, filepath.Dir(f))
 			if err2 != nil {
 				return nil, nil, ex.Wrapf(err2, "failed to get absolute path for directory containing file %s", f)
@@ -366,7 +349,6 @@ func (sp *SetupPhase) generateRuntimePerPackage(
 
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, cmd *cli.Command, invocation buildInvocation) error {
-func Setup(ctx context.Context, cmd *cli.Command, invocation buildInvocation) error {
 	logger := util.LoggerFromContext(ctx)
 
 	if isSetup() {
@@ -382,13 +364,11 @@ func Setup(ctx context.Context, cmd *cli.Command, invocation buildInvocation) er
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
 	pkgs, err := getBuildPackages(ctx, invocation.buildDir, invocation.args)
-	pkgs, err := getBuildPackages(ctx, invocation.buildDir, invocation.args)
 	if err != nil {
 		return err
 	}
 
 	// Find all dependencies of the project being build
-	deps, err := sp.findDeps(ctx, invocation)
 	deps, err := sp.findDeps(ctx, invocation)
 	if err != nil {
 		return err
@@ -449,15 +429,6 @@ func Setup(ctx context.Context, cmd *cli.Command, invocation buildInvocation) er
 
 	// Write the matched ruleset to matched.json for further instrument phase
 	return sp.store(ctx, matched, moduleDirs)
-}
-
-// SetupCommand is the CLI entrypoint for `otelc setup`.
-func SetupCommand(ctx context.Context, cmd *cli.Command) error {
-	invocation, err := parseGoInvocation(cmd.Args().Slice())
-	if err != nil {
-		return err
-	}
-	return Setup(ctx, cmd, invocation)
 }
 
 // SetupCommand is the CLI entrypoint for `otelc setup`.

@@ -18,7 +18,7 @@ import (
 // When cleanAll is false, backed-up files are restored and the generated runtime
 // file is removed, but .otelc-build/ is kept for debugging. When cleanAll is
 // true, .otelc-build/ is also removed.
-func Cleanup(ctx context.Context, buildDir string, args []string, cleanAll bool) error {
+func Cleanup(ctx context.Context, _ string, _ []string, cleanAll bool) error {
 	logger := util.LoggerFromContext(ctx)
 	stateManager, found := StateManagerFromContext(ctx)
 	if !found {
