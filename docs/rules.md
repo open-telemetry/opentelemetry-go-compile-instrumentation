@@ -13,6 +13,8 @@
   - [Special `target` values](#special-target-values)
   - [Glob targets](#glob-targets)
   - [Valid and invalid shapes](#valid-and-invalid-shapes)
+- [Loading Rules](#loading-rules)
+  - [Rule Source Precedence](#rule-source-precedence)
 - [Rule Types](#rule-types)
   - [1. Function Hook Rule](#1-function-hook-rule)
   - [2. Struct Field Injection Rule](#2-struct-field-injection-rule)
@@ -30,6 +32,8 @@
 This document explains the different types of instrumentation rules used by the Go compile-time instrumentation tool. These rules, defined in YAML files, allow for the injection of code into target Go packages.
 
 The schema is the 2-tier `target` / `version` + `where` / `do` surface decided in [ADR-0003](adr/0003-structured-rule-schema.md). `where` carries non-package selectors, `do` carries modifiers, and the modifier name in `do` declares the rule type.
+
+Rules are typically distributed as `*.otelc.yml` files within instrumentation packages. Instrumentation packages may also contain an `otel.instrumentation.go` (or `otelc.tool.go`) file that composes other instrumentation packages through blank imports.
 
 ## Schema Reference
 
@@ -115,9 +119,16 @@ instrument_sql_exec:
 
 ### `where.file` semantics
 
-- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`, `is_test`.
-  Combinator keys: `all-of`, `one-of`, `not`.
+- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`,
+  `has_package`, `is_test`. Combinator keys: `all-of`, `one-of`, `not`.
 - `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
+- `has_package` matches source files whose **declared `package` clause** equals
+  the given name. This is the `package foo` line in the source file, not the
+  import path (use `target` for that) and not the build's test-ness (use
+  `is_test` for that). Its main use case is with a glob target that spans
+  multiple compiles: `example.com/foo*` matches both `example.com/foo` and
+  `example.com/foo_test`; `has_package` then selects which declared name to
+  instrument. See the example below.
 - `is_test` is a tri-state boolean that gates on whether the file belongs to a
   test build — a compilation the Go toolchain produces only under `go test` (a
   package augmented with its `_test.go` files, an external `xxx_test` package,
@@ -130,10 +141,34 @@ instrument_sql_exec:
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
 - During the setup phase, leaf predicates (`has_func`, `has_recv`,
-  `has_struct`, `is_test`) and the `where.file` combinators documented below are
-  executed. `has_directive`, and combinators placed at the top level of
-  `where` (outside `where.file`), are validated but return a descriptive
-  "not yet supported" error at build time.
+  `has_struct`, `has_package`, `is_test`) and the `where.file` combinators
+  documented below are executed. `has_directive`, and combinators placed at the
+  top level of `where` (outside `where.file`), are validated but return a
+  descriptive "not yet supported" error at build time.
+
+**`has_package` example — filter within a glob-matched package family:**
+
+`target` selects by import path. An exact target already distinguishes
+`example.com/foo` from `example.com/foo_test` — they compile under distinct
+import paths. `has_package` adds value with a glob target that covers both:
+
+```yaml
+# Apply only to external test files (package foo_test) within the foo* family.
+# The glob target matches both example.com/foo and example.com/foo_test;
+# has_package narrows to the external test package, is_test guards test builds.
+trace_external_test:
+  target: example.com/foo*
+  where:
+    func: TestHelper
+    file:
+      all-of:
+        - is_test: true
+        - has_package: foo_test
+  do:
+    - inject_hooks:
+        before: BeforeTestHelper
+        path: example.com/foo/otel
+```
 
 #### Combining `where.file` predicates
 
@@ -338,6 +373,34 @@ invalid_where_file_shape:
         file: helpers.go
         path: github.com/example/helpers
 ```
+
+---
+
+## Loading Rules
+
+Rules are normally distributed through instrumentation packages and enabled using `otel.instrumentation.go` (or `otelc.tool.go`) files.
+
+For development and debugging, rules may also be loaded directly using the `--rules` (or `OTELC_RULES` environment variable) flag.
+
+### Rule Source Precedence
+
+When multiple rule sources are present, `otelc` resolves them using the following precedence order (highest to lowest):
+
+1. `OTELC_RULES` environment variable
+2. `--rules` flag
+3. `otel.instrumentation.go` / `otelc.tool.go`
+4. Default embedded rules.
+
+Only the highest-precedence source that is present is used.
+
+For example:
+
+- If `OTELC_RULES` is set, all other rule sources are ignored.
+- If `--rules` is provided, discovery through tool files is skipped.
+- If an `otel.instrumentation.go` (or `otelc.tool.go`) file exists, embedded
+  rules are not used.
+- Default embedded rules are only used when no higher-precedence rule source is
+  available.
 
 ---
 

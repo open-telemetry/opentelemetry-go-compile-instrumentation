@@ -4,6 +4,8 @@
 package setup
 
 import (
+	"strings"
+
 	"github.com/dave/dst"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -64,6 +66,7 @@ type MatchContext struct {
 var (
 	_ Filter = (*FuncFilter)(nil)
 	_ Filter = (*StructFilter)(nil)
+	_ Filter = (*PackageNameFilter)(nil)
 	_ Filter = (*IsTestFilter)(nil)
 )
 
@@ -91,6 +94,20 @@ type StructFilter struct {
 
 func (f *StructFilter) Match(ctx *MatchContext) bool {
 	return ast.FindStructDecl(ctx.AST, f.Struct) != nil
+}
+
+// PackageNameFilter matches source files whose declared package clause equals
+// Name. The declared name is read from ctx.AST.Name.Name (the `package foo`
+// line), not the import path (use target for that) and not the build's
+// test-ness (use is_test for that). Non-test files in a package share one
+// declared name; an external test file may declare a different name (e.g.
+// "foo_test").
+type PackageNameFilter struct {
+	Name string
+}
+
+func (f *PackageNameFilter) Match(ctx *MatchContext) bool {
+	return ctx.AST.Name.Name == f.Name
 }
 
 // IsTestFilter selects or excludes test builds — compilations the Go toolchain
@@ -203,7 +220,8 @@ func Build(where *rule.WhereDef) (Filter, error) {
 // predicate that sits as a sibling of a combinator on the same node.
 func hasLeafPredicate(def *rule.FilterDef) bool {
 	return def.HasFunc != "" || def.HasRecv != "" ||
-		def.HasStruct != "" || def.HasDirective != "" || def.IsTest != nil
+		def.HasStruct != "" || def.HasDirective != "" ||
+		strings.TrimSpace(def.HasPackage) != "" || def.IsTest != nil
 }
 
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
@@ -268,6 +286,9 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 	if def.HasDirective != "" {
 		active++
 	}
+	if strings.TrimSpace(def.HasPackage) != "" {
+		active++
+	}
 	if def.IsTest != nil {
 		active++
 	}
@@ -286,6 +307,8 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		return &StructFilter{Struct: def.HasStruct}, nil
 	case def.HasDirective != "":
 		return nil, ex.Newf("where.file.has_directive is not yet supported")
+	case strings.TrimSpace(def.HasPackage) != "":
+		return &PackageNameFilter{Name: strings.TrimSpace(def.HasPackage)}, nil
 	case def.IsTest != nil:
 		return &IsTestFilter{ShouldMatch: *def.IsTest}, nil
 	default:

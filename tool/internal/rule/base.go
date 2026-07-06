@@ -46,6 +46,14 @@ type FilterDef struct {
 	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`    // match files that declare this struct type
 	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"` // match files carrying this //go: directive (validated, not yet executed)
 
+	// HasPackage matches source files whose declared package clause equals this
+	// name. The declared name is read from the parsed AST (the `package foo`
+	// line), not the import path (use target for that) and not the build's
+	// test-ness (use is_test for that). Non-test files in a package share one
+	// declared name; an external test file may declare a different name
+	// (e.g. "foo_test").
+	HasPackage string `json:"has_package,omitempty" yaml:"has_package,omitempty"`
+
 	// IsTest is a tri-state boolean predicate that selects or excludes test
 	// builds — compilation units the Go toolchain produces only as part of
 	// `go test` (a package augmented with its _test.go files, the external

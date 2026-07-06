@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,7 +72,7 @@ func TestGetPackages(t *testing.T) {
 			name:             "file as a target",
 			args:             []string{"./cmd/main.go"},
 			expectedCount:    1,
-			expectedPackages: []string{commandLineArgumentsPackage},
+			expectedPackages: []string{pkgload.CommandLineArgumentsPackage},
 			expectError:      false,
 		},
 		{
@@ -285,56 +286,6 @@ func setupTestModule(t *testing.T, subDirs []string) {
 	}
 
 	t.Chdir(tmpDir)
-}
-
-func TestGetPackageDir(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	tests := []struct {
-		name    string
-		goFiles []string
-	}{
-		{
-			name:    "package with single go file",
-			goFiles: []string{filepath.Join("path_to_project", "main.go")},
-		},
-		{
-			name:    "package with multiple go files",
-			goFiles: []string{filepath.Join("path_to_project", "main.go"), filepath.Join("path_to_project", "util.go")},
-		},
-		{
-			name:    "package with nested path",
-			goFiles: []string{filepath.Join("path_to_project", "cmd", "server", "main.go")},
-		},
-		{
-			name:    "package with absolute path",
-			goFiles: []string{filepath.Join(tmpDir, "main.go")},
-		},
-		{
-			name:    "package with no go files",
-			goFiles: nil,
-		},
-		{
-			name:    "package with empty go files slice",
-			goFiles: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var expected string
-			if len(tt.goFiles) > 0 {
-				expected = filepath.Dir(tt.goFiles[0])
-			}
-
-			pkg := &packages.Package{}
-			pkg.GoFiles = tt.goFiles
-			result := getPackageDir(pkg)
-			if result != expected {
-				t.Errorf("getPackageDir() = %q, expected %q", result, expected)
-			}
-		})
-	}
 }
 
 func TestSetupGoCache(t *testing.T) {
