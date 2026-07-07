@@ -111,7 +111,7 @@ Run `otelc cleanup` to remove them.
 | --- | --- |
 | `debug.log` | Full build log, appended each run (not truncated). |
 | `matched.json` | Rules that matched dependencies; empty array when nothing matched. |
-| `debug/main/otelc.runtime.go` | Generated SDK initialization file injected into the main package. |
+| `debug/main/otelc.runtime.go` | Generated helper file for runtime hooks and file injections. |
 | `debug/main/go.mod` | Copy of `go.mod` after `otelc` adds its `replace` directives. |
 | `gocache/` | Persistent Go build cache used across `otelc` builds. |
 | `added_imports.<pid>.json` | Per-process import tracking used during the link phase. |
@@ -170,11 +170,12 @@ downloaded, or the module proxy is unreachable. Run `go mod download` and try ag
 The following constraints apply to all hook implementations. They come from the compile-time
 injection model and cannot be worked around.
 
-**Restricted imports.** Hook code may only import from the target library itself, from
-OpenTelemetry packages, and from the Go standard library. Importing other third-party
-packages is not allowed. This restriction exists because the hook code is injected into the
-target library's compile unit: importing an unrelated third-party package would introduce a
-dependency cycle. See [Adding a New Instrumentation Hook](instrument-guide.md#limitations).
+**Restricted imports.** Hook code is injected into the target library's compile unit, so
+it must not introduce circular dependencies. Imports from the target library itself,
+OpenTelemetry packages, and the Go standard library are always safe. Additional third-party
+packages are possible if declared in the instrumentation module's `go.mod`, but keep them to
+a minimum — every extra dependency widens the transitive dependency graph for every user of
+the instrumentation. See [Adding a New Instrumentation Hook](instrument-guide.md#limitations).
 
 **Generic functions.** When the target function is generic, `HookContext` APIs that modify
 parameters or return values (`SetParam`, `SetReturnVal`) cannot be used. The type parameters

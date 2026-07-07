@@ -29,9 +29,9 @@ This all-or-nothing model works for getting started, but it does not give you re
 builds: adding a new version of `otelc` may silently change which libraries get instrumented.
 
 The tool file mechanism gives you explicit, source-controlled control. You declare which
-instrumentation packages to enable using a standard Go
-[tools.go file](https://pkg.go.dev/cmd/go#hdr-Tool_dependencies). `otelc` reads the imports
-in that file, resolves each one as a Go package, and loads the rule files found there.
+instrumentation packages to enable using the standard Go `tools.go` pattern. `otelc` reads
+the imports in that file, resolves each one as a Go package, and loads the rule files found
+there.
 
 This approach mirrors how [DataDog Orchestrion](https://github.com/DataDog/orchestrion)
 manages its instrumentation configuration with `orchestrion.tool.go`, and it realizes the
@@ -79,9 +79,6 @@ Rules:
   convention).
 - **Every import must be a blank import** (`_ "path"`). Named imports and dot imports are
   rejected at load time.
-- The blank import of the `otelc` tool itself (`github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc`)
-  is silently skipped when present — it is recognized as the tool, not an instrumentation
-  package.
 
 After creating or editing the tool file, run `go mod tidy` to record the new dependencies
 in `go.mod` and `go.sum`.
@@ -128,8 +125,7 @@ complete rule set:
    never compiles into the binary.
 
 2. **Collect imports.** All blank imports (`_ "path"`) are extracted in the order they
-   appear. The `otelc` tool's own import path is skipped silently. Any non-blank import
-   (named or dot) causes an immediate error.
+   appear. Any non-blank import (named or dot) causes an immediate error.
 
 3. **Resolve packages.** All collected import paths are resolved in a single
    `packages.Load` call from the directory containing the tool file, using the project's
