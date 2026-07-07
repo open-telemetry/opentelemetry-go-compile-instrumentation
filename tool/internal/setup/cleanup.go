@@ -7,7 +7,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // Cleanup removes artifacts created by the setup and build phases.

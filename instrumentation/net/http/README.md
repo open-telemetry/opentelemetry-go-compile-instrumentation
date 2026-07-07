@@ -85,7 +85,7 @@ client_hook:
     - inject_hooks:
         before: BeforeRoundTrip
         after: AfterRoundTrip
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client"
+        path: "go.opentelemetry.io/otelc/instrumentation/net/http/client"
 
 server_hook:
   target: net/http
@@ -96,7 +96,7 @@ server_hook:
     - inject_hooks:
         before: BeforeServeHTTP
         after: AfterServeHTTP
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server"
+        path: "go.opentelemetry.io/otelc/instrumentation/net/http/server"
 ```
 
 ### Environment Variables

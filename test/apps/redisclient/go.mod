@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/redisclient
+module go.opentelemetry.io/otelc/test/apps/redisclient
 
 go 1.25.0
 

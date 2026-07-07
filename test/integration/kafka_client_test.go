@@ -15,7 +15,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestKafkaClient(t *testing.T) {

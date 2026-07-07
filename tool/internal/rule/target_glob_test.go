@@ -6,7 +6,7 @@ package rule_test
 import (
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestIsGlobTarget(t *testing.T) {

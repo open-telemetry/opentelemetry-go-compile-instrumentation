@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestNormalize(t *testing.T) {

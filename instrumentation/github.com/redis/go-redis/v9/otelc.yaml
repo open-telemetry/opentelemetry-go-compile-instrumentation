@@ -5,7 +5,7 @@ redis_hook_newclient:
   do:
     - inject_hooks:
         after: afterNewRedisClientV9
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
 
 redis_hook_newfailoverclient:
   target: github.com/redis/go-redis/v9
@@ -14,7 +14,7 @@ redis_hook_newfailoverclient:
   do:
     - inject_hooks:
         after: afterNewFailOverRedisClientV9
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
 
 redis_hook_newsentinelclient:
   target: github.com/redis/go-redis/v9
@@ -23,7 +23,7 @@ redis_hook_newsentinelclient:
   do:
     - inject_hooks:
         after: afterNewSentinelClientV9
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
 
 redis_client_hook:
   target: github.com/redis/go-redis/v9
@@ -33,7 +33,7 @@ redis_client_hook:
   do:
     - inject_hooks:
         after: afterClientConnV9
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
 
 redis_hook_newringclient:
   target: github.com/redis/go-redis/v9
@@ -42,7 +42,7 @@ redis_hook_newringclient:
   do:
     - inject_hooks:
         after: afterNewRingClientV9
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
 
 redis_hook_newclusterclient:
   target: github.com/redis/go-redis/v9
@@ -51,4 +51,4 @@ redis_hook_newclusterclient:
   do:
     - inject_hooks:
         after: afterNewClusterClientV9
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"

@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/dave/dst"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 )
 
 func TestBaseTypeName(t *testing.T) {
@@ -121,7 +121,7 @@ package main
 func OtelBeforeTrampoline(param0 *string, param1 *int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
 			hookSrc: `
 package testdata
-import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+import "go.opentelemetry.io/otelc/pkg/hook"
 func H1Before(ctx hook.HookContext, p1 string, p2 int) {}`,
 			before: true,
 		},
@@ -132,7 +132,7 @@ package main
 func OtelAfterTrampoline(hookContext *HookContext, ret0 *float32, ret1 *error) {}`,
 			hookSrc: `
 package testdata
-import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+import "go.opentelemetry.io/otelc/pkg/hook"
 func H1After(ctx hook.HookContext, r1 float32, r2 error) {}`,
 			before: false,
 		},
@@ -155,7 +155,7 @@ package main
 func OtelBeforeTrampoline(param0 *string, param1 *int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
 			hookSrc: `
 package testdata
-import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+import "go.opentelemetry.io/otelc/pkg/hook"
 func H1Before(ctx hook.HookContext, p1 string, p2 string) {}`,
 			before:      true,
 			expectError: true,

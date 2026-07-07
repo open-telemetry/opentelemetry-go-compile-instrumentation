@@ -14,7 +14,7 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb/pb"
+	"go.opentelemetry.io/otelc/test/shared/grpcpb/pb"
 	"google.golang.org/grpc"
 )
 

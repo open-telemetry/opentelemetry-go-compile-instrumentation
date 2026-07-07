@@ -33,7 +33,7 @@ No manual code changes required.
    ./otelc go build -o myapp .
 
    # Option 2: Install as tool dependency (Go 1.24+)
-   go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc
+   go get -tool go.opentelemetry.io/otelc/tool/cmd/otelc
    go tool otelc go build -o myapp .
    ```
 
@@ -49,10 +49,10 @@ The file follows the standard Go `tools.go` pattern and contains blank imports f
 package tools
 
 import (
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc" // pin the tool itself, not an instrumentation package
+	_ "go.opentelemetry.io/otelc/tool/cmd/otelc" // pin the tool itself, not an instrumentation package
 
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server" // enable net/http server instrumentation
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/gin-gonic/gin" // enable gin instrumentation
+	_ "go.opentelemetry.io/otelc/instrumentation/net/http/server" // enable net/http server instrumentation
+	_ "go.opentelemetry.io/otelc/instrumentation/github.com/gin-gonic/gin" // enable gin instrumentation
 )
 ```
 

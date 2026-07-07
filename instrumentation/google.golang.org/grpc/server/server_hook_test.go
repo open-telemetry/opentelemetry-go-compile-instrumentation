@@ -19,8 +19,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
+	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 func TestBeforeNewServer(t *testing.T) {

@@ -1,15 +1,15 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/gin-gonic/gin
+module go.opentelemetry.io/otelc/instrumentation/github.com/gin-gonic/gin
 
 go 1.25.0
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-00010101000000-000000000000
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
+	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -47,7 +47,7 @@ require (
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.59.0 // indirect
+	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
@@ -85,6 +85,6 @@ require (
 )
 
 replace (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../../pkg
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../../pkg/runtime
+	go.opentelemetry.io/otelc/pkg => ../../../../pkg
+	go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime
 )

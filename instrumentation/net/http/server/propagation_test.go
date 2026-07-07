@@ -18,7 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	// Import client package to enable client-side instrumentation hooks
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client"
+	_ "go.opentelemetry.io/otelc/instrumentation/net/http/client"
 )
 
 // TestServerContextExtraction verifies that trace context is properly extracted

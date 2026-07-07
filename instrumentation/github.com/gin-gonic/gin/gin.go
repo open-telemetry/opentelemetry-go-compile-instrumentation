@@ -4,7 +4,7 @@
 package server
 
 import (
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 var logger = runtime.Logger()

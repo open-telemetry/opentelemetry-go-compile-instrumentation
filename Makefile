@@ -78,7 +78,7 @@ GOOS ?= $(shell go env GOOS)
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
-MODULE_PATH = github.com/open-telemetry/opentelemetry-go-compile-instrumentation
+MODULE_PATH = go.opentelemetry.io/otelc
 LDFLAGS := -X $(MODULE_PATH)/tool/util.Version=$(VERSION) -X $(MODULE_PATH)/tool/util.CommitHash=$(COMMIT_HASH) -X $(MODULE_PATH)/tool/util.BuildTime=$(BUILD_TIME)
 GO_BUILD_CMD := go build -trimpath -a -ldflags "$(LDFLAGS)"
 ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' -exec dirname {} \; | sort)

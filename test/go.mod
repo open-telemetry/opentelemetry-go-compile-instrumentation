@@ -1,19 +1,17 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test
+module go.opentelemetry.io/otelc/test
 
 go 1.25.0
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation => ..
+replace go.opentelemetry.io/otelc => ..
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb => ./shared/grpcpb
+replace go.opentelemetry.io/otelc/test/shared/grpcpb => ./shared/grpcpb
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/logslog => ./apps/logslog
+replace go.opentelemetry.io/otelc/test/apps/logslog => ./apps/logslog
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/logslogrus => ./apps/logslogrus
+replace go.opentelemetry.io/otelc/test/apps/logslogrus => ./apps/logslogrus
 
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation v0.0.0-00010101000000-000000000000
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/k3s v0.41.0
@@ -21,6 +19,8 @@ require (
 	go.mongodb.org/mongo-driver v1.15.0
 	go.opentelemetry.io/collector/pdata v1.48.0
 	go.opentelemetry.io/otel v1.41.0
+	go.opentelemetry.io/otelc v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/test/shared/grpcpb v0.0.0-00010101000000-000000000000
 	golang.org/x/mod v0.37.0
 	google.golang.org/grpc v1.80.0
 	gopkg.in/yaml.v3 v3.0.1

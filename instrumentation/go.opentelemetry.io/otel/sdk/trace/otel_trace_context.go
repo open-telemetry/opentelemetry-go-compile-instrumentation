@@ -14,8 +14,11 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
-//go:linkname registerTraceAndSpanIDFunc github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime.RegisterTraceAndSpanIDFunc
+//go:linkname registerTraceAndSpanIDFunc go.opentelemetry.io/otelc/pkg/runtime.RegisterTraceAndSpanIDFunc
 func registerTraceAndSpanIDFunc(f func() (string, string))
+
+//go:linkname registerSpanFromGLSFunc go.opentelemetry.io/otelc/pkg/runtime.RegisterSpanFromGLSFunc
+func registerSpanFromGLSFunc(f func() trace.Span)
 
 const defaultGLSMaxSpans = 1000
 
@@ -29,6 +32,7 @@ func init() {
 		}
 	}
 	registerTraceAndSpanIDFunc(GetTraceAndSpanID)
+	registerSpanFromGLSFunc(spanFromGLS)
 }
 
 type traceContext struct {

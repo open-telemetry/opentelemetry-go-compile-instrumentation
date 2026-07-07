@@ -4,7 +4,7 @@
 package db
 
 import (
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/database/sql/dsnparse"
+	"go.opentelemetry.io/otelc/instrumentation/database/sql/dsnparse"
 )
 
 // DSNInfo is an alias for dsnparse.DSNInfo so callers that import the db

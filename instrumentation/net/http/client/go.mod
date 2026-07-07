@@ -1,21 +1,21 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client
+module go.opentelemetry.io/otelc/instrumentation/net/http/client
 
 go 1.25.0
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../../pkg
+replace go.opentelemetry.io/otelc/pkg => ../../../../pkg
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../../pkg/runtime
+replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => ../../..
+replace go.opentelemetry.io/otelc/instrumentation => ../../..
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation v0.0.0-00010101000000-000000000000
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-00010101000000-000000000000
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
+	go.opentelemetry.io/otelc/instrumentation v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
 )
 
 require (

@@ -9,8 +9,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -18,6 +16,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -94,7 +94,7 @@ func TestK8SClientGoEnabler(t *testing.T) {
 
 func TestInstrumentationConstants(t *testing.T) {
 	assert.Equal(t,
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/k8s.io/client-go",
+		"go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go",
 		instrumentationName,
 	)
 	assert.Equal(t, "K8S_CLIENT_GO", instrumentationKey)

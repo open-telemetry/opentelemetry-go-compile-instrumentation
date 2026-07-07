@@ -19,10 +19,10 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
@@ -210,14 +210,13 @@ func (sp *SetupPhase) runMatch(
 
 	if len(preciseRules) == 0 {
 		if !set.IsEmpty() && len(dep.Sources) > 0 {
-			// TODO: Optimize package name discovery for file-only rules to avoid
-			// parsing source files on the hot path.
-			tree, err := ast.ParseFileOnlyPackage(dep.Sources[0])
+			name, err := ast.ParsePackageName(dep.Sources[0])
 			if err != nil {
 				return nil, err
 			}
-			set.SetPackageName(tree.Name.Name)
+			set.SetPackageName(name)
 		}
+
 		return set, nil
 	}
 

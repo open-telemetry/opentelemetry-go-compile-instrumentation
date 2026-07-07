@@ -15,8 +15,8 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestInsertRawAtPattern(t *testing.T) {

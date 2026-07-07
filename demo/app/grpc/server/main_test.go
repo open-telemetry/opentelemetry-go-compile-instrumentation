@@ -9,9 +9,9 @@ import (
 	"os"
 	"testing"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/server/pb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	pb "go.opentelemetry.io/otelc/demo/app/grpc/server/pb"
 )
 
 func init() {

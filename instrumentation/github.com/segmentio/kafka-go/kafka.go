@@ -6,11 +6,11 @@ package kafka
 import (
 	kafka "github.com/segmentio/kafka-go"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 const (
-	instrumentationName = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/" +
+	instrumentationName = "go.opentelemetry.io/otelc/" +
 		"instrumentation/github.com/segmentio/kafka-go"
 	instrumentationKey = "KAFKA"
 )

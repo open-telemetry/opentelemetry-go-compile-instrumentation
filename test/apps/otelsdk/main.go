@@ -16,8 +16,6 @@ import (
 	"net/http"
 	"time"
 
-	_ "go.opentelemetry.io/otel"
-	_ "go.opentelemetry.io/otel/baggage"
 	_ "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
