@@ -80,7 +80,8 @@ otelc --debug go build .
 OTELC_DEBUG=1 otelc go build .
 ```
 
-Debug output goes to `.otelc-build/debug.log`. The file is overwritten on each run.
+Debug output goes to `.otelc-build/debug.log`. The file is opened in append mode, so
+entries accumulate across runs. Delete it between runs if you want a clean log.
 
 ### `--stats`
 
@@ -108,7 +109,7 @@ Run `otelc cleanup` to remove them.
 
 | File | Contents |
 | --- | --- |
-| `debug.log` | Full build log, overwritten each run. |
+| `debug.log` | Full build log, appended each run (not truncated). |
 | `matched.json` | Rules that matched dependencies; empty array when nothing matched. |
 | `debug/main/otelc.runtime.go` | Generated SDK initialization file injected into the main package. |
 | `debug/main/go.mod` | Copy of `go.mod` after `otelc` adds its `replace` directives. |
@@ -121,10 +122,10 @@ the sources there to see the exact code that entered the compiler for each packa
 
 ## Common Errors
 
-### `no command provided. Only 'go build' and 'go install' are supported`
+### `no command provided. Only 'go build', 'go install' and 'go test' are supported`
 
-`otelc go` was called without a subcommand, or with a subcommand other than `build` or
-`install`. Only `otelc go build` and `otelc go install` are supported.
+`otelc go` was called without a subcommand, or with a subcommand other than `build`,
+`install`, or `test`. Only these three are supported.
 
 ### `rule %q has no recognised selector`
 

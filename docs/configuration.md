@@ -39,14 +39,19 @@ from multiple locations:
 
 ```bash
 # Single file
-otelc go build --rules my-rules.yml .
+otelc --rules my-rules.yml go build .
 
 # Directory — all *.otelc.yml and otelc.yml files inside are loaded
-otelc go build --rules custom-rules/ .
+otelc --rules custom-rules/ go build .
 
 # Multiple sources
-otelc go build --rules base-rules/,extra.otelc.yml .
+otelc --rules base-rules/,extra.otelc.yml go build .
 ```
+
+> [!NOTE]
+> `--rules` is a global `otelc` flag and must appear **before** the `go` subcommand.
+> `otelc go` passes all arguments after `go` directly to the Go toolchain without parsing
+> them, so `otelc go build --rules ...` would forward `--rules` to `go build` instead.
 
 The `OTELC_RULES` environment variable accepts the same format and is useful in CI pipelines
 where you want to inject rules without modifying the build command:

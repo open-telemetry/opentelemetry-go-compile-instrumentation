@@ -160,7 +160,7 @@ files. Packages outside that reachable set are never loaded.
 | Priority | Source | How to enable |
 | --- | --- | --- |
 | 1 (highest) | `OTELC_RULES` environment variable | `OTELC_RULES=rules.yml otelc go build .` |
-| 2 | `--rules` flag | `otelc go build --rules rules.yml .` |
+| 2 | `--rules` flag | `otelc --rules rules.yml go build .` |
 | 3 | Tool files | `otel.instrumentation.go` in the module root |
 | 4 (lowest) | Embedded defaults | Active when no other source is present |
 
