@@ -8,8 +8,8 @@ rule schema reference, see [Instrumentation Rules](rules.md).
 
 By default, `otelc` applies all instrumentation rules from its embedded bundle to every
 dependency it finds in your module graph. This zero-configuration mode works well for
-getting started: run `otelc go build` and all supported libraries are instrumented
-automatically.
+getting started: run `otelc go build` and all [supported libraries](getting-started.md#supported-libraries)
+are instrumented automatically.
 
 For projects that need tighter control — because they use a narrow set of libraries, because
 they ship a library themselves, or because they need reproducible, auditable builds — you can
@@ -67,121 +67,24 @@ OTELC_RULES=ci-rules/ otelc go build .
 
 ## Narrowing What Gets Instrumented
 
-Rules select packages and locations within those packages. The following fields let you scope
-instrumentation precisely.
+Rules target packages and locations within them using three fields — the full schema is in
+[Instrumentation Rules](rules.md). This section covers when to reach for each one.
 
-### Targeting packages
-
-The `target` field selects the package to instrument by its import path:
-
-```yaml
-# Exact match — instruments only this package
-instrument_http_client:
-  target: net/http
-  where:
-    func: NewRequest
-  do:
-    - inject_hooks:
-        before: Before
-        path: example.com/myapp/hooks/http
-```
-
-When a single rule needs to cover a family of packages, `target` accepts glob syntax. A target
-is treated as a glob when it contains `*`, `?`, `[`, or `{`. See
-[Glob targets](rules.md#glob-targets) in the rules reference for the full pattern grammar.
-
-**When to use globs:** A glob target is useful when a library ships multiple packages with
-the same instrumentation contract — for example, `database/sql/driver*` to instrument every
-driver-side package, or `google.golang.org/grpc*` to cover all gRPC sub-packages with one
-rule.
-
-**`target: $root`** — a special sentinel that matches the root module of the current build
-and all packages below it. If the build spans multiple modules (Go workspace), it covers all
-resolved roots. Use this to apply instrumentation to your own application code without
-hardcoding the module path. See [Special `target` values](rules.md#special-target-values)
-for details.
-
-### Filtering by version
-
-The `version` field restricts a rule to a specific range of the target library, using the
-format from [Top-level fields](rules.md#top-level-fields):
-
-```yaml
-instrument_v2_only:
-  target: example.com/mylib
-  version: "v2.0.0,v3.0.0"  # [v2.0.0, v3.0.0)
-  where:
-    func: NewClient
-  do:
-    - inject_hooks:
-        before: Before
-        path: example.com/myapp/hooks
-```
-
-Omitting `version` (or setting it to `""`) matches all versions.
-
-### Filtering within a package
-
-The `where.file` block narrows which source files and declarations a rule applies to. All
-available predicates are documented in [`where.file` semantics](rules.md#wherefile-semantics);
-this section covers *when* to reach for each one.
-
-**`has_func` / `has_struct`** — scope a rule to files that declare a particular function or
-struct. Use this when you need to instrument a function that appears under the same name in
-multiple files and you only want one of them:
-
-```yaml
-instrument_driver_connect:
-  target: database/sql/driver
-  where:
-    func: Connect
-    file:
-      has_struct: Conn
-  do:
-    - inject_hooks:
-        before: Before
-        path: example.com/myapp/hooks/sql
-```
-
-**`has_package`** — matches the declared `package` clause (the `package foo` line), not
-the import path. Its main use is with glob targets that span multiple compiles: a glob like
-`example.com/foo*` matches both `example.com/foo` (package `foo`) and
-`example.com/foo_test` (package `foo_test`). Adding `has_package: foo` ensures the rule
-only applies to the production package:
-
-```yaml
-instrument_main_package_only:
-  target: example.com/foo*
-  where:
-    func: Handle
-    file:
-      has_package: foo
-  do:
-    - inject_hooks:
-        before: Before
-        path: example.com/myapp/hooks
-```
-
-**`is_test`** — gates on whether the compile is a test build (`otelc go test`). A plain
-`otelc go build` never produces test builds, so this predicate has no effect there. Use it
-to apply different instrumentation to test code than to production code, or to explicitly
-exclude test builds:
-
-```yaml
-instrument_production_only:
-  target: example.com/myservice
-  where:
-    func: HandleRequest
-    file:
-      is_test: false
-  do:
-    - inject_hooks:
-        before: Before
-        path: example.com/myapp/hooks
-```
-
-**Combinators** — `all-of`, `one-of`, and `not` compose multiple predicates. See
-[Combining `where.file` predicates](rules.md#combining-wherefile-predicates) for examples.
+- **`target`** — the package import path. Use an exact path for a single package, a
+  [glob](rules.md#glob-targets) (`google.golang.org/grpc*`) to cover a package family, or
+  `$root` to match your own module without hardcoding its path. See
+  [Special `target` values](rules.md#special-target-values).
+- **`version`** — restricts the rule to a [version range](rules.md#top-level-fields).
+  Omit to match all versions.
+- **`where.file`** predicates narrow to specific source files:
+  - `has_func` / `has_struct` — when the same function name appears in multiple files and
+    only one should be hooked.
+  - `has_package` — use alongside a glob target to distinguish `foo` from `foo_test` within
+    the same match.
+  - `is_test` — restrict a rule to test builds (`otelc go test`) or exclude them. Has no
+    effect under `otelc go build`.
+  - `all-of`, `one-of`, `not` — compose predicates. See
+    [`where.file` semantics](rules.md#wherefile-semantics).
 
 **Planned:** Source-level opt-out pragmas (`//otelc:ignore`) are planned (#469).
 

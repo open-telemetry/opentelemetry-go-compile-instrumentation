@@ -1,5 +1,14 @@
 # Troubleshooting
 
+## Table of Contents
+
+- ["Nothing Got Instrumented"](#nothing-got-instrumented)
+- [Enabling Debug Output](#enabling-debug-output)
+- [Inspecting Build Artifacts](#inspecting-build-artifacts)
+- [Common Errors](#common-errors)
+- [Hook and Instrumentation Limitations](#hook-and-instrumentation-limitations)
+- [Getting Help](#getting-help)
+
 This guide covers common problems with `otelc` instrumentation: why instrumentation may not
 be applied, how to read debug output, what the build artifacts contain, and the inherent
 limitations of compile-time hook injection.

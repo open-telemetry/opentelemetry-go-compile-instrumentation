@@ -151,83 +151,27 @@ files. Packages outside that reachable set are never loaded.
 
 ## Rule Source Precedence
 
-`otelc` selects rules from exactly one source, in this priority order:
-
-| Priority | Source | How to enable |
-| --- | --- | --- |
-| 1 (highest) | `OTELC_RULES` environment variable | `OTELC_RULES=rules.yml otelc go build .` |
-| 2 | `--rules` flag | `otelc --rules rules.yml go build .` |
-| 3 | Tool files | `otel.instrumentation.go` in the module root |
-| 4 (lowest) | Embedded defaults | Active when no other source is present |
-
-When a higher-priority source is present, all lower-priority sources are ignored entirely.
-In particular:
-
-- Setting `OTELC_RULES` disables `--rules`, tool files, and the embedded defaults.
-- Setting `--rules` disables tool files and the embedded defaults.
-- Having a tool file disables the embedded defaults.
-
-`OTELC_RULES` and `--rules` are intended for development and debugging. For stable,
-versioned instrumentation use tool files.
+The full precedence model is documented in [Rule Sources and Precedence](configuration.md#rule-sources-and-precedence).
+In short: `OTELC_RULES` > `--rules` > tool files > embedded defaults. Each source entirely
+replaces those below it; there is no merging.
 
 ## Errors and Diagnostics
 
-**Both `otel.instrumentation.go` and `otelc.tool.go` are present:**
+**Both config file names present in the same module.** Only one is allowed. Remove
+`otelc.tool.go` and keep `otel.instrumentation.go`.
 
-```
-both "otel.instrumentation.go" and "otelc.tool.go" exist; only one instrumentation config file is allowed
-```
+**Non-blank import in the tool file.** Every import must use the blank identifier
+(`_ "path"`). Named or dot imports are rejected at load time.
 
-Remove one of the two files. Prefer `otel.instrumentation.go`.
+**Imported package is not part of a module.** Run `go mod tidy` to ensure the module graph
+is consistent.
 
----
+**Imported package is not an instrumentation package.** The package provides neither a
+nested tool file nor any `*.otelc.yml` rule files. Remove the import or verify you have the
+correct package path.
 
-**A non-blank import in the tool file:**
-
-```
-<path>/otel.instrumentation.go: import "example.com/pkg" must be a blank import (use `_ "example.com/pkg"`)
-```
-
-or
-
-```
-<path>/otel.instrumentation.go: import "example.com/pkg" must be a blank import (named imports are not allowed)
-```
-
-Change the import to a blank import: `_ "example.com/pkg"`.
-
----
-
-**An imported package is not part of a module:**
-
-```
-package example.com/pkg is not part of a module
-```
-
-The package was resolved but `go/packages` could not determine its module. Run `go mod tidy`
-to ensure the module graph is consistent.
-
----
-
-**An imported package contains no tool file and no rule files:**
-
-```
-instrumentation package example.com/pkg contains neither otel.instrumentation.go nor any rule files: not an instrumentation package
-```
-
-The imported package exists but is not an instrumentation package — it provides no
-`*.otelc.yml` files and no nested tool file. Either remove the import from your tool file or
-check that you imported the correct package path.
-
----
-
-**Package load failures** (network, proxy, missing `go mod download`):
-
-```
-failed to load instrumentation packages: <underlying error>
-```
-
-Run `go mod download` and confirm `go build ./...` succeeds before retrying.
+**Package load failure.** Run `go mod download` and confirm `go build ./...` succeeds before
+retrying. See [Troubleshooting](troubleshooting.md#package-resolution-failures) for more.
 
 ## Composing Instrumentation Packages
 
