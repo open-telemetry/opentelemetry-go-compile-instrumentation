@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,8 +25,10 @@ import (
 )
 
 type SetupPhase struct {
-	logger     *slog.Logger
-	ruleConfig string
+	logger          *slog.Logger
+	ruleConfig      string
+	buildPackages   []*packages.Package
+	rootModulePaths []string
 }
 
 func (sp *SetupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
@@ -135,6 +138,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	if err != nil {
 		return nil, ex.Wrapf(err, "splitting build targets")
 	}
+	buildFlags := extractBuildFlags(args)
 
 	var (
 		pkgs    []*packages.Package
@@ -142,7 +146,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	)
 	switch {
 	case len(fileTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, fileTargets...)
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, fileTargets...)
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for files %v", fileTargets)
 		}
@@ -151,12 +155,12 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 			return nil, ex.New("multiple packages found for file targets")
 		}
 	case len(pkgTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, pkgTargets...)
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, pkgTargets...)
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for patterns %v", pkgTargets)
 		}
 	default:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, nil, ".")
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, ".")
 		if loadErr != nil {
 			return nil, ex.Wrapf(loadErr, "failed to load packages for pattern .")
 		}
@@ -240,6 +244,28 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 	return pkgs, files, nil
 }
 
+func rootModulePaths(ctx context.Context, pkgs []*packages.Package) ([]string, error) {
+	roots := make(map[string]bool)
+	for _, pkg := range pkgs {
+		if pkg.Module != nil && pkg.Module.Path != "" {
+			roots[pkg.Module.Path] = true
+			continue
+		}
+		pkgDir := pkgload.PackageDir(pkg)
+		if pkgDir == "" {
+			continue
+		}
+		mod, err := pkgload.ResolveModule(ctx, pkgDir)
+		if err != nil {
+			return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
+		}
+		if mod.Path != "" {
+			roots[mod.Path] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(roots)), nil
+}
+
 // generateRuntimePerPackage generates the injected hook code (otelc.runtime.go)
 // for every buildable package.
 func (sp *SetupPhase) generateRuntimePerPackage(
@@ -292,6 +318,7 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	sp.buildPackages = pkgs
 
 	// Find all dependencies of the project being build
 	deps, err := sp.findDeps(ctx, subcommand, args)
@@ -380,6 +407,8 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 //
 //nolint:gochecknoglobals // private lookup table
 var buildContextFlagsWithValue = map[string]bool{
+	"-C":       true, // Change directory before running the command
+	"-overlay": true, // JSON overlay file used by go list/build
 	"-tags":    true, // Build tags
 	"-mod":     true, // Module mode (vendor, mod, readonly)
 	"-modfile": true, // Custom go.mod file

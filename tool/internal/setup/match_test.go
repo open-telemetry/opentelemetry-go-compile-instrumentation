@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
+	"golang.org/x/tools/go/packages"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1228,7 +1229,12 @@ func TestRunMatch_GlobTargetMatches(t *testing.T) {
 	globRule := globFuncRule("glob-rule", "example.com/svc/**")
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, []rule.InstRule{globRule})
+	set, err := sp.runMatch(
+		context.Background(),
+		dep,
+		map[string][]rule.InstRule{},
+		[]targetRule{{target: globRule.Target, rule: globRule}},
+	)
 	require.NoError(t, err)
 	require.Len(t, set.FuncRules, 1, "glob target should match the descendant package")
 	require.Contains(t, set.FuncRules, srcFile)
@@ -1246,7 +1252,12 @@ func TestRunMatch_GlobTargetNoMatch(t *testing.T) {
 	globRule := globFuncRule("glob-rule", "example.com/svc/**")
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, []rule.InstRule{globRule})
+	set, err := sp.runMatch(
+		context.Background(),
+		dep,
+		map[string][]rule.InstRule{},
+		[]targetRule{{target: globRule.Target, rule: globRule}},
+	)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty(), "glob target must not match an unrelated package")
 }
@@ -1263,7 +1274,12 @@ func TestRunMatch_SingleSegmentGlobDoesNotCrossBoundary(t *testing.T) {
 	globRule := globFuncRule("glob-rule", "example.com/svc/*")
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, []rule.InstRule{globRule})
+	set, err := sp.runMatch(
+		context.Background(),
+		dep,
+		map[string][]rule.InstRule{},
+		[]targetRule{{target: globRule.Target, rule: globRule}},
+	)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty(), "single-segment glob must not cross a path boundary")
 }
@@ -1285,7 +1301,12 @@ func TestRunMatch_ExactAndGlobCoexist(t *testing.T) {
 	exactRules := map[string][]rule.InstRule{
 		"example.com/svc/users": {exactRule},
 	}
-	set, err := sp.runMatch(context.Background(), dep, exactRules, []rule.InstRule{globRule})
+	set, err := sp.runMatch(
+		context.Background(),
+		dep,
+		exactRules,
+		[]targetRule{{target: globRule.Target, rule: globRule}},
+	)
 	require.NoError(t, err)
 	require.Len(t, set.FuncRules[srcFile], 2, "both exact and glob rules should match")
 }
@@ -1327,6 +1348,78 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 	require.True(t, matchedPaths["example.com/svc/users"], "users package should match the glob target")
 	require.True(t, matchedPaths["example.com/svc/orders"], "orders package should match the glob target")
 	require.False(t, matchedPaths["example.com/other"], "unrelated package must not match")
+}
+
+func TestMatchDeps_RootTargetExpandsToRootModuleGlob(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "root.yaml")
+	err := os.WriteFile(ruleFile, []byte(`root_hook:
+  target: $root
+  func: Handler
+  before: BeforeHandler
+  path: "example.com/hooks"
+`), 0o644)
+	require.NoError(t, err)
+
+	rootSrc := writeGoSource(t, "root.go", "package app\n\nfunc Handler() {}\n")
+	childSrc := writeGoSource(t, "child.go", "package child\n\nfunc Handler() {}\n")
+	pluginSrc := writeGoSource(t, "plugin.go", "package plugin\n\nfunc Handler() {}\n")
+	externalSrc := writeGoSource(t, "external.go", "package external\n\nfunc Handler() {}\n")
+	prefixSrc := writeGoSource(t, "prefix.go", "package prefix\n\nfunc Handler() {}\n")
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+	sp.buildPackages = []*packages.Package{
+		{Module: &packages.Module{Path: "example.com/app"}},
+		{Module: &packages.Module{Path: "example.com/app/plugin"}},
+	}
+
+	deps := []*Dependency{
+		{ImportPath: "example.com/app", Sources: []string{rootSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/app/internal/child", Sources: []string{childSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/app/plugin", Sources: []string{pluginSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/other", Sources: []string{externalSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/appliance", Sources: []string{prefixSrc}, CgoFiles: map[string]string{}},
+	}
+
+	matched, err := sp.matchDeps(context.Background(), deps, nil)
+	require.NoError(t, err)
+
+	matchedPaths := make(map[string]bool)
+	for _, m := range matched {
+		matchedPaths[m.ModulePath] = true
+	}
+	require.True(t, matchedPaths["example.com/app"], "root package should match")
+	require.True(t, matchedPaths["example.com/app/internal/child"], "root sub-package should match")
+	require.True(t, matchedPaths["example.com/app/plugin"], "nested root package should match")
+	require.False(t, matchedPaths["example.com/other"], "external package must not match")
+	require.False(t, matchedPaths["example.com/appliance"], "prefix without slash boundary must not match")
+	for _, m := range matched {
+		if m.ModulePath == "example.com/app/plugin" {
+			require.Len(t, m.FuncRules[pluginSrc], 1, "overlapping roots must not apply the same rule twice")
+		}
+	}
+}
+
+func TestMatchDeps_RootTargetRequiresRootModule(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "root.yaml")
+	err := os.WriteFile(ruleFile, []byte(`root_hook:
+  target: $root
+  func: Handler
+  before: BeforeHandler
+  path: "example.com/hooks"
+`), 0o644)
+	require.NoError(t, err)
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	_, err = sp.matchDeps(context.Background(), []*Dependency{
+		{ImportPath: "example.com/app", Sources: []string{}, CgoFiles: map[string]string{}},
+	}, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, `target "$root"`)
 }
 
 func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {

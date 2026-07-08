@@ -7,6 +7,7 @@ package pkgload
 import (
 	"context"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/tools/go/packages"
 
@@ -23,16 +24,50 @@ func LoadPackages(
 	buildFlags []string,
 	patterns ...string,
 ) ([]*packages.Package, error) {
+	dir, buildFlags, err := loadDirFromBuildFlags(buildFlags)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &packages.Config{
 		Mode:       mode,
 		Context:    ctx,
 		BuildFlags: buildFlags,
+		Dir:        dir,
 	}
 	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading packages %v", patterns)
 	}
 	return pkgs, nil
+}
+
+func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
+	var dir string
+	filtered := make([]string, 0, len(buildFlags))
+	for i := 0; i < len(buildFlags); i++ {
+		flag := buildFlags[i]
+
+		switch {
+		case flag == "-C":
+			if i+1 >= len(buildFlags) {
+				return "", nil, ex.New("missing value for -C")
+			}
+			dir = buildFlags[i+1]
+			i++
+		case strings.HasPrefix(flag, "-C="):
+			dir = strings.TrimPrefix(flag, "-C=")
+		default:
+			filtered = append(filtered, flag)
+		}
+	}
+	if dir == "" {
+		return "", filtered, nil
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", nil, ex.Wrapf(err, "resolving -C directory %s", dir)
+	}
+	return absDir, filtered, nil
 }
 
 // ResolvePackageName returns the declared package name for an import path.
@@ -117,19 +152,19 @@ func PackageDir(pkg *packages.Package) string {
 	return ""
 }
 
-// resolveModuleDir returns the module directory for a given package directory.
-func resolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
+// ResolveModule returns the module for a given package directory.
+func ResolveModule(ctx context.Context, pkgDir string) (*packages.Module, error) {
 	pkgs, err := LoadPackages(ctx, packages.NeedModule, nil, pkgDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(pkgs) == 0 {
-		return "", ex.Newf("no packages found for directory: %s", pkgDir)
+		return nil, ex.Newf("no packages found for directory: %s", pkgDir)
 	}
 
 	pkg := pkgs[0]
 	if pkg.Module == nil || pkg.Module.Dir == "" || len(pkg.Errors) > 0 {
-		return "", ex.Newf(
+		return nil, ex.Newf(
 			"failed to load module information for package in directory %s: module=%v, errors=%v",
 			pkgDir,
 			pkg.Module,
@@ -137,7 +172,16 @@ func resolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
 		)
 	}
 
-	return pkg.Module.Dir, nil
+	return pkg.Module, nil
+}
+
+// ResolveModuleDir returns the module directory for a given package directory.
+func ResolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
+	mod, err := ResolveModule(ctx, pkgDir)
+	if err != nil {
+		return "", err
+	}
+	return mod.Dir, nil
 }
 
 func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) (map[string]bool, error) {
@@ -161,7 +205,7 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) (map[string]b
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
-			modDir, err := resolveModuleDir(ctx, pkgDir)
+			modDir, err := ResolveModuleDir(ctx, pkgDir)
 			if err != nil {
 				return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
 			}
