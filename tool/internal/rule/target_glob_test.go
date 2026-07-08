@@ -32,6 +32,25 @@ func TestIsGlobTarget(t *testing.T) {
 	}
 }
 
+func TestIsRootTarget(t *testing.T) {
+	tests := []struct {
+		target string
+		want   bool
+	}{
+		{rule.TargetRoot, true},
+		{"example.com/svc", false},
+		{"", false},
+		{"$root/**", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.target, func(t *testing.T) {
+			if got := rule.IsRootTarget(tt.target); got != tt.want {
+				t.Errorf("IsRootTarget(%q) = %v, want %v", tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateTarget(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -41,6 +60,7 @@ func TestValidateTarget(t *testing.T) {
 		// Exact targets are never glob-validated.
 		{name: "exact path", target: "example.com/svc"},
 		{name: "empty path", target: ""},
+		{name: "root target", target: "$root"},
 
 		// Valid glob patterns.
 		{name: "single segment star", target: "example.com/svc/*"},
@@ -62,6 +82,9 @@ func TestValidateTarget(t *testing.T) {
 		// doublestar.ValidatePattern. A semantically reversed range like "[z-a]"
 		// is not an error; it simply never matches, consistent with glob.
 		{name: "unclosed bracket", target: "example.com/svc/[ab", wantErr: true},
+		{name: "root target with suffix", target: "$root/**", wantErr: true},
+		{name: "root target with trailing space", target: "$root ", wantErr: true},
+		{name: "root target wrong case", target: "$ROOT", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

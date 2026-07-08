@@ -134,6 +134,43 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
 
+type targetRule struct {
+	target string
+	rule   rule.InstRule
+}
+
+func (sp *SetupPhase) matchGlobRules(
+	dep *Dependency,
+	relevantRules []rule.InstRule,
+	globRules []targetRule,
+) []rule.InstRule {
+	var matched []rule.InstRule
+	var seen map[rule.InstRule]bool
+	for _, gr := range globRules {
+		if !rule.MatchGlobTarget(gr.target, dep.ImportPath) {
+			continue
+		}
+		if matched == nil {
+			matched = make([]rule.InstRule, 0, len(relevantRules)+1)
+			matched = append(matched, relevantRules...)
+			seen = make(map[rule.InstRule]bool, len(relevantRules)+1)
+			for _, r := range relevantRules {
+				seen[r] = true
+			}
+		}
+		if seen[gr.rule] {
+			continue
+		}
+		seen[gr.rule] = true
+		matched = append(matched, gr.rule)
+		sp.Debug("Match glob target", "rule", gr.rule.GetName(), "target", gr.target, "dep", dep.ImportPath)
+	}
+	if matched == nil {
+		return relevantRules
+	}
+	return matched
+}
+
 // runMatch performs precise matching of rules against the dependency's source code.
 // It parses source files and matches rules by examining AST nodes.
 //
@@ -146,7 +183,7 @@ func (sp *SetupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
 	exactRules map[string][]rule.InstRule,
-	globRules []rule.InstRule,
+	globRules []targetRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
@@ -164,21 +201,7 @@ func (sp *SetupPhase) runMatch(
 	// allocation-free. When built, it is a fresh slice to avoid aliasing the
 	// exact-match slice shared read-only across goroutines.
 	if len(globRules) > 0 {
-		var matched []rule.InstRule
-		for _, r := range globRules {
-			if !rule.MatchGlobTarget(r.GetTarget(), dep.ImportPath) {
-				continue
-			}
-			if matched == nil {
-				matched = make([]rule.InstRule, 0, len(relevantRules)+1)
-				matched = append(matched, relevantRules...)
-			}
-			matched = append(matched, r)
-			sp.Debug("Match glob target", "rule", r.GetName(), "target", r.GetTarget(), "dep", dep.ImportPath)
-		}
-		if matched != nil {
-			relevantRules = matched
-		}
+		relevantRules = sp.matchGlobRules(dep, relevantRules, globRules)
 	}
 
 	if len(relevantRules) == 0 {
@@ -552,11 +575,26 @@ func (sp *SetupPhase) matchDeps(
 	// (unchanged fast path). Glob-target rules cannot be keyed, so they are
 	// kept in a flat slice and evaluated against every dependency's import path.
 	exactRules := make(map[string][]rule.InstRule)
-	globRules := make([]rule.InstRule, 0)
+	globRules := make([]targetRule, 0)
 	for _, r := range allRules {
 		target := r.GetTarget()
+		if rule.IsRootTarget(target) {
+			if len(sp.rootModulePaths) == 0 && len(sp.buildPackages) > 0 {
+				sp.rootModulePaths, err = rootModulePaths(ctx, sp.buildPackages)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if len(sp.rootModulePaths) == 0 {
+				return nil, ex.Newf("rule %q uses target %q, but no root module was found", r.GetName(), target)
+			}
+			for _, root := range sp.rootModulePaths {
+				globRules = append(globRules, targetRule{target: root + "/**", rule: r})
+			}
+			continue
+		}
 		if rule.IsGlobTarget(target) {
-			globRules = append(globRules, r)
+			globRules = append(globRules, targetRule{target: target, rule: r})
 			continue
 		}
 		exactRules[target] = append(exactRules[target], r)
