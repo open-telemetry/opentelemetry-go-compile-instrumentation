@@ -66,8 +66,8 @@ The tool file follows the standard Go `tools.go` pattern:
 package tools
 
 import (
-    _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server"
-    _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc"
+    _ "go.opentelemetry.io/otelc/instrumentation/net/http/server"
+    _ "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc"
 )
 ```
 
@@ -244,7 +244,7 @@ The `test/apps/gincustom` fixture in this repository demonstrates two-level comp
 package tools
 
 import (
-    _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/gincustom/instrumentation"
+    _ "go.opentelemetry.io/otelc/test/apps/gincustom/instrumentation"
 )
 ```
 
@@ -257,7 +257,7 @@ package's tool file, which activates the standard HTTP server instrumentation:
 package tools
 
 import (
-    _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server"
+    _ "go.opentelemetry.io/otelc/instrumentation/net/http/server"
 )
 ```
 
@@ -272,7 +272,7 @@ gin_custom:
   do:
     - inject_hooks:
         after: afterNew
-        path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/gincustom/instrumentation
+        path: go.opentelemetry.io/otelc/test/apps/gincustom/instrumentation
 ```
 
 When `otelc` processes the application's tool file, it:
