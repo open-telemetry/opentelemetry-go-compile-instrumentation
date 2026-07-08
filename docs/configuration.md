@@ -95,6 +95,12 @@ the same instrumentation contract — for example, `database/sql/driver*` to ins
 driver-side package, or `google.golang.org/grpc*` to cover all gRPC sub-packages with one
 rule.
 
+**`target: $root`** — a special sentinel that matches the root module of the current build
+and all packages below it. If the build spans multiple modules (Go workspace), it covers all
+resolved roots. Use this to apply instrumentation to your own application code without
+hardcoding the module path. See [Special `target` values](rules.md#special-target-values)
+for details.
+
 ### Filtering by version
 
 The `version` field restricts a rule to a specific range of the target library, using the
@@ -177,9 +183,7 @@ instrument_production_only:
 **Combinators** — `all-of`, `one-of`, and `not` compose multiple predicates. See
 [Combining `where.file` predicates](rules.md#combining-wherefile-predicates) for examples.
 
-**Planned:** A `target: root` shorthand is planned (#629) to select the module being built
-without specifying its import path. Source-level opt-out pragmas (`//otelc:ignore`) are also
-planned (#469).
+**Planned:** Source-level opt-out pragmas (`//otelc:ignore`) are planned (#469).
 
 ## Runtime Tuning
 
@@ -192,7 +196,7 @@ One `otelc`-specific runtime knob is `OTEL_GLS_MAX_SPANS`, which controls the de
 goroutine-local storage (GLS) span stack. Instrumentation that does not pass `context.Context`
 through all call boundaries relies on GLS to propagate trace context. Increasing
 `OTEL_GLS_MAX_SPANS` beyond the default accommodates deeper call stacks; see
-[GLS operation notes](../instrumentation/go.opentelemetry.io/otel/hook/gls-operation.md) for
+[GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for
 the operational constraints.
 
 ## Verifying Your Configuration

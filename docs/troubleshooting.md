@@ -186,7 +186,7 @@ to propagate trace context across boundaries that do not pass `context.Context`.
 is scoped to the goroutine that wrote it: spans started in a goroutine spawned from the
 instrumented function are not automatically visible to that function's GLS slot.
 GLS is an internal mechanism, not a public API. See
-[GLS operation notes](../instrumentation/go.opentelemetry.io/otel/hook/gls-operation.md)
+[GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md)
 for the full operational model.
 
 ## Getting Help
