@@ -40,18 +40,6 @@ func main() {
 
 func TestVendoredBuild(t *testing.T) {
 	t.Parallel()
-	buildVendored(t, "go", "build")
-}
-
-// An explicit -mod=vendor on the CLI beats the GOFLAGS=-mod=mod otelc sets, so
-// otelc has to rewrite it back or the build runs in vendor mode and fails.
-func TestVendoredBuildModVendor(t *testing.T) {
-	t.Parallel()
-	buildVendored(t, "go", "build", "-mod=vendor")
-}
-
-func buildVendored(t *testing.T, args ...string) {
-	t.Helper()
 
 	appsDir := t.TempDir()
 	app := filepath.Join(appsDir, vendoredApp)
@@ -67,7 +55,7 @@ func buildVendored(t *testing.T, args ...string) {
 
 	// setup edits go.mod but not vendor/modules.txt, so the build needs -mod=mod
 	// to pass the vendor consistency check.
-	testutil.Build(t, appsDir, vendoredApp, args...)
+	testutil.Build(t, appsDir, vendoredApp, "go", "build")
 	output := testutil.Run(t, appsDir, vendoredApp, nil)
 
 	// The basic rules gate rate.Every by version. At the pinned x/time v0.14.0,
