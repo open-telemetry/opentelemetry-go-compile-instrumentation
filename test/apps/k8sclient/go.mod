@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/k8sclient
+module go.opentelemetry.io/otelc/test/apps/k8sclient
 
 go 1.25.0
 

@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"go.opentelemetry.io/otelc/tool/ex"
 )
 
 // isCompileTool checks if the tool path is the Go compile tool.

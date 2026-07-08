@@ -8,13 +8,22 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"go.opentelemetry.io/otelc/tool/ex"
 )
 
 // Glob metacharacters recognised in a rule target. A target containing any of
 // these is treated as a doublestar glob pattern; otherwise it is an exact
 // import path that keeps the fast map-lookup matching path.
 const globMeta = "*?[{"
+
+// TargetRoot selects the root module of the build. The setup phase expands it
+// to a concrete module glob before matching rules.
+const TargetRoot = "$root"
+
+// IsRootTarget reports whether target is the root-module selector.
+func IsRootTarget(target string) bool {
+	return target == TargetRoot
+}
 
 // IsGlobTarget reports whether target uses glob syntax and therefore must be
 // matched against every dependency import path rather than looked up by exact
@@ -32,6 +41,9 @@ func IsGlobTarget(target string) bool {
 // before it reaches ValidateTarget; a non-glob target is a literal import path
 // and is always valid.
 func ValidateTarget(target string) error {
+	if strings.Contains(strings.ToLower(target), TargetRoot) && target != TargetRoot {
+		return ex.Newf("target %q must be exactly %q", target, TargetRoot)
+	}
 	if !IsGlobTarget(target) {
 		return nil
 	}

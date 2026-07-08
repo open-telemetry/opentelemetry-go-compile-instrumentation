@@ -20,8 +20,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
+	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
 func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerProvider) {

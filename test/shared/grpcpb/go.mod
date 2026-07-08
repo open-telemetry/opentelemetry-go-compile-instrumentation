@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb
+module go.opentelemetry.io/otelc/test/shared/grpcpb
 
 go 1.25.0
 

@@ -6,7 +6,7 @@ package testdata
 import (
 	_ "unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"go.opentelemetry.io/otelc/pkg/inst"
 )
 
 // BeforeProcessRequest would be injected before ProcessRequest in a test build.

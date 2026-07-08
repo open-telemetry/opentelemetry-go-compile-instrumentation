@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"go.opentelemetry.io/otelc/tool/ex"
 )
 
 // ImportConfig represents the parsed contents of an importcfg (or importcfg.link) file,

@@ -6,7 +6,7 @@ package testdata
 import (
 	_ "unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"go.opentelemetry.io/otelc/pkg/inst"
 )
 
 // BeforeExternalHelper is injected before ExternalHelper. The all-of

@@ -5,4 +5,4 @@ gin_custom:
   do:
     - inject_hooks:
         after: "afterNew"
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/gincustom/instrumentation"
+        path: "go.opentelemetry.io/otelc/test/apps/gincustom/instrumentation"

@@ -57,7 +57,7 @@ import (
 
 const (
 	numSkipFrame = 4 // skip the {New,Newf,Wrap,Wrapf} caller
-	modPrefix    = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/"
+	modPrefix    = "go.opentelemetry.io/otelc/"
 )
 
 // stackfulError represents an error with stack trace information

@@ -8,7 +8,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument"
+	"go.opentelemetry.io/otelc/tool/internal/instrument"
 )
 
 //nolint:gochecknoglobals // Implementation of a CLI command

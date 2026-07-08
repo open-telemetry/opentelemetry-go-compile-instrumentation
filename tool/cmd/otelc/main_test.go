@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/urfave/cli/v3"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestInitLogger(t *testing.T) {

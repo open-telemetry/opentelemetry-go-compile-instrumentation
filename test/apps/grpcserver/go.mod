@@ -1,11 +1,11 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver
+module go.opentelemetry.io/otelc/test/apps/grpcserver
 
 go 1.25.0
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb => ../../shared/grpcpb
+replace go.opentelemetry.io/otelc/test/shared/grpcpb => ../../shared/grpcpb
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/test/shared/grpcpb v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.82.0
 )
 

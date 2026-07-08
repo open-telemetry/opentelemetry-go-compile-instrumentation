@@ -73,7 +73,7 @@ func TestRedisClientEnabler(t *testing.T) {
 func TestInstrumentationConstants(t *testing.T) {
 	assert.Equal(
 		t,
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9",
+		"go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9",
 		instrumentationName,
 	)
 	assert.Equal(t, "REDIS", instrumentationKey)

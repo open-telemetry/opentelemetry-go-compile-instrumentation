@@ -18,7 +18,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
+	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
 // setupTest wires the package-level tracer/propagator to an in-memory span

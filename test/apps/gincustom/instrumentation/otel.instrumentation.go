@@ -6,5 +6,5 @@
 package tools
 
 import (
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server" // enable net/http server instrumentation
+	_ "go.opentelemetry.io/otelc/instrumentation/net/http/server" // enable net/http server instrumentation
 )

@@ -14,11 +14,11 @@ import (
 
 	"github.com/dave/dst"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/imports"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 type InstrumentPhase struct {

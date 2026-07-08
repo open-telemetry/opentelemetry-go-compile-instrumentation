@@ -1,21 +1,21 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/gincustom/instrumentation
+module go.opentelemetry.io/otelc/test/apps/gincustom/instrumentation
 
 go 1.25.0
 
 replace (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation => ../../../../instrumentation
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/client => ../../../../instrumentation/net/http/client
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server => ../../../../instrumentation/net/http/server
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ../../../../pkg
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime => ../../../../pkg/runtime
+	go.opentelemetry.io/otelc/instrumentation => ../../../../instrumentation
+	go.opentelemetry.io/otelc/instrumentation/net/http/client => ../../../../instrumentation/net/http/client
+	go.opentelemetry.io/otelc/instrumentation/net/http/server => ../../../../instrumentation/net/http/server
+	go.opentelemetry.io/otelc/pkg => ../../../../pkg
+	go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime
 )
 
 require (
 	github.com/gin-gonic/gin v1.10.0
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/server v0.0.0-00010101000000-000000000000
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
+	go.opentelemetry.io/otelc/instrumentation/net/http/server v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -43,8 +43,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation v0.0.0-00010101000000-000000000000 // indirect
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime v0.0.0-00010101000000-000000000000 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
@@ -73,6 +71,8 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
 	go.opentelemetry.io/otel/sdk/log v0.20.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
+	go.opentelemetry.io/otelc/instrumentation v0.0.0-00010101000000-000000000000 // indirect
+	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/arch v0.8.0 // indirect

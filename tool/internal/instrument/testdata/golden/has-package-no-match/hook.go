@@ -6,7 +6,7 @@ package testdata
 import (
 	_ "unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"go.opentelemetry.io/otelc/pkg/inst"
 )
 
 // BeforeProcessRequest is the hook for the has_package: otherpkg rule. Because

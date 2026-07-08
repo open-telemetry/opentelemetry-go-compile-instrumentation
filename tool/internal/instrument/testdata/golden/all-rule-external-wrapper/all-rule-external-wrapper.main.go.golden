@@ -6,7 +6,7 @@ package main
 import (
 	"unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+	"go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 )
 
 type T struct{ ExternalTag wrapper.Tag }

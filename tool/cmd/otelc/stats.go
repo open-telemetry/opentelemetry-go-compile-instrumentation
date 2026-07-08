@@ -9,8 +9,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // initStats enables toolexec timing stats if --stats is set.

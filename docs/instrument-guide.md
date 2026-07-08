@@ -37,7 +37,7 @@ inject_to_grpc_newserver:
     - inject_hooks:
         before: BeforeNewServer
         after: AfterNewServer
-        path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/server
+        path: go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server
 ```
 
 - `target`: Import path of the package to instrument.
@@ -73,7 +73,7 @@ Hook implementation:
 package server
 
 import (
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/hook"
 	"google.golang.org/grpc"
 )
 

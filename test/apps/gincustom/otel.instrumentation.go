@@ -6,6 +6,6 @@
 package tools
 
 import (
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/go.opentelemetry.io/otel/init"
-	_ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/gincustom/instrumentation"
+	_ "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+	_ "go.opentelemetry.io/otelc/test/apps/gincustom/instrumentation"
 )

@@ -1,10 +1,10 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/client
+module go.opentelemetry.io/otelc/demo/app/grpc/client
 
 go 1.25.0
 
 require (
-	github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/server v0.0.0
 	github.com/stretchr/testify v1.11.1
+	go.opentelemetry.io/otelc/demo/app/grpc/server v0.0.0
 	google.golang.org/grpc v1.82.0
 )
 
@@ -19,4 +19,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/server => ../server
+replace go.opentelemetry.io/otelc/demo/app/grpc/server => ../server

@@ -6,9 +6,9 @@ package logrus
 import (
 	"sync"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 const (

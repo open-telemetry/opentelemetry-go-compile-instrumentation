@@ -284,6 +284,11 @@ Rules:
 
 - `target: main` — matches the compile-time package named `main`.
 - `target: test_main` — not currently supported; reserved for future work.
+- `target: $root` — matches the root module of the build and every package
+  below it. If a build spans multiple modules, it matches the union of all
+  resolved roots. The setup phase expands this selector through the normal glob
+  target matcher, so rules do not need to hardcode the application's module
+  path.
 - An empty or whitespace-only `target` is rejected at load time: `target` is
   the sole package selector, so a rule without one can never match.
 
@@ -441,7 +446,7 @@ hook_helloworld:
     - inject_hooks:
         before: MyHookBefore
         after: MyHookAfter
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic"
+        path: "go.opentelemetry.io/otelc/instrumentation/basic"
 ```
 
 This rule will inject `MyHookBefore` at the start of the `Example` function in the `main` package, and `MyHookAfter` at the end. The hook functions are located in the specified `path`.

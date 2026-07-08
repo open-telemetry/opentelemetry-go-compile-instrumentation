@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestBasic(t *testing.T) {
@@ -116,7 +116,7 @@ func verifyExportedHelloWorldSpan(t *testing.T, output string) {
 		"expected hello-world span ID to be non-zero",
 	)
 	require.Equal(t,
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/basic",
+		"go.opentelemetry.io/otelc/instrumentation/basic",
 		span.InstrumentationScope.Name,
 	)
 

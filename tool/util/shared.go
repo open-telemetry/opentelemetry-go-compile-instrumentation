@@ -24,7 +24,7 @@ const (
 	// Set automatically when --debug is used; propagated to child processes.
 	EnvOtelcDebug    = "OTELC_DEBUG"
 	BuildTempDir     = ".otelc-build"
-	OtelcRoot        = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	OtelcRoot        = "go.opentelemetry.io/otelc"
 	OtelcPkgRoot     = OtelcRoot + "/pkg"
 	OtelcInstRoot    = OtelcRoot + "/instrumentation"
 	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"

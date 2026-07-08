@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb/pb"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/require"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
+	"go.opentelemetry.io/otelc/test/shared/grpcpb/pb"
+	"go.opentelemetry.io/otelc/test/testutil"
+	"go.opentelemetry.io/otelc/tool/util"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/mongoclient
+module go.opentelemetry.io/otelc/test/apps/mongoclient
 
 go 1.25.0
 

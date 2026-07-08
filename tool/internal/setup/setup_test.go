@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/pkgload"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -121,6 +121,29 @@ func TestGetPackages(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	pkgs, err := getBuildPackages(t.Context(), []string{"-C", "app", "."})
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	require.NotNil(t, pkgs[0].Module)
+	require.Equal(t, "example.com/app", pkgs[0].Module.Path)
 }
 
 func TestSplitBuildTargets(t *testing.T) {
@@ -288,6 +311,27 @@ func setupTestModule(t *testing.T, subDirs []string) {
 	t.Chdir(tmpDir)
 }
 
+func TestRootModulePaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.25\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+	mainFile := filepath.Join(appDir, "main.go")
+	require.NoError(t, os.WriteFile(mainFile, []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	got, err := rootModulePaths(t.Context(), []*packages.Package{
+		{PkgPath: "example.com/direct", Module: &packages.Module{Path: "example.com/direct"}},
+		{PkgPath: pkgload.CommandLineArgumentsPackage, GoFiles: []string{mainFile}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"example.com/app", "example.com/direct"}, got)
+}
+
 func TestSetupGoCache(t *testing.T) {
 	t.Run("respects existing GOCACHE", func(t *testing.T) {
 		t.Setenv("GOCACHE", "/existing/cache")
@@ -395,6 +439,16 @@ func TestExtractBuildFlags(t *testing.T) {
 			name:     "modfile with spaces in path",
 			args:     []string{"build", "-modfile", "path with spaces/go.mod", "./..."},
 			expected: []string{"-modfile", "path with spaces/go.mod"},
+		},
+		{
+			name:     "change directory flag",
+			args:     []string{"build", "-C", "app", "./..."},
+			expected: []string{"-C", "app"},
+		},
+		{
+			name:     "overlay flag",
+			args:     []string{"build", "-overlay=overlay.json", "./..."},
+			expected: []string{"-overlay=overlay.json"},
 		},
 		{
 			name:     "race=true is normalized",

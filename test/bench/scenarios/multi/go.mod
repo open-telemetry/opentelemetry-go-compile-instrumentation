@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/bench/scenarios/multi
+module go.opentelemetry.io/otelc/test/bench/scenarios/multi
 
 go 1.25.0
 

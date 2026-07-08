@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/kafkaclient
+module go.opentelemetry.io/otelc/test/apps/kafkaclient
 
 go 1.25.0
 

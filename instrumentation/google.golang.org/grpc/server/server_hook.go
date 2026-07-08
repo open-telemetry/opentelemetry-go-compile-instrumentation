@@ -21,13 +21,13 @@ import (
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
-	grpcsemconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/semconv"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
+	grpcsemconv "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/semconv"
+	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 const (
-	instrumentationName = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc"
+	instrumentationName = "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc"
 	instrumentationKey  = "GRPC"
 	optionsParamIndex   = 0
 )

@@ -6,7 +6,7 @@ package testdata
 import (
 	_ "unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
 func H12UnderscoreReturnAfter(ctx hook.HookContext, r1 int, r2 error) {}

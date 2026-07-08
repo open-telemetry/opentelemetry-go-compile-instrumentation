@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 // appBoundVersions returns, per test-app directory, the per-rule boundary

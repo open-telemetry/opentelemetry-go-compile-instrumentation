@@ -11,7 +11,7 @@ hook_logrus_new:
   do:
     - inject_hooks:
         after: AfterLogrusNew
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/sirupsen/logrus"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/sirupsen/logrus"
 
 hook_logrus_with_field:
   target: github.com/sirupsen/logrus
@@ -21,7 +21,7 @@ hook_logrus_with_field:
   do:
     - inject_hooks:
         after: AfterLogrusWithField
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/sirupsen/logrus"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/sirupsen/logrus"
 
 hook_logrus_set_formatter:
   target: github.com/sirupsen/logrus
@@ -31,4 +31,4 @@ hook_logrus_set_formatter:
   do:
     - inject_hooks:
         after: AfterLogrusSetFormatter
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/sirupsen/logrus"
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/sirupsen/logrus"

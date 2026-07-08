@@ -124,7 +124,7 @@ const file_greeter_proto_rawDesc = "" +
 	"\amessage\x18\x01 \x01(\tR\amessage2\x87\x01\n" +
 	"\aGreeter\x128\n" +
 	"\bSayHello\x12\x15.greeter.HelloRequest\x1a\x13.greeter.HelloReply\"\x00\x12B\n" +
-	"\x0eSayHelloStream\x12\x15.greeter.HelloRequest\x1a\x13.greeter.HelloReply\"\x00(\x010\x01BXZVgithub.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/shared/grpcpb/pbb\x06proto3"
+	"\x0eSayHelloStream\x12\x15.greeter.HelloRequest\x1a\x13.greeter.HelloReply\"\x00(\x010\x01B1Z/go.opentelemetry.io/otelc/test/shared/grpcpb/pbb\x06proto3"
 
 var (
 	file_greeter_proto_rawDescOnce sync.Once

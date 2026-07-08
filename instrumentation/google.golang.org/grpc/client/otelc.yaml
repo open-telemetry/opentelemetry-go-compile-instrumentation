@@ -6,7 +6,7 @@ client_hook_newclient:
     - inject_hooks:
         before: BeforeNewClient
         after: AfterNewClient
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/client"
+        path: "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/client"
 
 client_hook_dialcontext:
   target: google.golang.org/grpc
@@ -16,4 +16,4 @@ client_hook_dialcontext:
     - inject_hooks:
         before: BeforeDialContext
         after: AfterDialContext
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/client"
+        path: "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/client"

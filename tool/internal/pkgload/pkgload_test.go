@@ -21,6 +21,31 @@ func TestLoadPackages(t *testing.T) {
 	assert.Equal(t, "fmt", pkgs[0].PkgPath)
 }
 
+func TestLoadPackagesWithChangeDirectoryFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	for _, buildFlags := range [][]string{{"-C", "app"}, {"-C=app"}} {
+		pkgs, err := LoadPackages(t.Context(), packages.NeedName|packages.NeedModule, buildFlags, ".")
+		require.NoError(t, err)
+		require.Len(t, pkgs, 1)
+		require.NotNil(t, pkgs[0].Module)
+		assert.Equal(t, "example.com/app", pkgs[0].Module.Path)
+	}
+}
+
 func TestResolvePackageName(t *testing.T) {
 	tests := []struct {
 		importPath string
@@ -265,7 +290,7 @@ func TestResolveModuleDir(t *testing.T) {
 			t.Chdir(workDir)
 
 			ctx := t.Context()
-			moduleDir, err := resolveModuleDir(ctx, workDir)
+			mod, err := ResolveModule(ctx, workDir)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -273,12 +298,16 @@ func TestResolveModuleDir(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+			require.Equal(t, "example.com/test", mod.Path)
 
 			expectedDir := tmpDir
 			if tt.expectedDir != "." {
 				expectedDir = tt.expectedDir
 			}
 
+			require.Equal(t, expectedDir, mod.Dir)
+			moduleDir, err := ResolveModuleDir(ctx, workDir)
+			require.NoError(t, err)
 			require.Equal(t, expectedDir, moduleDir)
 		})
 	}

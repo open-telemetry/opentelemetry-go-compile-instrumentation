@@ -56,10 +56,10 @@ coupling them too tightly.
 The OpenTelemetry Go compile-time instrumentation tool is composed of the
 following software artifacts (in the form of Go packages):
 
-- `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc`,
+- `go.opentelemetry.io/otelc/tool/cmd/otelc`,
   a command-line tool that can be installed using `go install` or using
   `go get -tool`;
-- `github.com/open-telemetry/opentelemetry-go-compile-instrumentation/runtime`,
+- `go.opentelemetry.io/otelc/runtime`,
   a small, self-contained package that contains essential runtime functionality
   used by instrumented applications (not intended for manual usage).
 
@@ -69,7 +69,7 @@ The tool offers a wizard for getting started with the tool automatically by
 following a series of prompts:
 
 ```console
-$ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc@latest setup
+$ go run go.opentelemetry.io/otelc/tool/cmd/otelc@latest setup
 ╭──────────────────────────────────────────────────────────────────────╮
 │                                                                      │
 │           OpenTelemetry compile-time instrumentation tool            │
@@ -126,13 +126,13 @@ $ go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool
 🆗 I will use go tool dependencies to enable integration packages.
 
 🤖 We're all set! Based on your answers, I will execute the following commands:
-   $ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc@v1.2.3
+   $ go get -tool go.opentelemetry.io/otelc/tool/cmd/otelc@v1.2.3
    $ go get -tool github.com/open-telemetry/opentelemetry-go
 🤖 Should I proceed?
    [Yes]  No
 
 🆗 Let's go!
-✅ go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc@v1.2.3
+✅ go get -tool go.opentelemetry.io/otelc/tool/cmd/otelc@v1.2.3
 ✅ go get -tool github.com/open-telemetry/opentelemetry-go
 
 🤖 Your project is now configured to use otelc with the following integrations:
@@ -192,7 +192,7 @@ used directly to build, run, and test go applications directly:
 2. Installing `otelc` in `$GOBIN`
 
    ```console
-   go install github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc
+   go install go.opentelemetry.io/otelc/tool/cmd/otelc
    otelc go build -o bin/app
    otelc go test -shuffle=on ./...
    ```
@@ -200,8 +200,8 @@ used directly to build, run, and test go applications directly:
 3. Running `otelc` with `go run`:
 
    ```console
-   go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc go build -o bin/app
-   go run github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc go test -shuffle=on ./...
+   go run go.opentelemetry.io/otelc/tool/cmd/otelc go build -o bin/app
+   go run go.opentelemetry.io/otelc/tool/cmd/otelc go test -shuffle=on ./...
    ```
 
 #### Building Multiple Packages
