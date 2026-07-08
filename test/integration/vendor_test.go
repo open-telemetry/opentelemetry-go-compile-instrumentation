@@ -16,61 +16,75 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
-// TestVendoredBuild builds the basic demo from a vendored copy. setup edits
-// go.mod for the hook modules but not vendor/modules.txt, so the build must use
-// -mod=mod or it fails the vendor consistency check.
+const vendoredApp = "vendored"
+
+const vendoredAppGoMod = `module vendored
+
+go 1.25.0
+
+require golang.org/x/time v0.14.0
+`
+
+const vendoredAppMain = `package main
+
+import (
+	"time"
+
+	"golang.org/x/time/rate"
+)
+
+func main() {
+	println(rate.Every(time.Duration(1)))
+}
+`
+
 func TestVendoredBuild(t *testing.T) {
 	t.Parallel()
-	buildVendoredBasic(t, "go", "build", "-a")
+	buildVendored(t, "go", "build")
 }
 
-// TestVendoredBuildModVendor covers the flag-precedence path: an explicit
-// -mod=vendor on the CLI beats the GOFLAGS=-mod=mod otelc sets, so without
-// rewriting it every phase runs in vendor mode again — the consistency check
-// fails and the version-constrained x/time/rate rules go unmatched.
+// An explicit -mod=vendor on the CLI beats the GOFLAGS=-mod=mod otelc sets, so
+// otelc has to rewrite it back or the build runs in vendor mode and fails.
 func TestVendoredBuildModVendor(t *testing.T) {
 	t.Parallel()
-	buildVendoredBasic(t, "go", "build", "-a", "-mod=vendor")
+	buildVendored(t, "go", "build", "-mod=vendor")
 }
 
-// buildVendoredBasic vendors a temp copy of the basic demo (kept out of the
-// committed tree and clear of TestBasic), builds it with the given otelc args,
-// and asserts both the hello-world span and the version-constrained x/time/rate
-// instrumentation fired, and that the vendor directory was left untouched.
-func buildVendoredBasic(t *testing.T, args ...string) {
+func buildVendored(t *testing.T, args ...string) {
 	t.Helper()
 
 	appsDir := t.TempDir()
-	app := filepath.Join(appsDir, "basic")
-	src := filepath.Join("..", "..", "demo", "app", "basic")
-	require.NoError(t, os.CopyFS(app, os.DirFS(src)))
+	app := filepath.Join(appsDir, vendoredApp)
+	require.NoError(t, os.MkdirAll(app, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(app, "go.mod"), []byte(vendoredAppGoMod), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(app, "main.go"), []byte(vendoredAppMain), 0o644))
 
-	goModVendor(t, app)
+	goMod(t, app, "tidy")
+	goMod(t, app, "vendor")
 	modulesTxt := filepath.Join(app, "vendor", "modules.txt")
 	before, err := os.ReadFile(modulesTxt)
 	require.NoError(t, err)
 
-	testutil.Build(t, appsDir, "basic", args...)
-	output := testutil.Run(t, appsDir, "basic", nil)
+	// setup edits go.mod but not vendor/modules.txt, so the build needs -mod=mod
+	// to pass the vendor consistency check.
+	testutil.Build(t, appsDir, vendoredApp, args...)
+	output := testutil.Run(t, appsDir, vendoredApp, nil)
 
-	verifyExportedHelloWorldSpan(t, output)
-
-	// golang.org/x/time/rate is a vendored third-party dependency instrumented
-	// by version-constrained rules. Under -mod=vendor its source path carries no
-	// @version, so those rules silently fail to match; asserting Every1/Every3
-	// fired proves the vendored build resolved the dependency (and its version)
-	// from the module cache rather than vendor/.
+	// The basic rules gate rate.Every by version. At the pinned x/time v0.14.0,
+	// Every1 and Every3 match but Every2 (>= v0.15.0) does not; a vendored build
+	// that dropped the version would change that set.
 	require.Contains(t, output, "Every1")
 	require.Contains(t, output, "Every3")
+	require.NotContains(t, output, "Every2")
 
 	after, err := os.ReadFile(modulesTxt)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "otelc must not modify the vendor directory")
 }
 
-func goModVendor(t *testing.T, dir string) {
+func goMod(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "go", "mod", "vendor")
+	cmd := exec.CommandContext(t.Context(), "go", append([]string{"mod"}, args...)...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
