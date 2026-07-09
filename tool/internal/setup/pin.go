@@ -10,6 +10,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -509,6 +510,20 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	return &PinResult{}, nil
 }
 
+func prepareVendoredBuild(ctx context.Context, logger *slog.Logger, args []string) ([]string, error) {
+	if !vendoringActive(ctx, util.GetOtelcWorkDir()) {
+		return args, nil
+	}
+
+	logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
+
+	if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
+		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
+	}
+
+	return rewriteModVendor(args), nil
+}
+
 type PinOptions struct {
 	// Whether to prune invalid imports within otel.instrumentation.go
 	Prune bool
@@ -538,11 +553,21 @@ type PinResult struct {
 // re-parsing compile commands again.
 func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	moduleDirs := opts.ModuleDirs
+	// moduleDirs being empty means Pin was invoked as a standalone command
+	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
-		// Use opts.Args to find module directories
-		pkgs, err := getBuildPackages(ctx, opts.Args)
+		// For same reason as Setup, we have to check vendoring state before
+		// forcing module mode and rewriting vendor/ paths to module mode.
+		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
 		if err != nil {
-			return nil, ex.Wrapf(err, "getting build packages")
+			return nil, ex.Wrapf(err, "preparing vendored build")
+		}
+		opts.Args = args
+
+		// Use opts.Args to find module directories
+		pkgs, getErr := getBuildPackages(ctx, opts.Args)
+		if getErr != nil {
+			return nil, ex.Wrapf(getErr, "getting build packages")
 		}
 
 		moduleDirs, err = pkgload.FindModuleDirs(ctx, pkgs)

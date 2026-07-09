@@ -6,6 +6,8 @@
 package test
 
 import (
+	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,19 +24,30 @@ const vendoredAppGoMod = `module vendored
 
 go 1.25.0
 
-require golang.org/x/time v0.14.0
+require github.com/gin-gonic/gin v1.12.0
 `
 
 const vendoredAppMain = `package main
 
 import (
-	"time"
+	"flag"
+	"fmt"
 
-	"golang.org/x/time/rate"
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	println(rate.Every(time.Duration(1)))
+	port := flag.Int("port", 8080, "listen port")
+	flag.Parse()
+
+	r := gin.New()
+	r.GET("/hello/:name", func(c *gin.Context) {
+		c.String(200, "Hello %s", c.Param("name"))
+	})
+
+	if err := r.Run(fmt.Sprintf(":%d", *port)); err != nil {
+		panic(err)
+	}
 }
 `
 
@@ -56,14 +69,26 @@ func TestVendoredBuild(t *testing.T) {
 	// setup edits go.mod but not vendor/modules.txt, so the build needs -mod=mod
 	// to pass the vendor consistency check.
 	testutil.Build(t, appsDir, vendoredApp, "go", "build")
-	output := testutil.Run(t, appsDir, vendoredApp, nil)
 
-	// The basic rules gate rate.Every by version. At the pinned x/time v0.14.0,
-	// Every1 and Every3 match but Every2 (>= v0.15.0) does not; a vendored build
-	// that dropped the version would change that set.
-	require.Contains(t, output, "Every1")
-	require.Contains(t, output, "Every3")
-	require.NotContains(t, output, "Every2")
+	port := testutil.FreePort(t)
+
+	f := testutil.NewTestFixture(t, testutil.WithAppsDir(appsDir))
+	f.Start(vendoredApp, fmt.Sprintf("-port=%d", port))
+
+	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
+
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/hello/OpenTelemetry", port)) //nolint:noctx
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	testutil.WaitForSpanFlush(t)
+
+	f.RequireTraceCount(1)
+	f.RequireSpansPerTrace(1)
+
+	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
+	require.Equal(t, "GET /hello/:name", span.Name())
 
 	after, err := os.ReadFile(modulesTxt)
 	require.NoError(t, err)

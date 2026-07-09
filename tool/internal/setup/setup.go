@@ -332,6 +332,13 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
 			return ex.Wrapf(err, "forcing module mode for vendored build")
 		}
+
+		// A CLI -mod=vendor beats the GOFLAGS=-mod=mod forced above, so the Phase-1
+		// build-plan dry run (both the auto-pin and the direct findDeps fallback
+		// below call it) would still resolve vendor/ paths without an @version;
+		// rewrite it to module mode when vendoring is active so both build phases
+		// agree on where the dependency source lives.
+		args = rewriteModVendor(args)
 	}
 
 	if isSetup() {
@@ -370,15 +377,6 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 				logger.Error("failed to commit state", "error", err)
 			}
 		}()
-	}
-
-	// A CLI -mod=vendor beats the GOFLAGS=-mod=mod forced above, so the Phase-1
-	// build-plan dry run (both the auto-pin and the direct findDeps fallback
-	// below call it) would still resolve vendor/ paths without an @version;
-	// rewrite it to module mode when vendoring is active so both build phases
-	// agree on where the dependency source lives.
-	if vendored {
-		args = rewriteModVendor(args)
 	}
 
 	// Auto-pin generates/updates otel.instrumentation.go file
