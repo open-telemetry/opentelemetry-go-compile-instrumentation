@@ -1,8 +1,8 @@
-module go.opentelemetry.io/otelc/instrumentation/basic
+module go.opentelemetry.io/otelc/demo/app/basic/instrumentatio
 
 go 1.25.0
 
-replace go.opentelemetry.io/otelc/pkg => ../../pkg
+replace go.opentelemetry.io/otelc/pkg => ../../../../pkg
 
 require (
 	github.com/google/uuid v1.6.0
