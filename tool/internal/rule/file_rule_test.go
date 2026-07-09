@@ -41,31 +41,6 @@ path: github.com/example/pkg
 			yaml:    `target: example.com/pkg\nfile: my_file.go`,
 			wantErr: true,
 		},
-		{
-			name: "module defaults to path",
-			yaml: `
-file: my_file.go
-target: example.com/pkg
-path: github.com/example/instrumentation/net/http/client
-`,
-			check: func(t *testing.T, r *InstFileRule) {
-				assert.Equal(t,
-					"github.com/example/instrumentation/net/http/client",
-					r.Path,
-				)
-				assert.Equal(t, r.Path, r.ModulePath)
-			},
-		},
-		{
-			name: "import path not part of module path",
-			yaml: `
-file: my_file.go
-target: example.com/pkg
-path: github.com/example/instrumentation/net/http/client
-module: github.com/example/pkg
-`,
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {

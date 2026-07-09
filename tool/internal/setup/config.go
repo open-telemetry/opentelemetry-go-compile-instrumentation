@@ -176,7 +176,8 @@ func resolveInstrumentationConfigs(
 }
 
 type InstrumentationVisit struct {
-	Config *InstrumentationConfig
+	Config   *InstrumentationConfig
+	ToolFile string
 }
 
 type InstrumentationVisitor func(visit *InstrumentationVisit) (recurse bool, err error)
@@ -211,7 +212,7 @@ func collectImports(toolFile string, f *dst.File, seenImports map[string]bool) (
 			)
 		}
 
-		if importPath == util.OtelcToolCmdRoot || seenImports[importPath] {
+		if seenImports[importPath] {
 			continue
 		}
 
@@ -257,8 +258,10 @@ func walkInstrumentation(ctx context.Context, toolFiles []string, visit Instrume
 				continue
 			}
 
-			v := &InstrumentationVisit{Config: cfg}
-
+			v := &InstrumentationVisit{
+				Config:   cfg,
+				ToolFile: toolFile,
+			}
 			recurse, visitErr := visit(v)
 			if visitErr != nil {
 				return visitErr

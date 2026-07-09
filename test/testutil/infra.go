@@ -39,9 +39,9 @@ func newCmd(ctx context.Context, dir string, env []string, args ...string) *exec
 	return cmd
 }
 
-// otelcPath returns the absolute path to the otelc binary, assuming the
+// OtelcPath returns the absolute path to the otelc binary, assuming the
 // caller's working directory is a sibling of the repo's otelc output.
-func otelcPath() (string, error) {
+func OtelcPath() (string, error) {
 	binName := otelcBinName
 	if util.IsWindows() {
 		binName += ".exe"
@@ -74,7 +74,7 @@ func appsPath() (string, error) {
 // is registered for cleanup via t.Cleanup.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
-	otelc, err := otelcPath()
+	otelc, err := OtelcPath()
 	require.NoError(t, err)
 
 	output := appOutputName()

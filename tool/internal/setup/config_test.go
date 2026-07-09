@@ -14,8 +14,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestFindToolFile(t *testing.T) {
@@ -488,9 +486,8 @@ func TestWalkInstrumentation_VisitsImports(t *testing.T) {
 	tmp := t.TempDir()
 
 	toolFile := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
-		util.OtelcToolCmdRoot: filepath.Join(tmp, "otelc"), // ignored by walkInstrumentation
-		"example.com/foo":     filepath.Join(tmp, "foo"),
-		"example.com/bar":     filepath.Join(tmp, "bar"),
+		"example.com/foo": filepath.Join(tmp, "foo"),
+		"example.com/bar": filepath.Join(tmp, "bar"),
 	})
 	writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 	writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)

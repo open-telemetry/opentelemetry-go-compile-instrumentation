@@ -92,6 +92,9 @@ If we cannot import a specific type (e.g., it is unexported), we can use `interf
 
 ### Limitations
 
+The constraints below apply to hook implementations. For runtime symptoms (spans not
+appearing, instrumentation not applied), see [Troubleshooting](troubleshooting.md).
+
 When implementing hooks, we must adhere to certain limitations:
 
 1. **Restricted Imports**: If we are instrumenting a library (e.g., `github.com/foo/bar`), our hook code can only import from:

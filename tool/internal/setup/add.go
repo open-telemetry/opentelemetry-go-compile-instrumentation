@@ -137,10 +137,10 @@ func (sp *SetupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 		return err
 	}
 	// Write the ast to file
-	if err := ast.WriteFile(otelcRuntimeFilePath, root); err != nil {
+	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
-	sp.keepForDebug(otelcRuntimeFilePath)
+	keepForDebug(ctx, otelcRuntimeFilePath)
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
 }

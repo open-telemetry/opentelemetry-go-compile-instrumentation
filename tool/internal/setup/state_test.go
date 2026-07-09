@@ -111,12 +111,13 @@ func TestGetBackupFiles(t *testing.T) {
 		wantFiles func(tmp, moduleDir string) []string
 	}{
 		{
-			name: "go.mod, go.sum and go.work.sum exist",
+			name: "go.mod, go.sum, tool file and go.work.sum",
 			setup: func(t *testing.T, tmp string) string {
 				moduleDir := filepath.Join(tmp, "mod")
 
 				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
 				mustWriteFile(t, filepath.Join(moduleDir, "go.sum"), "sum")
+				mustWriteFile(t, filepath.Join(moduleDir, ToolFileCanonical), "//go:build tools\npackage tools")
 
 				mustWriteFile(t, filepath.Join(tmp, "go.work"), "go 1.24")
 				mustWriteFile(t, filepath.Join(tmp, "go.work.sum"), "worksum")
@@ -127,12 +128,13 @@ func TestGetBackupFiles(t *testing.T) {
 				return []string{
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
+					filepath.Join(moduleDir, ToolFileCanonical),
 					filepath.Join(tmp, "go.work.sum"),
 				}
 			},
 		},
 		{
-			name: "missing go.sum and go.work.sum",
+			name: "missing tool file, go.sum and go.work.sum",
 			setup: func(t *testing.T, tmp string) string {
 				moduleDir := filepath.Join(tmp, "mod")
 
@@ -145,6 +147,7 @@ func TestGetBackupFiles(t *testing.T) {
 				return []string{
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
+					filepath.Join(moduleDir, ToolFileCanonical),
 					filepath.Join(tmp, "go.work.sum"),
 				}
 			},
@@ -156,10 +159,11 @@ func TestGetBackupFiles(t *testing.T) {
 				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
 				return moduleDir
 			},
-			wantFiles: func(tmp, moduleDir string) []string {
+			wantFiles: func(_, moduleDir string) []string {
 				return []string{
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
+					filepath.Join(moduleDir, ToolFileCanonical),
 				}
 			},
 		},
@@ -170,6 +174,22 @@ func TestGetBackupFiles(t *testing.T) {
 			},
 			wantFiles: func(_, _ string) []string {
 				return nil
+			},
+		},
+		{
+			name: "uses tool file alias when canonical is missing",
+			setup: func(t *testing.T, tmp string) string {
+				moduleDir := filepath.Join(tmp, "mod")
+				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
+				mustWriteFile(t, filepath.Join(moduleDir, ToolFileAlias), "")
+				return moduleDir
+			},
+			wantFiles: func(_, moduleDir string) []string {
+				return []string{
+					filepath.Join(moduleDir, "go.mod"),
+					filepath.Join(moduleDir, "go.sum"),
+					filepath.Join(moduleDir, ToolFileAlias),
+				}
 			},
 		},
 	}

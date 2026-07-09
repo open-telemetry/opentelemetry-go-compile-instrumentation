@@ -28,6 +28,11 @@ const (
 	OtelcPkgRoot     = OtelcRoot + "/pkg"
 	OtelcInstRoot    = OtelcRoot + "/instrumentation"
 	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe     = "otelc"
+	// TODO: remove these once v1 is released and migrate all usage to the constants above
+	OtelcOldRoot        = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	OtelcOldToolCmdRoot = OtelcOldRoot + "/tool/cmd"
+	OtelcOldToolExe     = "cmd"
 )
 
 func GetMatchedRuleFile() string {

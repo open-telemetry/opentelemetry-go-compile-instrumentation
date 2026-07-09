@@ -96,13 +96,25 @@ func StateManagerFromContext(ctx context.Context) (*StateManager, bool) {
 func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, error) {
 	var files []string
 
-	// Find all go.mod and go.sum files
+	// Find all go.mod, go.sum, and tool files
 	for moduleDir := range moduleDirs {
 		goModFile := filepath.Join(moduleDir, "go.mod")
 		goSumFile := filepath.Join(moduleDir, "go.sum")
+		toolFileCanonical := filepath.Join(moduleDir, ToolFileCanonical)
+		toolFileAlias := filepath.Join(moduleDir, ToolFileAlias)
+
 		if util.PathExists(goModFile) {
 			files = append(files, goModFile)
 			files = append(files, goSumFile)
+
+			// If otelc.tool.go exists, use it (it may get modified)
+			// Otherwise, use the canonical path (it may get generated or modified)
+			toolFile := toolFileCanonical
+			if !util.PathExists(toolFileCanonical) && util.PathExists(toolFileAlias) {
+				toolFile = toolFileAlias
+			}
+
+			files = append(files, toolFile)
 		}
 	}
 

@@ -143,33 +143,6 @@ param: string
 			yaml:    `func: MyFunc\ntarget: example.com/pkg\nbefore: MyBefore`,
 			wantErr: true,
 		},
-		{
-			name: "module defaults to path",
-			yaml: `
-func: MyFunc
-target: example.com/pkg
-before: MyBefore
-path: github.com/example/instrumentation/net/http/client
-`,
-			check: func(t *testing.T, r *InstFuncRule) {
-				assert.Equal(t,
-					"github.com/example/instrumentation/net/http/client",
-					r.Path,
-				)
-				assert.Equal(t, r.Path, r.ModulePath)
-			},
-		},
-		{
-			name: "import path not part of module path",
-			yaml: `
-func: MyFunc
-target: example.com/pkg
-before: MyBefore
-path: github.com/example/instrumentation/net/http/client
-module: github.com/example/pkg
-`,
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {

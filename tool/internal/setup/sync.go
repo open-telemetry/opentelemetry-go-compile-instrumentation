@@ -15,7 +15,6 @@ import (
 	"golang.org/x/mod/semver"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -36,7 +35,8 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 	if err != nil {
 		return ex.Wrapf(err, "failed to format go.mod file")
 	}
-	err = os.WriteFile(gomod, data, 0o644) //nolint:gosec // 0644 is ok
+	const perm = 0o644
+	err = util.WriteFileAtomic(gomod, data, perm)
 	if err != nil {
 		return ex.Wrapf(err, "failed to write go.mod file")
 	}
@@ -86,7 +86,9 @@ func snapshotVersion(mf *modfile.File) versionSnapshot {
 	return snap
 }
 
-func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) error {
+func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) error {
+	logger := util.LoggerFromContext(ctx)
+
 	after, err := parseGoMod(goModPath)
 	if err != nil {
 		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
@@ -96,21 +98,16 @@ func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) erro
 	if after.Go != nil && before.goVersion != "" {
 		if goversion.Compare("go"+after.Go.Version, "go"+before.goVersion) > 0 {
 			_, _ = fmt.Fprintf(os.Stdout, "Bumped go version (%s -> %s)\n", before.goVersion, after.Go.Version)
-			sp.Warn("bumped go version", "old", before.goVersion, "new", after.Go.Version)
+			logger.WarnContext(ctx, "bumped go version", "old", before.goVersion, "new", after.Go.Version)
 		}
 	}
 
 	for _, req := range after.Require {
 		if oldVer, tracked := before.deps[req.Mod.Path]; tracked {
 			if semver.Compare(req.Mod.Version, oldVer) > 0 {
-				_, _ = fmt.Fprintf(
-					os.Stdout,
-					"Bumped dependency %s (%s -> %s)\n",
-					req.Mod.Path,
-					oldVer,
-					req.Mod.Version,
-				)
-				sp.Warn("bumped dependency",
+				_, _ = fmt.Fprintf(os.Stdout, "Bumped dependency %s (%s -> %s)\n",
+					req.Mod.Path, oldVer, req.Mod.Version)
+				logger.WarnContext(ctx, "bumped dependency",
 					"module", req.Mod.Path,
 					"old", oldVer,
 					"new", req.Mod.Version)
@@ -120,21 +117,13 @@ func (sp *SetupPhase) warnVersion(goModPath string, before versionSnapshot) erro
 	return nil
 }
 
-func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet, moduleDir string) error {
-	funcRules := []*rule.InstFuncRule{}
-	fileRules := []*rule.InstFileRule{}
-	for _, m := range matched {
-		funcRules = append(funcRules, m.AllFuncRules()...)
-		fileRules = append(fileRules, m.FileRules...)
-	}
-	if len(funcRules) == 0 && len(fileRules) == 0 {
+func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
+	if len(modPaths) == 0 {
 		return nil
 	}
 
-	// Add replace directives for matched dependencies
-	// In a matching rule, such as InstFuncRule, the hook code is defined in a
-	// separate module. Since this module is local, we need to add a replace
-	// directive in go.mod to point the module name to its local path.
+	logger := util.LoggerFromContext(ctx)
+
 	goModFile := filepath.Join(moduleDir, "go.mod")
 	modfile, err := parseGoMod(goModFile)
 	if err != nil {
@@ -142,15 +131,12 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 	}
 
 	before := snapshotVersion(modfile)
-	replaces := make(map[string]string)
-	for _, m := range funcRules {
-		if path, isEmbedded := strings.CutPrefix(m.ModulePath, util.OtelcInstRoot+"/"); isEmbedded {
-			replaces[m.ModulePath] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
-		}
-	}
-	for _, m := range fileRules {
-		if path, isEmbedded := strings.CutPrefix(m.ModulePath, util.OtelcInstRoot+"/"); isEmbedded {
-			replaces[m.ModulePath] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
+
+	// Add replace directives for modules imported to otel.instrumentation.go
+	replaces := make(map[string]string, len(modPaths))
+	for m := range modPaths {
+		if path, isEmbedded := strings.CutPrefix(m, util.OtelcInstRoot+"/"); isEmbedded {
+			replaces[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
 		}
 	}
 
@@ -178,27 +164,31 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet,
 		}
 		changed = changed || added
 		if added {
-			sp.Info("Replace dependency", "old", oldPath, "new", newPath)
+			logger.InfoContext(ctx, "Replace dependency", "old", oldPath, "new", newPath)
 		}
 	}
 
-	// Check if any replace directive is added, if so, write go.mod and run mod tidy
-	// to sync the changes to go.mod for build system to use.
+	// Check if any replace directive is added, if so, write to go.mod
 	if changed {
-		err = writeGoMod(goModFile, modfile)
-		if err != nil {
+		if err = writeGoMod(goModFile, modfile); err != nil {
 			return ex.Wrapf(err, "writing updated go.mod at %s", goModFile)
 		}
-		err = runModTidy(ctx, moduleDir)
-		if err != nil {
-			return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
-		}
-		// Compare after tidy because MVS may raise existing consumer versions.
-		err = sp.warnVersion(goModFile, before)
-		if err != nil {
-			return err
-		}
-		sp.keepForDebug(goModFile)
 	}
+
+	// Run "go mod tidy" to sync the dependencies regardless of
+	// the replace directives. We may have added new dependencies
+	// to otel.instrumentation.go that need to be pinned.
+	if err = runModTidy(ctx, moduleDir); err != nil {
+		return ex.Wrapf(err, "running go mod tidy in %s", moduleDir)
+	}
+
+	// Compare after tidy because MVS may raise existing consumer versions.
+	if err = warnVersion(ctx, goModFile, before); err != nil {
+		return err
+	}
+
+	// Keep the file for debugging
+	keepForDebug(ctx, goModFile)
+
 	return nil
 }

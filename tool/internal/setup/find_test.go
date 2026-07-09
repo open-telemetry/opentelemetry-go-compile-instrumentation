@@ -395,13 +395,11 @@ echo nothing useful
 				return exec.Command("sh", "-c", script)
 			}
 
-			sp := newTestSetupPhase()
 			subcommand := tt.subcommand
 			if subcommand == "" {
 				subcommand = "build"
 			}
-			buildPlan, err := sp.listBuildPlan(t.Context(), subcommand, tt.args)
-
+			buildPlan, err := listBuildPlan(t.Context(), subcommand, tt.args)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.buildPlan != "" {

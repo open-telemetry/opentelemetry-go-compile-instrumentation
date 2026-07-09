@@ -105,31 +105,6 @@ func isRuleFile(name string) bool {
 		strings.HasSuffix(name, ".otelc.yaml"))
 }
 
-func loadDefaultRules() ([]rule.InstRule, error) {
-	// List all files in the unzipped pkg directory, i.e. $BUILD_TEMP/instrumentation
-	files, err := util.ListFiles(util.GetBuildTemp(unzippedInstDir))
-	if err != nil {
-		return nil, err
-	}
-	// Parse all rule YAML files
-	parsedRules := make([]rule.InstRule, 0)
-	for _, file := range files {
-		if !isRuleFile(filepath.Base(file)) {
-			continue
-		}
-		content, err1 := os.ReadFile(file)
-		if err1 != nil {
-			return nil, ex.Wrapf(err1, "failed to read YAML file %s", file)
-		}
-		rs, err2 := parseRuleFromYaml(content)
-		if err2 != nil {
-			return nil, err2
-		}
-		parsedRules = append(parsedRules, rs...)
-	}
-	return parsedRules, nil
-}
-
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
@@ -550,9 +525,9 @@ func (sp *SetupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool)
 		return loadRulesFromToolFiles(ctx, toolFiles)
 	}
 
-	// Load default rules from the unzipped pkg directory
-	sp.Debug("rules source: default rules")
-	return loadDefaultRules()
+	// No tool files generated? Currently this part is un-reachable because
+	// auto-pinning always generates tool files.
+	return nil, nil
 }
 
 func (sp *SetupPhase) matchDeps(

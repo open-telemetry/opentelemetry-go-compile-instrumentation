@@ -407,6 +407,11 @@ For example:
 - Default embedded rules are only used when no higher-precedence rule source is
   available.
 
+For task-oriented guidance on choosing between these sources and verifying your
+configuration, see [Configuration and Fine-Tuning](configuration.md). For the full
+protocol of the tool-file mechanism (how imports are resolved, how rule files are
+discovered), see [External Configuration Sources](external-configuration.md).
+
 ---
 
 ## Rule Types
@@ -433,7 +438,11 @@ This is the most common rule type. It injects function calls at the beginning (`
 - `before` (string, optional): The name of the function to be called at the entry of the target function.
 - `after` (string, optional): The name of the function to be called just before the target function returns.
 - `path` (string, required): The import path for the package containing the `before` and `after` hook functions.
-- `module` (string, optional): The module path where the hook functions are located. This is needed for built-in packages if import path is not a module root. Not required for external instrumentation packages.
+
+  The package referenced by `path` must be available in the user's module at build time. When using
+  `otel.instrumentation.go` (whether written manually or generated automatically), the imported
+  module is added to the build graph automatically. When supplying rules via `--rules` or the
+  `OTELC_RULES` environment variable, the package must already be listed in the user's `go.mod`.
 
 **Example:**
 
@@ -1007,7 +1016,11 @@ This rule adds a new Go source file to the target package.
 - `path` (string, required): The import path of the package where the content of the new file is located. The instrumentation tool will find the file within this package.
 
   The package referenced by `path` must be importable by `go/packages`. If the implementation files are marked with `//go:build ignore` (for example because they rely on otelc compile-time transformations), include a small buildable stub file so the package remains importable during rule resolution.
-- `module` (string, optional): The module path where the file is located. This is needed for built-in packages if import path is not a module root. Not required for external instrumentation packages.
+
+  The package must also be available in the user's module at build time. When using
+  `otel.instrumentation.go` (whether written manually or generated automatically), the imported
+  module is added to the build graph automatically. When supplying rules via `--rules` or the
+  `OTELC_RULES` environment variable, the package must already be listed in the user's `go.mod`.
 
 **Example:**
 
