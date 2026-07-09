@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package kafka
+package producer
 
 import (
 	"context"
@@ -127,107 +127,6 @@ func TestWriteMessages_Disabled(t *testing.T) {
 	assert.Nil(t, ictx.GetData())
 }
 
-func TestReadMessage_LinksToProducerAndSetsAttrs(t *testing.T) {
-	sr := setupTest(t)
-
-	// Simulate the producer having injected a trace context into the message.
-	tid, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
-	require.NoError(t, err)
-	sid, err := trace.SpanIDFromHex("0102030405060708")
-	require.NoError(t, err)
-	sc := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    tid,
-		SpanID:     sid,
-		TraceFlags: trace.FlagsSampled,
-		Remote:     true,
-	})
-	producerCtx := trace.ContextWithSpanContext(context.Background(), sc)
-
-	var headers []kafka.Header
-	propagator.Inject(producerCtx, headerCarrier{headers: &headers})
-
-	msg := kafka.Message{
-		Topic:     "orders",
-		Partition: 3,
-		Offset:    42,
-		Key:       []byte("k1"),
-		Value:     []byte("hello"),
-		Headers:   headers,
-	}
-
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: []string{"localhost:9092"},
-		Topic:   "orders",
-	})
-	t.Cleanup(func() { _ = r.Close() })
-
-	ictx := hooktest.NewMockHookContext(r, context.Background())
-	BeforeReadMessage(ictx, r, context.Background())
-	AfterReadMessage(ictx, msg, nil)
-
-	spans := sr.Ended()
-	require.Len(t, spans, 1)
-
-	span := spans[0]
-	assert.Equal(t, "orders receive", span.Name())
-	assert.Equal(t, trace.SpanKindConsumer, span.SpanKind())
-	// The consumer span must be part of the producer's trace.
-	assert.Equal(t, tid, span.SpanContext().TraceID())
-	assert.Equal(t, tid, span.Parent().TraceID())
-	assert.Equal(t, sid, span.Parent().SpanID())
-
-	m := spanAttrs(span)
-	assert.Equal(t, "kafka", m["messaging.system"])
-	assert.Equal(t, "receive", m["messaging.operation.name"])
-	assert.Equal(t, "orders", m["messaging.destination.name"])
-	assert.Equal(t, "localhost", m["server.address"])
-	assert.Equal(t, "3", m["messaging.destination.partition.id"])
-	assert.Equal(t, int64(42), m["messaging.kafka.offset"])
-}
-
-func TestReadMessage_RecordsError(t *testing.T) {
-	sr := setupTest(t)
-
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: []string{"localhost:9092"},
-		Topic:   "orders",
-	})
-	t.Cleanup(func() { _ = r.Close() })
-
-	ictx := hooktest.NewMockHookContext(r, context.Background())
-	BeforeReadMessage(ictx, r, context.Background())
-	AfterReadMessage(ictx, kafka.Message{}, errors.New("read timeout"))
-
-	spans := sr.Ended()
-	require.Len(t, spans, 1)
-	assert.Equal(t, codes.Error, spans[0].Status().Code)
-	assert.Contains(t, spans[0].Status().Description, "read timeout")
-
-	// On error there is no valid partition/offset, so those attrs are omitted.
-	m := spanAttrs(spans[0])
-	_, hasPartition := m["messaging.destination.partition.id"]
-	assert.False(t, hasPartition)
-	_, hasOffset := m["messaging.kafka.offset"]
-	assert.False(t, hasOffset)
-}
-
-func TestReadMessage_Disabled(t *testing.T) {
-	sr := setupTest(t)
-	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "kafka")
-
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: []string{"localhost:9092"},
-		Topic:   "orders",
-	})
-	t.Cleanup(func() { _ = r.Close() })
-
-	ictx := hooktest.NewMockHookContext(r, context.Background())
-	BeforeReadMessage(ictx, r, context.Background())
-	AfterReadMessage(ictx, kafka.Message{Topic: "orders"}, nil)
-
-	assert.Empty(t, sr.Ended())
-}
-
 func TestHeaderCarrier_SetGetKeys(t *testing.T) {
 	var headers []kafka.Header
 	hc := headerCarrier{headers: &headers}
@@ -303,46 +202,4 @@ func TestAfterWriteMessages_AlwaysEndsSpans(t *testing.T) {
 
 	spans := sr.Ended()
 	require.Len(t, spans, 2, "spans must be ended even when instrumentation is disabled after Before")
-}
-
-// TestExtractContext verifies that ExtractContext correctly extracts the trace
-// context from a Kafka message's headers and returns a context that carries the
-// propagated span context.
-func TestExtractContext(t *testing.T) {
-	setupTest(t)
-
-	// Create a span context and inject it into message headers, simulating a
-	// producer that has propagated its trace context.
-	tid, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
-	require.NoError(t, err)
-	sid, err := trace.SpanIDFromHex("0102030405060708")
-	require.NoError(t, err)
-	sc := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    tid,
-		SpanID:     sid,
-		TraceFlags: trace.FlagsSampled,
-		Remote:     true,
-	})
-	producerCtx := trace.ContextWithSpanContext(context.Background(), sc)
-
-	var headers []kafka.Header
-	propagator.Inject(producerCtx, headerCarrier{headers: &headers})
-
-	msg := kafka.Message{
-		Topic:   "orders",
-		Key:     []byte("k1"),
-		Value:   []byte("hello"),
-		Headers: headers,
-	}
-
-	// Extract the context from the message.
-	extractedCtx := ExtractContext(msg)
-	extractedSc := trace.SpanContextFromContext(extractedCtx)
-
-	// Verify the extracted context matches what was injected.
-	assert.True(t, extractedSc.IsValid())
-	assert.Equal(t, tid, extractedSc.TraceID())
-	assert.Equal(t, sid, extractedSc.SpanID())
-	assert.True(t, extractedSc.IsSampled())
-	assert.True(t, extractedSc.IsRemote())
 }
