@@ -3,19 +3,14 @@
 package data
 
 import (
-	"embed"
-
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"bytes"
+	_ "embed"
 )
 
-//go:embed *
-var dataFs embed.FS
+//go:embed otelc-bundle.tgz
+var bundle []byte
 
-// ReadEmbedFile reads a file from the embedded data
-func ReadEmbedFile(path string) ([]byte, error) {
-	bs, err := dataFs.ReadFile(path)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to read file")
-	}
-	return bs, nil
+// GetBundleReader returns a bytes.Reader for the embedded bundle
+func GetBundleReader() *bytes.Reader {
+	return bytes.NewReader(bundle)
 }

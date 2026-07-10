@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 // TestOtelSDKSpanFromContext verifies that trace.SpanFromContext returns
@@ -22,6 +22,7 @@ import (
 //   - net/http server instrumentation (creates the span)
 func TestOtelSDKSpanFromContext(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "otelsdk", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
 

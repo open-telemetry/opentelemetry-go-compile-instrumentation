@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/imports"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestStripCompleteFlag(t *testing.T) {

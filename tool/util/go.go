@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"go.opentelemetry.io/otelc/tool/ex"
 )
 
 // isCompileTool checks if the tool path is the Go compile tool.
@@ -212,11 +212,6 @@ func mergeWindowsPathsWithSpaces(args []string) []string {
 
 func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
-}
-
-func IsYamlFile(path string) bool {
-	return strings.HasSuffix(strings.ToLower(path), ".yaml") ||
-		strings.HasSuffix(strings.ToLower(path), ".yml")
 }
 
 func NewFileScanner(file *os.File, size int) (*bufio.Scanner, error) {

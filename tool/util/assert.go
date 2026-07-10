@@ -6,7 +6,7 @@ package util
 import (
 	"reflect"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"go.opentelemetry.io/otelc/tool/ex"
 )
 
 func Assert(condition bool, message string) {

@@ -575,7 +575,7 @@ formatters:
       simplify: true
 
     gofumpt:
-      module-path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation
+      module-path: go.opentelemetry.io/otelc
       extra-rules: true
 
     goimports:

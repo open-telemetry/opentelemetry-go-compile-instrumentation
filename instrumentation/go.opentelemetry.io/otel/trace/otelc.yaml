@@ -1,0 +1,9 @@
+# Function hook for go.opentelemetry.io/otel/trace
+hook_span_from_context:
+  target: go.opentelemetry.io/otel/trace
+  where:
+    func: SpanFromContext
+  do:
+    - inject_hooks:
+        after: afterSpanFromContext
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/trace"

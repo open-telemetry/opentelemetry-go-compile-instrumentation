@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestLatestLibBuild(t *testing.T) {
 	appsRoot := filepath.Join("..", "apps")
-	rulesRoot := filepath.Join("..", "..", "pkg", "instrumentation")
+	rulesRoot := filepath.Join("..", "..", "instrumentation")
 	targets := testutil.InstrumentedTargets(t, rulesRoot)
 
 	entries, err := os.ReadDir(appsRoot)
@@ -29,7 +29,10 @@ func TestLatestLibBuild(t *testing.T) {
 		name := e.Name()
 		appDir := filepath.Join(appsRoot, name)
 		if _, err := os.Stat(filepath.Join(appDir, "go.mod")); err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("stat %s/go.mod: %v", appDir, err)
 		}
 		t.Run(name, func(t *testing.T) {
 			deps := testutil.DiscoverInstrumentedDeps(t, appDir, targets)
@@ -37,7 +40,7 @@ func TestLatestLibBuild(t *testing.T) {
 				t.Skipf("%s has no instrumented third-party deps with supported latest versions to bump", name)
 			}
 			testutil.BumpToLatest(t, appDir, deps...)
-			testutil.Build(t, appDir, "go", "build", "-a")
+			testutil.Build(t, appsRoot, name, "go", "build", "-a")
 		})
 	}
 }

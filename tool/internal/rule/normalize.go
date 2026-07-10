@@ -6,8 +6,8 @@ package rule
 import (
 	"maps"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // Structured top-level keys.
@@ -34,6 +34,10 @@ const (
 	SelResult            = "result"
 	SelLastResult        = "last_result"
 	SelParam             = "param"
+
+	// Raw match-narrowing selector for raw rules (see InstRawRule).
+	SelPattern   = "pattern"
+	SelPlacement = "placement"
 )
 
 // where sub-groups / combinators (preserved nested under flat).
@@ -125,6 +129,10 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 		return nil, err
 	}
 
+	// Expand each do modifier into its own flat rule, preserving do-sequence
+	// order. Downstream application follows this order, which is the only
+	// ordering guarantee today. Explicit, controllable ordering is tracked in
+	// issue #583.
 	normalized := make([]map[string]any, 0, len(doItems))
 	for _, item := range doItems {
 		flat := maps.Clone(common)
@@ -153,7 +161,8 @@ func normalizeWhere(common, where map[string]any) (map[string]any, error) {
 	for key, value := range where {
 		switch key {
 		case SelFunc, SelRecv, SelStruct, SelFunctionCall, SelDirective, SelKind, SelIdentifier,
-			SelSignature, SelSignatureContains, SelResult, SelLastResult, SelParam:
+			SelSignature, SelSignatureContains, SelResult, SelLastResult, SelParam,
+			SelPattern, SelPlacement:
 			common[key] = value
 		case WhereFile:
 			if _, ok := value.(map[string]any); !ok {

@@ -14,14 +14,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestBasic(t *testing.T) {
 	t.Parallel()
 
-	appDir := filepath.Join("..", "..", "demo", "app", "basic")
-	output := testutil.Run(t, appDir, nil)
+	appsDir := filepath.Join("..", "..", "demo", "app")
+	testutil.Build(t, appsDir, "basic", "go", "build", "-a")
+	output := testutil.Run(t, appsDir, "basic", nil)
 	expect := []string{
 		"Every1",
 		"Every3",
@@ -36,7 +37,6 @@ func TestBasic(t *testing.T) {
 		"GenericRecvExample after hook",
 		"traceID: 123, spanID: 456",
 		"[MyHook]",
-		"=setupOpenTelemetry=",
 		"RawCode",
 		"funcName:Example",
 		"packageName:main",
@@ -116,7 +116,7 @@ func verifyExportedHelloWorldSpan(t *testing.T, output string) {
 		"expected hello-world span ID to be non-zero",
 	)
 	require.Equal(t,
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld",
+		"go.opentelemetry.io/otelc/demo/app/basic/instrumentation",
 		span.InstrumentationScope.Name,
 	)
 

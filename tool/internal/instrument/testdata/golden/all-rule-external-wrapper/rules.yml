@@ -6,7 +6,7 @@ wrap_sizeof_external:
     - wrap_call:
         replace: "wrapper.Wrapper({{ . }})"
   imports:
-    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+    wrapper: "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 
 inject_raw_external:
   target: main
@@ -16,7 +16,7 @@ inject_raw_external:
     - inject_code:
         raw: 'wrapper.Log("raw instrumented")'
   imports:
-    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+    wrapper: "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 
 add_external_field:
   target: main
@@ -28,7 +28,7 @@ add_external_field:
           - name: ExternalTag
             type: wrapper.Tag
   imports:
-    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+    wrapper: "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 
 wrap_global_var_external:
   target: main
@@ -39,7 +39,7 @@ wrap_global_var_external:
     - assign_value:
         wrap: "wrapper.WrapValue({{ . }})"
   imports:
-    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+    wrapper: "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 
 log_directive_external:
   target: main
@@ -49,4 +49,4 @@ log_directive_external:
     - expand_directive:
         template: 'wrapper.Log("{{FuncName}}")'
   imports:
-    wrapper: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
+    wrapper: "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"

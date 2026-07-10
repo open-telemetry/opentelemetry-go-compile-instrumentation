@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"bytes"
 	"go/parser"
 	"go/token"
 	"os"
@@ -12,8 +13,8 @@ import (
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 type AstParser struct {
@@ -42,6 +43,11 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	astFile, err := parser.ParseFile(ap.fset, name, file, mode)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)
+	}
+	// Skip DST decoration when only the package clause is needed; decoration
+	// is expensive and unnecessary when the caller only reads astFile.Name.
+	if mode == parser.PackageClauseOnly {
+		return &dst.File{Name: &dst.Ident{Name: astFile.Name.Name}}, nil
 	}
 	dstFile, err := ap.dec.DecorateFile(astFile)
 	if err != nil {
@@ -100,10 +106,26 @@ func WriteFile(filePath string, root *dst.File) error {
 	return nil
 }
 
-// ParseFileOnlyPackage parses the AST from a file. Use it if you only need to
-// read the package name from the AST.
-func ParseFileOnlyPackage(filePath string) (*dst.File, error) {
-	return NewAstParser().Parse(filePath, parser.PackageClauseOnly)
+// WriteFileAtomic writes the AST to a file atomically.
+func WriteFileAtomic(filePath string, root *dst.File) error {
+	var buf bytes.Buffer
+
+	r := decorator.NewRestorer()
+	if err := r.Fprint(&buf, root); err != nil {
+		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
+	}
+
+	return util.WriteFileAtomic(filePath, buf.Bytes())
+}
+
+// ParsePackageName parses only the package name from a file, skipping
+// DST decoration for efficiency.
+func ParsePackageName(filePath string) (string, error) {
+	f, err := NewAstParser().Parse(filePath, parser.PackageClauseOnly)
+	if err != nil {
+		return "", err
+	}
+	return f.Name.Name, nil
 }
 
 // ParseFileFast parses the AST from a file, including comments as node

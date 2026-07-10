@@ -21,6 +21,31 @@ func TestLoadPackages(t *testing.T) {
 	assert.Equal(t, "fmt", pkgs[0].PkgPath)
 }
 
+func TestLoadPackagesWithChangeDirectoryFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	for _, buildFlags := range [][]string{{"-C", "app"}, {"-C=app"}} {
+		pkgs, err := LoadPackages(t.Context(), packages.NeedName|packages.NeedModule, buildFlags, ".")
+		require.NoError(t, err)
+		require.Len(t, pkgs, 1)
+		require.NotNil(t, pkgs[0].Module)
+		assert.Equal(t, "example.com/app", pkgs[0].Module.Path)
+	}
+}
+
 func TestResolvePackageName(t *testing.T) {
 	tests := []struct {
 		importPath string
@@ -104,6 +129,56 @@ func TestResolveExportFiles_NoExportFile(t *testing.T) {
 	require.Error(t, err, "unsafe package should not have an export archive")
 	assert.Contains(t, err.Error(), "not found or has no export file")
 	assert.Nil(t, archives)
+}
+
+func TestGetPackageDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		goFiles []string
+	}{
+		{
+			name:    "package with single go file",
+			goFiles: []string{filepath.Join("path_to_project", "main.go")},
+		},
+		{
+			name:    "package with multiple go files",
+			goFiles: []string{filepath.Join("path_to_project", "main.go"), filepath.Join("path_to_project", "util.go")},
+		},
+		{
+			name:    "package with nested path",
+			goFiles: []string{filepath.Join("path_to_project", "cmd", "server", "main.go")},
+		},
+		{
+			name:    "package with absolute path",
+			goFiles: []string{filepath.Join(tmpDir, "main.go")},
+		},
+		{
+			name:    "package with no go files",
+			goFiles: nil,
+		},
+		{
+			name:    "package with empty go files slice",
+			goFiles: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var expected string
+			if len(tt.goFiles) > 0 {
+				expected = filepath.Dir(tt.goFiles[0])
+			}
+
+			pkg := &packages.Package{}
+			pkg.GoFiles = tt.goFiles
+			result := PackageDir(pkg)
+			if result != expected {
+				t.Errorf("GetPackageDir() = %q, expected %q", result, expected)
+			}
+		})
+	}
 }
 
 func TestResolveModuleDir(t *testing.T) {
@@ -215,7 +290,7 @@ func TestResolveModuleDir(t *testing.T) {
 			t.Chdir(workDir)
 
 			ctx := t.Context()
-			moduleDir, err := ResolveModuleDir(ctx, workDir)
+			mod, err := ResolveModule(ctx, workDir)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -223,13 +298,213 @@ func TestResolveModuleDir(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+			require.Equal(t, "example.com/test", mod.Path)
 
 			expectedDir := tmpDir
 			if tt.expectedDir != "." {
 				expectedDir = tt.expectedDir
 			}
 
+			require.Equal(t, expectedDir, mod.Dir)
+			moduleDir, err := ResolveModuleDir(ctx, workDir)
+			require.NoError(t, err)
 			require.Equal(t, expectedDir, moduleDir)
+		})
+	}
+}
+
+func TestModuleAndWorkspace(t *testing.T) {
+	t.Run("resolves the module dir", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		dir, workspace, err := ModuleAndWorkspace(t.Context(), root)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+		assert.False(t, workspace)
+	})
+	t.Run("resolves from a subdirectory", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		sub := filepath.Join(root, "a", "b")
+		require.NoError(t, os.MkdirAll(sub, 0o755))
+		dir, workspace, err := ModuleAndWorkspace(t.Context(), sub)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+		assert.False(t, workspace)
+	})
+	t.Run("empty outside a module", func(t *testing.T) {
+		dir, workspace, err := ModuleAndWorkspace(t.Context(), t.TempDir())
+		require.NoError(t, err)
+		assert.Empty(t, dir)
+		assert.False(t, workspace)
+	})
+	t.Run("false outside a workspace", func(t *testing.T) {
+		_, workspace, err := ModuleAndWorkspace(t.Context(), t.TempDir())
+		require.NoError(t, err)
+		assert.False(t, workspace)
+	})
+	t.Run("true inside a workspace", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		dir, workspace, err := ModuleAndWorkspace(t.Context(), root)
+		require.NoError(t, err)
+		assert.True(t, workspace)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+	})
+	t.Run("true from a subdirectory of a workspace", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		sub := filepath.Join(root, "a", "b")
+		require.NoError(t, os.MkdirAll(sub, 0o755))
+		_, workspace, err := ModuleAndWorkspace(t.Context(), sub)
+		require.NoError(t, err)
+		assert.True(t, workspace)
+	})
+	t.Run("false when explicitly disabled", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		t.Setenv("GOWORK", "off")
+		_, workspace, err := ModuleAndWorkspace(t.Context(), root)
+		require.NoError(t, err)
+		assert.False(t, workspace)
+	})
+}
+
+func TestFindModuleDirs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmp, "go.mod"),
+		[]byte("module example.com/test\n\ngo 1.25\n"),
+		0o644,
+	))
+
+	mainFile := filepath.Join(tmp, "main.go")
+	require.NoError(t, os.WriteFile(
+		mainFile,
+		[]byte("package main\n"),
+		0o644,
+	))
+
+	tests := []struct {
+		name    string
+		pkgs    []*packages.Package
+		want    map[string]bool
+		wantErr bool
+	}{
+		{
+			name: "collects module dirs",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: "example.com/a",
+					GoFiles: []string{"/tmp/moda/a.go"},
+					Module: &packages.Module{
+						Dir: "/tmp/moda",
+					},
+				},
+				{
+					PkgPath: "example.com/b",
+					GoFiles: []string{"/tmp/modb/b.go"},
+					Module: &packages.Module{
+						Dir: "/tmp/modb",
+					},
+				},
+			},
+			want: map[string]bool{
+				"/tmp/moda": true,
+				"/tmp/modb": true,
+			},
+		},
+		{
+			name: "deduplicates module dirs",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: "example.com/a",
+					GoFiles: []string{"/tmp/mod/a.go"},
+					Module: &packages.Module{
+						Dir: "/tmp/mod",
+					},
+				},
+				{
+					PkgPath: "example.com/b",
+					GoFiles: []string{"/tmp/mod/b.go"},
+					Module: &packages.Module{
+						Dir: "/tmp/mod",
+					},
+				},
+			},
+			want: map[string]bool{
+				"/tmp/mod": true,
+			},
+		},
+		{
+			name: "skips package without module",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: "example.com/a",
+					GoFiles: []string{"/tmp/a.go"},
+				},
+			},
+			want: map[string]bool{},
+		},
+		{
+			name: "skips package with module but no go files",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: "example.com/a",
+					Module: &packages.Module{
+						Dir: "/tmp/mod",
+					},
+				},
+			},
+			want: map[string]bool{},
+		},
+		{
+			name: "skips command line package without go files",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: CommandLineArgumentsPackage,
+				},
+			},
+			want: map[string]bool{},
+		},
+		{
+			name: "resolves module dir for command line package",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: CommandLineArgumentsPackage,
+					GoFiles: []string{mainFile},
+				},
+			},
+			want: map[string]bool{
+				tmp: true,
+			},
+		},
+		{
+			name: "errors when command line package is not inside a module",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: CommandLineArgumentsPackage,
+					GoFiles: []string{"/tmp/a.go"},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FindModuleDirs(t.Context(), tt.pkgs)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

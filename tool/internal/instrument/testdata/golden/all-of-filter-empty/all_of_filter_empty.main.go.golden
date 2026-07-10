@@ -1,0 +1,150 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+// An empty all-of matches every file (vacuous truth): every condition in an
+// empty set is trivially satisfied, so the where.file.all-of: [] predicate
+// gates nothing out and Open below IS instrumented.
+package main
+
+import _ "unsafe"
+
+type Driver struct{}
+
+func Open(dsn string) (_unnamedRetVal0 error) {
+	//line <generated>:1
+	if hookContext3522809524, _ := OtelBeforeTrampoline_Open3522809524(&dsn); false {
+	} else {
+		defer OtelAfterTrampoline_Open3522809524(hookContext3522809524, &_unnamedRetVal0)
+	}
+	//line main.go:12:2
+	println("opening " + dsn)
+	//line main.go:13:2
+	return nil
+}
+
+//line <generated>:1
+type HookContextImpl3522809524 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl3522809524) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl3522809524) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl3522809524) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl3522809524) GetData() interface{}     { return c.data }
+func (c *HookContextImpl3522809524) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl3522809524) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl3522809524) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl3522809524) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*string))
+	}
+	return nil
+}
+
+func (c *HookContextImpl3522809524) SetParam(idx int, val interface{}) {
+	if val == nil {
+		c.params[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.params[0].(*string)) = val.(string)
+	}
+}
+
+func (c *HookContextImpl3522809524) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl3522809524) SetReturnVal(idx int, val interface{}) {
+	if val == nil {
+		c.returnVals[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.returnVals[0].(*error)) = val.(error)
+	}
+}
+func (c *HookContextImpl3522809524) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl3522809524) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl3522809524) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl3522809524) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_Open3522809524(param0 *string) (hookContext *HookContextImpl3522809524, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "BeforeOpen")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl3522809524{}
+	hookContext.params = []interface{}{param0}
+	hookContext.funcName = "Open"
+	hookContext.packageName = "main"
+	if BeforeOpen != nil {
+		BeforeOpen(hookContext, *param0)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_Open3522809524(hookContext HookContext, arg0 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "AfterOpen")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl3522809524).returnVals = []interface{}{arg0}
+	if AfterOpen != nil {
+		AfterOpen(hookContext, *arg0)
+	}
+}
+
+//go:linkname BeforeOpen testdata/golden/all-of-filter-empty.BeforeOpen
+func BeforeOpen(hookContext HookContext, param0 string)
+
+//go:linkname AfterOpen testdata/golden/all-of-filter-empty.AfterOpen
+func AfterOpen(hookContext HookContext, arg0 error)

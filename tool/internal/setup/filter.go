@@ -4,12 +4,14 @@
 package setup
 
 import (
+	"strings"
+
 	"github.com/dave/dst"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // File-level predicate evaluation for the structured where.file clause defined
@@ -22,7 +24,7 @@ import (
 //
 //	where:
 //	  file:
-//	    all-of:           # AllOf combinator (not yet implemented)
+//	    all-of:           # AllOf combinator
 //	      - has_func: Foo # FuncFilter leaf
 //	      - has_struct: Bar # StructFilter leaf
 
@@ -44,9 +46,12 @@ type Filter interface {
 // passed to all filters associated with the rules being evaluated for that
 // file.
 type MatchContext struct {
-	// ImportPath is the Go import path of the package containing the source
-	// file.
-	ImportPath string
+	// IsTest reports whether the source file is part of a test build — a
+	// compilation the Go toolchain produces only while building a test binary
+	// (a package augmented with its _test.go files, an external xxx_test
+	// package, or the generated _testmain.go runner). It is a property of the
+	// whole compile, so it is identical for every file in a given package.
+	IsTest bool
 
 	// SourceFile is the absolute path to the source file being evaluated.
 	SourceFile string
@@ -61,6 +66,8 @@ type MatchContext struct {
 var (
 	_ Filter = (*FuncFilter)(nil)
 	_ Filter = (*StructFilter)(nil)
+	_ Filter = (*PackageNameFilter)(nil)
+	_ Filter = (*IsTestFilter)(nil)
 )
 
 // FuncFilter matches source files that declare the named function or method.
@@ -70,7 +77,14 @@ type FuncFilter struct {
 }
 
 func (f *FuncFilter) Match(ctx *MatchContext) bool {
-	return ast.FindFuncDecl(ctx.AST, f.Func, f.Recv) != nil
+	// We create an `InstFuncRule`` because including `setup.FuncFilter` to
+	// `ast.FindFuncDecl` causes an import loop.
+	fr := &rule.InstFuncRule{
+		Func: f.Func,
+		Recv: f.Recv,
+	}
+	_, ok, _ := ast.FindFuncDecl(ctx.AST, fr)
+	return ok
 }
 
 // StructFilter matches source files that declare the named struct.
@@ -81,6 +95,79 @@ type StructFilter struct {
 func (f *StructFilter) Match(ctx *MatchContext) bool {
 	return ast.FindStructDecl(ctx.AST, f.Struct) != nil
 }
+
+// PackageNameFilter matches source files whose declared package clause equals
+// Name. The declared name is read from ctx.AST.Name.Name (the `package foo`
+// line), not the import path (use target for that) and not the build's
+// test-ness (use is_test for that). Non-test files in a package share one
+// declared name; an external test file may declare a different name (e.g.
+// "foo_test").
+type PackageNameFilter struct {
+	Name string
+}
+
+func (f *PackageNameFilter) Match(ctx *MatchContext) bool {
+	return ctx.AST.Name.Name == f.Name
+}
+
+// IsTestFilter selects or excludes test builds — compilations the Go toolchain
+// produces only as part of `go test` (see MatchContext.IsTest).
+//
+// ShouldMatch == true  → match only test builds
+// ShouldMatch == false → match only non-test builds
+//
+// The predicate is tri-state at the schema level: a nil *bool in FilterDef
+// means "unset" (no filtering), while true/false express explicit intent.
+// This filter is only constructed when the field is explicitly set, so
+// ShouldMatch is never ambiguous once an IsTestFilter exists.
+type IsTestFilter struct {
+	ShouldMatch bool
+}
+
+func (f *IsTestFilter) Match(ctx *MatchContext) bool {
+	return f.ShouldMatch == ctx.IsTest
+}
+
+// --- Combinators ---
+
+var _ Filter = (AllOf)(nil)
+
+// AllOf matches when every child filter matches. An empty AllOf matches
+// vacuously (all conditions in an empty set are satisfied). Evaluation
+// short-circuits on the first non-matching child.
+type AllOf []Filter
+
+func (a AllOf) Match(ctx *MatchContext) bool {
+	for _, f := range a {
+		if !f.Match(ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+var _ Filter = (OneOf)(nil)
+
+// OneOf matches when at least one child filter matches. An empty OneOf never
+// matches (no condition in an empty set is satisfied). Evaluation
+// short-circuits on the first matching child.
+type OneOf []Filter
+
+func (o OneOf) Match(ctx *MatchContext) bool {
+	for _, f := range o {
+		if f.Match(ctx) {
+			return true
+		}
+	}
+	return false
+}
+
+var _ Filter = (*Not)(nil)
+
+// Not matches when its inner filter does not match (logical negation).
+type Not struct{ Inner Filter }
+
+func (n *Not) Match(ctx *MatchContext) bool { return !n.Inner.Match(ctx) }
 
 // --- Build ---
 
@@ -118,16 +205,71 @@ func Build(where *rule.WhereDef) (Filter, error) {
 	return buildFile(where.File)
 }
 
+// buildFile compiles the where.file predicate for a single node.
+//
+// When all-of is present (a non-nil slice, including an explicit empty
+// all-of: []), it owns the composition for this node: sibling leaf predicates
+// and other combinators on the same node are rejected outright rather than
+// silently ignored, so an ambiguous spec fails fast at Build time. An empty
+// all-of: [] is treated as present and compiles to an empty AllOf{}, which
+// matches vacuously (see AllOf.Match) — consistent with the documented type
+// semantics.
+//
+// hasLeafPredicate reports whether any leaf (non-combinator) where.file
+// predicate is set on def. The combinator branches use it to reject a leaf
+// predicate that sits as a sibling of a combinator on the same node.
+func hasLeafPredicate(def *rule.FilterDef) bool {
+	return def.HasFunc != "" || def.HasRecv != "" ||
+		def.HasStruct != "" || def.HasDirective != "" ||
+		strings.TrimSpace(def.HasPackage) != "" || def.IsTest != nil
+}
+
 //nolint:nilnil // unreachable default branch is guarded by util.ShouldNotReachHere
 func buildFile(def *rule.FilterDef) (Filter, error) {
-	if len(def.AllOf) > 0 {
-		return nil, ex.Newf("where.file all-of predicate composition is not yet supported")
+	// Presence is detected via a non-nil slice (not len > 0): YAML unmarshals an
+	// explicit all-of: [] to a non-nil empty slice, and that empty combinator is
+	// a deliberate, vacuously-true predicate — not the absence of one.
+	if def.AllOf != nil {
+		// all-of owns the composition for this node; sibling predicates would be
+		// silently ignored, so reject the ambiguous combination explicitly. This
+		// guard runs for the empty case too, so all-of: [] + has_func: X is still
+		// rejected. Sibling combinators are detected by non-nil presence (not
+		// len > 0), so an explicit empty one-of: [] is also rejected here.
+		if hasLeafPredicate(def) || def.OneOf != nil || def.Not != nil {
+			return nil, ex.Newf("where.file.all-of cannot be combined with other predicates")
+		}
+		children, err := buildChildren(def.AllOf, "all-of")
+		if err != nil {
+			return nil, err
+		}
+		return AllOf(children), nil
 	}
-	if len(def.OneOf) > 0 {
-		return nil, ex.Newf("where.file one-of predicate composition is not yet supported")
+	// Presence via non-nil slice (mirrors all-of): an explicit one-of: [] is a
+	// deliberate, vacuously-false predicate (OneOf.Match returns false for an
+	// empty set), not the absence of one.
+	if def.OneOf != nil {
+		// one-of owns the composition for this node; reject sibling predicates
+		// that would otherwise be silently ignored. The guard runs for the empty
+		// case too, so one-of: [] + has_func: X is still rejected. Sibling
+		// combinators are detected by non-nil presence, independent of branch
+		// order.
+		if hasLeafPredicate(def) || def.AllOf != nil || def.Not != nil {
+			return nil, ex.Newf("where.file.one-of cannot be combined with other predicates")
+		}
+		children, err := buildChildren(def.OneOf, "one-of")
+		if err != nil {
+			return nil, err
+		}
+		return OneOf(children), nil
 	}
 	if def.Not != nil {
-		return nil, ex.Newf("where.file not predicate composition is not yet supported")
+		// not owns the composition for this node; reject sibling predicates.
+		// Sibling combinators are detected by non-nil presence (not len > 0), so
+		// an explicit empty all-of: [] / one-of: [] is also rejected here.
+		if hasLeafPredicate(def) || def.AllOf != nil || def.OneOf != nil {
+			return nil, ex.Newf("where.file.not cannot be combined with other predicates")
+		}
+		return buildNot(def.Not)
 	}
 
 	if def.HasRecv != "" && def.HasFunc == "" {
@@ -142,6 +284,12 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		active++
 	}
 	if def.HasDirective != "" {
+		active++
+	}
+	if strings.TrimSpace(def.HasPackage) != "" {
+		active++
+	}
+	if def.IsTest != nil {
 		active++
 	}
 
@@ -159,6 +307,10 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		return &StructFilter{Struct: def.HasStruct}, nil
 	case def.HasDirective != "":
 		return nil, ex.Newf("where.file.has_directive is not yet supported")
+	case strings.TrimSpace(def.HasPackage) != "":
+		return &PackageNameFilter{Name: strings.TrimSpace(def.HasPackage)}, nil
+	case def.IsTest != nil:
+		return &IsTestFilter{ShouldMatch: *def.IsTest}, nil
 	default:
 		// The active-predicate counter above proves at least one leaf is set;
 		// matching the convention in match.go / instrument.go / trampoline.go,
@@ -166,4 +318,39 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 		util.ShouldNotReachHere()
 		return nil, nil
 	}
+}
+
+// buildChildren compiles each child of a where.file combinator group with the
+// same buildFile rules, so nesting (a combinator within a combinator) composes
+// naturally. The caller converts the result to the concrete combinator type
+// (AllOf / OneOf). label names the combinator for error context.
+func buildChildren(defs []rule.FilterDef, label string) ([]Filter, error) {
+	filters := make([]Filter, 0, len(defs))
+	for i := range defs {
+		f, err := buildFile(&defs[i])
+		if err != nil {
+			return nil, ex.Wrapf(err, "where.file.%s[%d]", label, i)
+		}
+		if f == nil {
+			// buildFile returns a non-nil filter for every valid leaf; a nil here
+			// would make the combinator's Match panic, so fail loudly instead.
+			return nil, ex.Newf("where.file.%s[%d] produced no filter", label, i)
+		}
+		filters = append(filters, f)
+	}
+	return filters, nil
+}
+
+// buildNot compiles a where.file.not predicate into a Not combinator that
+// negates its single inner predicate. The inner predicate is compiled with the
+// same buildFile rules.
+func buildNot(def *rule.FilterDef) (Filter, error) {
+	inner, err := buildFile(def)
+	if err != nil {
+		return nil, ex.Wrapf(err, "where.file.not")
+	}
+	if inner == nil {
+		return nil, ex.Newf("where.file.not produced no inner filter")
+	}
+	return &Not{Inner: inner}, nil
 }

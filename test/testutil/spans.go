@@ -47,6 +47,9 @@ func IsClient(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindClient }
 // IsServer matches server spans.
 func IsServer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindServer }
 
+// IsInternal matches internal spans.
+func IsInternal(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindInternal }
+
 // HasAttribute matches spans with an exact attribute value.
 func HasAttribute(key string, value any) SpanMatcher {
 	return func(s ptrace.Span) bool {
@@ -60,6 +63,21 @@ func HasAttributeContaining(key, substr string) SpanMatcher {
 	return func(s ptrace.Span) bool {
 		v, ok := Attrs(s)[key].(string)
 		return ok && strings.Contains(v, substr)
+	}
+}
+
+// AttributeExists matches spans where the given span has an attribute.
+func AttributeExists(key string) SpanMatcher {
+	return func(s ptrace.Span) bool {
+		_, ok := Attrs(s)[key]
+		return ok
+	}
+}
+
+// HasName matches spans with names match the exact given name.
+func HasName(name string) SpanMatcher {
+	return func(s ptrace.Span) bool {
+		return s.Name() == name
 	}
 }
 

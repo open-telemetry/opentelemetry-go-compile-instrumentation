@@ -11,7 +11,10 @@
   - [`do` semantics](#do-semantics)
   - [Modifier names → rule types](#modifier-names--rule-types)
   - [Special `target` values](#special-target-values)
+  - [Glob targets](#glob-targets)
   - [Valid and invalid shapes](#valid-and-invalid-shapes)
+- [Loading Rules](#loading-rules)
+  - [Rule Source Precedence](#rule-source-precedence)
 - [Rule Types](#rule-types)
   - [1. Function Hook Rule](#1-function-hook-rule)
   - [2. Struct Field Injection Rule](#2-struct-field-injection-rule)
@@ -29,6 +32,8 @@
 This document explains the different types of instrumentation rules used by the Go compile-time instrumentation tool. These rules, defined in YAML files, allow for the injection of code into target Go packages.
 
 The schema is the 2-tier `target` / `version` + `where` / `do` surface decided in [ADR-0003](adr/0003-structured-rule-schema.md). `where` carries non-package selectors, `do` carries modifiers, and the modifier name in `do` declares the rule type.
+
+Rules are typically distributed as `*.otelc.yml` files within instrumentation packages. Instrumentation packages may also contain an `otel.instrumentation.go` (or `otelc.tool.go`) file that composes other instrumentation packages through blank imports.
 
 ## Schema Reference
 
@@ -56,7 +61,7 @@ rule_name:
 
 | Key       | Required | Meaning                                                            |
 | --------- | -------- | ------------------------------------------------------------------ |
-| `target`  | yes      | Package import path. Exact match against compile-time `-p` flag.   |
+| `target`  | yes      | Package import path or glob, matched against the `-p` flag.        |
 | `version` | no       | Version range `start_inclusive,end_exclusive`. Omit to match all.  |
 | `where`   | no       | Non-package selectors and file-level predicates.                   |
 | `do`      | yes      | Ordered modifier list. Modifier name declares the rule type.       |
@@ -65,7 +70,7 @@ rule_name:
 
 Field notes:
 
-- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package.
+- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package. May also be a glob to match a package family — see [Glob targets](#glob-targets).
 - `version` (string, optional): Specifies a version range for the target package using the format `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` matches versions ≥ `v0.11.0` and < `v0.12.0`. Omit to match all versions.
 - `where` (map, optional): Non-package selectors. Flat selector keys inside `where` are an implicit `all-of`. File-level predicates live under `where.file`. See [ADR-0003](adr/0003-structured-rule-schema.md#where-semantics) for the full list of selector keys and the qualifier composition (`all-of`, `one-of`, `not`).
 - `do` (sequence, required): Ordered list of modifier entries. Each entry is a single-key map whose key names the modifier (`inject_hooks`, `inject_code`, `add_struct_fields`, `add_file`, `wrap_call`, `expand_directive`, `assign_value`). A single-modifier rule may also use map form (`do: <modifier>: …`), but the canonical form is the sequence form.
@@ -114,14 +119,127 @@ instrument_sql_exec:
 
 ### `where.file` semantics
 
-- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`.
-  Combinator keys: `all-of`, `one-of`, `not`.
+- Predicate keys: `has_func`, `has_recv`, `has_struct`, `has_directive`,
+  `has_package`, `is_test`. Combinator keys: `all-of`, `one-of`, `not`.
 - `has_recv` inside `where.file` narrows `has_func` to a specific receiver type.
+- `has_package` matches source files whose **declared `package` clause** equals
+  the given name. This is the `package foo` line in the source file, not the
+  import path (use `target` for that) and not the build's test-ness (use
+  `is_test` for that). Its main use case is with a glob target that spans
+  multiple compiles: `example.com/foo*` matches both `example.com/foo` and
+  `example.com/foo_test`; `has_package` then selects which declared name to
+  instrument. See the example below.
+- `is_test` is a tri-state boolean that gates on whether the file belongs to a
+  test build — a compilation the Go toolchain produces only under `go test` (a
+  package augmented with its `_test.go` files, an external `xxx_test` package,
+  or the generated test-main runner). `is_test: true` matches only test builds,
+  `is_test: false` only non-test builds, and omitting it applies no filter. It
+  takes effect when building through `otelc go test`; a plain `otelc go build`
+  never produces test builds. Production code in a package whose tests are all
+  external (`package xxx_test`, no in-package `_test.go`) shares a single
+  compile with normal builds, so `is_test` cannot gate that code.
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
-- Today the setup phase executes only leaf predicates (`has_func`,
-  `has_struct`); combinators and `has_directive` are validated but return
-  descriptive errors at build time and are wired up in follow-up PRs.
+- During the setup phase, leaf predicates (`has_func`, `has_recv`,
+  `has_struct`, `has_package`, `is_test`) and the `where.file` combinators
+  documented below are executed. `has_directive`, and combinators placed at the
+  top level of `where` (outside `where.file`), are validated but return a
+  descriptive "not yet supported" error at build time.
+
+**`has_package` example — filter within a glob-matched package family:**
+
+`target` selects by import path. An exact target already distinguishes
+`example.com/foo` from `example.com/foo_test` — they compile under distinct
+import paths. `has_package` adds value with a glob target that covers both:
+
+```yaml
+# Apply only to external test files (package foo_test) within the foo* family.
+# The glob target matches both example.com/foo and example.com/foo_test;
+# has_package narrows to the external test package, is_test guards test builds.
+trace_external_test:
+  target: example.com/foo*
+  where:
+    func: TestHelper
+    file:
+      all-of:
+        - is_test: true
+        - has_package: foo_test
+  do:
+    - inject_hooks:
+        before: BeforeTestHelper
+        path: example.com/foo/otel
+```
+
+#### Combining `where.file` predicates
+
+`all-of`, `one-of`, and `not` compose `where.file` predicates into boolean
+expressions. A combinator **owns the node it appears on**: it cannot be mixed
+with a sibling leaf predicate (`has_func`, `has_struct`, etc.) or another
+combinator on the same node — that combination is **rejected at build time**
+with a descriptive error, never silently ignored. Nest predicates inside the
+combinator to express multiple conditions; combinators may be nested to any
+depth. Presence is keyed on the YAML key, so an explicit empty list (for
+example `all-of: []`) is a deliberate predicate, not an omission.
+
+`all-of` matches when **every** nested predicate matches (logical AND); an
+empty `all-of: []` matches vacuously (always true).
+
+```yaml
+# Instrument Connect only in the driver-registration file — the source file
+# that declares both an `init` function and the `Driver` type.
+register_driver:
+  target: github.com/example/sqldriver
+  where:
+    func: Connect
+    file:
+      all-of:
+        - has_func: init
+        - has_struct: Driver
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        path: github.com/example/sqldriver/otel
+```
+
+`one-of` matches when **at least one** nested predicate matches (logical OR);
+an empty `one-of: []` never matches (vacuously false).
+
+```yaml
+# Instrument Exec in the files that hold the driver's statement-execution
+# code — those declaring either a `Conn` or a `Stmt` type.
+trace_exec:
+  target: github.com/example/sqldriver
+  where:
+    func: Exec
+    file:
+      one-of:
+        - has_struct: Conn
+        - has_struct: Stmt
+  do:
+    - inject_hooks:
+        before: BeforeExec
+        path: github.com/example/sqldriver/otel
+```
+
+`not` matches when its single nested predicate does **not** match (logical
+negation). Unlike `all-of`/`one-of`, `not` is unary — it wraps exactly one
+predicate, so there is no list and thus no empty-set case.
+
+```yaml
+# Instrument Connect everywhere except the in-memory mock file — the source
+# file that declares a `MockConn` type, which must not be wrapped.
+trace_connect:
+  target: github.com/example/sqldriver
+  where:
+    func: Connect
+    file:
+      not:
+        has_struct: MockConn
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        path: github.com/example/sqldriver/otel
+```
 
 ### `do` semantics
 
@@ -166,8 +284,39 @@ Rules:
 
 - `target: main` — matches the compile-time package named `main`.
 - `target: test_main` — not currently supported; reserved for future work.
-- Wildcards in `target` are out of scope for this release and are tracked
-  separately.
+- `target: $root` — matches the root module of the build and every package
+  below it. If a build spans multiple modules, it matches the union of all
+  resolved roots. The setup phase expands this selector through the normal glob
+  target matcher, so rules do not need to hardcode the application's module
+  path.
+- An empty or whitespace-only `target` is rejected at load time: `target` is
+  the sole package selector, so a rule without one can never match.
+
+### Glob targets
+
+`target` accepts glob syntax so a single rule can instrument a whole package
+family instead of one exact import path. A target is treated as a glob when it
+contains any of `*`, `?`, `[`, or `{`; otherwise it stays an exact match and
+keeps the fast map-lookup path.
+
+Glob matching uses [`bmatcuk/doublestar`](https://github.com/bmatcuk/doublestar#patterns);
+`/` is the segment delimiter:
+
+| Pattern | Matches | Does **not** match |
+| --- | --- | --- |
+| `example.com/svc/*` | `example.com/svc/users` | `example.com/svc`, `example.com/svc/users/v2` |
+| `example.com/svc/**` | `example.com/svc` and every descendant (`example.com/svc/users/v2`) | `example.com/other` |
+
+- `*` matches within a single segment and never crosses `/`. `?`, `[...]`
+  character classes, and `{alt1,alt2}` alternation also work per doublestar.
+- `**` matches zero or more whole segments (`example.com/svc/**` matches both
+  `example.com/svc` and `example.com/svc/users/v2`). Per doublestar, a `**`
+  fused into a segment (`foo**`, `**bar`) is treated as a single-segment `*`.
+- A malformed pattern (for example an unclosed `[`) is rejected at load time. A
+  reversed range such as `[z-a]` is **not** an error; it simply never matches.
+
+See the [doublestar pattern reference](https://github.com/bmatcuk/doublestar#patterns)
+for the full grammar.
 
 ### Valid and invalid shapes
 
@@ -232,6 +381,39 @@ invalid_where_file_shape:
 
 ---
 
+## Loading Rules
+
+Rules are normally distributed through instrumentation packages and enabled using `otel.instrumentation.go` (or `otelc.tool.go`) files.
+
+For development and debugging, rules may also be loaded directly using the `--rules` (or `OTELC_RULES` environment variable) flag.
+
+### Rule Source Precedence
+
+When multiple rule sources are present, `otelc` resolves them using the following precedence order (highest to lowest):
+
+1. `OTELC_RULES` environment variable
+2. `--rules` flag
+3. `otel.instrumentation.go` / `otelc.tool.go`
+4. Default embedded rules.
+
+Only the highest-precedence source that is present is used.
+
+For example:
+
+- If `OTELC_RULES` is set, all other rule sources are ignored.
+- If `--rules` is provided, discovery through tool files is skipped.
+- If an `otel.instrumentation.go` (or `otelc.tool.go`) file exists, embedded
+  rules are not used.
+- Default embedded rules are only used when no higher-precedence rule source is
+  available.
+
+For task-oriented guidance on choosing between these sources and verifying your
+configuration, see [Configuration and Fine-Tuning](configuration.md). For the full
+protocol of the tool-file mechanism (how imports are resolved, how rule files are
+discovered), see [External Configuration Sources](external-configuration.md).
+
+---
+
 ## Rule Types
 
 There are several types of rules, each designed for a specific kind of code modification. Rule type is determined by the modifier name inside `do`.
@@ -257,6 +439,11 @@ This is the most common rule type. It injects function calls at the beginning (`
 - `after` (string, optional): The name of the function to be called just before the target function returns.
 - `path` (string, required): The import path for the package containing the `before` and `after` hook functions.
 
+  The package referenced by `path` must be available in the user's module at build time. When using
+  `otel.instrumentation.go` (whether written manually or generated automatically), the imported
+  module is added to the build graph automatically. When supplying rules via `--rules` or the
+  `OTELC_RULES` environment variable, the package must already be listed in the user's `go.mod`.
+
 **Example:**
 
 ```yaml
@@ -268,7 +455,7 @@ hook_helloworld:
     - inject_hooks:
         before: MyHookBefore
         after: MyHookAfter
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/helloworld"
+        path: "go.opentelemetry.io/otelc/demo/app/basic/instrumentation"
 ```
 
 This rule will inject `MyHookBefore` at the start of the `Example` function in the `main` package, and `MyHookAfter` at the end. The hook functions are located in the specified `path`.
@@ -413,6 +600,13 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
+- `pattern` (string, optional): The position within the function where the raw code should be injected. By default, the code is injected at the start of the function body. If provided, the value must be a valid regular expression.
+
+  The pattern is matched against the canonical gofmt representation for each statement in the function body (not always the exact original source formatting). The injected code is placed immediately before/after the first statement that matches the pattern.
+
+  If no statement matches the pattern, an error is returned.
+
+- `placement` (string, optional): Determines where to inject the raw code when a `pattern` is specified. Can be either `before` (default) or `after`.
 
 **Modifier (`do: - inject_code:`):**
 
@@ -455,6 +649,37 @@ raw_with_hash:
     fmt: "fmt"
     sha256: "crypto/sha256"
 ```
+
+**Example with pattern:**
+
+Sometimes you may want to inject raw code at a specific location within the function body rather than at the start. Use the `pattern` field with a regex pattern to specify the injection point:
+
+```yaml
+raw_with_pattern:
+  target: main
+  where:
+    func: Example
+    pattern: '^println\\("hello"\\)$'
+  do:
+    - inject_code:
+        raw: 'go func(){ println("RawCode") }()'
+```
+
+If `Example()` looks like this:
+
+```go
+func Example() {
+  if true {
+    println("hello")
+  }
+}
+```
+
+The injected code will be placed immediately before the `println("hello")` statement.
+
+Note the pattern starts with `^`. During AST traversal, outer statements (such as `if`, `for`, or `go func`) are visited before their inner statements. Since matching is performed on the formatted string of each statement, a loose pattern may accidentally match a parent statement if it contains the target code.
+
+Anchoring the pattern with `^` (and usually `$`) ensures that only the exact statement is matched, preventing insertion at the wrong level (e.g., before an entire block instead of the intended inner statement).
 
 ### 4. Call Wrapping Rule
 
@@ -789,6 +1014,13 @@ This rule adds a new Go source file to the target package.
 
 - `file` (string, required): The name of the new file to be added (e.g., `newfile.go`).
 - `path` (string, required): The import path of the package where the content of the new file is located. The instrumentation tool will find the file within this package.
+
+  The package referenced by `path` must be importable by `go/packages`. If the implementation files are marked with `//go:build ignore` (for example because they rely on otelc compile-time transformations), include a small buildable stub file so the package remains importable during rule resolution.
+
+  The package must also be available in the user's module at build time. When using
+  `otel.instrumentation.go` (whether written manually or generated automatically), the imported
+  module is added to the build graph automatically. When supplying rules via `--rules` or the
+  `OTELC_RULES` environment variable, the package must already be listed in the user's `go.mod`.
 
 **Example:**
 

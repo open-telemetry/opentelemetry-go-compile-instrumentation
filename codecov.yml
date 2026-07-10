@@ -1,0 +1,27 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Codecov configuration.
+# https://docs.codecov.com/docs/codecov-yaml
+
+# Exclude test helpers from coverage.
+ignore:
+  - "pkg/hook/hooktest"
+
+coverage:
+  status:
+    project:
+      # tool/ module tree
+      tool:
+        flags:
+          - tool
+        target: 70%
+        # informational: false (enforcing). A drop below target blocks the PR.
+        informational: false
+      # pkg/ module tree
+      pkg:
+        flags:
+          - pkg
+        target: 70%
+        # informational: false (enforcing). A drop below target blocks the PR.
+        informational: false

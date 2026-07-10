@@ -1,0 +1,54 @@
+# The otel SDK floor tracks the version the injected instrumentation modules
+# require (instrumentation/**); raise it together with those modules.
+trace_context:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.44.0"
+  do:
+    - add_file:
+        file: otel_trace_context.go
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+
+# Function hooks for go.opentelemetry.io/otel/sdk/trace
+hook_new_recording_span:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.44.0"
+  where:
+    func: newRecordingSpan
+    recv: "*tracer"
+  do:
+    - inject_hooks:
+        after: afterNewRecordingSpan
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+
+hook_new_non_recording_span:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.44.0"
+  where:
+    func: newNonRecordingSpan
+    recv: "*tracer"
+  do:
+    - inject_hooks:
+        after: afterNewNonRecordingSpan
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+
+hook_recording_span_end:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.44.0"
+  where:
+    func: End
+    recv: "*recordingSpan"
+  do:
+    - inject_hooks:
+        before: beforeRecordingSpanEnd
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+
+hook_non_recording_span_end:
+  target: go.opentelemetry.io/otel/sdk/trace
+  version: "v1.44.0"
+  where:
+    func: End
+    recv: nonRecordingSpan
+  do:
+    - inject_hooks:
+        before: beforeNonRecordingSpanEnd
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"

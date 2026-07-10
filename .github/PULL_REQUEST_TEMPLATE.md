@@ -23,6 +23,9 @@ BEFORE SUBMITTING:
   make lint    # Run all linters
   make test    # Run all tests (unit + integration + e2e)
 
+If your PR adds a new user-facing instrumentation, please also submit a corresponding OpenTelemetry Registry PR:
+https://opentelemetry.io/ecosystem/registry/adding/
+
 For detailed contribution guidelines, see CONTRIBUTING.md
 For available make targets, run: make help
 -->
@@ -48,3 +51,4 @@ Fixes #<!-- issue number -->
 - [ ] Tests added for new functionality
 - [ ] Tests follow [testing guidelines](docs/testing.md)
 - [ ] Documentation updated (if applicable)
+- [ ] OpenTelemetry Registry updated (if applicable, see [registry guide](docs/instrument-guide.md#4-register-the-instrumentation))

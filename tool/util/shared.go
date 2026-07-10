@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"golang.org/x/mod/semver"
 )
 
@@ -23,9 +22,17 @@ const (
 	EnvOtelcStats = "OTELC_STATS"
 	// EnvOtelcDebug enables debug-level logging when set to "1".
 	// Set automatically when --debug is used; propagated to child processes.
-	EnvOtelcDebug = "OTELC_DEBUG"
-	BuildTempDir  = ".otelc-build"
-	OtelcRoot     = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	EnvOtelcDebug    = "OTELC_DEBUG"
+	BuildTempDir     = ".otelc-build"
+	OtelcRoot        = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot     = OtelcRoot + "/pkg"
+	OtelcInstRoot    = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe     = "otelc"
+	// TODO: remove these once v1 is released and migrate all usage to the constants above
+	OtelcOldRoot        = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	OtelcOldToolCmdRoot = OtelcOldRoot + "/tool/cmd"
+	OtelcOldToolExe     = "cmd"
 )
 
 func GetMatchedRuleFile() string {
@@ -63,26 +70,6 @@ func GetBuildTempDir() string {
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
-}
-
-func copyBackupFiles(names []string, src, dst string) error {
-	var err error
-	for _, name := range names {
-		srcFile := filepath.Join(src, name)
-		dstFile := filepath.Join(dst, name)
-		err = ex.Join(err, CopyFile(srcFile, dstFile))
-	}
-	return err
-}
-
-// BackupFile backups the source file to $BUILD_TEMP/backup/name.
-func BackupFile(names []string) error {
-	return copyBackupFiles(names, ".", GetBuildTemp("backup"))
-}
-
-// RestoreFile restores the source file from $BUILD_TEMP/backup/name.
-func RestoreFile(names []string) error {
-	return copyBackupFiles(names, GetBuildTemp("backup"), ".")
 }
 
 // GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.

@@ -1,0 +1,13 @@
+instrument_external_test_only:
+  target: main*
+  where:
+    func: ExternalHelper
+    file:
+      all-of:
+        - is_test: true
+        - has_package: main_test
+  do:
+    - inject_hooks:
+        before: BeforeExternalHelper
+        after: AfterExternalHelper
+        path: testdata/golden/has-package-combo-match

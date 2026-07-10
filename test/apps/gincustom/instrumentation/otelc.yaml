@@ -1,0 +1,8 @@
+gin_custom:
+  target: github.com/gin-gonic/gin
+  where:
+    func: New
+  do:
+    - inject_hooks:
+        after: "afterNew"
+        path: "go.opentelemetry.io/otelc/test/apps/gincustom/instrumentation"
