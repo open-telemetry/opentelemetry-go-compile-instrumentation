@@ -94,6 +94,9 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Cleanup(func() {
 		_ = os.Remove(filepath.Join(appDir, output))
 		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
+		// Left behind only when the otelc subprocess was killed mid-run
+		// (release removes it on every normal exit).
+		_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
 	})
 }
 

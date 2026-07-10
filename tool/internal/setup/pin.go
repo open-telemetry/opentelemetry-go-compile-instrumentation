@@ -537,6 +537,21 @@ type PinResult struct {
 // (not just those with instrumentation). The PinResult can be used by later stages (setup) instead of
 // re-parsing compile commands again.
 func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
+	// Pin rewrites go.mod/go.sum (ensureOtelcRequire, syncDeps, go mod tidy)
+	// and its fresh-project path extracts the bundle into .otelc-build/, so
+	// it runs under the build lock like the other mutating entry points.
+	// When reached from Setup's AutoPin the surrounding lock is reused via
+	// the context marker.
+	var result *PinResult
+	err := withBuildLock(ctx, func(ctx context.Context) error {
+		var pinErr error
+		result, pinErr = pinLocked(ctx, opts)
+		return pinErr
+	})
+	return result, err
+}
+
+func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	moduleDirs := opts.ModuleDirs
 	if len(moduleDirs) == 0 {
 		// Use opts.Args to find module directories
