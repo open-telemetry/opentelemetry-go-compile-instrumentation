@@ -542,7 +542,7 @@ test-integration: go-protobuf-plugins ## Run integration tests
 test-integration: build build-demo
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags integration ./integration/... 2>&1 | tee ./gotest-integration.log`
+	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags integration ./integration/... 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-latestlibbuild: build ## Run LatestLibBuild tests
