@@ -313,6 +313,64 @@ func TestResolveModuleDir(t *testing.T) {
 	}
 }
 
+func TestModuleAndWorkspace(t *testing.T) {
+	t.Run("resolves the module dir", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		dir, workspace, err := ModuleAndWorkspace(t.Context(), root)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+		assert.False(t, workspace)
+	})
+	t.Run("resolves from a subdirectory", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		sub := filepath.Join(root, "a", "b")
+		require.NoError(t, os.MkdirAll(sub, 0o755))
+		dir, workspace, err := ModuleAndWorkspace(t.Context(), sub)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+		assert.False(t, workspace)
+	})
+	t.Run("empty outside a module", func(t *testing.T) {
+		dir, workspace, err := ModuleAndWorkspace(t.Context(), t.TempDir())
+		require.NoError(t, err)
+		assert.Empty(t, dir)
+		assert.False(t, workspace)
+	})
+	t.Run("false outside a workspace", func(t *testing.T) {
+		_, workspace, err := ModuleAndWorkspace(t.Context(), t.TempDir())
+		require.NoError(t, err)
+		assert.False(t, workspace)
+	})
+	t.Run("true inside a workspace", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		dir, workspace, err := ModuleAndWorkspace(t.Context(), root)
+		require.NoError(t, err)
+		assert.True(t, workspace)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+	})
+	t.Run("true from a subdirectory of a workspace", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		sub := filepath.Join(root, "a", "b")
+		require.NoError(t, os.MkdirAll(sub, 0o755))
+		_, workspace, err := ModuleAndWorkspace(t.Context(), sub)
+		require.NoError(t, err)
+		assert.True(t, workspace)
+	})
+	t.Run("false when explicitly disabled", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		t.Setenv("GOWORK", "off")
+		_, workspace, err := ModuleAndWorkspace(t.Context(), root)
+		require.NoError(t, err)
+		assert.False(t, workspace)
+	})
+}
+
 func TestFindModuleDirs(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)

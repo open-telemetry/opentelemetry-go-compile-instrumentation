@@ -1,4 +1,4 @@
-module go.opentelemetry.io/otelc/test/apps/kafkaclient
+module go.opentelemetry.io/otelc/test/apps/kafkaproducer
 
 go 1.25.0
 

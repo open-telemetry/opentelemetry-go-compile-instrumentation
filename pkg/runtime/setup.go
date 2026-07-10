@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
+	logglobal "go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -26,9 +29,11 @@ const (
 )
 
 var (
-	logger         *slog.Logger
-	meterProvider  *sdkmetric.MeterProvider
-	tracerProvider *sdktrace.TracerProvider
+	logger                *slog.Logger
+	meterProvider         *sdkmetric.MeterProvider
+	tracerProvider        *sdktrace.TracerProvider
+	loggerProvider        *sdklog.LoggerProvider
+	registerSignalHandler sync.Once
 )
 
 func init() {
@@ -110,14 +115,19 @@ func setupOpenTelemetry(cfg Config) {
 		res = resource.Default()
 	}
 
-	// Setup trace provider with OTLP exporter
+	// Setup trace provider with auto-configured exporter
 	if err := setupTraceProvider(ctx, res); err != nil {
 		logger.Warn("failed to setup trace provider", "error", err)
 	}
 
-	// Setup meter provider with OTLP exporter
+	// Setup meter provider with auto-configured exporter
 	if err := setupMeterProvider(ctx, res); err != nil {
 		logger.Warn("failed to setup meter provider", "error", err)
+	}
+
+	// Setup logger provider with auto-configured exporter
+	if err := setupLoggerProvider(ctx, res); err != nil {
+		logger.Warn("failed to setup logger provider", "error", err)
 	}
 
 	// Set W3C Trace Context as the propagator
@@ -133,23 +143,24 @@ func setupOpenTelemetry(cfg Config) {
 
 // setupTraceProvider creates and configures the trace provider
 func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
-	// Get OTLP endpoint from environment
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
-		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-	}
-
-	// If no endpoint is configured, skip trace provider setup
-	if endpoint == "" {
-		logger.Debug("no OTLP endpoint configured, skipping trace provider setup")
-		return nil
-	}
-
 	// Use autoexport to automatically select the right exporter based on
-	// OTEL_EXPORTER_OTLP_PROTOCOL (defaults to http/protobuf)
+	// OTEL_TRACES_EXPORTER (defaults to otlp) and OTEL_EXPORTER_OTLP_PROTOCOL
+	// (defaults to http/protobuf). Supports: otlp, console, and none.
+	//
+	// This mirrors setupMeterProvider: the exporter-selection env vars decide
+	// whether/where traces go, not the presence of an OTLP endpoint env var.
+	// When otlp is selected (the default) and no endpoint is configured, the
+	// exporter falls back to the OTLP-spec default endpoint.
 	traceExporter, err := autoexport.NewSpanExporter(ctx)
 	if err != nil {
 		return err
+	}
+
+	// OTEL_TRACES_EXPORTER=none: skip building a provider/processor entirely
+	// rather than running a batch processor that will never export anything.
+	if autoexport.IsNoneSpanExporter(traceExporter) {
+		logger.Debug("trace exporter disabled via OTEL_TRACES_EXPORTER=none, skipping trace provider setup")
+		return nil
 	}
 
 	spanProcessor := sdktrace.NewBatchSpanProcessor(traceExporter,
@@ -169,18 +180,25 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 	// Set global tracer provider
 	otel.SetTracerProvider(tracerProvider)
 
-	logger.Info("trace provider initialized", "endpoint", endpoint)
+	logger.Info("trace provider initialized with auto-export")
 	return nil
 }
 
 // setupMeterProvider creates and configures the meter provider
 func setupMeterProvider(ctx context.Context, res *resource.Resource) error {
 	// Use autoexport to automatically select the right exporter based on
-	// OTEL_EXPORTER_OTLP_PROTOCOL (defaults to http/protobuf)
-	// Supports: otlp, console, and none
+	// OTEL_METRICS_EXPORTER (defaults to otlp) and OTEL_EXPORTER_OTLP_PROTOCOL
+	// (defaults to http/protobuf). Supports: otlp, console, prometheus, and none.
 	metricReader, err := autoexport.NewMetricReader(ctx)
 	if err != nil {
 		return err
+	}
+
+	// OTEL_METRICS_EXPORTER=none: skip building a provider around a reader
+	// that will never be collected, matching the traces/logs behavior.
+	if autoexport.IsNoneMetricReader(metricReader) {
+		logger.Debug("metric exporter disabled via OTEL_METRICS_EXPORTER=none, skipping meter provider setup")
+		return nil
 	}
 
 	// Create meter provider with the auto-configured reader
@@ -193,6 +211,38 @@ func setupMeterProvider(ctx context.Context, res *resource.Resource) error {
 	otel.SetMeterProvider(meterProvider)
 
 	logger.Info("meter provider initialized with auto-export")
+	return nil
+}
+
+// setupLoggerProvider creates and configures the logger provider
+func setupLoggerProvider(ctx context.Context, res *resource.Resource) error {
+	// Use autoexport to automatically select the right exporter based on
+	// OTEL_LOGS_EXPORTER (defaults to otlp) and OTEL_EXPORTER_OTLP_PROTOCOL
+	// (defaults to http/protobuf). Supports: otlp, console, and none.
+	//
+	// This mirrors setupTraceProvider/setupMeterProvider so all three signals
+	// are configured symmetrically via autoexport.
+	logExporter, err := autoexport.NewLogExporter(ctx)
+	if err != nil {
+		return err
+	}
+
+	// OTEL_LOGS_EXPORTER=none: skip building a provider/processor entirely
+	// rather than running a batch processor that will never export anything.
+	if autoexport.IsNoneLogExporter(logExporter) {
+		logger.Debug("log exporter disabled via OTEL_LOGS_EXPORTER=none, skipping logger provider setup")
+		return nil
+	}
+
+	loggerProvider = sdklog.NewLoggerProvider(
+		sdklog.WithResource(res),
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
+	)
+
+	// Set global logger provider
+	logglobal.SetLoggerProvider(loggerProvider)
+
+	logger.Info("logger provider initialized with auto-export")
 	return nil
 }
 
@@ -210,6 +260,13 @@ func Shutdown(ctx context.Context) error {
 	if meterProvider != nil {
 		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown meter provider", "error", shutdownErr)
+			err = shutdownErr
+		}
+	}
+
+	if loggerProvider != nil {
+		if shutdownErr := loggerProvider.Shutdown(ctx); shutdownErr != nil {
+			Logger().Error("failed to shutdown logger provider", "error", shutdownErr)
 			err = shutdownErr
 		}
 	}
@@ -246,28 +303,31 @@ func StartRuntimeMetrics() {
 // setupSignalHandler registers a goroutine that listens for OS signals
 // and gracefully shuts down the OpenTelemetry SDK when receiving interrupt signals.
 // This ensures telemetry is flushed before the application exits.
+// This function is safe to call multiple times; it will only register the handler once.
 func setupSignalHandler() {
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
+	registerSignalHandler.Do(func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt)
 
-	go func() {
-		sig := <-sigCh
-		logger.Info("received signal, initiating graceful shutdown", "signal", sig.String())
+		go func() {
+			sig := <-sigCh
+			logger.Info("received signal, initiating graceful shutdown", "signal", sig.String())
 
-		// Create a context with timeout for shutdown
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+			// Create a context with timeout for shutdown
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-		// Shutdown OTel SDK
-		if err := Shutdown(ctx); err != nil {
-			logger.Error("error during shutdown", "error", err)
-		} else {
-			logger.Info("OpenTelemetry SDK shutdown completed successfully")
-		}
+			// Shutdown OTel SDK
+			if err := Shutdown(ctx); err != nil {
+				logger.Error("error during shutdown", "error", err)
+			} else {
+				logger.Info("OpenTelemetry SDK shutdown completed successfully")
+			}
 
-		// After shutdown completes, exit cleanly
-		// os.Interrupt is cross-platform (SIGINT on Unix, Ctrl+C on Windows)
-		signal.Reset(os.Interrupt)
-		os.Exit(0)
-	}()
+			// After shutdown completes, exit cleanly
+			// os.Interrupt is cross-platform (SIGINT on Unix, Ctrl+C on Windows)
+			signal.Reset(os.Interrupt)
+			os.Exit(0)
+		}()
+	})
 }

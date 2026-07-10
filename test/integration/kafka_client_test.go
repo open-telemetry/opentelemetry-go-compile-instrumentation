@@ -24,7 +24,8 @@ func TestKafkaClient(t *testing.T) {
 	}
 
 	t.Parallel()
-	testutil.Build(t, "", "kafkaclient", "go", "build", "-a")
+	testutil.Build(t, "", "kafkaproducer", "go", "build", "-a")
+	testutil.Build(t, "", "kafkaconsumer", "go", "build", "-a")
 
 	brokers := startKafkaContainer(t)
 
@@ -32,7 +33,7 @@ func TestKafkaClient(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("KAFKA_BROKERS", strings.Join(brokers, ","))
 
-		out := f.Run("kafkaclient", "-op=produce", "-topic=orders")
+		out := f.Run("kafkaproducer", "-topic=orders")
 		require.Contains(t, out, "produced message")
 
 		span := f.RequireSingleSpan()
@@ -55,7 +56,7 @@ func TestKafkaClient(t *testing.T) {
 		// The consumer seeds a message and reads it back from the real broker,
 		// so the injected hook records a successful consumer span with the
 		// resolved partition and offset.
-		out := f.Run("kafkaclient", "-op=consume", "-topic=orders")
+		out := f.Run("kafkaconsumer", "-topic=orders")
 		require.Contains(t, out, "consumed message")
 
 		span := testutil.RequireSpan(t, f.Traces(),

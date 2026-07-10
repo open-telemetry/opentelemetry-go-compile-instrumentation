@@ -6,6 +6,8 @@ package pkgload
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -39,6 +41,36 @@ func LoadPackages(
 		return nil, ex.Wrapf(err, "loading packages %v", patterns)
 	}
 	return pkgs, nil
+}
+
+// ModuleAndWorkspace resolves, in a single `go env` call, dir's main module
+// directory and whether dir is inside an active go.work workspace. It uses
+// `go env GOMOD`/`GOWORK` rather than go list, which would fail the vendor
+// consistency check while go.mod is mid-edit. moduleDir is empty when dir is
+// outside any module.
+func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
+	cmd := exec.CommandContext(ctx, "go", "env", "GOMOD", "GOWORK")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false, ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
+	}
+	// go env prints one line per requested var, in order: GOMOD then GOWORK.
+	goModLine, goWorkLine, ok := strings.Cut(string(out), "\n")
+	if !ok {
+		return "", false, ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
+	}
+	goMod := strings.TrimSpace(goModLine)
+	goWork := strings.TrimSpace(goWorkLine)
+	// go env GOMOD prints os.DevNull when dir is not inside a module.
+	var moduleDir string
+	if goMod != "" && goMod != os.DevNull {
+		moduleDir = filepath.Dir(goMod)
+	}
+	// GOWORK is the path to the resolved go.work file, "off" when workspace
+	// mode is explicitly disabled, or empty when none applies.
+	workspace := goWork != "" && goWork != "off"
+	return moduleDir, workspace, nil
 }
 
 func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {

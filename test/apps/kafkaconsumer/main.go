@@ -1,10 +1,8 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package main provides a minimal segmentio/kafka-go client for integration
-// testing against a real broker (started as a testcontainer). The broker
-// address is read from the KAFKA_BROKERS environment variable.
-// This client is designed to be instrumented with the otelc compile-time tool.
+// Package main provides a minimal segmentio/kafka-go consumer for integration
+// testing against a real broker.
 package main
 
 import (
@@ -20,8 +18,8 @@ import (
 )
 
 var (
-	op    = flag.String("op", "produce", "operation: produce | consume")
 	topic = flag.String("topic", "orders", "kafka topic")
+	seed  = flag.Bool("seed", true, "seed a message before reading (disable for cross-process E2E tests)")
 )
 
 func brokers() []string {
@@ -34,14 +32,31 @@ func brokers() []string {
 func main() {
 	flag.Parse()
 
-	switch *op {
-	case "produce":
-		doProduce()
-	case "consume":
-		doConsume()
-	default:
-		log.Fatalf("unknown operation: %s", *op)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Optionally seed a message so the reader has something to consume.
+	// When seed=false (used by E2E tests), the producer binary is expected
+	// to have already written the message so that trace context propagates
+	// across two separate instrumented processes.
+	if *seed {
+		writeMessage(ctx, "order-1", "hello kafka")
 	}
+
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:     brokers(),
+		Topic:       *topic,
+		Partition:   0,
+		StartOffset: kafka.FirstOffset,
+		MaxWait:     500 * time.Millisecond,
+	})
+	defer r.Close()
+
+	msg, err := r.ReadMessage(ctx)
+	if err != nil {
+		log.Fatalf("failed to read message: %v", err)
+	}
+	slog.Info("consumed message", "topic", *topic, "key", string(msg.Key), "offset", msg.Offset)
 }
 
 // ensureTopic creates the topic up front (best-effort) so a single
@@ -77,37 +92,4 @@ func writeMessage(ctx context.Context, key, value string) {
 	if err := w.WriteMessages(ctx, kafka.Message{Key: []byte(key), Value: []byte(value)}); err != nil {
 		log.Fatalf("failed to write messages: %v", err)
 	}
-}
-
-func doProduce() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	writeMessage(ctx, "order-1", "hello kafka")
-	slog.Info("produced message", "topic", *topic)
-}
-
-func doConsume() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Seed a message so the reader has something to consume. The instrumented
-	// writer injects trace context into the message headers, which the reader
-	// then extracts — exercising context propagation across the two hooks.
-	writeMessage(ctx, "order-1", "hello kafka")
-
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     brokers(),
-		Topic:       *topic,
-		Partition:   0,
-		StartOffset: kafka.FirstOffset,
-		MaxWait:     500 * time.Millisecond,
-	})
-	defer r.Close()
-
-	msg, err := r.ReadMessage(ctx)
-	if err != nil {
-		log.Fatalf("failed to read message: %v", err)
-	}
-	slog.Info("consumed message", "topic", *topic, "key", string(msg.Key), "offset", msg.Offset)
 }
