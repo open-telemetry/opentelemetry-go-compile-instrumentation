@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -45,7 +46,7 @@ func buildLockPath() string {
 	if resolved, err := filepath.EvalSymlinks(workDir); err == nil {
 		workDir = resolved
 	}
-	return filepath.Join(workDir, util.BuildTempDir) + ".lock"
+	return filepath.Join(workDir, util.BuildLockFile)
 }
 
 // buildLockHeldKey marks a context whose call chain already holds the
@@ -132,13 +133,9 @@ func AcquireBuildLock(ctx context.Context) (func(), error) {
 		return releaseFunc(ctx, lock), nil
 	}
 
-	logger.InfoContext(
-		ctx,
-		"another otelc invocation is running and holds the build lock; waiting for it to finish",
-		"path",
+	fmt.Fprintf(os.Stderr,
+		"otelc: another invocation holds the build lock; waiting for it to finish (lock: %s)\n",
 		path,
-		"note",
-		"a leftover lock file from a crashed build cannot cause waiting; the OS releases its lock when the process dies",
 	)
 
 	ticker := time.NewTicker(buildLockRetryInterval)
