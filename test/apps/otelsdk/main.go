@@ -14,28 +14,67 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	_ "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
 var port = flag.String("port", "8989", "The server port")
 
-func otelHandler(w http.ResponseWriter, r *http.Request) {
-	// Call SpanFromContext with a bare context.Background().
-	// Without GLS instrumentation this returns a no-op span.
-	// With the OTel SDK + net/http instrumentation, the GLS hook
-	// should return the active span created by the server handler.
-	span := trace.SpanFromContext(context.Background())
-	sc := span.SpanContext()
+var (
+	workerTasks = make(chan func())
+	startWorker sync.Once
+	spanToEnd   = make(chan trace.Span)
+	spanEnded   = make(chan struct{})
+)
 
-	if sc.IsValid() {
-		fmt.Printf("OTEL_SDK_TEST: span valid, traceID=%s spanID=%s\n",
-			sc.TraceID().String(), sc.SpanID().String())
-	} else {
-		fmt.Println("OTEL_SDK_TEST: span invalid")
-	}
+func submit(task func()) {
+	startWorker.Do(func() {
+		go func() {
+			for task := range workerTasks {
+				task()
+			}
+		}()
+	})
+	workerTasks <- task
+}
+
+func otelHandler(w http.ResponseWriter, r *http.Request) {
+	_, span := otel.Tracer("handler").Start(context.Background(), "cross-goroutine-span")
+	done := make(chan struct{})
+	submit(func() {
+		defer close(done)
+		span := trace.SpanFromContext(context.Background())
+		sc := span.SpanContext()
+
+		if sc.IsValid() {
+			fmt.Printf("OTEL_SDK_TEST: span valid, traceID=%s spanID=%s\n",
+				sc.TraceID().String(), sc.SpanID().String())
+		} else {
+			fmt.Println("OTEL_SDK_TEST: span invalid")
+		}
+	})
+	<-done
+	spanToEnd <- span
+	<-spanEnded
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
+func workerHandler(w http.ResponseWriter, r *http.Request) {
+	done := make(chan struct{})
+	submit(func() {
+		defer close(done)
+		stale := trace.SpanFromContext(context.Background()).SpanContext().IsValid()
+		fmt.Printf("OTEL_SDK_WORKER: stale span=%t\n", stale)
+		_, span := otel.Tracer("worker").Start(context.Background(), "worker-span")
+		span.End()
+	})
+	<-done
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
@@ -46,6 +85,12 @@ func main() {
 	addr := fmt.Sprintf(":%s", *port)
 
 	http.HandleFunc("/otel", otelHandler)
+	http.HandleFunc("/worker", workerHandler)
+	go func() {
+		span := <-spanToEnd
+		span.End()
+		close(spanEnded)
+	}()
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -57,12 +102,13 @@ func main() {
 		}
 	}()
 
-	// Send a request to self
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%s/otel", *port))
-	if err != nil {
-		log.Fatalf("request failed: %v", err)
+	for _, path := range []string{"otel", "worker"} {
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%s/%s", *port, path))
+		if err != nil {
+			log.Fatalf("request to %s failed: %v", path, err)
+		}
+		resp.Body.Close()
 	}
-	resp.Body.Close()
 
 	// Give time for span export
 	time.Sleep(1 * time.Second)

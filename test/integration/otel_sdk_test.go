@@ -37,4 +37,17 @@ func TestOtelSDKSpanFromContext(t *testing.T) {
 		"SpanFromContext(context.Background()) should return a valid span from GLS")
 	require.Contains(t, output, "traceID=")
 	require.Contains(t, output, "spanID=")
+	require.Contains(t, output, "OTEL_SDK_WORKER: stale span=false")
+
+	workerSpan := testutil.RequireSpan(t, f.Traces(), testutil.HasName("worker-span"))
+	require.True(t, workerSpan.ParentSpanID().IsEmpty(),
+		"a reused worker must not keep an ended span as its parent")
+
+	f = testutil.NewTestFixture(t)
+	f.SetEnv("OTEL_TRACES_SAMPLER", "always_off")
+	output = f.Run("otelsdk")
+	require.Contains(t, output, "OTEL_SDK_TEST: span valid",
+		"an active non-recording span should propagate through GLS")
+	require.Contains(t, output, "OTEL_SDK_WORKER: stale span=false",
+		"an ended non-recording span should be removed from GLS")
 }
