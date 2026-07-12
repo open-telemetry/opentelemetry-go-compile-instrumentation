@@ -139,7 +139,7 @@ func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
 	))
 	t.Chdir(tmpDir)
 
-	pkgs, err := getBuildPackages(t.Context(), []string{"-C", "app", "."})
+	pkgs, err := getBuildPackages(t.Context(), "app", []string{"."})
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	require.NotNil(t, pkgs[0].Module)

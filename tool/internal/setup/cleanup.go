@@ -14,18 +14,8 @@ import (
 )
 
 // CleanupCommand is the CLI entry point for `otelc cleanup`.
-func CleanupCommand(ctx context.Context, cmd *cli.Command, cleanAll bool) error {
-	var buildDir string
-	var args []string
-	if cmd.Args().Present() {
-		invocation, err := parseGoInvocation(cmd.Args().Slice())
-		if err != nil {
-			return err
-		}
-		buildDir = invocation.buildDir
-		args = invocation.args
-	}
-	return Cleanup(ctx, buildDir, args, cleanAll)
+func CleanupCommand(ctx context.Context, _ *cli.Command, cleanAll bool) error {
+	return Cleanup(ctx, cleanAll)
 }
 
 // Cleanup removes artifacts created by the setup and build phases.
@@ -35,7 +25,7 @@ func CleanupCommand(ctx context.Context, cmd *cli.Command, cleanAll bool) error 
 // When cleanAll is false, backed-up files are restored and the generated runtime
 // file is removed, but .otelc-build/ is kept for debugging. When cleanAll is
 // true, .otelc-build/ is also removed.
-func Cleanup(ctx context.Context, _ string, _ []string, cleanAll bool) error {
+func Cleanup(ctx context.Context, cleanAll bool) error {
 	logger := util.LoggerFromContext(ctx)
 	stateManager, found := StateManagerFromContext(ctx)
 	if !found {

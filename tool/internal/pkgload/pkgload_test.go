@@ -14,7 +14,7 @@ import (
 )
 
 func TestLoadPackages(t *testing.T) {
-	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, "", "fmt")
+	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, "fmt")
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "fmt", pkgs[0].Name)

@@ -281,7 +281,8 @@ func TestListBuildPlan(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		invocation    buildInvocation
+		subcommand    string
+		args          []string
 		buildPlan     string
 		expected      []string
 		wantErr       bool
@@ -289,12 +290,9 @@ func TestListBuildPlan(t *testing.T) {
 		expectedGoCmd []string
 	}{
 		{
-			name: "filters compile and cgo commands",
-			invocation: buildInvocation{
-				command:          "build",
-				buildDirPosition: buildDirPlacementNone,
-				args:             []string{"./..."},
-			},
+			name:       "filters compile and cgo commands",
+			subcommand: "build",
+			args:       []string{"./..."},
 			buildPlan: `
 cd /project/pkg
 .../cgo -objdir /tmp/b001 -importpath pkg/cgo
@@ -311,12 +309,9 @@ echo ignored
 			},
 		},
 		{
-			name: "passes additional build args",
-			invocation: buildInvocation{
-				command:          "build",
-				buildDirPosition: buildDirPlacementNone,
-				args:             []string{"-tags=integration", "./cmd"},
-			},
+			name:       "passes additional build args",
+			subcommand: "build",
+			args:       []string{"-tags=integration", "./cmd"},
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 `,
@@ -330,12 +325,9 @@ echo ignored
 			},
 		},
 		{
-			name: "returns build failure",
-			invocation: buildInvocation{
-				command:          "build",
-				buildDirPosition: buildDirPlacementNone,
-				args:             []string{"./bad"},
-			},
+			name:       "returns build failure",
+			subcommand: "build",
+			args:       []string{"./bad"},
 			buildPlan: `
 go: module example.com missing
 `,
@@ -346,12 +338,9 @@ go: module example.com missing
 			},
 		},
 		{
-			name: "empty build plan",
-			invocation: buildInvocation{
-				command:          "build",
-				buildDirPosition: buildDirPlacementNone,
-				args:             []string{"./..."},
-			},
+			name:       "empty build plan",
+			subcommand: "build",
+			args:       []string{"./..."},
 			buildPlan: `
 echo nothing useful
 `,
@@ -360,12 +349,9 @@ echo nothing useful
 			},
 		},
 		{
-			name: "ignores malformed compile lines",
-			invocation: buildInvocation{
-				command:          "build",
-				buildDirPosition: buildDirPlacementNone,
-				args:             []string{"./..."},
-			},
+			name:       "ignores malformed compile lines",
+			subcommand: "build",
+			args:       []string{"./..."},
 			buildPlan: `
 .../compile foo
 .../cgo blah
@@ -377,12 +363,9 @@ echo nothing useful
 			// The test subcommand must list a `go test` plan, which surfaces the
 			// test-augmented, external test, and test-main compiles that is_test
 			// gates on. A `go build` plan would never contain them.
-			name: "test subcommand lists a go test plan",
-			invocation: buildInvocation{
-				command:          "test",
-				buildDirPosition: buildDirPlacementNone,
-				args:             []string{"./..."},
-			},
+			name:       "test subcommand lists a go test plan",
+			subcommand: "test",
+			args:       []string{"./..."},
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 `,
@@ -392,13 +375,9 @@ echo nothing useful
 			expectedGoCmd: []string{"test", "-a", "-x", "-n", "./..."},
 		},
 		{
-			name: "-C after subcommand",
-			invocation: buildInvocation{
-				command:          "build",
-				buildDir:         "/project",
-				buildDirPosition: buildDirPlacementAfterSubcommand,
-				args:             []string{"./..."},
-			},
+			name:       "-C passed as build arg",
+			subcommand: "build",
+			args:       []string{"-C", "/project", "./..."},
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 `,
@@ -406,25 +385,7 @@ echo nothing useful
 				".../compile -o /tmp/out.a -buildid abc -p main main.go",
 			},
 			expectedGoCmd: []string{
-				"build", "-C", "/project", "-a", "-x", "-n", "./...",
-			},
-		},
-		{
-			name: "-C before subcommand",
-			invocation: buildInvocation{
-				command:          "build",
-				buildDir:         "/project",
-				buildDirPosition: buildDirPlacementBeforeSubcommand,
-				args:             []string{"./..."},
-			},
-			buildPlan: `
-.../compile -o /tmp/out.a -buildid abc -p main main.go
-`,
-			expected: []string{
-				".../compile -o /tmp/out.a -buildid abc -p main main.go",
-			},
-			expectedGoCmd: []string{
-				"-C", "/project", "build", "-a", "-x", "-n", "./...",
+				"build", "-a", "-x", "-n", "-C", "/project", "./...",
 			},
 		},
 	}
@@ -453,11 +414,7 @@ echo nothing useful
 				return exec.Command("sh", "-c", script)
 			}
 
-			subcommand := tt.subcommand
-			if subcommand == "" {
-				subcommand = "build"
-			}
-			buildPlan, err := listBuildPlan(t.Context(), subcommand, tt.args)
+			buildPlan, err := listBuildPlan(t.Context(), tt.subcommand, tt.args)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.buildPlan != "" {
