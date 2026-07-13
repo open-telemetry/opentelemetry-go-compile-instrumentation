@@ -119,20 +119,20 @@ jobs:
           echo "Coverage result: $coverage_result"
           echo "Integration result: $integration_result"
           if [[ "$changes_result" != "success" ]]; then
-            echo "Change detection failed"
+            echo "❌ Change detection failed"
             exit 1
           fi
           if [[ "$code_changed" == "false" ]]; then
-            echo "No relevant code changes; tests skipped"
+            echo "✅ No relevant code changes; tests skipped"
             exit 0
           fi
           if [[ "$code_changed" != "true" ]]; then
-            echo "Unexpected change detection output: $code_changed"
+            echo "❌ Unexpected change detection output: $code_changed"
             exit 1
           fi
           if [[ "$coverage_result" == "success" && "$integration_result" == "success" ]]; then
-            echo "Tests passed"
+            echo "✅ Tests passed"
             exit 0
           fi
-          echo "Tests failed"
+          echo "❌ Tests failed"
           exit 1
