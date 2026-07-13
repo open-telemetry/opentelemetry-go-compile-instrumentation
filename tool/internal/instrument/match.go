@@ -17,6 +17,11 @@ import (
 func (ip *InstrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	f := util.GetMatchedRuleFile()
 	content, err := os.ReadFile(f)
+	if os.IsNotExist(err) {
+		return nil, ex.Newf("no instrumentation configuration found (%s does not exist); "+
+			"run `otelc setup` in the module directory before building with `-toolexec`, "+
+			"or build with `otelc go build` instead", f)
+	}
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read file %s", f)
 	}

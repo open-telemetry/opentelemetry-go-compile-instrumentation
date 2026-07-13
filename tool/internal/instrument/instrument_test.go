@@ -107,7 +107,7 @@ func runTest(t *testing.T, testName string) {
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
 
 	args := compileArgs(tempDir, sourceFile, helpers, importPath)
-	err := Toolexec(ctx, args)
+	err := Toolexec(ctx, args, false)
 
 	if testName == invalidReceiver {
 		require.Error(t, err)
