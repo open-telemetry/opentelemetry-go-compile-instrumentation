@@ -23,14 +23,16 @@ import (
 
 func TestAddDeps(t *testing.T) {
 	tests := []struct {
-		name       string
-		matched    []*rule.InstRuleSet
-		goldenFile string // Empty means no file should be generated
+		name        string
+		matched     []*rule.InstRuleSet
+		packageName string
+		goldenFile  string // Empty means no file should be generated
 	}{
 		{
-			name:       "empty_matched_rules",
-			matched:    []*rule.InstRuleSet{},
-			goldenFile: "",
+			name:        "empty_matched_rules",
+			matched:     []*rule.InstRuleSet{},
+			packageName: "main",
+			goldenFile:  "",
 		},
 		{
 			name: "single_func_rule",
@@ -41,7 +43,8 @@ func TestAddDeps(t *testing.T) {
 					nil,
 				),
 			},
-			goldenFile: "single_func_rule.otelc.runtime.go.golden",
+			packageName: "main",
+			goldenFile:  "single_func_rule.otelc.runtime.go.golden",
 		},
 		{
 			name: "single_file_rule",
@@ -52,14 +55,16 @@ func TestAddDeps(t *testing.T) {
 					[]*rule.InstFileRule{newTestFileRule("github.com/example/pkg", "github.com/example/pkg")},
 				),
 			},
-			goldenFile: "single_file_rule.otelc.runtime.go.golden",
+			packageName: "main",
+			goldenFile:  "single_file_rule.otelc.runtime.go.golden",
 		},
 		{
 			name: "no_rules",
 			matched: []*rule.InstRuleSet{
 				newTestRuleSet("github.com/example/pkg", nil, nil),
 			},
-			goldenFile: "",
+			packageName: "main",
+			goldenFile:  "",
 		},
 		{
 			name: "multiple_rule_sets",
@@ -75,7 +80,20 @@ func TestAddDeps(t *testing.T) {
 					[]*rule.InstFileRule{newTestFileRule("github.com/example/pkg4", "github.com/example/pkg4")},
 				),
 			},
-			goldenFile: "multiple_rule_sets.otelc.runtime.go.golden",
+			packageName: "main",
+			goldenFile:  "multiple_rule_sets.otelc.runtime.go.golden",
+		},
+		{
+			name: "non_main_package_name",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"github.com/example/pkg",
+					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg", "github.com/example/pkg")},
+					nil,
+				),
+			},
+			packageName: "mypkg",
+			goldenFile:  "non_main_package_name.otelc.runtime.go.golden",
 		},
 	}
 
@@ -87,7 +105,7 @@ func TestAddDeps(t *testing.T) {
 			stateManager := NewStateManager()
 			ctx := ContextWithStateManager(t.Context(), stateManager)
 
-			err := sp.addDeps(ctx, tt.matched, tmpDir)
+			err := sp.addDeps(ctx, tt.matched, tmpDir, tt.packageName)
 			require.NoError(t, err)
 
 			runtimeFilePath := filepath.Join(tmpDir, OtelcRuntimeFile)
@@ -121,6 +139,6 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	invalidPath := filepath.Join(t.TempDir(), "nonexistent", "subdir")
 	sp := newTestSetupPhase()
 
-	err := sp.addDeps(t.Context(), matched, invalidPath)
+	err := sp.addDeps(t.Context(), matched, invalidPath, "main")
 	assert.Error(t, err)
 }

@@ -119,6 +119,15 @@ func addDir(tw *tar.Writer, dirPath, nameInArchive string) error {
 		}
 
 		if d.IsDir() {
+			// Ignore empty directories, similar to git's behavior
+			empty, err := isEffectivelyEmpty(path)
+			if err != nil {
+				return err
+			}
+			if empty {
+				return nil
+			}
+
 			return addDirEntry(tw, path, entryName, info)
 		}
 
@@ -129,6 +138,36 @@ func addDir(tw *tar.Writer, dirPath, nameInArchive string) error {
 // shouldExclude reports whether an archive entry should be omitted.
 func shouldExclude(name string) bool {
 	return strings.HasSuffix(name, ".log")
+}
+
+// isEffectivelyEmpty reports whether a directory is effectively empty,
+// i.e., it contains no non-excluded files or non-empty subdirectories.
+func isEffectivelyEmpty(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+
+		if entry.IsDir() {
+			empty, err := isEffectivelyEmpty(path)
+			if err != nil {
+				return false, err
+			}
+			if !empty {
+				return false, nil
+			}
+			continue
+		}
+
+		if !shouldExclude(entry.Name()) {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 // addDirEntry writes a tar header for a directory entry.
