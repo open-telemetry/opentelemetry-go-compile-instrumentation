@@ -71,7 +71,10 @@ func appsPath() (string, error) {
 }
 
 // Build builds the application with the instrumentation tool. The built binary
-// is registered for cleanup via t.Cleanup.
+// is registered for cleanup via t.Cleanup. Standard test apps use
+// OTELC_TEST_GOCACHE/<app> as GOCACHE when OTELC_TEST_GOCACHE is set, and drop
+// -a so warm builds can reuse that per-app cache. Custom appsDir builds keep
+// the caller's arguments and environment unchanged.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
 	otelc, err := OtelcPath()

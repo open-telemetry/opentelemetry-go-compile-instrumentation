@@ -15,6 +15,7 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -109,15 +110,25 @@ jobs:
     steps:
       - name: Check result
         run: |
+          changes_result="${{ needs.changes.result }}"
           code_changed="${{ needs.changes.outputs.code }}"
           coverage_result="${{ needs.test-integration-coverage.result }}"
           integration_result="${{ needs.test-integration.result }}"
+          echo "Changes result: $changes_result"
           echo "Code changed: $code_changed"
           echo "Coverage result: $coverage_result"
           echo "Integration result: $integration_result"
-          if [[ "$code_changed" != "true" ]]; then
+          if [[ "$changes_result" != "success" ]]; then
+            echo "Change detection failed"
+            exit 1
+          fi
+          if [[ "$code_changed" == "false" ]]; then
             echo "No relevant code changes; tests skipped"
             exit 0
+          fi
+          if [[ "$code_changed" != "true" ]]; then
+            echo "Unexpected change detection output: $code_changed"
+            exit 1
           fi
           if [[ "$coverage_result" == "success" && "$integration_result" == "success" ]]; then
             echo "Tests passed"
