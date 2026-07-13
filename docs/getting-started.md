@@ -37,6 +37,40 @@ No manual code changes required.
    go tool otelc go build -o myapp .
    ```
 
+## Using `go build` Directly (toolexec drop-in)
+
+Instead of wrapping the build with `otelc go build`, you can keep using the
+regular `go` toolchain and plug `otelc` in through `GOFLAGS`. This is useful
+when the build command is owned by a Makefile, CI pipeline, or another tool
+you don't want to change.
+
+1. **Prepare the module** (once, and again after dependencies change):
+
+   ```bash
+   cd path/to/your/module
+   otelc setup
+   ```
+
+   `otelc setup` analyzes the module, generates the instrumentation sources
+   (`otel.instrumentation.go`, `otelc.runtime.go`) and writes the matched
+   rules to `.otelc-build/`, which the build phase below reads.
+
+2. **Build with the standard toolchain**:
+
+   ```bash
+   export GOFLAGS="${GOFLAGS} '-toolexec=otelc toolexec'"
+   go build -o myapp .
+   ```
+
+Run `go build` from the module directory (or any subdirectory); `otelc`
+locates the `.otelc-build` directory created by `otelc setup` from there. To
+run the build from somewhere else, set `OTELC_WORK_DIR` to the directory
+where `otelc setup` ran.
+
+Instrumented and plain build artifacts are kept apart in Go's build cache
+(otelc marks the tool identity go hashes into every cache key), so switching
+between instrumented and regular builds does not require cleaning the cache.
+
 ## Managing Instrumentations
 
 Instrumentations are declared through an `otel.instrumentation.go` file located next to the application's `go.mod` file. The alternate filename `otelc.tool.go` is also accepted and behaves identically.

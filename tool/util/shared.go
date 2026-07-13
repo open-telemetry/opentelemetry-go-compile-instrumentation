@@ -22,14 +22,17 @@ const (
 	EnvOtelcStats = "OTELC_STATS"
 	// EnvOtelcDebug enables debug-level logging when set to "1".
 	// Set automatically when --debug is used; propagated to child processes.
-	EnvOtelcDebug    = "OTELC_DEBUG"
-	BuildTempDir     = ".otelc-build"
-	BuildLockFile    = BuildTempDir + ".lock"
-	OtelcRoot        = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot     = OtelcRoot + "/pkg"
-	OtelcInstRoot    = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe     = "otelc"
+	EnvOtelcDebug = "OTELC_DEBUG"
+	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
+	// command otelc itself ran (e.g. `go list -export`).
+	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
+	BuildTempDir           = ".otelc-build"
+	BuildLockFile          = BuildTempDir + ".lock"
+	OtelcRoot              = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot           = OtelcRoot + "/pkg"
+	OtelcInstRoot          = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot       = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe           = "otelc"
 	// TODO: remove these once v1 is released and migrate all usage to the constants above
 	OtelcOldRoot        = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
 	OtelcOldToolCmdRoot = OtelcOldRoot + "/tool/cmd"
@@ -61,6 +64,29 @@ func GetOtelcWorkDir() string {
 		return wd
 	}
 	return wd
+}
+
+// DiscoverWorkDir finds the work directory prepared by `otelc setup` when
+// otelc runs as a bare `-toolexec` (OTELC_WORK_DIR unset because the build
+// was started by `go build`).
+//
+// Needed because the go toolchain runs some tools (asm, cgo) from the package
+// source directory, which may be the read-only module cache.
+func DiscoverWorkDir(dir string) string {
+	dir = filepath.Clean(dir)
+	for {
+		if PathExists(filepath.Join(dir, BuildTempDir)) {
+			return dir
+		}
+		if PathExists(filepath.Join(dir, "go.mod")) {
+			return ""
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name

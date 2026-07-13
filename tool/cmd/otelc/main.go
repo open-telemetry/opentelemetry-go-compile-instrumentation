@@ -83,6 +83,16 @@ func main() {
 			&commandVersion,
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			// In drop-in mode (otelc is the GOFLAGS -toolexec tool) the go
+			// children otelc spawns would inherit the flag and recurse, so
+			// strip it process-wide; commands that need toolexec re-add it.
+			if goflags := os.Getenv("GOFLAGS"); goflags != "" {
+				if stripped := util.StripToolexecFromGoflags(goflags); stripped != goflags {
+					if err := os.Setenv("GOFLAGS", stripped); err != nil {
+						return ctx, ex.Wrapf(err, "stripping -toolexec from GOFLAGS")
+					}
+				}
+			}
 			ctx, err := initLogger(ctx, cmd)
 			if err != nil {
 				return ctx, err
@@ -112,6 +122,19 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	if err != nil {
 		return ctx, ex.Wrapf(err, "failed to resolve work directory %q", cmd.String("work-dir"))
 	}
+
+	// Bare -toolexec (GOFLAGS drop-in): no parent set OTELC_WORK_DIR, and the
+	// toolchain may run us from the package source dir (asm runs in the
+	// read-only module cache). Discover the dir from `otelc setup` rather than
+	// trusting cwd; skip filesystem setup when none is found instead of
+	// creating .otelc-build in an arbitrary location.
+	if cmd.Args().First() == "toolexec" && !cmd.IsSet("work-dir") && os.Getenv(util.EnvOtelcWorkDir) == "" {
+		workDir = util.DiscoverWorkDir(workDir)
+		if workDir == "" {
+			return ctx, nil
+		}
+	}
+
 	if setErr := os.Setenv(util.EnvOtelcWorkDir, workDir); setErr != nil {
 		return ctx, ex.Wrapf(setErr, "failed to set %s", util.EnvOtelcWorkDir)
 	}

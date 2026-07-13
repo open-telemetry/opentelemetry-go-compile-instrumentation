@@ -10,4 +10,4 @@ import _ "unsafe"
 var _getstack0 = _otel_debug.Stack
 
 //go:linkname _printstack0 github.com/example/pkg.OtelPrintStackImpl
-var _printstack0 = func(bt []byte) { _otel_log.Printf(string(bt)) }
+var _printstack0 = func(bt []byte) { _otel_log.Print(string(bt)) }

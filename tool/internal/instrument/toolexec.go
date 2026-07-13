@@ -5,9 +5,13 @@ package instrument
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -348,27 +352,81 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	return args, nil
 }
 
+// toolVersionLine appends an otelc marker to a `tool -V=full` line so the tool
+// ID (and every build cache key derived from it) differs from a plain build.
+// The rules hash is included so editing the config invalidates cached
+// artifacts too. For devel toolchains, Go uses only the content ID in the
+// trailing `buildID=...` field, so append the marker to that field's value.
+func toolVersionLine(line, rulesHash string) string {
+	hasBuildID := strings.Contains(line, " buildID=")
+	marker := "otelc@" + util.Version
+	if rulesHash != "" {
+		if hasBuildID {
+			marker += "+" + rulesHash
+		} else {
+			marker += "/" + rulesHash
+		}
+	}
+	if hasBuildID {
+		return line + "+" + marker
+	}
+	return line + " " + marker
+}
+
+// markedToolVersion turns a tool's raw `-V=full` output into the line otelc
+// reports in its place: the version with an otelc marker, plus the current
+// matched-rules hash when one exists.
+func markedToolVersion(rawOutput string) string {
+	var rulesHash string
+	if content, err := os.ReadFile(util.GetMatchedRuleFile()); err == nil {
+		sum := sha256.Sum256(content)
+		rulesHash = hex.EncodeToString(sum[:8])
+	}
+	return toolVersionLine(strings.TrimSpace(rawOutput), rulesHash)
+}
+
+// interceptToolVersion handles the `tool -V=full` probe go uses to compute
+// tool IDs, printing the tool's own version line with an otelc marker added.
+func interceptToolVersion(ctx context.Context, args []string) error {
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec // args come from the go toolchain
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return ex.Wrapf(err, "running %v", args)
+	}
+
+	// The line goes to stdout: it is the answer go itself is waiting for.
+	_, err = os.Stdout.WriteString(markedToolVersion(string(out)) + "\n")
+	if err != nil {
+		return ex.Wrapf(err, "writing tool version")
+	}
+	return nil
+}
+
 // Toolexec is the entry point of the toolexec command. It intercepts all the
 // commands(link, compile, asm, etc) during build process. Our responsibility is
 // to find out the compile command we are interested in and run it with the
 // instrumented code, and ensure the link command has all necessary dependencies.
-func Toolexec(ctx context.Context, args []string) error {
+// nested (see EnvOtelcNestedToolexec) means this runs inside a go command
+// another otelc spawned; such invocations only rewrite tool version probes.
+func Toolexec(ctx context.Context, args []string, nested bool) error {
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
 
-	// Intercept compile commands for instrumentation
-	if util.IsCompileCommandWithArgs(args) {
-		var err error
-		args, err = interceptCompile(ctx, args)
-		if err != nil {
-			return err
-		}
+	// go derives each tool's ID (an input to every build cache key) from
+	// `tool -V=full` run through toolexec. Answer it with an otelc marker
+	// appended so instrumented artifacts never share cache entries with plain
+	// builds; instrumentation changes compile output without changing any
+	// input go hashes.
+	if len(args) == 2 && args[1] == "-V=full" {
+		return interceptToolVersion(ctx, args)
 	}
 
-	// Intercept link commands to update importcfg with added dependencies
-	if util.IsLinkCommandWithArgs(args) {
+	// The tool version rewrite above already keeps a nested build's cache keys
+	// aligned with the outer one; instrumenting here too would recurse.
+	if !nested {
 		var err error
-		args, err = interceptLink(ctx, args)
+		args, err = interceptToolCommand(ctx, args)
 		if err != nil {
 			return err
 		}
@@ -389,4 +447,42 @@ func Toolexec(ctx context.Context, args []string) error {
 		"duration", elapsed,
 	)
 	return err
+}
+
+// interceptToolCommand rewrites the compile and link commands otelc cares
+// about; every other tool invocation is returned unchanged.
+func interceptToolCommand(ctx context.Context, args []string) ([]string, error) {
+	// Intercept compile commands for instrumentation
+	if util.IsCompileCommandWithArgs(args) {
+		return interceptCompile(ctx, args)
+	}
+	// Intercept link commands to update importcfg with added dependencies
+	if util.IsLinkCommandWithArgs(args) {
+		return interceptLink(ctx, args)
+	}
+	return args, nil
+}
+
+// EnableNestedToolexec points GOFLAGS at this executable in nested mode, so go
+// commands this process spawns (e.g. `go list -export`) run through a
+// version-only otelc toolexec and share this build's cache keys. Any existing
+// -toolexec was stripped at startup. Must only be called from the real otelc
+// binary, since os.Executable is what nested go commands will run.
+func EnableNestedToolexec() error {
+	execPath, err := os.Executable()
+	if err != nil {
+		return ex.Wrapf(err, "resolving otelc executable path")
+	}
+	toolexecFlag, err := util.QuoteGoflagsToken(fmt.Sprintf("-toolexec=%s toolexec", execPath))
+	if err != nil {
+		return ex.Wrapf(err, "quoting nested toolexec GOFLAGS entry")
+	}
+	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + " " + toolexecFlag)
+	if err = os.Setenv("GOFLAGS", goflags); err != nil {
+		return ex.Wrapf(err, "setting GOFLAGS for nested go commands")
+	}
+	if err = os.Setenv(util.EnvOtelcNestedToolexec, "1"); err != nil {
+		return ex.Wrapf(err, "setting %s", util.EnvOtelcNestedToolexec)
+	}
+	return nil
 }
