@@ -47,6 +47,8 @@ Integration tests build real binaries with the `otelc` tool and run them against
 
 Test applications are built on demand by the tests that use them. Each top-level test builds its required application once (via `otelc go build`) and reuses the resulting binary across its subtests when applicable.
 
+CI shards the integration suite by top-level test-name partitions through `INTEGRATION_TEST_RUN`; `SHARD_TOTAL` controls the shard count, and new tests are assigned automatically without per-test workflow changes.
+
 Each test follows the same pattern:
 
 1. Start an in-memory OTLP collector.
