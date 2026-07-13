@@ -373,18 +373,11 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(findModErr, "finding module directories for build packages")
 	}
 
-	// Track generated & modified files with state manager
+	// Ensure a state manager is available in the context
 	stateManager, found := StateManagerFromContext(ctx)
 	if !found {
 		// save this state manager in the context
 		ctx = ContextWithStateManager(ctx, stateManager)
-		// We only need to commit the state to disk if it was not found in the context
-		// i.e., it was created by this setup invocation
-		defer func() {
-			if err = stateManager.Commit(); err != nil {
-				logger.Error("failed to commit state", "error", err)
-			}
-		}()
 	}
 
 	// Auto-pin generates/updates otel.instrumentation.go file

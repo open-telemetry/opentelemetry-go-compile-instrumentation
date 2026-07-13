@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/util"
@@ -288,6 +289,35 @@ func TestStateManagerTrack_Duplicate(t *testing.T) {
 	require.True(t, stateManager.files[path])
 }
 
+func TestStateManagerTrackPersistsBeforeMutation(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n\ngo 1.25.0\n")
+	runtimeFile := filepath.Join(tmp, OtelcRuntimeFile)
+
+	// The "build" process tracks, mutates, and dies without any explicit
+	// Commit, exactly the `otelc go build` path.
+	dying := NewStateManager()
+	require.NoError(t, dying.Track(goMod))
+	require.NoError(t, dying.Track(runtimeFile))
+	mustWriteFile(t, goMod, "module example.com/app\n\ngo 1.25.0\n\nreplace x => ./.otelc-build/x\n")
+	mustWriteFile(t, runtimeFile, "package main\n")
+	// (process dies here)
+
+	// A fresh process recovers from the manifest alone.
+	recovered, err := LoadStateManager()
+	require.NoError(t, err)
+	require.NotNil(t, recovered, "manifest must exist without an explicit Commit")
+	require.NoError(t, recovered.Revert())
+
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n\ngo 1.25.0\n", string(content), "go.mod must be restored")
+	assert.False(t, util.PathExists(runtimeFile), "generated runtime file must be removed")
+}
+
 func TestStateManagerTrackAll(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
@@ -389,4 +419,25 @@ func TestStateManagerRoundTrip(t *testing.T) {
 	require.Equal(t, "module original", string(data))
 
 	require.False(t, util.PathExists(generated))
+}
+
+func TestStateManagerCommitIsAtomicAndSorted(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	b := filepath.Join(tmp, "b.txt")
+	a := filepath.Join(tmp, "a.txt")
+	mustWriteFile(t, a, "a")
+
+	s := NewStateManager()
+	require.NoError(t, s.Track(b)) // missing file, tracked first
+	require.NoError(t, s.Track(a))
+
+	first, err := os.ReadFile(util.GetBuildTemp(stateFileName))
+	require.NoError(t, err)
+	require.NoError(t, s.Commit())
+	second, err := os.ReadFile(util.GetBuildTemp(stateFileName))
+	require.NoError(t, err)
+	assert.Equal(t, string(first), string(second), "manifest serialization must be deterministic")
+	assert.False(t, util.PathExists(util.GetBuildTemp(stateFileName)+".tmp"), "no temp file left behind")
 }

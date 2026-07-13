@@ -132,9 +132,10 @@ func (sp *SetupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	root := buildOtelcRuntimeAst(append(importDecls, varDecls...))
 	otelcRuntimeFilePath := filepath.Join(packagePath, OtelcRuntimeFile)
 	// Track file in state manager
-	stateManager, _ := StateManagerFromContext(ctx)
-	if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
-		return err
+	if stateManager, found := StateManagerFromContext(ctx); found {
+		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
+			return err
+		}
 	}
 	// Write the ast to file
 	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {

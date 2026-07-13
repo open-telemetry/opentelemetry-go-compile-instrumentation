@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"go.opentelemetry.io/otelc/tool/util"
@@ -37,13 +38,31 @@ func cleanupLocked(ctx context.Context, cleanAll bool) error {
 		}
 	}
 
+	reverted := true
 	if stateManager != nil {
 		if err := stateManager.Revert(); err != nil {
+			reverted = false
 			logger.WarnContext(ctx, "failed to revert state", "error", err)
+		}
+
+		// If Revert succeeded, discard the consumed state.
+		if reverted {
+			if discardErr := stateManager.Discard(); discardErr != nil {
+				logger.WarnContext(ctx, "failed to discard consumed state", "error", discardErr)
+			}
 		}
 	}
 
 	if cleanAll {
+		if !reverted {
+			// The manifest and snapshots under .otelc-build/state are the only
+			// way left to restore go.mod/go.sum; deleting them now would strand
+			// the tree with replace directives pointing at removed directories.
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: state could not be fully reverted; "+
+				"original file snapshots remain available for recovery at: %s\n",
+				util.GetBuildTemp(stateDir))
+			return nil
+		}
 		// Remove the entire .otelc-build/ temp directory last.
 		// The extracted instrumentation package lives inside .otelc-build/pkg/,
 		// so this also covers removing it.

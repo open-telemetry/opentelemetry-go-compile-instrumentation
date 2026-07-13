@@ -58,6 +58,10 @@ $(YAMLFMT): PACKAGE=github.com/google/yamlfmt/cmd/yamlfmt
 RATCHET = $(TOOLS)/ratchet
 $(RATCHET): PACKAGE=github.com/sethvargo/ratchet
 
+BUNDLE = $(TOOLS)/bundle
+$(BUNDLE): | $(TOOLS)
+	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
+
 EMBEDMD = $(TOOLS)/embedmd
 $(EMBEDMD): PACKAGE=github.com/campoy/embedmd
 
@@ -155,7 +159,6 @@ install: package ## Install otelc to $$GOPATH/bin (auto-packages instrumentation
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
 	@set -euo pipefail
-	@rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@if [ ! -d pkg ]; then \
 		echo "Error: pkg directory does not exist"; \
 		exit 1; \
@@ -164,14 +167,14 @@ package: ## Package the instrumentation code into binary
 		echo "Error: instrumentation directory does not exist"; \
 		exit 1; \
 	fi
+	@trap 'rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)' EXIT
 	@cp -r pkg $(INST_BUNDLE_PKG_TMP)
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
 	@(cd $(INST_BUNDLE_PKG_TMP) && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
-	@tar -czf $(INST_BUNDLE_ARCHIVE) --exclude='*.log' $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@mkdir -p tool/data/
-	@mv $(INST_BUNDLE_ARCHIVE) tool/data/
-	@rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
+	@$(MAKE) $(BUNDLE)
+	@$(BUNDLE) tool/data/$(INST_BUNDLE_ARCHIVE) $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@echo "Package created successfully at tool/data/$(INST_BUNDLE_ARCHIVE)"
 
 build-demo: ## Build all demos

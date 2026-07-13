@@ -12,8 +12,8 @@ tmp
 demo/demo
 
 otelc.runtime.go
-otelc-bundle.tgz
 pkg_temp
+instrumentation_temp
 coverage.txt
 
 go.work

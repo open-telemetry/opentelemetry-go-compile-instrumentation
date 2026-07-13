@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -287,6 +289,54 @@ func TestCleanupKeepsBuildDirNoArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cleanup(cleanAll=false) returned unexpected error: %v", err)
 	}
+}
+
+func TestCleanup_RecoversAfterCrash(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+
+	dying := NewStateManager()
+	require.NoError(t, dying.Track(goMod))
+	mustWriteFile(t, goMod, "module example.com/app\n\nreplace x => ./.otelc-build/x\n")
+
+	// Fresh process, no state manager in the context: Cleanup must load the
+	// manifest from disk, restore the tree, and discard the consumed state.
+	require.NoError(t, Cleanup(t.Context(), false))
+
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n", string(content))
+	assert.False(t, util.PathExists(util.GetBuildTemp(stateFileName)), "consumed manifest must be discarded")
+	assert.False(t, util.PathExists(util.GetBuildTemp(stateDir)), "consumed snapshots must be discarded")
+}
+
+func TestCleanup_KeepsSnapshotsWhenRevertFails(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	goMod := filepath.Join(tmp, "go.mod")
+	otherFile := filepath.Join(tmp, "other.txt")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	mustWriteFile(t, otherFile, "keep me\n")
+
+	dying := NewStateManager()
+	require.NoError(t, dying.Track(goMod))
+	require.NoError(t, dying.Track(otherFile))
+
+	// Sabotage one snapshot so Revert fails partially.
+	require.NoError(t, os.Remove(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(otherFile))))
+
+	require.NoError(t, Cleanup(t.Context(), true))
+
+	// Even with cleanAll, a failed revert must not delete the remaining
+	// snapshots as they are the only path left to recovery.
+	assert.True(t, util.PathExists(util.GetBuildTemp(stateFileName)),
+		"manifest must survive a failed revert even with cleanAll")
+	assert.True(t, util.PathExists(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod))),
+		"snapshots must survive a failed revert even with cleanAll")
 }
 
 // mustWriteFile creates a file with the given content, creating parent dirs as needed.
