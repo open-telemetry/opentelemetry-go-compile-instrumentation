@@ -18,7 +18,16 @@ import (
 // When cleanAll is false, backed-up files are restored and the generated runtime
 // file is removed, but .otelc-build/ is kept for debugging. When cleanAll is
 // true, .otelc-build/ is also removed.
+//
+// Cleanup runs under the build lock; GoBuild's deferred call reuses the
+// surrounding lock via the context marker instead of re-acquiring it.
 func Cleanup(ctx context.Context, cleanAll bool) error {
+	return withBuildLock(ctx, func(ctx context.Context) error {
+		return cleanupLocked(ctx, cleanAll)
+	})
+}
+
+func cleanupLocked(ctx context.Context, cleanAll bool) error {
 	logger := util.LoggerFromContext(ctx)
 	stateManager, found := StateManagerFromContext(ctx)
 	if !found {
