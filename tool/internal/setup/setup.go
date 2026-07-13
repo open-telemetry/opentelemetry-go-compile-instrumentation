@@ -294,7 +294,7 @@ func (sp *SetupPhase) generateRuntimePerPackage(
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, pkgDir); err != nil {
+		if err := sp.addDeps(ctx, matched, pkgDir, pkg.Name); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
