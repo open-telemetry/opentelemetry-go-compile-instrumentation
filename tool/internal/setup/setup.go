@@ -619,11 +619,11 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Serialize with other otelc invocations in this module before touching
 	// any shared state (tracking files, go.mod, .otelc-build contents).
 	return withBuildLock(ctx, func(ctx context.Context) error {
-		return goBuildLocked(ctx, cmd)
+		return runGoBuild(ctx, cmd)
 	})
 }
 
-func goBuildLocked(ctx context.Context, cmd *cli.Command) error {
+func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	ctx = ContextWithStateManager(ctx, NewStateManager())
 	logger := util.LoggerFromContext(ctx)
 
