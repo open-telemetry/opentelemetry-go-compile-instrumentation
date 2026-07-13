@@ -81,10 +81,8 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: test/.otelc-gocache
-          key: ${{ runner.os }}-${{ matrix.platform.arch }}-otelc-gocache-shard${{ matrix.shard }}-${{ hashFiles('**/go.sum',
-            'tool/**', 'pkg/**', 'instrumentation/**') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.platform.arch }}-otelc-gocache-shard${{ matrix.shard }}-
+          key: ${{ runner.os }}-${{ matrix.platform.arch }}-otelc-gocache-shard${{ matrix.shard }}-${{ hashFiles('go.mod',
+            '**/go.mod', '**/go.sum', 'Makefile', 'tool/**', 'pkg/**', 'instrumentation/**', 'test/apps/**') }}
       - name: Build and test
         env:
           GOARCH: ${{ matrix.platform.arch }}
@@ -95,7 +93,7 @@ jobs:
         run: |
           set -euo pipefail
           # grpcpb is committed, so the integration package lists without building otelc/demo.
-          names=$(go -C test test -tags integration -list '^Test' ./integration/... 2>/dev/null | grep -E '^Test' | sort)
+          names=$(go -C test test -tags integration -list '^Test' ./integration/... | grep -E '^Test' | sort)
           run=$(printf '%s\n' "$names" | awk -v idx="$SHARD_INDEX" -v tot="$SHARD_TOTAL" '
             (NR-1) % tot == idx { a[n++]=$0 }
             END { if (n==0){print "^$"; exit}
@@ -111,12 +109,19 @@ jobs:
     steps:
       - name: Check result
         run: |
-          result="${{ needs.test-integration.result }}"
-          echo "Test result: $result"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "✅ Tests passed or were skipped"
+          code_changed="${{ needs.changes.outputs.code }}"
+          coverage_result="${{ needs.test-integration-coverage.result }}"
+          integration_result="${{ needs.test-integration.result }}"
+          echo "Code changed: $code_changed"
+          echo "Coverage result: $coverage_result"
+          echo "Integration result: $integration_result"
+          if [[ "$code_changed" != "true" ]]; then
+            echo "No relevant code changes; tests skipped"
             exit 0
-          else
-            echo "❌ Tests failed"
-            exit 1
           fi
+          if [[ "$coverage_result" == "success" && "$integration_result" == "success" ]]; then
+            echo "Tests passed"
+            exit 0
+          fi
+          echo "Tests failed"
+          exit 1

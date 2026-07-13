@@ -102,5 +102,5 @@ Results:
 
 Targeted correctness checks passed with `OTELC_TEST_GOCACHE` set:
 
-- `go -C test test -count=1 -tags integration -run '^TestExplicitInstrumentationSelection$' ./integration/...`
-- `go -C test test -count=1 -tags integration -run '^(TestVendoredBuild|TestAutoPin_RemovesGeneratedToolFile)$' ./integration/...`
+- `OTELC_TEST_GOCACHE=/tmp/otelc-test-gocache-phase2 go -C test test -count=1 -tags integration -run '^TestExplicitInstrumentationSelection$' ./integration/...`
+- `OTELC_TEST_GOCACHE=/tmp/otelc-test-gocache-phase2 go -C test test -count=1 -tags integration -run '^(TestVendoredBuild|TestAutoPin_RemovesGeneratedToolFile)$' ./integration/...`

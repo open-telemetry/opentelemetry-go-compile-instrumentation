@@ -86,6 +86,8 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 			require.NoError(t, os.MkdirAll(cacheDir, 0o755))
 			env = append(os.Environ(), "GOCACHE="+cacheDir)
 
+			// The external cache is per app, so dropping -a keeps warm builds fast
+			// without sharing compiled objects between different instrumentation configs.
 			filteredArgs := make([]string, 0, len(args))
 			for _, arg := range args {
 				if arg != "-a" {
