@@ -8,8 +8,15 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/urfave/cli/v3"
+
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+// CleanupCommand is the CLI entry point for `otelc cleanup`.
+func CleanupCommand(ctx context.Context, _ *cli.Command, cleanAll bool) error {
+	return Cleanup(ctx, cleanAll)
+}
 
 // Cleanup removes artifacts created by the setup and build phases.
 // It is idempotent and best-effort: individual failures are logged as warnings

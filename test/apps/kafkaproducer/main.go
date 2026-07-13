@@ -17,9 +17,7 @@ import (
 	kafka "github.com/segmentio/kafka-go"
 )
 
-var (
-	topic = flag.String("topic", "orders", "kafka topic")
-)
+var topic = flag.String("topic", "orders", "kafka topic")
 
 func brokers() []string {
 	if v := os.Getenv("KAFKA_BROKERS"); v != "" {

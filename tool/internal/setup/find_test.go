@@ -281,23 +281,24 @@ func TestListBuildPlan(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		subcommand    string // defaults to "build" when empty
-		buildPlan     string
+		subcommand    string
 		args          []string
+		buildPlan     string
 		expected      []string
 		wantErr       bool
 		buildFails    bool
 		expectedGoCmd []string
 	}{
 		{
-			name: "filters compile and cgo commands",
+			name:       "filters compile and cgo commands",
+			subcommand: "build",
+			args:       []string{"./..."},
 			buildPlan: `
 cd /project/pkg
 .../cgo -objdir /tmp/b001 -importpath pkg/cgo
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 echo ignored
 `,
-			args: []string{"./..."},
 			expected: []string{
 				"cd /project/pkg",
 				".../cgo -objdir /tmp/b001 -importpath pkg/cgo",
@@ -308,11 +309,12 @@ echo ignored
 			},
 		},
 		{
-			name: "passes additional build args",
+			name:       "passes additional build args",
+			subcommand: "build",
+			args:       []string{"-tags=integration", "./cmd"},
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 `,
-			args: []string{"-tags=integration", "./cmd"},
 			expected: []string{
 				".../compile -o /tmp/out.a -buildid abc -p main main.go",
 			},
@@ -323,11 +325,12 @@ echo ignored
 			},
 		},
 		{
-			name: "returns build failure",
+			name:       "returns build failure",
+			subcommand: "build",
+			args:       []string{"./bad"},
 			buildPlan: `
 go: module example.com missing
 `,
-			args:       []string{"./bad"},
 			buildFails: true,
 			wantErr:    true,
 			expectedGoCmd: []string{
@@ -335,22 +338,24 @@ go: module example.com missing
 			},
 		},
 		{
-			name: "empty build plan",
+			name:       "empty build plan",
+			subcommand: "build",
+			args:       []string{"./..."},
 			buildPlan: `
 echo nothing useful
 `,
-			args: []string{"./..."},
 			expectedGoCmd: []string{
 				"build", "-a", "-x", "-n", "./...",
 			},
 		},
 		{
-			name: "ignores malformed compile lines",
+			name:       "ignores malformed compile lines",
+			subcommand: "build",
+			args:       []string{"./..."},
 			buildPlan: `
 .../compile foo
 .../cgo blah
 `,
-			args:          []string{"./..."},
 			expected:      nil,
 			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./..."},
 		},
@@ -360,14 +365,28 @@ echo nothing useful
 			// gates on. A `go build` plan would never contain them.
 			name:       "test subcommand lists a go test plan",
 			subcommand: "test",
+			args:       []string{"./..."},
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 `,
-			args: []string{"./..."},
 			expected: []string{
 				".../compile -o /tmp/out.a -buildid abc -p main main.go",
 			},
 			expectedGoCmd: []string{"test", "-a", "-x", "-n", "./..."},
+		},
+		{
+			name:       "-C passed as build arg",
+			subcommand: "build",
+			args:       []string{"-C", "/project", "./..."},
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{
+				"build", "-a", "-x", "-n", "-C", "/project", "./...",
+			},
 		},
 	}
 
@@ -395,11 +414,7 @@ echo nothing useful
 				return exec.Command("sh", "-c", script)
 			}
 
-			subcommand := tt.subcommand
-			if subcommand == "" {
-				subcommand = "build"
-			}
-			buildPlan, err := listBuildPlan(t.Context(), subcommand, tt.args)
+			buildPlan, err := listBuildPlan(t.Context(), tt.subcommand, tt.args)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.buildPlan != "" {

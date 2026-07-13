@@ -89,9 +89,9 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	// needs its own plan because only it surfaces the test-augmented, external
 	// test, and test-main compiles that is_test gates on. `go install` shares
 	// `go build`'s compile plan, so it stays on the build verb.
-	planVerb := subcmdBuild
-	if subcommand == subcmdTest {
-		planVerb = subcmdTest
+	planVerb := subcommand
+	if planVerb != subcmdTest {
+		planVerb = subcmdBuild
 	}
 	// The full command is: "go build/test -a -x -n {...}"
 	prefix := []string{planVerb, "-a", "-x", "-n"}

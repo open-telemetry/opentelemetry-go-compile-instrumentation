@@ -535,6 +535,8 @@ type PinOptions struct {
 	Args []string
 	// Subcommand passed to go in findDeps (defaults to "build")
 	Subcommand string
+	// BuildDir is the -C directory, if any
+	BuildDir string
 	// ModuleDirs is the set of module directories to search for tool files
 	// If empty, module directories will be found using opts.Args
 	ModuleDirs map[string]bool
@@ -565,7 +567,7 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 		opts.Args = args
 
 		// Use opts.Args to find module directories
-		pkgs, getErr := getBuildPackages(ctx, opts.Args)
+		pkgs, getErr := getBuildPackages(ctx, opts.BuildDir, opts.Args)
 		if getErr != nil {
 			return nil, ex.Wrapf(getErr, "getting build packages")
 		}
@@ -594,7 +596,12 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 
 // AutoPin is a convenience function that automatically tracks generated/modified files before calling Pin
 // in order to restore them after the build completes.
-func AutoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
+func AutoPin(
+	ctx context.Context,
+	moduleDirs map[string]bool,
+	subcommand, buildDir string,
+	args []string,
+) (*PinResult, error) {
 	stateManager, found := StateManagerFromContext(ctx)
 	if !found {
 		return nil, ex.New("state manager not found in context")
@@ -612,6 +619,7 @@ func AutoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string,
 		Prune:      true,
 		Args:       args,
 		Subcommand: subcommand,
+		BuildDir:   buildDir,
 		ModuleDirs: moduleDirs,
 	})
 
