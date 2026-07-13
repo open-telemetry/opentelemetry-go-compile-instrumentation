@@ -77,18 +77,37 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 	otelc, err := OtelcPath()
 	require.NoError(t, err)
 
+	standardAppsDir := appsDir == ""
+	var env []string
+	if standardAppsDir {
+		cacheRoot := os.Getenv("OTELC_TEST_GOCACHE")
+		if cacheRoot != "" {
+			cacheDir := filepath.Join(cacheRoot, app)
+			require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+			env = append(os.Environ(), "GOCACHE="+cacheDir)
+
+			filteredArgs := make([]string, 0, len(args))
+			for _, arg := range args {
+				if arg != "-a" {
+					filteredArgs = append(filteredArgs, arg)
+				}
+			}
+			args = filteredArgs
+		}
+	}
+
 	output := appOutputName()
 	args = append(args, "-o", output)
 	args = append([]string{otelc}, args...)
 
-	if appsDir == "" {
+	if standardAppsDir {
 		var err error
 		appsDir, err = appsPath()
 		require.NoError(t, err)
 	}
 	appDir := filepath.Join(appsDir, app)
 
-	cmd := newCmd(t.Context(), appDir, nil, args...)
+	cmd := newCmd(t.Context(), appDir, env, args...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 	t.Cleanup(func() {

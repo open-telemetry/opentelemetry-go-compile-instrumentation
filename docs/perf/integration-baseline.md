@@ -81,3 +81,26 @@ Selected top-level local durations from `gotest-integration.log`:
 | TestExplicitInstrumentationSelection | 204.91s |
 | TestAutoPin_RemovesGeneratedToolFile | 203.06s |
 | TestHTTPClient | 42.98s |
+
+## Local cache measurement
+
+Command:
+
+```sh
+OTELC_TEST_GOCACHE=/tmp/otelc-test-gocache-phase2 \
+DOCKER_HOST=unix://$HOME/.colima/otel-issue-676/docker.sock \
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
+/usr/bin/time -p make test-integration
+```
+
+Results:
+
+| Run | real | Go package elapsed | Top-level tests passed |
+| --- | ---: | ---: | ---: |
+| Cold per-app cache | 261.12s | 226.018s | 24 |
+| Warm per-app cache | 154.63s | 121.287s | 24 |
+
+Targeted correctness checks passed with `OTELC_TEST_GOCACHE` set:
+
+- `go -C test test -count=1 -tags integration -run '^TestExplicitInstrumentationSelection$' ./integration/...`
+- `go -C test test -count=1 -tags integration -run '^(TestVendoredBuild|TestAutoPin_RemovesGeneratedToolFile)$' ./integration/...`

@@ -77,9 +77,18 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # ratchet:arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore otelc Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: test/.otelc-gocache
+          key: ${{ runner.os }}-${{ matrix.platform.arch }}-otelc-gocache-shard${{ matrix.shard }}-${{ hashFiles('**/go.sum',
+            'tool/**', 'pkg/**', 'instrumentation/**') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.platform.arch }}-otelc-gocache-shard${{ matrix.shard }}-
       - name: Build and test
         env:
           GOARCH: ${{ matrix.platform.arch }}
+          OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache
           SHARD_INDEX: ${{ matrix.shard }}
           SHARD_TOTAL: "3"
         shell: bash

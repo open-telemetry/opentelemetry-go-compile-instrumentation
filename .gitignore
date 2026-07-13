@@ -26,6 +26,7 @@ dist
 test/apps/*/app
 test/apps/*/app.exe
 
+test/.otelc-gocache/
 test/bench/scenarios/*/app
 bench.json
 bench-action.json
