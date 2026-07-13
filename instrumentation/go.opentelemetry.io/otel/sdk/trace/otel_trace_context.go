@@ -24,6 +24,10 @@ func registerSpanFromGLSFunc(f func() trace.Span)
 
 const defaultGLSMaxSpans = 1000
 
+// maxSpanStates bounds lifecycle bookkeeping. Evicted states are marked ended,
+// so reaching the limit drops implicit propagation instead of retaining a stale parent.
+const maxSpanStates = 100_000
+
 var otelGLSMaxSpans = defaultGLSMaxSpans
 
 func init() {
@@ -54,15 +58,32 @@ type spanKey struct {
 	spanID  trace.SpanID
 }
 
-var spanStates sync.Map
+var spanStates = struct {
+	sync.Mutex
+	states map[spanKey]*atomic.Bool
+}{states: make(map[spanKey]*atomic.Bool)}
 
 func stateForSpan(span trace.Span) *atomic.Bool {
 	sc := span.SpanContext()
 	if !sc.IsValid() {
 		return &atomic.Bool{}
 	}
-	state, _ := spanStates.LoadOrStore(spanKey{sc.TraceID(), sc.SpanID()}, &atomic.Bool{})
-	return state.(*atomic.Bool)
+	key := spanKey{sc.TraceID(), sc.SpanID()}
+	spanStates.Lock()
+	defer spanStates.Unlock()
+	if state, ok := spanStates.states[key]; ok {
+		return state
+	}
+	if len(spanStates.states) >= maxSpanStates {
+		for key, state := range spanStates.states {
+			state.Store(true)
+			delete(spanStates.states, key)
+			break
+		}
+	}
+	state := &atomic.Bool{}
+	spanStates.states[key] = state
+	return state
 }
 
 func markSpanEnded(span trace.Span) {
@@ -71,14 +92,33 @@ func markSpanEnded(span trace.Span) {
 		return
 	}
 	key := spanKey{sc.TraceID(), sc.SpanID()}
-	if state, ok := spanStates.Load(key); ok {
-		state.(*atomic.Bool).Store(true)
-		spanStates.CompareAndDelete(key, state)
+	spanStates.Lock()
+	defer spanStates.Unlock()
+	if state, ok := spanStates.states[key]; ok {
+		state.Store(true)
+		delete(spanStates.states, key)
+	}
+}
+
+func (tc *traceContext) compact() {
+	addr := &tc.sw
+	for *addr != nil {
+		if (*addr).ended.Load() {
+			*addr = (*addr).prev
+			tc.n--
+			continue
+		}
+		addr = &(*addr).prev
+	}
+	tc.lcs = nil
+	for cur := tc.sw; cur != nil; cur = cur.prev {
+		tc.lcs = cur.span
 	}
 }
 
 func (tc *traceContext) add(span trace.Span) bool {
-	if tc.n > 0 {
+	if tc.n >= otelGLSMaxSpans {
+		tc.compact()
 		if tc.n >= otelGLSMaxSpans {
 			return false
 		}
@@ -92,6 +132,9 @@ func (tc *traceContext) add(span trace.Span) bool {
 	return true
 }
 
+// tail must be called only on the current goroutine's own context: it mutates the
+// stack, whose list fields are unsynchronized. Only ended flags are shared.
+//
 //go:norace
 func (tc *traceContext) tail() trace.Span {
 	for tc.sw != nil && tc.sw.ended.Load() {
@@ -99,6 +142,7 @@ func (tc *traceContext) tail() trace.Span {
 		tc.n--
 	}
 	if tc.sw == nil {
+		tc.lcs = nil
 		return nil
 	}
 	return tc.sw.span
@@ -113,7 +157,6 @@ func (tc *traceContext) localRootSpan() trace.Span {
 }
 
 func (tc *traceContext) del(span trace.Span) {
-	markSpanEnded(span)
 	if tc.n == 0 {
 		return
 	}
@@ -126,6 +169,12 @@ func (tc *traceContext) del(span trace.Span) {
 			cur.ended.Store(true)
 			*addr = cur.prev
 			tc.n--
+			if cur.prev == nil {
+				tc.lcs = nil
+				for remaining := tc.sw; remaining != nil; remaining = remaining.prev {
+					tc.lcs = remaining.span
+				}
+			}
 			break
 		}
 		addr = &cur.prev
@@ -136,6 +185,7 @@ func (tc *traceContext) del(span trace.Span) {
 func (tc *traceContext) clear() {
 	tc.sw = nil
 	tc.n = 0
+	tc.lcs = nil
 	runtime.SetBaggageContainerToGLS(nil)
 }
 
@@ -193,8 +243,10 @@ func GetTraceAndSpanID() (string, string) {
 }
 
 func traceContextDelSpan(span trace.Span) {
-	ctx := getOrInitTraceContext()
-	ctx.del(span)
+	markSpanEnded(span)
+	if ctx := runtime.GetTraceContextFromGLS(); ctx != nil {
+		ctx.(*traceContext).del(span)
+	}
 }
 
 func ClearTraceContext() {

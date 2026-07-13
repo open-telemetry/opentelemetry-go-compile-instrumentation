@@ -80,12 +80,33 @@ func workerHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+func compactHandler(w http.ResponseWriter, r *http.Request) {
+	_, lower := otel.Tracer("compact").Start(context.Background(), "lower-span")
+	_, top := otel.Tracer("compact").Start(context.Background(), "top-span")
+	done := make(chan struct{})
+	go func() {
+		lower.End()
+		close(done)
+	}()
+	<-done
+
+	_, replacement := otel.Tracer("compact").Start(context.Background(), "replacement-span")
+	active := trace.SpanFromContext(context.Background()).SpanContext()
+	fmt.Printf("OTEL_SDK_COMPACT: admitted=%t\n", active.SpanID() == replacement.SpanContext().SpanID())
+	replacement.End()
+	top.End()
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
 func main() {
 	flag.Parse()
 	addr := fmt.Sprintf(":%s", *port)
 
 	http.HandleFunc("/otel", otelHandler)
 	http.HandleFunc("/worker", workerHandler)
+	http.HandleFunc("/compact", compactHandler)
 	go func() {
 		span := <-spanToEnd
 		span.End()
@@ -102,7 +123,7 @@ func main() {
 		}
 	}()
 
-	for _, path := range []string{"otel", "worker"} {
+	for _, path := range []string{"otel", "worker", "compact"} {
 		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%s/%s", *port, path))
 		if err != nil {
 			log.Fatalf("request to %s failed: %v", path, err)

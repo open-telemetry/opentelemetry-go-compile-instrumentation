@@ -25,6 +25,7 @@ func TestOtelSDKSpanFromContext(t *testing.T) {
 	testutil.Build(t, "", "otelsdk", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
+	f.SetEnv("OTEL_GLS_MAX_SPANS", "3")
 
 	var output string
 	defer func() {
@@ -38,6 +39,8 @@ func TestOtelSDKSpanFromContext(t *testing.T) {
 	require.Contains(t, output, "traceID=")
 	require.Contains(t, output, "spanID=")
 	require.Contains(t, output, "OTEL_SDK_WORKER: stale span=false")
+	require.Contains(t, output, "OTEL_SDK_COMPACT: admitted=true",
+		"ended spans below the active span should not consume the GLS limit")
 
 	workerSpan := testutil.RequireSpan(t, f.Traces(), testutil.HasName("worker-span"))
 	require.True(t, workerSpan.ParentSpanID().IsEmpty(),
