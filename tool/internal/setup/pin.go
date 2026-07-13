@@ -552,6 +552,16 @@ type PinResult struct {
 // (not just those with instrumentation). The PinResult can be used by later stages (setup) instead of
 // re-parsing compile commands again.
 func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
+	var result *PinResult
+	err := withBuildLock(ctx, func(ctx context.Context) error {
+		var pinErr error
+		result, pinErr = pinLocked(ctx, opts)
+		return pinErr
+	})
+	return result, err
+}
+
+func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	moduleDirs := opts.ModuleDirs
 	// moduleDirs being empty means Pin was invoked as a standalone command
 	// (not as part of a setup run), so use opts.Args to find module directories.

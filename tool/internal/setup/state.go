@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -154,6 +155,10 @@ func (s *StateManager) TrackAll(paths ...string) error {
 // If path does not exist, it is recorded so Revert will remove it if it is
 // later created.
 //
+// The updated state is persisted to disk before Track returns, so a build
+// killed at any later point (SIGKILL, OOM, CI cancellation) leaves behind a
+// manifest from which `otelc cleanup` or the next build can restore the tree.
+//
 // Duplicate calls for the same path are ignored.
 func (s *StateManager) Track(path string) error {
 	abs, err := filepath.Abs(path)
@@ -169,7 +174,7 @@ func (s *StateManager) Track(path string) error {
 	// If the file doesn't exist, mark it for removal
 	if !util.PathExists(abs) {
 		s.files[abs] = false
-		return nil
+		return s.Commit()
 	}
 
 	// If the file exists, snapshot it
@@ -179,12 +184,20 @@ func (s *StateManager) Track(path string) error {
 	}
 
 	s.files[abs] = true
-	return nil
+	return s.Commit()
 }
 
 // Commit persists the tracked state to disk so it can be restored by a future
-// process.
+// process. The manifest is written atomically (temp file + rename) so a crash
+// mid-write never leaves a truncated manifest behind.
+//
+// Track calls Commit automatically; calling it directly is only needed to
+// re-persist after external changes.
 func (s *StateManager) Commit() error {
+	if len(s.files) == 0 {
+		return nil
+	}
+
 	entries := make([]string, 0, len(s.files))
 
 	for path, exists := range s.files {
@@ -195,23 +208,42 @@ func (s *StateManager) Commit() error {
 		}
 	}
 
-	f := util.GetBuildTemp(stateFileName)
-	file, err := os.Create(f)
-	if err != nil {
-		return ex.Wrapf(err, "failed to create file %s", f)
-	}
-	defer file.Close()
+	// Sort the entries for deterministic behavior
+	sort.Strings(entries)
 
 	bs, err := json.Marshal(entries)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal state to JSON")
 	}
 
-	if _, err = file.Write(bs); err != nil {
-		return ex.Wrapf(err, "failed to write JSON to file %s", f)
+	f := util.GetBuildTemp(stateFileName)
+	if err = os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+		return ex.Wrapf(err, "failed to create build temp directory")
+	}
+
+	if err = util.WriteFileAtomic(f, bs); err != nil {
+		return ex.Wrapf(err, "failed to write state file %s", f)
 	}
 
 	return nil
+}
+
+// Discard removes the persisted manifest and snapshots. Call it only after a
+// successful Revert: the state is consumed, and leaving it behind would let a
+// later `otelc cleanup` re-apply snapshots from a finished build.
+func (s *StateManager) Discard() error {
+	if len(s.files) == 0 {
+		return nil
+	}
+
+	var err error
+	if rmErr := os.Remove(util.GetBuildTemp(stateFileName)); rmErr != nil && !os.IsNotExist(rmErr) {
+		err = ex.Join(err, rmErr)
+	}
+	if rmErr := os.RemoveAll(util.GetBuildTemp(stateDir)); rmErr != nil {
+		err = ex.Join(err, rmErr)
+	}
+	return err
 }
 
 // Revert restores all tracked files to the state they were in when tracked.
@@ -219,6 +251,10 @@ func (s *StateManager) Commit() error {
 // Files that originally existed are restored from their snapshots. Files that
 // did not exist when tracked are removed if they exist.
 func (s *StateManager) Revert() error {
+	if len(s.files) == 0 {
+		return nil
+	}
+
 	var err error
 
 	stateDir := util.GetBuildTemp(stateDir)
