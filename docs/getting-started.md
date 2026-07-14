@@ -23,7 +23,9 @@ No manual code changes required.
 2. **Try the demo**
 
    ```bash
-   make demo
+   cd demo/app/basic
+   ../../otelc go build
+   ./basic
    ```
 
 3. **Use with your application**
@@ -149,6 +151,6 @@ Learn more about the project from these presentations:
 
 ## Status
 
-> **Note**: This project is currently in active development and not yet ready for production use.
+This project is stable and ready for production use as of v1.0.0.
 
-For the latest updates and development progress, follow the project on GitHub and join the community discussions.
+For the latest updates, follow the project on GitHub and join the community discussions.
