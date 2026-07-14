@@ -28,3 +28,5 @@ require (
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 )
+
+retract v1.0.0 // otelc pin generates incorrect module paths in user go.mod files; use v1.0.1
