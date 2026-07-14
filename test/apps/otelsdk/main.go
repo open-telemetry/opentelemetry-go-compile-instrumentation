@@ -31,6 +31,11 @@ var (
 	spanEnded   = make(chan struct{})
 )
 
+// submit runs task on a single long-lived worker goroutine, created lazily on
+// first use. The goroutine inherits a GLS clone from whoever calls submit
+// first (the /otel handler, while its span is active), and that clone is then
+// reused across requests. This models real-world worker pools, where a
+// goroutine outlives the request whose GLS it inherited.
 func submit(task func()) {
 	startWorker.Do(func() {
 		go func() {
@@ -42,6 +47,10 @@ func submit(task func()) {
 	workerTasks <- task
 }
 
+// otelHandler verifies cross-goroutine propagation: the worker's GLS clone
+// snapshots the active span, so SpanFromContext must return it in the task.
+// The span is ended on a separate goroutine (see main) so it is only flagged
+// ended, never popped from the worker's clone.
 func otelHandler(w http.ResponseWriter, r *http.Request) {
 	_, span := otel.Tracer("handler").Start(context.Background(), "cross-goroutine-span")
 	done := make(chan struct{})
@@ -65,6 +74,9 @@ func otelHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+// workerHandler reuses the worker after the /otel span ended. Its GLS clone
+// still holds that span, so this checks SpanFromContext skips ended entries
+// (stale span=false) and worker-span starts as root, not as its child.
 func workerHandler(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 	submit(func() {
@@ -80,6 +92,10 @@ func workerHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+// compactHandler verifies ended spans below the active span don't consume the
+// GLS limit. With OTEL_GLS_MAX_SPANS=3 the stack [server-span, lower, top] is
+// full; ending lower on another goroutine only flags it, so replacement-span
+// hits the limit and must compact the stack to be admitted (admitted=true).
 func compactHandler(w http.ResponseWriter, r *http.Request) {
 	_, lower := otel.Tracer("compact").Start(context.Background(), "lower-span")
 	_, top := otel.Tracer("compact").Start(context.Background(), "top-span")
@@ -104,9 +120,15 @@ func main() {
 	flag.Parse()
 	addr := fmt.Sprintf(":%s", *port)
 
-	http.HandleFunc("/otel", otelHandler)
-	http.HandleFunc("/worker", workerHandler)
-	http.HandleFunc("/compact", compactHandler)
+	// Each endpoint exercises one GLS span-lifecycle scenario; the order in
+	// which they are requested below matters (/worker checks the aftermath of
+	// /otel). See the doc comment on each handler for details.
+	http.HandleFunc("/otel", otelHandler)       // cross-goroutine propagation via GLS clone
+	http.HandleFunc("/worker", workerHandler)   // ended span is invisible on a reused goroutine
+	http.HandleFunc("/compact", compactHandler) // ended spans don't count against OTEL_GLS_MAX_SPANS
+
+	// End the /otel span on a goroutine that never held it in GLS, so removal
+	// happens only through the shared ended flag (see otelHandler).
 	go func() {
 		span := <-spanToEnd
 		span.End()
