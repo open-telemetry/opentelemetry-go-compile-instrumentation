@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,15 +66,25 @@ func TestOperationName(t *testing.T) {
 
 func TestParseMessagesRequest(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"temperature":0.7,"top_p":0.9,"top_k":40}`)
-	model, attrs := parseMessagesRequest(body)
+	model, isStream, attrs := parseMessagesRequest(body)
 	assert.Equal(t, "claude-sonnet-4-5", model)
+	assert.False(t, isStream)
 	assert.Len(t, attrs, 4)
+}
+
+func TestParseMessagesRequest_Stream(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"stream":true}`)
+	model, isStream, attrs := parseMessagesRequest(body)
+	assert.Equal(t, "claude-sonnet-4-5", model)
+	assert.True(t, isStream)
+	assert.Len(t, attrs, 1)
 }
 
 func TestParseMessagesRequest_Invalid(t *testing.T) {
 	body := []byte(`invalid json`)
-	model, attrs := parseMessagesRequest(body)
+	model, isStream, attrs := parseMessagesRequest(body)
 	assert.Equal(t, "", model)
+	assert.False(t, isStream)
 	assert.Nil(t, attrs)
 }
 
@@ -132,9 +143,11 @@ func TestOtelMiddleware_Messages(t *testing.T) {
 	assertAttribute(t, attrs, "gen_ai.response.id", "msg_test_123")
 	assertAttribute(t, attrs, "gen_ai.response.model", "claude-sonnet-4-5")
 	assertStringSliceAttribute(t, attrs, "gen_ai.response.finish_reasons", []string{"end_turn"})
-	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 10)
+	// input_tokens folds in cache reads and creations (10 + 7 + 3): Anthropic
+	// reports them separately, unlike OpenAI's cache-inclusive prompt_tokens.
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 20)
 	assertInt64Attribute(t, attrs, "gen_ai.usage.output_tokens", 20)
-	assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 30)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 40)
 	assertInt64Attribute(t, attrs, "gen_ai.usage.cache_read.input_tokens", 7)
 	assertInt64Attribute(t, attrs, "gen_ai.usage.cache_creation.input_tokens", 3)
 }
@@ -200,10 +213,10 @@ func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
 	assert.Empty(t, sr.Ended())
 }
 
-// TestOtelMiddleware_Streaming verifies that a server-sent-event response keeps
-// the span open until the body is consumed, marks it as a stream, and ends it
-// once the reader reaches EOF.
-func TestOtelMiddleware_Streaming(t *testing.T) {
+// TestOtelMiddleware_StreamingRequestPassThrough verifies that streaming
+// requests are not instrumented until event accumulation lands, and that the
+// SDK still receives the complete request body.
+func TestOtelMiddleware_StreamingRequestPassThrough(t *testing.T) {
 	sr := setupTestTracer(t)
 
 	middleware := OtelMiddleware()
@@ -213,6 +226,40 @@ func TestOtelMiddleware_Streaming(t *testing.T) {
 		"POST",
 		"http://api.anthropic.com/v1/messages",
 		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
+
+	var received []byte
+	next := func(r *http.Request) (*http.Response, error) {
+		var err error
+		received, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("event: message_stop\n\n")),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, reqBody, string(received), "SDK must see the full request body")
+	assert.Empty(t, sr.Ended(), "streaming requests must not produce spans yet")
+}
+
+// TestOtelMiddleware_SSEResponseFallback covers the defensive path where a
+// request without the stream flag still receives an SSE response: the span
+// ends immediately instead of staying open on an unconsumed body.
+func TestOtelMiddleware_SSEResponseFallback(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
 	)
 
 	sse := "event: message_start\ndata: {\"type\":\"message_start\"}\n\n"
@@ -228,16 +275,108 @@ func TestOtelMiddleware_Streaming(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// The span stays open until the stream is drained.
-	assert.Empty(t, sr.Ended())
-
-	_, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
 	assertBoolAttribute(t, spans[0].Attributes(), "gen_ai.request.is_stream", true)
+
+	// The body is returned untouched for the caller to consume.
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, sse, string(got))
+}
+
+// TestOtelMiddleware_RequestBodyReadError verifies that a failing request body
+// read still passes a reassembled body to the SDK instead of a truncated one.
+func TestOtelMiddleware_RequestBodyReadError(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	wantErr := errors.New("read fail")
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(iotest.ErrReader(wantErr)),
+	)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		// The reassembled body must surface the original read error rather
+		// than appear as a silently truncated payload.
+		_, err := io.ReadAll(r.Body)
+		require.ErrorIs(t, err, wantErr)
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Empty(t, sr.Ended())
+}
+
+func TestOtelMiddleware_NilResponseBody(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{},
+			Body:       nil,
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// No panic, and the span still ends.
+	require.Len(t, sr.Ended(), 1)
+}
+
+// TestOtelMiddleware_ResponseBodyReadError verifies the span still ends and the
+// caller gets a reassembled body when the response read fails mid-parse.
+func TestOtelMiddleware_ResponseBodyReadError(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+
+	wantErr := errors.New("response read fail")
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(iotest.ErrReader(wantErr)),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	require.Len(t, sr.Ended(), 1)
+
+	// The reassembled body surfaces the original error to the caller.
+	_, err = io.ReadAll(resp.Body)
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestOtelMiddleware_HTTPError(t *testing.T) {
