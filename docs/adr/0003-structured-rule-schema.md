@@ -6,6 +6,11 @@ Date: 2026-04-29
 
 Accepted
 
+The implementation note under Consequences is amended by
+[ADR-0006](0006-dispatch-rule-type-on-do-modifier.md): the normalization
+boundary it describes was replaced with direct dispatch on the `do` modifier
+name. The `where`/`do` schema decision recorded here is unchanged.
+
 ## Context
 
 Rule YAML files describe compile-time instrumentation rules. Every rule answers
