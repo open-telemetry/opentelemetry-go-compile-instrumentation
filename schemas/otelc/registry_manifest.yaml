@@ -1,0 +1,29 @@
+name: otelc
+description: |
+  Schema registry for opentelemetry-go-compile-instrumentation (otelc).
+
+  This registry is the machine-readable contract of the telemetry that otelc's
+  compile-time instrumentations emit. Each instrumentation contributes one file
+  under `groups/` declaring the metrics, spans, and attributes it produces.
+  Attributes and metrics that come from the upstream OpenTelemetry semantic
+  conventions are referenced via `ref:`; any telemetry that is specific to a
+  library (not covered upstream) is declared locally with `id:`.
+
+  Together with the upstream registry referenced in `dependencies`, this
+  registry forms the complete contract of what otelc emits, validated by
+  `make lint-schema` (`weaver registry check --future`).
+semconv_version: 0.1.0
+schema_base_url: https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/schemas/
+dependencies:
+  # The dependency version MUST stay in sync with the upstream OpenTelemetry
+  # semantic conventions version this project is built against, i.e. the value
+  # in `.semconv-version` at the repository root. A CI guard asserts both sides
+  # match -- bump them together.
+  #
+  # `registry_path` points to a local pre-fetched copy under `.deps/` so weaver
+  # doesn't clone semconv on every container start. Run
+  # `make fetch-upstream-semconv` to populate it; the path is resolved relative
+  # to this manifest, so the same value works whether weaver runs against the
+  # registry on the host or inside a container bind-mount.
+  - name: opentelemetry
+    registry_path: .deps/upstream-v1.37.0[model]

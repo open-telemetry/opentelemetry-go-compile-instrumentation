@@ -79,7 +79,7 @@ func generateDirective(opts PinOptions) string {
 		"//go:generate",
 		"go",
 		"tool",
-		util.OtelcOldToolExe,
+		util.OtelcToolExe,
 		"pin",
 		"--generate",
 	}
@@ -104,7 +104,7 @@ func updateGenerateDirective(f *dst.File, opts PinOptions) {
 	for _, comment := range f.Decs.Start.All() {
 		// Drop any existing otelc pin directive. We will either
 		// regenerate it or remove it entirely.
-		const goGenerateDirectivePrefix = "//go:generate go tool " + util.OtelcOldToolExe + " pin"
+		const goGenerateDirectivePrefix = "//go:generate go tool " + util.OtelcToolExe + " pin"
 		if strings.HasPrefix(comment, goGenerateDirectivePrefix) {
 			continue
 		}
@@ -243,7 +243,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 	}
 
 	for _, req := range f.Require {
-		if req.Mod.Path != util.OtelcOldRoot {
+		if req.Mod.Path != util.OtelcRoot {
 			continue
 		}
 
@@ -253,7 +253,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 		break
 	}
 
-	if err := f.AddRequire(util.OtelcOldRoot, version); err != nil {
+	if err := f.AddRequire(util.OtelcRoot, version); err != nil {
 		return false, err
 	}
 
@@ -276,14 +276,14 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 
 	hasTool := false
 	for _, tool := range f.Tool {
-		if tool.Path == util.OtelcOldToolCmdRoot {
+		if tool.Path == util.OtelcToolCmdRoot {
 			hasTool = true
 			break
 		}
 	}
 
 	if !hasTool {
-		if addErr := f.AddTool(util.OtelcOldToolCmdRoot); addErr != nil {
+		if addErr := f.AddTool(util.OtelcToolCmdRoot); addErr != nil {
 			return false, addErr
 		}
 		modified = true

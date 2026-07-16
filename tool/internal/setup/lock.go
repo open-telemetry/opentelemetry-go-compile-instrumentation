@@ -96,7 +96,7 @@ func AcquireBuildLock(ctx context.Context) (func(), error) {
 		return releaseFunc(ctx, lock), nil
 	}
 
-	fmt.Fprintf(os.Stderr,
+	_, _ = fmt.Fprintf(os.Stderr,
 		"otelc: another invocation holds the build lock; waiting for it to finish (lock: %s)\n",
 		path,
 	)

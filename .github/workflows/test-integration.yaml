@@ -15,6 +15,7 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -48,11 +49,13 @@ jobs:
       - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
 
   test-integration:
-    name: Integration Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
+    name: Integration Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }} shard ${{ matrix.shard }})
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     strategy:
+      fail-fast: false
       matrix:
+        shard: [0, 1, 2]
         platform:
           - os: ubuntu-latest
             arch: amd64
@@ -75,10 +78,34 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # ratchet:arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore otelc Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: test/.otelc-gocache
+          key: ${{ runner.os }}-${{ matrix.platform.arch }}-otelc-gocache-shard${{ matrix.shard }}-${{ hashFiles('go.mod',
+            '**/go.mod', '**/go.sum', 'Makefile', 'tool/**', 'pkg/**', 'instrumentation/**', 'test/apps/**') }}
       - name: Build and test
         env:
           GOARCH: ${{ matrix.platform.arch }}
-        run: make test-integration
+          OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: "3"
+        shell: bash
+        run: |
+          set -euo pipefail
+          # grpcpb is committed, so listing tests does not need to build otelc or demo binaries.
+          names=$(go -C test test -tags integration -list '^Test' ./integration/... | grep -E '^Test' | LC_ALL=C sort)
+
+          # This shard's tests: every SHARD_TOTAL-th name, starting at SHARD_INDEX.
+          shard=$(printf '%s\n' "$names" | awk -v idx="$SHARD_INDEX" -v tot="$SHARD_TOTAL" '(NR-1) % tot == idx')
+
+          if [ -z "$shard" ]; then
+            run='^$'
+          else
+            run="^($(printf '%s\n' "$shard" | paste -sd '|' -))$"
+          fi
+          echo "Shard $SHARD_INDEX/$SHARD_TOTAL -run: $run"
+          INTEGRATION_TEST_RUN="$run" make test-integration
 
   done:
     name: Done (Integration Tests)
@@ -88,12 +115,29 @@ jobs:
     steps:
       - name: Check result
         run: |
-          result="${{ needs.test-integration.result }}"
-          echo "Test result: $result"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "✅ Tests passed or were skipped"
-            exit 0
-          else
-            echo "❌ Tests failed"
+          changes_result="${{ needs.changes.result }}"
+          code_changed="${{ needs.changes.outputs.code }}"
+          coverage_result="${{ needs.test-integration-coverage.result }}"
+          integration_result="${{ needs.test-integration.result }}"
+          echo "Changes result: $changes_result"
+          echo "Code changed: $code_changed"
+          echo "Coverage result: $coverage_result"
+          echo "Integration result: $integration_result"
+          if [[ "$changes_result" != "success" ]]; then
+            echo "❌ Change detection failed"
             exit 1
           fi
+          if [[ "$code_changed" == "false" ]]; then
+            echo "✅ No relevant code changes; tests skipped"
+            exit 0
+          fi
+          if [[ "$code_changed" != "true" ]]; then
+            echo "❌ Unexpected change detection output: $code_changed"
+            exit 1
+          fi
+          if [[ "$coverage_result" == "success" && "$integration_result" == "success" ]]; then
+            echo "✅ Tests passed"
+            exit 0
+          fi
+          echo "❌ Tests failed"
+          exit 1

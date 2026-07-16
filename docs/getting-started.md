@@ -23,7 +23,9 @@ No manual code changes required.
 2. **Try the demo**
 
    ```bash
-   make demo
+   cd demo/app/basic
+   ../../otelc go build
+   ./basic
    ```
 
 3. **Use with your application**
@@ -36,6 +38,40 @@ No manual code changes required.
    go get -tool go.opentelemetry.io/otelc/tool/cmd/otelc
    go tool otelc go build -o myapp .
    ```
+
+## Using `go build` Directly (toolexec drop-in)
+
+Instead of wrapping the build with `otelc go build`, you can keep using the
+regular `go` toolchain and plug `otelc` in through `GOFLAGS`. This is useful
+when the build command is owned by a Makefile, CI pipeline, or another tool
+you don't want to change.
+
+1. **Prepare the module** (once, and again after dependencies change):
+
+   ```bash
+   cd path/to/your/module
+   otelc setup
+   ```
+
+   `otelc setup` analyzes the module, generates the instrumentation sources
+   (`otel.instrumentation.go`, `otelc.runtime.go`) and writes the matched
+   rules to `.otelc-build/`, which the build phase below reads.
+
+2. **Build with the standard toolchain**:
+
+   ```bash
+   export GOFLAGS="${GOFLAGS} '-toolexec=otelc toolexec'"
+   go build -o myapp .
+   ```
+
+Run `go build` from the module directory (or any subdirectory); `otelc`
+locates the `.otelc-build` directory created by `otelc setup` from there. To
+run the build from somewhere else, set `OTELC_WORK_DIR` to the directory
+where `otelc setup` ran.
+
+Instrumented and plain build artifacts are kept apart in Go's build cache
+(otelc marks the tool identity go hashes into every cache key), so switching
+between instrumented and regular builds does not require cleaning the cache.
 
 ## Managing Instrumentations
 
@@ -115,6 +151,6 @@ Learn more about the project from these presentations:
 
 ## Status
 
-> **Note**: This project is currently in active development and not yet ready for production use.
+This project is stable and ready for production use as of v1.0.0.
 
-For the latest updates and development progress, follow the project on GitHub and join the community discussions.
+For the latest updates, follow the project on GitHub and join the community discussions.

@@ -92,6 +92,85 @@ func IsCgoCommand(line string) bool {
 		!strings.Contains(line, "-dynimport")
 }
 
+// splitGoflags splits a GOFLAGS value into tokens like the go command does
+// (https://cs.opensource.google/go/go/+/master:src/cmd/internal/quoted/quoted.go)
+//
+// space-separated, but a token starting with a quote runs to the matching close quote.
+// Quotes are kept so tokens re-join verbatim.
+func splitGoflags(goflags string) []string {
+	isSpace := func(c byte) bool {
+		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+	}
+	var tokens []string
+	i := 0
+	for i < len(goflags) {
+		for i < len(goflags) && isSpace(goflags[i]) {
+			i++
+		}
+		if i >= len(goflags) {
+			break
+		}
+		start := i
+		if q := goflags[i]; q == '\'' || q == '"' {
+			i++
+			for i < len(goflags) && goflags[i] != q {
+				i++
+			}
+			if i < len(goflags) {
+				i++ // include the closing quote
+			}
+		} else {
+			for i < len(goflags) && !isSpace(goflags[i]) {
+				i++
+			}
+		}
+		tokens = append(tokens, goflags[start:i])
+	}
+	return tokens
+}
+
+// StripToolexecFromGoflags returns goflags without any -toolexec entry. In
+// drop-in mode the go commands otelc spawns would inherit the flag and
+// recursively re-invoke otelc; stripping it lets each command choose its
+// children's toolexec: none for setup discovery, an explicit CLI flag for
+// `otelc go build`, and nested version-only mode during instrumentation.
+func StripToolexecFromGoflags(goflags string) string {
+	tokens := splitGoflags(goflags)
+	kept := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		unquoted := token
+		if len(unquoted) >= 2 && (unquoted[0] == '\'' || unquoted[0] == '"') &&
+			unquoted[len(unquoted)-1] == unquoted[0] {
+			unquoted = unquoted[1 : len(unquoted)-1]
+		}
+		if unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") {
+			continue
+		}
+		kept = append(kept, token)
+	}
+	return strings.Join(kept, " ")
+}
+
+// QuoteGoflagsToken quotes a token for inclusion in a GOFLAGS value, following
+// the same rules as cmd/internal/quoted.Join: unquoted if it has no space,
+// tab, or quote characters; otherwise wrapped in whichever of ' or " doesn't
+// appear in the token. A token containing both quote characters can't be
+// safely represented and returns an error.
+func QuoteGoflagsToken(token string) (string, error) {
+	hasSingleQuote := strings.ContainsRune(token, '\'')
+	hasDoubleQuote := strings.ContainsRune(token, '"')
+	switch {
+	case !strings.ContainsAny(token, " \t\n\r'\""):
+		return token, nil
+	case !hasSingleQuote:
+		return "'" + token + "'", nil
+	case !hasDoubleQuote:
+		return "\"" + token + "\"", nil
+	default:
+		return "", ex.Newf("cannot quote token containing both single and double quotes: %q", token)
+	}
+}
+
 // FindFlagValue finds the value of a flag in the command line.
 func FindFlagValue(cmd []string, flag string) string {
 	flagWithValue := flag + "="

@@ -781,7 +781,7 @@ func TestWalkInstrumentation_LoadsModulesWithoutBuildableFiles(t *testing.T) {
 	writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", false, map[string]string{
 		"example.com/bar": filepath.Join(tmp, "bar"),
 	})
-	// writeInstrumenationModule writes a dummy.go file in module dir
+	// writeInstrumentationModule writes a dummy.go file in module dir
 	// Remove the file to test that walkInstrumentation still loads the config
 	// even if there are no buildable go files (only otel.instrumentation.go with //go:build tools)
 	require.NoError(t, os.Remove(filepath.Join(tmp, "foo", "dummy.go")))

@@ -71,24 +71,48 @@ func appsPath() (string, error) {
 }
 
 // Build builds the application with the instrumentation tool. The built binary
-// is registered for cleanup via t.Cleanup.
+// is registered for cleanup via t.Cleanup. Standard test apps use
+// OTELC_TEST_GOCACHE/<app> as GOCACHE when OTELC_TEST_GOCACHE is set, and drop
+// -a so warm builds can reuse that per-app cache. Custom appsDir builds keep
+// the caller's arguments and environment unchanged.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
 	otelc, err := OtelcPath()
 	require.NoError(t, err)
 
+	standardAppsDir := appsDir == ""
+	var env []string
+	if standardAppsDir {
+		cacheRoot := os.Getenv("OTELC_TEST_GOCACHE")
+		if cacheRoot != "" {
+			cacheDir := filepath.Join(cacheRoot, app)
+			require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+			env = append(os.Environ(), "GOCACHE="+cacheDir)
+
+			// Dropping -a lets warm builds reuse this app-local cache without sharing
+			// compiled objects across different instrumentation configs.
+			filteredArgs := make([]string, 0, len(args))
+			for _, arg := range args {
+				if arg != "-a" {
+					filteredArgs = append(filteredArgs, arg)
+				}
+			}
+			args = filteredArgs
+		}
+	}
+
 	output := appOutputName()
 	args = append(args, "-o", output)
 	args = append([]string{otelc}, args...)
 
-	if appsDir == "" {
+	if standardAppsDir {
 		var err error
 		appsDir, err = appsPath()
 		require.NoError(t, err)
 	}
 	appDir := filepath.Join(appsDir, app)
 
-	cmd := newCmd(t.Context(), appDir, nil, args...)
+	cmd := newCmd(t.Context(), appDir, env, args...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 	t.Cleanup(func() {

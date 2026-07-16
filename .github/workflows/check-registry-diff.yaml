@@ -3,12 +3,16 @@ name: Check Semantic Convention Registry
 on:
   pull_request:
     paths:
+      - 'schemas/**'
+      - 'scripts/semconv/**'
       - 'instrumentation/**/semconv/**'
       - '.semconv-version'
   push:
     branches:
       - main
     paths:
+      - 'schemas/**'
+      - 'scripts/semconv/**'
       - 'instrumentation/**/semconv/**'
       - '.semconv-version'
 
@@ -21,12 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Install OTel Weaver
-        run: make weaver-install
 
       - name: Read semconv version
         id: read-version
@@ -42,6 +40,30 @@ jobs:
           fi
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "Current semantic conventions version: $CURRENT_VERSION"
+
+      - name: Validate registry manifest matches .semconv-version
+        run: |
+          # The upstream dependency pinned in the registry manifest must match
+          # the version declared in .semconv-version. `make lint-schema` also
+          # enforces this, but check it explicitly so the failure is obvious.
+          MANIFEST_VERSION=$(grep -oE 'upstream-v[0-9]+\.[0-9]+\.[0-9]+' schemas/otelc/registry_manifest.yaml | head -1 | sed -E 's/upstream-v//')
+          EXPECTED_VERSION=$(echo "${{ steps.read-version.outputs.current_version }}" | sed 's/^v//')
+
+          if [ -z "$MANIFEST_VERSION" ]; then
+            echo "::error::Could not read the upstream version from schemas/otelc/registry_manifest.yaml"
+            exit 1
+          fi
+
+          echo "registry_manifest.yaml upstream dependency: v$MANIFEST_VERSION"
+          echo "Expected from .semconv-version: v$EXPECTED_VERSION"
+
+          if [ "$MANIFEST_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Version mismatch! registry_manifest.yaml pins upstream v$MANIFEST_VERSION but .semconv-version specifies v$EXPECTED_VERSION"
+            echo "::error::Please update either schemas/otelc/registry_manifest.yaml or .semconv-version so they match"
+            exit 1
+          fi
+
+          echo "✅ Registry manifest version consistency check passed"
 
       - name: Validate code uses correct semconv version
         run: |
@@ -72,5 +94,8 @@ jobs:
 
       - name: Check registry for violations
         run: |
-          echo "Validating semantic convention registry for version ${{ steps.read-version.outputs.current_version }}"
-          make lint/semantic-conventions
+          # Runs OTel Weaver from an OCI image (ubuntu-latest has Docker and jq
+          # preinstalled). Internally fetches the pinned upstream semconv into
+          # schemas/otelc/.deps/ and runs `weaver registry check --future`.
+          echo "Validating the otelc semantic-convention registry (schemas/otelc)"
+          make lint-schema

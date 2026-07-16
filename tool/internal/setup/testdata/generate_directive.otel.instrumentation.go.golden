@@ -3,7 +3,7 @@
 
 //go:build tools
 
-//go:generate go tool cmd pin --generate --prune=false --validate
+//go:generate go tool otelc pin --generate --prune=false --validate
 package tools
 
 import (

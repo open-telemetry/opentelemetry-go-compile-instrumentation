@@ -8,6 +8,16 @@
     'before 8am on the 1st and 15th day of the month',
   ],
   updateNotScheduled: false,
+  customManagers: [
+    {
+      customType: 'regex',
+      fileMatch: ['^Makefile$'],
+      matchStrings: [
+        'WEAVER_IMAGE\\s*\\?=\\s*(?<depName>[^:]+):v(?<currentValue>[^\\s]+)',
+      ],
+      datasourceTemplate: 'docker',
+    },
+  ],
   packageRules: [
     {
       matchFileNames: [

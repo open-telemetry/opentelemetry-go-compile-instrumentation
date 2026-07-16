@@ -20,7 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/test/testutil"
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const toolFileCanonical = "otel.instrumentation.go"
@@ -149,19 +148,23 @@ func TestPin_GeneratesNewToolFile(t *testing.T) {
 	require.NoError(t, readErr)
 
 	// Ensure http integration is imported in the tool file.
-	require.Contains(t, string(content), "_ "+strconv.Quote(util.OtelcInstRoot+"/net/http/client"))
+	require.Contains(
+		t,
+		string(content),
+		"_ "+strconv.Quote("go.opentelemetry.io/otelc/instrumentation/net/http/client"),
+	)
 
 	goMod, goModErr := os.ReadFile(filepath.Join(workDir, "go.mod"))
 	require.NoError(t, goModErr)
 
 	// Ensure otelc tool directive is within the go.mod file.
-	require.Contains(t, string(goMod), util.OtelcOldToolCmdRoot)
+	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/tool/cmd/otelc")
 
 	// Ensure otelc require is within the go.mod file.
-	require.Contains(t, string(goMod), util.OtelcOldRoot)
+	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
 
 	// Ensure the http integration is within the go.mod file, which ensures it is pinned as a dependency.
-	require.Contains(t, string(goMod), util.OtelcInstRoot+"/net/http/client")
+	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/instrumentation/net/http/client")
 }
 
 func TestPin_PrunesInvalidImports(t *testing.T) {

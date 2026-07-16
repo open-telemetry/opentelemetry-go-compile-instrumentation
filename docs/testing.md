@@ -47,6 +47,13 @@ Integration tests build real binaries with the `otelc` tool and run them against
 
 Test applications are built on demand by the tests that use them. Each top-level test builds its required application once (via `otelc go build`) and reuses the resulting binary across its subtests when applicable.
 
+CI shards the integration suite by top-level test-name partitions through `INTEGRATION_TEST_RUN`; `SHARD_TOTAL` controls the shard count, and new tests are assigned automatically without per-test workflow changes.
+
+When `OTELC_TEST_GOCACHE` is set, standard `test/apps` builds use a per-app
+Go build cache at `${OTELC_TEST_GOCACHE}/${app}` and drop `-a` so warm builds can
+reuse cached compile outputs. Custom app directories do not use this cache and
+keep caller-supplied build arguments unchanged.
+
 Each test follows the same pattern:
 
 1. Start an in-memory OTLP collector.
@@ -125,7 +132,7 @@ Codecov evaluates each flag against the 70% target defined in `codecov.yml` and 
 as an **enforcing** status check (`informational: false`): a coverage shortfall below the target
 fails the check and blocks the PR.
 
-All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
+All Go test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and Go test result caching. Integration tests may still reuse the separate per-app Go build cache described above.
 
 CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (arm64), and Windows (amd64). See `.github/workflows/test-*.yaml` for details.
 

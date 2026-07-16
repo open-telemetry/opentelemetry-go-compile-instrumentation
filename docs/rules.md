@@ -966,7 +966,7 @@ span_directive:
     directive: "otelc:span"
   do:
     - expand_directive:
-        replace: |-
+        template: |-
           println("span start: {{FuncName}}")
           defer println("span end: {{FuncName}}")
 ```
