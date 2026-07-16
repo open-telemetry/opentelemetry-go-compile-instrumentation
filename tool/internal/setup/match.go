@@ -17,7 +17,6 @@ import (
 
 	"github.com/dave/dst"
 	"golang.org/x/sync/errgroup"
-	"gopkg.in/yaml.v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -32,68 +31,11 @@ const (
 	matchDepsConcurrencyMultiplier = 2
 )
 
-// createRuleFromFields creates a rule instance based on the field type present
-// in the (already-normalized) flat YAML fields map produced by [rule.Normalize].
-func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
-	switch {
-	case fields[rule.SelStruct] != nil:
-		return rule.NewInstStructRule(raw, name)
-	case fields[rule.WhereFile] != nil:
-		return rule.NewInstFileRule(raw, name)
-	case fields[rule.SelDirective] != nil:
-		return rule.NewInstDirectiveRule(raw, name)
-	case fields[rule.RawField] != nil:
-		return rule.NewInstRawRule(raw, name)
-	case fields[rule.SelFunc] != nil:
-		return rule.NewInstFuncRule(raw, name)
-	case fields[rule.SelFunctionCall] != nil:
-		return rule.NewInstCallRule(raw, name)
-	case fields[rule.SelIdentifier] != nil:
-		return rule.NewInstDeclRule(raw, name)
-	default:
-		return nil, ex.Newf("rule %q has no recognised selector", name)
-	}
-}
-
+// parseRuleFromYaml parses rule YAML into instrumentation rules. Rule type is
+// dispatched on the do modifier name; the structured parsing, validation, and
+// per-type construction all live in [rule.ParseRules].
 func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
-	var h map[string]map[string]any
-	err := yaml.Unmarshal(content, &h)
-	if err != nil {
-		return nil, ex.Wrap(err)
-	}
-	rules := make([]rule.InstRule, 0)
-	for name, fields := range h {
-		flatRules, normErr := rule.Normalize(fields)
-		if normErr != nil {
-			return nil, normErr
-		}
-		for _, flatFields := range flatRules {
-			raw, err1 := yaml.Marshal(flatFields)
-			if err1 != nil {
-				return nil, ex.Wrap(err1)
-			}
-
-			r, err2 := createRuleFromFields(raw, name, flatFields)
-			if err2 != nil {
-				return nil, err2
-			}
-			// target is the sole package selector and is required (docs/rules.md).
-			// An empty or whitespace-only target would land under exactRules[""]
-			// and silently never match any real import path, so reject it loudly
-			// at load time instead.
-			if strings.TrimSpace(r.GetTarget()) == "" {
-				return nil, ex.Newf("rule %q has an empty target; target is required", name)
-			}
-			// Reject ambiguous/invalid glob targets at load time so a bad rule
-			// fails loudly during parsing rather than silently matching nothing
-			// during the setup phase.
-			if err3 := rule.ValidateTarget(r.GetTarget()); err3 != nil {
-				return nil, ex.Wrapf(err3, "rule %q", name)
-			}
-			rules = append(rules, r)
-		}
-	}
-	return rules, nil
+	return rule.ParseRules(content)
 }
 
 // isRuleFile checks if the given file name matches the following patterns:

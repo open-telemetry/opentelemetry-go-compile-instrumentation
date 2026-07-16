@@ -90,14 +90,16 @@ var funcNamePattern = regexp.MustCompile(`^(.+)\.([^\d\W]\w*)$`)
 // {{ . }}, {{.}}, {{- . -}}, {{ .  }}, etc.
 var replacePlaceholderPattern = regexp.MustCompile(`\{\{-?\s*\.\s*-?\}\}`)
 
-// NewInstCallRule loads and validates an InstCallRule from YAML data.
-func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
-	var r InstCallRule
-	if err := yaml.Unmarshal(data, &r); err != nil {
-		return nil, ex.Wrap(err)
+// NewInstCallRule builds an InstCallRule from the structured where selectors
+// and the wrap_call modifier payload. The where node supplies function_call;
+// act supplies replace/append_args/variadic_type.
+func NewInstCallRule(base InstBaseRule, where *yaml.Node, act *CallAction) (*InstCallRule, error) {
+	r := &InstCallRule{InstBaseRule: base}
+	if err := decodeWhereSelectors(where, r); err != nil {
+		return nil, ex.Wrapf(err, "invalid call rule %q", base.Name)
 	}
-	if r.Name == "" {
-		r.Name = name
+	if act != nil {
+		r.Replace, r.AppendArgs, r.VariadicType = act.Replace, act.AppendArgs, act.VariadicType
 	}
 
 	// Parse the qualified function name once at creation
@@ -112,17 +114,17 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 
 	// Validate other fields
 	if err := r.validate(); err != nil {
-		return nil, ex.Wrapf(err, "invalid call rule %q", name)
+		return nil, ex.Wrapf(err, "invalid call rule %q", base.Name)
 	}
 
 	// Validate replacement template syntax
 	if r.Replace != "" {
 		if _, err := fasttemplate.NewTemplate(r.Replace, "{{", "}}"); err != nil {
-			return nil, ex.Wrapf(err, "invalid replace syntax for rule %q", name)
+			return nil, ex.Wrapf(err, "invalid replace syntax for rule %q", base.Name)
 		}
 	}
 
-	return &r, nil
+	return r, nil
 }
 
 func (r *InstCallRule) validate() error {

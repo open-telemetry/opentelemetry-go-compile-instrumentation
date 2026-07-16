@@ -32,19 +32,21 @@ type InstStructRule struct {
 	NewField []*InstStructField `json:"new_field" yaml:"new_field"` // The new fields to be added
 }
 
-// NewInstStructRule loads and validates an InstStructRule from YAML data.
-func NewInstStructRule(data []byte, name string) (*InstStructRule, error) {
-	var r InstStructRule
-	if err := yaml.Unmarshal(data, &r); err != nil {
-		return nil, ex.Wrap(err)
+// NewInstStructRule builds an InstStructRule from the structured where selector
+// and the add_struct_fields modifier payload. The where node supplies struct;
+// act supplies the new fields.
+func NewInstStructRule(base InstBaseRule, where *yaml.Node, act *StructAction) (*InstStructRule, error) {
+	r := &InstStructRule{InstBaseRule: base}
+	if err := decodeWhereSelectors(where, r); err != nil {
+		return nil, ex.Wrapf(err, "invalid struct rule %q", base.Name)
 	}
-	if r.Name == "" {
-		r.Name = name
+	if act != nil {
+		r.NewField = act.NewField
 	}
 	if err := r.validate(); err != nil {
-		return nil, ex.Wrapf(err, "invalid struct rule %q", name)
+		return nil, ex.Wrapf(err, "invalid struct rule %q", base.Name)
 	}
-	return &r, nil
+	return r, nil
 }
 
 func (r *InstStructRule) validate() error {

@@ -1,7 +1,10 @@
 func_sig_argument_hook:
   target: main
-  func: Func1
-  param: string
-  before: H1Before
-  after: H1After
-  path: testdata
+  where:
+    func: Func1
+    param: string
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata
