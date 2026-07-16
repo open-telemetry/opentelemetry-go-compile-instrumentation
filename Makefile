@@ -12,6 +12,7 @@ SHELL := /bin/bash
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
+        fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold
 
@@ -27,6 +28,13 @@ API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
 GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
+
+# OTel Weaver execution for the local semantic-convention registry under
+# schemas/otelc/. Weaver runs from an OCI image (no host install required);
+# override OCI_BIN=podman or WEAVER_IMAGE=... to use a different runtime/version.
+OCI_BIN ?= docker
+WEAVER_IMAGE ?= otel/weaver:v0.19.0
+OTELC_REGISTRY_DIR = $(CURDIR)/schemas/otelc
 
 ##@ Tooling
 
@@ -741,31 +749,36 @@ weaver-install: ## Install OTel Weaver if not present
 	fi
 
 # Semantic Conventions Validation Targets
-lint/semantic-conventions: ## Validate semantic convention registry against the project's version
-lint/semantic-conventions: weaver-install
-	@echo "Validating semantic convention registry..."
-	@# Read the semconv version from .semconv-version file (ignore comments and empty lines)
-	@if [ ! -f .semconv-version ]; then \
-		echo "Error: .semconv-version file not found"; \
+#
+# The project's telemetry contract lives in the local Weaver registry under
+# schemas/otelc/ (see docs/semantic-conventions.md). Weaver runs from an OCI
+# image ($(WEAVER_IMAGE)) via $(OCI_BIN), so no host install is required for
+# these targets.
+
+fetch-upstream-semconv: ## Pre-fetch the pinned upstream semconv registry into schemas/otelc/.deps/
+	@scripts/semconv/fetch-upstream-semconv.sh
+
+lint-schema: ## Validate the local semantic-convention registry (schemas/otelc/) with OTel Weaver
+lint-schema: fetch-upstream-semconv
+	@echo "Validating otelc semantic-convention registry (schemas/otelc)..."
+	@# Guard: the upstream dependency pinned in the registry manifest must match .semconv-version.
+	@MANIFEST_VERSION=$$(grep -oE 'upstream-v[0-9]+\.[0-9]+\.[0-9]+' $(OTELC_REGISTRY_DIR)/registry_manifest.yaml | head -1 | sed -E 's/upstream-v//'); \
+	SEMCONV_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]' | sed 's/^v//'); \
+	if [ -z "$$MANIFEST_VERSION" ]; then \
+		echo "::error::Could not read the upstream version from $(OTELC_REGISTRY_DIR)/registry_manifest.yaml"; \
 		exit 1; \
 	fi; \
-	CURRENT_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]'); \
-	if [ -z "$$CURRENT_VERSION" ]; then \
-		echo "Error: No version found in .semconv-version file"; \
+	if [ "$$MANIFEST_VERSION" != "$$SEMCONV_VERSION" ]; then \
+		echo "::error::registry_manifest.yaml pins upstream v$$MANIFEST_VERSION but .semconv-version is v$$SEMCONV_VERSION - bump them together"; \
 		exit 1; \
 	fi; \
-	echo "Checking semantic conventions registry at version: $$CURRENT_VERSION"; \
-	echo "Cloning semantic-conventions repository..."; \
-	rm -rf /tmp/semconv-$$$$; \
-	git clone --depth 1 --branch $$CURRENT_VERSION https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-$$$$ 2>/dev/null || { \
-		echo "::error::Failed to clone semantic-conventions repository at version $$CURRENT_VERSION"; \
-		rm -rf /tmp/semconv-$$$$; \
-		exit 1; \
-	}; \
-	weaver registry check --registry /tmp/semconv-$$$$/model; \
-	EXIT_CODE=$$?; \
-	rm -rf /tmp/semconv-$$$$; \
-	exit $$EXIT_CODE
+	echo "Upstream semconv dependency: v$$MANIFEST_VERSION (matches .semconv-version)"
+	@scripts/semconv/lint-schema.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)"
+
+# `lint/semantic-conventions` is the umbrella entry point used by CI and the
+# top-level `lint` target; it now validates the project's own registry.
+lint/semantic-conventions: ## Validate the otelc semantic-convention registry (schemas/otelc/) with OTel Weaver
+lint/semantic-conventions: lint-schema
 
 semantic-conventions/diff: ## Generate diff between current version and latest (non-blocking informational check)
 semantic-conventions/diff: weaver-install
