@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 
@@ -65,39 +66,45 @@ func TestGRPCServer(t *testing.T) {
 		})
 	}
 
-	// This test verifies that telemetry is properly flushed
-	// when the server receives SIGINT, using the batch span processor.
-	// This test validates that the signal-based shutdown handler in the instrumentation
-	// layer correctly triggers a flush before exit.
-	t.Run("telemetry flush on signal", func(t *testing.T) {
-		if util.IsWindows() {
-			t.Skip("SIGINT is not supported on windows")
-		}
+	// These tests verify that telemetry is properly flushed when the server
+	// receives SIGINT or SIGTERM, using the batch span processor.
+	for _, tc := range []struct {
+		name string
+		sig  os.Signal
+	}{
+		{name: "SIGINT", sig: os.Interrupt},
+		{name: "SIGTERM", sig: syscall.SIGTERM},
+	} {
+		t.Run("telemetry flush on "+tc.name, func(t *testing.T) {
+			if util.IsWindows() {
+				t.Skip("Unix signals are not supported on windows")
+			}
 
-		f := testutil.NewTestFixture(t)
-		f.SetEnv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
+			f := testutil.NewTestFixture(t)
+			f.SetEnv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
 
-		port := testutil.FreePort(t)
-		addr := fmt.Sprintf("localhost:%d", port)
-		srv := f.Start("grpcserver", fmt.Sprintf("-port=%d", port))
-		testutil.WaitForTCP(t, addr)
+			port := testutil.FreePort(t)
+			addr := fmt.Sprintf("localhost:%d", port)
+			srv := f.Start("grpcserver", fmt.Sprintf("-port=%d", port))
+			testutil.WaitForTCP(t, addr)
 
-		client := NewGRPCClient(t, addr)
-		client.SayHello(t, "ShutdownTest")
+			client := NewGRPCClient(t, addr)
+			client.SayHello(t, "ShutdownTest")
 
-		require.NoError(t, srv.Cmd.Process.Signal(os.Interrupt))
-		waitForProcessExit(t, srv.Cmd, 10*time.Second)
-		testutil.WaitForSpanFlush(t)
+			require.NoError(t, srv.Cmd.Process.Signal(tc.sig))
+			waitForProcessExit(t, srv.Cmd, 10*time.Second)
+			testutil.WaitForSpanFlush(t)
 
-		spans := testutil.AllSpans(f.Traces())
-		require.NotEmpty(t, spans, "expected spans to be flushed on SIGINT shutdown")
+			spans := testutil.AllSpans(f.Traces())
+			require.NotEmpty(t, spans, "expected spans to be flushed on %s shutdown", tc.name)
 
-		serverSpan := testutil.RequireSpan(t, f.Traces(),
-			testutil.IsServer,
-			testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
-		)
-		testutil.RequireGRPCServerSemconv(t, serverSpan, "greeter.Greeter", "SayHello", 0)
-	})
+			serverSpan := testutil.RequireSpan(t, f.Traces(),
+				testutil.IsServer,
+				testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+			)
+			testutil.RequireGRPCServerSemconv(t, serverSpan, "greeter.Greeter", "SayHello", 0)
+		})
+	}
 }
 
 // GRPCClient wraps a test gRPC client connection.

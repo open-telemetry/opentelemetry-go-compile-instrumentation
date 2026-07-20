@@ -6,6 +6,8 @@ package runtime
 import (
 	"context"
 	"log/slog"
+	"os"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +18,13 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
+func TestShutdownSignals(t *testing.T) {
+	signals := shutdownSignals()
+	require.Len(t, signals, 2)
+	assert.Contains(t, signals, os.Interrupt)
+	assert.Contains(t, signals, syscall.SIGTERM)
+}
 
 func TestLogLevel(t *testing.T) {
 	tests := []struct {

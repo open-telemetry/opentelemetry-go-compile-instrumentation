@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
@@ -300,14 +301,20 @@ func StartRuntimeMetrics() {
 	logger.Info("runtime metrics enabled")
 }
 
+// shutdownSignals returns the OS signals that trigger graceful OTel shutdown.
+func shutdownSignals() []os.Signal {
+	return []os.Signal{os.Interrupt, syscall.SIGTERM}
+}
+
 // setupSignalHandler registers a goroutine that listens for OS signals
-// and gracefully shuts down the OpenTelemetry SDK when receiving interrupt signals.
+// and gracefully shuts down the OpenTelemetry SDK when receiving SIGINT or SIGTERM.
 // This ensures telemetry is flushed before the application exits.
 // This function is safe to call multiple times; it will only register the handler once.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt)
+		signals := shutdownSignals()
+		signal.Notify(sigCh, signals...)
 
 		go func() {
 			sig := <-sigCh
@@ -324,9 +331,8 @@ func setupSignalHandler() {
 				logger.Info("OpenTelemetry SDK shutdown completed successfully")
 			}
 
-			// After shutdown completes, exit cleanly
-			// os.Interrupt is cross-platform (SIGINT on Unix, Ctrl+C on Windows)
-			signal.Reset(os.Interrupt)
+			// After shutdown completes, exit cleanly.
+			signal.Reset(signals...)
 			os.Exit(0)
 		}()
 	})
