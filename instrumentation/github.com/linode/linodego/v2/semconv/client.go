@@ -25,14 +25,14 @@ const (
 	MetricOperationDuration = "linodego.client.operation.duration"
 )
 
-// LinodegoRequest describes a single linodego HTTP request for tracing.
+// LinodegoRequest describes a single linodego HTTP request (doRequest) for tracing.
+// Public API identity is attached on operation spans via LinodegoOperationTraceAttrs,
+// not on request spans.
 type LinodegoRequest struct {
 	Method   string
 	Endpoint string
 	// ServerAddress is optional; defaults to DefaultServerAddress when empty.
 	ServerAddress string
-	// Operation is the public Client method name when known (e.g. GetInstance).
-	Operation string
 }
 
 // SpanName returns the span name for a linodego HTTP request (doRequest).
@@ -69,7 +69,7 @@ func LinodegoRequestTraceAttrs(req LinodegoRequest) []attribute.KeyValue {
 		server = DefaultServerAddress
 	}
 
-	attrs := make([]attribute.KeyValue, 0, 4)
+	attrs := make([]attribute.KeyValue, 0, 3)
 	attrs = append(attrs, semconv.HTTPRequestMethodKey.String(method))
 	if endpoint != "" {
 		path := endpoint
@@ -79,9 +79,6 @@ func LinodegoRequestTraceAttrs(req LinodegoRequest) []attribute.KeyValue {
 		attrs = append(attrs, semconv.URLPath(path))
 	}
 	attrs = append(attrs, semconv.ServerAddress(server))
-	if op := strings.TrimSpace(req.Operation); op != "" {
-		attrs = append(attrs, semconv.CodeFunctionName(op))
-	}
 	return attrs
 }
 

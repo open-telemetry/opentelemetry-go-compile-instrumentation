@@ -25,7 +25,8 @@ groups:
       - ref: http.request.method
       - ref: url.path
       - ref: server.address
-      - ref: code.function.name
+      # code.function.name is intentionally omitted: public API identity lives on
+      # operation spans (linodego.<Method>), not on every doRequest span.
       - ref: http.response.status_code
       - ref: error.type
 

@@ -53,13 +53,13 @@ func TestLinodegoRequestTraceAttrs(t *testing.T) {
 		Method:        "POST",
 		Endpoint:      "/v4/linode/instances",
 		ServerAddress: "api.test.linode.com",
-		Operation:     "CreateInstance",
 	})
 	m = attrsToMap(attrs)
 	assert.Equal(t, "POST", m["http.request.method"])
 	assert.Equal(t, "/v4/linode/instances", m["url.path"])
 	assert.Equal(t, "api.test.linode.com", m["server.address"])
-	assert.Equal(t, "CreateInstance", m["code.function.name"])
+	_, hasFunc := m["code.function.name"]
+	assert.False(t, hasFunc, "request spans do not set code.function.name")
 }
 
 func TestLinodegoOperationTraceAttrs(t *testing.T) {
