@@ -4,7 +4,9 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"syscall"
@@ -105,6 +107,29 @@ func TestSetupOpenTelemetryExporterError(t *testing.T) {
 	assert.NotPanics(t, func() {
 		setupOpenTelemetry(Config{InstrumentationName: "test-service"})
 	})
+}
+
+func TestSetupOpenTelemetryInstallsErrorHandler(t *testing.T) {
+	// Errors the SDK reports through otel.Handle must reach the package logger
+	// rather than the stdlib logger on stderr, which ignores OTEL_LOG_LEVEL.
+	origHandler := otel.GetErrorHandler()
+	t.Cleanup(func() { otel.SetErrorHandler(origHandler) })
+	restoreProviders(t)
+
+	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	t.Setenv("OTEL_LOGS_EXPORTER", "none")
+
+	var buf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	setupOpenTelemetry(Config{InstrumentationName: "test-inst"})
+	otel.Handle(errors.New("boom"))
+
+	assert.Contains(t, buf.String(), "boom",
+		"SDK errors should be routed through the package logger")
 }
 
 func TestInitializePanicRecovery(t *testing.T) {

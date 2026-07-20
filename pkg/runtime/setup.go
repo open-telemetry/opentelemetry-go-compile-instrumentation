@@ -102,6 +102,12 @@ func setupOpenTelemetry(cfg Config) {
 		}
 	}()
 
+	// The default handler writes to the stdlib logger on stderr, which bypasses OTEL_LOG_LEVEL and does not match
+	// the structured output the rest of the runtime emits.
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		logger.Error("OpenTelemetry SDK error", "error", err)
+	}))
+
 	ctx := context.Background()
 
 	// Create resource
