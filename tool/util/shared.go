@@ -124,6 +124,41 @@ func EncodeBuildFlags(flags []string) string {
 	return string(encoded)
 }
 
+// ValidateVersionRange validates the supported rule version syntax.
+//
+// Supported forms:
+//   - "" (empty string): match all versions
+//   - "v1.2.3": minimal supported version (>= v1.2.3)
+//   - "v1.2.3,v2.0.0": half-open range [v1.2.3, v2.0.0)
+func ValidateVersionRange(versionRange string) error {
+	if versionRange == "" {
+		return nil
+	}
+
+	if strings.Count(versionRange, ",") > 1 {
+		return fmt.Errorf("version %q must contain at most one comma", versionRange)
+	}
+
+	if startInclusive, endExclusive, ok := strings.Cut(versionRange, ","); ok {
+		if strings.TrimSpace(startInclusive) == "" || strings.TrimSpace(endExclusive) == "" {
+			return fmt.Errorf("version %q must use non-empty start and end bounds", versionRange)
+		}
+		if !semver.IsValid(startInclusive) || !semver.IsValid(endExclusive) {
+			return fmt.Errorf("version %q must use valid semantic versions", versionRange)
+		}
+		if semver.Compare(startInclusive, endExclusive) >= 0 {
+			return fmt.Errorf("version %q must have a lower bound below the upper bound", versionRange)
+		}
+		return nil
+	}
+
+	if !semver.IsValid(versionRange) {
+		return fmt.Errorf("version %q must be a valid semantic version", versionRange)
+	}
+
+	return nil
+}
+
 // VersionInRange checks if a given version is within a specified version range.
 // The version range can be in one of the following formats:
 // - "" (empty string): means all versions are supported.
