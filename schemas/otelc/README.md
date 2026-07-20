@@ -9,7 +9,14 @@ otelc produces".
 schemas/otelc/
 ├── registry_manifest.yaml   # registry metadata + pinned upstream semconv dependency
 ├── groups/                  # one file per instrumentation (metrics, spans, attributes)
-│   └── http.yaml            # net/http client & server telemetry
+│   ├── http.yaml            # net/http client & server metrics
+│   ├── grpc.yaml            # google.golang.org/grpc client & server metrics + spans
+│   ├── database-sql.yaml    # database/sql client spans
+│   ├── redis.yaml           # redis/go-redis (v9) client spans
+│   ├── kafka.yaml           # segmentio/kafka-go producer & consumer spans
+│   ├── k8s.yaml             # k8s.io/client-go informer spans
+│   ├── openai.yaml          # openai/openai-go GenAI client spans
+│   └── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
 

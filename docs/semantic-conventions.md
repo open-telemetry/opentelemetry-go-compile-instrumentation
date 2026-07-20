@@ -43,7 +43,14 @@ The project maintains its own Weaver schema registry under [`schemas/otelc/`](..
 schemas/otelc/
 ├── registry_manifest.yaml   # registry metadata + pinned upstream semconv dependency
 ├── groups/                  # one file per instrumentation (metrics, spans, attributes)
-│   └── http.yaml            # net/http client & server telemetry
+│   ├── http.yaml            # net/http client & server metrics
+│   ├── grpc.yaml            # google.golang.org/grpc client & server metrics + spans
+│   ├── database-sql.yaml    # database/sql client spans
+│   ├── redis.yaml           # redis/go-redis (v9) client spans
+│   ├── kafka.yaml           # segmentio/kafka-go producer & consumer spans
+│   ├── k8s.yaml             # k8s.io/client-go informer spans
+│   ├── openai.yaml          # openai/openai-go GenAI client spans
+│   └── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
 
@@ -56,8 +63,9 @@ Use `groups/http.yaml` as the template:
 
 1. Create `schemas/otelc/groups/<library>.yaml`.
 2. For each metric your instrumentation records (see its `instrumentation/**/semconv/*.go`), add a `type: metric` group with `metric_name`, `instrument`, `unit`, `stability`, and its attribute set.
-3. Reference upstream attributes with `- ref: <attribute.id>`. For attributes/metrics not defined upstream, declare them locally with `id:` (include `type`, `stability`, `brief`, and `examples` for string attributes — `--future` treats a missing example as an error).
-4. Run `make lint-schema` and fix any diagnostics.
+3. For each span your instrumentation creates, add a `type: span` group with `span_kind`, `stability`, `brief`, and its attribute set (see `groups/grpc.yaml`, `groups/database-sql.yaml`). List the union of all attributes the span may carry, including those set only conditionally.
+4. Reference upstream attributes with `- ref: <attribute.id>`. For attributes/metrics not defined upstream, declare them locally with `id:` (include `type`, `stability`, `brief`, and `examples` for string attributes — `--future` treats a missing example as an error). Group local attribute definitions in a `type: attribute_group` so several groups can `ref:` them (see `groups/k8s.yaml`, `groups/openai.yaml`).
+5. Run `make lint-schema` and fix any diagnostics.
 
 > **Note on re-declaring upstream metrics.** Most instrumentations emit standard upstream metrics (e.g. `http.client.request.duration`). Weaver has no way to *reference* a metric defined in a dependency, so we re-declare it locally to pin the emission contract. Weaver then reports a `DuplicateMetricName` between our registry and the upstream dependency; this specific, expected duplicate is allowlisted in [`scripts/semconv/lint-schema-filter.jq`](../scripts/semconv/lint-schema-filter.jq). Any *other* diagnostic — including a metric declared twice within our own registry, or an unresolved `ref:` — still fails the lint.
 

@@ -1,0 +1,102 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # k8s.io/client-go instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/k8s.io/client-go/hook.go                (span lifecycle)
+  #   instrumentation/k8s.io/client-go/k8s_otel_handler.go     (span names)
+  #   instrumentation/k8s.io/client-go/semconv/k8s.go          (attributes)
+  #
+  # The client-go instrumentation is trace-only: it instruments the informer /
+  # DeltaFIFO processing path and records no metrics. It creates internal spans
+  # covering (a) a batch "objects.process" step and (b) per-object add/update/
+  # delete events. Most attributes are standard upstream OpenTelemetry k8s
+  # resource attributes (referenced with `ref:`); six attributes are specific
+  # to this instrumentation and are not defined upstream, so they are declared
+  # locally with `id:` in the attribute group below.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.k8s
+    type: attribute_group
+    display_name: otelc client-go informer attributes
+    brief: >
+      Attributes emitted by the client-go informer instrumentation that are not covered by the upstream OpenTelemetry k8s
+      semantic conventions.
+    attributes:
+      - id: k8s.object.uid
+        type: string
+        stability: development
+        brief: The UID of a Kubernetes object whose concrete kind has no dedicated upstream attribute.
+        examples: ["275ecb36-5aa8-4c2a-9c47-d8bb681b9aff"]
+      - id: k8s.object.name
+        type: string
+        stability: development
+        brief: The name of a Kubernetes object whose concrete kind has no dedicated upstream attribute.
+        examples: ["my-object"]
+      - id: k8s.object.api_version
+        type: string
+        stability: development
+        brief: The API version (group/version) of the Kubernetes object.
+        examples: ["apps/v1", "v1"]
+      - id: k8s.object.kind
+        type: string
+        stability: development
+        brief: The kind of the Kubernetes object.
+        examples: ["Pod", "Deployment"]
+      - id: k8s.objects.count
+        type: int
+        stability: development
+        brief: The number of objects processed in a single informer batch.
+        examples: [42]
+      - id: k8s.objects.is_in_initial_list
+        type: boolean
+        stability: development
+        brief: Whether the processed objects are part of the informer's initial list (as opposed to a subsequent watch event).
+
+  - id: span.otelc.k8s.informer.objects.process
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Span covering the informer processing of a batch of object deltas.
+    attributes:
+      - ref: k8s.objects.count
+      - ref: k8s.objects.is_in_initial_list
+
+  - id: span.otelc.k8s.informer.object
+    type: span
+    span_kind: internal
+    stability: development
+    brief: >
+      Span covering a single object add/update/delete event processed by the informer. The concrete kind determines which
+      attributes are set; the attribute set below is the union of all possible attributes.
+    attributes:
+      - ref: k8s.namespace.name
+      - ref: k8s.object.uid
+      - ref: k8s.object.name
+      - ref: k8s.object.api_version
+      - ref: k8s.object.kind
+      - ref: k8s.node.uid
+      - ref: k8s.node.name
+      - ref: k8s.pod.uid
+      - ref: k8s.pod.name
+      - ref: k8s.replicaset.uid
+      - ref: k8s.replicaset.name
+      - ref: k8s.deployment.uid
+      - ref: k8s.deployment.name
+      - ref: k8s.statefulset.uid
+      - ref: k8s.statefulset.name
+      - ref: k8s.daemonset.uid
+      - ref: k8s.daemonset.name
+      - ref: k8s.job.uid
+      - ref: k8s.job.name
+      - ref: k8s.cronjob.uid
+      - ref: k8s.cronjob.name
+      - ref: k8s.replicationcontroller.uid
+      - ref: k8s.replicationcontroller.name
+      - ref: k8s.hpa.uid
+      - ref: k8s.hpa.name
+      - ref: k8s.hpa.scaletargetref.api_version
+      - ref: k8s.hpa.scaletargetref.kind
+      - ref: k8s.hpa.scaletargetref.name
+      - ref: k8s.resourcequota.uid
+      - ref: k8s.resourcequota.name
