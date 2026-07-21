@@ -682,23 +682,29 @@ func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 }
 
 func setValue(field string, idx int, t dst.Expr) *dst.CaseClause {
-	// *(c.Params[idx].(*int)) = val.(int)
-	// c.Params[idx] = val iff type is interface{}
+	// interface{}/any is a passthrough slot with no pointer indirection.
 	se := ast.SelectorExpr(ast.Ident(trampolineCtxIdentifier), field)
-	ie := ast.IndexExpr(se, ast.IntLit(idx))
-	te := ast.TypeAssertExpr(ie, ast.DereferenceOf(t))
-	pe := ast.ParenExpr(te)
-	de := ast.DereferenceOf(pe)
-	val := ast.Ident(trampolineValIdentifier)
-	assign := ast.AssignStmt(de, ast.TypeAssertExpr(val, t))
 	if ast.IsInterfaceType(t) {
-		assign = ast.AssignStmt(ie, val)
+		ie := ast.IndexExpr(se, ast.IntLit(idx))
+		assign := ast.AssignStmt(ie, ast.Ident(trampolineValIdentifier))
+		return ast.SwitchCase(ast.Exprs(ast.IntLit(idx)), ast.Stmts(assign))
 	}
-	caseClause := ast.SwitchCase(
-		ast.Exprs(ast.IntLit(idx)),
-		ast.Stmts(assign),
-	)
-	return caseClause
+
+	target := func() dst.Expr {
+		ie := ast.IndexExpr(se, ast.IntLit(idx))
+		te := ast.TypeAssertExpr(ie, ast.DereferenceOf(t))
+		return ast.DereferenceOf(ast.ParenExpr(te))
+	}
+	nonNilAssign := ast.AssignStmt(target(), ast.TypeAssertExpr(ast.Ident(trampolineValIdentifier), t))
+	tClone := util.AssertType[dst.Expr](dst.Clone(t))
+	nilAssign := ast.AssignStmt(target(), ast.DereferenceOf(ast.CallTo("new", nil, ast.Exprs(tClone))))
+
+	ifStmt := &dst.IfStmt{
+		Cond: &dst.BinaryExpr{X: ast.Ident(trampolineValIdentifier), Op: token.EQL, Y: ast.Nil()},
+		Body: ast.Block(nilAssign),
+		Else: ast.Block(nonNilAssign),
+	}
+	return ast.SwitchCase(ast.Exprs(ast.IntLit(idx)), ast.Stmts(ifStmt))
 }
 
 func getValue(field string, idx int, t dst.Expr) *dst.CaseClause {
@@ -848,13 +854,13 @@ func (ip *InstrumentPhase) rewriteHookContextMethods() {
 		body.List = nil
 		return body
 	}
-	methodSetParamBody := findSwitchBlock(methodSetParam, 1)
+	methodSetParamBody := findSwitchBlock(methodSetParam, 0)
 	methodGetParamBody := findSwitchBlock(methodGetParam, 0)
 	rewriteParamMethods(ip.targetFunc, methodSetParamBody, methodGetParamBody)
 
 	// Rewrite SetReturnVal and GetReturnVal methods
 	if ip.targetFunc.Type.Results != nil {
-		methodSetRetValBody := findSwitchBlock(methodSetRetVal, 1)
+		methodSetRetValBody := findSwitchBlock(methodSetRetVal, 0)
 		methodGetRetValBody := findSwitchBlock(methodGetRetVal, 0)
 		rewriteReturnValMethods(ip.targetFunc, methodSetRetValBody, methodGetRetValBody)
 	}
