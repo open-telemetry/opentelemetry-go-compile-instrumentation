@@ -446,9 +446,31 @@ func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 	assert.True(t, matches)
 }
 
+func TestApplyCallRule_NoMatchIsNoOp(t *testing.T) {
+	file := makeCallFile(&dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "fmt", Path: "fmt"},
+			Sel: &dst.Ident{Name: "Println"},
+		},
+		Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"hello"`}},
+	})
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_sizeof"},
+		FunctionCall: "unsafe.Sizeof",
+		ImportPath:   "unsafe",
+		FuncName:     "Sizeof",
+		Replace:      "Wrapper({{ . }})",
+	}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.NoError(t, err, "applyCallRule must no-op when no calls match")
+}
+
 func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 	// A file with no matching calls should cause applyCallAppendArgs to
-	// return false so the assertion in applyCallRule can detect unmatched rules.
+	// return false so applyCallRule can skip the file as a no-op.
 	file := makeCallFile(&dst.CallExpr{
 		Fun: &dst.SelectorExpr{
 			X:   &dst.Ident{Name: "fmt", Path: "fmt"},

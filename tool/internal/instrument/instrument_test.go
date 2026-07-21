@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -106,7 +107,7 @@ func runTest(t *testing.T, testName string) {
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
 
-	args := compileArgs(tempDir, sourceFile, helpers, importPath)
+	args := compileArgs(tempDir, helpers, importPath, sourceFile)
 	err := Toolexec(ctx, args, false)
 
 	if testName == invalidReceiver {
@@ -117,6 +118,82 @@ func runTest(t *testing.T, testName string) {
 
 	require.NoError(t, err)
 	verifyGoldenFiles(t, tempDir, testName)
+}
+
+func TestInstrument_CallRuleMultiFilePackage(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+	ctx := util.ContextWithLogger(
+		t.Context(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	mainFile := filepath.Join(tempDir, mainGoFileName)
+	otherFile := filepath.Join(tempDir, "other.go")
+	require.NoError(t, os.WriteFile(mainFile, []byte(`// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "unsafe"
+
+func Wrapper(size uintptr) uintptr {
+	println("Wrapped!")
+	return size
+}
+
+func CallSizeof() {
+	x := 42
+	size := unsafe.Sizeof(x)
+	_ = size
+}
+
+func main() {
+	y := "hello"
+	_ = unsafe.Sizeof(y)
+}
+`), 0o644))
+	require.NoError(t, os.WriteFile(otherFile, []byte(`// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+func Helper() {
+	println("helper")
+}
+`), 0o644))
+
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "wrap_sizeof_call",
+			Target: mainPackage,
+		},
+		FunctionCall: "unsafe.Sizeof",
+		ImportPath:   "unsafe",
+		FuncName:     "Sizeof",
+		Replace:      "Wrapper({{ . }})",
+	}
+
+	ruleSet := &rule.InstRuleSet{
+		PackageName: mainPackage,
+		ModulePath:  mainPackage,
+		CallRules: map[string][]*rule.InstCallRule{
+			mainFile:  {callRule},
+			otherFile: {callRule},
+		},
+	}
+	writeMatchedJSON(ruleSet)
+
+	args := compileArgs(tempDir, nil, mainPackage, mainFile, otherFile)
+	require.NoError(t, Toolexec(ctx, args, false))
+
+	mainContent, err := os.ReadFile(mainFile)
+	require.NoError(t, err)
+	otherContent, err := os.ReadFile(otherFile)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(mainContent), "Wrapper(unsafe.Sizeof")
+	assert.NotContains(t, string(otherContent), "Wrapper(")
 }
 
 func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest bool) *rule.InstRuleSet {
@@ -351,14 +428,14 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 	util.WriteFile(matchedFile, string(matchedJSON))
 }
 
-func compileArgs(tempDir, sourceFile string, helpers []helperPkg, importPath string) []string {
+func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceFiles ...string) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
 
 	// Create importcfg file for the test
 	importCfgPath := filepath.Join(tempDir, "importcfg")
 	createImportCfg(importCfgPath, helpers)
 
-	return []string{
+	args := []string{
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
 		"-p", importPath,
@@ -366,8 +443,8 @@ func compileArgs(tempDir, sourceFile string, helpers []helperPkg, importPath str
 		"-buildid", buildID,
 		"-importcfg", importCfgPath,
 		"-pack",
-		sourceFile,
 	}
+	return append(args, sourceFiles...)
 }
 
 // createImportCfg creates an importcfg file with standard library packages
