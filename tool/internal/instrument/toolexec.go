@@ -115,6 +115,13 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		ip.importConfig = imports
 	}
 
+	// Inject the compile-time otelc version into pkg/runtime so that
+	// telemetry.distro.version is baked into the binary's OTel Resource.
+	// This is a no-op for every package other than pkg/runtime.
+	if err := ip.injectDistroVersion(); err != nil {
+		return nil, ex.Wrapf(err, "injecting distro version into pkg/runtime")
+	}
+
 	// Load matched hook rules from setup phase
 	allSet, err := ip.load()
 	if err != nil {

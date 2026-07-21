@@ -110,7 +110,10 @@ func setupOpenTelemetry(cfg Config) {
 
 	ctx := context.Background()
 
-	// Create resource
+	// Create resource. Start with the distro attributes at lowest priority so
+	// that OTEL_RESOURCE_ATTRIBUTES (via WithFromEnv) and any user-supplied
+	// attributes still take precedence, as required by the OTel spec.
+	distro := distroResource()
 	res, err := resource.New(ctx, resource.WithProcess(),
 		resource.WithOS(),
 		resource.WithContainer(),
@@ -120,6 +123,14 @@ func setupOpenTelemetry(cfg Config) {
 		// Log but don't fail - continue with basic providers
 		logger.Warn("failed to create resource", "error", err)
 		res = resource.Default()
+	}
+	// Merge distro resource at lowest priority: resource.Merge(r1, r2) lets r2
+	// win on key conflicts, so placing distro as r1 ensures env-provided
+	// attributes (r2) always override the baked-in distro version.
+	if merged, mergeErr := resource.Merge(distro, res); mergeErr != nil {
+		logger.Warn("failed to merge distro resource", "error", mergeErr)
+	} else {
+		res = merged
 	}
 
 	// Setup trace provider with auto-configured exporter
