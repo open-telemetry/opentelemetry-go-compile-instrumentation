@@ -31,6 +31,7 @@ func TestKafka(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("kafka testcontainer not supported on windows")
 	}
+	testcontainers.SkipIfProviderIsNotHealthy(t)
 
 	brokers := startKafkaContainer(t)
 	brokerAddrs := strings.Join(brokers, ",")
