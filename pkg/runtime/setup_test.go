@@ -97,6 +97,47 @@ func TestSetupOpenTelemetry(t *testing.T) {
 	assert.NotNil(t, tracerProvider, "trace provider should be configured when an OTLP endpoint is set")
 }
 
+func TestSetupOpenTelemetryPropagatorsFromEnv(t *testing.T) {
+	// OTEL_PROPAGATORS must select the global propagator (here b3 single-header
+	// instead of the default tracecontext+baggage).
+	origProp := otel.GetTextMapPropagator()
+	t.Cleanup(func() { otel.SetTextMapPropagator(origProp) })
+	restoreProviders(t)
+
+	// Disable all exporters so setup only exercises the propagator path.
+	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	t.Setenv("OTEL_LOGS_EXPORTER", "none")
+	t.Setenv("OTEL_PROPAGATORS", "b3")
+
+	setupOpenTelemetry(Config{InstrumentationName: "test-inst"})
+
+	fields := otel.GetTextMapPropagator().Fields()
+	assert.Contains(t, fields, "x-b3-traceid",
+		"OTEL_PROPAGATORS=b3 should install the b3 propagator")
+	assert.NotContains(t, fields, "traceparent",
+		"the default tracecontext propagator should be replaced")
+}
+
+func TestSetupOpenTelemetryPropagatorsInvalidValue(t *testing.T) {
+	// An unrecognized OTEL_PROPAGATORS value falls back to the tracecontext+baggage
+	// default rather than leaving the process without a propagator.
+	origProp := otel.GetTextMapPropagator()
+	t.Cleanup(func() { otel.SetTextMapPropagator(origProp) })
+	restoreProviders(t)
+
+	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	t.Setenv("OTEL_LOGS_EXPORTER", "none")
+	t.Setenv("OTEL_PROPAGATORS", "not-a-propagator")
+
+	setupOpenTelemetry(Config{InstrumentationName: "test-inst"})
+
+	fields := otel.GetTextMapPropagator().Fields()
+	assert.Contains(t, fields, "traceparent",
+		"an unknown propagator name should fall back to the tracecontext default")
+}
+
 func TestSetupOpenTelemetryExporterError(t *testing.T) {
 	// An invalid protocol makes the exporter fail to build, but setupOpenTelemetry
 	// logs and swallows the error rather than propagating it or panicking.

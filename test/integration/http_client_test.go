@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,6 +55,34 @@ func TestHTTPClient(t *testing.T) {
 			)
 		})
 	}
+
+	t.Run("propagators_env", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("OTEL_PROPAGATORS", "b3")
+
+		var (
+			mu      sync.Mutex
+			headers http.Header
+		)
+		server := StartHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			headers = r.Header.Clone()
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, `{"message":"Hello"}`)
+		}))
+
+		f.Run("httpclient", "-addr="+server.URL, "-name=world")
+
+		mu.Lock()
+		defer mu.Unlock()
+		require.NotEmpty(t, headers.Get("b3"),
+			"OTEL_PROPAGATORS=b3 should make the instrumented client inject the b3 header")
+		require.Empty(t, headers.Get("traceparent"),
+			"the default tracecontext propagator should be replaced, not composed")
+
+		f.RequireSingleSpan()
+	})
 }
 
 // HTTPServer wraps a test HTTP server.

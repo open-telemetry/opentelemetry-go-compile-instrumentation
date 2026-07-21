@@ -14,9 +14,9 @@ import (
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
+	"go.opentelemetry.io/contrib/propagators/autoprop"
 	"go.opentelemetry.io/otel"
 	logglobal "go.opentelemetry.io/otel/log/global"
-	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -137,11 +137,10 @@ func setupOpenTelemetry(cfg Config) {
 		logger.Warn("failed to setup logger provider", "error", err)
 	}
 
-	// Set W3C Trace Context as the propagator
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	// Use autoprop to select propagators from OTEL_PROPAGATORS (tracecontext,
+	// baggage, b3, b3multi, jaeger, xray, ottrace, none). Defaults to W3C
+	// Trace Context + Baggage when the variable is not set.
+	otel.SetTextMapPropagator(autoprop.NewTextMapPropagator())
 
 	logger.Info("OpenTelemetry initialized",
 		"instrumentation_name", cfg.InstrumentationName,
