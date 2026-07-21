@@ -668,14 +668,14 @@ test-e2e: ## Run e2e tests
 test-e2e: build build-demo
 	@echo "Running e2e tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ./gotest-e2e.log
+	OTELC_TEST_GOCACHE="$${OTELC_TEST_GOCACHE:-$(CURDIR)/test/.otelc-gocache}" go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ./gotest-e2e.log
 
 .ONESHELL:
 test-e2e/coverage: ## Run e2e tests with coverage report
 test-e2e/coverage: build build-demo
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log
+	OTELC_TEST_GOCACHE="$${OTELC_TEST_GOCACHE:-$(CURDIR)/test/.otelc-gocache}" go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log
 
 .PHONY: crosslink
 crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
