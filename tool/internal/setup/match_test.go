@@ -1433,6 +1433,30 @@ func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
 	require.ErrorContains(t, err, "not a valid glob pattern")
 }
 
+func TestMatchDeps_InvalidVersionRangeRejected(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "bad-version.yaml")
+	err := os.WriteFile(ruleFile, []byte(`bad_version_hook:
+  target: example.com/lib
+  version: "v1.0.0,"
+  func: Handler
+  before: BeforeHandler
+  path: "example.com/hooks"
+`), 0o644)
+	require.NoError(t, err)
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	deps := []*Dependency{
+		{ImportPath: "example.com/lib", Version: "v1.5.0", Sources: []string{}, CgoFiles: map[string]string{}},
+	}
+
+	_, err = sp.matchDeps(context.Background(), deps, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "empty end version")
+}
+
 func TestMatchDeps_EmptyTargetRejected(t *testing.T) {
 	// target is required: an empty (or whitespace-only) target would land under
 	// exactRules[""] and silently never match, so the loader must reject it at

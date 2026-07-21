@@ -124,6 +124,49 @@ func EncodeBuildFlags(flags []string) string {
 	return string(encoded)
 }
 
+// ValidateVersionRange rejects malformed version ranges at rule load time.
+// Valid forms match docs/rules.md:
+//   - "" (match all versions)
+//   - "v0.11.0" (minimum version)
+//   - "v0.11.0,v0.12.0" (start_inclusive,end_exclusive)
+func ValidateVersionRange(versionRange string) error {
+	versionRange = strings.TrimSpace(versionRange)
+	if versionRange == "" {
+		return nil
+	}
+	if strings.Count(versionRange, ",") > 1 {
+		return fmt.Errorf(
+			"version range %q must use format start_inclusive,end_exclusive with at most one comma",
+			versionRange,
+		)
+	}
+	start, end, hasComma := strings.Cut(versionRange, ",")
+	if hasComma {
+		start = strings.TrimSpace(start)
+		end = strings.TrimSpace(end)
+		if start == "" {
+			return fmt.Errorf("version range %q has an empty start version", versionRange)
+		}
+		if end == "" {
+			return fmt.Errorf("version range %q has an empty end version", versionRange)
+		}
+		if !semver.IsValid(start) {
+			return fmt.Errorf("version range %q has invalid start version %q", versionRange, start)
+		}
+		if !semver.IsValid(end) {
+			return fmt.Errorf("version range %q has invalid end version %q", versionRange, end)
+		}
+		if semver.Compare(start, end) >= 0 {
+			return fmt.Errorf("version range %q start version must be less than end version", versionRange)
+		}
+		return nil
+	}
+	if !semver.IsValid(versionRange) {
+		return fmt.Errorf("version %q is not a valid semver", versionRange)
+	}
+	return nil
+}
+
 // VersionInRange checks if a given version is within a specified version range.
 // The version range can be in one of the following formats:
 // - "" (empty string): means all versions are supported.

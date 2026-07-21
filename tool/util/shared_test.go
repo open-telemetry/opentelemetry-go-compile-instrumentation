@@ -7,6 +7,37 @@ import (
 	"testing"
 )
 
+func TestValidateVersionRange(t *testing.T) {
+	tests := []struct {
+		name        string
+		version     string
+		expectError bool
+	}{
+		{name: "empty matches all", version: "", expectError: false},
+		{name: "minimum version", version: "v1.0.0", expectError: false},
+		{name: "valid range", version: "v1.0.0,v2.0.0", expectError: false},
+		{name: "trailing comma", version: "v1.0.0,", expectError: true},
+		{name: "missing lower bound", version: ",v2.0.0", expectError: true},
+		{name: "extra comma", version: "v1.0.0,v2.0.0,v3.0.0", expectError: true},
+		{name: "start not less than end", version: "v2.0.0,v1.0.0", expectError: true},
+		{name: "invalid semver", version: "not-a-version", expectError: true},
+		{name: "invalid start semver", version: "bad,v2.0.0", expectError: true},
+		{name: "invalid end semver", version: "v1.0.0,bad", expectError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateVersionRange(tt.version)
+			if tt.expectError && err == nil {
+				t.Fatalf("ValidateVersionRange(%q) = nil, want error", tt.version)
+			}
+			if !tt.expectError && err != nil {
+				t.Fatalf("ValidateVersionRange(%q) = %v, want nil", tt.version, err)
+			}
+		})
+	}
+}
+
 func TestVersionInRange(t *testing.T) {
 	tests := []struct {
 		name           string
