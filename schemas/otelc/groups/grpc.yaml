@@ -1,0 +1,172 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # gRPC instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/google.golang.org/grpc/client/client_hook.go
+  #   instrumentation/google.golang.org/grpc/server/server_hook.go
+  #   instrumentation/google.golang.org/grpc/semconv/grpc.go
+  #
+  # The gRPC instrumentation records ten standard upstream RPC histograms (via
+  # the generated `semconv/.../rpcconv` package) and creates one client or
+  # server span per RPC. All metrics and attributes are standard upstream
+  # OpenTelemetry RPC telemetry, referenced with `ref:`. Declaring them here
+  # pins the exact subset this project emits. The size histograms carry only
+  # `rpc.system`/`rpc.service`/`rpc.method` because their attribute set is
+  # captured before the RPC status code is known.
+  # ---------------------------------------------------------------------------
+
+  # --- Client metrics -------------------------------------------------------
+  - id: metric.otelc.rpc.client.duration
+    type: metric
+    metric_name: rpc.client.duration
+    instrument: histogram
+    unit: ms
+    stability: development
+    brief: Measures the duration of outbound RPC.
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+      - ref: rpc.grpc.status_code
+
+  - id: metric.otelc.rpc.client.request.size
+    type: metric
+    metric_name: rpc.client.request.size
+    instrument: histogram
+    unit: By
+    stability: development
+    brief: Measures the size of RPC request messages (uncompressed).
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+
+  - id: metric.otelc.rpc.client.response.size
+    type: metric
+    metric_name: rpc.client.response.size
+    instrument: histogram
+    unit: By
+    stability: development
+    brief: Measures the size of RPC response messages (uncompressed).
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+
+  - id: metric.otelc.rpc.client.requests_per_rpc
+    type: metric
+    metric_name: rpc.client.requests_per_rpc
+    instrument: histogram
+    unit: "{count}"
+    stability: development
+    brief: Measures the number of messages received per RPC.
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+      - ref: rpc.grpc.status_code
+
+  - id: metric.otelc.rpc.client.responses_per_rpc
+    type: metric
+    metric_name: rpc.client.responses_per_rpc
+    instrument: histogram
+    unit: "{count}"
+    stability: development
+    brief: Measures the number of messages sent per RPC.
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+      - ref: rpc.grpc.status_code
+
+  # --- Server metrics -------------------------------------------------------
+  - id: metric.otelc.rpc.server.duration
+    type: metric
+    metric_name: rpc.server.duration
+    instrument: histogram
+    unit: ms
+    stability: development
+    brief: Measures the duration of inbound RPC.
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+      - ref: rpc.grpc.status_code
+
+  - id: metric.otelc.rpc.server.request.size
+    type: metric
+    metric_name: rpc.server.request.size
+    instrument: histogram
+    unit: By
+    stability: development
+    brief: Measures the size of RPC request messages (uncompressed).
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+
+  - id: metric.otelc.rpc.server.response.size
+    type: metric
+    metric_name: rpc.server.response.size
+    instrument: histogram
+    unit: By
+    stability: development
+    brief: Measures the size of RPC response messages (uncompressed).
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+
+  - id: metric.otelc.rpc.server.requests_per_rpc
+    type: metric
+    metric_name: rpc.server.requests_per_rpc
+    instrument: histogram
+    unit: "{count}"
+    stability: development
+    brief: Measures the number of messages received per RPC.
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+      - ref: rpc.grpc.status_code
+
+  - id: metric.otelc.rpc.server.responses_per_rpc
+    type: metric
+    metric_name: rpc.server.responses_per_rpc
+    instrument: histogram
+    unit: "{count}"
+    stability: development
+    brief: Measures the number of messages sent per RPC.
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+      - ref: rpc.grpc.status_code
+
+  # --- Spans ----------------------------------------------------------------
+  - id: span.otelc.rpc.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: gRPC client span, one per outbound RPC.
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+      - ref: rpc.grpc.status_code
+      - ref: server.address
+      - ref: server.port
+
+  - id: span.otelc.rpc.server
+    type: span
+    span_kind: server
+    stability: development
+    brief: gRPC server span, one per inbound RPC.
+    attributes:
+      - ref: rpc.system
+      - ref: rpc.service
+      - ref: rpc.method
+      - ref: rpc.grpc.status_code
+      - ref: client.address
+      - ref: client.port

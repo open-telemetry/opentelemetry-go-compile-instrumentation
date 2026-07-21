@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/.github/tools
+module go.opentelemetry.io/otelc/.github/tools
 
 go 1.25.0
 

@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/data"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
@@ -140,7 +140,7 @@ func extractGZip(bundleReader io.Reader, targetDir string) error {
 	return nil
 }
 
-func (*SetupPhase) extract() error {
+func extractOtelcBundle() error {
 	// Extract the instrumentation code to the build temp directory
 	// for future instrumentation phase
 	return extractGZip(data.GetBundleReader(), util.GetBuildTempDir())

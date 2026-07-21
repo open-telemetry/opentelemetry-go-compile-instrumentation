@@ -6,7 +6,7 @@ package testdata
 import (
 	_ "unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
 func BeforeOpen(ctx hook.HookContext, dsn string) {

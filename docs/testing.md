@@ -2,7 +2,7 @@
 
 This document describes the testing strategy for the project, the different test categories, and when to use each.
 
-Tests are organized in five categories, each with a distinct purpose and scope.
+Tests are organized in six categories, each with a distinct purpose and scope.
 
 | Category | Location | Build Tag | Scope |
 | :------- | :------- | :-------- | :---- |
@@ -11,6 +11,7 @@ Tests are organized in five categories, each with a distinct purpose and scope.
 | E2E | `test/e2e/` | `e2e` | Multiple processes (e.g. client + server). |
 | LatestLibBuild | `test/latestlibbuild/` | `latestlibbuild` | Compile instrumented app against `@latest` of each instrumented library. |
 | LatestLibRun | `test/latestlibrun/` | `latestlibrun` | Run integration suite after bumping each instrumented library to `@latest`. |
+| VersionMatrix | `test/versionmatrix/` | `versionmatrix` | Run integration suite after pinning each instrumented library to the lower and upper bounds of its declared version ranges. |
 
 ## Unit Tests
 
@@ -39,12 +40,19 @@ Use this convention when a testcase exercises call rules that reference wrapper 
 > [!IMPORTANT]
 > **When to write an integration test.**
 >
-> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `instrumentation/basic/` and validates the foundational hook machinery that all other instrumentations rely on.
+> - **Tool hook changes.** Any change to the tool's code injection or the `HookContext` interface must be covered by `basic_test.go`. It exercises `demo/app/basic/instrumentation` and validates the foundational hook machinery that all other instrumentations rely on.
 > - **Instrumentation package changes.** Every package in `instrumentation/` must have a corresponding integration test. If you add or modify a hook, there should be an integration test that builds an instrumented binary and asserts on the exported spans for that component.
 
 Integration tests build real binaries with the `otelc` tool and run them against **in-process** dependencies (e.g. `httptest.Server`, in-process gRPC server, miniredis, testdb driver).
 
 Test applications are built on demand by the tests that use them. Each top-level test builds its required application once (via `otelc go build`) and reuses the resulting binary across its subtests when applicable.
+
+CI shards the integration suite by top-level test-name partitions through `INTEGRATION_TEST_RUN`; `SHARD_TOTAL` controls the shard count, and new tests are assigned automatically without per-test workflow changes.
+
+When `OTELC_TEST_GOCACHE` is set, standard `test/apps` builds use a per-app
+Go build cache at `${OTELC_TEST_GOCACHE}/${app}` and drop `-a` so warm builds can
+reuse cached compile outputs. Custom app directories do not use this cache and
+keep caller-supplied build arguments unchanged.
 
 Each test follows the same pattern:
 
@@ -92,6 +100,9 @@ make test-latestlibbuild
 # LatestLibRun tests (requires: make build; mutates test/apps/*/go.mod — run git restore test/apps afterwards)
 make test-latestlibrun
 
+# VersionMatrix tests (requires: make build; mutates test/apps/*/go.mod — run git restore test/apps afterwards)
+make test-versionmatrix
+
 # Coverage
 make test-unit/coverage
 make test-integration/coverage
@@ -101,10 +112,8 @@ make test-e2e/coverage
 ## Coverage
 
 > [!NOTE]
-> The project targets a **≥70% unit-test coverage** goal for both the `tool/` and `pkg/` module trees.
-> This is an **aspirational target** currently being worked toward. The CI step reports coverage
-> for both trees but does **not yet block merges** when coverage is below the threshold.
-> Once the target is consistently met, the gate will be promoted to enforcement.
+> The project enforces a **≥70% unit-test coverage** floor for both the `tool/` and `pkg/` module trees.
+> Codecov checks each tree against the target and **blocks the PR** when coverage drops below it.
 
 ### Coverage target rationale
 
@@ -120,10 +129,10 @@ The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
 
 Codecov evaluates each flag against the 70% target defined in `codecov.yml` and posts the result
-as an **informational** status check — a coverage shortfall is visible in the PR but does **not**
-block merges. Flip `informational: false` in `codecov.yml` once the target is consistently met.
+as an **enforcing** status check (`informational: false`): a coverage shortfall below the target
+fails the check and blocks the PR.
 
-All test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and caching.
+All Go test commands use `-shuffle=on` and `-count=1` to avoid ordering issues and Go test result caching. Integration tests may still reuse the separate per-app Go build cache described above.
 
 CI runs each category in a separate workflow across Linux (amd64/arm64), macOS (arm64), and Windows (amd64). See `.github/workflows/test-*.yaml` for details.
 
@@ -159,6 +168,27 @@ A failure means that the latest release of an upstream library introduced a **ru
 1. Cap the existing rule's version range in the relevant `instrumentation/.../*.yaml` file.
 2. Open a new rule entry covering the new version range and update the hook implementation.
 3. Close the auto-opened `latestlibrun-failure` issue once the fix lands on `main`.
+
+## VersionMatrix Tests
+
+> [!IMPORTANT]
+> **What this test does.** While LatestLibBuild and LatestLibRun verify forward compatibility against `@latest`, nothing else exercises the rest of a declared version range — the ranges are assumed correct rather than verified. For every instrumentation rule, this test collects the **lower and upper bound of each rule's `version:` range**, pins the matching test app's dependency to one of those bounds, and runs the full integration suite against it — repeating once per distinct bound version (a "tier"), so the number of runs grows with the number of rules. It runs on a weekly schedule and on demand via `workflow_dispatch`. When it fails on `main`, the CI workflow automatically opens or updates a GitHub issue labelled `versionmatrix-failure`.
+
+| Category | Location | Build Tag | Scope |
+| :------- | :------- | :-------- | :---- |
+| VersionMatrix | `test/versionmatrix/` | `versionmatrix` | Run integration suite at the lower and upper bound of each instrumentation rule's version range. |
+
+Bounds are taken **per rule, not per dependency**: a dependency covered by two rules contributes both rules' lower bounds (e.g. `k8s.io/client-go` rules `v0.34.0,v0.36.0` and `v0.35.0,v0.36.0` are tested at `v0.34.0` and `v0.35.0`), so the boundary where one rule hands off to the next is exercised on its own. Version ranges are half-open (`v0.34.0,v0.36.0` supports `>= v0.34.0` and `< v0.36.0`), so the upper bound tested for a capped range is the newest release **below** the cap. An upper bound equal to the latest release (an open-ended range) is dropped, because LatestLibRun already exercises the latest release and a shared failure would otherwise open two issues. Note that a capped range whose library has already released past the cap (e.g. `v0.34.0,v0.36.0` when `@latest` is `v0.36.1`) is skipped by both latest-lib tests, so this test is the only one exercising it at all.
+
+Per [ADR-0004](adr/0004-instrumentation-ownership-and-compatibility.md), the supported window per library is the last two major versions; that policy bounds the matrix this test has to cover.
+
+### What a failure means
+
+A failure means a declared version range does **not** actually work at one of its bounds: the bound cannot be installed (another module in the build graph, such as the instrumentation hook's own `go.mod`, forces a newer version), no published release is covered by the range at all, or the integration suite fails against the pinned version. The remediation is:
+
+1. Fix the rule's range in the relevant `instrumentation/.../*.yaml` file: raise the lower bound to the oldest version that actually works, or cap the range below the first version that breaks.
+2. If the wider range should stay supported, split the rule instead and add an implementation covering the versions the current hook cannot handle.
+3. Close the auto-opened `versionmatrix-failure` issue once the fix lands on `main`.
 
 ## Writing New Tests
 

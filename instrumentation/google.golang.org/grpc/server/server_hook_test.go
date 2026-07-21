@@ -19,7 +19,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook/hooktest"
+	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 func TestBeforeNewServer(t *testing.T) {
@@ -152,7 +153,7 @@ func TestServerStatsHandler_TagRPC(t *testing.T) {
 	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
 
 	handler := newServerStatsHandler()
 
@@ -274,7 +275,7 @@ func TestServerStatsHandler_OTELExporterFiltering(t *testing.T) {
 	})
 
 	// Re-initialize to use new tracer provider
-	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(moduleVersion()))
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
 
 	handler := newServerStatsHandler()
 

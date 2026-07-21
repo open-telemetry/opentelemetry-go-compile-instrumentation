@@ -7,8 +7,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/k8s.io/client-go/semconv"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go/semconv"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"

@@ -6,4 +6,4 @@ server_hook:
     - inject_hooks:
         before: BeforeNewServer
         after: AfterNewServer
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/server"
+        path: "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server"

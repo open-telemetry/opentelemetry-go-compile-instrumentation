@@ -1,0 +1,10 @@
+kafka_writer_writemessages:
+  target: github.com/segmentio/kafka-go
+  where:
+    func: WriteMessages
+    recv: "*Writer"
+  do:
+    - inject_hooks:
+        before: BeforeWriteMessages
+        after: AfterWriteMessages
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/producer"

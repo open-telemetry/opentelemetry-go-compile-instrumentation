@@ -1,0 +1,13 @@
+# Target a specific external service family (example.com/svc/**). The package
+# under instrumentation is "main", which is outside that family, so the glob
+# does not match and no instrumentation is applied. The resulting main.go must
+# be byte-identical to source.go.
+hook_glob:
+  target: "example.com/svc/**"
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata/golden/target-glob-no-match

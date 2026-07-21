@@ -21,3 +21,5 @@ exclude:
   - node_modules/
   - pb/
   - .otelc-build/
+  # Pre-fetched upstream semantic-conventions registry (generated, git-ignored).
+  - schemas/otelc/.deps/

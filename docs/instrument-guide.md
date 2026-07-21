@@ -37,7 +37,7 @@ inject_to_grpc_newserver:
     - inject_hooks:
         before: BeforeNewServer
         after: AfterNewServer
-        path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/server
+        path: go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server
 ```
 
 - `target`: Import path of the package to instrument.
@@ -73,7 +73,7 @@ Hook implementation:
 package server
 
 import (
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/hook"
 	"google.golang.org/grpc"
 )
 
@@ -91,6 +91,9 @@ func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
 If we cannot import a specific type (e.g., it is unexported), we can use `interface{}` in the hook signature.
 
 ### Limitations
+
+The constraints below apply to hook implementations. For runtime symptoms (spans not
+appearing, instrumentation not applied), see [Troubleshooting](troubleshooting.md).
 
 When implementing hooks, we must adhere to certain limitations:
 
@@ -206,11 +209,20 @@ To run integration tests:
 make test-integration
 ```
 
-## 4. Verify
+## 4. Register the Instrumentation
+
+If your PR adds a new user-facing instrumentation, create a PR to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.
+
+Follow the [OpenTelemetry Registry contribution guide](https://opentelemetry.io/ecosystem/registry/adding/).
+
+Not every instrumentation package should be listed. Internal helper packages (for example, `basic`, `runtime`, or packages that only provide implementation details for other instrumentations) generally do not need registry entries.
+
+## 5. Verify
 
 Check that your instrumentation package has the following elements:
 
 - A rule YAML under `instrumentation/<import_path>/.../otelc..yaml` with a correct `target` and version range.
-- Hook implementation under `instrumentation/<import_path>/...`
+- Hook implementation under `instrumentation/<import_path>/...`.
 - Unit tests alongside the hooks for logic-level behavior.
 - Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
+- If applicable, a PR has been opened to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.

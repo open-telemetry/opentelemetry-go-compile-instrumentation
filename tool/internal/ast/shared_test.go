@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 // fixture source used across all shared_test cases

@@ -21,6 +21,8 @@ type TestFixture struct {
 	serviceName   string
 	skipCollector bool
 
+	appsDir string
+
 	// env holds per-fixture environment overrides (KEY=VALUE form). Applied
 	// when spawning processes via f.Start/f.Run so parallel tests do not
 	// race on os.Environ via t.Setenv.
@@ -38,6 +40,12 @@ func WithServiceName(name string) TestFixtureOption {
 func WithoutCollector() TestFixtureOption {
 	return func(f *TestFixture) {
 		f.skipCollector = true
+	}
+}
+
+func WithAppsDir(dir string) TestFixtureOption {
+	return func(f *TestFixture) {
+		f.appsDir = dir
 	}
 }
 
@@ -119,27 +127,27 @@ type Server struct {
 // Start starts a test application from test/apps/. The binary is
 // expected to be built using Build.
 func (f *TestFixture) Start(appName string, args ...string) *Server {
-	cmd := Start(f.t, "", appName, f.Env(), args...)
+	cmd := Start(f.t, f.appsDir, appName, f.Env(), args...)
 	return &Server{t: f.t, appPath: appName, Cmd: cmd}
 }
 
 // Run runs a application and returns its output. The binary is
 // expected to be built using Build.
 func (f *TestFixture) Run(appName string, args ...string) string {
-	return Run(f.t, "", appName, f.Env(), args...)
+	return Run(f.t, f.appsDir, appName, f.Env(), args...)
 }
 
 // BuildAndStart builds the named app and then starts it. Kept for e2e test
 // backward compatibility. Integration tests build applications once and reuse them.
 func (f *TestFixture) BuildAndStart(appName string, args ...string) *Server {
-	Build(f.t, "", appName, "go", "build", "-a")
+	Build(f.t, f.appsDir, appName, "go", "build", "-a")
 	return f.Start(appName, args...)
 }
 
 // BuildAndRun builds the named app and runs it, returning its output. Kept for
 // e2e test backward compatibility. Integration tests build applications once and reuse them.
 func (f *TestFixture) BuildAndRun(appName string, args ...string) string {
-	Build(f.t, "", appName, "go", "build", "-a")
+	Build(f.t, f.appsDir, appName, "go", "build", "-a")
 	return f.Run(appName, args...)
 }
 

@@ -16,7 +16,7 @@ import (
 	"os"
 	"time"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/demo/app/grpc/server/pb"
+	pb "go.opentelemetry.io/otelc/demo/app/grpc/server/pb"
 	"google.golang.org/grpc"
 )
 

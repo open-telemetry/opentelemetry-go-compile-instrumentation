@@ -6,7 +6,7 @@ No manual code changes required.
 ## Why Use This Tool?
 
 - **Zero-code instrumentation** - Automatically instrument your entire application without modifying source code
-- **Third-party library support** - Instrument dependencies and libraries you don't control
+- **Third-party library support** - Instrument dependencies and libraries you don't control (HTTP, gRPC, database/sql, Redis, OpenAI, Anthropic, and more)
 - **Complete decoupling** - Keep your codebase free from instrumentation concerns
 - **Flexible deployment** - Integrate at development time or in your CI/CD pipeline
 
@@ -23,7 +23,9 @@ No manual code changes required.
 2. **Try the demo**
 
    ```bash
-   make demo
+   cd demo/app/basic
+   ../../otelc go build
+   ./basic
    ```
 
 3. **Use with your application**
@@ -33,9 +35,73 @@ No manual code changes required.
    ./otelc go build -o myapp .
 
    # Option 2: Install as tool dependency (Go 1.24+)
-   go get -tool github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/cmd/otelc
+   go get -tool go.opentelemetry.io/otelc/tool/cmd/otelc
    go tool otelc go build -o myapp .
    ```
+
+## Using `go build` Directly (toolexec drop-in)
+
+Instead of wrapping the build with `otelc go build`, you can keep using the
+regular `go` toolchain and plug `otelc` in through `GOFLAGS`. This is useful
+when the build command is owned by a Makefile, CI pipeline, or another tool
+you don't want to change.
+
+1. **Prepare the module** (once, and again after dependencies change):
+
+   ```bash
+   cd path/to/your/module
+   otelc setup
+   ```
+
+   `otelc setup` analyzes the module, generates the instrumentation sources
+   (`otel.instrumentation.go`, `otelc.runtime.go`) and writes the matched
+   rules to `.otelc-build/`, which the build phase below reads.
+
+2. **Build with the standard toolchain**:
+
+   ```bash
+   export GOFLAGS="${GOFLAGS} '-toolexec=otelc toolexec'"
+   go build -o myapp .
+   ```
+
+Run `go build` from the module directory (or any subdirectory); `otelc`
+locates the `.otelc-build` directory created by `otelc setup` from there. To
+run the build from somewhere else, set `OTELC_WORK_DIR` to the directory
+where `otelc setup` ran.
+
+Instrumented and plain build artifacts are kept apart in Go's build cache
+(otelc marks the tool identity go hashes into every cache key), so switching
+between instrumented and regular builds does not require cleaning the cache.
+
+## Managing Instrumentations
+
+Instrumentations are declared through an `otel.instrumentation.go` file located next to the application's `go.mod` file. The alternate filename `otelc.tool.go` is also accepted and behaves identically.
+
+The file follows the standard Go `tools.go` pattern and contains blank imports for the instrumentation packages that should be enabled:
+
+```go
+//go:build tools
+
+package tools
+
+import (
+	_ "go.opentelemetry.io/otelc/instrumentation/net/http/server" // enable net/http server instrumentation
+	_ "go.opentelemetry.io/otelc/instrumentation/github.com/gin-gonic/gin" // enable gin instrumentation
+)
+```
+
+The file can be created and maintained automatically using:
+
+```bash
+otelc pin
+```
+
+The `pin` command discovers applicable instrumentations, creates the file if it does not already exist, updates imports, synchronizes dependencies, and runs validation checks.
+
+If no instrumentation file exists, `otelc go build` automatically analyzes the application's dependency graph and generates a temporary instrumentation configuration for the duration of the build. This ensures a zero-configuration workflow while allowing projects to adopt a persistent, source-controlled configuration when desired.
+
+> [!NOTE]
+> Support for committing an `otelc pin`-generated `otel.instrumentation.go` file is still under development. Until the work in [#585](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585) to decouple instrumentation packages from the `otelc` executable is complete, `otelc pin` should be considered a local workflow. `otelc go build` continues to work without a committed instrumentation file by automatically generating a temporary configuration during the build.
 
 ## How It Works
 
@@ -46,6 +112,23 @@ The tool uses compile-time instrumentation through:
 3. **Custom Toolchain Integration** - Intercepts compilation using `-toolexec` flag
 
 This approach provides dynamic instrumentation without runtime overhead or invasive code modifications.
+
+## Supported Libraries
+
+The following libraries are automatically instrumented:
+
+| Library | Semantic Conventions |
+| --- | --- |
+| `net/http` (client & server) | HTTP spans |
+| `google.golang.org/grpc` (client & server) | gRPC/RPC spans |
+| `database/sql` | DB client spans |
+| `github.com/gin-gonic/gin` | HTTP server spans |
+| `github.com/redis/go-redis/v9` | Redis DB spans |
+| `go.mongodb.org/mongo-driver` | MongoDB DB spans |
+| `k8s.io/client-go` | K8s resource spans |
+| `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
+| `github.com/anthropics/anthropic-sdk-go` | GenAI spans |
+| `github.com/segmentio/kafka-go` | Kafka messaging spans |
 
 ## Learn More
 
@@ -69,6 +152,6 @@ Learn more about the project from these presentations:
 
 ## Status
 
-> **Note**: This project is currently in active development and not yet ready for production use.
+This project is stable and ready for production use as of v1.0.0.
 
-For the latest updates and development progress, follow the project on GitHub and join the community discussions.
+For the latest updates, follow the project on GitHub and join the community discussions.

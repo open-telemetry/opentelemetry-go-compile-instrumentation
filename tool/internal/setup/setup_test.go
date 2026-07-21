@@ -10,11 +10,32 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
+	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
+
+func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no subcommand", args: []string{"go"}},
+		{name: "unsupported subcommand run", args: []string{"go", "run", "./..."}},
+		{name: "unsupported subcommand vet", args: []string{"go", "vet", "./..."}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: GoBuild}
+			err := cmd.Run(t.Context(), tt.args)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "supported")
+		})
+	}
+}
 
 func TestGetPackages(t *testing.T) {
 	setupTestModule(t, []string{"cmd", "foo/demo"})
@@ -51,7 +72,7 @@ func TestGetPackages(t *testing.T) {
 			name:             "file as a target",
 			args:             []string{"./cmd/main.go"},
 			expectedCount:    1,
-			expectedPackages: []string{commandLineArgumentsPackage},
+			expectedPackages: []string{pkgload.CommandLineArgumentsPackage},
 			expectError:      false,
 		},
 		{
@@ -102,13 +123,37 @@ func TestGetPackages(t *testing.T) {
 	}
 }
 
+func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	pkgs, err := getBuildPackages(t.Context(), []string{"-C", "app", "."})
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	require.NotNil(t, pkgs[0].Module)
+	require.Equal(t, "example.com/app", pkgs[0].Module.Path)
+}
+
 func TestSplitBuildTargets(t *testing.T) {
 	tests := []struct {
-		name        string
-		targets     []string
-		pkgTargets  []string
-		fileTargets []string
-		expectError bool
+		name          string
+		targets       []string
+		pkgTargets    []string
+		fileTargets   []string
+		notPkgTargets []string // must NOT be parsed as packages (e.g. flag values)
+		expectError   bool
 	}{
 		{
 			name:        "all package targets",
@@ -138,6 +183,54 @@ func TestSplitBuildTargets(t *testing.T) {
 			fileTargets: nil,
 			expectError: true,
 		},
+		{
+			name:          "go test -run value is not a package",
+			targets:       []string{"-run", "TestX", "./pkg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"TestX"},
+			expectError:   false,
+		},
+		{
+			name:        "go test joined -count=1 leaves package",
+			targets:     []string{"-count=1", "./pkg"},
+			pkgTargets:  []string{"./pkg"},
+			expectError: false,
+		},
+		{
+			name:          "go test -run value with no package target",
+			targets:       []string{"-run", "TestX"},
+			pkgTargets:    nil,
+			notPkgTargets: []string{"TestX"},
+			expectError:   false,
+		},
+		{
+			name:          "go test package before -run flag",
+			targets:       []string{"./pkg", "-run", "TestX"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"TestX"},
+			expectError:   false,
+		},
+		{
+			name:          "go test package before joined -count",
+			targets:       []string{"./...", "-count=1"},
+			pkgTargets:    []string{"./..."},
+			notPkgTargets: []string{"-count=1"},
+			expectError:   false,
+		},
+		{
+			name:          "go test -args tail is not a package",
+			targets:       []string{"./pkg", "-args", "serverarg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"serverarg"},
+			expectError:   false,
+		},
+		{
+			name:          "go test -vet value is not a package",
+			targets:       []string{"-vet", "off", "./pkg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"off"},
+			expectError:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -154,6 +247,10 @@ func TestSplitBuildTargets(t *testing.T) {
 				}
 				for _, exp := range tt.fileTargets {
 					assert.Contains(t, fileTargets, exp, "Expected file target %q not found in %v", exp, fileTargets)
+				}
+				for _, notExp := range tt.notPkgTargets {
+					assert.NotContains(t, pkgTargets, notExp,
+						"Flag value %q must not be parsed as a package (got %v)", notExp, pkgTargets)
 				}
 			}
 		})
@@ -214,54 +311,25 @@ func setupTestModule(t *testing.T, subDirs []string) {
 	t.Chdir(tmpDir)
 }
 
-func TestGetPackageDir(t *testing.T) {
+func TestRootModulePaths(t *testing.T) {
 	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.25\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+	mainFile := filepath.Join(appDir, "main.go")
+	require.NoError(t, os.WriteFile(mainFile, []byte("package main\n\nfunc main() {}\n"), 0o644))
 
-	tests := []struct {
-		name    string
-		goFiles []string
-	}{
-		{
-			name:    "package with single go file",
-			goFiles: []string{filepath.Join("path_to_project", "main.go")},
-		},
-		{
-			name:    "package with multiple go files",
-			goFiles: []string{filepath.Join("path_to_project", "main.go"), filepath.Join("path_to_project", "util.go")},
-		},
-		{
-			name:    "package with nested path",
-			goFiles: []string{filepath.Join("path_to_project", "cmd", "server", "main.go")},
-		},
-		{
-			name:    "package with absolute path",
-			goFiles: []string{filepath.Join(tmpDir, "main.go")},
-		},
-		{
-			name:    "package with no go files",
-			goFiles: nil,
-		},
-		{
-			name:    "package with empty go files slice",
-			goFiles: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var expected string
-			if len(tt.goFiles) > 0 {
-				expected = filepath.Dir(tt.goFiles[0])
-			}
-
-			pkg := &packages.Package{}
-			pkg.GoFiles = tt.goFiles
-			result := getPackageDir(pkg)
-			if result != expected {
-				t.Errorf("getPackageDir() = %q, expected %q", result, expected)
-			}
-		})
-	}
+	got, err := rootModulePaths(t.Context(), []*packages.Package{
+		{PkgPath: "example.com/direct", Module: &packages.Module{Path: "example.com/direct"}},
+		{PkgPath: pkgload.CommandLineArgumentsPackage, GoFiles: []string{mainFile}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"example.com/app", "example.com/direct"}, got)
 }
 
 func TestSetupGoCache(t *testing.T) {
@@ -371,6 +439,16 @@ func TestExtractBuildFlags(t *testing.T) {
 			name:     "modfile with spaces in path",
 			args:     []string{"build", "-modfile", "path with spaces/go.mod", "./..."},
 			expected: []string{"-modfile", "path with spaces/go.mod"},
+		},
+		{
+			name:     "change directory flag",
+			args:     []string{"build", "-C", "app", "./..."},
+			expected: []string{"-C", "app"},
+		},
+		{
+			name:     "overlay flag",
+			args:     []string{"build", "-overlay=overlay.json", "./..."},
+			expected: []string{"-overlay=overlay.json"},
 		},
 		{
 			name:     "race=true is normalized",

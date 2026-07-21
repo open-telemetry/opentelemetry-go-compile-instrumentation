@@ -1,0 +1,9 @@
+anthropic_v1_new_client:
+  target: github.com/anthropics/anthropic-sdk-go
+  version: v1.0.0
+  where:
+    func: NewClient
+  do:
+    - inject_hooks:
+        before: BeforeNewClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic-sdk-go"

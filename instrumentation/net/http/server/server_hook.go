@@ -5,7 +5,6 @@ package server
 
 import (
 	"net/http"
-	"runtime/debug"
 	"sync"
 	"time"
 
@@ -14,13 +13,13 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http/semconv"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
+	"go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
+	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 const (
-	instrumentationName = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/net/http"
+	instrumentationName = "go.opentelemetry.io/otelc/instrumentation/net/http"
 	instrumentationKey  = "NETHTTP"
 	responseWriterIndex = 1
 	requestIndex        = 2
@@ -33,42 +32,13 @@ var (
 	initOnce   sync.Once
 )
 
-// moduleVersion extracts the version from the Go module system.
-// Falls back to "dev" if version cannot be determined.
-func moduleVersion() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "dev"
-	}
-
-	// Return the main module version
-	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		return bi.Main.Version
-	}
-
-	return "dev"
-}
-
 func initInstrumentation() {
 	initOnce.Do(func() {
-		version := moduleVersion()
-		if err := runtime.SetupOTelSDK(
-			"go.opentelemetry.io/compile-instrumentation/net/http/server",
-			version,
-		); err != nil {
-			logger.Error("failed to setup OTel SDK", "error", err)
-		}
 		tracer = otel.GetTracerProvider().Tracer(
 			instrumentationName,
-			trace.WithInstrumentationVersion(version),
+			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
 		propagator = otel.GetTextMapPropagator()
-
-		// Start runtime metrics (respects OTEL_GO_ENABLED/DISABLED_INSTRUMENTATIONS)
-		if err := runtime.StartRuntimeMetrics(); err != nil {
-			logger.Error("failed to start runtime metrics", "error", err)
-		}
-
 		logger.Info("HTTP server instrumentation initialized")
 	})
 }

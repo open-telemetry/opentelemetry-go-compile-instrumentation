@@ -73,14 +73,8 @@ func TestRedisClientEnabler(t *testing.T) {
 func TestInstrumentationConstants(t *testing.T) {
 	assert.Equal(
 		t,
-		"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9",
+		"go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9",
 		instrumentationName,
 	)
 	assert.Equal(t, "REDIS", instrumentationKey)
-}
-
-func TestModuleVersion(t *testing.T) {
-	version := moduleVersion()
-	// In test mode, version should be "dev" since there's no proper build info
-	assert.NotEmpty(t, version)
 }

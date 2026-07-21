@@ -9,7 +9,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
 // routeSetKey is stored on the gin.Context to prevent repeated span updates

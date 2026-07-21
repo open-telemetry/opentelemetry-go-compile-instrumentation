@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // InstRule defines the interface for an instrumentation rule. Each rule
@@ -33,14 +33,37 @@ type InstRule interface {
 // support remains intentionally narrow: simple leaf predicates are supported,
 // while qualifier composition is validated but not yet executed.
 type FilterDef struct {
-	AllOf []FilterDef `json:"all-of,omitempty" yaml:"all-of,omitempty"`
-	OneOf []FilterDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
-	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`
+	// AllOf, OneOf, and Not are the boolean combinators. Each composes nested
+	// FilterDefs so predicates can be combined. A node may use at most one
+	// combinator, and a combinator may not be mixed with sibling leaf predicates
+	// on the same node; both rules are enforced at build time.
+	AllOf []FilterDef `json:"all-of,omitempty" yaml:"all-of,omitempty"` // match when every nested predicate matches
+	OneOf []FilterDef `json:"one-of,omitempty" yaml:"one-of,omitempty"` // match when at least one nested predicate matches
+	Not   *FilterDef  `json:"not,omitempty"    yaml:"not,omitempty"`    // match when the nested predicate does not match
 
-	HasFunc      string `json:"has_func,omitempty"      yaml:"has_func,omitempty"`
-	HasRecv      string `json:"has_recv,omitempty"      yaml:"has_recv,omitempty"`
-	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`
-	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"`
+	HasFunc      string `json:"has_func,omitempty"      yaml:"has_func,omitempty"`      // match files that declare this function
+	HasRecv      string `json:"has_recv,omitempty"      yaml:"has_recv,omitempty"`      // narrow has_func to this receiver type; requires has_func
+	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`    // match files that declare this struct type
+	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"` // match files carrying this //go: directive (validated, not yet executed)
+
+	// HasPackage matches source files whose declared package clause equals this
+	// name. The declared name is read from the parsed AST (the `package foo`
+	// line), not the import path (use target for that) and not the build's
+	// test-ness (use is_test for that). Non-test files in a package share one
+	// declared name; an external test file may declare a different name
+	// (e.g. "foo_test").
+	HasPackage string `json:"has_package,omitempty" yaml:"has_package,omitempty"`
+
+	// IsTest is a tri-state boolean predicate that selects or excludes test
+	// builds — compilation units the Go toolchain produces only as part of
+	// `go test` (a package augmented with its _test.go files, the external
+	// xxx_test package, or the generated _testmain.go runner). Test-ness is a
+	// property of the compile's source set, not of the import path.
+	//
+	//   is_test: true  → match only test builds
+	//   is_test: false → match only non-test builds
+	//   absent (nil)   → no filtering; the rule applies to every build
+	IsTest *bool `json:"is_test,omitempty" yaml:"is_test,omitempty"`
 }
 
 // WhereDef carries the structured where clause after package selectors have

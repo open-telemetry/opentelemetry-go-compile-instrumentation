@@ -6,12 +6,12 @@ package v9
 import (
 	redis "github.com/redis/go-redis/v9"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
+	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 const (
-	instrumentationName = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/github.com/redis/go-redis/v9"
+	instrumentationName = "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
 	instrumentationKey  = "REDIS"
 )
 

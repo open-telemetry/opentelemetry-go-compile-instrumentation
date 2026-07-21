@@ -10,8 +10,9 @@ SHELL := /bin/bash
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
-        test-integration/coverage test-e2e/coverage test-latestlibrun \
+        test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
+        fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold
 
@@ -26,6 +27,14 @@ API_SYNC_SOURCE = pkg/hook/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
 GO_VERSION = 1.25
+INTEGRATION_TEST_RUN ?= .
+
+# OTel Weaver execution for the local semantic-convention registry under
+# schemas/otelc/. Weaver runs from an OCI image (no host install required);
+# override OCI_BIN=podman or WEAVER_IMAGE=... to use a different runtime/version.
+OCI_BIN ?= docker
+WEAVER_IMAGE ?= otel/weaver:v0.19.0
+OTELC_REGISTRY_DIR = $(CURDIR)/schemas/otelc
 
 ##@ Tooling
 
@@ -58,6 +67,10 @@ $(YAMLFMT): PACKAGE=github.com/google/yamlfmt/cmd/yamlfmt
 RATCHET = $(TOOLS)/ratchet
 $(RATCHET): PACKAGE=github.com/sethvargo/ratchet
 
+BUNDLE = $(TOOLS)/bundle
+$(BUNDLE): | $(TOOLS)
+	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
+
 EMBEDMD = $(TOOLS)/embedmd
 $(EMBEDMD): PACKAGE=github.com/campoy/embedmd
 
@@ -78,7 +91,7 @@ GOOS ?= $(shell go env GOOS)
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
-MODULE_PATH = github.com/open-telemetry/opentelemetry-go-compile-instrumentation
+MODULE_PATH = go.opentelemetry.io/otelc
 LDFLAGS := -X $(MODULE_PATH)/tool/util.Version=$(VERSION) -X $(MODULE_PATH)/tool/util.CommitHash=$(COMMIT_HASH) -X $(MODULE_PATH)/tool/util.BuildTime=$(BUILD_TIME)
 GO_BUILD_CMD := go build -trimpath -a -ldflags "$(LDFLAGS)"
 ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' -exec dirname {} \; | sort)
@@ -155,7 +168,6 @@ install: package ## Install otelc to $$GOPATH/bin (auto-packages instrumentation
 package: ## Package the instrumentation code into binary
 	@echo "Packaging instrumentation code into binary..."
 	@set -euo pipefail
-	@rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@if [ ! -d pkg ]; then \
 		echo "Error: pkg directory does not exist"; \
 		exit 1; \
@@ -164,14 +176,14 @@ package: ## Package the instrumentation code into binary
 		echo "Error: instrumentation directory does not exist"; \
 		exit 1; \
 	fi
+	@trap 'rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)' EXIT
 	@cp -r pkg $(INST_BUNDLE_PKG_TMP)
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
 	@(cd $(INST_BUNDLE_PKG_TMP) && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
-	@tar -czf $(INST_BUNDLE_ARCHIVE) --exclude='*.log' $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@mkdir -p tool/data/
-	@mv $(INST_BUNDLE_ARCHIVE) tool/data/
-	@rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
+	@$(MAKE) $(BUNDLE)
+	@$(BUNDLE) tool/data/$(INST_BUNDLE_ARCHIVE) $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@echo "Package created successfully at tool/data/$(INST_BUNDLE_ARCHIVE)"
 
 build-demo: ## Build all demos
@@ -542,13 +554,13 @@ test-integration: go-protobuf-plugins ## Run integration tests
 test-integration: build build-demo
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... 2>&1 | tee ./gotest-integration.log
+	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-latestlibbuild: build ## Run LatestLibBuild tests
 	@echo "Running LatestLibBuild tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ./gotest-latestlibbuild.log
+	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ./gotest-latestlibbuild.log
 
 .ONESHELL:
 test-latestlibrun: build ## Run LatestLibRun tests (bump apps to @latest then run integration suite)
@@ -562,11 +574,28 @@ test-latestlibrun: build ## Run LatestLibRun tests (bump apps to @latest then ru
 	$(MAKE) test-integration
 
 .ONESHELL:
+test-versionmatrix: build ## Run VersionMatrix tests (pin apps to each rule's bounds then run integration suite, once per tier)
+	@echo "Computing version matrix tiers..."
+	set -euo pipefail
+	rm -f ./gotest-versionmatrix.log
+	tiers=$$(go -C "test" test -v -count=1 -tags versionmatrix -run '^TestVersionMatrixTierCount$$' ./versionmatrix/... 2>&1 | grep -oE 'VERSIONMATRIX_TIERS=[0-9]+' | tail -1 | cut -d= -f2)
+	echo "Version matrix needs $$tiers tier(s)"
+	for (( tier=0; tier<tiers; tier++ )); do
+		echo "Pinning test apps to per-rule bound tier $$tier..."
+		VERSIONMATRIX_TIER=$$tier go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags versionmatrix -run '^TestVersionMatrixBump$$' ./versionmatrix/... 2>&1 | tee -a ./gotest-versionmatrix.log
+		$(MAKE) tidy/test-apps
+		echo "Syncing test module with pinned apps..."
+		go -C "test" mod tidy
+		echo "Running integration suite against bound tier $$tier..."
+		$(MAKE) test-integration
+	done
+
+.ONESHELL:
 test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
@@ -624,7 +653,7 @@ clean: ## Clean build artifacts
 	rm -f demo/app/http/client/client
 	find demo -type d -name ".otelc-build" -exec rm -rf {} +
 	find demo -type f -name "otelc.runtime.go" -delete
-	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-unit-instrumentation.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log \) -delete
+	find . -type f \( -name gotest-unit-tool.log -o -name gotest-unit-pkg.log -o -name gotest-unit-instrumentation.log -o -name gotest-integration.log -o -name gotest-e2e.log -o -name gotest-latestlibbuild.log -o -name gotest-latestlibrun.log -o -name gotest-versionmatrix.log \) -delete
 
 .ONESHELL:
 tidy/test-apps: ## Run go mod tidy in all test app modules
@@ -720,31 +749,36 @@ weaver-install: ## Install OTel Weaver if not present
 	fi
 
 # Semantic Conventions Validation Targets
-lint/semantic-conventions: ## Validate semantic convention registry against the project's version
-lint/semantic-conventions: weaver-install
-	@echo "Validating semantic convention registry..."
-	@# Read the semconv version from .semconv-version file (ignore comments and empty lines)
-	@if [ ! -f .semconv-version ]; then \
-		echo "Error: .semconv-version file not found"; \
+#
+# The project's telemetry contract lives in the local Weaver registry under
+# schemas/otelc/ (see docs/semantic-conventions.md). Weaver runs from an OCI
+# image ($(WEAVER_IMAGE)) via $(OCI_BIN), so no host install is required for
+# these targets.
+
+fetch-upstream-semconv: ## Pre-fetch the pinned upstream semconv registry into schemas/otelc/.deps/
+	@scripts/semconv/fetch-upstream-semconv.sh
+
+lint-schema: ## Validate the local semantic-convention registry (schemas/otelc/) with OTel Weaver
+lint-schema: fetch-upstream-semconv
+	@echo "Validating otelc semantic-convention registry (schemas/otelc)..."
+	@# Guard: the upstream dependency pinned in the registry manifest must match .semconv-version.
+	@MANIFEST_VERSION=$$(grep -oE 'upstream-v[0-9]+\.[0-9]+\.[0-9]+' $(OTELC_REGISTRY_DIR)/registry_manifest.yaml | head -1 | sed -E 's/upstream-v//'); \
+	SEMCONV_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]' | sed 's/^v//'); \
+	if [ -z "$$MANIFEST_VERSION" ]; then \
+		echo "::error::Could not read the upstream version from $(OTELC_REGISTRY_DIR)/registry_manifest.yaml"; \
 		exit 1; \
 	fi; \
-	CURRENT_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]'); \
-	if [ -z "$$CURRENT_VERSION" ]; then \
-		echo "Error: No version found in .semconv-version file"; \
+	if [ "$$MANIFEST_VERSION" != "$$SEMCONV_VERSION" ]; then \
+		echo "::error::registry_manifest.yaml pins upstream v$$MANIFEST_VERSION but .semconv-version is v$$SEMCONV_VERSION - bump them together"; \
 		exit 1; \
 	fi; \
-	echo "Checking semantic conventions registry at version: $$CURRENT_VERSION"; \
-	echo "Cloning semantic-conventions repository..."; \
-	rm -rf /tmp/semconv-$$$$; \
-	git clone --depth 1 --branch $$CURRENT_VERSION https://github.com/open-telemetry/semantic-conventions.git /tmp/semconv-$$$$ 2>/dev/null || { \
-		echo "::error::Failed to clone semantic-conventions repository at version $$CURRENT_VERSION"; \
-		rm -rf /tmp/semconv-$$$$; \
-		exit 1; \
-	}; \
-	weaver registry check --registry /tmp/semconv-$$$$/model; \
-	EXIT_CODE=$$?; \
-	rm -rf /tmp/semconv-$$$$; \
-	exit $$EXIT_CODE
+	echo "Upstream semconv dependency: v$$MANIFEST_VERSION (matches .semconv-version)"
+	@scripts/semconv/lint-schema.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)"
+
+# `lint/semantic-conventions` is the umbrella entry point used by CI and the
+# top-level `lint` target; it now validates the project's own registry.
+lint/semantic-conventions: ## Validate the otelc semantic-convention registry (schemas/otelc/) with OTel Weaver
+lint/semantic-conventions: lint-schema
 
 semantic-conventions/diff: ## Generate diff between current version and latest (non-blocking informational check)
 semantic-conventions/diff: weaver-install

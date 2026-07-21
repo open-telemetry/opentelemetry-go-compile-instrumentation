@@ -7,7 +7,7 @@ k8s_hook_processdeltas:
     - inject_hooks:
         before: beforeProcessDeltas
         after: afterProcessDeltas
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/k8s.io/client-go"
+        path: "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go"
 
 k8s_hook_processdeltasinbatch:
   target: k8s.io/client-go/tools/cache
@@ -18,4 +18,4 @@ k8s_hook_processdeltasinbatch:
     - inject_hooks:
         before: beforeProcessDeltasInBatch
         after: afterProcessDeltasInBatch
-        path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/k8s.io/client-go"
+        path: "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go"

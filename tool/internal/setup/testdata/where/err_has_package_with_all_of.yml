@@ -1,0 +1,4 @@
+# Error: has_package as a sibling of all-of — combinator owns the node
+all-of:
+  - has_func: init
+has_package: main

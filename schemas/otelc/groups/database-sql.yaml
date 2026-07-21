@@ -1,0 +1,27 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # database/sql instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/database/sql/client.go        (span lifecycle)
+  #   instrumentation/database/sql/semconv/db.go     (DbClientRequestTraceAttrs)
+  #
+  # The database/sql instrumentation is trace-only: it creates one client span
+  # per database operation and records no metrics. Every attribute is standard
+  # upstream OpenTelemetry database telemetry, referenced with `ref:`.
+  # `server.port` is emitted only when the endpoint carries a parseable port.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.db.sql.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: database/sql client span, one per database operation.
+    attributes:
+      - ref: db.system.name
+      - ref: db.operation.name
+      - ref: db.namespace
+      - ref: db.query.text
+      - ref: network.transport
+      - ref: server.address
+      - ref: server.port

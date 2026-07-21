@@ -11,12 +11,12 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/profile"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/profile"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
-//nolint:gochecknoglobals // Shared between Before/After hooks; cli/v3 After cannot receive modified context.
+//nolint:gochecknoglobals // Profiling session is shared between Before/After hooks.
 var activeSession *profile.Session
 
 // initProfiling starts profiling if --profile-path and --profile flags are set.

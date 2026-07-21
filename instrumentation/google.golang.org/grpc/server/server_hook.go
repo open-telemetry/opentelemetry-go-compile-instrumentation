@@ -5,7 +5,6 @@ package server
 
 import (
 	"context"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,13 +21,13 @@ import (
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
-	grpcsemconv "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc/semconv"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/hook"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/runtime"
+	grpcsemconv "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/semconv"
+	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 const (
-	instrumentationName = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/instrumentation/google.golang.org/grpc"
+	instrumentationName = "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc"
 	instrumentationKey  = "GRPC"
 	optionsParamIndex   = 0
 )
@@ -52,31 +51,9 @@ var (
 	serverResponsesPerRPC rpcconv.ServerResponsesPerRPC
 )
 
-// moduleVersion extracts the version from the Go module system.
-// Falls back to "dev" if version cannot be determined.
-func moduleVersion() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "dev"
-	}
-
-	// Return the main module version
-	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		return bi.Main.Version
-	}
-
-	return "dev"
-}
-
 func initInstrumentation() {
 	initOnce.Do(func() {
-		version := moduleVersion()
-		if err := runtime.SetupOTelSDK(
-			"go.opentelemetry.io/compile-instrumentation/google.golang.org/grpc/server",
-			version,
-		); err != nil {
-			logger.Error("failed to setup OTel SDK", "error", err)
-		}
+		version := runtime.ModuleVersion()
 		tracer = otel.GetTracerProvider().Tracer(
 			instrumentationName,
 			trace.WithInstrumentationVersion(version),
@@ -112,11 +89,6 @@ func initInstrumentation() {
 		serverResponsesPerRPC, err = rpcconv.NewServerResponsesPerRPC(meter)
 		if err != nil {
 			logger.Error("failed to create server responses per RPC metric", "error", err)
-		}
-
-		// Start runtime metrics (respects OTEL_GO_ENABLED/DISABLED_INSTRUMENTATIONS)
-		if err := runtime.StartRuntimeMetrics(); err != nil {
-			logger.Error("failed to start runtime metrics", "error", err)
 		}
 
 		logger.Info("gRPC server instrumentation initialized")

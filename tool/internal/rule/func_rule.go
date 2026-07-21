@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -53,7 +53,9 @@ type InstFuncRule struct {
 	Recv   string `json:"recv"   yaml:"recv"`   // The name of the receiver type
 	Before string `json:"before" yaml:"before"` // The function we inject at the target function entry
 	After  string `json:"after"  yaml:"after"`  // The function we inject at the target function exit
-	Path   string `json:"path"   yaml:"path"`   // The module path where hook code is located
+	Path   string `json:"path"   yaml:"path"`   // The import path where hook code is located
+
+	ResolvedPath string `json:"resolved_path" yaml:"-"` // The local path of the package directory resolved from import path
 
 	// Optional signature sub-filters (all non-empty filters must match; combined
 	// with AND logic so any combination is allowed).
@@ -85,6 +87,9 @@ func (r *InstFuncRule) validate() error {
 	}
 	if strings.TrimSpace(r.Before) == "" && strings.TrimSpace(r.After) == "" {
 		return ex.Newf("before or after must be set")
+	}
+	if strings.TrimSpace(r.Path) == "" {
+		return ex.Newf("path cannot be empty")
 	}
 	return nil
 }

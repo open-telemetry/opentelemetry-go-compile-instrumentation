@@ -11,10 +11,10 @@ import (
 
 	"github.com/dave/dst"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // -----------------------------------------------------------------------------
@@ -180,7 +180,7 @@ func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 }
 
 func findHookFile(rule *rule.InstFuncRule) (string, error) {
-	files, err0 := listRuleFiles(rule.Path)
+	files, err0 := util.ListFiles(rule.ResolvedPath)
 	if err0 != nil {
 		return "", err0
 	}
