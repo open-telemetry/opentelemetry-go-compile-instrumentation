@@ -16,6 +16,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -32,6 +34,15 @@ func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerPro
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	return sr, tp
+}
+
+func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	return reader
 }
 
 func TestBeforeRoundTrip(t *testing.T) {
@@ -400,4 +411,39 @@ func TestClientEnabler(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestRoundTripRecordsRequestMetrics(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.com/items", nil)
+	req.ContentLength = 12
+	ctx := hooktest.NewMockHookContext()
+
+	BeforeRoundTrip(ctx, http.DefaultTransport.(*http.Transport), req)
+	AfterRoundTrip(ctx, &http.Response{
+		StatusCode:    http.StatusCreated,
+		ContentLength: 34,
+		Proto:         "HTTP/2.0",
+		Request:       req,
+	}, nil)
+
+	var data metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &data))
+
+	var names []string
+	for _, scope := range data.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			names = append(names, metric.Name)
+		}
+	}
+	assert.ElementsMatch(t, []string{
+		"http.client.active_requests",
+		"http.client.request.body.size",
+		"http.client.response.body.size",
+		"http.client.request.duration",
+	}, names)
 }
