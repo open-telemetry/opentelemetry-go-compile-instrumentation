@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ import (
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
+
+var captureContent = os.Getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT") == "true"
 
 const (
 	maxRequestBodySize  = 1 << 20 // 1 MB
@@ -138,10 +141,11 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		var model string
 		var spanAttrs []attribute.KeyValue
+		var promptMessages []json.RawMessage
 
 		switch op {
 		case opChat:
-			model, spanAttrs = parseChatRequest(bodyBytes)
+			model, spanAttrs, promptMessages = parseChatRequest(bodyBytes)
 		case opCompletion:
 			model, spanAttrs = parseCompletionRequest(bodyBytes)
 		case opEmbedding:
@@ -166,6 +170,14 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(spanAttrs...),
 		)
+
+		if captureContent && len(promptMessages) > 0 {
+			for _, msg := range promptMessages {
+				span.AddEvent("gen_ai.content.prompt", trace.WithAttributes(
+					attribute.String("gen_ai.prompt", string(msg)),
+				))
+			}
+		}
 		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 		req = req.WithContext(ctx)
 
@@ -232,17 +244,18 @@ func handleNonStreamingResponse(
 	}
 }
 
-func parseChatRequest(body []byte) (string, []attribute.KeyValue) {
+func parseChatRequest(body []byte) (string, []attribute.KeyValue, []json.RawMessage) {
 	var req struct {
-		Model            string   `json:"model"`
-		MaxTokens        *int64   `json:"max_tokens,omitempty"`
-		Temperature      *float64 `json:"temperature,omitempty"`
-		TopP             *float64 `json:"top_p,omitempty"`
-		FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
-		PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
+		Model            string            `json:"model"`
+		MaxTokens        *int64            `json:"max_tokens,omitempty"`
+		Temperature      *float64          `json:"temperature,omitempty"`
+		TopP             *float64          `json:"top_p,omitempty"`
+		FrequencyPenalty *float64          `json:"frequency_penalty,omitempty"`
+		PresencePenalty  *float64          `json:"presence_penalty,omitempty"`
+		Messages         []json.RawMessage `json:"messages,omitempty"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		return "", nil
+		return "", nil, nil
 	}
 
 	var attrs []attribute.KeyValue
@@ -261,7 +274,7 @@ func parseChatRequest(body []byte) (string, []attribute.KeyValue) {
 	if req.PresencePenalty != nil {
 		attrs = append(attrs, semconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
 	}
-	return req.Model, attrs
+	return req.Model, attrs, req.Messages
 }
 
 func parseCompletionRequest(body []byte) (string, []attribute.KeyValue) {
@@ -304,6 +317,9 @@ func parseChatResponse(body []byte, span trace.Span) {
 		Model   string `json:"model"`
 		Choices []struct {
 			FinishReason string `json:"finish_reason"`
+			Message      struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
 			PromptTokens     int64 `json:"prompt_tokens"`
@@ -319,6 +335,11 @@ func parseChatResponse(body []byte, span trace.Span) {
 	for _, c := range resp.Choices {
 		if c.FinishReason != "" {
 			reasons = append(reasons, c.FinishReason)
+		}
+		if captureContent && c.Message.Content != "" {
+			span.AddEvent("gen_ai.content.completion", trace.WithAttributes(
+				attribute.String("gen_ai.completion", c.Message.Content),
+			))
 		}
 	}
 

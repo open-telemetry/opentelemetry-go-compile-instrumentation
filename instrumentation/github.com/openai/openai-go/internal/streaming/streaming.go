@@ -12,9 +12,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -40,8 +42,9 @@ type StreamingReader struct {
 	responseModel string
 	reasons       []string
 	span          trace.Span
-	op            OperationType
-	done          atomic.Bool
+	op             OperationType
+	done           atomic.Bool
+	capturedStream strings.Builder
 }
 
 func NewStreamingReader(
@@ -112,6 +115,12 @@ func (r *StreamingReader) finalize(flush bool) {
 	if !r.first.IsZero() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
 		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
+	}
+
+	if captureContent && r.capturedStream.Len() > 0 {
+		r.span.AddEvent("gen_ai.content.completion", trace.WithAttributes(
+			attribute.String("gen_ai.completion", r.capturedStream.String()),
+		))
 	}
 
 	r.span.End()
@@ -242,6 +251,9 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 	for _, c := range chunk.Choices {
 		if c.FinishReason != "" {
 			r.reasons = append(r.reasons, c.FinishReason)
+		}
+		if captureContent && c.Delta.Content != "" {
+			r.capturedStream.WriteString(c.Delta.Content)
 		}
 	}
 }
