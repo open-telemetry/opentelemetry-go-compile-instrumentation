@@ -74,14 +74,14 @@ func TestOperationName(t *testing.T) {
 
 func TestParseChatRequest(t *testing.T) {
 	body := []byte(`{"model":"gpt-4","max_tokens":100,"temperature":0.7}`)
-	model, attrs := parseChatRequest(body)
+	model, attrs, _ := parseChatRequest(body)
 	assert.Equal(t, "gpt-4", model)
 	assert.NotEmpty(t, attrs)
 }
 
 func TestParseChatRequest_Invalid(t *testing.T) {
 	body := []byte(`invalid json`)
-	model, attrs := parseChatRequest(body)
+	model, attrs, _ := parseChatRequest(body)
 	assert.Equal(t, "", model)
 	assert.Nil(t, attrs)
 }
