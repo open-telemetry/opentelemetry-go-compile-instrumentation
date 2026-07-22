@@ -49,6 +49,27 @@ cd demo/app/basic
 make test
 ```
 
+## Resource Attributes
+
+Every binary built with `otelc` automatically includes the following
+[Telemetry distro](https://opentelemetry.io/docs/specs/semconv/resource/#telemetry-distro)
+attributes on its OpenTelemetry Resource, visible in exported traces, metrics, and logs:
+
+| Attribute | Value |
+|---|---|
+| `telemetry.distro.name` | `opentelemetry-go-compile-instrumentation` |
+| `telemetry.distro.version` | The exact `otelc` version used to build the binary |
+
+The version is baked at compile time and travels with the binary: no environment
+variable configuration is required.
+
+**Precedence:** These attributes are merged at the _lowest_ priority.
+Setting `OTEL_RESOURCE_ATTRIBUTES=telemetry.distro.version=my-custom-version` at
+runtime will override the baked-in value, as required by the OTel specification.
+
+**Plain builds:** If you build without `otelc` (plain `go build`), the package
+sentinel falls back to `"dev"` for `telemetry.distro.version`.
+
 ## Community
 
 ### Documentation
