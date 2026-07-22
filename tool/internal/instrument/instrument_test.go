@@ -435,7 +435,8 @@ func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceF
 	importCfgPath := filepath.Join(tempDir, "importcfg")
 	createImportCfg(importCfgPath, helpers)
 
-	args := []string{
+	args := make([]string, 0, 11+len(sourceFiles))
+	args = append(args,
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
 		"-p", importPath,
@@ -443,7 +444,7 @@ func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceF
 		"-buildid", buildID,
 		"-importcfg", importCfgPath,
 		"-pack",
-	}
+	)
 	return append(args, sourceFiles...)
 }
 
