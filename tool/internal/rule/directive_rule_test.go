@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
 func TestNewInstDirectiveRule(t *testing.T) {
@@ -89,14 +88,7 @@ target: main
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var fields map[string]any
-			err := yaml.Unmarshal([]byte(tt.yamlContent), &fields)
-			require.NoError(t, err)
-
-			data, err := yaml.Marshal(fields)
-			require.NoError(t, err)
-
-			r, err := NewInstDirectiveRule(data, tt.ruleName)
+			r, err := newDirectiveRuleFromFlat(t, tt.ruleName, tt.yamlContent)
 			if tt.expectError {
 				require.Error(t, err)
 				require.Nil(t, r)
@@ -107,4 +99,21 @@ target: main
 			assert.Equal(t, tt.ruleName, r.GetName())
 		})
 	}
+}
+
+// newDirectiveRuleFromFlat builds an InstDirectiveRule from a flat fixture:
+// directive is the where selector; template the expand_directive payload.
+func newDirectiveRuleFromFlat(t *testing.T, name, yamlStr string) (*InstDirectiveRule, error) {
+	t.Helper()
+	flat, err := flatMap(yamlStr)
+	if err != nil {
+		return nil, err
+	}
+	base, rest := splitBase(flat, name)
+	act := &DirectiveAction{}
+	if v, ok := rest["template"].(string); ok {
+		act.Template = v
+		delete(rest, "template")
+	}
+	return NewInstDirectiveRule(base, mapNode(t, rest), act)
 }

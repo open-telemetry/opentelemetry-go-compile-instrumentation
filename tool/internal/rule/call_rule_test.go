@@ -156,7 +156,7 @@ replace: "wrapper({{ . }}) {{ unclosed"
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, err := NewInstCallRule([]byte(tt.yaml), tt.ruleName)
+			r, err := newCallRuleFromFlat(t, tt.ruleName, tt.yaml)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errContains != "" {
@@ -171,6 +171,32 @@ replace: "wrapper({{ . }}) {{ unclosed"
 			}
 		})
 	}
+}
+
+// newCallRuleFromFlat builds an InstCallRule from a flat fixture: function_call
+// is the where selector; replace/append_args/variadic_type the wrap_call
+// payload.
+func newCallRuleFromFlat(t *testing.T, name, yamlStr string) (*InstCallRule, error) {
+	t.Helper()
+	flat, err := flatMap(yamlStr)
+	if err != nil {
+		return nil, err
+	}
+	base, rest := splitBase(flat, name)
+	act := &CallAction{}
+	if v, ok := rest["replace"].(string); ok {
+		act.Replace = v
+		delete(rest, "replace")
+	}
+	if v, ok := rest["append_args"]; ok {
+		act.AppendArgs = toStrings(v)
+		delete(rest, "append_args")
+	}
+	if v, ok := rest["variadic_type"].(string); ok {
+		act.VariadicType = v
+		delete(rest, "variadic_type")
+	}
+	return NewInstCallRule(base, mapNode(t, rest), act)
 }
 
 func TestInstCallRule_UnmarshalJSON(t *testing.T) {

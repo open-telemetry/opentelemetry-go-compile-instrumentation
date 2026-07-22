@@ -250,7 +250,7 @@ replace: "int"
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, err := NewInstDeclRule([]byte(tt.yaml), tt.ruleName)
+			r, err := newDeclRuleFromFlat(t, tt.ruleName, tt.yaml)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errContains != "" {
@@ -265,4 +265,25 @@ replace: "int"
 			}
 		})
 	}
+}
+
+// newDeclRuleFromFlat builds an InstDeclRule from a flat fixture: kind and
+// identifier are the where selectors; replace/wrap the assign_value payload.
+func newDeclRuleFromFlat(t *testing.T, name, yamlStr string) (*InstDeclRule, error) {
+	t.Helper()
+	flat, err := flatMap(yamlStr)
+	if err != nil {
+		return nil, err
+	}
+	base, rest := splitBase(flat, name)
+	act := &DeclAction{}
+	if v, ok := rest["replace"].(string); ok {
+		act.Replace = v
+		delete(rest, "replace")
+	}
+	if v, ok := rest["wrap"].(string); ok {
+		act.Wrap = v
+		delete(rest, "wrap")
+	}
+	return NewInstDeclRule(base, mapNode(t, rest), act)
 }

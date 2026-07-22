@@ -278,7 +278,7 @@ Rules:
 | `expand_directive`  | `InstDirectiveRule` |
 | `assign_value`      | `InstDeclRule`      |
 
-**Planned:** rule type will be derived from the modifier key in `do`. The current implementation still infers from field presence and ignores the modifier name; see #546 for the planned migration.
+Rule type is derived directly from the modifier key in `do`: the parser dispatches on the modifier name to build the matching rule type, so no field-presence priority order is involved.
 
 ### Special `target` values
 

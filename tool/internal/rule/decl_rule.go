@@ -54,19 +54,21 @@ type InstDeclRule struct {
 	Wrap string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
 }
 
-// NewInstDeclRule loads and validates an InstDeclRule from YAML data.
-func NewInstDeclRule(data []byte, name string) (*InstDeclRule, error) {
-	var r InstDeclRule
-	if err := yaml.Unmarshal(data, &r); err != nil {
-		return nil, ex.Wrap(err)
+// NewInstDeclRule builds an InstDeclRule from the structured where selectors
+// and the assign_value modifier payload. The where node supplies kind and
+// identifier; act supplies replace/wrap.
+func NewInstDeclRule(base InstBaseRule, where *yaml.Node, act *DeclAction) (*InstDeclRule, error) {
+	r := &InstDeclRule{InstBaseRule: base}
+	if err := decodeWhereSelectors(where, r); err != nil {
+		return nil, ex.Wrapf(err, "invalid decl rule %q", base.Name)
 	}
-	if r.Name == "" {
-		r.Name = name
+	if act != nil {
+		r.Replace, r.Wrap = act.Replace, act.Wrap
 	}
 	if err := r.validate(); err != nil {
-		return nil, ex.Wrapf(err, "invalid decl rule %q", name)
+		return nil, ex.Wrapf(err, "invalid decl rule %q", base.Name)
 	}
-	return &r, nil
+	return r, nil
 }
 
 // validDeclKinds lists accepted values for the kind field.

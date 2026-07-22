@@ -66,19 +66,21 @@ type InstFuncRule struct {
 	Param             string         `json:"param,omitempty"              yaml:"param"`
 }
 
-// NewInstFuncRule loads and validates an InstFuncRule from YAML data.
-func NewInstFuncRule(data []byte, name string) (*InstFuncRule, error) {
-	var r InstFuncRule
-	if err := yaml.Unmarshal(data, &r); err != nil {
-		return nil, ex.Wrap(err)
+// NewInstFuncRule builds an InstFuncRule from the structured where selectors
+// and the inject_hooks modifier payload. The where node supplies the func/recv
+// and signature narrowing selectors; act supplies the before/after/path hooks.
+func NewInstFuncRule(base InstBaseRule, where *yaml.Node, act *HookAction) (*InstFuncRule, error) {
+	r := &InstFuncRule{InstBaseRule: base}
+	if err := decodeWhereSelectors(where, r); err != nil {
+		return nil, ex.Wrapf(err, "invalid func rule %q", base.Name)
 	}
-	if r.Name == "" {
-		r.Name = name
+	if act != nil {
+		r.Before, r.After, r.Path = act.Before, act.After, act.Path
 	}
 	if err := r.validate(); err != nil {
-		return nil, ex.Wrapf(err, "invalid func rule %q", name)
+		return nil, ex.Wrapf(err, "invalid func rule %q", base.Name)
 	}
-	return &r, nil
+	return r, nil
 }
 
 func (r *InstFuncRule) validate() error {

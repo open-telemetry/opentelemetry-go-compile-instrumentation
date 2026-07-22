@@ -21,19 +21,21 @@ type InstDirectiveRule struct {
 	Template  string `json:"template"  yaml:"template"`  // Go text/template rendered into code prepended to matching functions
 }
 
-// NewInstDirectiveRule loads and validates an InstDirectiveRule from YAML data.
-func NewInstDirectiveRule(data []byte, name string) (*InstDirectiveRule, error) {
-	var r InstDirectiveRule
-	if err := yaml.Unmarshal(data, &r); err != nil {
-		return nil, ex.Wrap(err)
+// NewInstDirectiveRule builds an InstDirectiveRule from the structured where
+// selector and the expand_directive modifier payload. The where node supplies
+// directive; act supplies the template.
+func NewInstDirectiveRule(base InstBaseRule, where *yaml.Node, act *DirectiveAction) (*InstDirectiveRule, error) {
+	r := &InstDirectiveRule{InstBaseRule: base}
+	if err := decodeWhereSelectors(where, r); err != nil {
+		return nil, ex.Wrapf(err, "invalid directive rule %q", base.Name)
 	}
-	if r.Name == "" {
-		r.Name = name
+	if act != nil {
+		r.Template = act.Template
 	}
 	if err := r.validate(); err != nil {
-		return nil, ex.Wrapf(err, "invalid directive rule %q", name)
+		return nil, ex.Wrapf(err, "invalid directive rule %q", base.Name)
 	}
-	return &r, nil
+	return r, nil
 }
 
 func (r *InstDirectiveRule) validate() error {

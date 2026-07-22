@@ -1,7 +1,10 @@
 func_sig_result_hook:
   target: main
-  func: Func1
-  result: error
-  before: H1Before
-  after: H1After
-  path: testdata
+  where:
+    func: Func1
+    result: error
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata

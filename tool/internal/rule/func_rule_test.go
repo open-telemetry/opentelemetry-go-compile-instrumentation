@@ -147,11 +147,7 @@ param: string
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var fields map[string]any
-			_ = yaml.Unmarshal([]byte(tt.yaml), &fields)
-			data, _ := yaml.Marshal(fields)
-
-			r, err := NewInstFuncRule(data, tt.name)
+			r, err := newFuncRuleFromFlat(t, tt.name, tt.yaml)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -165,15 +161,40 @@ param: string
 	}
 }
 
-// ruleIdentity builds a func rule the way the setup phase does — marshal the
-// flat fields and run them through NewInstFuncRule — then returns its Identity.
-// This exercises the real path so the identity is computed exactly as in
-// production.
+// newFuncRuleFromFlat builds an InstFuncRule from a flat fixture: func/recv and
+// signature narrowing selectors become the where node, before/after/path the
+// inject_hooks payload.
+func newFuncRuleFromFlat(t *testing.T, name, yamlStr string) (*InstFuncRule, error) {
+	t.Helper()
+	flat, err := flatMap(yamlStr)
+	if err != nil {
+		return nil, err
+	}
+	base, rest := splitBase(flat, name)
+	act := &HookAction{}
+	if v, ok := rest["before"].(string); ok {
+		act.Before = v
+		delete(rest, "before")
+	}
+	if v, ok := rest["after"].(string); ok {
+		act.After = v
+		delete(rest, "after")
+	}
+	if v, ok := rest["path"].(string); ok {
+		act.Path = v
+		delete(rest, "path")
+	}
+	return NewInstFuncRule(base, mapNode(t, rest), act)
+}
+
+// ruleIdentity builds a func rule from flat fields through the structured
+// constructor and returns its Identity, exercising the real construction path
+// so the identity is computed exactly as in production.
 func ruleIdentity(t *testing.T, name string, flat map[string]any) string {
 	t.Helper()
 	data, err := yaml.Marshal(flat)
 	require.NoError(t, err)
-	r, err := NewInstFuncRule(data, name)
+	r, err := newFuncRuleFromFlat(t, name, string(data))
 	require.NoError(t, err)
 	return r.Identity()
 }

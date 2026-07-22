@@ -34,7 +34,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
-	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/golden"
 )
 
@@ -123,8 +122,11 @@ func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest
 	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
 	require.NoError(t, err)
 
-	var rawRules map[string]map[string]any
-	yaml.Unmarshal(data, &rawRules)
+	// Parse through the production rule parser so the golden harness exercises
+	// the same structured where/do dispatch as the setup phase, instead of a
+	// parallel copy of parsing and rule-type inference that could drift.
+	parsed, err := rule.ParseRules(data)
+	require.NoError(t, err)
 
 	// Parse the source AST once and reuse it for every rule's where.file gating
 	// below. The gating is per-rule, but the tree is shared, so N rules do not
@@ -148,59 +150,46 @@ func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest
 		FileRules:      make([]*rule.InstFileRule, 0),
 	}
 
-	// Sort rule names to ensure deterministic order in tests
-	ruleNames := make([]string, 0, len(rawRules))
-	for name := range rawRules {
-		ruleNames = append(ruleNames, name)
-	}
-	slices.Sort(ruleNames)
+	// Sort by rule name for deterministic bucketing. ParseRules preserves
+	// do-sequence order within a name, and a stable sort keeps it.
+	slices.SortStableFunc(parsed, func(a, b rule.InstRule) int {
+		return strings.Compare(a.GetName(), b.GetName())
+	})
 
-	for _, name := range ruleNames {
-		propsList, normErr := rule.Normalize(rawRules[name])
-		require.NoError(t, normErr)
-		for _, props := range propsList {
-			props["name"] = name
-			ruleData, _ := yaml.Marshal(props)
+	for _, r := range parsed {
+		// The golden harness has no setup phase, so the where.file filter that
+		// setup.preciseMatching would evaluate is applied inline here. A rule
+		// whose file predicate does not match the source is skipped, exactly as
+		// it would be gated out during matching.
+		if !whereFileMatches(t, r.GetWhere(), isTest, sourceTree) {
+			continue
+		}
 
-			// The golden harness has no setup phase, so the where.file filter
-			// that setup.preciseMatching would evaluate is applied inline here.
-			// A rule whose file predicate does not match the source is skipped,
-			// exactly as it would be gated out during matching.
-			if !whereFileMatches(t, ruleData, isTest, sourceTree) {
-				continue
-			}
+		// Mirror the setup-phase package gate: a rule applies only when its
+		// target selects this fixture's import path (exact equality or glob
+		// match). This lets golden fixtures prove glob match vs no-match
+		// against realistic deep import paths, not just "main".
+		if !targetMatches(r.GetTarget(), importPath) {
+			continue
+		}
 
-			// Mirror the setup-phase package gate: a rule applies only when its
-			// target selects this fixture's import path (exact equality or glob
-			// match). This lets golden fixtures prove glob match vs no-match
-			// against realistic deep import paths, not just "main".
-			if !targetMatches(props, importPath) {
-				continue
-			}
-
-			switch {
-			case props["struct"] != nil:
-				r, _ := rule.NewInstStructRule(ruleData, name)
-				ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
-			case props["file"] != nil:
-				r, _ := rule.NewInstFileRule(ruleData, name)
-				ruleSet.FileRules = append(ruleSet.FileRules, r)
-			case props["directive"] != nil:
-				r, _ := rule.NewInstDirectiveRule(ruleData, name)
-				ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
-			case props["raw"] != nil:
-				r, _ := rule.NewInstRawRule(ruleData, name)
-				ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
-			case props["func"] != nil:
-				r, _ := rule.NewInstFuncRule(ruleData, name)
-				ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
-			case props["function_call"] != nil:
-				r, _ := rule.NewInstCallRule(ruleData, name)
-				ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
-			case props["identifier"] != nil:
-				r, _ := rule.NewInstDeclRule(ruleData, name)
-				ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
-			}
+		switch rt := r.(type) {
+		case *rule.InstStructRule:
+			ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], rt)
+		case *rule.InstFileRule:
+			ruleSet.FileRules = append(ruleSet.FileRules, rt)
+		case *rule.InstDirectiveRule:
+			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], rt)
+		case *rule.InstRawRule:
+			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], rt)
+		case *rule.InstFuncRule:
+			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], rt)
+		case *rule.InstCallRule:
+			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], rt)
+		case *rule.InstDeclRule:
+			ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], rt)
+		default:
+			t.Fatalf("golden harness: unexpected rule type %T", r)
 		}
 	}
 
@@ -217,18 +206,12 @@ func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest
 // isTest reports whether the fixture is a test build (its source is a
 // source_test.go file), mirroring setup.isTestBuild; the is_test predicate is
 // evaluated against it.
-func whereFileMatches(t *testing.T, ruleData []byte, isTest bool, tree *dst.File) bool {
+func whereFileMatches(t *testing.T, where *rule.WhereDef, isTest bool, tree *dst.File) bool {
 	t.Helper()
-
-	var probe struct {
-		Where *rule.WhereDef `yaml:"where"`
-	}
-	require.NoError(t, yaml.Unmarshal(ruleData, &probe))
-	if probe.Where == nil || probe.Where.File == nil {
+	if where == nil || where.File == nil {
 		return true
 	}
-
-	return fileFilterMatches(t, probe.Where.File, isTest, tree)
+	return fileFilterMatches(t, where.File, isTest, tree)
 }
 
 // fileFilterMatches reports whether a where.file predicate matches the parsed
@@ -316,12 +299,10 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 
 // targetMatches reports whether a rule's target selects importPath, mirroring
 // setup-phase package selection: a glob target matches via MatchGlobTarget, an
-// exact target matches only on equality. A missing, non-string, or empty target
-// never matches, so an invalid fixture fails the golden test instead of silently
-// being applied.
-func targetMatches(props map[string]any, importPath string) bool {
-	target, ok := props["target"].(string)
-	if !ok || strings.TrimSpace(target) == "" {
+// exact target matches only on equality. An empty target never matches, so an
+// invalid fixture fails the golden test instead of silently being applied.
+func targetMatches(target, importPath string) bool {
+	if strings.TrimSpace(target) == "" {
 		return false
 	}
 	if rule.IsGlobTarget(target) {

@@ -28,19 +28,19 @@ type InstFileRule struct {
 	ResolvedPath string `json:"resolved_path" yaml:"-"` // The local path of the package directory resolved from import path
 }
 
-// NewInstFileRule loads and validates an InstFileRule from YAML data.
-func NewInstFileRule(data []byte, name string) (*InstFileRule, error) {
-	var r InstFileRule
-	if err := yaml.Unmarshal(data, &r); err != nil {
-		return nil, ex.Wrap(err)
-	}
-	if r.Name == "" {
-		r.Name = name
+// NewInstFileRule builds an InstFileRule from the add_file modifier payload.
+// File rules take no where selectors: the where.file key is a file predicate
+// (routed to base.Where), not this rule's file field, so the where node is not
+// decoded onto the rule here.
+func NewInstFileRule(base InstBaseRule, _ *yaml.Node, act *FileAction) (*InstFileRule, error) {
+	r := &InstFileRule{InstBaseRule: base}
+	if act != nil {
+		r.File, r.Path = act.File, act.Path
 	}
 	if err := r.validate(); err != nil {
-		return nil, ex.Wrapf(err, "invalid file rule %q", name)
+		return nil, ex.Wrapf(err, "invalid file rule %q", base.Name)
 	}
-	return &r, nil
+	return r, nil
 }
 
 func (r *InstFileRule) validate() error {

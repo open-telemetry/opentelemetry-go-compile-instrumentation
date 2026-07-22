@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
 func TestNewInstFileRule(t *testing.T) {
@@ -45,11 +44,7 @@ path: github.com/example/pkg
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var fields map[string]any
-			_ = yaml.Unmarshal([]byte(tt.yaml), &fields)
-			data, _ := yaml.Marshal(fields)
-
-			r, err := NewInstFileRule(data, tt.name)
+			r, err := newFileRuleFromFlat(t, tt.name, tt.yaml)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -61,4 +56,25 @@ path: github.com/example/pkg
 			}
 		})
 	}
+}
+
+// newFileRuleFromFlat builds an InstFileRule from a flat fixture. File rules
+// take no where selectors; file/path are the add_file payload.
+func newFileRuleFromFlat(t *testing.T, name, yamlStr string) (*InstFileRule, error) {
+	t.Helper()
+	flat, err := flatMap(yamlStr)
+	if err != nil {
+		return nil, err
+	}
+	base, rest := splitBase(flat, name)
+	act := &FileAction{}
+	if v, ok := rest["file"].(string); ok {
+		act.File = v
+		delete(rest, "file")
+	}
+	if v, ok := rest["path"].(string); ok {
+		act.Path = v
+		delete(rest, "path")
+	}
+	return NewInstFileRule(base, mapNode(t, rest), act)
 }

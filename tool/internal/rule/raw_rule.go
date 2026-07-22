@@ -33,19 +33,21 @@ type InstRawRule struct {
 	Placement string `json:"placement,omitempty" yaml:"placement,omitempty"` // The placement of the raw code. Can be "before" or "after". Default is "before".
 }
 
-// NewInstRawRule loads and validates an InstRawRule from YAML data.
-func NewInstRawRule(data []byte, name string) (*InstRawRule, error) {
-	var r InstRawRule
-	if err := yaml.Unmarshal(data, &r); err != nil {
-		return nil, ex.Wrap(err)
+// NewInstRawRule builds an InstRawRule from the structured where selectors and
+// the inject_code modifier payload. The where node supplies func/recv and the
+// pattern/placement narrowing selectors; act supplies the raw code.
+func NewInstRawRule(base InstBaseRule, where *yaml.Node, act *CodeAction) (*InstRawRule, error) {
+	r := &InstRawRule{InstBaseRule: base}
+	if err := decodeWhereSelectors(where, r); err != nil {
+		return nil, ex.Wrapf(err, "invalid raw rule %q", base.Name)
 	}
-	if r.Name == "" {
-		r.Name = name
+	if act != nil {
+		r.Raw = act.Raw
 	}
 	if err := r.validate(); err != nil {
-		return nil, ex.Wrapf(err, "invalid raw rule %q", name)
+		return nil, ex.Wrapf(err, "invalid raw rule %q", base.Name)
 	}
-	return &r, nil
+	return r, nil
 }
 
 func (r *InstRawRule) validate() error {
