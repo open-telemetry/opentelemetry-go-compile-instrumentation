@@ -17,7 +17,7 @@ require (
 	go.opentelemetry.io/otelc/instrumentation v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 )
 
 require (
