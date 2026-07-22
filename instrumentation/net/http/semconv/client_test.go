@@ -161,13 +161,14 @@ func TestHTTPClientMetrics(t *testing.T) {
 	meter := noop.NewMeterProvider().Meter("test")
 	client := NewHTTPClient(meter)
 
-	// Verify metrics are initialized
-	assert.NotNil(t, client.requestBodySize)
-	assert.NotNil(t, client.responseBodySize)
-	assert.NotNil(t, client.requestDuration)
-	assert.NotNil(t, client.activeRequests)
-	assert.NotNil(t, client.openConnections)
-	assert.NotNil(t, client.connectionDuration)
+	assert.ElementsMatch(t, []string{
+		"http.client.request.body.size",
+		"http.client.response.body.size",
+		"http.client.request.duration",
+		"http.client.active_requests",
+		"http.client.open_connections",
+		"http.client.connection.duration",
+	}, client.metricNames())
 }
 
 func TestHTTPClientRecordMetrics(t *testing.T) {

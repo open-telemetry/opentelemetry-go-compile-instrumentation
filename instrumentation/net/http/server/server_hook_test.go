@@ -4,6 +4,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -32,6 +35,15 @@ func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerPro
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	return sr, tp
+}
+
+func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	return reader
 }
 
 func TestBeforeServeHTTP(t *testing.T) {
