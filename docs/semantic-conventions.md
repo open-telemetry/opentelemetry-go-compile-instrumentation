@@ -50,9 +50,16 @@ schemas/otelc/
 │   ├── kafka.yaml           # segmentio/kafka-go producer & consumer spans
 │   ├── k8s.yaml             # k8s.io/client-go informer spans
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
-│   └── mongo.yaml           # go.mongodb.org/mongo-driver client spans
+│   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
+│   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
+│   ├── gin.yaml             # gin-gonic/gin server-span enrichment
+│   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
+│   ├── logs.yaml            # log, log/slog, logrus — no telemetry (correlation only)
+│   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
+
+Every instrumentation module in `instrumentation/` maps to exactly one file here — see the [coverage table](../schemas/otelc/README.md#instrumentation-coverage). Instrumentations that emit no telemetry of their own still get a file, with `groups: []` and a comment explaining why.
 
 - `registry_manifest.yaml` declares the registry name and a **dependency** on the upstream OpenTelemetry semantic conventions, pre-fetched locally under `.deps/` so weaver doesn't clone it over the network on every run.
 - Each `groups/*.yaml` file declares the metrics/spans/attributes one instrumentation produces. Telemetry that exists **upstream** is referenced with `ref:`; telemetry that is **specific to a library** (not covered upstream) is declared locally with `id:`.
