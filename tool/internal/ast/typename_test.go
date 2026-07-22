@@ -50,10 +50,11 @@ func TestParseTypeName(t *testing.T) {
 
 func TestTypeNameMatches(t *testing.T) {
 	tests := []struct {
-		name    string
-		typeStr string
-		node    dst.Expr
-		want    bool
+		name      string
+		typeStr   string
+		node      dst.Expr
+		want      bool
+		contained bool
 	}{
 		{
 			name:    "builtin ident matches",
@@ -114,13 +115,65 @@ func TestTypeNameMatches(t *testing.T) {
 			node:    &dst.InterfaceType{Methods: &dst.FieldList{}},
 			want:    true,
 		},
+		{
+			name:      "byte matches slice element",
+			typeStr:   "byte",
+			node:      &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}},
+			want:      true,
+			contained: true,
+		},
+		{
+			name:      "int matches chan element",
+			typeStr:   "int",
+			node:      &dst.ChanType{Value: &dst.Ident{Name: "int"}},
+			want:      true,
+			contained: true,
+		},
+		{
+			name:    "string matches map value",
+			typeStr: "string",
+			node: &dst.MapType{
+				Key:   &dst.Ident{Name: "int"},
+				Value: &dst.Ident{Name: "string"},
+			},
+			want:      true,
+			contained: true,
+		},
+		{
+			name:    "error matches func result",
+			typeStr: "error",
+			node: &dst.FuncType{
+				Results: &dst.FieldList{
+					List: []*dst.Field{{Type: &dst.Ident{Name: "error"}}},
+				},
+			},
+			want:      true,
+			contained: true,
+		},
+		{
+			name:      "slice type does not match unrelated filter",
+			typeStr:   "int",
+			node:      &dst.ArrayType{Elt: &dst.Ident{Name: "string"}},
+			want:      false,
+			contained: true,
+		},
+		{
+			name:    "slice does not exact-match element filter",
+			typeStr: "byte",
+			node:    &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}},
+			want:    false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tn, err := parseTypeName(tt.typeStr)
 			require.NoError(t, err)
-			assert.Equal(t, tt.want, tn.matches(tt.node))
+			matchFn := tn.matches
+			if tt.contained {
+				matchFn = tn.matchesContainedIn
+			}
+			assert.Equal(t, tt.want, matchFn(tt.node))
 		})
 	}
 }
@@ -153,6 +206,16 @@ func TestFieldListContainsType(t *testing.T) {
 	assert.False(t, mustContains(t, fields, "io.Reader"))
 	assert.False(t, mustContains(t, nil, "error"))
 	assert.False(t, mustContains(t, &dst.FieldList{}, "error"))
+
+	compositeFields := &dst.FieldList{
+		List: []*dst.Field{
+			{Type: &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}}},
+			{Type: &dst.ChanType{Value: &dst.Ident{Name: "int"}}},
+		},
+	}
+	assert.True(t, mustContains(t, compositeFields, "byte"))
+	assert.True(t, mustContains(t, compositeFields, "int"))
+	assert.False(t, mustContains(t, compositeFields, "string"))
 
 	_, err := fieldListContainsType(fields, "[]invalid")
 	assert.Error(t, err)

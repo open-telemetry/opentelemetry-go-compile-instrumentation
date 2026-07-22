@@ -242,3 +242,27 @@ func TestFuncDeclMatchesFilters_InvalidTypeReturnsError(t *testing.T) {
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"})
 	require.Error(t, err)
 }
+
+func TestFuncDeclMatchesFilters_CompositeParamTypes(t *testing.T) {
+	// func(ch chan int) error
+	chanDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.ChanType{Value: ident("int")})},
+		[]*dst.Field{field(ident("error"))},
+	)
+	sigInt := rule.FuncSignature{Args: []string{"int"}}
+	assert.True(t, mustMatch(t, chanDecl, &rule.InstFuncRule{SignatureContains: &sigInt}))
+	assert.False(t, mustMatch(t, chanDecl, &rule.InstFuncRule{Param: "string"}))
+
+	// func Read(p []byte) (n int, err error)
+	readDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.ArrayType{Elt: ident("byte")})},
+		[]*dst.Field{field(ident("int")), field(ident("error"))},
+	)
+	sigByte := rule.FuncSignature{Args: []string{"byte"}}
+	assert.True(t, mustMatch(t, readDecl, &rule.InstFuncRule{SignatureContains: &sigByte}))
+	assert.True(t, mustMatch(t, readDecl, &rule.InstFuncRule{Param: "byte"}))
+	assert.True(t, mustMatch(t, readDecl, &rule.InstFuncRule{LastResult: "error"}))
+
+	exactSig := rule.FuncSignature{Args: []string{"byte"}, Returns: []string{"int", "error"}}
+	assert.False(t, mustMatch(t, readDecl, &rule.InstFuncRule{Signature: &exactSig}))
+}
