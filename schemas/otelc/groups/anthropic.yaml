@@ -37,8 +37,8 @@ groups:
     type: attribute_group
     display_name: otelc Anthropic GenAI attributes
     brief: >
-      Prompt-cache attributes emitted by the anthropic-sdk-go instrumentation that are not covered by the upstream
-      OpenTelemetry GenAI semantic conventions.
+      Prompt-cache attributes emitted by the anthropic-sdk-go instrumentation that are not covered by the upstream OpenTelemetry
+      GenAI semantic conventions.
     attributes:
       - id: gen_ai.usage.cache_read.input_tokens
         type: int
