@@ -92,8 +92,17 @@ func TestGRPCServer(t *testing.T) {
 			client.SayHello(t, "ShutdownTest")
 
 			require.NoError(t, srv.Cmd.Process.Signal(tc.sig))
-			waitForProcessExit(t, srv.Cmd, 10*time.Second)
+			exitErr := waitForProcessExit(t, srv.Cmd, 10*time.Second)
 			testutil.WaitForSpanFlush(t)
+
+			// The handler-less demo must die from the signal itself, not a clean
+			// exit 0 — the regression guard against the exit code being rewritten.
+			var wantExit *exec.ExitError
+			require.ErrorAs(t, exitErr, &wantExit)
+			status, ok := wantExit.Sys().(syscall.WaitStatus)
+			require.True(t, ok, "expected a unix wait status")
+			require.True(t, status.Signaled(), "process should be terminated by a signal, not exit 0")
+			require.Equal(t, tc.sig, status.Signal(), "should terminate with the signal it received")
 
 			spans := testutil.AllSpans(f.Traces())
 			require.NotEmpty(t, spans, "expected spans to be flushed on %s shutdown", tc.name)
@@ -157,8 +166,10 @@ func (c *GRPCClient) SayHelloStream(t *testing.T, name string, count int) {
 	require.Equal(t, count, responseCount, "Should receive %d responses", count)
 }
 
-// waitForProcessExit waits for a process to exit within the given timeout.
-func waitForProcessExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
+// waitForProcessExit waits for a process to exit within the given timeout and
+// returns the error from cmd.Wait: nil for a clean exit-0, or an *exec.ExitError
+// describing a non-zero or signal termination.
+func waitForProcessExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) error {
 	t.Helper()
 
 	done := make(chan error, 1)
@@ -167,8 +178,10 @@ func waitForProcessExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
 	}()
 
 	select {
-	case <-done:
+	case err := <-done:
+		return err
 	case <-time.After(timeout):
 		t.Fatal("process did not exit within timeout")
+		return nil
 	}
 }

@@ -311,34 +311,40 @@ func shutdownSignals() []os.Signal {
 	return []os.Signal{os.Interrupt, syscall.SIGTERM}
 }
 
-// setupSignalHandler registers a goroutine that listens for OS signals
-// and gracefully shuts down the OpenTelemetry SDK when receiving SIGINT or SIGTERM.
-// This ensures telemetry is flushed before the application exits.
-// This function is safe to call multiple times; it will only register the handler once.
+// setupSignalHandler flushes the OTel SDK on SIGINT/SIGTERM, then re-raises the
+// signal so the app's own handler or the default disposition owns the exit. It
+// avoids os.Exit, which would race the app's shutdown and force the exit code to 0.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
 		sigCh := make(chan os.Signal, 1)
-		signals := shutdownSignals()
-		signal.Notify(sigCh, signals...)
+		signal.Notify(sigCh, shutdownSignals()...)
 
 		go func() {
 			sig := <-sigCh
-			logger.Info("received signal, initiating graceful shutdown", "signal", sig.String())
+			logger.Info("received signal, flushing telemetry before shutdown", "signal", sig.String())
 
-			// Create a context with timeout for shutdown
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			// Shutdown OTel SDK
 			if err := Shutdown(ctx); err != nil {
-				logger.Error("error during shutdown", "error", err)
+				logger.Error("error flushing telemetry during shutdown", "error", err)
 			} else {
 				logger.Info("OpenTelemetry SDK shutdown completed successfully")
 			}
 
-			// After shutdown completes, exit cleanly.
-			signal.Reset(signals...)
-			os.Exit(0)
+			signal.Stop(sigCh)
+			raiseSignalToSelf(sig)
 		}()
 	})
+}
+
+// raiseSignalToSelf re-sends sig to this process, falling back to os.Exit where
+// re-raising isn't supported.
+func raiseSignalToSelf(sig os.Signal) {
+	if p, err := os.FindProcess(os.Getpid()); err == nil {
+		if err := p.Signal(sig); err == nil {
+			return
+		}
+	}
+	os.Exit(0)
 }
