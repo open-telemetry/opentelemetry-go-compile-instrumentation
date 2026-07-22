@@ -1,0 +1,146 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import _ "unsafe"
+
+// Blank param + blank named return, the collision case from issue #736.
+func UnderscoreParamReturnFunc(_ignoredParam0 int) (_ignoredRetVal0 error) {
+	//line <generated>:1
+	if hookContext1353090234, _ := OtelBeforeTrampoline_UnderscoreParamReturnFunc1353090234(&_ignoredParam0); false {
+	} else {
+		defer OtelAfterTrampoline_UnderscoreParamReturnFunc1353090234(hookContext1353090234, &_ignoredRetVal0)
+	}
+	//line main.go:8:2
+	return nil
+}
+
+func main() {}
+
+//line <generated>:1
+type HookContextImpl1353090234 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl1353090234) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl1353090234) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl1353090234) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl1353090234) GetData() interface{}     { return c.data }
+func (c *HookContextImpl1353090234) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl1353090234) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl1353090234) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl1353090234) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*int))
+	}
+	return nil
+}
+
+func (c *HookContextImpl1353090234) SetParam(idx int, val interface{}) {
+	if val == nil {
+		c.params[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.params[0].(*int)) = val.(int)
+	}
+}
+
+func (c *HookContextImpl1353090234) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl1353090234) SetReturnVal(idx int, val interface{}) {
+	if val == nil {
+		c.returnVals[idx] = nil
+		return
+	}
+	switch idx {
+	case 0:
+		*(c.returnVals[0].(*error)) = val.(error)
+	}
+}
+func (c *HookContextImpl1353090234) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl1353090234) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl1353090234) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl1353090234) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_UnderscoreParamReturnFunc1353090234(param0 *int) (hookContext *HookContextImpl1353090234, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "H12UnderscoreParamReturnBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl1353090234{}
+	hookContext.params = []interface{}{param0}
+	hookContext.funcName = "UnderscoreParamReturnFunc"
+	hookContext.packageName = "main"
+	if H12UnderscoreParamReturnBefore != nil {
+		H12UnderscoreParamReturnBefore(hookContext, *param0)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_UnderscoreParamReturnFunc1353090234(hookContext HookContext, arg0 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "H12UnderscoreParamReturnAfter")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl1353090234).returnVals = []interface{}{arg0}
+	if H12UnderscoreParamReturnAfter != nil {
+		H12UnderscoreParamReturnAfter(hookContext, *arg0)
+	}
+}
+
+//go:linkname H12UnderscoreParamReturnBefore testdata/golden/underscore-param-and-return.H12UnderscoreParamReturnBefore
+func H12UnderscoreParamReturnBefore(hookContext HookContext, param0 int)
+
+//go:linkname H12UnderscoreParamReturnAfter testdata/golden/underscore-param-and-return.H12UnderscoreParamReturnAfter
+func H12UnderscoreParamReturnAfter(hookContext HookContext, arg0 error)
