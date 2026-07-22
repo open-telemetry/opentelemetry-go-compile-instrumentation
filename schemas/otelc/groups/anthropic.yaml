@@ -1,0 +1,76 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # anthropics/anthropic-sdk-go instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/anthropics/anthropic-sdk-go/middleware.go
+  #   instrumentation/github.com/anthropics/anthropic-sdk-go/semconv/genai.go
+  #
+  # The anthropic-sdk-go instrumentation is trace-only: it wraps the SDK HTTP transport
+  # and creates one client span per messages API call, with GenAI attributes. 
+  # Most attributes are standard upstream OpenTelemetry GenAI attributes (referenced with `ref:`). 
+  # Attributes not defined upstream are declared locally with `id:` below.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.gen_ai.anthropic
+    type: attribute_group
+    display_name: otelc GenAI attributes for Anthropic
+    brief: >
+      GenAI attributes emitted by the anthropic-sdk-go instrumentation that are not covered by the upstream OpenTelemetry GenAI semantic conventions.
+    attributes:
+      - id: gen_ai.usage.total_tokens
+        type: int
+        stability: development
+        brief: The total number of tokens used in the request and response.
+        examples: [180]
+      - id: gen_ai.usage.cache_read.input_tokens
+        type: int
+        stability: development
+        brief: The number of tokens read from the cache for the request.
+        examples: [50]
+      - id: gen_ai.usage.cache_creation.input_tokens
+        type: int
+        stability: development
+        brief: The number of tokens written to the cache for the request.
+        examples: [100]
+      - id: gen_ai.request.is_stream
+        type: boolean
+        stability: development
+        brief: Whether the request was served as a streaming (server-sent events) response.
+      - id: gen_ai.response.time_to_first_token
+        type: int
+        stability: development
+        brief: >
+          Time from sending the request to receiving the first token of a streaming response, in microseconds.
+        examples: [1200]
+      - id: gen_ai.request.top_k
+        type: int
+        stability: development
+        brief: The top_k parameter used for the request.
+        examples: [5]
+
+  - id: span.otelc.gen_ai.client.anthropic
+    type: span
+    span_kind: client
+    stability: development
+    brief: Anthropic client span, one per messages API call.
+    attributes:
+      - ref: gen_ai.system
+      - ref: gen_ai.provider.name
+      - ref: gen_ai.operation.name
+      - ref: gen_ai.request.model
+      - ref: gen_ai.request.max_tokens
+      - ref: gen_ai.request.temperature
+      - ref: gen_ai.request.top_p
+      - ref: gen_ai.request.top_k
+      - ref: gen_ai.response.id
+      - ref: gen_ai.response.model
+      - ref: gen_ai.response.finish_reasons
+      - ref: gen_ai.usage.input_tokens
+      - ref: gen_ai.usage.output_tokens
+      - ref: gen_ai.usage.total_tokens
+      - ref: gen_ai.usage.cache_read.input_tokens
+      - ref: gen_ai.usage.cache_creation.input_tokens
+      - ref: gen_ai.request.is_stream
+      - ref: gen_ai.response.time_to_first_token
+      - ref: error.type
