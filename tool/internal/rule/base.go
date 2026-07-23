@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -102,6 +103,13 @@ func (ibr *InstBaseRule) GetName() string     { return ibr.Name }
 func (ibr *InstBaseRule) GetTarget() string   { return ibr.Target }
 func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
 func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
+
+func (ibr *InstBaseRule) validateBase() error {
+	if strings.TrimSpace(ibr.Target) == "" {
+		return ex.Newf("target cannot be empty")
+	}
+	return nil
+}
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
