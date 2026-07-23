@@ -1,0 +1,943 @@
+diff --git a/instrumentation/net/http/client/client_hook.go b/instrumentation/net/http/client/client_hook.go
+index 02307e939..2ef5dac66 100644
+--- a/instrumentation/net/http/client/client_hook.go
++++ b/instrumentation/net/http/client/client_hook.go
+@@ -4,17 +4,21 @@
+ package client
+ 
+ import (
++	"context"
+ 	"net/http"
+ 	"strings"
+ 	"sync"
+ 	"time"
+ 
+ 	"go.opentelemetry.io/otel"
++	"go.opentelemetry.io/otel/attribute"
+ 	"go.opentelemetry.io/otel/codes"
++	"go.opentelemetry.io/otel/metric"
+ 	"go.opentelemetry.io/otel/propagation"
++	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+ 	"go.opentelemetry.io/otel/trace"
+ 
+-	"go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
++	httpsemconv "go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
+ 	"go.opentelemetry.io/otelc/pkg/hook"
+ 	"go.opentelemetry.io/otelc/pkg/runtime"
+ )
+@@ -30,16 +34,24 @@ var (
+ 	logger     = runtime.Logger()
+ 	tracer     trace.Tracer
+ 	propagator propagation.TextMapPropagator
++	metrics    httpsemconv.HTTPClient
+ 	initOnce   sync.Once
+ )
+ 
+ func initInstrumentation() {
+ 	initOnce.Do(func() {
++		version := runtime.ModuleVersion()
+ 		tracer = otel.GetTracerProvider().Tracer(
+ 			instrumentationName,
+-			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
++			trace.WithInstrumentationVersion(version),
+ 		)
+ 		propagator = otel.GetTextMapPropagator()
++		meter := otel.GetMeterProvider().Meter(
++			instrumentationName,
++			metric.WithInstrumentationVersion(version),
++			metric.WithSchemaURL(otelsemconv.SchemaURL),
++		)
++		metrics = httpsemconv.NewHTTPClient(meter)
+ 		logger.Info("HTTP client instrumentation initialized")
+ 	})
+ }
+@@ -81,7 +93,7 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
+ 	ctx := req.Context()
+ 
+ 	// Get trace attributes from semconv
+-	attrs := semconv.HTTPClientRequestTraceAttrs(req)
++	attrs := httpsemconv.HTTPClientRequestTraceAttrs(req)
+ 
+ 	// Start span
+ 	spanName := req.Method
+@@ -98,12 +110,16 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
+ 	newReq := req.WithContext(ctx)
+ 	ictx.SetParam(requestParamIndex, newReq)
+ 
++	activeMetricAttrs := attribute.NewSet(metrics.ActiveRequestMetricAttributes(req, nil)...)
++	metrics.AddActiveRequests(ctx, 1, activeMetricAttrs)
++
+ 	// Store data for after hook
+ 	ictx.SetData(map[string]interface{}{
+-		"ctx":   ctx,
+-		"span":  span,
+-		"req":   req,
+-		"start": time.Now(),
++		"activeMetricAttrs": activeMetricAttrs,
++		"ctx":               ctx,
++		"span":              span,
++		"req":               req,
++		"start":             time.Now(),
+ 	})
+ }
+ 
+@@ -113,6 +129,14 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
+ 		return
+ 	}
+ 
++	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
++	if ctx == nil {
++		ctx = context.Background()
++	}
++	if set, ok := ictx.GetKeyData("activeMetricAttrs").(attribute.Set); ok {
++		defer metrics.AddActiveRequests(ctx, -1, set)
++	}
++
+ 	span, ok := ictx.GetKeyData("span").(trace.Span)
+ 	if !ok || span == nil {
+ 		logger.Debug("AfterRoundTrip: no span from before hook")
+@@ -123,11 +147,11 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
+ 	// Add response attributes
+ 	if res != nil {
+ 		startTime, _ := ictx.GetKeyData("start").(time.Time)
+-		attrs := semconv.HTTPClientResponseTraceAttrs(res)
++		attrs := httpsemconv.HTTPClientResponseTraceAttrs(res)
+ 		span.SetAttributes(attrs...)
+ 
+ 		// Set span status based on status code
+-		code, desc := semconv.HTTPClientStatus(res.StatusCode)
++		code, desc := httpsemconv.HTTPClientStatus(res.StatusCode)
+ 		if code != codes.Unset {
+ 			span.SetStatus(code, desc)
+ 		}
+@@ -143,9 +167,36 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
+ 	if err != nil {
+ 		span.RecordError(err)
+ 		span.SetStatus(codes.Error, err.Error())
+-		span.SetAttributes(semconv.HTTPClientErrorType(err))
++		span.SetAttributes(httpsemconv.HTTPClientErrorType(err))
+ 		logger.Debug("AfterRoundTrip called with error", "error", err)
+ 	}
+ 
++	startTime, hasStart := ictx.GetKeyData("start").(time.Time)
++	req, hasRequest := ictx.GetKeyData("req").(*http.Request)
++	if hasStart && hasRequest {
++		statusCode := 0
++		responseSize := int64(0)
++		metricAttrs := []attribute.KeyValue(nil)
++		if res != nil {
++			statusCode = res.StatusCode
++			responseSize = res.ContentLength
++			metricReq := req.Clone(req.Context())
++			metricReq.Proto = res.Proto
++			req = metricReq
++		}
++		if err != nil {
++			metricAttrs = append(metricAttrs, httpsemconv.HTTPClientErrorType(err))
++		}
++		metrics.RecordMetrics(
++			ctx,
++			req,
++			statusCode,
++			req.ContentLength,
++			responseSize,
++			time.Since(startTime).Seconds(),
++			metricAttrs,
++		)
++	}
++
+ 	logger.Debug("AfterRoundTrip completed")
+ }
+diff --git a/instrumentation/net/http/client/client_hook_test.go b/instrumentation/net/http/client/client_hook_test.go
+index 193b64096..33703360d 100644
+--- a/instrumentation/net/http/client/client_hook_test.go
++++ b/instrumentation/net/http/client/client_hook_test.go
+@@ -16,6 +16,8 @@ import (
+ 	"go.opentelemetry.io/otel"
+ 	"go.opentelemetry.io/otel/codes"
+ 	"go.opentelemetry.io/otel/propagation"
++	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
++	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+ 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+ 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+ 	"go.opentelemetry.io/otel/trace"
+@@ -34,6 +36,15 @@ func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerPro
+ 	return sr, tp
+ }
+ 
++func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
++	t.Helper()
++	reader := sdkmetric.NewManualReader()
++	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
++	otel.SetMeterProvider(provider)
++	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
++	return reader
++}
++
+ func TestBeforeRoundTrip(t *testing.T) {
+ 	tests := []struct {
+ 		name            string
+@@ -401,3 +412,38 @@ func TestClientEnabler(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestRoundTripRecordsRequestMetrics(t *testing.T) {
++	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
++	initOnce = *new(sync.Once)
++	setupTestTracer(t)
++	reader := setupTestMeter(t)
++
++	req := httptest.NewRequest(http.MethodPost, "https://example.com/items", nil)
++	req.ContentLength = 12
++	ctx := hooktest.NewMockHookContext()
++
++	BeforeRoundTrip(ctx, http.DefaultTransport.(*http.Transport), req)
++	AfterRoundTrip(ctx, &http.Response{
++		StatusCode:    http.StatusCreated,
++		ContentLength: 34,
++		Proto:         "HTTP/2.0",
++		Request:       req,
++	}, nil)
++
++	var data metricdata.ResourceMetrics
++	require.NoError(t, reader.Collect(context.Background(), &data))
++
++	var names []string
++	for _, scope := range data.ScopeMetrics {
++		for _, metric := range scope.Metrics {
++			names = append(names, metric.Name)
++		}
++	}
++	assert.ElementsMatch(t, []string{
++		"http.client.active_requests",
++		"http.client.request.body.size",
++		"http.client.response.body.size",
++		"http.client.request.duration",
++	}, names)
++}
+diff --git a/instrumentation/net/http/client/go.mod b/instrumentation/net/http/client/go.mod
+index 35714393b..51ce4dceb 100644
+--- a/instrumentation/net/http/client/go.mod
++++ b/instrumentation/net/http/client/go.mod
+@@ -11,7 +11,9 @@ replace go.opentelemetry.io/otelc/instrumentation => ../../..
+ require (
+ 	github.com/stretchr/testify v1.11.1
+ 	go.opentelemetry.io/otel v1.44.0
++	go.opentelemetry.io/otel/metric v1.44.0
+ 	go.opentelemetry.io/otel/sdk v1.44.0
++	go.opentelemetry.io/otel/sdk/metric v1.44.0
+ 	go.opentelemetry.io/otel/trace v1.44.0
+ 	go.opentelemetry.io/otelc/instrumentation v0.0.0-00010101000000-000000000000
+ 	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
+@@ -55,9 +57,7 @@ require (
+ 	go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.44.0 // indirect
+ 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.44.0 // indirect
+ 	go.opentelemetry.io/otel/log v0.20.0 // indirect
+-	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+ 	go.opentelemetry.io/otel/sdk/log v0.20.0 // indirect
+-	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.4 // indirect
+diff --git a/instrumentation/net/http/semconv/client.go b/instrumentation/net/http/semconv/client.go
+index 3cd012b47..4ab617b99 100644
+--- a/instrumentation/net/http/semconv/client.go
++++ b/instrumentation/net/http/semconv/client.go
+@@ -15,74 +15,56 @@ import (
+ 	"go.opentelemetry.io/otel/codes"
+ 	"go.opentelemetry.io/otel/metric"
+ 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
++	"go.opentelemetry.io/otel/semconv/v1.37.0/httpconv"
+ )
+ 
+ // HTTPClient provides HTTP semantic convention attributes and metrics for client requests.
+ type HTTPClient struct {
+-	requestBodySize    metric.Int64Histogram
+-	responseBodySize   metric.Int64Histogram
+-	requestDuration    metric.Float64Histogram
+-	activeRequests     metric.Int64UpDownCounter
+-	openConnections    metric.Int64UpDownCounter
+-	connectionDuration metric.Float64Histogram
++	requestBodySize    httpconv.ClientRequestBodySize
++	responseBodySize   httpconv.ClientResponseBodySize
++	requestDuration    httpconv.ClientRequestDuration
++	activeRequests     httpconv.ClientActiveRequests
++	openConnections    httpconv.ClientOpenConnections
++	connectionDuration httpconv.ClientConnectionDuration
+ }
+ 
+ // NewHTTPClient creates a new HTTPClient instance with metrics.
+-// If meter is nil, returns a client without metrics support.
++// If meter is nil, the client uses no-op metrics.
+ func NewHTTPClient(meter metric.Meter) HTTPClient {
+-	client := HTTPClient{}
+-
+-	if meter == nil {
+-		return client
+-	}
+-
+ 	var err error
+-	client.requestBodySize, err = meter.Int64Histogram(
+-		"http.client.request.body.size",
+-		metric.WithDescription("Size of HTTP client request bodies."),
+-		metric.WithUnit("By"),
+-	)
++	client := HTTPClient{}
++	client.requestBodySize, err = httpconv.NewClientRequestBodySize(meter)
+ 	HandleErr(err)
+ 
+-	client.responseBodySize, err = meter.Int64Histogram(
+-		"http.client.response.body.size",
+-		metric.WithDescription("Size of HTTP client response bodies."),
+-		metric.WithUnit("By"),
+-	)
++	client.responseBodySize, err = httpconv.NewClientResponseBodySize(meter)
+ 	HandleErr(err)
+ 
+-	client.requestDuration, err = meter.Float64Histogram(
+-		"http.client.request.duration",
+-		metric.WithDescription("Duration of HTTP client requests."),
+-		metric.WithUnit("s"),
+-		metric.WithExplicitBucketBoundaries(0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10),
+-	)
++	client.requestDuration, err = httpconv.NewClientRequestDuration(meter)
+ 	HandleErr(err)
+ 
+-	client.activeRequests, err = meter.Int64UpDownCounter(
+-		"http.client.active_requests",
+-		metric.WithDescription("Number of active HTTP requests."),
+-		metric.WithUnit("{request}"),
+-	)
++	client.activeRequests, err = httpconv.NewClientActiveRequests(meter)
+ 	HandleErr(err)
+ 
+-	client.openConnections, err = meter.Int64UpDownCounter(
+-		"http.client.open_connections",
+-		metric.WithDescription("Number of outbound HTTP connections that are currently active or idle on the client."),
+-		metric.WithUnit("{connection}"),
+-	)
++	client.openConnections, err = httpconv.NewClientOpenConnections(meter)
+ 	HandleErr(err)
+ 
+-	client.connectionDuration, err = meter.Float64Histogram(
+-		"http.client.connection.duration",
+-		metric.WithDescription("The duration of the successfully established outbound HTTP connections."),
+-		metric.WithUnit("s"),
+-	)
++	client.connectionDuration, err = httpconv.NewClientConnectionDuration(meter)
+ 	HandleErr(err)
+ 
+ 	return client
+ }
+ 
++func (n HTTPClient) metricNames() []string {
++	return []string{
++		n.requestBodySize.Name(),
++		n.responseBodySize.Name(),
++		n.requestDuration.Name(),
++		n.activeRequests.Name(),
++		n.openConnections.Name(),
++		n.connectionDuration.Name(),
++	}
++}
++
+ // Status returns the span status code based on HTTP response status code.
+ func (HTTPClient) Status(code int) (codes.Code, string) {
+ 	if code < 100 || code >= 600 {
+@@ -296,6 +278,27 @@ func (n HTTPClient) MetricAttributes(
+ 	return attributes
+ }
+ 
++// ActiveRequestMetricAttributes returns attributes for the active request metric.
++func (n HTTPClient) ActiveRequestMetricAttributes(
++	req *http.Request,
++	additionalAttributes []attribute.KeyValue,
++) []attribute.KeyValue {
++	attributes := n.MetricAttributes(req, 0, additionalAttributes)
++	result := attributes[:0]
++	for _, attr := range attributes {
++		if attr.Key == semconv.NetworkProtocolNameKey || attr.Key == semconv.NetworkProtocolVersionKey {
++			continue
++		}
++		result = append(result, attr)
++	}
++	return result
++}
++
++// AddActiveRequests adds incr to the number of active HTTP client requests.
++func (n HTTPClient) AddActiveRequests(ctx context.Context, incr int64, set attribute.Set) {
++	n.activeRequests.AddSet(ctx, incr, set)
++}
++
+ // scheme returns the URL scheme attribute for metrics.
+ func (HTTPClient) scheme(req *http.Request) attribute.KeyValue {
+ 	if req.URL != nil && req.URL.Scheme != "" {
+@@ -333,25 +336,19 @@ func (n HTTPClient) RecordMetrics(
+ 	elapsedTime float64,
+ 	additionalAttributes []attribute.KeyValue,
+ ) {
+-	if n.requestBodySize == nil && n.responseBodySize == nil && n.requestDuration == nil {
+-		return
+-	}
+-
+ 	attributes := n.MetricAttributes(req, statusCode, additionalAttributes)
+-	opts := metric.WithAttributeSet(attribute.NewSet(attributes...))
++	set := attribute.NewSet(attributes...)
+ 
+-	if n.requestBodySize != nil && requestSize > 0 {
+-		n.requestBodySize.Record(ctx, requestSize, opts)
++	if requestSize > 0 {
++		n.requestBodySize.RecordSet(ctx, requestSize, set)
+ 	}
+ 
+-	if n.responseBodySize != nil && responseSize > 0 {
+-		n.responseBodySize.Record(ctx, responseSize, opts)
++	if responseSize > 0 {
++		n.responseBodySize.RecordSet(ctx, responseSize, set)
+ 	}
+ 
+-	if n.requestDuration != nil {
+-		// elapsedTime should be in seconds
+-		n.requestDuration.Record(ctx, elapsedTime, opts)
+-	}
++	// elapsedTime should be in seconds
++	n.requestDuration.RecordSet(ctx, elapsedTime, set)
+ }
+ 
+ // Package-level convenience functions for direct use in hooks.
+diff --git a/instrumentation/net/http/semconv/client_test.go b/instrumentation/net/http/semconv/client_test.go
+index 400442ff5..44a5cc541 100644
+--- a/instrumentation/net/http/semconv/client_test.go
++++ b/instrumentation/net/http/semconv/client_test.go
+@@ -161,13 +161,14 @@ func TestHTTPClientMetrics(t *testing.T) {
+ 	meter := noop.NewMeterProvider().Meter("test")
+ 	client := NewHTTPClient(meter)
+ 
+-	// Verify metrics are initialized
+-	assert.NotNil(t, client.requestBodySize)
+-	assert.NotNil(t, client.responseBodySize)
+-	assert.NotNil(t, client.requestDuration)
+-	assert.NotNil(t, client.activeRequests)
+-	assert.NotNil(t, client.openConnections)
+-	assert.NotNil(t, client.connectionDuration)
++	assert.ElementsMatch(t, []string{
++		"http.client.request.body.size",
++		"http.client.response.body.size",
++		"http.client.request.duration",
++		"http.client.active_requests",
++		"http.client.open_connections",
++		"http.client.connection.duration",
++	}, client.metricNames())
+ }
+ 
+ func TestHTTPClientRecordMetrics(t *testing.T) {
+diff --git a/instrumentation/net/http/semconv/metric_contract_test.go b/instrumentation/net/http/semconv/metric_contract_test.go
+new file mode 100644
+index 000000000..b3bbdb452
+--- /dev/null
++++ b/instrumentation/net/http/semconv/metric_contract_test.go
+@@ -0,0 +1,43 @@
++// Copyright The OpenTelemetry Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package semconv
++
++import (
++	"bufio"
++	"os"
++	"strings"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++)
++
++func TestHTTPMetricNamesMatchRegistry(t *testing.T) {
++	declared := declaredHTTPMetricNames(t)
++	registered := append(NewHTTPClient(nil).metricNames(), NewHTTPServer(nil).metricNames()...)
++
++	assert.ElementsMatch(t, declared, registered)
++}
++
++func declaredHTTPMetricNames(t *testing.T) []string {
++	t.Helper()
++
++	file, err := os.Open("../../../../schemas/otelc/groups/http.yaml")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer file.Close()
++
++	var names []string
++	scanner := bufio.NewScanner(file)
++	for scanner.Scan() {
++		line := strings.TrimSpace(scanner.Text())
++		if name, ok := strings.CutPrefix(line, "metric_name:"); ok {
++			names = append(names, strings.TrimSpace(name))
++		}
++	}
++	if err := scanner.Err(); err != nil {
++		t.Fatal(err)
++	}
++	return names
++}
+diff --git a/instrumentation/net/http/semconv/server.go b/instrumentation/net/http/semconv/server.go
+index 62fd4f67e..a48f323df 100644
+--- a/instrumentation/net/http/semconv/server.go
++++ b/instrumentation/net/http/semconv/server.go
+@@ -14,6 +14,7 @@ import (
+ 	"go.opentelemetry.io/otel/codes"
+ 	"go.opentelemetry.io/otel/metric"
+ 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
++	"go.opentelemetry.io/otel/semconv/v1.37.0/httpconv"
+ )
+ 
+ // RequestTraceAttrsOpts provides options for request trace attributes.
+@@ -33,54 +34,41 @@ type ResponseTelemetry struct {
+ 
+ // HTTPServer provides HTTP semantic convention attributes and metrics for server requests.
+ type HTTPServer struct {
+-	requestBodySize  metric.Int64Histogram
+-	responseBodySize metric.Int64Histogram
+-	requestDuration  metric.Float64Histogram
+-	activeRequests   metric.Int64UpDownCounter
++	requestBodySize  httpconv.ServerRequestBodySize
++	responseBodySize httpconv.ServerResponseBodySize
++	requestDuration  httpconv.ServerRequestDuration
++	activeRequests   httpconv.ServerActiveRequests
+ }
+ 
+ // NewHTTPServer creates a new HTTPServer instance with metrics.
+-// If meter is nil, returns a server without metrics support.
++// If meter is nil, the server uses no-op metrics.
+ func NewHTTPServer(meter metric.Meter) HTTPServer {
+-	server := HTTPServer{}
+-
+-	if meter == nil {
+-		return server
+-	}
+-
+ 	var err error
+-	server.requestBodySize, err = meter.Int64Histogram(
+-		"http.server.request.body.size",
+-		metric.WithDescription("Size of HTTP server request bodies."),
+-		metric.WithUnit("By"),
+-	)
++	server := HTTPServer{}
++	server.requestBodySize, err = httpconv.NewServerRequestBodySize(meter)
+ 	HandleErr(err)
+ 
+-	server.responseBodySize, err = meter.Int64Histogram(
+-		"http.server.response.body.size",
+-		metric.WithDescription("Size of HTTP server response bodies."),
+-		metric.WithUnit("By"),
+-	)
++	server.responseBodySize, err = httpconv.NewServerResponseBodySize(meter)
+ 	HandleErr(err)
+ 
+-	server.requestDuration, err = meter.Float64Histogram(
+-		"http.server.request.duration",
+-		metric.WithDescription("Duration of HTTP server requests."),
+-		metric.WithUnit("s"),
+-		metric.WithExplicitBucketBoundaries(0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10),
+-	)
++	server.requestDuration, err = httpconv.NewServerRequestDuration(meter)
+ 	HandleErr(err)
+ 
+-	server.activeRequests, err = meter.Int64UpDownCounter(
+-		"http.server.active_requests",
+-		metric.WithDescription("Number of active HTTP server requests."),
+-		metric.WithUnit("{request}"),
+-	)
++	server.activeRequests, err = httpconv.NewServerActiveRequests(meter)
+ 	HandleErr(err)
+ 
+ 	return server
+ }
+ 
++func (n HTTPServer) metricNames() []string {
++	return []string{
++		n.requestBodySize.Name(),
++		n.responseBodySize.Name(),
++		n.requestDuration.Name(),
++		n.activeRequests.Name(),
++	}
++}
++
+ // Status returns a span status code and message for an HTTP status code
+ // value returned by a server. Status codes in the 400-499 range are not
+ // returned as errors (per HTTP semconv spec).
+@@ -360,6 +348,28 @@ func (n HTTPServer) MetricAttributes(
+ 	return attributes
+ }
+ 
++// ActiveRequestMetricAttributes returns attributes for the active request metric.
++func (n HTTPServer) ActiveRequestMetricAttributes(
++	server string,
++	req *http.Request,
++	additionalAttributes []attribute.KeyValue,
++) []attribute.KeyValue {
++	attributes := n.MetricAttributes(server, req, 0, "", additionalAttributes)
++	result := attributes[:0]
++	for _, attr := range attributes {
++		if attr.Key == semconv.NetworkProtocolNameKey || attr.Key == semconv.NetworkProtocolVersionKey {
++			continue
++		}
++		result = append(result, attr)
++	}
++	return result
++}
++
++// AddActiveRequests adds incr to the number of active HTTP server requests.
++func (n HTTPServer) AddActiveRequests(ctx context.Context, incr int64, set attribute.Set) {
++	n.activeRequests.AddSet(ctx, incr, set)
++}
++
+ // method returns the HTTP method attribute and optional original method attribute.
+ func (HTTPServer) method(method string) (attribute.KeyValue, attribute.KeyValue) {
+ 	if method == "" {
+@@ -395,25 +405,19 @@ func (n HTTPServer) RecordMetrics(
+ 	elapsedTime float64,
+ 	additionalAttributes []attribute.KeyValue,
+ ) {
+-	if n.requestBodySize == nil && n.responseBodySize == nil && n.requestDuration == nil {
+-		return
+-	}
+-
+ 	attributes := n.MetricAttributes(server, req, statusCode, route, additionalAttributes)
+-	opts := metric.WithAttributeSet(attribute.NewSet(attributes...))
++	set := attribute.NewSet(attributes...)
+ 
+-	if n.requestBodySize != nil && requestSize > 0 {
+-		n.requestBodySize.Record(ctx, requestSize, opts)
++	if requestSize > 0 {
++		n.requestBodySize.RecordSet(ctx, requestSize, set)
+ 	}
+ 
+-	if n.responseBodySize != nil && responseSize > 0 {
+-		n.responseBodySize.Record(ctx, responseSize, opts)
++	if responseSize > 0 {
++		n.responseBodySize.RecordSet(ctx, responseSize, set)
+ 	}
+ 
+-	if n.requestDuration != nil {
+-		// elapsedTime should be in seconds
+-		n.requestDuration.Record(ctx, elapsedTime, opts)
+-	}
++	// elapsedTime should be in seconds
++	n.requestDuration.RecordSet(ctx, elapsedTime, set)
+ }
+ 
+ // Package-level convenience functions for direct use in hooks.
+diff --git a/instrumentation/net/http/semconv/server_test.go b/instrumentation/net/http/semconv/server_test.go
+index 7f49b65c4..e94f22499 100644
+--- a/instrumentation/net/http/semconv/server_test.go
++++ b/instrumentation/net/http/semconv/server_test.go
+@@ -230,11 +230,12 @@ func TestHTTPServerMetrics(t *testing.T) {
+ 	meter := noop.NewMeterProvider().Meter("test")
+ 	server := NewHTTPServer(meter)
+ 
+-	// Verify metrics are initialized
+-	assert.NotNil(t, server.requestBodySize)
+-	assert.NotNil(t, server.responseBodySize)
+-	assert.NotNil(t, server.requestDuration)
+-	assert.NotNil(t, server.activeRequests)
++	assert.ElementsMatch(t, []string{
++		"http.server.request.body.size",
++		"http.server.response.body.size",
++		"http.server.request.duration",
++		"http.server.active_requests",
++	}, server.metricNames())
+ }
+ 
+ func TestHTTPServerRecordMetrics(t *testing.T) {
+diff --git a/instrumentation/net/http/server/go.mod b/instrumentation/net/http/server/go.mod
+index 2e101080e..7682fbc5e 100644
+--- a/instrumentation/net/http/server/go.mod
++++ b/instrumentation/net/http/server/go.mod
+@@ -13,7 +13,9 @@ replace go.opentelemetry.io/otelc/instrumentation/net/http/client => ../client
+ require (
+ 	github.com/stretchr/testify v1.11.1
+ 	go.opentelemetry.io/otel v1.44.0
++	go.opentelemetry.io/otel/metric v1.44.0
+ 	go.opentelemetry.io/otel/sdk v1.44.0
++	go.opentelemetry.io/otel/sdk/metric v1.44.0
+ 	go.opentelemetry.io/otel/trace v1.44.0
+ 	go.opentelemetry.io/otelc/instrumentation v0.0.0-00010101000000-000000000000
+ 	go.opentelemetry.io/otelc/instrumentation/net/http/client v0.0.0-00010101000000-000000000000
+@@ -58,9 +60,7 @@ require (
+ 	go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.44.0 // indirect
+ 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.44.0 // indirect
+ 	go.opentelemetry.io/otel/log v0.20.0 // indirect
+-	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+ 	go.opentelemetry.io/otel/sdk/log v0.20.0 // indirect
+-	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+ 	go.uber.org/multierr v1.11.0 // indirect
+ 	go.yaml.in/yaml/v2 v2.4.4 // indirect
+diff --git a/instrumentation/net/http/server/response_writer.go b/instrumentation/net/http/server/response_writer.go
+index 8c649c505..21e0597c5 100644
+--- a/instrumentation/net/http/server/response_writer.go
++++ b/instrumentation/net/http/server/response_writer.go
+@@ -15,6 +15,7 @@ type writerWrapper struct {
+ 	http.ResponseWriter
+ 	statusCode  int
+ 	wroteHeader bool
++	written     int64
+ }
+ 
+ // WriteHeader captures the status code and forwards to the underlying ResponseWriter
+@@ -34,7 +35,9 @@ func (w *writerWrapper) Write(b []byte) (int, error) {
+ 	if !w.wroteHeader {
+ 		w.WriteHeader(http.StatusOK)
+ 	}
+-	return w.ResponseWriter.Write(b)
++	n, err := w.ResponseWriter.Write(b)
++	w.written += int64(n)
++	return n, err
+ }
+ 
+ // Hijack implements the http.Hijacker interface
+diff --git a/instrumentation/net/http/server/server_hook.go b/instrumentation/net/http/server/server_hook.go
+index 83c2b0649..a2652625a 100644
+--- a/instrumentation/net/http/server/server_hook.go
++++ b/instrumentation/net/http/server/server_hook.go
+@@ -4,16 +4,21 @@
+ package server
+ 
+ import (
++	"context"
+ 	"net/http"
++	"strconv"
+ 	"sync"
+ 	"time"
+ 
+ 	"go.opentelemetry.io/otel"
++	"go.opentelemetry.io/otel/attribute"
+ 	"go.opentelemetry.io/otel/codes"
++	"go.opentelemetry.io/otel/metric"
+ 	"go.opentelemetry.io/otel/propagation"
++	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+ 	"go.opentelemetry.io/otel/trace"
+ 
+-	"go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
++	httpsemconv "go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
+ 	"go.opentelemetry.io/otelc/pkg/hook"
+ 	"go.opentelemetry.io/otelc/pkg/runtime"
+ )
+@@ -29,16 +34,24 @@ var (
+ 	logger     = runtime.Logger()
+ 	tracer     trace.Tracer
+ 	propagator propagation.TextMapPropagator
++	metrics    httpsemconv.HTTPServer
+ 	initOnce   sync.Once
+ )
+ 
+ func initInstrumentation() {
+ 	initOnce.Do(func() {
++		version := runtime.ModuleVersion()
+ 		tracer = otel.GetTracerProvider().Tracer(
+ 			instrumentationName,
+-			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
++			trace.WithInstrumentationVersion(version),
+ 		)
+ 		propagator = otel.GetTextMapPropagator()
++		meter := otel.GetMeterProvider().Meter(
++			instrumentationName,
++			metric.WithInstrumentationVersion(version),
++			metric.WithSchemaURL(otelsemconv.SchemaURL),
++		)
++		metrics = httpsemconv.NewHTTPServer(meter)
+ 		logger.Info("HTTP server instrumentation initialized")
+ 	})
+ }
+@@ -69,11 +82,11 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
+ 	ctx := propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+ 
+ 	// Get trace attributes from semconv
+-	attrs := semconv.HTTPServerRequestTraceAttrs("", r)
++	attrs := httpsemconv.HTTPServerRequestTraceAttrs("", r)
+ 
+ 	// Get HTTP route from r.Pattern (Go 1.22+)
+-	route := semconv.HTTPRoute(r.Pattern)
+-	spanName := semconv.HTTPServerSpanName(r.Method, route)
++	route := httpsemconv.HTTPRoute(r.Pattern)
++	spanName := httpsemconv.HTTPServerSpanName(r.Method, route)
+ 
+ 	// Start span
+ 	ctx, span := tracer.Start(ctx,
+@@ -84,7 +97,7 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
+ 
+ 	// Add route attribute if available
+ 	if route != "" {
+-		span.SetAttributes(semconv.HTTPServerRoute(route))
++		span.SetAttributes(httpsemconv.HTTPServerRoute(route))
+ 	}
+ 
+ 	// Wrap ResponseWriter to capture status code
+@@ -98,11 +111,17 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
+ 	newReq := r.WithContext(ctx)
+ 	ictx.SetParam(requestIndex, newReq)
+ 
++	activeMetricAttrs := attribute.NewSet(metrics.ActiveRequestMetricAttributes("", r, nil)...)
++	metrics.AddActiveRequests(ctx, 1, activeMetricAttrs)
++
+ 	// Store data for after hook
+ 	ictx.SetData(map[string]interface{}{
+-		"ctx":   ctx,
+-		"span":  span,
+-		"start": time.Now(),
++		"activeMetricAttrs": activeMetricAttrs,
++		"ctx":               ctx,
++		"req":               r,
++		"route":             route,
++		"span":              span,
++		"start":             time.Now(),
+ 	})
+ }
+ 
+@@ -111,6 +130,14 @@ func AfterServeHTTP(ictx hook.HookContext) {
+ 		return
+ 	}
+ 
++	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
++	if ctx == nil {
++		ctx = context.Background()
++	}
++	if set, ok := ictx.GetKeyData("activeMetricAttrs").(attribute.Set); ok {
++		defer metrics.AddActiveRequests(ctx, -1, set)
++	}
++
+ 	span, ok := ictx.GetKeyData("span").(trace.Span)
+ 	if !ok || span == nil {
+ 		logger.Debug("AfterServeHTTP: no span from before hook")
+@@ -120,23 +147,44 @@ func AfterServeHTTP(ictx hook.HookContext) {
+ 
+ 	// Extract status code from wrapped ResponseWriter
+ 	statusCode := http.StatusOK
++	responseSize := int64(0)
+ 	if p, ok := ictx.GetParam(responseWriterIndex).(http.ResponseWriter); ok {
+ 		if wrapper, ok := p.(*writerWrapper); ok {
+ 			statusCode = wrapper.statusCode
++			responseSize = wrapper.written
+ 		}
+ 	}
+ 
+ 	// Add response attributes
+-	attrs := semconv.HTTPServerResponseTraceAttrs(statusCode, 0)
++	attrs := httpsemconv.HTTPServerResponseTraceAttrs(statusCode, responseSize)
+ 	span.SetAttributes(attrs...)
+ 
+ 	// Set span status based on status code
+-	code, desc := semconv.HTTPServerStatus(statusCode)
++	code, desc := httpsemconv.HTTPServerStatus(statusCode)
+ 	if code != codes.Unset {
+ 		span.SetStatus(code, desc)
+ 	}
+ 
+ 	startTime, _ := ictx.GetKeyData("start").(time.Time)
++	req, hasRequest := ictx.GetKeyData("req").(*http.Request)
++	if !startTime.IsZero() && hasRequest {
++		metricAttrs := []attribute.KeyValue(nil)
++		if statusCode >= 500 && statusCode < 600 {
++			metricAttrs = append(metricAttrs, otelsemconv.ErrorTypeKey.String(strconv.Itoa(statusCode)))
++		}
++		route, _ := ictx.GetKeyData("route").(string)
++		metrics.RecordMetrics(
++			ctx,
++			"",
++			req,
++			statusCode,
++			route,
++			req.ContentLength,
++			responseSize,
++			time.Since(startTime).Seconds(),
++			metricAttrs,
++		)
++	}
+ 	logger.Debug("AfterServeHTTP called",
+ 		"status_code", statusCode,
+ 		"duration_ms", time.Since(startTime).Milliseconds())
+diff --git a/instrumentation/net/http/server/server_hook_test.go b/instrumentation/net/http/server/server_hook_test.go
+index 6e1687ba4..658a9232a 100644
+--- a/instrumentation/net/http/server/server_hook_test.go
++++ b/instrumentation/net/http/server/server_hook_test.go
+@@ -4,6 +4,7 @@
+ package server
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"net/http"
+ 	"net/http/httptest"
+@@ -15,6 +16,8 @@ import (
+ 	"go.opentelemetry.io/otel"
+ 	"go.opentelemetry.io/otel/codes"
+ 	"go.opentelemetry.io/otel/propagation"
++	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
++	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+ 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+ 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+ 	"go.opentelemetry.io/otel/trace"
+@@ -33,6 +36,15 @@ func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerPro
+ 	return sr, tp
+ }
+ 
++func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
++	t.Helper()
++	reader := sdkmetric.NewManualReader()
++	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
++	otel.SetMeterProvider(provider)
++	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
++	return reader
++}
++
+ func TestBeforeServeHTTP(t *testing.T) {
+ 	tests := []struct {
+ 		name            string
+@@ -466,3 +478,42 @@ func TestWriterWrapper_IntegrationWithHandler(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestServeHTTPRecordsRequestMetrics(t *testing.T) {
++	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
++	initOnce = *new(sync.Once)
++	setupTestTracer(t)
++	reader := setupTestMeter(t)
++
++	req := httptest.NewRequest(
++		http.MethodPost,
++		"https://example.com/items",
++		bytes.NewBufferString("request body"),
++	)
++	req.Pattern = "POST /items"
++	ctx := hooktest.NewMockHookContext()
++
++	BeforeServeHTTP(ctx, nil, httptest.NewRecorder(), req)
++	wrapper, ok := ctx.GetParam(responseWriterIndex).(*writerWrapper)
++	require.True(t, ok)
++	wrapper.WriteHeader(http.StatusCreated)
++	_, err := wrapper.Write([]byte("response body"))
++	require.NoError(t, err)
++	AfterServeHTTP(ctx)
++
++	var data metricdata.ResourceMetrics
++	require.NoError(t, reader.Collect(context.Background(), &data))
++
++	var names []string
++	for _, scope := range data.ScopeMetrics {
++		for _, metric := range scope.Metrics {
++			names = append(names, metric.Name)
++		}
++	}
++	assert.ElementsMatch(t, []string{
++		"http.server.active_requests",
++		"http.server.request.body.size",
++		"http.server.response.body.size",
++		"http.server.request.duration",
++	}, names)
++}
+diff --git a/tool/data/otelc-bundle.tgz b/tool/data/otelc-bundle.tgz
+index 2a55a0f3e..502679261 100644
+Binary files a/tool/data/otelc-bundle.tgz and b/tool/data/otelc-bundle.tgz differ

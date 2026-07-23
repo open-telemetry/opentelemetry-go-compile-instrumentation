@@ -65,8 +65,11 @@ Instead of parsing and mapping SemConv natively, the `openai-go` middleware simp
 
 ```go
 // Inside openai-go/middleware.go
+cfg := runtime.GetConfig("openai-go")
+captureContent, _ := cfg["capture_content"].(bool)
+
 observer := genai.NewObserver(tracer, genai.ObserverOptions{
-    CaptureContent: true, // Tied to env var
+    CaptureContent: captureContent, // Powered by .otel.yml Declarative Config
 })
 
 // 1. Extract and Start

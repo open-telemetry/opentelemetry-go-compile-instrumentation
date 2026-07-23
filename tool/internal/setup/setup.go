@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/config"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -25,10 +27,11 @@ import (
 )
 
 type SetupPhase struct {
-	logger          *slog.Logger
-	ruleConfig      string
-	buildPackages   []*packages.Package
-	rootModulePaths []string
+	logger            *slog.Logger
+	ruleConfig        string
+	buildPackages     []*packages.Package
+	rootModulePaths   []string
+	declarativeConfig string
 }
 
 func (sp *SetupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
@@ -357,6 +360,20 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	sp := &SetupPhase{
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
+	}
+
+	// Load declarative configuration if present
+	otelYmlPath := filepath.Join(util.GetOtelcWorkDir(), ".otel.yml")
+	if util.PathExists(otelYmlPath) {
+		cfg, err := config.ParseFile(otelYmlPath)
+		if err != nil {
+			logger.Warn("failed to parse declarative configuration", "path", otelYmlPath, "error", err)
+		} else if cfg != nil && cfg.Instrumentation.Development.Go != nil {
+			if b, err := json.Marshal(cfg.Instrumentation.Development.Go); err == nil {
+				sp.declarativeConfig = string(b)
+				logger.Info("Loaded declarative configuration", "path", otelYmlPath)
+			}
+		}
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
