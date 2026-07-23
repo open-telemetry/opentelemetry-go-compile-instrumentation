@@ -14,12 +14,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/pkg/hook"
@@ -421,23 +423,51 @@ func TestRoundTripRecordsRequestMetrics(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "https://example.com/items", nil)
 	req.ContentLength = 12
+	originalProto := req.Proto
 	ctx := hooktest.NewMockHookContext()
 
 	BeforeRoundTrip(ctx, http.DefaultTransport.(*http.Transport), req)
 	AfterRoundTrip(ctx, &http.Response{
-		StatusCode:    http.StatusCreated,
+		StatusCode:    http.StatusBadRequest,
 		ContentLength: 34,
 		Proto:         "HTTP/2.0",
 		Request:       req,
 	}, nil)
+	assert.Equal(t, originalProto, req.Proto)
 
 	var data metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(context.Background(), &data))
 
 	var names []string
+	var activeRequests int64
+	var durationAttrs attribute.Set
+	var requestSize int64
+	var responseSize int64
 	for _, scope := range data.ScopeMetrics {
-		for _, metric := range scope.Metrics {
-			names = append(names, metric.Name)
+		for _, m := range scope.Metrics {
+			names = append(names, m.Name)
+			switch m.Name {
+			case "http.client.active_requests":
+				sum, ok := m.Data.(metricdata.Sum[int64])
+				require.True(t, ok)
+				require.Len(t, sum.DataPoints, 1)
+				activeRequests = sum.DataPoints[0].Value
+			case "http.client.request.body.size":
+				histogram, ok := m.Data.(metricdata.Histogram[int64])
+				require.True(t, ok)
+				require.Len(t, histogram.DataPoints, 1)
+				requestSize = histogram.DataPoints[0].Sum
+			case "http.client.response.body.size":
+				histogram, ok := m.Data.(metricdata.Histogram[int64])
+				require.True(t, ok)
+				require.Len(t, histogram.DataPoints, 1)
+				responseSize = histogram.DataPoints[0].Sum
+			case "http.client.request.duration":
+				histogram, ok := m.Data.(metricdata.Histogram[float64])
+				require.True(t, ok)
+				require.Len(t, histogram.DataPoints, 1)
+				durationAttrs = histogram.DataPoints[0].Attributes
+			}
 		}
 	}
 	assert.ElementsMatch(t, []string{
@@ -446,4 +476,51 @@ func TestRoundTripRecordsRequestMetrics(t *testing.T) {
 		"http.client.response.body.size",
 		"http.client.request.duration",
 	}, names)
+	assert.Zero(t, activeRequests)
+	assert.Equal(t, int64(12), requestSize)
+	assert.Equal(t, int64(34), responseSize)
+	protocolVersion, ok := durationAttrs.Value(semconv.NetworkProtocolVersionKey)
+	require.True(t, ok)
+	assert.Equal(t, "2.0", protocolVersion.AsString())
+	errorType, ok := durationAttrs.Value(semconv.ErrorTypeKey)
+	require.True(t, ok)
+	assert.Equal(t, "400", errorType.AsString())
+}
+
+func TestRoundTripRecordsErrorMetrics(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/items", nil)
+	ctx := hooktest.NewMockHookContext()
+
+	BeforeRoundTrip(ctx, http.DefaultTransport.(*http.Transport), req)
+	AfterRoundTrip(ctx, nil, errors.New("connection refused"))
+
+	var data metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &data))
+
+	var names []string
+	var durationAttrs attribute.Set
+	for _, scope := range data.ScopeMetrics {
+		for _, m := range scope.Metrics {
+			names = append(names, m.Name)
+			if m.Name == "http.client.request.duration" {
+				histogram, ok := m.Data.(metricdata.Histogram[float64])
+				require.True(t, ok)
+				require.Len(t, histogram.DataPoints, 1)
+				durationAttrs = histogram.DataPoints[0].Attributes
+			}
+		}
+	}
+	assert.ElementsMatch(t, []string{
+		"http.client.active_requests",
+		"http.client.request.duration",
+	}, names)
+	errorType, ok := durationAttrs.Value(semconv.ErrorTypeKey)
+	require.True(t, ok)
+	assert.NotEmpty(t, errorType.AsString())
+	assert.NotEqual(t, "_OTHER", errorType.AsString())
 }

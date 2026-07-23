@@ -14,12 +14,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/pkg/hook"
@@ -505,9 +507,29 @@ func TestServeHTTPRecordsRequestMetrics(t *testing.T) {
 	require.NoError(t, reader.Collect(context.Background(), &data))
 
 	var names []string
+	var activeRequests int64
+	var requestSize int64
+	var responseSize int64
 	for _, scope := range data.ScopeMetrics {
-		for _, metric := range scope.Metrics {
-			names = append(names, metric.Name)
+		for _, m := range scope.Metrics {
+			names = append(names, m.Name)
+			switch m.Name {
+			case "http.server.active_requests":
+				sum, ok := m.Data.(metricdata.Sum[int64])
+				require.True(t, ok)
+				require.Len(t, sum.DataPoints, 1)
+				activeRequests = sum.DataPoints[0].Value
+			case "http.server.request.body.size":
+				histogram, ok := m.Data.(metricdata.Histogram[int64])
+				require.True(t, ok)
+				require.Len(t, histogram.DataPoints, 1)
+				requestSize = histogram.DataPoints[0].Sum
+			case "http.server.response.body.size":
+				histogram, ok := m.Data.(metricdata.Histogram[int64])
+				require.True(t, ok)
+				require.Len(t, histogram.DataPoints, 1)
+				responseSize = histogram.DataPoints[0].Sum
+			}
 		}
 	}
 	assert.ElementsMatch(t, []string{
@@ -516,4 +538,47 @@ func TestServeHTTPRecordsRequestMetrics(t *testing.T) {
 		"http.server.response.body.size",
 		"http.server.request.duration",
 	}, names)
+	assert.Zero(t, activeRequests)
+	assert.Equal(t, int64(len("request body")), requestSize)
+	assert.Equal(t, int64(len("response body")), responseSize)
+}
+
+func TestServeHTTPRecordsErrorMetrics(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/items", nil)
+	ctx := hooktest.NewMockHookContext()
+
+	BeforeServeHTTP(ctx, nil, httptest.NewRecorder(), req)
+	wrapper, ok := ctx.GetParam(responseWriterIndex).(*writerWrapper)
+	require.True(t, ok)
+	wrapper.WriteHeader(http.StatusInternalServerError)
+	AfterServeHTTP(ctx)
+
+	var data metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &data))
+
+	var names []string
+	var durationAttrs attribute.Set
+	for _, scope := range data.ScopeMetrics {
+		for _, m := range scope.Metrics {
+			names = append(names, m.Name)
+			if m.Name == "http.server.request.duration" {
+				histogram, ok := m.Data.(metricdata.Histogram[float64])
+				require.True(t, ok)
+				require.Len(t, histogram.DataPoints, 1)
+				durationAttrs = histogram.DataPoints[0].Attributes
+			}
+		}
+	}
+	assert.ElementsMatch(t, []string{
+		"http.server.active_requests",
+		"http.server.request.duration",
+	}, names)
+	errorType, ok := durationAttrs.Value(semconv.ErrorTypeKey)
+	require.True(t, ok)
+	assert.Equal(t, "500", errorType.AsString())
 }

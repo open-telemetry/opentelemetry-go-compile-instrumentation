@@ -51,7 +51,10 @@ func NewHTTPServer(meter metric.Meter) HTTPServer {
 	server.responseBodySize, err = httpconv.NewServerResponseBodySize(meter)
 	HandleErr(err)
 
-	server.requestDuration, err = httpconv.NewServerRequestDuration(meter)
+	server.requestDuration, err = httpconv.NewServerRequestDuration(
+		meter,
+		metric.WithExplicitBucketBoundaries(requestDurationBucketBoundaries...),
+	)
 	HandleErr(err)
 
 	server.activeRequests, err = httpconv.NewServerActiveRequests(meter)
