@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -22,9 +24,9 @@ import (
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
-var captureContentEnabled = func() bool {
+var captureContentEnabled = sync.OnceValue(func() bool {
 	return os.Getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT") == "true"
-}
+})
 
 const (
 	maxRequestBodySize  = 1 << 20 // 1 MB
