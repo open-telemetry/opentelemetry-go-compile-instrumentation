@@ -18,14 +18,14 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
-func TestGRPCServerSQL(t *testing.T) {
+func TestGRPCServerDBClient(t *testing.T) {
 	t.Parallel()
-	testutil.Build(t, "", "grpcserversql", "go", "build", "-a")
+	testutil.Build(t, "", "grpcserverdbclient", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
 	frontPort := testutil.FreePort(t)
 
-	f.Start("grpcserversql", fmt.Sprintf("-front-port=%d", frontPort))
+	f.Start("grpcserverdbclient", fmt.Sprintf("-front-port=%d", frontPort))
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
 
 	// Connect to frontend

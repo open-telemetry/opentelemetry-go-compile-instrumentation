@@ -1,4 +1,4 @@
-module go.opentelemetry.io/otelc/test/apps/grpcserversql
+module go.opentelemetry.io/otelc/test/apps/grpcserverdbclient
 
 go 1.25.0
 
