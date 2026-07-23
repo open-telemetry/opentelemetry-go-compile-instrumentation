@@ -421,3 +421,36 @@ func assertSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, 
 	}
 	t.Errorf("attribute %q not found", key)
 }
+
+func TestStreamingReader_ContentCapture(t *testing.T) {
+	// Temporarily override captureContentEnabled
+	orig := captureContentEnabled
+	captureContentEnabled = func() bool { return true }
+	defer func() { captureContentEnabled = orig }()
+
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	ctx, span := tr.Start(t.Context(), "test-content")
+
+	streamData := "data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"hello \"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"world\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+
+	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
+	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	_, _ = io.ReadAll(reader)
+	reader.Close()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	hasCompletion := false
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			hasCompletion = true
+			assertAttribute(t, event.Attributes, "gen_ai.completion", "hello world")
+		}
+	}
+	assert.True(t, hasCompletion, "missing completion event")
+}
