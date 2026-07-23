@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
-func TestComplexGinHTTPServer(t *testing.T) {
+func TestGinServerHTTPClient(t *testing.T) {
 	t.Parallel()
 	testutil.Build(t, "", "ginserverhttpclient", "go", "build", "-a")
 

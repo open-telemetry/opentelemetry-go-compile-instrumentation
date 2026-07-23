@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func TestComplexGRPCApp(t *testing.T) {
+func TestGRPCServerGRPCClient(t *testing.T) {
 	t.Parallel()
 	testutil.Build(t, "", "grpcservergrpcclient", "go", "build", "-a")
 
