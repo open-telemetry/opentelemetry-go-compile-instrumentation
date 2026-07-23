@@ -392,7 +392,8 @@ func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceF
 	createImportCfg(importCfgPath, helpers)
 
 	args := make([]string, 0, 11+len(sourceFiles))
-	args = append(args,
+	args = append(
+		args,
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
 		"-p", importPath,
@@ -502,12 +503,13 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		actualNorm := normalizeSpace(string(actualBytes))
 
 		updateFlag := flag.Lookup("update")
-		isUpdate := updateFlag != nil && updateFlag.Value.(flag.Getter).Get().(bool)
+		isUpdate := updateFlag != nil && updateFlag.Value.String() == "true"
 
 		if isUpdate {
 			golden.Assert(t, actualNorm, goldenPath)
 		} else {
-			expectedBytes, err := os.ReadFile(filepath.Join(testdataDir, goldenPath))
+			var expectedBytes []byte
+			expectedBytes, err = os.ReadFile(filepath.Join(testdataDir, goldenPath))
 			require.NoError(t, err)
 			expectedNorm := normalizeSpace(string(expectedBytes))
 			require.Equal(t, expectedNorm, actualNorm, "mismatch in %s (ignoring spacing)", goldenPath)
@@ -515,7 +517,7 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 	}
 }
 
-// normalizeSpace standardizes AST spacing to prevent cross-toolchain flakiness 
+// normalizeSpace standardizes AST spacing to prevent cross-toolchain flakiness
 // (e.g., Go 1.25+ dropping blank lines in dst) and Windows CRLF issues.
 func normalizeSpace(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
