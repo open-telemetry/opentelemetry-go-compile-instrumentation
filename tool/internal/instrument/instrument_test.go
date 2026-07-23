@@ -1,8 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build !windows
-
 // Package instrument tests verify that the instrumentation process generates
 // the expected output by comparing against golden files.
 //
