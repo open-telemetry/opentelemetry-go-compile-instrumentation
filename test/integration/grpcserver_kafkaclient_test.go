@@ -63,7 +63,7 @@ func TestGRPCServerKafkaClient(t *testing.T) {
 		t,
 		f.Traces(),
 		testutil.IsServer,
-		func(s ptrace.Span) bool { return s.Name() == "grpcpb.Greeter/SayHello" },
+		func(s ptrace.Span) bool { return s.Name() == "greeter.Greeter/SayHello" },
 	)
 	kafkaProducerSpan := testutil.RequireSpan(
 		t,
