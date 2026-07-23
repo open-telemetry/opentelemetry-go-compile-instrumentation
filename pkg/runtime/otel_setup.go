@@ -44,6 +44,8 @@ import (
 // *_EXPORTER variable to "none" to disable a signal explicitly.
 //
 // Other Configuration:
+//   - OTEL_PROPAGATORS: Comma-separated propagators (tracecontext, baggage, b3,
+//     b3multi, jaeger, xray, ottrace, none). Default: "tracecontext,baggage"
 //   - OTEL_LOG_LEVEL: Log level (debug, info, warn, error)
 func SetupOTelSDK() {
 	if strings.EqualFold(os.Getenv("OTEL_SDK_DISABLED"), "true") {

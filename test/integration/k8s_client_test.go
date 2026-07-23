@@ -20,6 +20,7 @@ func TestK8SClient(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("k3s not supported on windows")
 	}
+	testcontainers.SkipIfProviderIsNotHealthy(t)
 
 	t.Parallel()
 	testutil.Build(t, "", "k8sclient", "go", "build", "-a")

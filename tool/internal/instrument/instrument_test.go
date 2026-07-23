@@ -53,6 +53,7 @@ const (
 	importPathFileName = "importpath"
 	mainGoFileName     = "main.go"
 	mainTestFileName   = "main_test.go"
+	otherGoFileName    = "other.go"
 	mainPackage        = "main"
 	buildID            = "foo/bar"
 	compiledOutput     = "_pkg_.a"
@@ -99,14 +100,22 @@ func runTest(t *testing.T, testName string) {
 	require.NoError(t, util.CopyFile(testSpecificSource, sourceFile),
 		"missing %s for test %q at %s", srcName, testName, testSpecificSource)
 
+	packageFiles := copyExtraPackageFiles(t, testName, tempDir, sourceFile)
+
 	importPath := testImportPath(t, testName)
-	ruleSet := loadRulesYAML(t, testName, sourceFile, importPath, isTest)
+	ruleSet := loadRulesYAML(t, loadRulesParams{
+		testName:     testName,
+		sourceFile:   sourceFile,
+		packageFiles: packageFiles,
+		importPath:   importPath,
+		isTest:       isTest,
+	})
 	writeMatchedJSON(ruleSet)
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
 
-	args := compileArgs(tempDir, sourceFile, helpers, importPath)
+	args := compileArgs(tempDir, helpers, importPath, packageFiles...)
 	err := Toolexec(ctx, args, false)
 
 	if testName == invalidReceiver {
@@ -119,8 +128,29 @@ func runTest(t *testing.T, testName string) {
 	verifyGoldenFiles(t, tempDir, testName)
 }
 
-func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest bool) *rule.InstRuleSet {
-	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
+func copyExtraPackageFiles(t *testing.T, testName, tempDir, primaryFile string) []string {
+	t.Helper()
+	files := make([]string, 1, 2)
+	files[0] = primaryFile
+	otherSrc := filepath.Join(testdataDir, goldenDir, testName, otherGoFileName)
+	if !util.PathExists(otherSrc) {
+		return files
+	}
+	otherFile := filepath.Join(tempDir, otherGoFileName)
+	require.NoError(t, util.CopyFile(otherSrc, otherFile))
+	return append(files, otherFile)
+}
+
+type loadRulesParams struct {
+	testName     string
+	sourceFile   string
+	packageFiles []string
+	importPath   string
+	isTest       bool
+}
+
+func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
+	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, p.testName, rulesFileName))
 	require.NoError(t, err)
 
 	var rawRules map[string]map[string]any
@@ -129,7 +159,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest
 	// Parse the source AST once and reuse it for every rule's where.file gating
 	// below. The gating is per-rule, but the tree is shared, so N rules do not
 	// trigger N reparses of the same file.
-	sourceTree, parseErr := ast.ParseFileFast(sourceFile)
+	sourceTree, parseErr := ast.ParseFileFast(p.sourceFile)
 	require.NoError(t, parseErr)
 
 	ruleSet := &rule.InstRuleSet{
@@ -138,7 +168,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest
 		// checks against the -p flag before applying the set. They coincide for
 		// the default "main" fixtures but differ for a deep-path glob fixture.
 		PackageName:    sourceTree.Name.Name,
-		ModulePath:     importPath,
+		ModulePath:     p.importPath,
 		FuncRules:      make(map[string][]*rule.InstFuncRule),
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),
@@ -166,7 +196,7 @@ func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest
 			// that setup.preciseMatching would evaluate is applied inline here.
 			// A rule whose file predicate does not match the source is skipped,
 			// exactly as it would be gated out during matching.
-			if !whereFileMatches(t, ruleData, isTest, sourceTree) {
+			if !whereFileMatches(t, ruleData, p.isTest, sourceTree) {
 				continue
 			}
 
@@ -174,32 +204,34 @@ func loadRulesYAML(t *testing.T, testName, sourceFile, importPath string, isTest
 			// target selects this fixture's import path (exact equality or glob
 			// match). This lets golden fixtures prove glob match vs no-match
 			// against realistic deep import paths, not just "main".
-			if !targetMatches(props, importPath) {
+			if !targetMatches(props, p.importPath) {
 				continue
 			}
 
 			switch {
 			case props["struct"] != nil:
 				r, _ := rule.NewInstStructRule(ruleData, name)
-				ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
+				ruleSet.StructRules[p.sourceFile] = append(ruleSet.StructRules[p.sourceFile], r)
 			case props["file"] != nil:
 				r, _ := rule.NewInstFileRule(ruleData, name)
 				ruleSet.FileRules = append(ruleSet.FileRules, r)
 			case props["directive"] != nil:
 				r, _ := rule.NewInstDirectiveRule(ruleData, name)
-				ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
+				ruleSet.DirectiveRules[p.sourceFile] = append(ruleSet.DirectiveRules[p.sourceFile], r)
 			case props["raw"] != nil:
 				r, _ := rule.NewInstRawRule(ruleData, name)
-				ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
+				ruleSet.RawRules[p.sourceFile] = append(ruleSet.RawRules[p.sourceFile], r)
 			case props["func"] != nil:
 				r, _ := rule.NewInstFuncRule(ruleData, name)
-				ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
+				ruleSet.FuncRules[p.sourceFile] = append(ruleSet.FuncRules[p.sourceFile], r)
 			case props["function_call"] != nil:
 				r, _ := rule.NewInstCallRule(ruleData, name)
-				ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
+				for _, file := range p.packageFiles {
+					ruleSet.CallRules[file] = append(ruleSet.CallRules[file], r)
+				}
 			case props["identifier"] != nil:
 				r, _ := rule.NewInstDeclRule(ruleData, name)
-				ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+				ruleSet.DeclRules[p.sourceFile] = append(ruleSet.DeclRules[p.sourceFile], r)
 			}
 		}
 	}
@@ -351,14 +383,15 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 	util.WriteFile(matchedFile, string(matchedJSON))
 }
 
-func compileArgs(tempDir, sourceFile string, helpers []helperPkg, importPath string) []string {
+func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceFiles ...string) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
 
 	// Create importcfg file for the test
 	importCfgPath := filepath.Join(tempDir, "importcfg")
 	createImportCfg(importCfgPath, helpers)
 
-	return []string{
+	args := make([]string, 0, 11+len(sourceFiles))
+	args = append(args,
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
 		"-p", importPath,
@@ -366,8 +399,8 @@ func compileArgs(tempDir, sourceFile string, helpers []helperPkg, importPath str
 		"-buildid", buildID,
 		"-importcfg", importCfgPath,
 		"-pack",
-		sourceFile,
-	}
+	)
+	return append(args, sourceFiles...)
 }
 
 // createImportCfg creates an importcfg file with standard library packages

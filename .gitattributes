@@ -1,1 +1,2 @@
 *.golden text eol=lf
+tool/data/otelc-bundle.tgz binary

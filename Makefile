@@ -762,7 +762,7 @@ lint-schema: ## Validate the local semantic-convention registry (schemas/otelc/)
 lint-schema: fetch-upstream-semconv
 	@echo "Validating otelc semantic-convention registry (schemas/otelc)..."
 	@# Guard: the upstream dependency pinned in the registry manifest must match .semconv-version.
-	@MANIFEST_VERSION=$$(grep -oE 'upstream-v[0-9]+\.[0-9]+\.[0-9]+' $(OTELC_REGISTRY_DIR)/registry_manifest.yaml | head -1 | sed -E 's/upstream-v//'); \
+	@MANIFEST_VERSION=$$(grep -oE 'upstream-v[0-9]+\.[0-9]+\.[0-9]+' "$(OTELC_REGISTRY_DIR)/registry_manifest.yaml" | head -1 | sed -E 's/upstream-v//'); \
 	SEMCONV_VERSION=$$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' .semconv-version | head -1 | tr -d '[:space:]' | sed 's/^v//'); \
 	if [ -z "$$MANIFEST_VERSION" ]; then \
 		echo "::error::Could not read the upstream version from $(OTELC_REGISTRY_DIR)/registry_manifest.yaml"; \

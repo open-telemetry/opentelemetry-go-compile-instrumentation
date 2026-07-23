@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -284,9 +285,7 @@ func loadAddedImports(ctx context.Context) (map[string]string, error) {
 		}
 
 		// Merge into result
-		for pkg, archive := range imports {
-			merged[pkg] = archive
-		}
+		maps.Copy(merged, imports)
 	}
 
 	return merged, nil
