@@ -70,6 +70,7 @@ linters:
     - mirror  # reports wrong mirror patterns of bytes/strings usage
     - misspell  # finds commonly misspelled English words in comments
     - mnd  # detects magic numbers
+    - modernize  # suggests simplifications to Go code using modern language and library features
     - musttag  # enforces field tags in (un)marshaled structs
     - nakedret  # finds naked returns in functions greater than a specified function length
     - nestif  # reports deeply nested if statements

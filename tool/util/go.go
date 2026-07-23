@@ -181,8 +181,8 @@ func FindFlagValue(cmd []string, flag string) string {
 			}
 			return ""
 		}
-		if strings.HasPrefix(v, flagWithValue) {
-			return strings.TrimPrefix(v, flagWithValue)
+		if suffix, ok := strings.CutPrefix(v, flagWithValue); ok {
+			return suffix
 		}
 	}
 	return ""

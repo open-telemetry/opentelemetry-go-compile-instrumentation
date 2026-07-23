@@ -361,8 +361,8 @@ func TestSetupGoCache(t *testing.T) {
 
 		var cacheDir string
 		for _, e := range env {
-			if strings.HasPrefix(e, "GOCACHE=") {
-				cacheDir = strings.TrimPrefix(e, "GOCACHE=")
+			if suffix, ok := strings.CutPrefix(e, "GOCACHE="); ok {
+				cacheDir = suffix
 				break
 			}
 		}
