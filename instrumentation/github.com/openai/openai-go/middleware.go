@@ -116,14 +116,14 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		var buf bytes.Buffer
 		tee := io.TeeReader(req.Body, &buf)
 		bodyBytes, err := io.ReadAll(io.LimitReader(tee, maxRequestBodySize))
-		if err != nil {
-			return next(req)
-		}
 		// Reassemble: buffered bytes + remaining unread body.
 		req.Body = struct {
 			io.Reader
 			io.Closer
 		}{io.MultiReader(&buf, req.Body), req.Body}
+		if err != nil {
+			return next(req)
+		}
 
 		var model string
 		var spanAttrs []attribute.KeyValue
@@ -196,14 +196,14 @@ func handleNonStreamingResponse(
 	var buf bytes.Buffer
 	tee := io.TeeReader(resp.Body, &buf)
 	bodyBytes, err := io.ReadAll(io.LimitReader(tee, maxResponseBodySize))
-	if err != nil {
-		return
-	}
 	// Reassemble: preview bytes + remaining unread body.
 	resp.Body = struct {
 		io.Reader
 		io.Closer
 	}{io.MultiReader(&buf, resp.Body), resp.Body}
+	if err != nil {
+		return
+	}
 
 	switch op {
 	case opChat:
