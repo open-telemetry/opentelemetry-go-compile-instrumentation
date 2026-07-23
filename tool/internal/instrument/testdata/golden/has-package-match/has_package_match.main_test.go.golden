@@ -1,10 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main_test
-
 import _ "unsafe"
-
 // ProcessRequest is an external test function (package main_test). The rule
 // uses has_package: main_test, whose declared name differs from the import-path
 // tail "main". This is the discriminating case: target: main alone cannot
@@ -23,7 +20,6 @@ func ProcessRequest(req string) (_unnamedRetVal0 error) {
 	//line main_test.go:15:2
 	return nil
 }
-
 //line <generated>:1
 type HookContextImpl3868073204 struct {
 	params      []interface{}
@@ -33,7 +29,6 @@ type HookContextImpl3868073204 struct {
 	funcName    string
 	packageName string
 }
-
 func (c *HookContextImpl3868073204) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl3868073204) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl3868073204) SetData(data interface{}) { c.data = data }
@@ -44,14 +39,12 @@ func (c *HookContextImpl3868073204) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl3868073204) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl3868073204) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -59,7 +52,6 @@ func (c *HookContextImpl3868073204) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl3868073204) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -67,7 +59,6 @@ func (c *HookContextImpl3868073204) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl3868073204) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -78,7 +69,6 @@ func (c *HookContextImpl3868073204) SetParam(idx int, val interface{}) {
 		*(c.params[0].(*string)) = val.(string)
 	}
 }
-
 func (c *HookContextImpl3868073204) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -86,7 +76,6 @@ func (c *HookContextImpl3868073204) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl3868073204) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -101,7 +90,6 @@ func (c *HookContextImpl3868073204) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl3868073204) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl3868073204) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl3868073204) GetPackageName() string { return c.packageName }
-
 // Trampoline Template
 func OtelBeforeTrampoline_ProcessRequest3868073204(param0 *string) (hookContext *HookContextImpl3868073204, skipCall bool) {
 	defer func() {
@@ -125,7 +113,6 @@ func OtelBeforeTrampoline_ProcessRequest3868073204(param0 *string) (hookContext 
 	}
 	return hookContext, hookContext.skipCall
 }
-
 func OtelAfterTrampoline_ProcessRequest3868073204(hookContext HookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -144,9 +131,7 @@ func OtelAfterTrampoline_ProcessRequest3868073204(hookContext HookContext, arg0 
 		AfterProcessRequest(hookContext, *arg0)
 	}
 }
-
 //go:linkname BeforeProcessRequest testdata/golden/has-package-match.BeforeProcessRequest
 func BeforeProcessRequest(hookContext HookContext, param0 string)
-
 //go:linkname AfterProcessRequest testdata/golden/has-package-match.AfterProcessRequest
 func AfterProcessRequest(hookContext HookContext, arg0 error)

@@ -1,10 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main
-
 import _ "unsafe"
-
 func Unnamed(_ignoredParam0 int, _ignoredParam1 float32) {
 	//line <generated>:1
 	if OtelBeforeTrampoline_Unnamed604682800(&_ignoredParam0, &_ignoredParam1); false {
@@ -12,7 +9,6 @@ func Unnamed(_ignoredParam0 int, _ignoredParam1 float32) {
 	}
 	//line main.go:6:28
 }
-
 //line <generated>:1
 type HookContextImpl604682800 struct {
 	params      []interface{}
@@ -22,7 +18,6 @@ type HookContextImpl604682800 struct {
 	funcName    string
 	packageName string
 }
-
 func (c *HookContextImpl604682800) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl604682800) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl604682800) SetData(data interface{}) { c.data = data }
@@ -33,14 +28,12 @@ func (c *HookContextImpl604682800) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl604682800) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl604682800) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -48,7 +41,6 @@ func (c *HookContextImpl604682800) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl604682800) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -58,7 +50,6 @@ func (c *HookContextImpl604682800) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl604682800) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -71,13 +62,11 @@ func (c *HookContextImpl604682800) SetParam(idx int, val interface{}) {
 		*(c.params[1].(*float32)) = val.(float32)
 	}
 }
-
 func (c *HookContextImpl604682800) GetReturnVal(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl604682800) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -90,7 +79,6 @@ func (c *HookContextImpl604682800) GetParamCount() int     { return len(c.params
 func (c *HookContextImpl604682800) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl604682800) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl604682800) GetPackageName() string { return c.packageName }
-
 // Trampoline Template
 func OtelBeforeTrampoline_Unnamed604682800(param0 *int, param1 *float32) (hookContext *HookContextImpl604682800, skipCall bool) {
 	defer func() {
@@ -114,6 +102,5 @@ func OtelBeforeTrampoline_Unnamed604682800(param0 *int, param1 *float32) (hookCo
 	}
 	return hookContext, hookContext.skipCall
 }
-
 //go:linkname H13Before testdata/golden/unnamed-param.H13Before
 func H13Before(hookContext HookContext, param0 int, param1 float32)

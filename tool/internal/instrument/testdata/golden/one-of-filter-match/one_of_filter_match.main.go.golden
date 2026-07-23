@@ -1,16 +1,12 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 // This package supports multiple SQL backends behind one Open entry point. The
 // one-of filter instruments Open in any file that declares one of the known
 // backend driver types. This file declares PostgresDriver, so Open is matched
 // here even though the MySQLDriver type lives in a different backend file.
 package main
-
 import _ "unsafe"
-
 type PostgresDriver struct{}
-
 func Open(dsn string) (_unnamedRetVal0 error) {
 	//line <generated>:1
 	if hookContext2733714658, _ := OtelBeforeTrampoline_Open2733714658(&dsn); false {
@@ -22,7 +18,6 @@ func Open(dsn string) (_unnamedRetVal0 error) {
 	//line main.go:14:2
 	return nil
 }
-
 //line <generated>:1
 type HookContextImpl2733714658 struct {
 	params      []interface{}
@@ -32,7 +27,6 @@ type HookContextImpl2733714658 struct {
 	funcName    string
 	packageName string
 }
-
 func (c *HookContextImpl2733714658) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl2733714658) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl2733714658) SetData(data interface{}) { c.data = data }
@@ -43,14 +37,12 @@ func (c *HookContextImpl2733714658) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl2733714658) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl2733714658) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -58,7 +50,6 @@ func (c *HookContextImpl2733714658) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl2733714658) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -66,7 +57,6 @@ func (c *HookContextImpl2733714658) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2733714658) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -77,7 +67,6 @@ func (c *HookContextImpl2733714658) SetParam(idx int, val interface{}) {
 		*(c.params[0].(*string)) = val.(string)
 	}
 }
-
 func (c *HookContextImpl2733714658) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -85,7 +74,6 @@ func (c *HookContextImpl2733714658) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2733714658) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -100,7 +88,6 @@ func (c *HookContextImpl2733714658) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl2733714658) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl2733714658) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl2733714658) GetPackageName() string { return c.packageName }
-
 // Trampoline Template
 func OtelBeforeTrampoline_Open2733714658(param0 *string) (hookContext *HookContextImpl2733714658, skipCall bool) {
 	defer func() {
@@ -124,7 +111,6 @@ func OtelBeforeTrampoline_Open2733714658(param0 *string) (hookContext *HookConte
 	}
 	return hookContext, hookContext.skipCall
 }
-
 func OtelAfterTrampoline_Open2733714658(hookContext HookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -143,9 +129,7 @@ func OtelAfterTrampoline_Open2733714658(hookContext HookContext, arg0 *error) {
 		AfterOpen(hookContext, *arg0)
 	}
 }
-
 //go:linkname BeforeOpen testdata/golden/one-of-filter-match.BeforeOpen
 func BeforeOpen(hookContext HookContext, param0 string)
-
 //go:linkname AfterOpen testdata/golden/one-of-filter-match.AfterOpen
 func AfterOpen(hookContext HookContext, arg0 error)

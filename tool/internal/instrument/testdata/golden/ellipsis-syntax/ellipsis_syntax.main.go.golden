@@ -1,10 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main
-
 import _ "unsafe"
-
 func EllipsisFunc(p1 ...string) {
 	//line <generated>:1
 	if OtelBeforeTrampoline_EllipsisFunc1782564695(&p1); false {
@@ -12,7 +9,6 @@ func EllipsisFunc(p1 ...string) {
 	}
 	//line main.go:6:33
 }
-
 //line <generated>:1
 type HookContextImpl1782564695 struct {
 	params      []interface{}
@@ -22,7 +18,6 @@ type HookContextImpl1782564695 struct {
 	funcName    string
 	packageName string
 }
-
 func (c *HookContextImpl1782564695) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl1782564695) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl1782564695) SetData(data interface{}) { c.data = data }
@@ -33,14 +28,12 @@ func (c *HookContextImpl1782564695) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl1782564695) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl1782564695) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -48,7 +41,6 @@ func (c *HookContextImpl1782564695) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl1782564695) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -56,7 +48,6 @@ func (c *HookContextImpl1782564695) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl1782564695) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -67,13 +58,11 @@ func (c *HookContextImpl1782564695) SetParam(idx int, val interface{}) {
 		*(c.params[0].(*[]string)) = val.([]string)
 	}
 }
-
 func (c *HookContextImpl1782564695) GetReturnVal(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl1782564695) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -86,7 +75,6 @@ func (c *HookContextImpl1782564695) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl1782564695) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl1782564695) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl1782564695) GetPackageName() string { return c.packageName }
-
 // Trampoline Template
 func OtelBeforeTrampoline_EllipsisFunc1782564695(param0 *[]string) (hookContext *HookContextImpl1782564695, skipCall bool) {
 	defer func() {
@@ -110,6 +98,5 @@ func OtelBeforeTrampoline_EllipsisFunc1782564695(param0 *[]string) (hookContext 
 	}
 	return hookContext, hookContext.skipCall
 }
-
 //go:linkname H9Before testdata/golden/ellipsis-syntax.H9Before
 func H9Before(hookContext HookContext, param0 ...string)

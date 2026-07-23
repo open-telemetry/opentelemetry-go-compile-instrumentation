@@ -1,10 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main_test
-
 import _ "unsafe"
-
 // ExternalHelper lives in an external test package (package main_test). The
 // rule uses a glob target (main*) that covers both the main and main_test
 // compiles, then narrows to this package via all-of: [is_test: true,
@@ -22,7 +19,6 @@ func ExternalHelper() (_unnamedRetVal0 error) {
 	//line main_test.go:14:2
 	return nil
 }
-
 //line <generated>:1
 type HookContextImpl2215449730 struct {
 	params      []interface{}
@@ -32,7 +28,6 @@ type HookContextImpl2215449730 struct {
 	funcName    string
 	packageName string
 }
-
 func (c *HookContextImpl2215449730) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl2215449730) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl2215449730) SetData(data interface{}) { c.data = data }
@@ -43,14 +38,12 @@ func (c *HookContextImpl2215449730) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
-
 func (c *HookContextImpl2215449730) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
-
 func (c *HookContextImpl2215449730) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -58,13 +51,11 @@ func (c *HookContextImpl2215449730) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
-
 func (c *HookContextImpl2215449730) GetParam(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2215449730) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -73,7 +64,6 @@ func (c *HookContextImpl2215449730) SetParam(idx int, val interface{}) {
 	switch idx {
 	}
 }
-
 func (c *HookContextImpl2215449730) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -81,7 +71,6 @@ func (c *HookContextImpl2215449730) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2215449730) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -96,7 +85,6 @@ func (c *HookContextImpl2215449730) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl2215449730) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl2215449730) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl2215449730) GetPackageName() string { return c.packageName }
-
 // Trampoline Template
 func OtelBeforeTrampoline_ExternalHelper2215449730() (hookContext *HookContextImpl2215449730, skipCall bool) {
 	defer func() {
@@ -120,7 +108,6 @@ func OtelBeforeTrampoline_ExternalHelper2215449730() (hookContext *HookContextIm
 	}
 	return hookContext, hookContext.skipCall
 }
-
 func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -139,9 +126,7 @@ func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 
 		AfterExternalHelper(hookContext, *arg0)
 	}
 }
-
 //go:linkname BeforeExternalHelper testdata/golden/has-package-combo-match.BeforeExternalHelper
 func BeforeExternalHelper(hookContext HookContext)
-
 //go:linkname AfterExternalHelper testdata/golden/has-package-combo-match.AfterExternalHelper
 func AfterExternalHelper(hookContext HookContext, arg0 error)
