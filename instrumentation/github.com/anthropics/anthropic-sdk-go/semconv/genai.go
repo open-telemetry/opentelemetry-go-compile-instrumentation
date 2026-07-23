@@ -26,6 +26,9 @@ const (
 	GenAIRequestTopKKey                   = attribute.Key("gen_ai.request.top_k")
 	GenAIRequestIsStreamKey               = attribute.Key("gen_ai.request.is_stream")
 	GenAIResponseTimeToFirstTokenKey      = attribute.Key("gen_ai.response.time_to_first_token")
+	// ErrorTypeKey follows the general error semantic conventions. For a failed
+	// HTTP request its value is the numeric status code as a string (e.g. "429").
+	ErrorTypeKey = attribute.Key("error.type")
 )
 
 func GenAISystem(val string) attribute.KeyValue {
@@ -98,4 +101,8 @@ func GenAIRequestIsStream(val bool) attribute.KeyValue {
 
 func GenAIResponseTimeToFirstToken(microseconds int64) attribute.KeyValue {
 	return GenAIResponseTimeToFirstTokenKey.Int64(microseconds)
+}
+
+func ErrorType(val string) attribute.KeyValue {
+	return ErrorTypeKey.String(val)
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,7 +134,9 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		if resp.StatusCode >= 400 {
 			span.SetStatus(codes.Error, resp.Status)
-			span.SetAttributes(attribute.String("error.type", resp.Status))
+			// error.type carries the numeric status code per the error semantic
+			// conventions (e.g. "429"), not the full status line.
+			span.SetAttributes(semconv.ErrorType(strconv.Itoa(resp.StatusCode)))
 			span.End()
 			return resp, nil
 		}

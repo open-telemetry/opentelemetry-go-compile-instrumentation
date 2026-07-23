@@ -405,7 +405,7 @@ func TestOtelMiddleware_HTTPError(t *testing.T) {
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
-	assertAttribute(t, spans[0].Attributes(), "error.type", "429 Too Many Requests")
+	assertAttribute(t, spans[0].Attributes(), "error.type", "429")
 	assert.Equal(t, codes.Error, spans[0].Status().Code)
 }
 
