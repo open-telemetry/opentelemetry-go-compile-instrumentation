@@ -1,4 +1,4 @@
-module go.opentelemetry.io/otelc/test/apps/dbclient
+module go.opentelemetry.io/otelc/test/apps/httpserversql
 
 go 1.25.0
 
