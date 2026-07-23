@@ -39,7 +39,10 @@ func NewHTTPClient(meter metric.Meter) HTTPClient {
 	client.responseBodySize, err = httpconv.NewClientResponseBodySize(meter)
 	HandleErr(err)
 
-	client.requestDuration, err = httpconv.NewClientRequestDuration(meter)
+	client.requestDuration, err = httpconv.NewClientRequestDuration(
+		meter,
+		metric.WithExplicitBucketBoundaries(requestDurationBucketBoundaries...),
+	)
 	HandleErr(err)
 
 	client.activeRequests, err = httpconv.NewClientActiveRequests(meter)
@@ -223,6 +226,15 @@ func (n HTTPClient) MetricAttributes(
 	statusCode int,
 	additionalAttributes []attribute.KeyValue,
 ) []attribute.KeyValue {
+	return n.metricAttributes(req, statusCode, req.Proto, additionalAttributes)
+}
+
+func (n HTTPClient) metricAttributes(
+	req *http.Request,
+	statusCode int,
+	networkProtocol string,
+	additionalAttributes []attribute.KeyValue,
+) []attribute.KeyValue {
 	num := len(additionalAttributes) + 3 // method, server.address, url.scheme
 	var h string
 	if req.URL != nil {
@@ -242,7 +254,10 @@ func (n HTTPClient) MetricAttributes(
 		num++
 	}
 
-	protoName, protoVersion := NetProtocol(req.Proto)
+	if networkProtocol == "" {
+		networkProtocol = req.Proto
+	}
+	protoName, protoVersion := NetProtocol(networkProtocol)
 	if protoName != "" {
 		num++
 	}
@@ -331,12 +346,13 @@ func (n HTTPClient) RecordMetrics(
 	ctx context.Context,
 	req *http.Request,
 	statusCode int,
+	networkProtocol string,
 	requestSize int64,
 	responseSize int64,
 	elapsedTime float64,
 	additionalAttributes []attribute.KeyValue,
 ) {
-	attributes := n.MetricAttributes(req, statusCode, additionalAttributes)
+	attributes := n.metricAttributes(req, statusCode, networkProtocol, additionalAttributes)
 	set := attribute.NewSet(attributes...)
 
 	if requestSize > 0 {

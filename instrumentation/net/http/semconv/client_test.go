@@ -190,6 +190,7 @@ func TestHTTPClientRecordMetrics(t *testing.T) {
 		context.Background(),
 		req,
 		200,   // statusCode
+		"",    // networkProtocol
 		1024,  // requestSize
 		2048,  // responseSize
 		0.123, // elapsedTime

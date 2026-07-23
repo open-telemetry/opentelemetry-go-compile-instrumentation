@@ -6,6 +6,7 @@ package client
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -124,6 +125,14 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 }
 
 func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if set, ok := ictx.GetKeyData("activeMetricAttrs").(attribute.Set); ok {
+		defer metrics.AddActiveRequests(ctx, -1, set)
+	}
+
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterRoundTrip: no span from before hook")
@@ -163,21 +172,29 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 	if hasStart && hasRequest {
 		statusCode := 0
 		responseSize := int64(0)
+		networkProtocol := req.Proto
 		metricAttrs := []attribute.KeyValue(nil)
 		if res != nil {
 			statusCode = res.StatusCode
 			responseSize = res.ContentLength
-			metricReq := req.Clone(req.Context())
-			metricReq.Proto = res.Proto
-			req = metricReq
+			networkProtocol = res.Proto
 		}
 		if err != nil {
 			metricAttrs = append(metricAttrs, httpsemconv.HTTPClientErrorType(err))
+		} else if res != nil {
+			code, _ := httpsemconv.HTTPClientStatus(statusCode)
+			if code == codes.Error {
+				metricAttrs = append(
+					metricAttrs,
+					otelsemconv.ErrorTypeKey.String(strconv.Itoa(statusCode)),
+				)
+			}
 		}
 		metrics.RecordMetrics(
 			ctx,
 			req,
 			statusCode,
+			networkProtocol,
 			req.ContentLength,
 			responseSize,
 			time.Since(startTime).Seconds(),

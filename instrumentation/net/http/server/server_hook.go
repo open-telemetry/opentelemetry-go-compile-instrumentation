@@ -85,7 +85,7 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 	attrs := httpsemconv.HTTPServerRequestTraceAttrs("", r)
 
 	// Route isn't known until ServeMux matches. AfterServeHTTP renames the span.
-	spanName := semconv.HTTPServerSpanName(r.Method, "")
+	spanName := httpsemconv.HTTPServerSpanName(r.Method, "")
 
 	// Start span
 	ctx, span := tracer.Start(ctx,
@@ -113,13 +113,20 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 		"activeMetricAttrs": activeMetricAttrs,
 		"ctx":               ctx,
 		"req":               r,
-		"route":             route,
 		"span":              span,
 		"start":             time.Now(),
 	})
 }
 
 func AfterServeHTTP(ictx hook.HookContext) {
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if set, ok := ictx.GetKeyData("activeMetricAttrs").(attribute.Set); ok {
+		defer metrics.AddActiveRequests(ctx, -1, set)
+	}
+
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterServeHTTP: no span from before hook")
@@ -129,10 +136,12 @@ func AfterServeHTTP(ictx hook.HookContext) {
 
 	// ServeMux fills in r.Pattern on the same request after the span was created.
 	// Stays empty for routers that name the span themselves (gin, chi).
-	if r, ok := ictx.GetParam(requestIndex).(*http.Request); ok && r != nil && span.IsRecording() {
-		if route := semconv.HTTPRoute(r.Pattern); route != "" {
-			span.SetName(semconv.HTTPServerSpanName(r.Method, route))
-			span.SetAttributes(semconv.HTTPServerRoute(route))
+	route := ""
+	if r, ok := ictx.GetParam(requestIndex).(*http.Request); ok && r != nil {
+		route = httpsemconv.HTTPRoute(r.Pattern)
+		if route != "" && span.IsRecording() {
+			span.SetName(httpsemconv.HTTPServerSpanName(r.Method, route))
+			span.SetAttributes(httpsemconv.HTTPServerRoute(route))
 		}
 	}
 
@@ -163,7 +172,6 @@ func AfterServeHTTP(ictx hook.HookContext) {
 		if statusCode >= 500 && statusCode < 600 {
 			metricAttrs = append(metricAttrs, otelsemconv.ErrorTypeKey.String(strconv.Itoa(statusCode)))
 		}
-		route, _ := ictx.GetKeyData("route").(string)
 		metrics.RecordMetrics(
 			ctx,
 			"",
