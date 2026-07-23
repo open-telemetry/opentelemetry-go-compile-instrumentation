@@ -192,9 +192,7 @@ func Build(where *rule.WhereDef) (Filter, error) {
 		return nil, ex.Newf("where not selector composition is not yet supported")
 	}
 
-	if where.Func != "" || where.Recv != "" || where.Struct != "" ||
-		where.FunctionCall != "" || where.Directive != "" ||
-		where.Kind != "" || where.Identifier != "" {
+	if rule.HasWhereSelectors(where) {
 		return nil, ex.Newf("where selector composition beyond where.file is not yet supported")
 	}
 
