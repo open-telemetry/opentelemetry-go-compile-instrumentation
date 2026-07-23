@@ -800,6 +800,40 @@ func TestPreciseMatching_WhereFileAllOf(t *testing.T) {
 	require.NotContains(t, result.FuncRules, noMatchFile)
 }
 
+func TestPreciseMatching_CallRuleAddedToAllFiles(t *testing.T) {
+	matchFile := writeGoSource(
+		t,
+		"calls.go",
+		"package main\n\nimport \"unsafe\"\n\nfunc CallSizeof() {\n\t_ = unsafe.Sizeof(42)\n}\n",
+	)
+	noMatchFile := writeGoSource(t, "other.go", "package main\n\nfunc Helper() { println(\"hi\") }\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/app",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "wrap-sizeof",
+			Target: "example.com/app",
+		},
+		FunctionCall: "unsafe.Sizeof",
+		ImportPath:   "unsafe",
+		FuncName:     "Sizeof",
+		Replace:      "Wrapper({{ . }})",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.CallRules, 2)
+	require.Contains(t, result.CallRules, matchFile)
+	require.Contains(t, result.CallRules, noMatchFile)
+}
+
 func TestPreciseMatching_WhereFileOneOf(t *testing.T) {
 	// one-of matches the file when it declares EITHER backend driver. The match
 	// file declares PostgresDriver (one of the two), so Open is selected; the

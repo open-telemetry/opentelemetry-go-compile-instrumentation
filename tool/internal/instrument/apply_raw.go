@@ -23,6 +23,9 @@ import (
 const (
 	unnamedRetValName = "_unnamedRetVal"
 	ignoredParam      = "_ignoredParam"
+	// Blank named returns get their own prefix; sharing ignoredParam with a blank
+	// param or receiver would collide, since both live in the same scope.
+	ignoredRetValName = "_ignoredRetVal"
 )
 
 func renameReturnValues(funcDecl *dst.FuncDecl) {

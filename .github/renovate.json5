@@ -11,7 +11,9 @@
   customManagers: [
     {
       customType: 'regex',
-      fileMatch: ['^Makefile$'],
+      managerFilePatterns: [
+        '/^Makefile$/',
+      ],
       matchStrings: [
         'WEAVER_IMAGE\\s*\\?=\\s*(?<depName>[^:]+):v(?<currentValue>[^\\s]+)',
       ],

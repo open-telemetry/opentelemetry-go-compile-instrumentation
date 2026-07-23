@@ -70,7 +70,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 				// Collect only (for further use)
 				for _, name := range field.Names {
 					if name.Name == ast.IdentIgnore {
-						name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
+						name.Name = fmt.Sprintf("%s%d", ignoredRetValName, idx)
 						idx++
 					}
 					retVals = append(retVals, name.Name)
