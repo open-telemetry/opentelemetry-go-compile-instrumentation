@@ -24,7 +24,9 @@ import (
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
-var captureContent = os.Getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT") == "true"
+var captureContentEnabled = func() bool {
+	return os.Getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT") == "true"
+}
 
 const (
 	maxRequestBodySize  = 1 << 20 // 1 MB
@@ -171,11 +173,16 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			trace.WithAttributes(spanAttrs...),
 		)
 
-		if captureContent && len(promptMessages) > 0 {
+		if captureContentEnabled() && len(promptMessages) > 0 {
 			for _, msg := range promptMessages {
-				span.AddEvent("gen_ai.content.prompt", trace.WithAttributes(
-					attribute.String("gen_ai.prompt", string(msg)),
-				))
+				var m struct {
+					Content string `json:"content"`
+				}
+				if err := json.Unmarshal(msg, &m); err == nil && m.Content != "" {
+					span.AddEvent("gen_ai.content.prompt", trace.WithAttributes(
+						attribute.String("gen_ai.prompt", m.Content),
+					))
+				}
 			}
 		}
 		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
@@ -336,7 +343,7 @@ func parseChatResponse(body []byte, span trace.Span) {
 		if c.FinishReason != "" {
 			reasons = append(reasons, c.FinishReason)
 		}
-		if captureContent && c.Message.Content != "" {
+		if captureContentEnabled() && c.Message.Content != "" {
 			span.AddEvent("gen_ai.content.completion", trace.WithAttributes(
 				attribute.String("gen_ai.completion", c.Message.Content),
 			))
