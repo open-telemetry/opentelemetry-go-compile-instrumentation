@@ -495,7 +495,8 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 			continue
 		}
 		actualFile := actualFileFromGolden(t, entry.Name())
-		actualBytes, _ := os.ReadFile(filepath.Join(tempDir, actualFile))
+actualBytes, err := os.ReadFile(filepath.Join(tempDir, actualFile))
+require.NoError(t, err, "read actual file %s", filepath.Join(tempDir, actualFile))
 		
 		goldenPath := filepath.Join(goldenDir, testName, entry.Name())
 		actualNorm := normalizeSpace(string(actualBytes))
