@@ -1,0 +1,110 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # go.opentelemetry.io/otel* instrumentation emission contract.
+  #
+  # This file covers the four modules that instrument the OpenTelemetry SDK/API
+  # itself (see instrumentation/go.opentelemetry.io/otel/README.md):
+  #
+  #   go.opentelemetry.io/otel/init       SDK bootstrap; starts runtime metrics
+  #   go.opentelemetry.io/otel            SetTracerProvider guard
+  #   go.opentelemetry.io/otel/sdk/trace  active-span chain in goroutine-local storage
+  #   go.opentelemetry.io/otel/trace      SpanFromContext GLS fallback
+  #
+  # Only `otel/init` emits telemetry of its own. The other three are
+  # infrastructure: they carry span context across goroutines and keep the
+  # global tracer provider from being replaced after setup, which is what lets
+  # the *other* instrumentations produce correct telemetry. They create no
+  # spans, record no metrics, and add no attributes, so they contribute no
+  # groups to this file.
+  #
+  # Source of truth for the groups below:
+  #   instrumentation/go.opentelemetry.io/otel/init/init_otelsdk.go (StartRuntimeMetrics)
+  #   pkg/runtime/setup.go                                          (StartRuntimeMetrics)
+  #
+  # `otel/init` is injected into `main` and calls
+  # `runtime.StartRuntimeMetrics()`, which starts
+  # `go.opentelemetry.io/contrib/instrumentation/runtime`. That produces the
+  # standard upstream Go runtime metrics declared below, on the SDK's periodic
+  # reader interval rather than per request. They are enabled by default and can
+  # be turned off with `OTEL_GO_DISABLED_INSTRUMENTATIONS=runtimemetrics`.
+  #
+  # Every metric is a standard upstream OpenTelemetry Go runtime metric, so the
+  # names, instruments, units and attributes below mirror the upstream
+  # definitions exactly and all attributes are referenced with `ref:`.
+  #
+  # Two metrics contrib can produce are deliberately absent:
+  #   - `go.schedule.duration` comes from `runtime.NewProducer()`, which
+  #     `pkg/runtime/setup.go` does not register with the metric reader, so
+  #     otelc does not emit it today.
+  #   - The legacy `runtime.go.*` / `runtime.uptime` metrics are only produced
+  #     when `OTEL_GO_X_DEPRECATED_RUNTIME_METRICS=true`, which otelc neither
+  #     sets nor documents.
+  # `go.memory.limit` is registered unconditionally but is not observed when the
+  # Go runtime reports no memory limit.
+  # ---------------------------------------------------------------------------
+
+  - id: metric.otelc.go.memory.used
+    type: metric
+    metric_name: go.memory.used
+    instrument: updowncounter
+    unit: By
+    stability: development
+    brief: Memory used by the Go runtime.
+    attributes:
+      - ref: go.memory.type
+
+  - id: metric.otelc.go.memory.limit
+    type: metric
+    metric_name: go.memory.limit
+    instrument: updowncounter
+    unit: By
+    stability: development
+    brief: Go runtime memory limit configured by the user, if a limit exists.
+
+  - id: metric.otelc.go.memory.allocated
+    type: metric
+    metric_name: go.memory.allocated
+    instrument: counter
+    unit: By
+    stability: development
+    brief: Memory allocated to the heap by the application.
+
+  - id: metric.otelc.go.memory.allocations
+    type: metric
+    metric_name: go.memory.allocations
+    instrument: counter
+    unit: "{allocation}"
+    stability: development
+    brief: Count of allocations to the heap by the application.
+
+  - id: metric.otelc.go.memory.gc.goal
+    type: metric
+    metric_name: go.memory.gc.goal
+    instrument: updowncounter
+    unit: By
+    stability: development
+    brief: Heap size target for the end of the GC cycle.
+
+  - id: metric.otelc.go.goroutine.count
+    type: metric
+    metric_name: go.goroutine.count
+    instrument: updowncounter
+    unit: "{goroutine}"
+    stability: development
+    brief: Count of live goroutines.
+
+  - id: metric.otelc.go.processor.limit
+    type: metric
+    metric_name: go.processor.limit
+    instrument: updowncounter
+    unit: "{thread}"
+    stability: development
+    brief: The number of OS threads that can execute user-level Go code simultaneously.
+
+  - id: metric.otelc.go.config.gogc
+    type: metric
+    metric_name: go.config.gogc
+    instrument: updowncounter
+    unit: "%"
+    stability: development
+    brief: Heap size target percentage configured by the user, otherwise 100.
