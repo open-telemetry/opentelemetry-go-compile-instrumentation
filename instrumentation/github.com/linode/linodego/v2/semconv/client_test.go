@@ -88,6 +88,12 @@ func TestStatusCodeFromError(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 404, code)
 
+	// Wrapped errors must still yield the status code.
+	wrapped := fmt.Errorf("linode request failed: %w", statusErr{code: 404, msg: "not found"})
+	code, ok = StatusCodeFromError(wrapped)
+	require.True(t, ok)
+	assert.Equal(t, 404, code)
+
 	code, ok = StatusCodeFromError(statusErr{code: 2, msg: "from stringer"})
 	assert.False(t, ok)
 	assert.Equal(t, 0, code)

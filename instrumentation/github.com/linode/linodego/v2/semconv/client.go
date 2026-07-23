@@ -5,6 +5,7 @@ package semconv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -95,7 +96,8 @@ func LinodegoOperationTraceAttrs(operation string) []attribute.KeyValue {
 }
 
 // StatusCodeFromError extracts an HTTP status code from an error when available.
-// Supports linodego.Error and any error implementing StatusCode() int.
+// Supports linodego.Error and any error implementing StatusCode() int,
+// including when that error is wrapped (e.g. fmt.Errorf("context: %w", err)).
 func StatusCodeFromError(err error) (int, bool) {
 	if err == nil {
 		return 0, false
@@ -103,7 +105,8 @@ func StatusCodeFromError(err error) (int, bool) {
 	type statusCoder interface {
 		StatusCode() int
 	}
-	if sc, ok := err.(statusCoder); ok {
+	var sc statusCoder
+	if errors.As(err, &sc) {
 		code := sc.StatusCode()
 		// linodego uses synthetic codes for non-HTTP errors; only treat
 		// real HTTP status codes as response codes.
