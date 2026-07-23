@@ -318,25 +318,40 @@ func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, shutdownSignals()...)
-
-		go func() {
-			sig := <-sigCh
-			logger.Info("received signal, flushing telemetry before shutdown", "signal", sig.String())
-
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			if err := Shutdown(ctx); err != nil {
-				logger.Error("error flushing telemetry during shutdown", "error", err)
-			} else {
-				logger.Info("OpenTelemetry SDK shutdown completed successfully")
-			}
-
-			signal.Stop(sigCh)
-			raiseSignalToSelf(sig)
-		}()
+		go handleShutdownSignal(sigCh)
 	})
 }
+
+// handleShutdownSignal waits for the first signal on sigCh, flushes the SDK,
+// then re-raises the signal so the app or the default disposition owns the exit.
+func handleShutdownSignal(sigCh chan os.Signal) {
+	sig := <-sigCh
+
+	// Stop listening now so a repeated signal during the flush isn't swallowed by
+	// our buffered channel but reaches the app or the default disposition, keeping
+	// the "press again to force quit" behavior.
+	signal.Stop(sigCh)
+
+	logger.Info("received signal, flushing telemetry before shutdown", "signal", sig.String())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := Shutdown(ctx); err != nil {
+		logger.Error("error flushing telemetry during shutdown", "error", err)
+	} else {
+		logger.Info("OpenTelemetry SDK shutdown completed successfully")
+	}
+
+	// Apps that also call signal.Notify will see this signal twice, since Go
+	// broadcasts it. We can't detect other handlers, so re-raise anyway.
+	// reRaise is a var so tests can exercise this path without delivering a real
+	// signal to the test process.
+	reRaise(sig)
+}
+
+// reRaise re-sends the shutdown signal; overridden in tests.
+var reRaise = raiseSignalToSelf
 
 // raiseSignalToSelf re-sends sig to this process, falling back to os.Exit where
 // re-raising isn't supported.
@@ -346,5 +361,14 @@ func raiseSignalToSelf(sig os.Signal) {
 			return
 		}
 	}
-	os.Exit(0)
+	os.Exit(signalExitCode(sig))
+}
+
+// signalExitCode returns the conventional 128+signal exit code, or 1 when sig
+// isn't a syscall.Signal. Used only on the fallback path, so it avoids forcing 0.
+func signalExitCode(sig os.Signal) int {
+	if s, ok := sig.(syscall.Signal); ok {
+		return 128 + int(s)
+	}
+	return 1
 }

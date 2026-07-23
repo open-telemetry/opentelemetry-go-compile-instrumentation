@@ -28,6 +28,65 @@ func TestShutdownSignals(t *testing.T) {
 	assert.Contains(t, signals, syscall.SIGTERM)
 }
 
+// runShutdownHandler runs handleShutdownSignal inline with the re-raise stubbed,
+// so the handler is exercised without delivering a real signal to the test
+// process (which would race sibling tests). It returns the re-raised signal.
+func runShutdownHandler(t *testing.T) os.Signal {
+	t.Helper()
+	orig := reRaise
+	var raised os.Signal
+	reRaise = func(sig os.Signal) { raised = sig }
+	t.Cleanup(func() { reRaise = orig })
+
+	sigCh := make(chan os.Signal, 1)
+	sigCh <- syscall.SIGTERM
+	handleShutdownSignal(sigCh)
+	return raised
+}
+
+func TestHandleShutdownSignalFlushesAndReRaises(t *testing.T) {
+	// Nil providers keep Shutdown an instant no-op.
+	restoreProviders(t)
+	tracerProvider, meterProvider, loggerProvider = nil, nil, nil
+
+	raised := runShutdownHandler(t)
+	assert.Equal(t, syscall.SIGTERM, raised, "handler should re-raise the received signal after flushing")
+}
+
+// errShutdownProcessor is a span processor whose Shutdown always fails, used to
+// exercise the handler's error-logging branch.
+type errShutdownProcessor struct{}
+
+func (errShutdownProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (errShutdownProcessor) OnEnd(sdktrace.ReadOnlySpan)                     {}
+func (errShutdownProcessor) ForceFlush(context.Context) error                { return nil }
+func (errShutdownProcessor) Shutdown(context.Context) error                  { return errors.New("shutdown failed") }
+
+func TestHandleShutdownSignalLogsFlushError(t *testing.T) {
+	restoreProviders(t)
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(errShutdownProcessor{}))
+	meterProvider, loggerProvider = nil, nil
+
+	// Even when the flush errors, the handler still re-raises so the process exits.
+	raised := runShutdownHandler(t)
+	assert.Equal(t, syscall.SIGTERM, raised, "handler must re-raise even if the flush fails")
+}
+
+func TestSignalExitCode(t *testing.T) {
+	// A syscall.Signal maps to the conventional 128+signal code; anything else
+	// falls back to 1. Never 0, which is what the fallback path exists to avoid.
+	assert.Equal(t, 128+int(syscall.SIGTERM), signalExitCode(syscall.SIGTERM))
+	assert.Equal(t, 128+int(syscall.SIGINT), signalExitCode(syscall.SIGINT))
+	assert.Equal(t, 1, signalExitCode(nonSyscallSignal{}))
+}
+
+// nonSyscallSignal is an os.Signal that isn't a syscall.Signal, exercising the
+// signalExitCode fallback.
+type nonSyscallSignal struct{}
+
+func (nonSyscallSignal) String() string { return "custom" }
+func (nonSyscallSignal) Signal()        {}
+
 func TestLogLevel(t *testing.T) {
 	tests := []struct {
 		envValue string
