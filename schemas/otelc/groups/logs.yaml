@@ -1,0 +1,31 @@
+# -----------------------------------------------------------------------------
+# Log-correlation instrumentations emission contract: no OTel telemetry.
+#
+# Covers the three logging-library instrumentations:
+#
+#   log         instrumentation/log/log_hook.go            (BeforeLogOutput)
+#   log/slog    instrumentation/log/slog/slog_hook.go      (AfterSlogNewRecord)
+#   sirupsen/logrus instrumentation/github.com/sirupsen/logrus/logrus_hook.go (traceHook.Fire)
+#
+# These instrumentations create no spans, record no metrics, and emit no OTel
+# log records. They only correlate the application's *own* logging output with
+# the active trace: each hook reads the current trace and span ID from
+# goroutine-local storage and adds them to the log line the application was
+# already writing --- as `slog` attributes, as `logrus.Entry` fields, or as a
+# ` trace_id=<id> span_id=<id>` suffix on the stdlib `log` output.
+#
+# The resulting `trace_id` / `span_id` keys are fields of the application's log
+# format, not OpenTelemetry attributes: they are not attached to any span,
+# metric, or OTel log record and never reach an OTel exporter. They are
+# therefore deliberately *not* declared as registry attributes --- doing so
+# would claim otelc emits telemetry it does not emit, and the bare names do not
+# follow the OTel attribute naming conventions. When these instrumentations are
+# combined with an OTel log bridge, the exported log records come from that
+# bridge, not from here.
+#
+# This file exists so the registry covers every instrumentation in the project
+# (ADR 0006), including the ones whose contract is "emits nothing".
+#
+# See `schemas/otelc/README.md` for the full instrumentation coverage table.
+# -----------------------------------------------------------------------------
+groups: []

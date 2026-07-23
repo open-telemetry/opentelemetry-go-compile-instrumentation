@@ -12,12 +12,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 	"go.opentelemetry.io/otelc/pkg/runtime"
@@ -373,6 +376,98 @@ func TestClientStatsHandler_Integration(t *testing.T) {
 
 	newOpts2 := ictx2.GetParam(dialOptionsParamIndex).([]grpc.DialOption)
 	assert.Greater(t, len(newOpts2), len(opts), "Expected stats handler to be added for DialContext")
+}
+
+func TestClientStatsHandler_HandleRPC_PayloadEvents(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+	)
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newClientStatsHandler()
+
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+		FullMethodName: "/grpc.testing.TestService/UnaryCall",
+	})
+	require.NotNil(t, ctx)
+
+	// Drive the message-lifecycle events HandleRPC handles before End.
+	// On the client, OutPayload counts outgoing requests and InPayload
+	// counts incoming responses. These branches were previously untested.
+	handler.HandleRPC(ctx, &stats.Begin{BeginTime: time.Now()})
+	handler.HandleRPC(ctx, &stats.OutPayload{Length: 256})
+	handler.HandleRPC(ctx, &stats.InPayload{Length: 128})
+	handler.HandleRPC(ctx, &stats.InPayload{Length: 64})
+	handler.HandleRPC(ctx, &stats.OutHeader{})
+
+	gctx, ok := ctx.Value(gRPCContextKey{}).(*gRPCContext)
+	require.True(t, ok, "expected gRPC context to be set by TagRPC")
+	assert.Equal(t, int64(1), gctx.outMessages, "one OutPayload event should be counted")
+	assert.Equal(t, int64(2), gctx.inMessages, "two InPayload events should be counted")
+
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-50 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	spans := exporter.GetSpans()
+	assert.NotEmpty(t, spans, "expected the RPC span to be exported after End")
+}
+
+func TestClientStatsHandler_HandleRPC_WithError(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+	)
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newClientStatsHandler()
+
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+		FullMethodName: "/grpc.testing.TestService/UnaryCall",
+	})
+	require.NotNil(t, ctx)
+
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-50 * time.Millisecond),
+		EndTime:   time.Now(),
+		Error:     status.Error(codes.Unavailable, "connection refused"),
+	})
+
+	spans := exporter.GetSpans()
+	require.NotEmpty(t, spans, "expected span to be exported")
+	assert.Equal(t, otelcodes.Error, spans[0].Status.Code, "errored RPC should set span status to Error")
+}
+
+func TestClientStatsHandler_HandleRPC_NilContextIsNoop(t *testing.T) {
+	handler := newClientStatsHandler()
+
+	assert.NotPanics(t, func() {
+		handler.HandleRPC(t.Context(), &stats.OutPayload{Length: 10})
+		handler.HandleRPC(t.Context(), &stats.InPayload{Length: 10})
+		handler.HandleRPC(t.Context(), &stats.OutHeader{})
+	})
 }
 
 func TestClientStatsHandler_TagConn(t *testing.T) {
