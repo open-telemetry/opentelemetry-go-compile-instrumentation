@@ -109,6 +109,162 @@ func TestFindFuncDeclForRule(t *testing.T) {
 	})
 }
 
+// qualifiedRecvTestSource reproduces GitHub issue #766: a file containing a
+// method with a qualified pointer receiver (syntactically legal to parse,
+// even though go/types would reject it) alongside a normal, rule-relevant
+// method. Matching against the normal method must not fatal while scanning
+// past the qualified-receiver one.
+const qualifiedRecvTestSource = `package main
+
+import (
+	"bufio"
+	"net/http"
+)
+
+type MyStruct struct{ x int }
+
+func (s *MyStruct) Method() error { return nil }
+
+func (w *bufio.Writer) Flush() error { return nil }
+
+func (w *http.ResponseWriter) Foo() {}
+`
+
+func parseQualifiedRecvFixture(t *testing.T) *dst.File {
+	t.Helper()
+	p := NewAstParser()
+	file, err := p.ParseSource(qualifiedRecvTestSource)
+	require.NoError(t, err)
+	return file
+}
+
+func TestFindFuncDeclQualifiedPointerReceiver(t *testing.T) {
+	file := parseQualifiedRecvFixture(t)
+
+	t.Run("does not fatal and finds unrelated method past a qualified receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "Method",
+			Recv: "*MyStruct",
+		}
+
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Method", fn.Name.Name)
+	})
+
+	t.Run("matches qualified pointer receiver *bufio.Writer via base name *Writer", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "Flush",
+			Recv: "*Writer",
+		}
+
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Flush", fn.Name.Name)
+	})
+
+	t.Run("matches qualified pointer receiver *http.ResponseWriter via base name *ResponseWriter", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "Foo",
+			Recv: "*ResponseWriter",
+		}
+
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Foo", fn.Name.Name)
+	})
+
+	t.Run("returns no match gracefully when recv does not match anything", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "Flush",
+			Recv: "*NoSuchType",
+		}
+
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		assert.False(t, ok)
+		assert.Nil(t, fn)
+	})
+}
+
+func TestStripGenericTypes(t *testing.T) {
+	extractRecvType := func(t *testing.T, src string) dst.Expr {
+		t.Helper()
+		p := NewAstParser()
+		file, err := p.ParseSource(src)
+		require.NoError(t, err)
+		decls := ListFuncDecls(file)
+		require.Len(t, decls, 1)
+		require.True(t, HasReceiver(decls[0]))
+		return decls[0].Recv.List[0].Type
+	}
+
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "pointer receiver",
+			src:  "package main\ntype MyStruct struct{}\nfunc (s *MyStruct) M() {}\n",
+			want: "*MyStruct",
+		},
+		{
+			name: "value receiver",
+			src:  "package main\ntype MyStruct struct{}\nfunc (s MyStruct) M() {}\n",
+			want: "MyStruct",
+		},
+		{
+			name: "generic pointer receiver single type param",
+			src:  "package main\ntype GenStruct[T any] struct{}\nfunc (s *GenStruct[T]) M() {}\n",
+			want: "*GenStruct",
+		},
+		{
+			name: "generic value receiver single type param",
+			src:  "package main\ntype GenStruct[T any] struct{}\nfunc (s GenStruct[T]) M() {}\n",
+			want: "GenStruct",
+		},
+		{
+			name: "generic pointer receiver multiple type params",
+			src:  "package main\ntype GenStruct[T, U any] struct{}\nfunc (s *GenStruct[T, U]) M() {}\n",
+			want: "*GenStruct",
+		},
+		{
+			name: "generic value receiver multiple type params",
+			src:  "package main\ntype GenStruct[T, U any] struct{}\nfunc (s GenStruct[T, U]) M() {}\n",
+			want: "GenStruct",
+		},
+		{
+			name: "qualified pointer receiver *bufio.Writer",
+			src:  "package main\nimport \"bufio\"\nfunc (w *bufio.Writer) M() {}\n",
+			want: "*Writer",
+		},
+		{
+			name: "qualified pointer receiver *http.ResponseWriter",
+			src:  "package main\nimport \"net/http\"\nfunc (w *http.ResponseWriter) M() {}\n",
+			want: "*ResponseWriter",
+		},
+		{
+			name: "bare qualified value receiver",
+			src:  "package main\nimport \"bufio\"\nfunc (w bufio.Writer) M() {}\n",
+			want: "Writer",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recvType := extractRecvType(t, tc.src)
+			assert.Equal(t, tc.want, stripGenericTypes(recvType))
+		})
+	}
+}
+
 func TestFindVarDecl(t *testing.T) {
 	file := parseSharedFixture(t)
 

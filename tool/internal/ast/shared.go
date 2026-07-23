@@ -4,7 +4,6 @@
 package ast
 
 import (
-	"fmt"
 	"go/token"
 	"strconv"
 
@@ -47,39 +46,64 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 // - MyStruct -> MyStruct
 // - *GenStruct[T] -> *GenStruct
 // - GenStruct[T] -> GenStruct
+// - *pkg.MyStruct -> *MyStruct
+// - pkg.MyStruct -> MyStruct
+//
+// Qualified receivers (package-selector types) are not legal Go, but the
+// parser does not enforce that, so they must still be handled gracefully
+// here rather than falling through to an unrecognized shape.
 func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	switch expr := recvTypeExpr.(type) {
 	case *dst.StarExpr: // func (*Recv)T or func (*Recv[T])T
-		// Check if X is an Ident (non-generic) or IndexExpr/IndexListExpr (generic)
+		// Check if X is an Ident/SelectorExpr (non-generic) or IndexExpr/IndexListExpr (generic)
 		switch x := expr.X.(type) {
 		case *dst.Ident:
 			// Non-generic pointer receiver: *MyStruct
 			return "*" + x.Name
+		case *dst.SelectorExpr:
+			// Non-generic qualified pointer receiver: *pkg.MyStruct
+			return "*" + x.Sel.Name
 		case *dst.IndexExpr:
 			// Generic pointer receiver with single type param: *GenStruct[T]
-			if baseIdent, ok := x.X.(*dst.Ident); ok {
-				return "*" + baseIdent.Name
+			if name, ok := baseTypeName(x.X); ok {
+				return "*" + name
 			}
 		case *dst.IndexListExpr:
 			// Generic pointer receiver with multiple type params: *GenStruct[T, U]
-			if baseIdent, ok := x.X.(*dst.Ident); ok {
-				return "*" + baseIdent.Name
+			if name, ok := baseTypeName(x.X); ok {
+				return "*" + name
 			}
 		}
 	case *dst.Ident: // func (Recv)T
 		return expr.Name
+	case *dst.SelectorExpr:
+		// Non-generic qualified value receiver: pkg.MyStruct
+		return expr.Sel.Name
 	case *dst.IndexExpr:
 		// Generic value receiver with single type param: GenStruct[T]
-		if baseIdent, ok := expr.X.(*dst.Ident); ok {
-			return baseIdent.Name
+		if name, ok := baseTypeName(expr.X); ok {
+			return name
 		}
 	case *dst.IndexListExpr:
 		// Generic value receiver with multiple type params: GenStruct[T, U]
-		if baseIdent, ok := expr.X.(*dst.Ident); ok {
-			return baseIdent.Name
+		if name, ok := baseTypeName(expr.X); ok {
+			return name
 		}
 	}
 	return ""
+}
+
+// baseTypeName returns the unqualified type name of expr when it is an
+// Ident (MyStruct) or a SelectorExpr (pkg.MyStruct), used to resolve the
+// base of a generic receiver's type-parameter list.
+func baseTypeName(expr dst.Expr) (string, bool) {
+	switch x := expr.(type) {
+	case *dst.Ident:
+		return x.Name, true
+	case *dst.SelectorExpr:
+		return x.Sel.Name, true
+	}
+	return "", false
 }
 
 func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
@@ -100,9 +124,12 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 		recvTypeExpr := funcDecl.Recv.List[0].Type
 		baseType := stripGenericTypes(recvTypeExpr)
 
+		// An empty baseType means the receiver shape is not one we can
+		// resolve to a type name; treat it as a non-match rather than
+		// fataling, since this function may be scanning declarations
+		// unrelated to the rule being matched.
 		if baseType == "" {
-			msg := fmt.Sprintf("unexpected receiver type: %T", recvTypeExpr)
-			util.Unimplemented(msg)
+			return false
 		}
 
 		return baseType == recv && name == funcName
