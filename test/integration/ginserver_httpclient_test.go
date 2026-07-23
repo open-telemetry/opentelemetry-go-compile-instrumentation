@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -19,25 +18,27 @@ import (
 
 func TestComplexGinHTTPServer(t *testing.T) {
 	t.Parallel()
-	testutil.Build(t, "", "complexginhttp", "go", "build", "-a")
+	testutil.Build(t, "", "ginserverhttpclient", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
 	frontPort := testutil.FreePort(t)
 	backPort := testutil.FreePort(t)
 
-	f.Start("complexginhttp", fmt.Sprintf("-front-port=%d", frontPort), fmt.Sprintf("-back-port=%d", backPort))
+	f.Start("ginserverhttpclient", fmt.Sprintf("-front-port=%d", frontPort), fmt.Sprintf("-back-port=%d", backPort))
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", backPort))
 
 	// Send request to frontend
 	url := fmt.Sprintf("http://127.0.0.1:%d/hello", frontPort)
-	resp, err := http.Get(url)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	require.NoError(t, err)
+
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Wait for the spans from the frontend, client, and backend to be flushed
-	time.Sleep(3 * time.Second) // wait for multiple spans, testutil.WaitForSpanFlush handles this implicitly mostly
 	testutil.WaitForSpanFlush(t)
 
 	// We expect exactly 1 trace with 3 spans:

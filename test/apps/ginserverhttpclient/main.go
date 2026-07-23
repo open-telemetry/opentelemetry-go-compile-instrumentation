@@ -11,13 +11,16 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gin-gonic/gin"
 )
 
 var (
-	frontPort = flag.String("front-port", "8080", "port for gin frontend")
-	backPort  = flag.String("back-port", "8081", "port for net/http backend")
+	frontPort = flag.Int("front-port", 8080, "port for gin frontend")
+	backPort  = flag.Int("back-port", 8081, "port for net/http backend")
 )
 
 func backendHandler(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +35,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/backend", backendHandler)
 	backendServer := &http.Server{
-		Addr:    fmt.Sprintf(":%s", *backPort),
+		Addr:    fmt.Sprintf(":%d", *backPort),
 		Handler: mux,
 	}
 	go func() {
@@ -45,7 +48,7 @@ func main() {
 	r := gin.New()
 	r.GET("/hello", func(c *gin.Context) {
 		// Create a request to the backend, explicitly passing the context for propagation
-		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", fmt.Sprintf("http://127.0.0.1:%s/api/backend", *backPort), nil)
+		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", fmt.Sprintf("http://127.0.0.1:%d/api/backend", *backPort), nil)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -64,7 +67,7 @@ func main() {
 	})
 
 	frontendServer := &http.Server{
-		Addr:    fmt.Sprintf(":%s", *frontPort),
+		Addr:    fmt.Sprintf(":%d", *frontPort),
 		Handler: r,
 	}
 
@@ -74,6 +77,11 @@ func main() {
 		}
 	}()
 
-	// Keep alive
-	<-context.Background().Done()
+	// Wait for shutdown signal
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	backendServer.Shutdown(context.Background())
+	frontendServer.Shutdown(context.Background())
 }

@@ -1,4 +1,4 @@
-module go.opentelemetry.io/otelc/test/apps/complexgrpc
+module go.opentelemetry.io/otelc/test/apps/grpcservergrpcclient
 
 go 1.25.0
 
