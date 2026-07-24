@@ -307,6 +307,70 @@ func TestGenerateOtelInstrumentationGo(t *testing.T) {
 	}
 }
 
+func TestLoadOtelYAMLImports(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		content string
+		want    map[string]bool
+		wantErr string
+	}{
+		{
+			name: "valid",
+			content: `instrumentations:
+  - example.com/foo
+  - example.com/bar
+  - example.com/foo
+`,
+			want: map[string]bool{
+				"example.com/foo": true,
+				"example.com/bar": true,
+			},
+		},
+		{
+			name: "missing instrumentations",
+			content: `other:
+  - example.com/foo
+`,
+			wantErr: "field other not found",
+		},
+		{
+			name: "empty list",
+			content: `instrumentations: []
+`,
+			wantErr: "instrumentations must contain at least one import path",
+		},
+		{
+			name: "empty import path",
+			content: `instrumentations:
+  - example.com/foo
+  - "   "
+`,
+			wantErr: "instrumentations must not contain empty import paths",
+		},
+		{
+			name: "malformed yaml",
+			content: `instrumentations: [
+`,
+			wantErr: "parsing",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, OtelYAMLCanonical)
+			require.NoError(t, os.WriteFile(path, []byte(tt.content), 0o644))
+
+			got, err := loadOtelYAMLImports(path)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestEnsureOtelcRequire(t *testing.T) {
 	const testVersion = "v1.2.3"
 
@@ -877,4 +941,86 @@ func main() {
 	// Verify tool is pinned in go.mod
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/tool/cmd/otelc")
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
+}
+
+func TestGeneratePinnedProjectsFromOtelYAML(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		fmt.Appendf(nil, `module example.com/app
+
+go 1.25
+
+replace example.com/foo => %s
+`, filepath.Join(dir, "foo")),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+	writeInstrumentationModule(t, filepath.Join(dir, "foo"), "example.com/foo", true, nil)
+	writeOtelYAMLFile(t, filepath.Join(dir, OtelYAMLCanonical), "example.com/foo")
+
+	result, err := generatePinnedProjectsFromOtelYAML(
+		t.Context(),
+		map[string]string{dir: filepath.Join(dir, OtelYAMLCanonical)},
+		PinOptions{},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, result.AllDeps)
+
+	toolFile := filepath.Join(dir, ToolFileCanonical)
+	require.FileExists(t, toolFile)
+
+	data, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"example.com/foo"`)
+
+	goMod, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	require.NoError(t, err)
+	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/tool/cmd/otelc")
+	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
+	require.Contains(t, string(goMod), "example.com/foo")
+}
+
+func TestPinLocked_ToolFilePrecedesOtelYAML(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		fmt.Appendf(nil, `module example.com/app
+
+go 1.25
+
+require example.com/foo v0.0.0-00010101000000-000000000000
+
+replace example.com/foo => %s
+replace example.com/bar => %s
+`, filepath.Join(dir, "foo"), filepath.Join(dir, "bar")),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+
+	writeInstrumentationModule(t, filepath.Join(dir, "foo"), "example.com/foo", true, nil)
+	writeInstrumentationModule(t, filepath.Join(dir, "bar"), "example.com/bar", true, nil)
+	writeToolFile(t, filepath.Join(dir, ToolFileCanonical), "example.com/foo")
+	writeOtelYAMLFile(t, filepath.Join(dir, OtelYAMLCanonical), "example.com/bar")
+
+	_, err := pinLocked(t.Context(), PinOptions{ModuleDirs: map[string]bool{dir: true}})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, ToolFileCanonical))
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"example.com/foo"`)
+	require.NotContains(t, string(data), `"example.com/bar"`)
 }

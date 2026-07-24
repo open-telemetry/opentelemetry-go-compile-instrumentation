@@ -33,6 +33,11 @@ instrumentation packages to enable using the standard Go `tools.go` pattern. `ot
 the imports in that file, resolves each one as a Go package, and loads the rule files found
 there.
 
+For CI/CD workflows that should not persist a tool file in the repository, `otelc` also accepts
+module-local `.otel.yml` / `.otel.yaml` files with an `instrumentations:` list. `otelc` turns
+that list into a generated `otel.instrumentation.go` and then follows the same resolution
+protocol documented here. If both a tool file and a `.otel.yml` file exist, the tool file wins.
+
 This approach mirrors how [DataDog Orchestrion](https://github.com/DataDog/orchestrion)
 manages its instrumentation configuration with `orchestrion.tool.go`, and it realizes the
 vendor-agnostic design described in [#567](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/567).
@@ -158,8 +163,8 @@ files. Packages outside that reachable set are never loaded.
 ## Rule Source Precedence
 
 The full precedence model is documented in [Rule Sources and Precedence](configuration.md#rule-sources-and-precedence).
-In short: `OTELC_RULES` > `--rules` > tool files > embedded defaults. Each source entirely
-replaces those below it; there is no merging.
+In short: `OTELC_RULES` > `--rules` > tool files > `.otel.yml` > embedded defaults. Each source
+entirely replaces those below it; there is no merging.
 
 ## Errors and Diagnostics
 

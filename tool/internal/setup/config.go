@@ -26,6 +26,8 @@ const (
 	// Allowed names for the instrumentation config file.
 	ToolFileCanonical = "otel.instrumentation.go"
 	ToolFileAlias     = "otelc.tool.go"
+	OtelYAMLCanonical = ".otel.yml"
+	OtelYAMLAlias     = ".otel.yaml"
 )
 
 type InstrumentationConfig struct {
@@ -75,6 +77,43 @@ func findToolFiles(moduleDirs map[string]bool) ([]string, error) {
 	// Sort for deterministic rule loading.
 	slices.Sort(toolFiles)
 	return toolFiles, nil
+}
+
+func findOtelYAMLFile(moduleDir string) (string, error) {
+	canonical := filepath.Join(moduleDir, OtelYAMLCanonical)
+	alias := filepath.Join(moduleDir, OtelYAMLAlias)
+
+	canonicalExists := util.PathExists(canonical)
+	aliasExists := util.PathExists(alias)
+
+	switch {
+	case canonicalExists && aliasExists:
+		return "", ex.Newf(
+			"both %q and %q exist; only one module-local .otel config file is allowed",
+			OtelYAMLCanonical,
+			OtelYAMLAlias,
+		)
+	case canonicalExists:
+		return canonical, nil
+	case aliasExists:
+		return alias, nil
+	default:
+		return "", nil
+	}
+}
+
+func findOtelYAMLFiles(moduleDirs map[string]bool) (map[string]string, error) {
+	otelYAMLFiles := make(map[string]string, len(moduleDirs))
+	for dir := range moduleDirs {
+		otelYAMLFile, err := findOtelYAMLFile(dir)
+		if err != nil {
+			return nil, err
+		}
+		if otelYAMLFile != "" {
+			otelYAMLFiles[dir] = otelYAMLFile
+		}
+	}
+	return otelYAMLFiles, nil
 }
 
 const packagesLoadTimeout = 30 * time.Second

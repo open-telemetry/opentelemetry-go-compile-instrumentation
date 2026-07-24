@@ -26,11 +26,14 @@ for the `otel.instrumentation.go` mechanism that makes this explicit and source-
    set.
 3. **Tool files** (`otel.instrumentation.go` / `otelc.tool.go`) — when the project declares
    instrumentations explicitly. See [External Configuration Sources](external-configuration.md).
-4. **Embedded defaults** — the instrumentation bundle built into `otelc`, applied when none of
+4. **Module-local `.otel.yml` / `.otel.yaml`** — CI/CD-oriented instrumentation selection. The
+   file is translated into a generated `otel.instrumentation.go` through `otelc pin`; if a tool
+   file already exists, it takes precedence and the YAML file is ignored.
+5. **Embedded defaults** — the instrumentation bundle built into `otelc`, applied when none of
    the above are present.
 
 Each source entirely replaces those below it. There is no merging: when `--rules` is provided,
-tool files and the embedded bundle are not consulted.
+tool files, `.otel.yml`, and the embedded bundle are not consulted.
 
 ### Using `--rules` for development and debugging
 
@@ -63,7 +66,9 @@ OTELC_RULES=ci-rules/ otelc go build .
 > [!NOTE]
 > `--rules` and `OTELC_RULES` are intended for development and debugging, not for production
 > configuration. For stable, versioned instrumentation, use the `otel.instrumentation.go`
-> mechanism described in [External Configuration Sources](external-configuration.md).
+> mechanism described in [External Configuration Sources](external-configuration.md). Use
+> `.otel.yml` / `.otel.yaml` when instrumentation selection must be injected without persisting a
+> tool file in source control.
 
 ## Narrowing What Gets Instrumented
 
