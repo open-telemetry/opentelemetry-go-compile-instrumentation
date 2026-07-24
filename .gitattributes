@@ -1,2 +1,7 @@
 *.golden text eol=lf
-tool/data/otelc-bundle.tgz binary
+# otelc-bundle.tgz is a binary archive derived from pkg/ and instrumentation/.
+# Treat it as binary (no diff/eol conversion). The custom 'otelc-bundle' merge
+# driver keeps the current version instead of conflicting so rebases/merges
+# don't stop on it; regenerate it afterwards with `make package`. Register the
+# driver once per clone with `make setup-git`.
+tool/data/otelc-bundle.tgz -text -diff merge=otelc-bundle
