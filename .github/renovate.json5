@@ -24,17 +24,6 @@
       ],
       datasourceTemplate: 'docker',
     },
-    {
-      customType: 'regex',
-      managerFilePatterns: [
-        '/^Makefile$/',
-      ],
-      matchStrings: [
-        'GOVULNCHECK_VERSION\\s*=\\s*(?<currentValue>v[^\\s]+)',
-      ],
-      depNameTemplate: 'golang.org/x/vuln',
-      datasourceTemplate: 'go',
-    },
   ],
   packageRules: [
     {

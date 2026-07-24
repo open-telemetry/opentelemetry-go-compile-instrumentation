@@ -29,8 +29,8 @@ TOOLS_DIR = .tools
 GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
 
-# govulncheck version (Renovate-managed). Scans shipped modules for known Go CVEs.
-GOVULNCHECK_VERSION = v1.6.0
+# Modules scanned by govulncheck for known Go CVEs (tool version pinned in
+# .tools/go.mod, Renovate-managed like every other .tools binary).
 # Core modules: root module (covers tool/) plus every pkg/ module.
 # Instrumentation modules are scanned by a separate target/CI job because a vuln
 # reachable from injected instrumentation code is higher-impact than one in tool/.
@@ -85,6 +85,9 @@ $(EMBEDMD): PACKAGE=github.com/campoy/embedmd
 
 CHECKMAKE = $(TOOLS)/checkmake
 $(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
+
+GOVULNCHECK = $(TOOLS)/govulncheck
+$(GOVULNCHECK): PACKAGE=golang.org/x/vuln/cmd/govulncheck
 
 # Phony targets to build tools from .tools module (no go install; binaries in .bin/)
 gotestfmt: $(GOTESTFMT) ## Build gotestfmt from .tools
@@ -408,25 +411,25 @@ check-golden-files: package
 
 ##@ Security
 
-# Run govulncheck over a list of module dirs; $(1) = space-separated dirs.
+# Run govulncheck (built from .tools) over a list of module dirs; $(1) = dirs.
 define run_govulncheck
 	@set -uo pipefail
 	@status=0; \
 	for moddir in $(1); do \
 		echo "==> govulncheck $$moddir"; \
-		(cd "$$moddir" && go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...) || status=1; \
+		(cd "$$moddir" && $(GOVULNCHECK) ./...) || status=1; \
 	done; \
 	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found"; exit 1; fi; \
 	echo "govulncheck: no reachable vulnerabilities found"
 endef
 
 .ONESHELL:
-govulncheck: ## Scan core modules (root, pkg) for known Go vulnerabilities
+govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulnerabilities
 	@echo "Running govulncheck across $(words $(GOVULNCHECK_CORE_MODULES)) core modules..."
 	$(call run_govulncheck,$(GOVULNCHECK_CORE_MODULES))
 
 .ONESHELL:
-govulncheck-instrumentation: ## Scan instrumentation modules for known Go vulnerabilities
+govulncheck-instrumentation: $(GOVULNCHECK) ## Scan instrumentation modules for known Go vulnerabilities
 	@echo "Running govulncheck across $(words $(GOVULNCHECK_INSTR_MODULES)) instrumentation modules..."
 	$(call run_govulncheck,$(GOVULNCHECK_INSTR_MODULES))
 
