@@ -14,7 +14,7 @@ SHELL := /bin/bash
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
-        benchmark/codspeed benchmark/threshold
+        benchmark/codspeed benchmark/threshold govulncheck
 
 # Constant variables
 BINARY_NAME := otelc
@@ -28,6 +28,12 @@ API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
 GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
+
+# govulncheck version (Renovate-managed). Scans shipped modules for known Go CVEs.
+GOVULNCHECK_VERSION = v1.6.0
+# Shipped modules: root module (covers tool/), plus every pkg/ and instrumentation/
+# module. Test apps and demos are intentionally excluded (pinned example deps).
+GOVULNCHECK_MODULES := . $(shell find pkg instrumentation -type f -name 'go.mod' -exec dirname {} \; | sort)
 
 # OTel Weaver execution for the local semantic-convention registry under
 # schemas/otelc/. Weaver runs from an OCI image (no host install required);
@@ -396,6 +402,20 @@ check-golden-files: package
 	fi
 	git status --porcelain -- tool/internal/instrument/testdata/golden/ | grep -q . && (echo "Golden files have untracked changes"; exit 1) || true
 	echo "Golden files are up to date"
+
+##@ Security
+
+.ONESHELL:
+govulncheck: ## Scan shipped modules (root, pkg, instrumentation) for known Go vulnerabilities
+	@echo "Running govulncheck across $(words $(GOVULNCHECK_MODULES)) modules..."
+	@set -uo pipefail
+	@status=0; \
+	for moddir in $(GOVULNCHECK_MODULES); do \
+		echo "==> govulncheck $$moddir"; \
+		(cd "$$moddir" && go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...) || status=1; \
+	done; \
+	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found"; exit 1; fi; \
+	echo "govulncheck: no reachable vulnerabilities found"
 
 ##@ Benchmarking
 
