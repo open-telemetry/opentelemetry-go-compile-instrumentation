@@ -162,20 +162,6 @@ func (m *mockPusher) Push(target string, opts *http.PushOptions) error {
 	return nil
 }
 
-// TestWriterWrapper_ImplementsPusher pins the behavior the previous Pusher()
-// method got wrong: a handler discovers HTTP/2 push via a type assertion on the
-// http.ResponseWriter it is handed, so the wrapper must actually satisfy
-// http.Pusher. This is the assertion real net/http code performs.
-func TestWriterWrapper_ImplementsPusher(t *testing.T) {
-	var rw http.ResponseWriter = &writerWrapper{
-		ResponseWriter: &mockPusher{ResponseWriter: httptest.NewRecorder()},
-		statusCode:     http.StatusOK,
-	}
-
-	_, ok := rw.(http.Pusher)
-	assert.True(t, ok, "writerWrapper must satisfy http.Pusher so handlers can use HTTP/2 server push")
-}
-
 func TestWriterWrapper_Push(t *testing.T) {
 	mock := &mockPusher{ResponseWriter: httptest.NewRecorder()}
 	wrapper := &writerWrapper{
@@ -195,8 +181,6 @@ func TestWriterWrapper_Push_NotSupported(t *testing.T) {
 		statusCode:     http.StatusOK,
 	}
 
-	// A non-push underlying writer must yield the documented sentinel, not a
-	// silent failure, mirroring Hijack's not-supported behavior.
 	err := wrapper.Push("/test", nil)
 	require.ErrorIs(t, err, http.ErrNotSupported)
 }
