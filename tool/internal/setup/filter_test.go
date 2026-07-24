@@ -179,7 +179,7 @@ func TestDirectiveFilter_Match(t *testing.T) {
 	}{
 		{
 			name:      "directive present",
-			src:       "package main\n\n//go:build linux\nfunc foo() {}\n",
+			src:       "//go:build linux\npackage main\n\nfunc foo() {}\n",
 			directive: "go:build",
 			want:      true,
 		},

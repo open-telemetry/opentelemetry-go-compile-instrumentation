@@ -68,6 +68,7 @@ var (
 	_ Filter = (*StructFilter)(nil)
 	_ Filter = (*PackageNameFilter)(nil)
 	_ Filter = (*IsTestFilter)(nil)
+	_ Filter = (*DirectiveFilter)(nil)
 )
 
 // FuncFilter matches source files that declare the named function or method.
@@ -116,7 +117,7 @@ type DirectiveFilter struct {
 }
 
 func (f *DirectiveFilter) Match(ctx *MatchContext) bool {
-	return ast.FileHasDirective(ctx.AST, f.Directive)
+	return ast.FileHasLeadingDirective(ctx.AST, f.Directive)
 }
 
 // IsTestFilter selects or excludes test builds — compilations the Go toolchain
