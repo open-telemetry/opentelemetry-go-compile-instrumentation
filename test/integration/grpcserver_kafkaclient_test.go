@@ -27,7 +27,8 @@ func TestGRPCServerKafkaClient(t *testing.T) {
 	}
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
-	t.Parallel()
+	// Not using t.Parallel() here to prevent CI resource exhaustion 
+	// from spinning up multiple heavy Kafka testcontainers simultaneously.
 	testutil.Build(t, "", "grpcserverkafkaclient", "go", "build", "-a")
 
 	brokers := startKafkaContainer(t)
@@ -71,6 +72,10 @@ func TestGRPCServerKafkaClient(t *testing.T) {
 		testutil.IsProducer,
 		func(s ptrace.Span) bool { return s.Name() == "test-topic-grpc send" },
 	)
+
+	attrs := testutil.Attrs(kafkaProducerSpan)
+	require.Equal(t, "kafka", attrs["messaging.system"])
+	require.Equal(t, "test-topic-grpc", attrs["messaging.destination.name"])
 
 	// Assert on propagation (parent-child relationships across async boundary)
 	require.Equal(t, grpcServerSpan.TraceID(), kafkaProducerSpan.TraceID(), "trace ID mismatch")

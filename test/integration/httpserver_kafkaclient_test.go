@@ -25,7 +25,8 @@ func TestHTTPServerKafkaClient(t *testing.T) {
 	}
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
-	t.Parallel()
+	// Not using t.Parallel() here to prevent CI resource exhaustion 
+	// from spinning up multiple heavy Kafka testcontainers simultaneously.
 	testutil.Build(t, "", "httpserverkafkaclient", "go", "build", "-a")
 
 	brokers := startKafkaContainer(t)
@@ -68,6 +69,10 @@ func TestHTTPServerKafkaClient(t *testing.T) {
 		testutil.IsProducer,
 		func(s ptrace.Span) bool { return s.Name() == "test-topic-http send" },
 	)
+
+	attrs := testutil.Attrs(kafkaProducerSpan)
+	require.Equal(t, "kafka", attrs["messaging.system"])
+	require.Equal(t, "test-topic-http", attrs["messaging.destination.name"])
 
 	// Assert on propagation (parent-child relationships across async boundary)
 	require.Equal(t, httpServerSpan.TraceID(), kafkaProducerSpan.TraceID(), "trace ID mismatch")

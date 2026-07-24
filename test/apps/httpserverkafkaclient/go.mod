@@ -1,8 +1,8 @@
 module go.opentelemetry.io/otelc/test/apps/httpserverkafkaclient
 
-go 1.23.0
+go 1.25.0
 
-require github.com/segmentio/kafka-go v0.4.47
+require github.com/segmentio/kafka-go v0.4.51
 
 require (
 	github.com/klauspost/compress v1.17.9 // indirect
