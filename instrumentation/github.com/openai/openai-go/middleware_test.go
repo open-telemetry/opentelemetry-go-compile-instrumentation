@@ -103,7 +103,7 @@ func TestParseChatRequest_Invalid(t *testing.T) {
 }
 
 func TestParseCompletionRequest(t *testing.T) {
-	body := []byte(`{"model":"gpt-3.5-turbo-instruct","max_tokens":50}`)
+	body := []byte(`{"model":"gpt-3.5-turbo-instruct","max_tokens":50,"top_p":0.9}`)
 	model, attrs := parseCompletionRequest(body)
 	assert.Equal(t, "gpt-3.5-turbo-instruct", model)
 	assert.NotEmpty(t, attrs)
