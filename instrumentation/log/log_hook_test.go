@@ -190,3 +190,22 @@ func TestBeforeLogOutput_PreservesNewline(t *testing.T) {
 	assert.True(t, result[len(result)-1] == '\n')
 	assert.Contains(t, result, "trace_id=abc123")
 }
+
+func TestBeforeLogOutput_PreservesCRLF(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+		return "abc123", "def456"
+	})
+	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+		return "", ""
+	})
+
+	ictx := hooktest.NewMockHookContext()
+	originalAppend := func(b []byte) []byte { return append(b, []byte("msg\r\n")...) }
+	BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+
+	wrappedFn := ictx.GetParam(3)
+	wrapped := wrappedFn.(func([]byte) []byte)
+	result := string(wrapped([]byte{}))
+	assert.True(t, len(result) >= 2 && result[len(result)-2:] == "\r\n")
+	assert.Contains(t, result, "msg trace_id=abc123 span_id=def456\r\n")
+}
