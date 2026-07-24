@@ -14,7 +14,7 @@ SHELL := /bin/bash
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
-        benchmark/codspeed benchmark/threshold govulncheck
+        benchmark/codspeed benchmark/threshold govulncheck govulncheck-instrumentation
 
 # Constant variables
 BINARY_NAME := otelc
@@ -31,9 +31,12 @@ INTEGRATION_TEST_RUN ?= .
 
 # govulncheck version (Renovate-managed). Scans shipped modules for known Go CVEs.
 GOVULNCHECK_VERSION = v1.6.0
-# Shipped modules: root module (covers tool/), plus every pkg/ and instrumentation/
-# module. Test apps and demos are intentionally excluded (pinned example deps).
-GOVULNCHECK_MODULES := . $(shell find pkg instrumentation -type f -name 'go.mod' -exec dirname {} \; | sort)
+# Core modules: root module (covers tool/) plus every pkg/ module.
+# Instrumentation modules are scanned by a separate target/CI job because a vuln
+# reachable from injected instrumentation code is higher-impact than one in tool/.
+# Test apps and demos are intentionally excluded (pinned example deps).
+GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
+GOVULNCHECK_INSTR_MODULES := $(shell find instrumentation -type f -name 'go.mod' -exec dirname {} \; | sort)
 
 # OTel Weaver execution for the local semantic-convention registry under
 # schemas/otelc/. Weaver runs from an OCI image (no host install required);
@@ -405,17 +408,27 @@ check-golden-files: package
 
 ##@ Security
 
-.ONESHELL:
-govulncheck: ## Scan shipped modules (root, pkg, instrumentation) for known Go vulnerabilities
-	@echo "Running govulncheck across $(words $(GOVULNCHECK_MODULES)) modules..."
+# Run govulncheck over a list of module dirs; $(1) = space-separated dirs.
+define run_govulncheck
 	@set -uo pipefail
 	@status=0; \
-	for moddir in $(GOVULNCHECK_MODULES); do \
+	for moddir in $(1); do \
 		echo "==> govulncheck $$moddir"; \
 		(cd "$$moddir" && go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...) || status=1; \
 	done; \
 	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found"; exit 1; fi; \
 	echo "govulncheck: no reachable vulnerabilities found"
+endef
+
+.ONESHELL:
+govulncheck: ## Scan core modules (root, pkg) for known Go vulnerabilities
+	@echo "Running govulncheck across $(words $(GOVULNCHECK_CORE_MODULES)) core modules..."
+	$(call run_govulncheck,$(GOVULNCHECK_CORE_MODULES))
+
+.ONESHELL:
+govulncheck-instrumentation: ## Scan instrumentation modules for known Go vulnerabilities
+	@echo "Running govulncheck across $(words $(GOVULNCHECK_INSTR_MODULES)) instrumentation modules..."
+	$(call run_govulncheck,$(GOVULNCHECK_INSTR_MODULES))
 
 ##@ Benchmarking
 

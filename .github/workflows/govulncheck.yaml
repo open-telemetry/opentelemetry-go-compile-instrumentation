@@ -17,8 +17,33 @@ on:
 permissions: read-all
 
 jobs:
+  # Core modules (root, pkg). Non-blocking: a newly-disclosed stdlib/dep CVE with
+  # no fix released yet shouldn't red unrelated PRs on tooling code. Still visible
+  # as a failed check. Instrumentation (higher impact) stays hard-blocking below.
   govulncheck:
-    name: govulncheck
+    name: govulncheck (core)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          # Latest stable toolchain, not the go.mod version: govulncheck reports
+          # stdlib CVEs against the Go release running it, so pinning to go.mod
+          # would flag stdlib vulns already fixed in the current toolchain.
+          go-version: stable
+          cache-dependency-path: "**/go.mod"
+      - name: Run govulncheck
+        run: make govulncheck
+
+  # Instrumentation modules. Split out and kept separate because a vuln reachable
+  # from injected instrumentation code is higher-impact than one in tooling.
+  govulncheck-instrumentation:
+    name: govulncheck (instrumentation)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -28,7 +53,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache-dependency-path: "**/go.mod"
       - name: Run govulncheck
-        run: make govulncheck
+        run: make govulncheck-instrumentation
