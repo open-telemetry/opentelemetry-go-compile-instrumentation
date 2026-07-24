@@ -62,8 +62,7 @@ func keepForDebug(ctx context.Context, srcPath string) {
 
 // This function can be used to check if the setup has been completed.
 func isSetup() bool {
-	// TODO: Implement Task
-	return false
+	return util.PathExists(util.GetMatchedRuleFile())
 }
 
 // flagsWithPathValues contains flags that accept a value from "go build" command.

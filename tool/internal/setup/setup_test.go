@@ -547,3 +547,23 @@ func TestExtractBuildFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestIsSetup(t *testing.T) {
+	setupTestModule(t, []string{})
+
+	// Initially, setup should not be completed
+	assert.False(t, isSetup())
+
+	// Create matched.json inside .otelc-build/
+	matchedFile := util.GetMatchedRuleFile()
+	require.NoError(t, os.MkdirAll(filepath.Dir(matchedFile), 0o755))
+	require.NoError(t, os.WriteFile(matchedFile, []byte("[]"), 0o644))
+
+	// Now it should return true
+	assert.True(t, isSetup())
+
+	// Clean up and it should return false again
+	require.NoError(t, os.Remove(matchedFile))
+	assert.False(t, isSetup())
+}
+
