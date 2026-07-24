@@ -170,6 +170,39 @@ func TestPackageNameFilter_Match(t *testing.T) {
 	}
 }
 
+func TestDirectiveFilter_Match(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		directive string
+		want      bool
+	}{
+		{
+			name:      "directive present",
+			src:       "package main\n\n//go:build linux\nfunc foo() {}\n",
+			directive: "go:build",
+			want:      true,
+		},
+		{
+			name:      "directive missing",
+			src:       "package main\n",
+			directive: "go:build",
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := parseSource(t, tt.src)
+			f := &setup.DirectiveFilter{Directive: tt.directive}
+			if got := f.Match(ctx); got != tt.want {
+				t.Fatalf("DirectiveFilter{Directive:%q}.Match() = %v, want %v",
+					tt.directive, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Build ---
 
 func TestBuild_NilWhere(t *testing.T) {
