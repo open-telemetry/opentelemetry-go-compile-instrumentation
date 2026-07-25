@@ -52,6 +52,19 @@ func TestGetProviderName(t *testing.T) {
 	}
 }
 
+// TestGetProviderName_AmbiguousHostIsDeterministic guards against a
+// regression to a map-based provider table: when a host matches more than
+// one keyword, the result must always be the earliest match in declaration
+// order, not whichever keyword a randomized map iteration happens to hit
+// first.
+func TestGetProviderName_AmbiguousHostIsDeterministic(t *testing.T) {
+	host := "litellm-gateway.mistral-together-proxy.internal"
+
+	for range 50 {
+		assert.Equal(t, "together", getProviderName(host))
+	}
+}
+
 func TestOperationName(t *testing.T) {
 	assert.Equal(t, "chat", operationName(opChat))
 	assert.Equal(t, "text_completion", operationName(opCompletion))
