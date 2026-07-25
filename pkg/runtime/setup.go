@@ -311,9 +311,10 @@ func shutdownSignals() []os.Signal {
 	return []os.Signal{os.Interrupt, syscall.SIGTERM}
 }
 
-// setupSignalHandler flushes the OTel SDK on SIGINT/SIGTERM, then re-raises the
-// signal so the app's own handler or the default disposition owns the exit. It
-// avoids os.Exit, which would race the app's shutdown and force the exit code to 0.
+// setupSignalHandler flushes the OTel SDK on SIGINT/SIGTERM so buffered telemetry
+// survives shutdown, then steps aside. It never exits or re-raises the signal:
+// the application owns its own exit path and exit code. Terminating here would
+// race an application running its own graceful shutdown and could truncate it.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
 		sigCh := make(chan os.Signal, 1)
@@ -322,17 +323,18 @@ func setupSignalHandler() {
 	})
 }
 
-// handleShutdownSignal waits for the first signal on sigCh, flushes the SDK,
-// then re-raises the signal so the app or the default disposition owns the exit.
+// handleShutdownSignal waits for the first signal on sigCh and flushes the SDK.
+// It does not exit or re-raise the signal, leaving the process exit to the
+// application or the OS default disposition.
 func handleShutdownSignal(sigCh chan os.Signal) {
 	sig := <-sigCh
 
-	// Stop listening now so a repeated signal during the flush isn't swallowed by
-	// our buffered channel but reaches the app or the default disposition, keeping
-	// the "press again to force quit" behavior.
+	// Stop listening now so a repeated signal isn't swallowed by our buffered
+	// channel but reaches the app or the default disposition, keeping the
+	// "press again to force quit" behavior.
 	signal.Stop(sigCh)
 
-	logger.Info("received signal, flushing telemetry before shutdown", "signal", sig.String())
+	logger.Info("received signal, flushing telemetry", "signal", sig.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -342,33 +344,4 @@ func handleShutdownSignal(sigCh chan os.Signal) {
 	} else {
 		logger.Info("OpenTelemetry SDK shutdown completed successfully")
 	}
-
-	// Apps that also call signal.Notify will see this signal twice, since Go
-	// broadcasts it. We can't detect other handlers, so re-raise anyway.
-	// reRaise is a var so tests can exercise this path without delivering a real
-	// signal to the test process.
-	reRaise(sig)
-}
-
-// reRaise re-sends the shutdown signal; overridden in tests.
-var reRaise = raiseSignalToSelf
-
-// raiseSignalToSelf re-sends sig to this process, falling back to os.Exit where
-// re-raising isn't supported.
-func raiseSignalToSelf(sig os.Signal) {
-	if p, err := os.FindProcess(os.Getpid()); err == nil {
-		if err := p.Signal(sig); err == nil {
-			return
-		}
-	}
-	os.Exit(signalExitCode(sig))
-}
-
-// signalExitCode returns the conventional 128+signal exit code, or 1 when sig
-// isn't a syscall.Signal. Used only on the fallback path, so it avoids forcing 0.
-func signalExitCode(sig os.Signal) int {
-	if s, ok := sig.(syscall.Signal); ok {
-		return 128 + int(s)
-	}
-	return 1
 }
