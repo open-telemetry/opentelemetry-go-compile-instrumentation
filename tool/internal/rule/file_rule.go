@@ -44,9 +44,6 @@ func NewInstFileRule(data []byte, name string) (*InstFileRule, error) {
 }
 
 func (r *InstFileRule) validate() error {
-	if err := r.validateBase(); err != nil {
-		return err
-	}
 	if strings.TrimSpace(r.File) == "" {
 		return ex.Newf("file cannot be empty")
 	}

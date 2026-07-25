@@ -127,7 +127,7 @@ func TestOtelObserver_ObserveQuery(t *testing.T) {
 		attrMap[string(a.Key)] = a.Value.AsString()
 	}
 
-	assert.Equal(t, "cassandra", attrMap["db.system"])
+	assert.Equal(t, "cassandra", attrMap["db.system.name"])
 	assert.Equal(t, "SELECT", attrMap["db.operation.name"])
 	assert.Equal(t, "my_keyspace", attrMap["db.namespace"])
 	assert.Equal(t, "SELECT * FROM users WHERE id = 1", attrMap["db.query.text"])
@@ -183,6 +183,42 @@ func TestOtelObserver_ObserveBatch(t *testing.T) {
 	span := spans[0]
 
 	assert.Equal(t, "batch_ks.BATCH", span.Name())
+
+	attrMap := make(map[string]string)
+	for _, a := range span.Attributes() {
+		attrMap[string(a.Key)] = a.Value.AsString()
+	}
+
+	assert.Equal(t, "cassandra", attrMap["db.system.name"])
+	assert.Equal(t, "BATCH", attrMap["db.operation.name"])
+	assert.Equal(t, "batch_ks", attrMap["db.namespace"])
+	assert.Equal(t, "INSERT INTO a VALUES (1); UPDATE b SET x = 2", attrMap["db.query.text"])
+}
+
+func TestOtelObserver_ObserveBatchWithError(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+
+	obs := newOtelObserver(nil, nil, nil)
+	obs.tracer = tp.Tracer(instrumentationName)
+
+	batchErr := errors.New("batch execution failed")
+	b := gocql.ObservedBatch{
+		Keyspace:   "batch_ks",
+		Statements: []string{"INSERT INTO a VALUES (1)"},
+		Err:        batchErr,
+		Start:      time.Now(),
+		End:        time.Now().Add(5 * time.Millisecond),
+	}
+
+	obs.ObserveBatch(context.Background(), b)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	span := spans[0]
+
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.Equal(t, "batch execution failed", span.Status().Description)
 }
 
 func TestOtelObserver_ObserveConnect(t *testing.T) {

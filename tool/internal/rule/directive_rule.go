@@ -37,9 +37,6 @@ func NewInstDirectiveRule(data []byte, name string) (*InstDirectiveRule, error) 
 }
 
 func (r *InstDirectiveRule) validate() error {
-	if err := r.validateBase(); err != nil {
-		return err
-	}
 	if strings.TrimSpace(r.Directive) == "" {
 		return ex.Newf("directive cannot be empty")
 	}

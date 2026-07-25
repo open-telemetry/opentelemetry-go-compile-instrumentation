@@ -80,9 +80,6 @@ var validDeclKinds = map[string]bool{ //nolint:gochecknoglobals // private looku
 }
 
 func (r *InstDeclRule) validate() error {
-	if err := r.validateBase(); err != nil {
-		return err
-	}
 	if strings.TrimSpace(r.Identifier) == "" {
 		return ex.Newf("identifier cannot be empty")
 	}

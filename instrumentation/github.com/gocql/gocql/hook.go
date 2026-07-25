@@ -99,7 +99,7 @@ func (o *otelObserver) recordQuerySpan(ctx context.Context, q gocql.ObservedQuer
 	defer span.End(trace.WithTimestamp(endTime))
 
 	attrs := []attribute.KeyValue{
-		attribute.String("db.system", "cassandra"),
+		semconv.DBSystemNameCassandra,
 		semconv.DBOperationName(opName),
 		semconv.DBQueryText(q.Statement),
 	}
@@ -154,7 +154,7 @@ func (o *otelObserver) recordBatchSpan(ctx context.Context, b gocql.ObservedBatc
 	stmtText := strings.Join(b.Statements, "; ")
 
 	attrs := []attribute.KeyValue{
-		attribute.String("db.system", "cassandra"),
+		semconv.DBSystemNameCassandra,
 		semconv.DBOperationName("BATCH"),
 		semconv.DBQueryText(stmtText),
 	}
@@ -195,6 +195,7 @@ func parseOpName(stmt string) string {
 }
 
 // AfterNewCluster is invoked after gocql.NewCluster returns a *ClusterConfig.
+// It wraps observers on the returned ClusterConfig for pre-session configuration.
 func AfterNewCluster(ictx hook.HookContext, cluster *gocql.ClusterConfig) {
 	if cluster == nil || !enabler.Enable() {
 		return
@@ -203,6 +204,7 @@ func AfterNewCluster(ictx hook.HookContext, cluster *gocql.ClusterConfig) {
 }
 
 // BeforeNewSession is invoked before gocql.NewSession creates a session from ClusterConfig.
+// It ensures observers are wrapped even if NewSession is called directly with a custom ClusterConfig.
 func BeforeNewSession(ictx hook.HookContext, cfg gocql.ClusterConfig) {
 	if !enabler.Enable() {
 		return

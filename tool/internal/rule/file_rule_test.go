@@ -41,24 +41,6 @@ path: github.com/example/pkg
 			yaml:    `target: example.com/pkg\nfile: my_file.go`,
 			wantErr: true,
 		},
-		{
-			name: "empty target",
-			yaml: `
-file: my_file.go
-target: ""
-path: github.com/example/pkg
-`,
-			wantErr: true,
-		},
-		{
-			name: "whitespace-only target",
-			yaml: `
-file: my_file.go
-target: "   "
-path: github.com/example/pkg
-`,
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {

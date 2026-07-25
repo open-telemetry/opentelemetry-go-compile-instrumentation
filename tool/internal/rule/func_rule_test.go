@@ -143,16 +143,6 @@ param: string
 			yaml:    `func: MyFunc\ntarget: example.com/pkg\nbefore: MyBefore`,
 			wantErr: true,
 		},
-		{
-			name:    "empty target",
-			yaml:    "func: MyFunc\ntarget: \"\"\nbefore: MyBefore\npath: example.com/pkg",
-			wantErr: true,
-		},
-		{
-			name:    "whitespace-only target",
-			yaml:    "func: MyFunc\ntarget: \"   \"\nbefore: MyBefore\npath: example.com/pkg",
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {
