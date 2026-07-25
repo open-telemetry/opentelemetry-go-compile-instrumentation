@@ -222,8 +222,12 @@ func TestOtelObserver_ObserveBatchWithError(t *testing.T) {
 }
 
 func TestOtelObserver_ObserveConnect(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+
 	userConn := &dummyUserConnectObserver{}
 	obs := newOtelObserver(nil, nil, userConn)
+	obs.tracer = tp.Tracer(instrumentationName)
 
 	oc := gocql.ObservedConnect{
 		Start: time.Now(),
@@ -232,4 +236,43 @@ func TestOtelObserver_ObserveConnect(t *testing.T) {
 
 	obs.ObserveConnect(oc)
 	assert.True(t, userConn.called)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	span := spans[0]
+
+	assert.Equal(t, "CONNECT", span.Name())
+
+	attrMap := make(map[string]string)
+	for _, a := range span.Attributes() {
+		attrMap[string(a.Key)] = a.Value.AsString()
+	}
+
+	assert.Equal(t, "cassandra", attrMap["db.system.name"])
+	assert.Equal(t, "CONNECT", attrMap["db.operation.name"])
+	assert.Equal(t, codes.Ok, span.Status().Code)
+}
+
+func TestOtelObserver_ObserveConnectWithError(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+
+	obs := newOtelObserver(nil, nil, nil)
+	obs.tracer = tp.Tracer(instrumentationName)
+
+	connectErr := errors.New("dial tcp: connection refused")
+	oc := gocql.ObservedConnect{
+		Err:   connectErr,
+		Start: time.Now(),
+		End:   time.Now().Add(2 * time.Millisecond),
+	}
+
+	obs.ObserveConnect(oc)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	span := spans[0]
+
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.Equal(t, "dial tcp: connection refused", span.Status().Description)
 }

@@ -68,6 +68,9 @@ func (o *otelObserver) ObserveBatch(ctx context.Context, b gocql.ObservedBatch) 
 }
 
 func (o *otelObserver) ObserveConnect(oc gocql.ObservedConnect) {
+	if enabler.Enable() {
+		o.recordConnectSpan(oc)
+	}
 	if o.userConnect != nil {
 		o.userConnect.ObserveConnect(oc)
 	}
@@ -177,6 +180,46 @@ func (o *otelObserver) recordBatchSpan(ctx context.Context, b gocql.ObservedBatc
 	if b.Err != nil {
 		span.RecordError(b.Err)
 		span.SetStatus(codes.Error, b.Err.Error())
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+}
+
+func (o *otelObserver) recordConnectSpan(oc gocql.ObservedConnect) {
+	startTime := oc.Start
+	if startTime.IsZero() {
+		startTime = time.Now()
+	}
+	endTime := oc.End
+	if endTime.IsZero() {
+		endTime = time.Now()
+	}
+
+	_, span := o.tracer.Start(context.Background(), "CONNECT",
+		trace.WithTimestamp(startTime),
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
+	defer span.End(trace.WithTimestamp(endTime))
+
+	attrs := []attribute.KeyValue{
+		semconv.DBSystemNameCassandra,
+		semconv.DBOperationName("CONNECT"),
+	}
+	if oc.Host != nil {
+		peer := oc.Host.Peer()
+		if len(peer) > 0 {
+			attrs = append(attrs, semconv.ServerAddress(peer.String()))
+		}
+		if port := oc.Host.Port(); port > 0 {
+			attrs = append(attrs, semconv.ServerPort(port))
+		}
+	}
+
+	span.SetAttributes(attrs...)
+
+	if oc.Err != nil {
+		span.RecordError(oc.Err)
+		span.SetStatus(codes.Error, oc.Err.Error())
 	} else {
 		span.SetStatus(codes.Ok, "")
 	}
