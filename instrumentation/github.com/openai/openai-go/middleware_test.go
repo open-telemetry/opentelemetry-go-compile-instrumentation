@@ -52,6 +52,18 @@ func TestGetProviderName(t *testing.T) {
 	}
 }
 
+// TestGetProviderNameDeterministic guards against a regression to map-based
+// matching: a host that contains more than one provider keyword must resolve
+// to the same provider on every call, not vary with Go's randomized map
+// iteration order.
+func TestGetProviderNameDeterministic(t *testing.T) {
+	host := "litellm-gateway.mistral-together-proxy.internal"
+	want := getProviderName(host)
+	for i := 0; i < 50; i++ {
+		assert.Equal(t, want, getProviderName(host))
+	}
+}
+
 func TestOperationName(t *testing.T) {
 	assert.Equal(t, "chat", operationName(opChat))
 	assert.Equal(t, "text_completion", operationName(opCompletion))

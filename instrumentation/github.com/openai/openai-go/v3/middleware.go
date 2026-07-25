@@ -25,36 +25,43 @@ const (
 	maxResponseBodySize = 4 << 20 // 4 MB
 )
 
-var providerMapping = map[string]string{
-	"openai.com":         "openai",
-	"azure.com":          "azure",
-	"anthropic.com":      "anthropic",
-	"dashscope.aliyuncs": "qwen",
-	"volces.com":         "ark",
-	"ark.cn":             "ark",
-	"hunyuan":            "tencent",
-	"tencentcloudapi":    "tencent",
-	"googleapis.com":     "google",
-	"generativelanguage": "google",
-	"deepseek.com":       "deepseek",
-	"moonshot":           "moonshot",
-	"zhipuai.cn":         "zhipu",
-	"bigmodel.cn":        "zhipu",
-	"baidu.com":          "baidu",
-	"minimax":            "minimax",
-	"siliconflow":        "siliconflow",
-	"together":           "together",
-	"mistral":            "mistral",
-	"groq.com":           "groq",
-	"ollama":             "ollama",
-	"localhost":          "local",
-	"127.0.0.1":          "local",
+// providerRules is ordered, not a map: getProviderName does first-match-wins
+// substring matching, and Go randomizes map iteration order on every range.
+// A host matching more than one keyword (e.g. behind a gateway that embeds
+// several provider names) must still resolve to the same provider every time.
+var providerRules = []struct {
+	keyword  string
+	provider string
+}{
+	{"openai.com", "openai"},
+	{"azure.com", "azure"},
+	{"anthropic.com", "anthropic"},
+	{"dashscope.aliyuncs", "qwen"},
+	{"volces.com", "ark"},
+	{"ark.cn", "ark"},
+	{"hunyuan", "tencent"},
+	{"tencentcloudapi", "tencent"},
+	{"googleapis.com", "google"},
+	{"generativelanguage", "google"},
+	{"deepseek.com", "deepseek"},
+	{"moonshot", "moonshot"},
+	{"zhipuai.cn", "zhipu"},
+	{"bigmodel.cn", "zhipu"},
+	{"baidu.com", "baidu"},
+	{"minimax", "minimax"},
+	{"siliconflow", "siliconflow"},
+	{"together", "together"},
+	{"mistral", "mistral"},
+	{"groq.com", "groq"},
+	{"ollama", "ollama"},
+	{"localhost", "local"},
+	{"127.0.0.1", "local"},
 }
 
 func getProviderName(host string) string {
-	for keyword, provider := range providerMapping {
-		if strings.Contains(host, keyword) {
-			return provider
+	for _, rule := range providerRules {
+		if strings.Contains(host, rule.keyword) {
+			return rule.provider
 		}
 	}
 	return "openai"
