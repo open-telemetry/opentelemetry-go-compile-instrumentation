@@ -1,6 +1,8 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
+# yaml-language-server: $schema=../../../../tool/data/schema.json
+
 # Instrumentation for github.com/sirupsen/logrus to inject trace context into log fields
 
 hook_logrus_new:

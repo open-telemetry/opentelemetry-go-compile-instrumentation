@@ -1,6 +1,8 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
+# yaml-language-server: $schema=../../../tool/data/schema.json
+
 # Instrumentation for log/slog to inject trace context into log records as structured attributes
 
 hook_slog_new_record:

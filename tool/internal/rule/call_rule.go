@@ -37,7 +37,7 @@ type InstCallRule struct {
 
 	// FunctionCall is the qualified function name from YAML (e.g., "net/http.Get")
 	// This field is parsed into ImportPath and FuncName during rule creation.
-	FunctionCall string `json:"function_call" yaml:"function_call"`
+	FunctionCall string `json:"function_call" yaml:"function_call" jsonschema:"minLength=1"`
 
 	// ImportPath is the parsed package import path (e.g., "net/http")
 	// This field is populated during rule creation from FunctionCall.
@@ -55,17 +55,17 @@ type InstCallRule struct {
 	//   - "wrapper({{ . }})" wraps the call with wrapper()
 	//   - "(func() { return {{ . }} })()" uses an IIFE
 	//   - "otelhttp.NewTransport({{ . }})" replaces a transport value
-	Replace string `json:"replace" yaml:"replace"`
+	Replace string `json:"replace,omitempty" yaml:"replace,omitempty"`
 
 	// AppendArgs is a list of Go expression strings appended as additional
 	// arguments to the matched call. See docs/rules.md for full semantics.
-	AppendArgs []string `json:"append_args" yaml:"append_args"`
+	AppendArgs []string `json:"append_args,omitempty" yaml:"append_args,omitempty"`
 
 	// VariadicType is the element type of the variadic parameter (e.g. "grpc.DialOption").
 	// Required only when the matched call uses an ellipsis spread (f(a, opts...)).
 	// When set and the call is ellipsis, an IIFE wrapper is generated.
 	// When unset and the call is ellipsis, the call is skipped with a warning.
-	VariadicType string `json:"variadic_type" yaml:"variadic_type"`
+	VariadicType string `json:"variadic_type,omitempty" yaml:"variadic_type,omitempty"`
 }
 
 // funcNamePattern matches qualified function names like "net/http.Get".

@@ -90,10 +90,10 @@ type WhereDef struct {
 
 // InstBaseRule is the base rule for all instrumentation rules.
 type InstBaseRule struct {
-	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`
-	Target  string            `json:"target"            yaml:"target"`
-	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"` // map[alias]path
+	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`    // Explicit rule name
+	Target  string            `json:"target"            yaml:"target"`            // Target package import path or glob
+	Version string            `json:"version,omitempty" yaml:"version,omitempty"` // Version range start_inclusive,end_exclusive
+	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"` // Injected imports map (map[alias]path)
 	Where   *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
 }
 

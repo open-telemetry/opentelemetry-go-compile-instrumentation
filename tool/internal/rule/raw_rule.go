@@ -26,11 +26,11 @@ import (
 type InstRawRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Func      string `json:"func"                yaml:"func"`                // The name of the target func to be instrumented
-	Recv      string `json:"recv"                yaml:"recv"`                // The name of the receiver type
-	Raw       string `json:"raw"                 yaml:"raw"`                 // The raw code to be injected
-	Pattern   string `json:"pattern,omitempty"   yaml:"pattern,omitempty"`   // The position to inject the raw code. Must be a regex pattern
-	Placement string `json:"placement,omitempty" yaml:"placement,omitempty"` // The placement of the raw code. Can be "before" or "after". Default is "before".
+	Func      string `json:"func"                yaml:"func"                jsonschema:"minLength=1"`            // The name of the target func to be instrumented
+	Recv      string `json:"recv,omitempty"      yaml:"recv,omitempty"`                                          // The name of the receiver type
+	Raw       string `json:"raw"                 yaml:"raw"                 jsonschema:"minLength=1"`            // The raw code to be injected
+	Pattern   string `json:"pattern,omitempty"   yaml:"pattern,omitempty"   jsonschema:"format=regex"`           // The position to inject the raw code. Must be a regex pattern
+	Placement string `json:"placement,omitempty" yaml:"placement,omitempty" jsonschema:"enum=before,enum=after"` // The placement of the raw code. Can be "before" or "after". Default is "before".
 }
 
 // NewInstRawRule loads and validates an InstRawRule from YAML data.

@@ -1,3 +1,8 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# yaml-language-server: $schema=../../../../../tool/data/schema.json
+
 kafka_writer_writemessages:
   target: github.com/segmentio/kafka-go
   where:

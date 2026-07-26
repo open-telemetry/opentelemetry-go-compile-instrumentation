@@ -38,14 +38,14 @@ type InstDeclRule struct {
 
 	// Kind optionally constrains the kind of declaration to match.
 	// Valid values: "func", "var", "const", "type", or "" (match any).
-	Kind string `json:"kind" yaml:"kind"` // empty = matches any kind
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty" jsonschema:"enum=,enum=func,enum=var,enum=const,enum=type"` // empty = matches any kind
 
 	// Identifier is the name of the top-level declaration to match.
-	Identifier string `json:"identifier" yaml:"identifier"`
+	Identifier string `json:"identifier" yaml:"identifier" jsonschema:"minLength=1"`
 
 	// Replace is a Go expression to assign as the value of the matched var or
 	// const declaration. Mutually exclusive with Wrap.
-	Replace string `json:"replace" yaml:"replace"`
+	Replace string `json:"replace,omitempty" yaml:"replace,omitempty"`
 
 	// Wrap wraps the existing initializer of the matched var or const
 	// declaration using a template. {{ . }} is substituted with the original

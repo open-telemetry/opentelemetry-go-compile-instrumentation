@@ -6,7 +6,7 @@ SHELL := /bin/bash
 
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package clean setup-git \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
-        lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
+        lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile lint/rules actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
@@ -220,8 +220,8 @@ format/yaml: $(YAMLFMT)
 		-exclude '**/testdata/**' \
 		'**/*.yml' '**/*.yaml'
 
-lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile, typos)
-lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile lint/typos
+lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile, typos, rules)
+lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile lint/typos lint/rules
 
 lint/action: ## Lint GitHub Actions workflows
 lint/action: $(ACTIONLINT) ratchet/check
@@ -245,6 +245,18 @@ lint/yaml: $(YAMLFMT)
 		-exclude '**/schemas/otelc/.deps/**' \
 		-exclude '**/testdata/**' \
 		'**/*.yml' '**/*.yaml'
+
+.PHONY: schema
+schema: ## Generate JSON Schema for otelc rule files
+	@echo "Generating schema.json..."
+	@mkdir -p tool/data
+	@cd tool/cmd/otelc-lint && go run . schema > ../../data/schema.json
+	@echo "Schema generated at tool/data/schema.json"
+
+lint/rules: ## Lint otelc rule files against JSON Schema
+lint/rules: build schema
+	@echo "Linting otelc rule files..."
+	@cd tool/cmd/otelc-lint && go run . rules ../../../instrumentation/
 
 lint/dockerfile: ## Lint Dockerfiles
 lint/dockerfile: hadolint

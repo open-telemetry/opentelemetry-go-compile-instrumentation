@@ -1,3 +1,8 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# yaml-language-server: $schema=../../../../../tool/data/schema.json
+
 # Code generated from github.com/linode/linodego/v2@v2.4.1.
 # One rule per public *Client method (context + error). Unique hook names avoid
 # //go:linkname redeclaration across package files.

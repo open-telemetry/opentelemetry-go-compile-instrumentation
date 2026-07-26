@@ -1,3 +1,8 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# yaml-language-server: $schema=../../../../tool/data/schema.json
+
 mongodb_hook_connect:
   target: go.mongodb.org/mongo-driver/mongo
   where:

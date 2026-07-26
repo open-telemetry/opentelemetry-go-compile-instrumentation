@@ -1,0 +1,1036 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "FilterDef": {
+      "properties": {
+        "all-of": {
+          "items": {
+            "$ref": "#/$defs/FilterDef"
+          },
+          "type": "array",
+          "description": "AllOf, OneOf, and Not are the boolean combinators. Each composes nested\nFilterDefs so predicates can be combined. A node may use at most one\ncombinator, and a combinator may not be mixed with sibling leaf predicates\non the same node; both rules are enforced at build time."
+        },
+        "one-of": {
+          "items": {
+            "$ref": "#/$defs/FilterDef"
+          },
+          "type": "array",
+          "description": "match when at least one nested predicate matches"
+        },
+        "not": {
+          "$ref": "#/$defs/FilterDef",
+          "description": "match when the nested predicate does not match"
+        },
+        "has_func": {
+          "type": "string",
+          "description": "match files that declare this function"
+        },
+        "has_recv": {
+          "type": "string",
+          "description": "narrow has_func to this receiver type; requires has_func"
+        },
+        "has_struct": {
+          "type": "string",
+          "description": "match files that declare this struct type"
+        },
+        "has_directive": {
+          "type": "string",
+          "description": "match files carrying this //go: directive (validated, not yet executed)"
+        },
+        "has_package": {
+          "type": "string",
+          "description": "HasPackage matches source files whose declared package clause equals this\nname. The declared name is read from the parsed AST (the `package foo`\nline), not the import path (use target for that) and not the build's\ntest-ness (use is_test for that). Non-test files in a package share one\ndeclared name; an external test file may declare a different name\n(e.g. \"foo_test\")."
+        },
+        "is_test": {
+          "type": "boolean",
+          "description": "IsTest is a tri-state boolean predicate that selects or excludes test\nbuilds — compilation units the Go toolchain produces only as part of\n`go test` (a package augmented with its _test.go files, the external\nxxx_test package, or the generated _testmain.go runner). Test-ness is a\nproperty of the compile's source set, not of the import path.\n\n  is_test: true  → match only test builds\n  is_test: false → match only non-test builds\n  absent (nil)   → no filtering; the rule applies to every build"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "FilterDef describes file predicates nested under where.file."
+    },
+    "FuncSignature": {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "The argument types to match"
+        },
+        "returns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "The result types to match"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "FuncSignature specifies the argument and result types used by signature sub-filters on InstFuncRule."
+    },
+    "InstCallRuleDo": {
+      "properties": {
+        "replace": {
+          "type": "string",
+          "description": "Replace is the wrapper code with {{ . }} as placeholder for the original call.\nThe replacement must be a valid Go expression. The output may be any\nexpression type; it is not required to be a call expression.\n\nExamples:\n  - \"wrapper({{ . }})\" wraps the call with wrapper()\n  - \"(func() { return {{ . }} })()\" uses an IIFE\n  - \"otelhttp.NewTransport({{ . }})\" replaces a transport value"
+        },
+        "append_args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "AppendArgs is a list of Go expression strings appended as additional\narguments to the matched call. See docs/rules.md for full semantics."
+        },
+        "variadic_type": {
+          "type": "string",
+          "description": "VariadicType is the element type of the variadic parameter (e.g. \"grpc.DialOption\").\nRequired only when the matched call uses an ellipsis spread (f(a, opts...)).\nWhen set and the call is ellipsis, an IIFE wrapper is generated.\nWhen unset and the call is ellipsis, the call is skipped with a warning."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "InstCallRule represents a rule that wraps function calls at call sites."
+    },
+    "InstCallRuleWhere": {
+      "properties": {
+        "function_call": {
+          "type": "string",
+          "minLength": 1,
+          "description": "FunctionCall is the qualified function name from YAML (e.g., \"net/http.Get\")\nThis field is parsed into ImportPath and FuncName during rule creation."
+        },
+        "file": {
+          "$ref": "#/$defs/FilterDef",
+          "description": "File-level predicates"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "function_call"
+      ],
+      "description": "InstCallRule represents a rule that wraps function calls at call sites."
+    },
+    "InstDeclRuleDo": {
+      "properties": {
+        "replace": {
+          "type": "string",
+          "description": "Replace is a Go expression to assign as the value of the matched var or\nconst declaration. Mutually exclusive with Wrap."
+        },
+        "wrap": {
+          "type": "string",
+          "description": "Wrap wraps the existing initializer of the matched var or const\ndeclaration using a template. {{ . }} is substituted with the original\nexpression. Mutually exclusive with Replace. An error is returned at\ninstrumentation time if the declaration has no initializer."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "InstDeclRule represents a rule that matches a named top-level declaration (function, type, variable, or constant) and applies an action to it."
+    },
+    "InstDeclRuleWhere": {
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "",
+            "func",
+            "var",
+            "const",
+            "type"
+          ],
+          "description": "Kind optionally constrains the kind of declaration to match.\nValid values: \"func\", \"var\", \"const\", \"type\", or \"\" (match any)."
+        },
+        "identifier": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier is the name of the top-level declaration to match."
+        },
+        "file": {
+          "$ref": "#/$defs/FilterDef",
+          "description": "File-level predicates"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "identifier"
+      ],
+      "description": "InstDeclRule represents a rule that matches a named top-level declaration (function, type, variable, or constant) and applies an action to it."
+    },
+    "InstDirectiveRuleDo": {
+      "properties": {
+        "template": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Go text/template rendered into code prepended to matching functions"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "template"
+      ],
+      "description": "InstDirectiveRule represents a rule that instruments functions annotated with magic comments (e.g., //otelc:span) by prepending templated Go code into their bodies."
+    },
+    "InstDirectiveRuleWhere": {
+      "properties": {
+        "directive": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The directive name to match (without //)"
+        },
+        "file": {
+          "$ref": "#/$defs/FilterDef",
+          "description": "File-level predicates"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "directive"
+      ],
+      "description": "InstDirectiveRule represents a rule that instruments functions annotated with magic comments (e.g., //otelc:span) by prepending templated Go code into their bodies."
+    },
+    "InstFileRuleDo": {
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The name of the file to be added to the target package"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The import path where the file is located"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "file",
+        "path"
+      ],
+      "description": "InstFileRule represents a rule that allows adding a new file to the target package."
+    },
+    "InstFileRuleWhere": {
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/FilterDef",
+          "description": "File-level predicates"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "InstFileRule represents a rule that allows adding a new file to the target package."
+    },
+    "InstFuncRuleDo": {
+      "properties": {
+        "before": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The function we inject at the target function entry"
+        },
+        "after": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The function we inject at the target function exit"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The import path where hook code is located"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "description": "InstFuncRule represents a rule that guides hook function injection into appropriate target function locations."
+    },
+    "InstFuncRuleWhere": {
+      "properties": {
+        "func": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The name of the target func to be instrumented"
+        },
+        "recv": {
+          "type": "string",
+          "description": "The name of the receiver type"
+        },
+        "signature": {
+          "$ref": "#/$defs/FuncSignature",
+          "description": "The function signature to match"
+        },
+        "signature_contains": {
+          "$ref": "#/$defs/FuncSignature",
+          "description": "The function signature to match (contains)"
+        },
+        "result": {
+          "type": "string",
+          "description": "The result to match"
+        },
+        "last_result": {
+          "type": "string",
+          "description": "The last result to match"
+        },
+        "param": {
+          "type": "string",
+          "description": "The param to match"
+        },
+        "file": {
+          "$ref": "#/$defs/FilterDef",
+          "description": "File-level predicates"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "func"
+      ],
+      "description": "InstFuncRule represents a rule that guides hook function injection into appropriate target function locations."
+    },
+    "InstRawRuleDo": {
+      "properties": {
+        "raw": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The raw code to be injected"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "raw"
+      ],
+      "description": "InstRawRule represents a rule that allows raw Go source code injection into appropriate target function locations."
+    },
+    "InstRawRuleWhere": {
+      "properties": {
+        "func": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The name of the target func to be instrumented"
+        },
+        "recv": {
+          "type": "string",
+          "description": "The name of the receiver type"
+        },
+        "pattern": {
+          "type": "string",
+          "format": "regex",
+          "description": "The position to inject the raw code. Must be a regex pattern"
+        },
+        "placement": {
+          "type": "string",
+          "enum": [
+            "before",
+            "after"
+          ],
+          "description": "The placement of the raw code. Can be \"before\" or \"after\". Default is \"before\"."
+        },
+        "file": {
+          "$ref": "#/$defs/FilterDef",
+          "description": "File-level predicates"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "func"
+      ],
+      "dependentRequired": {
+        "placement": [
+          "pattern"
+        ]
+      },
+      "description": "InstRawRule represents a rule that allows raw Go source code injection into appropriate target function locations."
+    },
+    "InstStructField": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The name of the field to be added"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The type of the field to be added"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "description": "InstStructField represents a single field to be added to a struct."
+    },
+    "InstStructRuleDo": {
+      "properties": {
+        "new_field": {
+          "items": {
+            "$ref": "#/$defs/InstStructField"
+          },
+          "type": "array",
+          "description": "The new fields to be added"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "new_field"
+      ],
+      "description": "InstStructRule represents a rule that adds new fields to a target struct."
+    },
+    "InstStructRuleWhere": {
+      "properties": {
+        "struct": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The type name of the struct to be instrumented"
+        },
+        "file": {
+          "$ref": "#/$defs/FilterDef",
+          "description": "File-level predicates"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "struct"
+      ],
+      "description": "InstStructRule represents a rule that adds new fields to a target struct."
+    }
+  },
+  "additionalProperties": {
+    "allOf": [
+      {
+        "oneOf": [
+          {
+            "properties": {
+              "do": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "inject_hooks": {
+                          "$ref": "#/$defs/InstFuncRuleDo",
+                          "description": "InstFuncRule represents a rule that guides hook function injection into appropriate target function locations."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "inject_hooks"
+                      ]
+                    },
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  {
+                    "properties": {
+                      "inject_hooks": {
+                        "$ref": "#/$defs/InstFuncRuleDo",
+                        "description": "InstFuncRule represents a rule that guides hook function injection into appropriate target function locations."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "inject_hooks"
+                    ]
+                  }
+                ]
+              },
+              "where": {
+                "$ref": "#/$defs/InstFuncRuleWhere"
+              }
+            },
+            "required": [
+              "do",
+              "where"
+            ],
+            "title": "Function Rule"
+          },
+          {
+            "properties": {
+              "do": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "inject_code": {
+                          "$ref": "#/$defs/InstRawRuleDo",
+                          "description": "InstRawRule represents a rule that allows raw Go source code injection into appropriate target function locations."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "inject_code"
+                      ]
+                    },
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  {
+                    "properties": {
+                      "inject_code": {
+                        "$ref": "#/$defs/InstRawRuleDo",
+                        "description": "InstRawRule represents a rule that allows raw Go source code injection into appropriate target function locations."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "inject_code"
+                    ]
+                  }
+                ]
+              },
+              "where": {
+                "$ref": "#/$defs/InstRawRuleWhere"
+              }
+            },
+            "required": [
+              "do",
+              "where"
+            ],
+            "title": "Raw Code Rule"
+          },
+          {
+            "properties": {
+              "do": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "add_struct_fields": {
+                          "$ref": "#/$defs/InstStructRuleDo",
+                          "description": "InstStructRule represents a rule that adds new fields to a target struct."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "add_struct_fields"
+                      ]
+                    },
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  {
+                    "properties": {
+                      "add_struct_fields": {
+                        "$ref": "#/$defs/InstStructRuleDo",
+                        "description": "InstStructRule represents a rule that adds new fields to a target struct."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "add_struct_fields"
+                    ]
+                  }
+                ]
+              },
+              "where": {
+                "$ref": "#/$defs/InstStructRuleWhere"
+              }
+            },
+            "required": [
+              "do",
+              "where"
+            ],
+            "title": "Struct Rule"
+          },
+          {
+            "properties": {
+              "do": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "wrap_call": {
+                          "$ref": "#/$defs/InstCallRuleDo",
+                          "description": "InstCallRule represents a rule that wraps function calls at call sites."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "wrap_call"
+                      ]
+                    },
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  {
+                    "properties": {
+                      "wrap_call": {
+                        "$ref": "#/$defs/InstCallRuleDo",
+                        "description": "InstCallRule represents a rule that wraps function calls at call sites."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "wrap_call"
+                    ]
+                  }
+                ]
+              },
+              "where": {
+                "$ref": "#/$defs/InstCallRuleWhere"
+              }
+            },
+            "required": [
+              "do",
+              "where"
+            ],
+            "title": "Call Rule"
+          },
+          {
+            "properties": {
+              "do": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "expand_directive": {
+                          "$ref": "#/$defs/InstDirectiveRuleDo",
+                          "description": "InstDirectiveRule represents a rule that instruments functions annotated with magic comments (e.g., //otelc:span) by prepending templated Go code into their bodies."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "expand_directive"
+                      ]
+                    },
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  {
+                    "properties": {
+                      "expand_directive": {
+                        "$ref": "#/$defs/InstDirectiveRuleDo",
+                        "description": "InstDirectiveRule represents a rule that instruments functions annotated with magic comments (e.g., //otelc:span) by prepending templated Go code into their bodies."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "expand_directive"
+                    ]
+                  }
+                ]
+              },
+              "where": {
+                "$ref": "#/$defs/InstDirectiveRuleWhere"
+              }
+            },
+            "required": [
+              "do",
+              "where"
+            ],
+            "title": "Directive Rule"
+          },
+          {
+            "properties": {
+              "do": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "add_file": {
+                          "$ref": "#/$defs/InstFileRuleDo",
+                          "description": "InstFileRule represents a rule that allows adding a new file to the target package."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "add_file"
+                      ]
+                    },
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  {
+                    "properties": {
+                      "add_file": {
+                        "$ref": "#/$defs/InstFileRuleDo",
+                        "description": "InstFileRule represents a rule that allows adding a new file to the target package."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "add_file"
+                    ]
+                  }
+                ]
+              },
+              "where": {
+                "$ref": "#/$defs/InstFileRuleWhere"
+              }
+            },
+            "required": [
+              "do"
+            ],
+            "title": "File Rule"
+          },
+          {
+            "properties": {
+              "do": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "assign_value": {
+                          "$ref": "#/$defs/InstDeclRuleDo",
+                          "description": "InstDeclRule represents a rule that matches a named top-level declaration (function, type, variable, or constant) and applies an action to it."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "assign_value"
+                      ]
+                    },
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  {
+                    "properties": {
+                      "assign_value": {
+                        "$ref": "#/$defs/InstDeclRuleDo",
+                        "description": "InstDeclRule represents a rule that matches a named top-level declaration (function, type, variable, or constant) and applies an action to it."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "assign_value"
+                    ]
+                  }
+                ]
+              },
+              "where": {
+                "$ref": "#/$defs/InstDeclRuleWhere"
+              }
+            },
+            "required": [
+              "do",
+              "where"
+            ],
+            "title": "Declaration Rule"
+          }
+        ]
+      }
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Explicit rule name"
+      },
+      "target": {
+        "type": "string",
+        "description": "Target package import path or glob"
+      },
+      "version": {
+        "type": "string",
+        "description": "Version range start_inclusive,end_exclusive"
+      },
+      "imports": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object",
+        "description": "Injected imports map (map[alias]path)"
+      },
+      "where": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/InstFuncRuleWhere"
+          },
+          {
+            "$ref": "#/$defs/InstRawRuleWhere"
+          },
+          {
+            "$ref": "#/$defs/InstStructRuleWhere"
+          },
+          {
+            "$ref": "#/$defs/InstCallRuleWhere"
+          },
+          {
+            "$ref": "#/$defs/InstDirectiveRuleWhere"
+          },
+          {
+            "$ref": "#/$defs/InstFileRuleWhere"
+          },
+          {
+            "$ref": "#/$defs/InstDeclRuleWhere"
+          }
+        ],
+        "description": "Rule matching conditions. Available fields depend on the rule type."
+      },
+      "do": {
+        "anyOf": [
+          {
+            "oneOf": [
+              {
+                "items": {
+                  "properties": {
+                    "inject_hooks": {
+                      "$ref": "#/$defs/InstFuncRuleDo",
+                      "description": "InstFuncRule represents a rule that guides hook function injection into appropriate target function locations."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "inject_hooks"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "properties": {
+                  "inject_hooks": {
+                    "$ref": "#/$defs/InstFuncRuleDo",
+                    "description": "InstFuncRule represents a rule that guides hook function injection into appropriate target function locations."
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "inject_hooks"
+                ]
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "items": {
+                  "properties": {
+                    "inject_code": {
+                      "$ref": "#/$defs/InstRawRuleDo",
+                      "description": "InstRawRule represents a rule that allows raw Go source code injection into appropriate target function locations."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "inject_code"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "properties": {
+                  "inject_code": {
+                    "$ref": "#/$defs/InstRawRuleDo",
+                    "description": "InstRawRule represents a rule that allows raw Go source code injection into appropriate target function locations."
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "inject_code"
+                ]
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "items": {
+                  "properties": {
+                    "add_struct_fields": {
+                      "$ref": "#/$defs/InstStructRuleDo",
+                      "description": "InstStructRule represents a rule that adds new fields to a target struct."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "add_struct_fields"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "properties": {
+                  "add_struct_fields": {
+                    "$ref": "#/$defs/InstStructRuleDo",
+                    "description": "InstStructRule represents a rule that adds new fields to a target struct."
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "add_struct_fields"
+                ]
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "items": {
+                  "properties": {
+                    "wrap_call": {
+                      "$ref": "#/$defs/InstCallRuleDo",
+                      "description": "InstCallRule represents a rule that wraps function calls at call sites."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "wrap_call"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "properties": {
+                  "wrap_call": {
+                    "$ref": "#/$defs/InstCallRuleDo",
+                    "description": "InstCallRule represents a rule that wraps function calls at call sites."
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "wrap_call"
+                ]
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "items": {
+                  "properties": {
+                    "expand_directive": {
+                      "$ref": "#/$defs/InstDirectiveRuleDo",
+                      "description": "InstDirectiveRule represents a rule that instruments functions annotated with magic comments (e.g., //otelc:span) by prepending templated Go code into their bodies."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "expand_directive"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "properties": {
+                  "expand_directive": {
+                    "$ref": "#/$defs/InstDirectiveRuleDo",
+                    "description": "InstDirectiveRule represents a rule that instruments functions annotated with magic comments (e.g., //otelc:span) by prepending templated Go code into their bodies."
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "expand_directive"
+                ]
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "items": {
+                  "properties": {
+                    "add_file": {
+                      "$ref": "#/$defs/InstFileRuleDo",
+                      "description": "InstFileRule represents a rule that allows adding a new file to the target package."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "add_file"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "properties": {
+                  "add_file": {
+                    "$ref": "#/$defs/InstFileRuleDo",
+                    "description": "InstFileRule represents a rule that allows adding a new file to the target package."
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "add_file"
+                ]
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "items": {
+                  "properties": {
+                    "assign_value": {
+                      "$ref": "#/$defs/InstDeclRuleDo",
+                      "description": "InstDeclRule represents a rule that matches a named top-level declaration (function, type, variable, or constant) and applies an action to it."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "assign_value"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "properties": {
+                  "assign_value": {
+                    "$ref": "#/$defs/InstDeclRuleDo",
+                    "description": "InstDeclRule represents a rule that matches a named top-level declaration (function, type, variable, or constant) and applies an action to it."
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "assign_value"
+                ]
+              }
+            ]
+          }
+        ],
+        "description": "Rule actions to perform when matched. Available actions depend on the rule type."
+      }
+    },
+    "type": "object",
+    "required": [
+      "target"
+    ],
+    "title": "Instrumentation Rule",
+    "description": "A single otelc instrumentation rule."
+  },
+  "type": "object",
+  "title": "OpenTelemetry Go Compile Instrumentation Rule File",
+  "description": "Schema for otelc instrumentation rule files"
+}

@@ -1,3 +1,8 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# yaml-language-server: $schema=../../../../tool/data/schema.json
+
 anthropic_v1_new_client:
   target: github.com/anthropics/anthropic-sdk-go
   version: v1.0.0
