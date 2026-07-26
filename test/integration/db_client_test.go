@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"go.opentelemetry.io/otelc/test/testutil"
@@ -103,6 +104,22 @@ func TestDBClient(t *testing.T) {
 			testutil.HasAttribute("db.operation.name", "COMMIT"),
 		)
 		require.Equal(t, "COMMIT", commitSpan.Name())
+	})
+
+	t.Run("TransactionFailure", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-fail")
+
+		spans := testutil.AllSpans(f.Traces())
+		require.Equal(t, 1, len(spans), "Expected 1 span for failed transaction begin")
+
+		beginSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "START"),
+		)
+		require.Equal(t, "START", beginSpan.Name())
+		require.Equal(t, ptrace.StatusCodeError, beginSpan.Status().Code())
 	})
 
 	t.Run("All", func(t *testing.T) {

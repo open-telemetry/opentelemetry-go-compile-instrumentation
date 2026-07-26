@@ -19,7 +19,7 @@ import (
 var (
 	driverName = flag.String("driver", "testdb", "The database driver name")
 	dsn        = flag.String("dsn", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", "The data source name")
-	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, prepare, all")
+	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-fail, prepare, all")
 )
 
 func main() {
@@ -42,6 +42,8 @@ func main() {
 		doQuery(ctx, db)
 	case "tx":
 		doTx(ctx, db)
+	case "tx-fail":
+		doTxFail(ctx, db)
 	case "prepare":
 		doPrepare(ctx, db)
 	case "all":
@@ -121,4 +123,17 @@ func doTx(ctx context.Context, db *sql.DB) {
 		log.Fatalf("failed to commit: %v", err)
 	}
 	slog.Info("transaction committed")
+}
+
+func doTxFail(ctx context.Context, db *sql.DB) {
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	tx, err := db.BeginTx(canceledCtx, nil)
+	if err == nil {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+		log.Fatalf("expected begin tx to fail with canceled context")
+	}
+	slog.Info("begin tx failed as expected", "error", err)
 }
