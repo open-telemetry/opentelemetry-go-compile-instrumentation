@@ -50,8 +50,8 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: test/.otelc-gocache
-          key: ${{ runner.os }}-amd64-otelc-gocache-coverage-${{ hashFiles('go.mod',
-            '**/go.mod', '**/go.sum', 'Makefile', 'tool/**', 'pkg/**', 'instrumentation/**', 'test/apps/**') }}
+          key: ${{ runner.os }}-amd64-otelc-gocache-coverage-${{ hashFiles('go.mod', '**/go.mod', '**/go.sum', 'Makefile',
+            'tool/**', 'pkg/**', 'instrumentation/**', 'test/apps/**') }}
       - name: Run coverage integration tests
         env:
           OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache
