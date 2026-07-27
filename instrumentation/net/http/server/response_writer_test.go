@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -183,6 +184,33 @@ func TestWriterWrapper_Push_NotSupported(t *testing.T) {
 
 	err := wrapper.Push("/test", nil)
 	require.ErrorIs(t, err, http.ErrNotSupported)
+}
+
+func TestWriterWrapper_Unwrap(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	wrapper := &writerWrapper{ResponseWriter: recorder}
+
+	assert.Same(t, recorder, wrapper.Unwrap())
+}
+
+// mockDeadlineWriter is a mock ResponseWriter that supports read deadlines, a
+// capability http.ResponseController can only reach through Unwrap.
+type mockDeadlineWriter struct {
+	http.ResponseWriter
+	deadlineSet bool
+}
+
+func (m *mockDeadlineWriter) SetReadDeadline(time.Time) error {
+	m.deadlineSet = true
+	return nil
+}
+
+func TestWriterWrapper_ResponseControllerReachesUnderlyingWriter(t *testing.T) {
+	mock := &mockDeadlineWriter{ResponseWriter: httptest.NewRecorder()}
+	wrapper := &writerWrapper{ResponseWriter: mock}
+
+	require.NoError(t, http.NewResponseController(wrapper).SetReadDeadline(time.Time{}))
+	assert.True(t, mock.deadlineSet)
 }
 
 func TestWriterWrapper_MultipleStatusCodes(t *testing.T) {
