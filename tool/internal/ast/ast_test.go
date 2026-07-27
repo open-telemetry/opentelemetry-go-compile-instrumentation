@@ -59,3 +59,18 @@ func BenchmarkParsePackageName(b *testing.B) {
 		}
 	}
 }
+
+func TestWriteFile(t *testing.T) {
+	f, err := ParseFile("ast_test.go")
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "out.go")
+	err = WriteFile(outPath, f)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "package ast")
+}
+

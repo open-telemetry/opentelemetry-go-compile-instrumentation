@@ -97,11 +97,13 @@ func WriteFile(filePath string, root *dst.File) error {
 	if err != nil {
 		return ex.Wrapf(err, "failed to create file %s", filePath)
 	}
-	defer file.Close()
 	r := decorator.NewRestorer()
-	err = r.Fprint(file, root)
-	if err != nil {
+	if err = r.Fprint(file, root); err != nil {
+		_ = file.Close()
 		return ex.Wrapf(err, "failed to write to file %s", filePath)
+	}
+	if err := file.Close(); err != nil {
+		return ex.Wrapf(err, "failed to close file %s", filePath)
 	}
 	return nil
 }
