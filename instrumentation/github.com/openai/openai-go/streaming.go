@@ -11,12 +11,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
 )
 
 type streamingReader struct {
+	ctx           context.Context
 	reader        io.ReadCloser
 	teeReader     io.Reader
 	logBuffer     *bytes.Buffer
@@ -43,9 +45,10 @@ func newStreamingReader(
 	start time.Time,
 	model, opName, provider string,
 	op operationType,
-	_ context.Context,
+	ctx context.Context,
 ) *streamingReader {
 	return &streamingReader{
+		ctx:      ctx,
 		reader:   body,
 		start:    start,
 		span:     span,
@@ -103,6 +106,16 @@ func (r *streamingReader) finalize() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
 		r.span.SetAttributes(semconv.GenAIResponseTimeToFirstToken(firstTokenUs))
 	}
+
+	// Record token usage with the same base attributes the middleware builds
+	// for non-streaming responses, so streaming and non-streaming metrics match.
+	baseAttrs := []attribute.KeyValue{
+		semconv.GenAISystem("openai"),
+		semconv.GenAIOperationName(r.opName),
+		semconv.GenAIRequestModel(r.model),
+		semconv.GenAIProviderName(r.provider),
+	}
+	recordTokenUsage(r.ctx, baseAttrs, r.inputTokens, r.outputTokens)
 
 	r.span.End()
 }

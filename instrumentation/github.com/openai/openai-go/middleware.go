@@ -14,6 +14,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
@@ -176,7 +177,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
 			resp.Body = newStreamingReader(resp.Body, span, start, model, opName, provider, op, ctx)
 		} else {
-			handleNonStreamingResponse(ctx, resp, span, start, op)
+			handleNonStreamingResponse(ctx, resp, span, op, baseAttrs)
 		}
 
 		return resp, nil
@@ -184,11 +185,11 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 }
 
 func handleNonStreamingResponse(
-	_ context.Context,
+	ctx context.Context,
 	resp *http.Response,
 	span trace.Span,
-	_ time.Time,
 	op operationType,
+	baseAttrs []attribute.KeyValue,
 ) {
 	defer span.End()
 
@@ -205,13 +206,36 @@ func handleNonStreamingResponse(
 		return
 	}
 
+	var inputTokens, outputTokens int64
 	switch op {
 	case opChat:
-		parseChatResponse(bodyBytes, span)
+		inputTokens, outputTokens = parseChatResponse(bodyBytes, span)
 	case opCompletion:
-		parseCompletionResponse(bodyBytes, span)
+		inputTokens, outputTokens = parseCompletionResponse(bodyBytes, span)
 	case opEmbedding:
-		parseEmbeddingResponse(bodyBytes, span)
+		inputTokens, outputTokens = parseEmbeddingResponse(bodyBytes, span)
+	}
+	recordTokenUsage(ctx, baseAttrs, inputTokens, outputTokens)
+}
+
+// recordTokenUsage emits the gen_ai.client.token.usage histogram, once per
+// token type that has a non-zero count. The base attributes are copied so the
+// gen_ai.token.type tag never mutates the caller's slice.
+func recordTokenUsage(ctx context.Context, baseAttrs []attribute.KeyValue, inputTokens, outputTokens int64) {
+	if tokenUsage == nil {
+		return
+	}
+	record := func(tokens int64, tokenType string) {
+		attrs := make([]attribute.KeyValue, 0, len(baseAttrs)+1)
+		attrs = append(attrs, baseAttrs...)
+		attrs = append(attrs, semconv.GenAITokenType(tokenType))
+		tokenUsage.Record(ctx, tokens, metric.WithAttributes(attrs...))
+	}
+	if inputTokens > 0 {
+		record(inputTokens, "input")
+	}
+	if outputTokens > 0 {
+		record(outputTokens, "output")
 	}
 }
 
@@ -281,7 +305,9 @@ func parseEmbeddingRequest(body []byte) (string, []attribute.KeyValue) {
 	return req.Model, nil
 }
 
-func parseChatResponse(body []byte, span trace.Span) {
+// parseChatResponse sets response attributes on the span and returns the
+// input and output token counts for metric recording.
+func parseChatResponse(body []byte, span trace.Span) (int64, int64) {
 	var resp struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
@@ -295,7 +321,7 @@ func parseChatResponse(body []byte, span trace.Span) {
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return
+		return 0, 0
 	}
 
 	var reasons []string
@@ -313,9 +339,12 @@ func parseChatResponse(body []byte, span trace.Span) {
 		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
 		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
 	)
+	return resp.Usage.PromptTokens, resp.Usage.CompletionTokens
 }
 
-func parseCompletionResponse(body []byte, span trace.Span) {
+// parseCompletionResponse sets response attributes on the span and returns the
+// input and output token counts for metric recording.
+func parseCompletionResponse(body []byte, span trace.Span) (int64, int64) {
 	var resp struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
@@ -329,7 +358,7 @@ func parseCompletionResponse(body []byte, span trace.Span) {
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return
+		return 0, 0
 	}
 
 	var reasons []string
@@ -347,9 +376,12 @@ func parseCompletionResponse(body []byte, span trace.Span) {
 		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
 		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
 	)
+	return resp.Usage.PromptTokens, resp.Usage.CompletionTokens
 }
 
-func parseEmbeddingResponse(body []byte, span trace.Span) {
+// parseEmbeddingResponse sets response attributes on the span and returns the
+// input token count; embeddings have no output tokens.
+func parseEmbeddingResponse(body []byte, span trace.Span) (int64, int64) {
 	var resp struct {
 		Model string `json:"model"`
 		Usage struct {
@@ -358,7 +390,7 @@ func parseEmbeddingResponse(body []byte, span trace.Span) {
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return
+		return 0, 0
 	}
 
 	span.SetAttributes(
@@ -366,4 +398,5 @@ func parseEmbeddingResponse(body []byte, span trace.Span) {
 		semconv.GenAIUsageInputTokens(resp.Usage.PromptTokens),
 		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
 	)
+	return resp.Usage.PromptTokens, 0
 }
