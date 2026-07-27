@@ -103,6 +103,11 @@ func WriteFile(filePath string, root *dst.File) error {
 	if err != nil {
 		return ex.Wrapf(err, "failed to write to file %s", filePath)
 	}
+	if err := file.Close(); err != nil {
+		return ex.Wrapf(err, "failed to close file %s", filePath)
+	if err != nil {
+		return ex.Wrapf(err, "failed to write to file %s", filePath)
+	}
 	return nil
 }
 
