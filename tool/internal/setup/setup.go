@@ -398,6 +398,24 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
+	// The SDK bootstrap (instrumentation/go.opentelemetry.io/otel/init) always
+	// injects go.opentelemetry.io/otel/sdk/trace into the build via init_sdk's
+	// root-target add_file (init_sdk's target "main" always matches), but that
+	// injection happens during the later toolexec compile, after this dry run
+	// completes. Without accounting for it here, sdk/trace's own exact-target
+	// hook rules (which wire spans into the goroutine-local storage that
+	// log/slog and logrus read from) never match unless the target application
+	// also imports go.opentelemetry.io/otel/sdk/trace itself.
+	if !slices.ContainsFunc(deps, func(d *Dependency) bool {
+		return d.ImportPath == bootstrapSdkTracePkg
+	}) {
+		bootstrapDeps, bsErr := resolveBootstrapDeps(ctx)
+		if bsErr != nil {
+			return ex.Wrapf(bsErr, "resolving SDK bootstrap dependencies")
+		}
+		deps = append(deps, bootstrapDeps...)
+	}
+
 	// Match the hook code with these dependencies
 	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
 	if err != nil {
