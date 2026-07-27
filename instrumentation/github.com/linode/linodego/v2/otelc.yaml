@@ -1,0 +1,13 @@
+# (*Client).doRequest is the shared HTTP path for nearly all API calls.
+# Present with a stable signature from linodego v2.0.0 onward.
+linodego_hook_dorequest:
+  target: github.com/linode/linodego/v2
+  version: v2.0.0
+  where:
+    func: doRequest
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDoRequest
+        after: AfterDoRequest
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
