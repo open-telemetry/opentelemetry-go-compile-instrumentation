@@ -45,7 +45,17 @@ jobs:
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
           go-version-file: go.mod
-      - run: make test-integration/coverage
+          cache-dependency-path: "**/go.mod"
+      - name: Restore otelc Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: test/.otelc-gocache
+          key: ${{ runner.os }}-amd64-otelc-gocache-coverage-${{ hashFiles('go.mod', '**/go.mod', '**/go.sum', 'Makefile',
+            'tool/**', 'pkg/**', 'instrumentation/**', 'test/apps/**') }}
+      - name: Run coverage integration tests
+        env:
+          OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache
+        run: make test-integration/coverage
       - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
 
   test-integration:
