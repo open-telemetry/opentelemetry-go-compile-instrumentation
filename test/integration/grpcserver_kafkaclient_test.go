@@ -27,7 +27,7 @@ func TestGRPCServerKafkaClient(t *testing.T) {
 	}
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
-	// Not using t.Parallel() here to prevent CI resource exhaustion 
+	// Not using t.Parallel() here to prevent CI resource exhaustion
 	// from spinning up multiple heavy Kafka testcontainers simultaneously.
 	testutil.Build(t, "", "grpcserverkafkaclient", "go", "build", "-a")
 

@@ -1,3 +1,8 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# yaml-language-server: $schema=../../../tool/data/schema.json
+
 k8s_hook_processdeltas:
   target: k8s.io/client-go/tools/cache
   version: "v0.34.0,v0.36.0"

@@ -20,8 +20,8 @@ import (
 // (signature_contains), each entry is checked for presence anywhere in the
 // corresponding list.
 type FuncSignature struct {
-	Args    []string `json:"args,omitempty"    yaml:"args"`
-	Returns []string `json:"returns,omitempty" yaml:"returns"`
+	Args    []string `json:"args,omitempty"    yaml:"args"`    // The argument types to match
+	Returns []string `json:"returns,omitempty" yaml:"returns"` // The result types to match
 }
 
 // InstFuncRule represents a rule that guides hook function injection into
@@ -49,21 +49,22 @@ type FuncSignature struct {
 type InstFuncRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Func   string `json:"func"   yaml:"func"`   // The name of the target func to be instrumented
-	Recv   string `json:"recv"   yaml:"recv"`   // The name of the receiver type
-	Before string `json:"before" yaml:"before"` // The function we inject at the target function entry
-	After  string `json:"after"  yaml:"after"`  // The function we inject at the target function exit
-	Path   string `json:"path"   yaml:"path"`   // The import path where hook code is located
+	Func   string `json:"func"             yaml:"func"   jsonschema:"minLength=1"`                      // The name of the target func to be instrumented
+	Recv   string `json:"recv,omitempty"   yaml:"recv"`                                                 // The name of the receiver type
+	Before string `json:"before,omitempty" yaml:"before" jsonschema:"minLength=1,anyof_required=hooks"` // The function we inject at the target function entry
+	After  string `json:"after,omitempty"  yaml:"after"  jsonschema:"minLength=1,anyof_required=hooks"` // The function we inject at the target function exit
+	Path   string `json:"path"             yaml:"path"   jsonschema:"minLength=1"`                      // The import path where hook code is located
 
 	ResolvedPath string `json:"resolved_path" yaml:"-"` // The local path of the package directory resolved from import path
 
 	// Optional signature sub-filters (all non-empty filters must match; combined
 	// with AND logic so any combination is allowed).
-	Signature         *FuncSignature `json:"signature,omitempty"          yaml:"signature"`
-	SignatureContains *FuncSignature `json:"signature_contains,omitempty" yaml:"signature_contains"`
-	Result            string         `json:"result,omitempty"             yaml:"result"`
-	LastResult        string         `json:"last_result,omitempty"        yaml:"last_result"`
-	Param             string         `json:"param,omitempty"              yaml:"param"`
+
+	Signature         *FuncSignature `json:"signature,omitempty"          yaml:"signature"`          // The function signature to match
+	SignatureContains *FuncSignature `json:"signature_contains,omitempty" yaml:"signature_contains"` // The function signature to match (contains)
+	Result            string         `json:"result,omitempty"             yaml:"result"`             // The result to match
+	LastResult        string         `json:"last_result,omitempty"        yaml:"last_result"`        // The last result to match
+	Param             string         `json:"param,omitempty"              yaml:"param"`              // The param to match
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
