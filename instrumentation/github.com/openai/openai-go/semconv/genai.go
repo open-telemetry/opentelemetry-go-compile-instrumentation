@@ -25,6 +25,7 @@ const (
 	GenAIRequestPresencePenaltyKey   = attribute.Key("gen_ai.request.presence_penalty")
 	GenAIRequestIsStreamKey          = attribute.Key("gen_ai.request.is_stream")
 	GenAIResponseTimeToFirstTokenKey = attribute.Key("gen_ai.response.time_to_first_token")
+	GenAITokenTypeKey                = attribute.Key("gen_ai.token.type")
 )
 
 func GenAISystem(val string) attribute.KeyValue {
@@ -93,4 +94,10 @@ func GenAIRequestIsStream(val bool) attribute.KeyValue {
 
 func GenAIResponseTimeToFirstToken(microseconds int64) attribute.KeyValue {
 	return GenAIResponseTimeToFirstTokenKey.Int64(microseconds)
+}
+
+// GenAITokenType tags a gen_ai.client.token.usage measurement as counting
+// "input" or "output" tokens.
+func GenAITokenType(val string) attribute.KeyValue {
+	return GenAITokenTypeKey.String(val)
 }
