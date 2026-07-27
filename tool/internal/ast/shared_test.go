@@ -74,13 +74,21 @@ func TestStripGenericTypes(t *testing.T) {
 			expected: "*GenStruct",
 		},
 		{
-			name:     "multi param generic value receiver",
-			expr:     &dst.IndexListExpr{X: &dst.Ident{Name: "GenStruct"}, Indices: []dst.Expr{&dst.Ident{Name: "T"}, &dst.Ident{Name: "K"}}},
+			name: "multi param generic value receiver",
+			expr: &dst.IndexListExpr{
+				X:       &dst.Ident{Name: "GenStruct"},
+				Indices: []dst.Expr{&dst.Ident{Name: "T"}, &dst.Ident{Name: "K"}},
+			},
 			expected: "GenStruct",
 		},
 		{
-			name:     "multi param generic pointer receiver",
-			expr:     &dst.StarExpr{X: &dst.IndexListExpr{X: &dst.Ident{Name: "GenStruct"}, Indices: []dst.Expr{&dst.Ident{Name: "T"}, &dst.Ident{Name: "K"}}}},
+			name: "multi param generic pointer receiver",
+			expr: &dst.StarExpr{
+				X: &dst.IndexListExpr{
+					X:       &dst.Ident{Name: "GenStruct"},
+					Indices: []dst.Expr{&dst.Ident{Name: "T"}, &dst.Ident{Name: "K"}},
+				},
+			},
 			expected: "*GenStruct",
 		},
 		{
@@ -109,8 +117,10 @@ func TestStripGenericTypes(t *testing.T) {
 			expected: "",
 		},
 		{
-			name:     "star generic index list expression with non-ident X",
-			expr:     &dst.StarExpr{X: &dst.IndexListExpr{X: &dst.BasicLit{Value: "123"}, Indices: []dst.Expr{&dst.Ident{Name: "T"}}}},
+			name: "star generic index list expression with non-ident X",
+			expr: &dst.StarExpr{
+				X: &dst.IndexListExpr{X: &dst.BasicLit{Value: "123"}, Indices: []dst.Expr{&dst.Ident{Name: "T"}}},
+			},
 			expected: "",
 		},
 	}
