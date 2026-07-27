@@ -212,10 +212,13 @@ format/go: $(GOLANGCI_LINT)
 	@echo "Formatting Go code..."
 	$(GOLANGCI_LINT) fmt --config .tools/golangci.yml
 
-format/yaml: ## Format YAML files only (excludes testdata)
+format/yaml: ## Format YAML files only (excludes testdata and schemas/otelc/.deps)
 format/yaml: $(YAMLFMT)
 	@echo "Formatting YAML files..."
-	$(YAMLFMT) -conf .tools/yamlfmt -dstar '**/*.yml' '**/*.yaml'
+	$(YAMLFMT) -conf .tools/yamlfmt -dstar \
+		-exclude '**/schemas/otelc/.deps/**' \
+		-exclude '**/testdata/**' \
+		'**/*.yml' '**/*.yaml'
 
 lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile, typos)
 lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile lint/typos
@@ -238,7 +241,10 @@ lint/go/fix: $(GOLANGCI_LINT)
 lint/yaml: ## Lint YAML formatting
 lint/yaml: $(YAMLFMT)
 	@echo "Linting YAML files..."
-	$(YAMLFMT) -conf .tools/yamlfmt -lint -dstar '**/*.yml' '**/*.yaml'
+	$(YAMLFMT) -conf .tools/yamlfmt -lint -dstar \
+		-exclude '**/schemas/otelc/.deps/**' \
+		-exclude '**/testdata/**' \
+		'**/*.yml' '**/*.yaml'
 
 lint/dockerfile: ## Lint Dockerfiles
 lint/dockerfile: hadolint
@@ -268,10 +274,13 @@ lint/typos: ## Check for typos using crate-ci/typos
 	@echo "Checking for typos..."
 	@if command -v typos >/dev/null 2>&1; then \
 		typos --config .tools/typos.toml; \
-	elif command -v docker >/dev/null 2>&1; then \
-		docker run --rm -v "$(CURDIR)":/src -w /src ghcr.io/crate-ci/typos:latest --config .tools/typos.toml; \
 	else \
-		echo "Error: install 'typos' (https://github.com/crate-ci/typos) or Docker to run this check."; \
+		echo "Error: 'typos' not found on PATH."; \
+		echo "Install with one of:"; \
+		echo "  brew install typos-cli"; \
+		echo "  cargo install typos-cli"; \
+		echo "  https://github.com/crate-ci/typos/releases"; \
+		echo "(The former ghcr.io/crate-ci/typos Docker image is no longer published.)"; \
 		exit 1; \
 	fi
 
@@ -561,7 +570,9 @@ test-integration: go-protobuf-plugins ## Run integration tests
 test-integration: build build-demo
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
+	# 40m: linodego public-method instrumentation rewrites ~450 *Client methods per
+	# instrumented build; under coverage (all tests, no shards) wall time exceeds 20m.
+	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-latestlibbuild: build ## Run LatestLibBuild tests
@@ -602,7 +613,8 @@ test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	# See test-integration: linodego builds need >20m when the suite is unsharded.
+	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
