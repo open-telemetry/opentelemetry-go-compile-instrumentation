@@ -445,60 +445,6 @@ func updatePinnedProjects(
 	return &PinResult{}, nil
 }
 
-// closeOverNestedInstrumentation expands imports to also include modules that
-// are blank-imported (transitively) from another matched module's own
-// otel.instrumentation.go file. Some instrumentation modules only take effect
-// when a normally-unrelated module is also present (e.g. the log/slog and
-// logrus hooks only populate GLS-backed trace/span ids when the sdk/trace
-// hooks are active), so they pull that dependency in themselves rather than
-// relying on the target app importing it directly.
-func closeOverNestedInstrumentation(rulesRoot string, imports map[string]bool) error {
-	p := ast.NewAstParser()
-
-	queue := make([]string, 0, len(imports))
-	for imp := range imports {
-		queue = append(queue, imp)
-	}
-
-	for len(queue) > 0 {
-		imp := queue[0]
-		queue = queue[1:]
-
-		suffix, ok := strings.CutPrefix(imp, util.OtelcInstRoot+"/")
-		if !ok {
-			continue
-		}
-
-		modDir := filepath.Join(rulesRoot, filepath.FromSlash(suffix))
-		toolFile, findErr := findToolFile(modDir)
-		if findErr != nil {
-			return ex.Wrapf(findErr, "checking for nested tool file for %s", imp)
-		}
-		if toolFile == "" {
-			continue
-		}
-
-		f, parseErr := p.Parse(toolFile, parser.ImportsOnly)
-		if parseErr != nil {
-			return ex.Wrapf(parseErr, "parsing nested tool file %s", toolFile)
-		}
-
-		nested, collectErr := collectImports(toolFile, f, map[string]bool{})
-		if collectErr != nil {
-			return collectErr
-		}
-
-		for _, n := range nested {
-			if !imports[n] {
-				imports[n] = true
-				queue = append(queue, n)
-			}
-		}
-	}
-
-	return nil
-}
-
 func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opts PinOptions) (*PinResult, error) {
 	logger := util.LoggerFromContext(ctx)
 	subcommand := opts.Subcommand
@@ -517,18 +463,13 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 		return nil, ex.Wrapf(extractErr, "extracting otelc package")
 	}
 
-	rulesRoot := filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
-	ruleset, err := loadMinimalRules(rulesRoot)
+	ruleset, err := loadMinimalRules(filepath.Join(util.GetBuildTempDir(), unzippedInstDir))
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading instrumentation rules")
 	}
 
 	// We expect every built-in instrumentation module to be importable
 	imports := matchInstrumentationImports(deps, ruleset)
-
-	if closeErr := closeOverNestedInstrumentation(rulesRoot, imports); closeErr != nil {
-		return nil, ex.Wrapf(closeErr, "expanding nested instrumentation imports")
-	}
 
 	// Nothing to instrument? Warn and skip generating tool file.
 	if len(imports) == 0 {

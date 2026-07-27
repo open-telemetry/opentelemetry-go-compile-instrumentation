@@ -12,8 +12,6 @@ import (
 	"regexp"
 	"strings"
 
-	"golang.org/x/tools/go/packages"
-
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -244,49 +242,6 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			cgoObjDirs[util.NormalizePath(objDir)] = currentDir
 			logger.DebugContext(ctx, "Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
 		}
-	}
-	return deps, nil
-}
-
-// bootstrapSdkTracePkg is the real package that pkg/runtime.SetupOTelSDK
-// (added unconditionally to every build's main package by the init_sdk root
-// rule) imports to construct the default TracerProvider.
-const bootstrapSdkTracePkg = "go.opentelemetry.io/otel/sdk/trace"
-
-// resolveBootstrapDeps resolves the real, on-disk files and version of
-// go.opentelemetry.io/otel/sdk/trace as seen from pkg/runtime's own go.mod.
-// pkg/runtime is what the init_sdk bootstrap file (always added to the
-// build's main package) imports, so this package is always part of the real
-// build even when the target application never imports it directly. Phase 1's
-// dry run predates that injection, so it can't discover this dependency on
-// its own; resolving it here lets sdk/trace's own exact-target hook rules
-// (which record spans into the goroutine-local storage backing log/slog and
-// logrus trace/span id injection) match in a zero-code build.
-func resolveBootstrapDeps(ctx context.Context) ([]*Dependency, error) {
-	if err := extractOtelcBundle(); err != nil {
-		return nil, ex.Wrapf(err, "extracting otelc package")
-	}
-
-	runtimeDir := filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
-	pkgs, err := packages.Load(&packages.Config{
-		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedModule,
-		Context: ctx,
-		Dir:     runtimeDir,
-	}, bootstrapSdkTracePkg)
-	if err != nil {
-		return nil, ex.Wrapf(err, "resolving bootstrap SDK dependency")
-	}
-
-	deps := make([]*Dependency, 0, len(pkgs))
-	for _, p := range pkgs {
-		if p.PkgPath == "" || p.Module == nil || len(p.GoFiles) == 0 {
-			continue
-		}
-		deps = append(deps, &Dependency{
-			ImportPath: p.PkgPath,
-			Version:    p.Module.Version,
-			Sources:    append([]string(nil), p.GoFiles...),
-		})
 	}
 	return deps, nil
 }
