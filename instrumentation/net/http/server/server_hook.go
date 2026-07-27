@@ -4,12 +4,14 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
@@ -28,6 +30,7 @@ const (
 var (
 	logger     = runtime.Logger()
 	tracer     trace.Tracer
+	httpServer semconv.HTTPServer
 	propagator propagation.TextMapPropagator
 	initOnce   sync.Once
 )
@@ -38,6 +41,10 @@ func initInstrumentation() {
 			instrumentationName,
 			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
+		httpServer = semconv.NewHTTPServer(otel.GetMeterProvider().Meter(
+			instrumentationName,
+			metric.WithInstrumentationVersion(runtime.ModuleVersion()),
+		))
 		propagator = otel.GetTextMapPropagator()
 		logger.Info("HTTP server instrumentation initialized")
 	})
@@ -100,9 +107,10 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 
 	// Store data for after hook
 	ictx.SetData(map[string]interface{}{
-		"ctx":   ctx,
-		"span":  span,
-		"start": time.Now(),
+		"ctx":     ctx,
+		"span":    span,
+		"request": r,
+		"start":   time.Now(),
 	})
 }
 
@@ -137,6 +145,11 @@ func AfterServeHTTP(ictx hook.HookContext) {
 	}
 
 	startTime, _ := ictx.GetKeyData("start").(time.Time)
+	request, _ := ictx.GetKeyData("request").(*http.Request)
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
+	if request != nil && ctx != nil {
+		httpServer.RecordMetrics(ctx, "", request, statusCode, semconv.HTTPRoute(request.Pattern), request.ContentLength, 0, time.Since(startTime).Seconds(), nil)
+	}
 	logger.Debug("AfterServeHTTP called",
 		"status_code", statusCode,
 		"duration_ms", time.Since(startTime).Milliseconds())

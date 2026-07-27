@@ -4,6 +4,7 @@
 package client
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
@@ -29,6 +31,7 @@ const (
 var (
 	logger     = runtime.Logger()
 	tracer     trace.Tracer
+	httpClient semconv.HTTPClient
 	propagator propagation.TextMapPropagator
 	initOnce   sync.Once
 )
@@ -39,6 +42,10 @@ func initInstrumentation() {
 			instrumentationName,
 			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
+		httpClient = semconv.NewHTTPClient(otel.GetMeterProvider().Meter(
+			instrumentationName,
+			metric.WithInstrumentationVersion(runtime.ModuleVersion()),
+		))
 		propagator = otel.GetTextMapPropagator()
 		logger.Info("HTTP client instrumentation initialized")
 	})
@@ -119,6 +126,7 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 		return
 	}
 	defer span.End()
+	ctx, _ := ictx.GetKeyData("ctx").(context.Context)
 
 	// Add response attributes
 	if res != nil {
@@ -137,6 +145,14 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 			"url", res.Request.URL.String(),
 			"status_code", res.StatusCode,
 			"duration_ms", time.Since(startTime).Milliseconds())
+		httpClient.RecordMetrics(ctx, res.Request, res.StatusCode, res.Request.ContentLength, res.ContentLength,
+			time.Since(startTime).Seconds(), nil)
+	} else {
+		startTime, _ := ictx.GetKeyData("start").(time.Time)
+		request, _ := ictx.GetKeyData("req").(*http.Request)
+		if request != nil {
+			httpClient.RecordMetrics(ctx, request, 0, request.ContentLength, 0, time.Since(startTime).Seconds(), nil)
+		}
 	}
 
 	// Handle error
