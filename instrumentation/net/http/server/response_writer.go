@@ -70,3 +70,8 @@ func (w *writerWrapper) Push(target string, opts *http.PushOptions) error {
 	}
 	return http.ErrNotSupported
 }
+
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (w *writerWrapper) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}

@@ -185,6 +185,13 @@ func TestWriterWrapper_Push_NotSupported(t *testing.T) {
 	require.ErrorIs(t, err, http.ErrNotSupported)
 }
 
+func TestWriterWrapper_Unwrap(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	wrapper := &writerWrapper{ResponseWriter: recorder}
+
+	assert.Same(t, recorder, wrapper.Unwrap())
+}
+
 func TestWriterWrapper_MultipleStatusCodes(t *testing.T) {
 	tests := []struct {
 		name       string
