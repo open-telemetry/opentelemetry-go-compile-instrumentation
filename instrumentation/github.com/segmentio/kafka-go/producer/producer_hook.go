@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
+	kafkaprop "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/internal/propagation"
 	"go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
 	"go.opentelemetry.io/otelc/pkg/runtime"
@@ -50,43 +51,6 @@ func initInstrumentation() {
 		propagator = otel.GetTextMapPropagator()
 		logger.Info("Kafka (segmentio/kafka-go) producer instrumentation initialized")
 	})
-}
-
-// headerCarrier adapts a slice of kafka.Header to the OpenTelemetry
-// TextMapCarrier interface so trace context can be propagated through Kafka
-// message headers.
-type headerCarrier struct {
-	headers *[]kafka.Header
-}
-
-// Get returns the value of the first header matching key, or "" if absent.
-func (c headerCarrier) Get(key string) string {
-	for _, h := range *c.headers {
-		if h.Key == key {
-			return string(h.Value)
-		}
-	}
-	return ""
-}
-
-// Set replaces any existing header with key, otherwise appends a new one.
-func (c headerCarrier) Set(key, value string) {
-	for i := range *c.headers {
-		if (*c.headers)[i].Key == key {
-			(*c.headers)[i].Value = []byte(value)
-			return
-		}
-	}
-	*c.headers = append(*c.headers, kafka.Header{Key: key, Value: []byte(value)})
-}
-
-// Keys lists the header keys carried by this carrier.
-func (c headerCarrier) Keys() []string {
-	keys := make([]string, 0, len(*c.headers))
-	for _, h := range *c.headers {
-		keys = append(keys, h.Key)
-	}
-	return keys
 }
 
 // -----------------------------------------------------------------------------
@@ -133,7 +97,7 @@ func BeforeWriteMessages(
 			trace.WithSpanKind(trace.SpanKindProducer),
 			trace.WithAttributes(semconv.KafkaRequestTraceAttrs(req)...),
 		)
-		propagator.Inject(msgCtx, headerCarrier{headers: &msgs[i].Headers})
+		propagator.Inject(msgCtx, kafkaprop.NewHeaderCarrier(&msgs[i].Headers))
 		spans[i] = span
 	}
 

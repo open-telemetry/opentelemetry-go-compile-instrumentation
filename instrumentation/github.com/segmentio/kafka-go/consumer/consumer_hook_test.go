@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	kafkaprop "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/internal/propagation"
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
@@ -71,7 +72,7 @@ func TestReadMessage_LinksToProducerAndSetsAttrs(t *testing.T) {
 	producerCtx := trace.ContextWithSpanContext(context.Background(), sc)
 
 	var headers []kafka.Header
-	propagator.Inject(producerCtx, headerCarrier{headers: &headers})
+	propagator.Inject(producerCtx, kafkaprop.NewHeaderCarrier(&headers))
 
 	msg := kafka.Message{
 		Topic:     "orders",
@@ -204,7 +205,7 @@ func TestExtractContext(t *testing.T) {
 	producerCtx := trace.ContextWithSpanContext(context.Background(), sc)
 
 	var headers []kafka.Header
-	propagator.Inject(producerCtx, headerCarrier{headers: &headers})
+	propagator.Inject(producerCtx, kafkaprop.NewHeaderCarrier(&headers))
 
 	msg := kafka.Message{
 		Topic:   "orders",
