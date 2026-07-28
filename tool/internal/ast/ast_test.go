@@ -74,3 +74,11 @@ func TestWriteFile(t *testing.T) {
 	assert.Contains(t, string(content), "package ast")
 }
 
+func TestWriteFile_CreateError(t *testing.T) {
+	f, err := ParseFile("ast_test.go")
+	require.NoError(t, err)
+
+	err = WriteFile(filepath.Join(t.TempDir(), "nonexistent", "out.go"), f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create file")
+}
