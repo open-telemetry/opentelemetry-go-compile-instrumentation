@@ -97,11 +97,16 @@ func parse(r io.Reader) (ImportConfig, error) {
 func (r *ImportConfig) WriteFile(filename string) error {
 	file, err := os.Create(filename)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "failed to create file %s", filename)
 	}
-	defer file.Close()
-
-	return r.write(file)
+	if err := r.write(file); err != nil {
+		_ = file.Close()
+		return ex.Wrapf(err, "failed to write to file %s", filename)
+	}
+	if err := file.Close(); err != nil {
+		return ex.Wrapf(err, "failed to close file %s", filename)
+	}
+	return nil
 }
 
 // write writes the content of the ImportConfig to the provided writer,
