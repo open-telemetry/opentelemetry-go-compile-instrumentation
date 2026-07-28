@@ -5,7 +5,13 @@
 // through Kafka message headers.
 package propagation
 
-import "github.com/segmentio/kafka-go"
+import (
+	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/propagation"
+)
+
+// Compile-time assertion that HeaderCarrier implements propagation.TextMapCarrier.
+var _ propagation.TextMapCarrier = (*HeaderCarrier)(nil)
 
 // HeaderCarrier adapts Kafka message headers to the OpenTelemetry TextMapCarrier
 // interface so trace context can be propagated through Kafka messages.
