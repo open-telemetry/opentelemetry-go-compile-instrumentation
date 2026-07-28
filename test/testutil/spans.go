@@ -158,3 +158,6 @@ func (ts TraceStats) String() string {
 	}
 	return b.String()
 }
+
+// IsProducer matches producer spans.
+func IsProducer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindProducer }
