@@ -20,6 +20,22 @@ This project uses several tools for development. Most tools will be automaticall
 - [Git](https://git-scm.com/)
 - Make (usually pre-installed on macOS and Linux)
 
+#### Windows / WSL note (line endings)
+
+On Windows (including WSL clones managed by Windows Git), Git often defaults to
+`core.autocrlf=true`. That converts checked-out files to CRLF and can break
+golden-file tests under `tool/internal/instrument` (diffs that drop blank lines
+even when logic is correct).
+
+Before cloning this repository, disable CRLF conversion:
+
+```sh
+git config --global core.autocrlf false
+```
+
+If you already cloned with `core.autocrlf` enabled, set it to `false` and
+re-clone (or refresh the working tree) so source files use LF line endings.
+
 ### Getting Started
 
 1. Clone the repository:
