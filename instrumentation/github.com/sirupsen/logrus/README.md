@@ -18,6 +18,12 @@ The installed hook calls `runtime.GetTraceAndSpanID()` (see `pkg/runtime/trace_c
 
 Instrumentation imports declared in an `otel.instrumentation.go` file are tracked in `go.mod` but are intentionally **not** added to the build's dependency graph — that file is marked with the `//go:build tools` build tag specifically so instrumentation imports do not become build dependencies themselves. So relying on `logrus`'s own instrumentation module to pull in `sdk/trace` does not work.
 
-In practice, this means your application must construct a real `sdk/trace.TracerProvider` somewhere in its own source (for example via `sdktrace.NewTracerProvider(...)` and `otel.SetTracerProvider(...)`), even if you don't otherwise call the SDK directly. Without that, spans are still created and exported correctly, but `logrus` output will not carry `trace_id`/`span_id`.
+In practice, all that's needed is a plain blank import of the package somewhere in your own application source, outside of any `//go:build tools`-tagged file:
+
+```go
+import _ "go.opentelemetry.io/otel/sdk/trace"
+```
+
+That's enough to put it in the build graph — you don't need to actually construct or use a `TracerProvider` yourself. Without it, spans are still created and exported correctly, but `logrus` output will not carry `trace_id`/`span_id`.
 
 If `go.opentelemetry.io/otel/sdk/trace` instrumentation was not applied (for example because the package was not present in the application's build graph), or if there is no active span in GLS, entries are left unchanged — see [`instrumentation/go.opentelemetry.io/otel`'s README](../../../go.opentelemetry.io/otel/README.md) for how GLS is populated.
