@@ -99,11 +99,11 @@ func (r *ImportConfig) WriteFile(filename string) error {
 	if err != nil {
 		return ex.Wrapf(err, "failed to create file %s", filename)
 	}
-	if err := r.write(file); err != nil {
+	if err = r.write(file); err != nil {
 		_ = file.Close()
 		return ex.Wrapf(err, "failed to write to file %s", filename)
 	}
-	if err := file.Close(); err != nil {
+	if err = file.Close(); err != nil {
 		return ex.Wrapf(err, "failed to close file %s", filename)
 	}
 	return nil

@@ -91,6 +91,13 @@ func TestWriteFile(t *testing.T) {
 	assert.Equal(t, "packagefile fmt=/path/to/fmt.a\n", string(content))
 }
 
+func TestWriteFile_CreateError(t *testing.T) {
+	cfg := ImportConfig{}
+	err := cfg.WriteFile(filepath.Join(t.TempDir(), "nonexistent", "importcfg"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create file")
+}
+
 func TestRoundTrip(t *testing.T) {
 	input := `# comment line
 packagefile fmt=/usr/local/go/pkg/linux_amd64/fmt.a
