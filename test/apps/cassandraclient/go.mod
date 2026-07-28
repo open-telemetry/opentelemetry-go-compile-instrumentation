@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/test/apps/cassandraclient
 
-go 1.26.2
+go 1.25.0
 
 require github.com/gocql/gocql v1.7.0
 
