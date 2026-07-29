@@ -146,6 +146,10 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			model, spanAttrs = parseEmbeddingRequest(bodyBytes)
 		}
 
+		if model == "" {
+			return next(req)
+		}
+
 		spanName := opName + " " + model
 		baseAttrs := []attribute.KeyValue{
 			semconv.GenAISystem("openai"),
