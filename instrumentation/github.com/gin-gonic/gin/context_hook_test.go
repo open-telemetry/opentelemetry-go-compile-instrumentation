@@ -245,6 +245,42 @@ func TestAfterNext_RecordsOnlyAtOutermostReturn(t *testing.T) {
 		"both errors must be recorded at the outermost return")
 }
 
+func TestBeforeNext_DisabledInstrumentationIsNoop(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin")
+
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, "GET", sr.Ended()[0].Name(),
+		"span name must not be modified when gin instrumentation is disabled")
+}
+
+func TestAfterNext_DisabledInstrumentationIsNoop(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin")
+
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	_ = c.Error(errors.New("should not be recorded"))
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Unset, sr.Ended()[0].Status().Code,
+		"errors must not be recorded when gin instrumentation is disabled")
+	assert.Empty(t, sr.Ended()[0].Events())
+}
+
 func TestAfterNext_NonRecordingSpanSkipsRecording(t *testing.T) {
 	sr, _ := setupContextTracer(t)
 
