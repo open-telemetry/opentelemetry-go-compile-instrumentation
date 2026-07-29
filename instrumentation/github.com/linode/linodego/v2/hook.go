@@ -24,6 +24,8 @@ package v2
 
 import (
 	"context"
+	"net/url"
+	"reflect"
 	"sync"
 
 	"github.com/linode/linodego/v2"
@@ -44,10 +46,11 @@ const (
 	// doRequest param indices (receiver is 0).
 	ctxParamIndex = 1
 
-	keySpan      = "span"
-	keyStart     = "start"
-	keyOperation = "operation"
-	keyCtx       = "ctx"
+	keySpan          = "span"
+	keyStart         = "start"
+	keyOperation     = "operation"
+	keyCtx           = "ctx"
+	keyServerAddress = "serverAddress"
 )
 
 var (
@@ -65,6 +68,38 @@ func (linodegoEnabler) Enable() bool {
 }
 
 var enabler = linodegoEnabler{}
+
+// hostFromClient returns the API host a linodego.Client is currently
+// configured to call. linodego has no exported getter for the host set via
+// SetBaseURL/UseURL, so this reads the unexported hostURL field by
+// reflection; it never panics and returns "" (letting callers fall back to
+// semconv.DefaultServerAddress) if the field is missing or unreadable, e.g.
+// after an upstream linodego field rename.
+func hostFromClient(client *linodego.Client) (host string) {
+	if client == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			host = ""
+		}
+	}()
+
+	v := reflect.ValueOf(client)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return ""
+	}
+	f := v.Elem().FieldByName("hostURL")
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+
+	parsed, err := url.Parse(f.String())
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Host
+}
 
 func initInstrumentation() {
 	initOnce.Do(func() {
@@ -88,7 +123,7 @@ func initInstrumentation() {
 // as interface{} per the instrument guide.
 func BeforeDoRequest(
 	ictx hook.HookContext,
-	_ *linodego.Client,
+	client *linodego.Client,
 	ctx context.Context,
 	method, endpoint string,
 	_ interface{}, // requestParams
@@ -101,8 +136,9 @@ func BeforeDoRequest(
 	initInstrumentation()
 
 	req := semconv.LinodegoRequest{
-		Method:   method,
-		Endpoint: endpoint,
+		Method:        method,
+		Endpoint:      endpoint,
+		ServerAddress: hostFromClient(client),
 	}
 	attrs := semconv.LinodegoRequestTraceAttrs(req)
 	spanName := semconv.SpanName(method, endpoint)
