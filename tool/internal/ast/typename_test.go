@@ -159,8 +159,8 @@ func TestTypeNameMatches_PreResolvedIdentPath(t *testing.T) {
 	})
 
 	t.Run("mismatched import path does not match", func(t *testing.T) {
-		other, err := parseTypeName("example.com/other/http.Request")
-		require.NoError(t, err)
+		other, parseErr := parseTypeName("example.com/other/http.Request")
+		require.NoError(t, parseErr)
 		assert.False(t, other.matches(node, nil))
 	})
 }
