@@ -306,7 +306,11 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	return true, nil
 }
 
-func matchInstrumentationImports(deps []*Dependency, ruleset map[string][]yamlRule) map[string]bool {
+func matchInstrumentationImports(
+	deps []*Dependency,
+	ruleset map[string][]yamlRule,
+	warn func(msg string, args ...any),
+) map[string]bool {
 	imports := make(map[string]bool)
 
 	// Match only on target + version.
@@ -328,6 +332,13 @@ func matchInstrumentationImports(deps []*Dependency, ruleset map[string][]yamlRu
 				}
 
 				if !util.VersionInRange(dep.Version, r.VersionRange) {
+					if warn != nil && unresolvedVersionSkip(dep.Version, r.VersionRange) {
+						warn("skipping version-gated instrumentation because dependency version is unresolved",
+							"instrumentation", modPath,
+							"dep", dep.ImportPath,
+							"version_range", r.VersionRange,
+						)
+					}
 					continue
 				}
 
@@ -469,7 +480,9 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	}
 
 	// We expect every built-in instrumentation module to be importable
-	imports := matchInstrumentationImports(deps, ruleset)
+	imports := matchInstrumentationImports(deps, ruleset, func(msg string, args ...any) {
+		logger.WarnContext(ctx, msg, args...)
+	})
 
 	// Nothing to instrument? Warn and skip generating tool file.
 	if len(imports) == 0 {

@@ -492,6 +492,40 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			want: map[string]bool{},
 		},
 		{
+			name: "empty dependency version skips version-gated rule",
+			deps: []*Dependency{
+				{
+					ImportPath: "example.com/foo",
+					Version:    "", // replace/local path: findModVersion returns empty
+				},
+			},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target:       "example.com/foo",
+					VersionRange: "v1.0.0",
+				}},
+			},
+			want: map[string]bool{},
+		},
+		{
+			name: "empty dependency version still matches when rule has no version range",
+			deps: []*Dependency{
+				{
+					ImportPath: "example.com/foo",
+					Version:    "",
+				},
+			},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target:       "example.com/foo",
+					VersionRange: "",
+				}},
+			},
+			want: map[string]bool{
+				"example.com/instrumentation/foo": true,
+			},
+		},
+		{
 			name: "glob target",
 			deps: []*Dependency{
 				{
@@ -554,10 +588,35 @@ func TestMatchInstrumentationImports(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := matchInstrumentationImports(tt.deps, tt.rules)
+			got := matchInstrumentationImports(tt.deps, tt.rules, nil)
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
+	deps := []*Dependency{{
+		ImportPath: "example.com/foo",
+		Version:    "",
+	}}
+	rules := map[string][]yamlRule{
+		"example.com/instrumentation/foo": {{
+			Target:       "example.com/foo",
+			VersionRange: "v1.0.0",
+		}},
+	}
+
+	var warned bool
+	var warnedMsg string
+	got := matchInstrumentationImports(deps, rules, func(msg string, args ...any) {
+		warned = true
+		warnedMsg = msg
+		_ = args
+	})
+
+	require.Empty(t, got)
+	require.True(t, warned)
+	require.Contains(t, warnedMsg, "unresolved")
 }
 
 func TestLoadMinimalRules_HappyPath(t *testing.T) {
