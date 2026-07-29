@@ -54,6 +54,11 @@ func GetAddedImportsPattern() string {
 	return GetBuildTemp("added_imports.*.json")
 }
 
+// GetOtelcWorkDir returns the otelc working directory. It first checks the
+// OTELC_WORK_DIR environment variable; if unset, it falls back to the current
+// working directory. If the working directory cannot be determined, the process
+// exits via ex.Fatalf, since otelc cannot safely place build artifacts without
+// a known base path.
 func GetOtelcWorkDir() string {
 	wd := os.Getenv(EnvOtelcWorkDir)
 	if wd == "" {
