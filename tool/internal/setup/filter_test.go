@@ -215,11 +215,9 @@ func TestBuild_StructFilter(t *testing.T) {
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestBuild_IsTestFilter(t *testing.T) {
 	t.Run("true matches test packages", func(t *testing.T) {
-		where := &rule.WhereDef{File: &rule.FilterDef{IsTest: boolPtr(true)}}
+		where := &rule.WhereDef{File: &rule.FilterDef{IsTest: new(true)}}
 		f, err := setup.Build(where)
 		if err != nil {
 			t.Fatalf("Build(IsTest=true) error = %v, want nil", err)
@@ -234,7 +232,7 @@ func TestBuild_IsTestFilter(t *testing.T) {
 	})
 
 	t.Run("false matches non-test packages", func(t *testing.T) {
-		where := &rule.WhereDef{File: &rule.FilterDef{IsTest: boolPtr(false)}}
+		where := &rule.WhereDef{File: &rule.FilterDef{IsTest: new(false)}}
 		f, err := setup.Build(where)
 		if err != nil {
 			t.Fatalf("Build(IsTest=false) error = %v, want nil", err)
@@ -295,7 +293,7 @@ func TestBuild_ErrorCases(t *testing.T) {
 		},
 		{
 			name:  "is_test combined with another predicate",
-			where: &rule.WhereDef{File: &rule.FilterDef{HasFunc: "Foo", IsTest: boolPtr(true)}},
+			where: &rule.WhereDef{File: &rule.FilterDef{HasFunc: "Foo", IsTest: new(true)}},
 		},
 		{
 			// A combinator owns the node: is_test as a sibling must be rejected,
@@ -303,21 +301,21 @@ func TestBuild_ErrorCases(t *testing.T) {
 			name: "is_test sibling of all-of",
 			where: &rule.WhereDef{File: &rule.FilterDef{
 				AllOf:  []rule.FilterDef{{HasFunc: "Foo"}},
-				IsTest: boolPtr(true),
+				IsTest: new(true),
 			}},
 		},
 		{
 			name: "is_test sibling of one-of",
 			where: &rule.WhereDef{File: &rule.FilterDef{
 				OneOf:  []rule.FilterDef{{HasFunc: "Foo"}},
-				IsTest: boolPtr(true),
+				IsTest: new(true),
 			}},
 		},
 		{
 			name: "is_test sibling of not",
 			where: &rule.WhereDef{File: &rule.FilterDef{
 				Not:    &rule.FilterDef{HasFunc: "Foo"},
-				IsTest: boolPtr(false),
+				IsTest: new(false),
 			}},
 		},
 		{
@@ -351,7 +349,7 @@ func TestBuild_ErrorCases(t *testing.T) {
 			// Explicit regression for the primary use case of has_package: combining
 			// it with is_test as siblings (without all-of) must be rejected.
 			name:  "has_package combined with is_test",
-			where: &rule.WhereDef{File: &rule.FilterDef{HasPackage: "foo_test", IsTest: boolPtr(true)}},
+			where: &rule.WhereDef{File: &rule.FilterDef{HasPackage: "foo_test", IsTest: new(true)}},
 		},
 		{
 			// Whitespace-only has_package must not count as an active predicate.

@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/mongo
 
-go 1.25.0
+go 1.26.0
 
 replace go.opentelemetry.io/otelc/pkg => ../../../../pkg
 

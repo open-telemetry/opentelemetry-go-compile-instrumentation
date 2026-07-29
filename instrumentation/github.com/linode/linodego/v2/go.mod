@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/linode/linodego/v2 v2.4.1

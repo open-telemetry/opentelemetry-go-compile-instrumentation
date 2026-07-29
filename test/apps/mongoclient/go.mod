@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/test/apps/mongoclient
 
-go 1.25.0
+go 1.26.0
 
 require go.mongodb.org/mongo-driver v1.17.9
 

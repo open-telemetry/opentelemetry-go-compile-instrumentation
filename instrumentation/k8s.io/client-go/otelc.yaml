@@ -19,3 +19,28 @@ k8s_hook_processdeltasinbatch:
         before: beforeProcessDeltasInBatch
         after: afterProcessDeltasInBatch
         path: "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go"
+
+# v0.36.0 prepended a logger parameter and appended a keyFunc parameter to
+# both processDeltas and processDeltasInBatch, so they need their own before
+# hooks (the after hooks are unchanged and reused from the rules above).
+k8s_hook_processdeltas_v036:
+  target: k8s.io/client-go/tools/cache
+  version: "v0.36.0,v0.37.0"
+  where:
+    func: processDeltas
+  do:
+    - inject_hooks:
+        before: beforeProcessDeltasV036
+        after: afterProcessDeltas
+        path: "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go"
+
+k8s_hook_processdeltasinbatch_v036:
+  target: k8s.io/client-go/tools/cache
+  version: "v0.36.0,v0.37.0"
+  where:
+    func: processDeltasInBatch
+  do:
+    - inject_hooks:
+        before: beforeProcessDeltasInBatchV036
+        after: afterProcessDeltasInBatch
+        path: "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go"

@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/openai/openai-go/v3 v3.41.0
