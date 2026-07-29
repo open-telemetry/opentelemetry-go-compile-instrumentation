@@ -91,17 +91,22 @@ func (sp *SetupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, mo
 	if err != nil {
 		return ex.Wrapf(err, "failed to create file %s", f)
 	}
-	defer file.Close()
 
 	bs, err := json.Marshal(matched)
 	if err != nil {
+		_ = file.Close()
 		return ex.Wrapf(err, "failed to marshal rules to JSON")
 	}
 
-	_, err = file.Write(bs)
-	if err != nil {
+	if _, err = file.Write(bs); err != nil {
+		_ = file.Close()
 		return ex.Wrapf(err, "failed to write JSON to file %s", f)
 	}
+
+	if err = file.Close(); err != nil {
+		return ex.Wrapf(err, "failed to close file %s", f)
+	}
+
 	sp.Info("Stored matched sets", "path", f)
 	return nil
 }
