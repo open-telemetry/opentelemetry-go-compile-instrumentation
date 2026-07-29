@@ -57,8 +57,11 @@ func GetAddedImportsPattern() string {
 func GetOtelcWorkDir() string {
 	wd := os.Getenv(EnvOtelcWorkDir)
 	if wd == "" {
-		wd, _ = os.Getwd()
-		return wd
+		var err error
+		wd, err = os.Getwd()
+		if err != nil {
+			ex.Fatalf("failed to get working directory: %v", err)
+		}
 	}
 	return wd
 }
