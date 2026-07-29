@@ -153,6 +153,62 @@ func TestBeforeProcessDeltas(t *testing.T) {
 	}
 }
 
+func TestBeforeProcessDeltasV036(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		setupEnv    func(t *testing.T)
+		expectSpans bool
+	}{
+		{
+			name: "instrumentation enabled",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "k8s_client_go")
+			},
+			expectSpans: true,
+		},
+		{
+			name: "instrumentation disabled",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "k8s_client_go")
+			},
+			expectSpans: false,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			initOnce = *new(sync.Once)
+
+			tt.setupEnv(t)
+			sr, _ := setupTestTracer(t)
+
+			handler := cache.ResourceEventHandlerFuncs{}
+
+			// index 0: logger, index 1: handler, index 5: keyFunc (v0.36.0+ signature).
+			mockCtx := hooktest.NewMockHookContext(nil, handler, nil, nil, nil, nil)
+			beforeProcessDeltasV036(
+				mockCtx,
+				nil,
+				handler,
+				cache.NewStore(cache.DeletionHandlingMetaNamespaceKeyFunc),
+				[]cache.Delta{},
+				false,
+				nil,
+			)
+
+			handlerUpdated := mockCtx.GetParam(1).(cache.ResourceEventHandler)
+			handlerUpdated.OnAdd(&corev1.Pod{}, false)
+
+			startedSpans := sr.Started()
+			endedSpans := sr.Ended()
+			if tt.expectSpans {
+				require.Len(t, startedSpans, 2, "should have started two spans")
+				require.Len(t, endedSpans, 1, "only the span from handler.OnAdd should have ended")
+			} else {
+				require.Len(t, endedSpans, 0, "no spans should be emitted")
+			}
+		})
+	}
+}
+
 func TestAfterProcessDeltas(t *testing.T) {
 	for _, tt := range []struct {
 		name         string
@@ -297,6 +353,62 @@ func TestBeforeProcessDeltasInBatch(t *testing.T) {
 			)
 
 			handlerUpdated := mockCtx.GetParam(0).(cache.ResourceEventHandler)
+			handlerUpdated.OnAdd(&corev1.Pod{}, false)
+
+			startedSpans := sr.Started()
+			endedSpans := sr.Ended()
+			if tt.expectSpans {
+				require.Len(t, startedSpans, 2, "should have started two spans")
+				require.Len(t, endedSpans, 1, "only the span from handler.OnAdd should have ended")
+			} else {
+				require.Len(t, endedSpans, 0, "no spans should be emitted")
+			}
+		})
+	}
+}
+
+func TestBeforeProcessDeltasInBatchV036(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		setupEnv    func(t *testing.T)
+		expectSpans bool
+	}{
+		{
+			name: "instrumentation enabled",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "k8s_client_go")
+			},
+			expectSpans: true,
+		},
+		{
+			name: "instrumentation disabled",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "k8s_client_go")
+			},
+			expectSpans: false,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			initOnce = *new(sync.Once)
+
+			tt.setupEnv(t)
+			sr, _ := setupTestTracer(t)
+
+			handler := cache.ResourceEventHandlerFuncs{}
+
+			// index 0: logger, index 1: handler, index 5: keyFunc (v0.36.0+ signature).
+			mockCtx := hooktest.NewMockHookContext(nil, handler, nil, nil, nil, nil)
+			beforeProcessDeltasInBatchV036(
+				mockCtx,
+				nil,
+				handler,
+				cache.NewStore(cache.DeletionHandlingMetaNamespaceKeyFunc),
+				[]cache.Delta{},
+				false,
+				nil,
+			)
+
+			handlerUpdated := mockCtx.GetParam(1).(cache.ResourceEventHandler)
 			handlerUpdated.OnAdd(&corev1.Pod{}, false)
 
 			startedSpans := sr.Started()

@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/test/apps/ginserver
 
-go 1.25.0
+go 1.26.0
 
 require github.com/gin-gonic/gin v1.12.0
 

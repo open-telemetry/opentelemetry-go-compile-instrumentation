@@ -96,6 +96,43 @@ func afterProcessDeltas(ictx hook.HookContext, err error) {
 	}
 }
 
+// beforeProcessDeltasV036 matches the arguments of processDeltas as of
+// k8s.io/client-go v0.36.0, which prepended a logger parameter and appended a
+// keyFunc parameter compared to earlier versions. The logger and keyFunc
+// types live in k8s.io/klog/v2 and cache's own unexported surface, and aren't
+// otherwise used here, so interface{} stands in for both.
+func beforeProcessDeltasV036(
+	ictx hook.HookContext,
+	_ interface{},
+	handler cache.ResourceEventHandler,
+	_ cache.Store,
+	deltas cache.Deltas,
+	isInInitialList bool,
+	_ interface{},
+) {
+	if !k8SEnabler.Enable() {
+		logger.Debug("K8S client-go instrumentation disabled")
+		return
+	}
+	initInstrumentation()
+
+	objsInfo := semconv.K8SObjectsInfo{
+		Count:           len(deltas),
+		IsInInitialList: isInInitialList,
+	}
+	attrs := semconv.K8SObjectsInfoTraceAttrs(objsInfo)
+
+	spanName := "k8s.informer.objects.process"
+	ctx, span := tracer.Start(context.Background(),
+		spanName,
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(attrs...),
+	)
+
+	ictx.SetParam(1, newK8SOtelEventHandler(handler, ctx))
+	ictx.SetKeyData("span", span)
+}
+
 func beforeProcessDeltasInBatch(
 	ictx hook.HookContext,
 	handler cache.ResourceEventHandler,
@@ -123,6 +160,41 @@ func beforeProcessDeltasInBatch(
 	)
 
 	ictx.SetParam(0, newK8SOtelEventHandler(handler, ctx))
+	ictx.SetKeyData("span", span)
+}
+
+// beforeProcessDeltasInBatchV036 matches the arguments of
+// processDeltasInBatch as of k8s.io/client-go v0.36.0; see
+// beforeProcessDeltasV036 for why the extra parameters are untyped.
+func beforeProcessDeltasInBatchV036(
+	ictx hook.HookContext,
+	_ interface{},
+	handler cache.ResourceEventHandler,
+	_ cache.Store,
+	deltas []cache.Delta,
+	isInInitialList bool,
+	_ interface{},
+) {
+	if !k8SEnabler.Enable() {
+		logger.Debug("K8S client-go instrumentation disabled")
+		return
+	}
+	initInstrumentation()
+
+	objsInfo := semconv.K8SObjectsInfo{
+		Count:           len(deltas),
+		IsInInitialList: isInInitialList,
+	}
+	attrs := semconv.K8SObjectsInfoTraceAttrs(objsInfo)
+
+	spanName := "k8s.informer.objects.process"
+	ctx, span := tracer.Start(context.Background(),
+		spanName,
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(attrs...),
+	)
+
+	ictx.SetParam(1, newK8SOtelEventHandler(handler, ctx))
 	ictx.SetKeyData("span", span)
 }
 

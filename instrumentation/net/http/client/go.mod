@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/instrumentation/net/http/client
 
-go 1.25.0
+go 1.26.0
 
 replace go.opentelemetry.io/otelc/pkg => ../../../../pkg
 

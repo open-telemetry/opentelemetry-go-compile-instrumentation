@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/.github/tools
 
-go 1.25.0
+go 1.26.0
 
 require github.com/google/go-github/v79 v79.0.0
 
