@@ -149,16 +149,14 @@ func WriteFile(filePath, content string) error {
 	if err != nil {
 		return ex.Wrap(err)
 	}
-	defer func(file *os.File) {
-		err = file.Close()
-		if err != nil {
-			ex.Fatal(err)
-		}
-	}(file)
 
-	_, err = file.WriteString(content)
-	if err != nil {
+	if _, err = file.WriteString(content); err != nil {
+		_ = file.Close()
 		return ex.Wrap(err)
+	}
+
+	if closeErr := file.Close(); closeErr != nil {
+		return ex.Wrap(closeErr)
 	}
 	return nil
 }
