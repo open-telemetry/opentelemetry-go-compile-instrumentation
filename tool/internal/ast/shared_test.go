@@ -232,3 +232,48 @@ func TestFindNamedDecl(t *testing.T) {
 		assert.Nil(t, node)
 	})
 }
+
+func TestAddStructField(t *testing.T) {
+	st := &dst.StructType{Fields: &dst.FieldList{}}
+
+	AddStructField(st, "Count", "int")
+
+	require.Len(t, st.Fields.List, 1)
+	field := st.Fields.List[0]
+	require.Len(t, field.Names, 1)
+	assert.Equal(t, "Count", field.Names[0].Name)
+	typeIdent, ok := field.Type.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "int", typeIdent.Name)
+}
+
+func TestFindStructType(t *testing.T) {
+	t.Run("finds a plain struct", func(t *testing.T) {
+		assert.NotNil(t, FindStructType(parseSharedFixture(t), "MyStruct"))
+	})
+
+	t.Run("nil for interface, alias, or missing type", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type Iface interface{ M() }
+type Alias = int
+type Plain struct{ x int }
+`)
+		require.NoError(t, err)
+		assert.Nil(t, FindStructType(src, "Iface"))
+		assert.Nil(t, FindStructType(src, "Alias"))
+		assert.Nil(t, FindStructType(src, "Nope"))
+		assert.NotNil(t, FindStructType(src, "Plain"))
+	})
+
+	t.Run("resolves the named struct in a grouped type block", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type (
+	First  = int
+	Second struct{ a int }
+)
+`)
+		require.NoError(t, err)
+		assert.Nil(t, FindStructType(src, "First"))
+		assert.NotNil(t, FindStructType(src, "Second"))
+	})
+}
