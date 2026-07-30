@@ -210,17 +210,20 @@ func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
 	// If found, the trampoline-jump-if cannot be flattened.
 	found := false
 	dst.Inspect(hookFunc, func(node dst.Node) bool {
-		if call, ok := node.(*dst.CallExpr); ok {
-			if sel, ok := call.Fun.(*dst.SelectorExpr); ok {
-				if id, ok := sel.X.(*dst.Ident); ok && id.Name == hookContextParam {
-					if sel.Sel.Name == trampolineSetSkipCallName {
-						found = true
-						return false
-					}
-				}
-			}
-		}
 		if found {
+			return false
+		}
+		call, isCall := node.(*dst.CallExpr)
+		if !isCall {
+			return true
+		}
+		sel, isSel := call.Fun.(*dst.SelectorExpr)
+		if !isSel {
+			return true
+		}
+		id, isID := sel.X.(*dst.Ident)
+		if isID && id.Name == hookContextParam && sel.Sel.Name == trampolineSetSkipCallName {
+			found = true
 			return false
 		}
 		return true

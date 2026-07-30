@@ -503,6 +503,18 @@ func TestFlattenTJump(t *testing.T) {
 			removedOnExit: false,
 			validate:      nil,
 		},
+		{
+			name: "flatten despite unrelated SetSkipCall",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
+				var mySetSkipCall string
+				_ = mySetSkipCall
+				req.Header.SetSkipCall()
+			}`,
+			canFlatten:    true,
+			removedOnExit: false,
+			validate:      nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
