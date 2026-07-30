@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -132,6 +133,27 @@ func LinodegoErrorTraceAttrs(err error) []attribute.KeyValue {
 	return attrs
 }
 
+// ErrorType returns a low-cardinality error.type attribute for an operation
+// error that carries no HTTP status code, e.g. the request never reached the
+// server (timeout, connection failure, context cancellation). It mirrors
+// instrumentation/net/http/semconv's HTTPClient.ErrorType so callers get the
+// same Go type name convention across instrumentations.
+func ErrorType(err error) attribute.KeyValue {
+	t := reflect.TypeOf(err)
+	var value string
+	if t.PkgPath() == "" && t.Name() == "" {
+		// Likely a builtin type.
+		value = t.String()
+	} else {
+		value = fmt.Sprintf("%s.%s", t.PkgPath(), t.Name())
+	}
+
+	if value == "" {
+		return semconv.ErrorTypeOther
+	}
+	return semconv.ErrorTypeKey.String(value)
+}
+
 // HTTPClientStatus returns the span status for an HTTP response status code.
 // Matches HTTP client semantic conventions: 4xx/5xx are Error; others Unset.
 func HTTPClientStatus(code int) (codes.Code, string) {
@@ -176,14 +198,17 @@ func NewMetrics(meter metric.Meter) Metrics {
 //   - server.address — fixed default host
 //   - code.function.name — public Client method (finite API surface, ~hundreds)
 //   - http.response.status_code — when known (HTTP status range)
+//   - error.type — when the operation failed without a status code (bounded:
+//     Go error type names), so failures are distinguishable from successes
+//     even when no HTTP response was ever received
 //
 // Omitted (unbounded / path IDs):
 //   - url.path / raw endpoints like "linode/instances/123"
 //   - resource UIDs, request IDs, etc.
 //
 // Per-request HTTP method/path detail stays on spans (and optional net/http metrics).
-func MetricAttributes(operation string, statusCode int) []attribute.KeyValue {
-	attrs := make([]attribute.KeyValue, 0, 3)
+func MetricAttributes(operation string, statusCode int, errorType string) []attribute.KeyValue {
+	attrs := make([]attribute.KeyValue, 0, 4)
 	attrs = append(attrs, semconv.ServerAddress(DefaultServerAddress))
 	if op := strings.TrimSpace(operation); op != "" {
 		attrs = append(attrs, semconv.CodeFunctionName(op))
@@ -191,13 +216,19 @@ func MetricAttributes(operation string, statusCode int) []attribute.KeyValue {
 	if statusCode > 0 {
 		attrs = append(attrs, semconv.HTTPResponseStatusCode(statusCode))
 	}
+	if et := strings.TrimSpace(errorType); et != "" {
+		attrs = append(attrs, semconv.ErrorTypeKey.String(et))
+	}
 	return attrs
 }
 
 // RecordOperationDuration records public API method duration in seconds.
-func (m Metrics) RecordOperationDuration(ctx context.Context, seconds float64, operation string, statusCode int) {
+// errorType is the error.type attribute value for failures that carry no
+// HTTP status code; pass "" for a successful call or one already identified
+// by statusCode.
+func (m Metrics) RecordOperationDuration(ctx context.Context, seconds float64, operation string, statusCode int, errorType string) {
 	if m.operationDuration == nil {
 		return
 	}
-	m.operationDuration.Record(ctx, seconds, metric.WithAttributes(MetricAttributes(operation, statusCode)...))
+	m.operationDuration.Record(ctx, seconds, metric.WithAttributes(MetricAttributes(operation, statusCode, errorType)...))
 }
