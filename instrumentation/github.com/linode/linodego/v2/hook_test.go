@@ -189,6 +189,8 @@ func TestBeforeAfterDoRequest_PlainError(t *testing.T) {
 	got := spans[0]
 	assert.Equal(t, codes.Error, got.Status().Code)
 	assert.Equal(t, "network down", got.Status().Description)
+	attrs := attrMap(got.Attributes())
+	assert.Equal(t, "*errors.errorString", attrs["error.type"])
 }
 
 func TestBeforeDoRequest_Disabled(t *testing.T) {

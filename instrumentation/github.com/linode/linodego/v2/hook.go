@@ -143,6 +143,7 @@ func AfterDoRequest(ictx hook.HookContext, err error) {
 				span.SetStatus(sc, desc)
 			}
 		} else {
+			span.SetAttributes(semconv.ErrorType(err))
 			span.SetStatus(codes.Error, err.Error())
 		}
 		logger.Debug("AfterDoRequest error", "error", err)
