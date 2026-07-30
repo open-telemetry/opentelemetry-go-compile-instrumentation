@@ -4,8 +4,6 @@
 package instrument
 
 import (
-	"strings"
-
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -205,14 +203,21 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
 // 1. SetSkipCall is never called (so skip is always false)
 // 2. The HookContext parameter is only used as a receiver for method calls
 func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
-	// Check if the hook function contains any "SetSkipCall" string
-	// If found, the trampoline-jump-if cannot be flattened
+	// The hook context parameter is always the first parameter of the hook function.
+	hookContextParam := hookFunc.Type.Params.List[0].Names[0].Name
+
+	// Check if the hook function explicitly calls SetSkipCall on the hook context.
+	// If found, the trampoline-jump-if cannot be flattened.
 	found := false
 	dst.Inspect(hookFunc, func(node dst.Node) bool {
-		if ident, ok := node.(*dst.Ident); ok {
-			if strings.Contains(ident.Name, trampolineSetSkipCallName) {
-				found = true
-				return false
+		if call, ok := node.(*dst.CallExpr); ok {
+			if sel, ok := call.Fun.(*dst.SelectorExpr); ok {
+				if id, ok := sel.X.(*dst.Ident); ok && id.Name == hookContextParam {
+					if sel.Sel.Name == trampolineSetSkipCallName {
+						found = true
+						return false
+					}
+				}
 			}
 		}
 		if found {
@@ -226,7 +231,6 @@ func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
 
 	// Check if the hook context parameter escapes (used for non-method calls)
 	escape := false
-	hookContextParam := hookFunc.Type.Params.List[0].Names[0].Name
 	if hookContextParam == ast.IdentIgnore {
 		// If the parameter is ignored, it doesn't escape because it is not used
 		return true
