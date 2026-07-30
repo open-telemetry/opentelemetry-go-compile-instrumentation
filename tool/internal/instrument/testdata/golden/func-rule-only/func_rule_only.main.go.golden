@@ -1,7 +1,10 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+
 package main
+
 import _ "unsafe"
+
 func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	//line <generated>:1
 	if hookContext2313790154, _ := OtelBeforeTrampoline_Func12313790154(&p1, &p2); false {
@@ -13,6 +16,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	//line main.go:8:2
 	return 0.0, nil
 }
+
 //line <generated>:1
 type HookContextImpl2313790154 struct {
 	params      []interface{}
@@ -22,6 +26,7 @@ type HookContextImpl2313790154 struct {
 	funcName    string
 	packageName string
 }
+
 func (c *HookContextImpl2313790154) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl2313790154) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl2313790154) SetData(data interface{}) { c.data = data }
@@ -32,12 +37,14 @@ func (c *HookContextImpl2313790154) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
+
 func (c *HookContextImpl2313790154) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
+
 func (c *HookContextImpl2313790154) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -45,6 +52,7 @@ func (c *HookContextImpl2313790154) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
+
 func (c *HookContextImpl2313790154) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -54,6 +62,7 @@ func (c *HookContextImpl2313790154) GetParam(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl2313790154) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -66,6 +75,7 @@ func (c *HookContextImpl2313790154) SetParam(idx int, val interface{}) {
 		*(c.params[1].(*int)) = val.(int)
 	}
 }
+
 func (c *HookContextImpl2313790154) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -75,6 +85,7 @@ func (c *HookContextImpl2313790154) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl2313790154) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -91,6 +102,7 @@ func (c *HookContextImpl2313790154) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl2313790154) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl2313790154) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl2313790154) GetPackageName() string { return c.packageName }
+
 // Trampoline Template
 func OtelBeforeTrampoline_Func12313790154(param0 *string, param1 *int) (hookContext *HookContextImpl2313790154, skipCall bool) {
 	defer func() {
@@ -114,6 +126,7 @@ func OtelBeforeTrampoline_Func12313790154(param0 *string, param1 *int) (hookCont
 	}
 	return hookContext, hookContext.skipCall
 }
+
 func OtelAfterTrampoline_Func12313790154(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -132,7 +145,9 @@ func OtelAfterTrampoline_Func12313790154(hookContext HookContext, arg0 *float32,
 		H1After(hookContext, *arg0, *arg1)
 	}
 }
+
 //go:linkname H1Before testdata/golden/func-rule-only.H1Before
 func H1Before(hookContext HookContext, param0 string, param1 int)
+
 //go:linkname H1After testdata/golden/func-rule-only.H1After
 func H1After(hookContext HookContext, arg0 float32, arg1 error)

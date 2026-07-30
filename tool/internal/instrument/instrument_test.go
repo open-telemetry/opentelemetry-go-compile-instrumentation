@@ -520,11 +520,7 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 // normalizeSpace standardizes AST spacing to prevent cross-toolchain flakiness
 // (e.g., Go 1.25+ dropping blank lines in dst) and Windows CRLF issues.
 func normalizeSpace(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	for strings.Contains(s, "\n\n") {
-		s = strings.ReplaceAll(s, "\n\n", "\n")
-	}
-	return s
+	return strings.ReplaceAll(s, "\r\n", "\n")
 }
 
 // testImportPath returns the compile-time import path for a fixture. A fixture

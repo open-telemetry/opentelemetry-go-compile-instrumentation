@@ -1,7 +1,10 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+
 package main
+
 import _ "unsafe"
+
 func GenericFunc[T any](p1 T, p2 int) (_unnamedRetVal0 T, _unnamedRetVal1 error) {
 	//line <generated>:1
 	if hookContext1523734358, _ := OtelBeforeTrampoline_GenericFunc1523734358[T](&p1, &p2); false {
@@ -11,9 +14,11 @@ func GenericFunc[T any](p1 T, p2 int) (_unnamedRetVal0 T, _unnamedRetVal1 error)
 	//line main.go:7:2
 	return p1, nil
 }
+
 type GenStruct[T any] struct {
 	value T
 }
+
 func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal0 T, _unnamedRetVal1 error) {
 	//line <generated>:1
 	if hookContext1139503255, _ := OtelBeforeTrampoline_GenericMethod1139503255(&g, &p1, &p2); false {
@@ -23,6 +28,7 @@ func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal0 T, _unnam
 	//line main.go:15:2
 	return p1, nil
 }
+
 //line <generated>:1
 type HookContextImpl1523734358 struct {
 	params      []interface{}
@@ -32,6 +38,7 @@ type HookContextImpl1523734358 struct {
 	funcName    string
 	packageName string
 }
+
 func (c *HookContextImpl1523734358) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl1523734358) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl1523734358) SetData(data interface{}) { c.data = data }
@@ -42,12 +49,14 @@ func (c *HookContextImpl1523734358) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
+
 func (c *HookContextImpl1523734358) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
+
 func (c *HookContextImpl1523734358) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -55,15 +64,19 @@ func (c *HookContextImpl1523734358) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
+
 func (c *HookContextImpl1523734358) GetParam(idx int) interface{} {
 	panic("GetParam is unsupported for generic functions")
 }
+
 func (c *HookContextImpl1523734358) SetParam(idx int, val interface{}) {
 	panic("SetParam is unsupported for generic functions")
 }
+
 func (c *HookContextImpl1523734358) GetReturnVal(idx int) interface{} {
 	panic("GetReturnVal is unsupported for generic functions")
 }
+
 func (c *HookContextImpl1523734358) SetReturnVal(idx int, val interface{}) {
 	panic("SetReturnVal is unsupported for generic functions")
 }
@@ -71,6 +84,7 @@ func (c *HookContextImpl1523734358) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl1523734358) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl1523734358) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl1523734358) GetPackageName() string { return c.packageName }
+
 // Trampoline Template
 func OtelBeforeTrampoline_GenericFunc1523734358[T any](param0 *T, param1 *int) (hookContext *HookContextImpl1523734358, skipCall bool) {
 	defer func() {
@@ -94,6 +108,7 @@ func OtelBeforeTrampoline_GenericFunc1523734358[T any](param0 *T, param1 *int) (
 	}
 	return hookContext, hookContext.skipCall
 }
+
 func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, arg0 *T, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -112,10 +127,13 @@ func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, a
 		GenericFuncAfter(hookContext, *arg0, *arg1)
 	}
 }
+
 //go:linkname GenericFuncBefore testdata/golden/generic-functions.GenericFuncBefore
 func GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 int)
+
 //go:linkname GenericFuncAfter testdata/golden/generic-functions.GenericFuncAfter
 func GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)
+
 //line <generated>:1
 type HookContextImpl1139503255 struct {
 	params      []interface{}
@@ -125,6 +143,7 @@ type HookContextImpl1139503255 struct {
 	funcName    string
 	packageName string
 }
+
 func (c *HookContextImpl1139503255) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl1139503255) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl1139503255) SetData(data interface{}) { c.data = data }
@@ -135,12 +154,14 @@ func (c *HookContextImpl1139503255) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
+
 func (c *HookContextImpl1139503255) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
+
 func (c *HookContextImpl1139503255) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -148,15 +169,19 @@ func (c *HookContextImpl1139503255) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
+
 func (c *HookContextImpl1139503255) GetParam(idx int) interface{} {
 	panic("GetParam is unsupported for generic functions")
 }
+
 func (c *HookContextImpl1139503255) SetParam(idx int, val interface{}) {
 	panic("SetParam is unsupported for generic functions")
 }
+
 func (c *HookContextImpl1139503255) GetReturnVal(idx int) interface{} {
 	panic("GetReturnVal is unsupported for generic functions")
 }
+
 func (c *HookContextImpl1139503255) SetReturnVal(idx int, val interface{}) {
 	panic("SetReturnVal is unsupported for generic functions")
 }
@@ -164,6 +189,7 @@ func (c *HookContextImpl1139503255) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl1139503255) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl1139503255) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl1139503255) GetPackageName() string { return c.packageName }
+
 // Trampoline Template
 func OtelBeforeTrampoline_GenericMethod1139503255[T any](recv0 **GenStruct[T], param0 *T, param1 *string) (hookContext *HookContextImpl1139503255, skipCall bool) {
 	defer func() {
@@ -187,6 +213,7 @@ func OtelBeforeTrampoline_GenericMethod1139503255[T any](recv0 **GenStruct[T], p
 	}
 	return hookContext, hookContext.skipCall
 }
+
 func OtelAfterTrampoline_GenericMethod1139503255[T any](hookContext HookContext, arg0 *T, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -205,7 +232,9 @@ func OtelAfterTrampoline_GenericMethod1139503255[T any](hookContext HookContext,
 		GenericMethodAfter(hookContext, *arg0, *arg1)
 	}
 }
+
 //go:linkname GenericMethodBefore testdata/golden/generic-functions.GenericMethodBefore
 func GenericMethodBefore(hookContext HookContext, recv0 interface{}, param0 interface{}, param1 string)
+
 //go:linkname GenericMethodAfter testdata/golden/generic-functions.GenericMethodAfter
 func GenericMethodAfter(hookContext HookContext, arg0 interface{}, arg1 error)

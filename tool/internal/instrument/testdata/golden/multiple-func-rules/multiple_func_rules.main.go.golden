@@ -1,7 +1,10 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+
 package main
+
 import _ "unsafe"
+
 func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	//line <generated>:1
 	if hookContext3592294264, _ := OtelBeforeTrampoline_Func13592294264(&p1, &p2); false {
@@ -17,6 +20,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
 	//line main.go:8:2
 	return 0.0, nil
 }
+
 //line <generated>:1
 type HookContextImpl3592294264 struct {
 	params      []interface{}
@@ -26,6 +30,7 @@ type HookContextImpl3592294264 struct {
 	funcName    string
 	packageName string
 }
+
 func (c *HookContextImpl3592294264) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl3592294264) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl3592294264) SetData(data interface{}) { c.data = data }
@@ -36,12 +41,14 @@ func (c *HookContextImpl3592294264) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
+
 func (c *HookContextImpl3592294264) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
+
 func (c *HookContextImpl3592294264) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -49,6 +56,7 @@ func (c *HookContextImpl3592294264) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
+
 func (c *HookContextImpl3592294264) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -58,6 +66,7 @@ func (c *HookContextImpl3592294264) GetParam(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl3592294264) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -70,6 +79,7 @@ func (c *HookContextImpl3592294264) SetParam(idx int, val interface{}) {
 		*(c.params[1].(*int)) = val.(int)
 	}
 }
+
 func (c *HookContextImpl3592294264) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -79,6 +89,7 @@ func (c *HookContextImpl3592294264) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl3592294264) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -95,6 +106,7 @@ func (c *HookContextImpl3592294264) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl3592294264) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl3592294264) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl3592294264) GetPackageName() string { return c.packageName }
+
 // Trampoline Template
 func OtelBeforeTrampoline_Func13592294264(param0 *string, param1 *int) (hookContext *HookContextImpl3592294264, skipCall bool) {
 	defer func() {
@@ -118,6 +130,7 @@ func OtelBeforeTrampoline_Func13592294264(param0 *string, param1 *int) (hookCont
 	}
 	return hookContext, hookContext.skipCall
 }
+
 func OtelAfterTrampoline_Func13592294264(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -136,10 +149,13 @@ func OtelAfterTrampoline_Func13592294264(hookContext HookContext, arg0 *float32,
 		H1After(hookContext, *arg0, *arg1)
 	}
 }
+
 //go:linkname H1Before testdata/golden/multiple-func-rules.H1Before
 func H1Before(hookContext HookContext, param0 string, param1 int)
+
 //go:linkname H1After testdata/golden/multiple-func-rules.H1After
 func H1After(hookContext HookContext, arg0 float32, arg1 error)
+
 //line <generated>:1
 type HookContextImpl1830170046 struct {
 	params      []interface{}
@@ -149,6 +165,7 @@ type HookContextImpl1830170046 struct {
 	funcName    string
 	packageName string
 }
+
 func (c *HookContextImpl1830170046) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl1830170046) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl1830170046) SetData(data interface{}) { c.data = data }
@@ -159,12 +176,14 @@ func (c *HookContextImpl1830170046) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
+
 func (c *HookContextImpl1830170046) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
+
 func (c *HookContextImpl1830170046) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -172,6 +191,7 @@ func (c *HookContextImpl1830170046) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
+
 func (c *HookContextImpl1830170046) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -181,6 +201,7 @@ func (c *HookContextImpl1830170046) GetParam(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl1830170046) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -193,6 +214,7 @@ func (c *HookContextImpl1830170046) SetParam(idx int, val interface{}) {
 		*(c.params[1].(*int)) = val.(int)
 	}
 }
+
 func (c *HookContextImpl1830170046) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -202,6 +224,7 @@ func (c *HookContextImpl1830170046) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl1830170046) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -218,6 +241,7 @@ func (c *HookContextImpl1830170046) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl1830170046) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl1830170046) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl1830170046) GetPackageName() string { return c.packageName }
+
 // Trampoline Template
 func OtelBeforeTrampoline_Func11830170046(param0 *string, param1 *int) (hookContext *HookContextImpl1830170046, skipCall bool) {
 	defer func() {
@@ -241,6 +265,7 @@ func OtelBeforeTrampoline_Func11830170046(param0 *string, param1 *int) (hookCont
 	}
 	return hookContext, hookContext.skipCall
 }
+
 func OtelAfterTrampoline_Func11830170046(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -259,7 +284,9 @@ func OtelAfterTrampoline_Func11830170046(hookContext HookContext, arg0 *float32,
 		H2After(hookContext, *arg0, *arg1)
 	}
 }
+
 //go:linkname H2Before testdata/golden/multiple-func-rules.H2Before
 func H2Before(hookContext HookContext, param0 string, param1 int)
+
 //go:linkname H2After testdata/golden/multiple-func-rules.H2After
 func H2After(hookContext HookContext, arg0 float32, arg1 error)

@@ -1,7 +1,10 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+
 package main
+
 import _ "unsafe"
+
 func UnderscoreFunc(_ignoredParam0 int, _ignoredParam1 float32) {
 	//line <generated>:1
 	if OtelBeforeTrampoline_UnderscoreFunc418572368(&_ignoredParam0, &_ignoredParam1); false {
@@ -9,6 +12,7 @@ func UnderscoreFunc(_ignoredParam0 int, _ignoredParam1 float32) {
 	}
 	//line main.go:6:39
 }
+
 //line <generated>:1
 type HookContextImpl418572368 struct {
 	params      []interface{}
@@ -18,6 +22,7 @@ type HookContextImpl418572368 struct {
 	funcName    string
 	packageName string
 }
+
 func (c *HookContextImpl418572368) SetSkipCall(skip bool)    { c.skipCall = skip }
 func (c *HookContextImpl418572368) IsSkipCall() bool         { return c.skipCall }
 func (c *HookContextImpl418572368) SetData(data interface{}) { c.data = data }
@@ -28,12 +33,14 @@ func (c *HookContextImpl418572368) GetKeyData(key string) interface{} {
 	}
 	return c.data.(map[string]interface{})[key]
 }
+
 func (c *HookContextImpl418572368) SetKeyData(key string, val interface{}) {
 	if c.data == nil {
 		c.data = make(map[string]interface{})
 	}
 	c.data.(map[string]interface{})[key] = val
 }
+
 func (c *HookContextImpl418572368) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
@@ -41,6 +48,7 @@ func (c *HookContextImpl418572368) HasKeyData(key string) bool {
 	_, ok := c.data.(map[string]interface{})[key]
 	return ok
 }
+
 func (c *HookContextImpl418572368) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -50,6 +58,7 @@ func (c *HookContextImpl418572368) GetParam(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl418572368) SetParam(idx int, val interface{}) {
 	if val == nil {
 		c.params[idx] = nil
@@ -62,11 +71,13 @@ func (c *HookContextImpl418572368) SetParam(idx int, val interface{}) {
 		*(c.params[1].(*float32)) = val.(float32)
 	}
 }
+
 func (c *HookContextImpl418572368) GetReturnVal(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
+
 func (c *HookContextImpl418572368) SetReturnVal(idx int, val interface{}) {
 	if val == nil {
 		c.returnVals[idx] = nil
@@ -79,6 +90,7 @@ func (c *HookContextImpl418572368) GetParamCount() int     { return len(c.params
 func (c *HookContextImpl418572368) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl418572368) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl418572368) GetPackageName() string { return c.packageName }
+
 // Trampoline Template
 func OtelBeforeTrampoline_UnderscoreFunc418572368(param0 *int, param1 *float32) (hookContext *HookContextImpl418572368, skipCall bool) {
 	defer func() {
@@ -102,5 +114,6 @@ func OtelBeforeTrampoline_UnderscoreFunc418572368(param0 *int, param1 *float32) 
 	}
 	return hookContext, hookContext.skipCall
 }
+
 //go:linkname H10Before testdata/golden/underscore-syntax.H10Before
 func H10Before(hookContext HookContext, param0 int, param1 float32)
