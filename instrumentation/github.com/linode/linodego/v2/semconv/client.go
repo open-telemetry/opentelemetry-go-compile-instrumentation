@@ -138,7 +138,19 @@ func LinodegoErrorTraceAttrs(err error) []attribute.KeyValue {
 // server (timeout, connection failure, context cancellation). It mirrors
 // instrumentation/net/http/semconv's HTTPClient.ErrorType so callers get the
 // same Go type name convention across instrumentations.
+//
+// The error chain is unwrapped to its root cause first, since linodego and
+// net/http wrap transport errors (e.g. fmt.Errorf("...: %w", err),
+// *url.Error) and the wrapper type is rarely what callers want to alert on.
 func ErrorType(err error) attribute.KeyValue {
+	for {
+		unwrapped := errors.Unwrap(err)
+		if unwrapped == nil {
+			break
+		}
+		err = unwrapped
+	}
+
 	t := reflect.TypeOf(err)
 	var value string
 	if t.PkgPath() == "" && t.Name() == "" {

@@ -193,6 +193,11 @@ func TestErrorType(t *testing.T) {
 
 	kv = ErrorType(statusErr{code: 0, msg: "custom"})
 	assert.Equal(t, "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2/semconv.statusErr", kv.Value.AsString())
+
+	// Wrapped errors (e.g. fmt.Errorf("...: %w", err)) report the root cause's
+	// type, not the wrapper's, so alerts group on the underlying failure.
+	kv = ErrorType(fmt.Errorf("request failed: %w", statusErr{code: 0, msg: "custom"}))
+	assert.Equal(t, "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2/semconv.statusErr", kv.Value.AsString())
 }
 
 func attrsToMap(attrs []attribute.KeyValue) map[string]interface{} {
