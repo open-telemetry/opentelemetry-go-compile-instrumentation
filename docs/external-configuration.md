@@ -80,12 +80,14 @@ Rules:
 - **Every import must be a blank import** (`_ "path"`). Named imports and dot imports are
   rejected at load time.
 
-**Planned — `otelc pin`:** an upcoming `otelc pin` subcommand (#655) will create or update
-the tool file automatically, discover applicable instrumentation packages, and run
-`go mod tidy`. Until #655 lands, create the file manually as shown above.
+`otelc pin` can create or update the tool file automatically, discover applicable
+instrumentation packages, and run `go mod tidy`.
 
-After creating or editing the tool file, run `go mod tidy` to record the new dependencies
-in `go.mod` and `go.sum`.
+After creating or editing the tool file manually, run `go mod tidy` to record the new
+dependencies in `go.mod` and `go.sum`.
+
+For current limitations around committing generated instrumentation files, see
+[Managing Instrumentations](getting-started.md#managing-instrumentations).
 
 ### Module scope
 

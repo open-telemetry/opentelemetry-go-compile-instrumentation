@@ -1,0 +1,9 @@
+hook_underscore_param_return:
+  target: main
+  where:
+    func: UnderscoreParamReturnFunc
+  do:
+    - inject_hooks:
+        before: H12UnderscoreParamReturnBefore
+        after: H12UnderscoreParamReturnAfter
+        path: testdata/golden/underscore-param-and-return

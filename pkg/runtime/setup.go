@@ -9,13 +9,14 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
+	"go.opentelemetry.io/contrib/propagators/autoprop"
 	"go.opentelemetry.io/otel"
 	logglobal "go.opentelemetry.io/otel/log/global"
-	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -101,6 +102,12 @@ func setupOpenTelemetry(cfg Config) {
 		}
 	}()
 
+	// The default handler writes to the stdlib logger on stderr, which bypasses OTEL_LOG_LEVEL and does not match
+	// the structured output the rest of the runtime emits.
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		logger.Error("OpenTelemetry SDK error", "error", err)
+	}))
+
 	ctx := context.Background()
 
 	// Create resource
@@ -130,11 +137,10 @@ func setupOpenTelemetry(cfg Config) {
 		logger.Warn("failed to setup logger provider", "error", err)
 	}
 
-	// Set W3C Trace Context as the propagator
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	// Use autoprop to select propagators from OTEL_PROPAGATORS (tracecontext,
+	// baggage, b3, b3multi, jaeger, xray, ottrace, none). Defaults to W3C
+	// Trace Context + Baggage when the variable is not set.
+	otel.SetTextMapPropagator(autoprop.NewTextMapPropagator())
 
 	logger.Info("OpenTelemetry initialized",
 		"instrumentation_name", cfg.InstrumentationName,
@@ -300,14 +306,20 @@ func StartRuntimeMetrics() {
 	logger.Info("runtime metrics enabled")
 }
 
+// shutdownSignals returns the OS signals that trigger graceful OTel shutdown.
+func shutdownSignals() []os.Signal {
+	return []os.Signal{os.Interrupt, syscall.SIGTERM}
+}
+
 // setupSignalHandler registers a goroutine that listens for OS signals
-// and gracefully shuts down the OpenTelemetry SDK when receiving interrupt signals.
+// and gracefully shuts down the OpenTelemetry SDK when receiving SIGINT or SIGTERM.
 // This ensures telemetry is flushed before the application exits.
 // This function is safe to call multiple times; it will only register the handler once.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt)
+		signals := shutdownSignals()
+		signal.Notify(sigCh, signals...)
 
 		go func() {
 			sig := <-sigCh
@@ -324,9 +336,8 @@ func setupSignalHandler() {
 				logger.Info("OpenTelemetry SDK shutdown completed successfully")
 			}
 
-			// After shutdown completes, exit cleanly
-			// os.Interrupt is cross-platform (SIGINT on Unix, Ctrl+C on Windows)
-			signal.Reset(os.Interrupt)
+			// After shutdown completes, exit cleanly.
+			signal.Reset(signals...)
 			os.Exit(0)
 		}()
 	})

@@ -5,11 +5,11 @@ package main
 
 import _ "unsafe"
 
-func UnderscoreReturnFunc() (_ignoredParam0 int, _ignoredParam1 error) {
+func UnderscoreReturnFunc() (_ignoredRetVal0 int, _ignoredRetVal1 error) {
 	//line <generated>:1
 	if false {
 	} else {
-		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(&HookContextImpl2035128499{params: []interface{}{}, returnVals: []interface{}{&_ignoredParam0, &_ignoredParam1}}, &_ignoredParam0, &_ignoredParam1)
+		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(&HookContextImpl2035128499{params: []interface{}{}, returnVals: []interface{}{&_ignoredRetVal0, &_ignoredRetVal1}}, &_ignoredRetVal0, &_ignoredRetVal1)
 	}
 	//line main.go:7:2
 	return 0, nil

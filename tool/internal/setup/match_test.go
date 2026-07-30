@@ -529,6 +529,25 @@ func TestMultipleRuleFiles(t *testing.T) {
 	require.Equal(t, "h1", rules[0].GetName())
 }
 
+func TestLoadRules_InvalidVersionRange(t *testing.T) {
+	content := `broken:
+  target: main
+  version: "v1.0.0,"
+  func: Example
+  raw: "_ = 1"`
+
+	p := writeCustomRules(t, "broken.yaml", content)
+	t.Setenv(util.EnvOtelcRules, "")
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = p
+
+	_, err := sp.loadRules(t.Context(), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `rule "broken"`)
+	assert.Contains(t, err.Error(), `version "v1.0.0,"`)
+}
+
 func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	// A single YAML entry whose do: sequence carries multiple modifiers expands
 	// into one rule per modifier, all sharing the entry name. loadCustomRules
@@ -798,6 +817,40 @@ func TestPreciseMatching_WhereFileAllOf(t *testing.T) {
 	require.Len(t, result.FuncRules, 1)
 	require.Contains(t, result.FuncRules, matchFile)
 	require.NotContains(t, result.FuncRules, noMatchFile)
+}
+
+func TestPreciseMatching_CallRuleAddedToAllFiles(t *testing.T) {
+	matchFile := writeGoSource(
+		t,
+		"calls.go",
+		"package main\n\nimport \"unsafe\"\n\nfunc CallSizeof() {\n\t_ = unsafe.Sizeof(42)\n}\n",
+	)
+	noMatchFile := writeGoSource(t, "other.go", "package main\n\nfunc Helper() { println(\"hi\") }\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/app",
+		Sources:    []string{matchFile, noMatchFile},
+	}
+
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "wrap-sizeof",
+			Target: "example.com/app",
+		},
+		FunctionCall: "unsafe.Sizeof",
+		ImportPath:   "unsafe",
+		FuncName:     "Sizeof",
+		Replace:      "Wrapper({{ . }})",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.CallRules, 2)
+	require.Contains(t, result.CallRules, matchFile)
+	require.Contains(t, result.CallRules, noMatchFile)
 }
 
 func TestPreciseMatching_WhereFileOneOf(t *testing.T) {

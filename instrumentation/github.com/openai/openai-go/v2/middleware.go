@@ -25,36 +25,44 @@ const (
 	maxResponseBodySize = 4 << 20 // 4 MB
 )
 
-var providerMapping = map[string]string{
-	"openai.com":         "openai",
-	"azure.com":          "azure",
-	"anthropic.com":      "anthropic",
-	"dashscope.aliyuncs": "qwen",
-	"volces.com":         "ark",
-	"ark.cn":             "ark",
-	"hunyuan":            "tencent",
-	"tencentcloudapi":    "tencent",
-	"googleapis.com":     "google",
-	"generativelanguage": "google",
-	"deepseek.com":       "deepseek",
-	"moonshot":           "moonshot",
-	"zhipuai.cn":         "zhipu",
-	"bigmodel.cn":        "zhipu",
-	"baidu.com":          "baidu",
-	"minimax":            "minimax",
-	"siliconflow":        "siliconflow",
-	"together":           "together",
-	"mistral":            "mistral",
-	"groq.com":           "groq",
-	"ollama":             "ollama",
-	"localhost":          "local",
-	"127.0.0.1":          "local",
+// providerMapping is checked in order: the first entry whose keyword is a
+// substring of the request host wins. It is a slice, not a map, because Go
+// map iteration order is randomized on every range - a map here would make
+// getProviderName non-deterministic whenever a host matched more than one
+// keyword (see Issue #824).
+var providerMapping = []struct { //nolint:gochecknoglobals // private lookup table
+	keyword  string
+	provider string
+}{
+	{"openai.com", "openai"},
+	{"azure.com", "azure"},
+	{"anthropic.com", "anthropic"},
+	{"dashscope.aliyuncs", "qwen"},
+	{"volces.com", "ark"},
+	{"ark.cn", "ark"},
+	{"hunyuan", "tencent"},
+	{"tencentcloudapi", "tencent"},
+	{"googleapis.com", "google"},
+	{"generativelanguage", "google"},
+	{"deepseek.com", "deepseek"},
+	{"moonshot", "moonshot"},
+	{"zhipuai.cn", "zhipu"},
+	{"bigmodel.cn", "zhipu"},
+	{"baidu.com", "baidu"},
+	{"minimax", "minimax"},
+	{"siliconflow", "siliconflow"},
+	{"together", "together"},
+	{"mistral", "mistral"},
+	{"groq.com", "groq"},
+	{"ollama", "ollama"},
+	{"localhost", "local"},
+	{"127.0.0.1", "local"},
 }
 
 func getProviderName(host string) string {
-	for keyword, provider := range providerMapping {
-		if strings.Contains(host, keyword) {
-			return provider
+	for _, entry := range providerMapping {
+		if strings.Contains(host, entry.keyword) {
+			return entry.provider
 		}
 	}
 	return "openai"
@@ -116,14 +124,14 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		var buf bytes.Buffer
 		tee := io.TeeReader(req.Body, &buf)
 		bodyBytes, err := io.ReadAll(io.LimitReader(tee, maxRequestBodySize))
-		if err != nil {
-			return next(req)
-		}
 		// Reassemble: buffered bytes + remaining unread body.
 		req.Body = struct {
 			io.Reader
 			io.Closer
 		}{io.MultiReader(&buf, req.Body), req.Body}
+		if err != nil {
+			return next(req)
+		}
 
 		var model string
 		var spanAttrs []attribute.KeyValue
@@ -196,14 +204,14 @@ func handleNonStreamingResponse(
 	var buf bytes.Buffer
 	tee := io.TeeReader(resp.Body, &buf)
 	bodyBytes, err := io.ReadAll(io.LimitReader(tee, maxResponseBodySize))
-	if err != nil {
-		return
-	}
 	// Reassemble: preview bytes + remaining unread body.
 	resp.Body = struct {
 		io.Reader
 		io.Closer
 	}{io.MultiReader(&buf, resp.Body), resp.Body}
+	if err != nil {
+		return
+	}
 
 	switch op {
 	case opChat:

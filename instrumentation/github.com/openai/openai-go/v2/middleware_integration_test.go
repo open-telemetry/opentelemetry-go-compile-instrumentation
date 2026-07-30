@@ -6,6 +6,7 @@ package v2
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -25,6 +26,20 @@ func setupTestTracer(t *testing.T) *tracetest.SpanRecorder {
 	tracer = tp.Tracer("test")
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	return sr
+}
+
+type partialReadErrorReader struct {
+	prefix []byte
+	err    error
+	read   bool
+}
+
+func (r *partialReadErrorReader) Read(p []byte) (int, error) {
+	if !r.read {
+		r.read = true
+		return copy(p, r.prefix), nil
+	}
+	return 0, r.err
 }
 
 func TestOtelMiddleware_ChatCompletion(t *testing.T) {
@@ -227,6 +242,70 @@ func TestOtelMiddleware_NextError(t *testing.T) {
 
 	span := spans[0]
 	assert.Equal(t, "chat gpt-4", span.Name())
+}
+
+func TestOtelMiddleware_RequestBodyReadError(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	wantErr := errors.New("read fail")
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(&partialReadErrorReader{prefix: []byte(`{"model":"gpt-4"}`), err: wantErr}),
+	)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		body, err := io.ReadAll(r.Body)
+		require.ErrorIs(t, err, wantErr)
+		assert.Equal(t, `{"model":"gpt-4"}`, string(body))
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{},
+			Body:       io.NopCloser(bytes.NewReader(nil)),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Empty(t, sr.Ended())
+}
+
+func TestOtelMiddleware_ResponseBodyReadError(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	reqBody := `{"model":"gpt-4"}`
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
+
+	wantErr := errors.New("response read fail")
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(&partialReadErrorReader{prefix: []byte(`{"id":"chatcmpl-123"}`), err: wantErr}),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	body, err := io.ReadAll(resp.Body)
+	require.ErrorIs(t, err, wantErr)
+	assert.Equal(t, `{"id":"chatcmpl-123"}`, string(body))
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
 }
 
 func TestOtelMiddleware_ProviderDetection(t *testing.T) {
