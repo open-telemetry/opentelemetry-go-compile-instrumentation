@@ -114,11 +114,15 @@ func TestStructFilter_Match(t *testing.T) {
 	ctx := parseSource(t, `package main
 
 type Server struct{}
+type Reader interface{ Read() error }
 func NotAStruct() {}
 `)
 
 	if !(&setup.StructFilter{Struct: "Server"}).Match(ctx) {
 		t.Fatal("StructFilter.Match(Server) = false, want true")
+	}
+	if (&setup.StructFilter{Struct: "Reader"}).Match(ctx) {
+		t.Fatal("StructFilter.Match(Reader) = true, want false")
 	}
 	if (&setup.StructFilter{Struct: "NotAStruct"}).Match(ctx) {
 		t.Fatal("StructFilter.Match(NotAStruct) = true, want false")
