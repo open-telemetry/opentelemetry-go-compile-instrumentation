@@ -236,7 +236,7 @@ func TestPublicMethodHooks_Success(t *testing.T) {
 }
 
 func TestPublicMethodHooks_Error(t *testing.T) {
-	sr, _ := setupTestProviders(t)
+	sr, reader := setupTestProviders(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
 
 	parent := context.Background()
@@ -252,6 +252,47 @@ func TestPublicMethodHooks_Error(t *testing.T) {
 	assert.Equal(t, codes.Error, got.Status().Code)
 	attrs := attrMap(got.Attributes())
 	assert.Equal(t, int64(404), attrs["http.response.status_code"])
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	m, ok := findMetricAttrs(rm, "linodego.client.operation.duration")
+	require.True(t, ok)
+	assert.Equal(t, "404", m["error.type"])
+}
+
+// TestPublicMethodHooks_ErrorWithoutStatus covers a failure that never
+// produced an HTTP status code (e.g. the request timed out or the connection
+// was refused before a response arrived). Previously the operation.duration
+// metric recorded exactly the same attributes as a success in this case;
+// error.type must now be set from the Go error type so failed and successful
+// calls remain distinguishable in the metric.
+func TestPublicMethodHooks_ErrorWithoutStatus(t *testing.T) {
+	sr, reader := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(nil, parent, 1)
+	ictx.FuncName = "ListRegions"
+
+	BeforeAPICall1(ictx, nil, parent)
+	AfterAPICall1(ictx, errors.New("connection refused"))
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	got := spans[0]
+	assert.Equal(t, codes.Error, got.Status().Code)
+	attrs := attrMap(got.Attributes())
+	_, hasStatusCode := attrs["http.response.status_code"]
+	assert.False(t, hasStatusCode)
+	assert.Equal(t, "*errors.errorString", attrs["error.type"])
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	m, ok := findMetricAttrs(rm, "linodego.client.operation.duration")
+	require.True(t, ok)
+	_, hasMetricStatusCode := m["http.response.status_code"]
+	assert.False(t, hasMetricStatusCode, "no status code was available, so none should be recorded")
+	assert.Equal(t, "*errors.errorString", m["error.type"])
 }
 
 func TestPublicMethodHooks_Disabled(t *testing.T) {
@@ -289,4 +330,23 @@ func hasMetric(rm metricdata.ResourceMetrics, name string) bool {
 		}
 	}
 	return false
+}
+
+// findMetricAttrs returns the attribute set on the most recent data point of
+// the named histogram metric.
+func findMetricAttrs(rm metricdata.ResourceMetrics, name string) (map[string]interface{}, bool) {
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != name {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			if !ok || len(hist.DataPoints) == 0 {
+				return nil, false
+			}
+			dp := hist.DataPoints[len(hist.DataPoints)-1]
+			return attrMap(dp.Attributes.ToSlice()), true
+		}
+	}
+	return nil, false
 }
