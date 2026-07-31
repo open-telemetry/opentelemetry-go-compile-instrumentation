@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -105,10 +104,7 @@ func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
 func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
 
 func (ibr *InstBaseRule) validateBase() error {
-	if strings.TrimSpace(ibr.Target) == "" {
-		return ex.Newf("target cannot be empty")
-	}
-	return nil
+	return ValidateTarget(ibr.Target)
 }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a

@@ -1488,7 +1488,8 @@ func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
 
 func TestMatchDeps_EmptyTargetRejected(t *testing.T) {
 	// target is required: an empty (or whitespace-only) target would land under
-	// exactRules[""] and silently never match, so the loader must reject it at
+	// exactRules[""] and silently never match, so rule.ValidateTarget (invoked
+	// via InstBaseRule.validateBase during rule construction) must reject it at
 	// load time rather than accepting a rule that can never fire.
 	dir := t.TempDir()
 	ruleFile := filepath.Join(dir, "empty.yaml")
@@ -1509,7 +1510,7 @@ func TestMatchDeps_EmptyTargetRejected(t *testing.T) {
 
 	_, err = sp.matchDeps(context.Background(), deps, nil)
 	require.Error(t, err)
-	require.ErrorContains(t, err, "empty target")
+	require.ErrorContains(t, err, "target cannot be empty")
 }
 
 func TestMatchDeps_NoMatchesWarning(t *testing.T) {
