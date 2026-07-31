@@ -1,8 +1,0 @@
-gocql_newsession:
-  target: github.com/gocql/gocql
-  where:
-    func: NewSession
-  do:
-    - inject_hooks:
-        before: BeforeNewSession
-        path: "go.opentelemetry.io/otelc/instrumentation/github.com/gocql/gocql"
