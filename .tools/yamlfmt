@@ -13,13 +13,16 @@ formatter:
   pad_line_comments: 2
   include_document_start: false
 
-# Exclude patterns for files/directories to ignore
+# Exclude patterns for files/directories to ignore.
+# With Makefile -dstar includes, patterns must also be doublestar-compatible
+# (prefix **/ …) so generated trees like schemas/otelc/.deps are skipped.
 exclude:
-  - testdata/
-  - vendor/
-  - .git/
-  - node_modules/
-  - pb/
-  - .otelc-build/
+  - "**/testdata/**"
+  - "**/vendor/**"
+  - "**/.git/**"
+  - "**/node_modules/**"
+  - "**/pb/**"
+  - "**/.otelc-build/**"
   # Pre-fetched upstream semantic-conventions registry (generated, git-ignored).
-  - schemas/otelc/.deps/
+  # Upstream k8s/registry.yaml is not always valid YAML; never format/lint it.
+  - "**/schemas/otelc/.deps/**"
