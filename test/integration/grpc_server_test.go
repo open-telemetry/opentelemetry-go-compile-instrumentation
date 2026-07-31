@@ -11,7 +11,6 @@ import (
 	"os"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
@@ -58,7 +57,7 @@ func TestGRPCServer(t *testing.T) {
 
 			client := NewGRPCClient(t, addr)
 			tc.exercise(t, client)
-			testutil.WaitForSpanFlush(t)
+			f.WaitForSpans(1)
 
 			span := f.RequireSingleSpan()
 			testutil.RequireGRPCServerSemconv(t, span, "greeter.Greeter", tc.method, 0)
@@ -94,9 +93,7 @@ func TestGRPCServer(t *testing.T) {
 			// terminate the process — the app owns its exit. Wait for the flushed
 			// span, then confirm the process is still alive (fixture kills it later).
 			require.NoError(t, srv.Cmd.Process.Signal(tc.sig))
-			require.Eventuallyf(t, func() bool {
-				return len(testutil.AllSpans(f.Traces())) > 0
-			}, 5*time.Second, 100*time.Millisecond, "expected spans to be flushed on %s", tc.name)
+			f.WaitForSpans(1)
 			require.NoError(t, srv.Cmd.Process.Signal(syscall.Signal(0)),
 				"instrumentation must not terminate the process on %s", tc.name)
 

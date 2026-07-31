@@ -37,7 +37,7 @@ func TestHTTPServerDBClient(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Wait for the spans to be flushed
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(2)
 
 	// We expect exactly 1 trace with 2 spans:
 	// 1. HTTP server (Frontend)

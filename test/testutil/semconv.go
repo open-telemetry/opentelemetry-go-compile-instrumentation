@@ -175,3 +175,16 @@ func RequireK8SClientSemconv(
 	RequireAttribute(t, span, "k8s.object.kind", "Pod")
 	RequireAttribute(t, span, "k8s.object.api_version", "v1")
 }
+
+// RequireAWSClientSemconv verifies that an AWS SDK client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/cloud-providers/aws-sdk/
+func RequireAWSClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	requestID string,
+) {
+	// Required attributes
+	RequireAttribute(t, span, "rpc.system.name", "aws-api")
+	// Recommended attributes
+	RequireAttribute(t, span, "aws.request_id", requestID)
+}
