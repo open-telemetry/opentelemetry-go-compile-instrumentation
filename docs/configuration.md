@@ -16,6 +16,34 @@ they ship a library themselves, or because they need reproducible, auditable bui
 declare exactly which instrumentations to enable. See [External Configuration Sources](external-configuration.md)
 for the `otel.instrumentation.go` mechanism that makes this explicit and source-controlled.
 
+### Runtime selection without rebuilding
+
+The `otel.instrumentation.go` mechanism above is resolved at build time. To turn instrumentations
+on or off at **runtime** — without rebuilding the binary — set these environment variables, which
+the injected SDK reads at startup:
+
+- **`OTEL_GO_ENABLED_INSTRUMENTATIONS`** — comma-separated allowlist. When set, only the listed
+  instrumentations run; all others are turned off.
+- **`OTEL_GO_DISABLED_INSTRUMENTATIONS`** — comma-separated denylist. The listed instrumentations
+  are turned off. Applied after the enabled list.
+
+Names are lowercase and matched case-insensitively, e.g. `nethttp,grpc`. When neither variable is
+set, all instrumentations compiled into the binary run (the default). When both are set, the
+enabled allowlist is applied first, then the disabled list removes entries from it.
+
+```bash
+# Run only net/http and gRPC instrumentation
+OTEL_GO_ENABLED_INSTRUMENTATIONS=nethttp,grpc ./myapp
+
+# Run everything except net/http
+OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
+```
+
+> [!NOTE]
+> These variables only gate instrumentations already compiled into the binary. To control what is
+> compiled in, use `otel.instrumentation.go` (see
+> [External Configuration Sources](external-configuration.md)).
+
 ## Rule Sources and Precedence
 
 `otelc` resolves rules from the following sources, in priority order (highest first):

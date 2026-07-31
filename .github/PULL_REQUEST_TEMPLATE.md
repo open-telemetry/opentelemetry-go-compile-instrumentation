@@ -49,6 +49,12 @@ Fixes #<!-- issue number -->
 - [ ] Linters pass: `make lint`
 - [ ] Tests pass: `make test`
 - [ ] Tests added for new functionality
-- [ ] Tests follow [testing guidelines](docs/testing.md)
+- [ ] Tests follow [testing guidelines](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/blob/main/docs/testing.md)
 - [ ] Documentation updated (if applicable)
-- [ ] OpenTelemetry Registry updated (if applicable, see [registry guide](docs/instrument-guide.md#4-register-the-instrumentation))
+- [ ] OpenTelemetry Registry updated (if applicable, see [registry guide](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/blob/main/docs/instrument-guide.md#4-register-the-instrumentation))
+- [ ] This PR has content that I did not fully write myself.
+  - [ ] I used AI and I have read and followed the [Generative AI Contribution Policy](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/blob/main/AI_POLICY.md).
+- [ ] I have the experience and knowledge necessary to understand, review, and validate all content in this PR.[^I-know-my-stuff]
+
+[^I-know-my-stuff]:
+    Yes, I can answer maintainer questions about the content of this PR, without using AI.
