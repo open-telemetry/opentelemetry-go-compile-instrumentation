@@ -449,23 +449,22 @@ govulncheck-instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps
 	@set -uo pipefail
 	@status=0
 	@app_bin=app$(EXT)
-	@cleanup() { \
-		find test/apps -mindepth 2 -maxdepth 2 \( -name "$$app_bin" -o -name '.otelc-build.lock' \) -delete 2>/dev/null || true; \
-		find test/apps -type d -name '.otelc-build' -exec rm -rf {} + 2>/dev/null || true; \
-	}; \
-	trap cleanup EXIT; \
-	for appdir in $(GOVULNCHECK_TEST_APPS); do \
+	@otelc="$(CURDIR)/$(BINARY_NAME)$(EXT)"
+	@for appdir in $(GOVULNCHECK_TEST_APPS); do \
 		app=$$(basename "$$appdir"); \
 		echo "==> otelc go build $$app"; \
-		if ! (cd "$$appdir" && "$(CURDIR)/$(BINARY_NAME)$(EXT)" go build -a -o "$$app_bin" .); then \
+		if ! (cd "$$appdir" && "$$otelc" go build -a -o "$$app_bin" .); then \
 			echo "govulncheck-instrumentation: failed to build $$app"; \
 			status=1; \
+			(cd "$$appdir" && "$$otelc" cleanup) || true; \
 			continue; \
 		fi; \
 		echo "==> govulncheck -mode=binary $$app"; \
 		if ! "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin"; then \
 			status=1; \
 		fi; \
+		rm -f "$$appdir/$$app_bin"; \
+		(cd "$$appdir" && "$$otelc" cleanup) || true; \
 	done; \
 	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found or build failed"; exit 1; fi; \
 	echo "govulncheck: no reachable vulnerabilities found"
