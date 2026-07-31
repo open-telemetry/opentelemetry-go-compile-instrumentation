@@ -24,7 +24,7 @@ func TestGin(t *testing.T) {
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
 	f.BuildAndRun("httpclient", "-addr", fmt.Sprintf("http://127.0.0.1:%d", port), "-path", "/hello/OTel")
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(2) // client + server
 
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(2)
