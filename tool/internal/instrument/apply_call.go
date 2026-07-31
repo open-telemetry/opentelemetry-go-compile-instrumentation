@@ -224,9 +224,9 @@ func callRuleHelperFiles(resolvedPath string, names map[string]bool) ([]string, 
 		if !util.IsGoFile(file) {
 			continue
 		}
-		root, err := ast.ParseFileFast(file)
-		if err != nil {
-			return nil, err
+		root, parseErr := ast.ParseFileFast(file)
+		if parseErr != nil {
+			return nil, parseErr
 		}
 		var found bool
 		for _, decl := range root.Decls {

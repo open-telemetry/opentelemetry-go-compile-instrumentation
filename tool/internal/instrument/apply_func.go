@@ -276,8 +276,8 @@ func (ip *InstrumentPhase) hasCompileArg(arg string) bool {
 		return false
 	}
 	for _, compileArg := range ip.compileArgs {
-		absCompileArg, err := filepath.Abs(compileArg)
-		if err != nil {
+		absCompileArg, absErr := filepath.Abs(compileArg)
+		if absErr != nil {
 			continue
 		}
 		if absCompileArg == absArg {

@@ -8,7 +8,6 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -154,7 +153,103 @@ func Other(resp any) any {
 	err := phase.applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "Wrapper"), err.Error())
+	assert.Contains(t, err.Error(), "Wrapper")
+}
+
+// --- callRuleHelperNames tests ---
+
+func TestCallRuleHelperNames_ReplaceAndAppendArgs(t *testing.T) {
+	r := httpGetRule("Wrapper({{ . }})")
+	r.AppendArgs = []string{"len(resp)", "Helper(resp)"}
+
+	names, err := callRuleHelperNames(r)
+
+	require.NoError(t, err)
+	assert.True(t, names["Wrapper"])
+	assert.True(t, names["Helper"])
+	assert.False(t, names["len"], "builtin calls must not be treated as helper names")
+}
+
+func TestCallRuleHelperNames_InvalidReplaceTemplate(t *testing.T) {
+	r := httpGetRule("wrapper({{")
+
+	_, err := callRuleHelperNames(r)
+
+	require.Error(t, err)
+}
+
+func TestCallRuleHelperNames_ReplaceCompileError(t *testing.T) {
+	// Valid fasttemplate syntax, but an unsupported tag fails compileExpression.
+	r := httpGetRule("{{ foo }}")
+
+	_, err := callRuleHelperNames(r)
+
+	require.Error(t, err)
+}
+
+func TestCallRuleHelperNames_InvalidAppendArg(t *testing.T) {
+	r := httpGetRule("")
+	r.AppendArgs = []string{"("}
+
+	_, err := callRuleHelperNames(r)
+
+	require.Error(t, err)
+}
+
+// --- callRuleHelperFiles tests ---
+
+func TestCallRuleHelperFiles_ListFilesError(t *testing.T) {
+	_, err := callRuleHelperFiles(filepath.Join(t.TempDir(), "does-not-exist"), map[string]bool{"Wrapper": true})
+
+	require.Error(t, err)
+}
+
+func TestCallRuleHelperFiles_ParseError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.go"), []byte("package helper\nfunc ("), 0o600))
+
+	_, err := callRuleHelperFiles(dir, map[string]bool{"Wrapper": true})
+
+	require.Error(t, err)
+}
+
+// --- addCallRuleHelperFile tests ---
+
+func TestAddCallRuleHelperFile_ReadFileError(t *testing.T) {
+	r := httpGetRule("Wrapper({{ . }})")
+	phase := newTestPhase()
+	phase.workDir = t.TempDir()
+
+	err := phase.addCallRuleHelperFile(context.Background(), r, filepath.Join(t.TempDir(), "missing.go"), "main")
+
+	require.Error(t, err)
+}
+
+func TestAddCallRuleHelperFile_ParseSourceError(t *testing.T) {
+	dir := t.TempDir()
+	badFile := filepath.Join(dir, "bad.go")
+	require.NoError(t, os.WriteFile(badFile, []byte("package helper\nfunc ("), 0o600))
+
+	r := httpGetRule("Wrapper({{ . }})")
+	phase := newTestPhase()
+	phase.workDir = t.TempDir()
+
+	err := phase.addCallRuleHelperFile(context.Background(), r, badFile, "main")
+
+	require.Error(t, err)
+}
+
+// --- applyCallRuleHelpers tests ---
+
+func TestApplyCallRuleHelpers_HelperNamesError(t *testing.T) {
+	root := makeCallFile(httpGetCall())
+	r := httpGetRule("{{ foo }}")
+	r.Path = t.TempDir()
+	r.ResolvedPath = r.Path
+
+	err := newTestPhase().applyCallRuleHelpers(context.Background(), r, root)
+
+	require.Error(t, err)
 }
 
 // --- matchesCallRule tests ---
