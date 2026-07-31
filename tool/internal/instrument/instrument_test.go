@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -500,27 +499,12 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		require.NoError(t, err, "read actual file %s", filepath.Join(tempDir, actualFile))
 
 		goldenPath := filepath.Join(goldenDir, testName, entry.Name())
-		actualNorm := normalizeSpace(string(actualBytes))
-
-		updateFlag := flag.Lookup("update")
-		isUpdate := updateFlag != nil && updateFlag.Value.String() == "true"
-
-		if isUpdate {
-			golden.Assert(t, actualNorm, goldenPath)
-		} else {
-			var expectedBytes []byte
-			expectedBytes, err = os.ReadFile(filepath.Join(testdataDir, goldenPath))
-			require.NoError(t, err)
-			expectedNorm := normalizeSpace(string(expectedBytes))
-			require.Equal(t, expectedNorm, actualNorm, "mismatch in %s (ignoring spacing)", goldenPath)
-		}
+		
+		// The dave/dst stringifier occasionally introduces CRLF on Windows.
+		// We normalize the generated string to LF before comparing to the .gitattributes LF golden file.
+		actualNorm := strings.ReplaceAll(string(actualBytes), "\r\n", "\n")
+		golden.Assert(t, actualNorm, goldenPath)
 	}
-}
-
-// normalizeSpace standardizes AST spacing to prevent cross-toolchain flakiness
-// (e.g., Go 1.25+ dropping blank lines in dst) and Windows CRLF issues.
-func normalizeSpace(s string) string {
-	return strings.ReplaceAll(s, "\r\n", "\n")
 }
 
 // testImportPath returns the compile-time import path for a fixture. A fixture
