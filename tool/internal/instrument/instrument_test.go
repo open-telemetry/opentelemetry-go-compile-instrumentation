@@ -499,7 +499,7 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		require.NoError(t, err, "read actual file %s", filepath.Join(tempDir, actualFile))
 
 		goldenPath := filepath.Join(goldenDir, testName, entry.Name())
-		
+
 		// The dave/dst stringifier occasionally introduces CRLF on Windows.
 		// We normalize the generated string to LF before comparing to the .gitattributes LF golden file.
 		actualNorm := strings.ReplaceAll(string(actualBytes), "\r\n", "\n")
