@@ -29,7 +29,8 @@ func WaitForTCP(t *testing.T, addr string) {
 	}, defaultReadinessTimeout, defaultReadinessInterval, "timeout waiting for TCP readiness at %s", addr)
 }
 
-// WaitForSpanFlush waits for spans to be flushed to collector.
+// WaitForSpanFlush waits for spans to be flushed to the collector before
+// assertions run.
 func WaitForSpanFlush(t *testing.T) {
 	t.Helper()
 	time.Sleep(200 * time.Millisecond)
