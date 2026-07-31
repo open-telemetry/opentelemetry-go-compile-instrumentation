@@ -23,22 +23,7 @@ const (
 )
 
 func main() {
-	app := newRootCommand()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	err := app.Run(ctx, os.Args)
-	if err != nil {
-		ex.Fatal(err)
-	}
-}
-
-// newRootCommand builds the otelc root command with all flags, subcommands, and
-// lifecycle hooks. It is separated from main so tests can construct and drive
-// the command without spawning a process.
-func newRootCommand() *cli.Command {
-	return &cli.Command{
+	app := cli.Command{
 		Name:        "otelc",
 		Usage:       "OpenTelemetry Go Compile-Time Instrumentation Tool",
 		HideVersion: true,
@@ -121,6 +106,14 @@ func newRootCommand() *cli.Command {
 		After: func(ctx context.Context, cmd *cli.Command) error {
 			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
 		},
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	err := app.Run(ctx, os.Args)
+	if err != nil {
+		ex.Fatal(err)
 	}
 }
 
