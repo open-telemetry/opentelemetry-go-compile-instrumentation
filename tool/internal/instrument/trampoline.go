@@ -690,11 +690,8 @@ func setValue(field string, idx int, t dst.Expr) *dst.CaseClause {
 		return ast.SwitchCase(ast.Exprs(ast.IntLit(idx)), ast.Stmts(assign))
 	}
 
-	// A concrete (non-interface) slot must be written through the stored
-	// pointer. A nil val cannot be type-asserted to a non-nilable type, so it
-	// is written as that type's zero value (*new(T)); a non-nil val is asserted
-	// to the concrete type and written through. This mirrors the SetParam and
-	// SetReturnVal contract documented on the HookContext interface.
+	// Non-interface slots are written through the stored pointer. A nil val
+	// can't be asserted to a non-nilable type, so write its zero value instead.
 	target := func() dst.Expr {
 		ie := ast.IndexExpr(se, ast.IntLit(idx))
 		te := ast.TypeAssertExpr(ie, ast.DereferenceOf(t))
@@ -852,9 +849,8 @@ func (ip *InstrumentPhase) rewriteHookContextMethods() {
 		return
 	}
 
-	// Rewrite SetParam and GetParam methods. Since nil handling now lives inside
-	// each switch case, the type switch is always the first statement of every
-	// Get/Set method body.
+	// nil handling now lives inside each case, so the type switch is always the
+	// first statement of every Get/Set method.
 	findSwitchBlock := func(fn *dst.FuncDecl) *dst.BlockStmt {
 		stmt := util.AssertType[*dst.SwitchStmt](fn.Body.List[0])
 		body := stmt.Body

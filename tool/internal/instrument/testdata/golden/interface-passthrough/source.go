@@ -3,11 +3,8 @@
 
 package main
 
-// InterfacePassthrough has an interface{} parameter and an "any" return value.
-// Interface-typed slots are passthrough slots in the generated SetParam and
-// SetReturnVal switches: the value is stored directly with no pointer
-// indirection and no nil special-casing (exercises setValue's IsInterfaceType
-// branch).
+// interface{}/any params and returns take the passthrough path in the
+// generated SetParam/SetReturnVal (stored directly, no pointer, no nil check).
 func InterfacePassthrough(v interface{}) (r any) {
 	return v
 }

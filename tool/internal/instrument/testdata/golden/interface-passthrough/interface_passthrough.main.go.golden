@@ -5,18 +5,15 @@ package main
 
 import _ "unsafe"
 
-// InterfacePassthrough has an interface{} parameter and an "any" return value.
-// Interface-typed slots are passthrough slots in the generated SetParam and
-// SetReturnVal switches: the value is stored directly with no pointer
-// indirection and no nil special-casing (exercises setValue's IsInterfaceType
-// branch).
+// interface{}/any params and returns take the passthrough path in the
+// generated SetParam/SetReturnVal (stored directly, no pointer, no nil check).
 func InterfacePassthrough(v interface{}) (r any) {
 	//line <generated>:1
 	if hookContext3881633898, _ := OtelBeforeTrampoline_InterfacePassthrough3881633898(&v); false {
 	} else {
 		defer OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext3881633898, &r)
 	}
-	//line main.go:12:2
+	//line main.go:9:2
 	return v
 }
 
