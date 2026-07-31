@@ -7,6 +7,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -17,21 +19,30 @@ const (
 // WaitForTCP waits until a TCP connection can be established.
 func WaitForTCP(t *testing.T, addr string) {
 	t.Helper()
-	deadline := time.Now().Add(defaultReadinessTimeout)
-
-	for time.Now().Before(deadline) {
+	require.Eventuallyf(t, func() bool {
 		conn, err := net.DialTimeout("tcp", addr, defaultReadinessInterval)
 		if err == nil {
 			conn.Close()
-			return
+			return true
 		}
-		time.Sleep(defaultReadinessInterval)
-	}
-	t.Fatalf("timeout waiting for TCP readiness at %s", addr)
+		return false
+	}, defaultReadinessTimeout, defaultReadinessInterval, "timeout waiting for TCP readiness at %s", addr)
 }
 
 // WaitForSpanFlush waits for spans to be flushed to collector.
 func WaitForSpanFlush(t *testing.T) {
 	t.Helper()
 	time.Sleep(200 * time.Millisecond)
+}
+
+// FreePort returns a port the OS just assigned for "localhost:0". The
+// listener is closed before returning, so the test app can bind to it.
+// There is a tiny race window between close and rebind; acceptable for CI.
+func FreePort(t *testing.T) int {
+	t.Helper()
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	port := lis.Addr().(*net.TCPAddr).Port
+	require.NoError(t, lis.Close())
+	return port
 }

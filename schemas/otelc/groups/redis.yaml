@@ -1,0 +1,27 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # redis/go-redis (v9) instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/redis/go-redis/v9/hook.go          (span lifecycle)
+  #   instrumentation/github.com/redis/go-redis/v9/semconv/client.go (RedisClientRequestTraceAttrs)
+  #
+  # The go-redis instrumentation is trace-only: it creates one client span per
+  # command (and one per pipeline) and records no metrics. Every attribute is
+  # standard upstream OpenTelemetry database telemetry, referenced with `ref:`.
+  # `db.system.name` is always `redis`. `server.port` is emitted only when the
+  # endpoint carries a parseable port.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.db.redis.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: go-redis client span, one per command or pipeline.
+    attributes:
+      - ref: db.system.name
+      - ref: db.operation.name
+      - ref: db.query.text
+      - ref: network.transport
+      - ref: server.address
+      - ref: server.port

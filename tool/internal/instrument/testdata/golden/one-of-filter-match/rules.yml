@@ -1,0 +1,17 @@
+# Instrument Open in any file that declares one of the supported backend driver
+# types. The one-of filter matches if EITHER MySQLDriver or PostgresDriver is
+# present. This source declares PostgresDriver, so Open is rewritten with
+# trampoline calls.
+instrument_driver_open:
+  target: main
+  where:
+    func: Open
+    file:
+      one-of:
+        - has_struct: MySQLDriver
+        - has_struct: PostgresDriver
+  do:
+    - inject_hooks:
+        before: BeforeOpen
+        after: AfterOpen
+        path: testdata/golden/one-of-filter-match

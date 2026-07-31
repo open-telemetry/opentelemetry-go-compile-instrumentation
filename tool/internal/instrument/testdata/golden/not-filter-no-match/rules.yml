@@ -1,0 +1,16 @@
+# Same rule as the match fixture: instrument Connect everywhere EXCEPT files
+# that declare a MockConn test double. This source declares MockConn, so the
+# not filter's negation fails, the rule is gated out, and the file is left
+# unchanged.
+instrument_connect:
+  target: main
+  where:
+    func: Connect
+    file:
+      not:
+        has_struct: MockConn
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        after: AfterConnect
+        path: testdata/golden/not-filter-no-match

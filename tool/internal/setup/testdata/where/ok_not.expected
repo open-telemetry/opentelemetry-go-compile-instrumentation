@@ -1,0 +1,4 @@
+type: Not
+children:
+  - type: StructFilter
+    struct: MockConn

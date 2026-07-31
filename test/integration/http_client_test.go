@@ -11,14 +11,18 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestHTTPClient(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "httpclient", "go", "build", "-a")
+
 	testCases := []struct {
 		name       string
 		queryParam string
@@ -34,7 +38,7 @@ func TestHTTPClient(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 			server := StartHTTPServerWithResponse(t, 200, `{"message":"Hello"}`)
 
-			f.BuildAndRun("httpclient", "-addr="+server.URL, "-name="+tc.queryParam)
+			f.Run("httpclient", "-addr="+server.URL, "-name="+tc.queryParam)
 
 			span := f.RequireSingleSpan()
 			expectedURL := server.URL + "/hello?name=" + tc.queryParam
@@ -51,6 +55,79 @@ func TestHTTPClient(t *testing.T) {
 			)
 		})
 	}
+
+	t.Run("propagators_env", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("OTEL_PROPAGATORS", "b3")
+
+		var (
+			mu      sync.Mutex
+			headers http.Header
+		)
+		server := StartHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			headers = r.Header.Clone()
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, `{"message":"Hello"}`)
+		}))
+
+		f.Run("httpclient", "-addr="+server.URL, "-name=world")
+
+		mu.Lock()
+		defer mu.Unlock()
+		require.NotEmpty(t, headers.Get("b3"),
+			"OTEL_PROPAGATORS=b3 should make the instrumented client inject the b3 header")
+		require.Empty(t, headers.Get("traceparent"),
+			"the default tracecontext propagator should be replaced, not composed")
+
+		f.RequireSingleSpan()
+	})
+
+	t.Run("instrumentation_controls_env", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			enabled      string
+			disabled     string
+			expectedSpan bool
+		}{
+			{
+				name:         "allow listed",
+				enabled:      "nethttp",
+				expectedSpan: true,
+			},
+			{
+				name:    "not allow listed",
+				enabled: "grpc",
+			},
+			{
+				name:     "deny listed",
+				disabled: "nethttp",
+			},
+			{
+				name:     "deny list overrides allow list",
+				enabled:  "nethttp",
+				disabled: "nethttp",
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				f := testutil.NewTestFixture(t)
+				f.SetEnv("OTEL_GO_ENABLED_INSTRUMENTATIONS", tc.enabled)
+				f.SetEnv("OTEL_GO_DISABLED_INSTRUMENTATIONS", tc.disabled)
+				server := StartHTTPServerWithResponse(t, http.StatusOK, `{"message":"Hello"}`)
+
+				f.Run("httpclient", "-addr="+server.URL, "-name=world")
+
+				if tc.expectedSpan {
+					f.RequireSingleSpan()
+				} else {
+					f.RequireTraceCount(0)
+				}
+			})
+		}
+	})
 }
 
 // HTTPServer wraps a test HTTP server.

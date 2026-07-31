@@ -1,0 +1,9 @@
+func_sig_hook:
+  target: main
+  func: Func1
+  signature:
+    args: [string, int]
+    returns: [float32, error]
+  before: H1Before
+  after: H1After
+  path: testdata

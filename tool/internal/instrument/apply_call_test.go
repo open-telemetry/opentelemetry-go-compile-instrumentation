@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 // makeCallFile builds a minimal *dst.File containing a single function whose
@@ -444,4 +444,63 @@ func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
+}
+
+func TestApplyCallRule_NoMatchIsNoOp(t *testing.T) {
+	file := makeCallFile(&dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "fmt", Path: "fmt"},
+			Sel: &dst.Ident{Name: "Println"},
+		},
+		Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"hello"`}},
+	})
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_sizeof"},
+		FunctionCall: "unsafe.Sizeof",
+		ImportPath:   "unsafe",
+		FuncName:     "Sizeof",
+		Replace:      "Wrapper({{ . }})",
+	}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.NoError(t, err, "applyCallRule must no-op when no calls match")
+}
+
+func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
+	// A file with no matching calls should cause applyCallAppendArgs to
+	// return false so applyCallRule can skip the file as a no-op.
+	file := makeCallFile(&dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "fmt", Path: "fmt"},
+			Sel: &dst.Ident{Name: "Println"},
+		},
+		Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"hello"`}},
+	})
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "no_match"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		AppendArgs:   []string{"ctx"},
+	}
+
+	ip := newTestPhase()
+	importAliases := collectImportAliases(file)
+	result := ip.applyCallAppendArgs(r, file, importAliases)
+
+	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
+}
+
+func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
+	// Template parses but generates invalid Go when applied to the matched call.
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("not a valid expression {{ . }}")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to wrap")
 }

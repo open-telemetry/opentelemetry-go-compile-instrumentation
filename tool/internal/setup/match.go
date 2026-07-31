@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -15,14 +16,13 @@ import (
 	"sync"
 
 	"github.com/dave/dst"
-	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
@@ -32,28 +32,26 @@ const (
 	matchDepsConcurrencyMultiplier = 2
 )
 
-// createRuleFromFields creates a rule instance based on the field type present in the YAML
-//
-//nolint:nilnil // factory function
+// createRuleFromFields creates a rule instance based on the field type present
+// in the (already-normalized) flat YAML fields map produced by [rule.Normalize].
 func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
 	switch {
-	case fields["struct"] != nil:
+	case fields[rule.SelStruct] != nil:
 		return rule.NewInstStructRule(raw, name)
-	case fields["file"] != nil:
+	case fields[rule.WhereFile] != nil:
 		return rule.NewInstFileRule(raw, name)
-	case fields["directive"] != nil:
+	case fields[rule.SelDirective] != nil:
 		return rule.NewInstDirectiveRule(raw, name)
-	case fields["raw"] != nil:
+	case fields[rule.RawField] != nil:
 		return rule.NewInstRawRule(raw, name)
-	case fields["func"] != nil:
+	case fields[rule.SelFunc] != nil:
 		return rule.NewInstFuncRule(raw, name)
-	case fields["function_call"] != nil:
+	case fields[rule.SelFunctionCall] != nil:
 		return rule.NewInstCallRule(raw, name)
-	case fields["identifier"] != nil:
+	case fields[rule.SelIdentifier] != nil:
 		return rule.NewInstDeclRule(raw, name)
 	default:
-		util.ShouldNotReachHere()
-		return nil, nil
+		return nil, ex.Newf("rule %q has no recognised selector", name)
 	}
 }
 
@@ -65,75 +63,105 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 	}
 	rules := make([]rule.InstRule, 0)
 	for name, fields := range h {
-		raw, err1 := yaml.Marshal(fields)
-		if err1 != nil {
-			return nil, ex.Wrap(err1)
+		flatRules, normErr := rule.Normalize(fields)
+		if normErr != nil {
+			return nil, normErr
 		}
+		for _, flatFields := range flatRules {
+			raw, err1 := yaml.Marshal(flatFields)
+			if err1 != nil {
+				return nil, ex.Wrap(err1)
+			}
 
-		r, err2 := createRuleFromFields(raw, name, fields)
-		if err2 != nil {
-			return nil, err2
+			r, err2 := createRuleFromFields(raw, name, flatFields)
+			if err2 != nil {
+				return nil, err2
+			}
+			// target is the sole package selector and is required (docs/rules.md).
+			// An empty or whitespace-only target would land under exactRules[""]
+			// and silently never match any real import path, so reject it loudly
+			// at load time instead.
+			if strings.TrimSpace(r.GetTarget()) == "" {
+				return nil, ex.Newf("rule %q has an empty target; target is required", name)
+			}
+			// Reject ambiguous/invalid glob targets at load time so a bad rule
+			// fails loudly during parsing rather than silently matching nothing
+			// during the setup phase.
+			if err3 := rule.ValidateTarget(r.GetTarget()); err3 != nil {
+				return nil, ex.Wrapf(err3, "rule %q", name)
+			}
+			if err3 := util.ValidateVersionRange(r.GetVersion()); err3 != nil {
+				return nil, ex.Wrapf(err3, "rule %q", name)
+			}
+			rules = append(rules, r)
 		}
-		rules = append(rules, r)
 	}
 	return rules, nil
 }
 
-func loadDefaultRules() ([]rule.InstRule, error) {
-	// List all YAML files in the unzipped pkg directory, i.e. $BUILD_TEMP/pkg
-	files, err := util.ListFiles(util.GetBuildTemp(unzippedPkgDir))
-	if err != nil {
-		return nil, err
-	}
-	// Parse all YAML contents into rule instances
-	parsedRules := make([]rule.InstRule, 0)
-	for _, file := range files {
-		if !util.IsYamlFile(file) {
-			continue
-		}
-		content, err1 := os.ReadFile(file)
-		if err1 != nil {
-			return nil, ex.Wrapf(err1, "failed to read YAML file %s", file)
-		}
-		rs, err2 := parseRuleFromYaml(content)
-		if err2 != nil {
-			return nil, err2
-		}
-		parsedRules = append(parsedRules, rs...)
-	}
-	return parsedRules, nil
+// isRuleFile checks if the given file name matches the following patterns:
+// otelc.yml, otelc.yaml, *.otelc.yml, *.otelc.yaml
+func isRuleFile(name string) bool {
+	return (name == "otelc.yml" ||
+		name == "otelc.yaml" ||
+		strings.HasSuffix(name, ".otelc.yml") ||
+		strings.HasSuffix(name, ".otelc.yaml"))
 }
 
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
-	// No version specified, so it's always applicable
-	if rule.GetVersion() == "" {
-		return true
-	}
+	return util.VersionInRange(dependency.Version, rule.GetVersion())
+}
 
-	// Version range? i.e. "v0.11.0,v0.12.0"
-	ruleVersion := rule.GetVersion()
-	if strings.Contains(ruleVersion, ",") {
-		commaIndex := strings.Index(ruleVersion, ",")
-		//nolint:gocritic // commaIndex is always valid
-		startInclusive := ruleVersion[:commaIndex]
-		endExclusive := ruleVersion[commaIndex+1:]
-		// Version is in the "inclusive,exclusive" range
-		if semver.Compare(dependency.Version, startInclusive) >= 0 &&
-			semver.Compare(dependency.Version, endExclusive) < 0 {
-			return true
+type targetRule struct {
+	target string
+	rule   rule.InstRule
+}
+
+func (sp *SetupPhase) matchGlobRules(
+	dep *Dependency,
+	relevantRules []rule.InstRule,
+	globRules []targetRule,
+) []rule.InstRule {
+	var matched []rule.InstRule
+	var seen map[rule.InstRule]bool
+	for _, gr := range globRules {
+		if !rule.MatchGlobTarget(gr.target, dep.ImportPath) {
+			continue
 		}
-		return false
+		if matched == nil {
+			matched = make([]rule.InstRule, 0, len(relevantRules)+1)
+			matched = append(matched, relevantRules...)
+			seen = make(map[rule.InstRule]bool, len(relevantRules)+1)
+			for _, r := range relevantRules {
+				seen[r] = true
+			}
+		}
+		if seen[gr.rule] {
+			continue
+		}
+		seen[gr.rule] = true
+		matched = append(matched, gr.rule)
+		sp.Debug("Match glob target", "rule", gr.rule.GetName(), "target", gr.target, "dep", dep.ImportPath)
 	}
-	// Minimal version only? i.e. "v0.11.0"
-	return semver.Compare(dependency.Version, ruleVersion) >= 0
+	if matched == nil {
+		return relevantRules
+	}
+	return matched
 }
 
 // runMatch performs precise matching of rules against the dependency's source code.
-// It parses source files and matches rules by examining AST nodes
+// It parses source files and matches rules by examining AST nodes.
+//
+// Rules reach this function through two paths:
+//   - exactRules is the rule index keyed by exact target import path. The fast
+//     path is a single map lookup on dep.ImportPath.
+//   - globRules are rules whose target uses glob syntax; each one's pattern is
+//     evaluated against dep.ImportPath because they cannot be pre-indexed by key.
 func (sp *SetupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
-	rulesByTarget map[string][]rule.InstRule,
+	exactRules map[string][]rule.InstRule,
+	globRules []targetRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
@@ -142,14 +170,24 @@ func (sp *SetupPhase) runMatch(
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
 	}
 
-	// Filter rules by target
-	relevantRules := rulesByTarget[dep.ImportPath]
+	// Fast path: exact-target rules via a single map lookup.
+	relevantRules := exactRules[dep.ImportPath]
+
+	// Glob path: a rule applies when its glob target matches this dependency's
+	// import path. The combined slice is built lazily, on the first glob match,
+	// so a dependency that matches no glob rule (the common case) stays
+	// allocation-free. When built, it is a fresh slice to avoid aliasing the
+	// exact-match slice shared read-only across goroutines.
+	if len(globRules) > 0 {
+		relevantRules = sp.matchGlobRules(dep, relevantRules, globRules)
+	}
+
 	if len(relevantRules) == 0 {
 		return set, nil
 	}
 
 	// Filter rules by version
-	filteredRules := make([]rule.InstRule, 0)
+	filteredRules := make([]rule.InstRule, 0, len(relevantRules))
 	for _, r := range relevantRules {
 		if !matchVersion(dep, r) {
 			continue
@@ -158,7 +196,7 @@ func (sp *SetupPhase) runMatch(
 	}
 
 	// Separate file rules from rules that need precise matching
-	preciseRules := make([]rule.InstRule, 0)
+	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
 	for _, r := range filteredRules {
 		// If the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
@@ -173,48 +211,129 @@ func (sp *SetupPhase) runMatch(
 
 	if len(preciseRules) == 0 {
 		if !set.IsEmpty() && len(dep.Sources) > 0 {
-			// TODO: Optimize package name discovery for file-only rules to avoid
-			// parsing source files on the hot path.
-			tree, err := ast.ParseFileOnlyPackage(dep.Sources[0])
+			name, err := ast.ParsePackageName(dep.Sources[0])
 			if err != nil {
 				return nil, err
 			}
-			set.SetPackageName(tree.Name.Name)
+			set.SetPackageName(name)
 		}
+
 		return set, nil
 	}
 
 	return sp.preciseMatching(ctx, dep, preciseRules, set)
 }
 
+// ruleFilter pairs a rule with its pre-compiled where filter (if any).
+// Using a struct instead of parallel slices prevents index-desync bugs if
+// the rules slice is ever sorted or deduplicated before this point.
+type ruleFilter struct {
+	rule  rule.InstRule
+	where Filter // nil means no where clause — apply unconditionally
+}
+
 // preciseMatching performs AST-based matching of instrumentation rules against
 // the dependency's source files. It returns the rule set with the matched rules.
+//
+// If a rule carries a where clause, the compiled Filter is evaluated against
+// each source file before the standard AST match. Only files for which the
+// filter passes proceed to the type-specific matching step.
 func (sp *SetupPhase) preciseMatching(
 	ctx context.Context,
 	dep *Dependency,
 	rules []rule.InstRule,
 	set *rule.InstRuleSet,
 ) (*rule.InstRuleSet, error) {
+	if len(dep.Sources) == 0 {
+		return set, nil
+	}
+
+	// Pre-build filter trees for rules that carry a where clause.
+	// Filters are compiled once per rule before source-file iteration, not
+	// once per source file. In practice each rule targets exactly one import
+	// path, so each filter is built once across the entire matchDeps run.
+	ruleFilters := make([]ruleFilter, 0, len(rules))
+	for _, r := range rules {
+		var f Filter
+		if where := r.GetWhere(); where != nil {
+			var err error
+			f, err = Build(where)
+			if err != nil {
+				return nil, ex.Wrapf(err, "build where filter for rule %q", r.GetName())
+			}
+		}
+		ruleFilters = append(ruleFilters, ruleFilter{rule: r, where: f})
+	}
+
+	// IsTest is a property of the whole compile (every file in a test build
+	// shares it), so compute it once and reuse it across each file's context.
+	isTest := isTestBuild(dep.Sources)
+
 	for _, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		// Parse the source code. Since the only purpose here is to match,
-		// no node updates, we can use fast variant.
+		// no node updates, we can use the fast variant.
+		//
+		// Contract: ParseFileFast returns (non-nil, nil) on success and
+		// (nil, non-nil error) on failure. A (nil, nil) return is not
+		// possible per the Go stdlib parser.ParseFile and dave/dst
+		// DecorateFile contracts that ParseFileFast composes.
 		tree, err := ast.ParseFileFast(source)
 		if err != nil {
 			return nil, err
 		}
-		if tree == nil {
-			return nil, ex.Newf("failed to parse file %s", source)
-		}
+		// All files in a Go package share the same declared package name, so
+		// this is idempotent across iterations; SetPackageName asserts non-empty.
 		set.SetPackageName(tree.Name.Name)
 
-		for _, r := range rules {
-			sp.matchOneRule(tree, source, r, set, dep)
+		// mctx is allocated once per source file and reused across all rules
+		// evaluated against that file. All fields are constant for a given
+		// source file, so no updates are needed inside the inner loop.
+		mctx := MatchContext{
+			IsTest:     isTest,
+			SourceFile: source,
+			AST:        tree,
+		}
+
+		for _, rf := range ruleFilters {
+			// Evaluate the where filter if one is defined for this rule.
+			// A nil filter means the rule applies to all files unconditionally.
+			if rf.where != nil && !rf.where.Match(&mctx) {
+				continue
+			}
+			if err = sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return set, nil
+}
+
+// isTestBuild reports whether a compile invocation is part of a `go test` run.
+// The Go toolchain only ever feeds these inputs to the compiler while building
+// a test binary: a package augmented with its in-package _test.go files, the
+// external xxx_test package (whose sources are also _test.go files), and the
+// generated _testmain.go runner. None of them appear in a normal `go build`,
+// so their presence in the source set is the signal. There is no dedicated
+// "is test" compiler flag — verified against the toolchain — so the source set
+// is the only thing to key on.
+//
+// ponytail: known gap, no fix possible at compile granularity. A package whose
+// tests live only in an external xxx_test package (no in-package _test.go) is
+// compiled once and shared between normal and test builds — the toolchain emits
+// no test-only variant of it — so is_test cannot gate that package's production
+// code. The external xxx_test package and any in-package _test.go files are
+// still detected.
+func isTestBuild(sources []string) bool {
+	for _, src := range sources {
+		base := filepath.Base(src)
+		if base == "_testmain.go" || strings.HasSuffix(base, "_test.go") {
+			return true
+		}
+	}
+	return false
 }
 
 // matchOneRule performs precise AST matching for a single rule against a parsed
@@ -225,11 +344,14 @@ func (sp *SetupPhase) matchOneRule(
 	r rule.InstRule,
 	set *rule.InstRuleSet,
 	dep *Dependency,
-) {
+) error {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
-		if funcDecl != nil {
+		_, ok, err := ast.FindFuncDecl(tree, rt)
+		if err != nil {
+			return err
+		}
+		if ok {
 			set.AddFuncRule(source, rt)
 			sp.Info("Match func rule", "rule", rt, "dep", dep)
 		}
@@ -240,8 +362,11 @@ func (sp *SetupPhase) matchOneRule(
 			sp.Info("Match struct rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstRawRule:
-		funcDecl := ast.FindFuncDecl(tree, rt.Func, rt.Recv)
-		if funcDecl != nil {
+		_, ok, err := ast.FindFuncDecl(tree, rt)
+		if err != nil {
+			return err
+		}
+		if ok {
 			set.AddRawRule(source, rt)
 			sp.Info("Match raw rule", "rule", rt, "dep", dep)
 		}
@@ -268,43 +393,24 @@ func (sp *SetupPhase) matchOneRule(
 	default:
 		util.ShouldNotReachHere()
 	}
+	return nil
 }
 
-func ruleFromDir(path string) ([]string, error) {
-	ruleFilePatterns := []string{"*.otelc.yaml", "*.otelc.yml"}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to stat %s", path)
-	}
-
-	if !info.IsDir() {
-		return []string{path}, nil
-	}
-
+func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 	var filesToProcess []string
 
 	// Recursively traverse to each directories and include the rule files
-	err = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if d.IsDir() {
-			return nil
+		if skipSubmodules && d.IsDir() && p != path && util.PathExists(filepath.Join(p, "go.mod")) {
+			return filepath.SkipDir
 		}
 
-		var matched bool
-		for _, pat := range ruleFilePatterns {
-			matched, err = filepath.Match(pat, filepath.Base(p))
-			if err != nil {
-				return ex.Wrapf(err, "bad pattern %s", pat)
-			}
-
-			if matched {
-				filesToProcess = append(filesToProcess, p)
-				break
-			}
+		if !d.IsDir() && isRuleFile(d.Name()) {
+			filesToProcess = append(filesToProcess, p)
 		}
 
 		return nil
@@ -317,17 +423,31 @@ func ruleFromDir(path string) ([]string, error) {
 }
 
 func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
-	// Custom map to deduplicate rules
-	ruleSet := make(map[string]rule.InstRule)
+	// Deduplicate by YAML-entry name. A single entry can expand into several
+	// rules (e.g. a do: sequence with multiple modifiers), all sharing that
+	// name, so each name maps to the full slice of rules it produced. Re-reading
+	// the same entry replaces the whole group as a unit, preserving the
+	// "same rule file passed twice should dedupe" behavior.
+	ruleSet := make(map[string][]rule.InstRule)
 	ruleFiles := strings.SplitSeq(ruleConfig, ",")
 	var content []byte
 	for path := range ruleFiles {
 		path = strings.TrimSpace(path)
 
 		// Get all rule files from path (file or directory)
-		files, err := ruleFromDir(path)
+		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return nil, ex.Wrapf(err, "failed to stat %s", path)
+		}
+
+		var files []string
+		if info.IsDir() {
+			files, err = rulesFromDir(path, false)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			files = []string{path}
 		}
 		for _, file := range files {
 			content, err = os.ReadFile(file)
@@ -341,26 +461,55 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 				return nil, err
 			}
 
+			// Group this file's rules by entry name, then replace any
+			// previously-seen entry of the same name as a single unit.
+			grouped := make(map[string][]rule.InstRule)
 			for _, r := range rules {
-				ruleSet[r.GetName()] = r
+				grouped[r.GetName()] = append(grouped[r.GetName()], r)
 			}
+			maps.Copy(ruleSet, grouped)
 		}
 	}
 
-	return slices.Collect(maps.Values(ruleSet)), nil
+	return slices.Concat(slices.Collect(maps.Values(ruleSet))...), nil
 }
 
-func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
+func loadRulesFromToolFiles(ctx context.Context, toolFiles []string) ([]rule.InstRule, error) {
+	ruleSet := make([]rule.InstRule, 0)
+	walkErr := walkInstrumentation(ctx, toolFiles, func(v *InstrumentationVisit) (bool, error) {
+		if v.Config.Error != nil {
+			return false, v.Config.Error
+		}
+
+		for _, file := range v.Config.RuleFiles {
+			content, readErr := os.ReadFile(file)
+			if readErr != nil {
+				return false, ex.Wrapf(readErr, "reading %s", file)
+			}
+
+			rules, parseErr := parseRuleFromYaml(content)
+			if parseErr != nil {
+				return false, parseErr
+			}
+
+			ruleSet = append(ruleSet, rules...)
+		}
+		return true, nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	return ruleSet, nil
+}
+
+func (sp *SetupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool) ([]rule.InstRule, error) {
 	// Load rules from environment variable OTELC_RULES if specified. It has the
 	// highest priority.
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
 		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
-		content, err := os.ReadFile(filepath.Clean(rulePath))
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to read %s from env variable", rulePath)
-		}
-		return parseRuleFromYaml(content)
+		return loadCustomRules(rulePath)
 	}
 
 	// Load custom rule(s) from config file if specified
@@ -369,14 +518,28 @@ func (sp *SetupPhase) loadRules() ([]rule.InstRule, error) {
 		return loadCustomRules(sp.ruleConfig)
 	}
 
-	// Load default rules from the unzipped pkg directory
-	sp.Debug("rules source: default rules")
-	return loadDefaultRules()
+	// Load rules from tool files if available
+	toolFiles, err := findToolFiles(moduleDirs)
+	if err != nil {
+		return nil, err
+	}
+	if len(toolFiles) > 0 {
+		sp.Debug("rules source: tool files", "toolFiles", toolFiles)
+		return loadRulesFromToolFiles(ctx, toolFiles)
+	}
+
+	// No tool files generated? Currently this part is un-reachable because
+	// auto-pinning always generates tool files.
+	return nil, nil
 }
 
-func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
+func (sp *SetupPhase) matchDeps(
+	ctx context.Context,
+	deps []*Dependency,
+	moduleDirs map[string]bool,
+) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
-	allRules, err := sp.loadRules()
+	allRules, err := sp.loadRules(ctx, moduleDirs)
 	if err != nil {
 		return nil, err
 	}
@@ -385,11 +548,34 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 		return nil, nil
 	}
 
-	// Pre-index rules by target
-	rulesByTarget := make(map[string][]rule.InstRule)
+	// Split rules into two matching tiers. Exact-target rules are pre-indexed
+	// by import path so each dependency resolves them with one map lookup
+	// (unchanged fast path). Glob-target rules cannot be keyed, so they are
+	// kept in a flat slice and evaluated against every dependency's import path.
+	exactRules := make(map[string][]rule.InstRule)
+	globRules := make([]targetRule, 0)
 	for _, r := range allRules {
 		target := r.GetTarget()
-		rulesByTarget[target] = append(rulesByTarget[target], r)
+		if rule.IsRootTarget(target) {
+			if len(sp.rootModulePaths) == 0 && len(sp.buildPackages) > 0 {
+				sp.rootModulePaths, err = rootModulePaths(ctx, sp.buildPackages)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if len(sp.rootModulePaths) == 0 {
+				return nil, ex.Newf("rule %q uses target %q, but no root module was found", r.GetName(), target)
+			}
+			for _, root := range sp.rootModulePaths {
+				globRules = append(globRules, targetRule{target: root + "/**", rule: r})
+			}
+			continue
+		}
+		if rule.IsGlobTarget(target) {
+			globRules = append(globRules, targetRule{target: target, rule: r})
+			continue
+		}
+		exactRules[target] = append(exactRules[target], r)
 	}
 
 	// Match the default rules with the found dependencies
@@ -400,7 +586,7 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			m, err1 := sp.runMatch(gCtx, dep, rulesByTarget)
+			m, err1 := sp.runMatch(gCtx, dep, exactRules, globRules)
 			if err1 != nil {
 				return err1
 			}
@@ -415,6 +601,10 @@ func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rul
 
 	if err = g.Wait(); err != nil {
 		return nil, err
+	}
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
 	}
 	return matched, nil
 }

@@ -1,0 +1,5409 @@
+# Code generated from github.com/linode/linodego/v2@v2.4.1.
+# One rule per public *Client method (context + error). Unique hook names avoid
+# //go:linkname redeclaration across package files.
+#
+# version is a minimum bound (see tool/util.VersionInRange): rules apply to
+# linodego v2.4.1 and newer releases on the v2 module path.
+# Regenerate with: go run ./gen -version v2.4.1
+# Do not edit by hand.
+
+linodego_api_AcceptAccountServiceTransfer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AcceptAccountServiceTransfer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAcceptAccountServiceTransfer
+        after: AfterAcceptAccountServiceTransfer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AcknowledgeAccountAgreements:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AcknowledgeAccountAgreements
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAcknowledgeAccountAgreements
+        after: AfterAcknowledgeAccountAgreements
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AddInstanceIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AddInstanceIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAddInstanceIPAddress
+        after: AfterAddInstanceIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AddPaymentMethod:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AddPaymentMethod
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAddPaymentMethod
+        after: AfterAddPaymentMethod
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AddPromoCode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AddPromoCode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAddPromoCode
+        after: AfterAddPromoCode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AllocateReserveIP:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AllocateReserveIP
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAllocateReserveIP
+        after: AfterAllocateReserveIP
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AppendInstanceConfigInterface:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AppendInstanceConfigInterface
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAppendInstanceConfigInterface
+        after: AfterAppendInstanceConfigInterface
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AssignInstanceReservedIP:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AssignInstanceReservedIP
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAssignInstanceReservedIP
+        after: AfterAssignInstanceReservedIP
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AssignPlacementGroupLinodes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AssignPlacementGroupLinodes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAssignPlacementGroupLinodes
+        after: AfterAssignPlacementGroupLinodes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_AttachVolume:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: AttachVolume
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeAttachVolume
+        after: AfterAttachVolume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_BootInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: BootInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeBootInstance
+        after: AfterBootInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CancelAccountServiceTransfer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CancelAccountServiceTransfer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCancelAccountServiceTransfer
+        after: AfterCancelAccountServiceTransfer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CancelInstanceBackups:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CancelInstanceBackups
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCancelInstanceBackups
+        after: AfterCancelInstanceBackups
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CancelObjectStorage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CancelObjectStorage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCancelObjectStorage
+        after: AfterCancelObjectStorage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CloneDomain:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CloneDomain
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCloneDomain
+        after: AfterCloneDomain
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CloneInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CloneInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCloneInstance
+        after: AfterCloneInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CloneInstanceDisk:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CloneInstanceDisk
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCloneInstanceDisk
+        after: AfterCloneInstanceDisk
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CloneMonitorAlertDefinition:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CloneMonitorAlertDefinition
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCloneMonitorAlertDefinition
+        after: AfterCloneMonitorAlertDefinition
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CloneVolume:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CloneVolume
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCloneVolume
+        after: AfterCloneVolume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ConfirmTwoFactor:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ConfirmTwoFactor
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeConfirmTwoFactor
+        after: AfterConfirmTwoFactor
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateChildAccountToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateChildAccountToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateChildAccountToken
+        after: AfterCreateChildAccountToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateDomain:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateDomain
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateDomain
+        after: AfterCreateDomain
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateDomainRecord:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateDomainRecord
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateDomainRecord
+        after: AfterCreateDomainRecord
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateFirewall:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateFirewall
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateFirewall
+        after: AfterCreateFirewall
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateFirewallDevice:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateFirewallDevice
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateFirewallDevice
+        after: AfterCreateFirewallDevice
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateFirewallRuleSet:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateFirewallRuleSet
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateFirewallRuleSet
+        after: AfterCreateFirewallRuleSet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateIPv6Range:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateIPv6Range
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateIPv6Range
+        after: AfterCreateIPv6Range
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateImage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateImage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateImage
+        after: AfterCreateImage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateImageShareGroup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateImageShareGroup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateImageShareGroup
+        after: AfterCreateImageShareGroup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateImageUpload:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateImageUpload
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateImageUpload
+        after: AfterCreateImageUpload
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateInstance
+        after: AfterCreateInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateInstanceConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateInstanceConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateInstanceConfig
+        after: AfterCreateInstanceConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateInstanceDisk:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateInstanceDisk
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateInstanceDisk
+        after: AfterCreateInstanceDisk
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateInstanceSnapshot:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateInstanceSnapshot
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateInstanceSnapshot
+        after: AfterCreateInstanceSnapshot
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateInterface:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateInterface
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateInterface
+        after: AfterCreateInterface
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateLKECluster:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateLKECluster
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateLKECluster
+        after: AfterCreateLKECluster
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateLKENodePool:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateLKENodePool
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateLKENodePool
+        after: AfterCreateLKENodePool
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateLock:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateLock
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateLock
+        after: AfterCreateLock
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateLogStream:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateLogStream
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateLogStream
+        after: AfterCreateLogStream
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateLogsDestination:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateLogsDestination
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateLogsDestination
+        after: AfterCreateLogsDestination
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateLongviewClient:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateLongviewClient
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateLongviewClient
+        after: AfterCreateLongviewClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateMonitorAlertDefinition:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateMonitorAlertDefinition
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateMonitorAlertDefinition
+        after: AfterCreateMonitorAlertDefinition
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateMonitorAlertDefinitionWithIdempotency:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateMonitorAlertDefinitionWithIdempotency
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateMonitorAlertDefinitionWithIdempotency
+        after: AfterCreateMonitorAlertDefinitionWithIdempotency
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateMonitorServiceTokenForServiceType:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateMonitorServiceTokenForServiceType
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateMonitorServiceTokenForServiceType
+        after: AfterCreateMonitorServiceTokenForServiceType
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateMySQLDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateMySQLDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateMySQLDatabase
+        after: AfterCreateMySQLDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateNodeBalancer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateNodeBalancer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateNodeBalancer
+        after: AfterCreateNodeBalancer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateNodeBalancerConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateNodeBalancerConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateNodeBalancerConfig
+        after: AfterCreateNodeBalancerConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateNodeBalancerNode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateNodeBalancerNode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateNodeBalancerNode
+        after: AfterCreateNodeBalancerNode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateOAuthClient:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateOAuthClient
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateOAuthClient
+        after: AfterCreateOAuthClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateObjectStorageBucket:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateObjectStorageBucket
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateObjectStorageBucket
+        after: AfterCreateObjectStorageBucket
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateObjectStorageKey:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateObjectStorageKey
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateObjectStorageKey
+        after: AfterCreateObjectStorageKey
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateObjectStorageObjectURL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateObjectStorageObjectURL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateObjectStorageObjectURL
+        after: AfterCreateObjectStorageObjectURL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreatePayment:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreatePayment
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreatePayment
+        after: AfterCreatePayment
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreatePlacementGroup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreatePlacementGroup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreatePlacementGroup
+        after: AfterCreatePlacementGroup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreatePostgresDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreatePostgresDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreatePostgresDatabase
+        after: AfterCreatePostgresDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateSSHKey:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateSSHKey
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateSSHKey
+        after: AfterCreateSSHKey
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateStackscript:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateStackscript
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateStackscript
+        after: AfterCreateStackscript
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateTag:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateTag
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateTag
+        after: AfterCreateTag
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateToken
+        after: AfterCreateToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateTwoFactorSecret:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateTwoFactorSecret
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateTwoFactorSecret
+        after: AfterCreateTwoFactorSecret
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateUser:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateUser
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateUser
+        after: AfterCreateUser
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateVPC:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateVPC
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateVPC
+        after: AfterCreateVPC
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateVPCSubnet:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateVPCSubnet
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateVPCSubnet
+        after: AfterCreateVPCSubnet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_CreateVolume:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: CreateVolume
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeCreateVolume
+        after: AfterCreateVolume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteDomain:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteDomain
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteDomain
+        after: AfterDeleteDomain
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteDomainRecord:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteDomainRecord
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteDomainRecord
+        after: AfterDeleteDomainRecord
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteFirewall:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteFirewall
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteFirewall
+        after: AfterDeleteFirewall
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteFirewallDevice:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteFirewallDevice
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteFirewallDevice
+        after: AfterDeleteFirewallDevice
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteFirewallRuleSet:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteFirewallRuleSet
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteFirewallRuleSet
+        after: AfterDeleteFirewallRuleSet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteIPv6Range:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteIPv6Range
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteIPv6Range
+        after: AfterDeleteIPv6Range
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteImage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteImage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteImage
+        after: AfterDeleteImage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteImageShareGroup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteImageShareGroup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteImageShareGroup
+        after: AfterDeleteImageShareGroup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteInstance
+        after: AfterDeleteInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteInstanceConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteInstanceConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteInstanceConfig
+        after: AfterDeleteInstanceConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteInstanceConfigInterface:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteInstanceConfigInterface
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteInstanceConfigInterface
+        after: AfterDeleteInstanceConfigInterface
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteInstanceDisk:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteInstanceDisk
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteInstanceDisk
+        after: AfterDeleteInstanceDisk
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteInstanceIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteInstanceIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteInstanceIPAddress
+        after: AfterDeleteInstanceIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteInterface:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteInterface
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteInterface
+        after: AfterDeleteInterface
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLKECluster:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLKECluster
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLKECluster
+        after: AfterDeleteLKECluster
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLKEClusterControlPlaneACL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLKEClusterControlPlaneACL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLKEClusterControlPlaneACL
+        after: AfterDeleteLKEClusterControlPlaneACL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLKEClusterKubeconfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLKEClusterKubeconfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLKEClusterKubeconfig
+        after: AfterDeleteLKEClusterKubeconfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLKEClusterServiceToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLKEClusterServiceToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLKEClusterServiceToken
+        after: AfterDeleteLKEClusterServiceToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLKENodePool:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLKENodePool
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLKENodePool
+        after: AfterDeleteLKENodePool
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLKENodePoolNode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLKENodePoolNode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLKENodePoolNode
+        after: AfterDeleteLKENodePoolNode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLock:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLock
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLock
+        after: AfterDeleteLock
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLogStream:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLogStream
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLogStream
+        after: AfterDeleteLogStream
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLogsDestination:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLogsDestination
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLogsDestination
+        after: AfterDeleteLogsDestination
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteLongviewClient:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteLongviewClient
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteLongviewClient
+        after: AfterDeleteLongviewClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteMonitorAlertDefinition:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteMonitorAlertDefinition
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteMonitorAlertDefinition
+        after: AfterDeleteMonitorAlertDefinition
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteMySQLDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteMySQLDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteMySQLDatabase
+        after: AfterDeleteMySQLDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteNodeBalancer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteNodeBalancer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteNodeBalancer
+        after: AfterDeleteNodeBalancer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteNodeBalancerConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteNodeBalancerConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteNodeBalancerConfig
+        after: AfterDeleteNodeBalancerConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteNodeBalancerNode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteNodeBalancerNode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteNodeBalancerNode
+        after: AfterDeleteNodeBalancerNode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteOAuthClient:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteOAuthClient
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteOAuthClient
+        after: AfterDeleteOAuthClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteObjectStorageBucket:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteObjectStorageBucket
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteObjectStorageBucket
+        after: AfterDeleteObjectStorageBucket
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteObjectStorageBucketCert:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteObjectStorageBucketCert
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteObjectStorageBucketCert
+        after: AfterDeleteObjectStorageBucketCert
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteObjectStorageKey:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteObjectStorageKey
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteObjectStorageKey
+        after: AfterDeleteObjectStorageKey
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeletePaymentMethod:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeletePaymentMethod
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeletePaymentMethod
+        after: AfterDeletePaymentMethod
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeletePhoneNumber:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeletePhoneNumber
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeletePhoneNumber
+        after: AfterDeletePhoneNumber
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeletePlacementGroup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeletePlacementGroup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeletePlacementGroup
+        after: AfterDeletePlacementGroup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeletePostgresDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeletePostgresDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeletePostgresDatabase
+        after: AfterDeletePostgresDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteProfileApp:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteProfileApp
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteProfileApp
+        after: AfterDeleteProfileApp
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteProfileDevice:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteProfileDevice
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteProfileDevice
+        after: AfterDeleteProfileDevice
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteReservedIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteReservedIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteReservedIPAddress
+        after: AfterDeleteReservedIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteSSHKey:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteSSHKey
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteSSHKey
+        after: AfterDeleteSSHKey
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteStackscript:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteStackscript
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteStackscript
+        after: AfterDeleteStackscript
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteTag:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteTag
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteTag
+        after: AfterDeleteTag
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteToken
+        after: AfterDeleteToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteUser:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteUser
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteUser
+        after: AfterDeleteUser
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteVPC:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteVPC
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteVPC
+        after: AfterDeleteVPC
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteVPCSubnet:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteVPCSubnet
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteVPCSubnet
+        after: AfterDeleteVPCSubnet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DeleteVolume:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DeleteVolume
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDeleteVolume
+        after: AfterDeleteVolume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DetachVolume:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DetachVolume
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDetachVolume
+        after: AfterDetachVolume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_DisableTwoFactor:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: DisableTwoFactor
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeDisableTwoFactor
+        after: AfterDisableTwoFactor
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_EnableInstanceBackups:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: EnableInstanceBackups
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeEnableInstanceBackups
+        after: AfterEnableInstanceBackups
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetAccount:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetAccount
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetAccount
+        after: AfterGetAccount
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetAccountAgreements:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetAccountAgreements
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetAccountAgreements
+        after: AfterGetAccountAgreements
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetAccountAvailability:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetAccountAvailability
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetAccountAvailability
+        after: AfterGetAccountAvailability
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetAccountBetaProgram:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetAccountBetaProgram
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetAccountBetaProgram
+        after: AfterGetAccountBetaProgram
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetAccountRolePermissions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetAccountRolePermissions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetAccountRolePermissions
+        after: AfterGetAccountRolePermissions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetAccountServiceTransfer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetAccountServiceTransfer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetAccountServiceTransfer
+        after: AfterGetAccountServiceTransfer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetAccountSettings:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetAccountSettings
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetAccountSettings
+        after: AfterGetAccountSettings
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetAccountTransfer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetAccountTransfer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetAccountTransfer
+        after: AfterGetAccountTransfer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetBetaProgram:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetBetaProgram
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetBetaProgram
+        after: AfterGetBetaProgram
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetChildAccount:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetChildAccount
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetChildAccount
+        after: AfterGetChildAccount
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetDatabaseEngine:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetDatabaseEngine
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetDatabaseEngine
+        after: AfterGetDatabaseEngine
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetDatabaseType:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetDatabaseType
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetDatabaseType
+        after: AfterGetDatabaseType
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetDomain:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetDomain
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetDomain
+        after: AfterGetDomain
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetDomainRecord:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetDomainRecord
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetDomainRecord
+        after: AfterGetDomainRecord
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetDomainZoneFile:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetDomainZoneFile
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetDomainZoneFile
+        after: AfterGetDomainZoneFile
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetEntityRoles:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetEntityRoles
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetEntityRoles
+        after: AfterGetEntityRoles
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetEvent:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetEvent
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetEvent
+        after: AfterGetEvent
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetFirewall:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetFirewall
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetFirewall
+        after: AfterGetFirewall
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetFirewallDevice:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetFirewallDevice
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetFirewallDevice
+        after: AfterGetFirewallDevice
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetFirewallRuleSet:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetFirewallRuleSet
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetFirewallRuleSet
+        after: AfterGetFirewallRuleSet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetFirewallRules:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetFirewallRules
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetFirewallRules
+        after: AfterGetFirewallRules
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetFirewallRulesExpansion:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetFirewallRulesExpansion
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetFirewallRulesExpansion
+        after: AfterGetFirewallRulesExpansion
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetFirewallSettings:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetFirewallSettings
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetFirewallSettings
+        after: AfterGetFirewallSettings
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetFirewallTemplate:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetFirewallTemplate
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetFirewallTemplate
+        after: AfterGetFirewallTemplate
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetIPAddress
+        after: AfterGetIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetIPv6Pool:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetIPv6Pool
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetIPv6Pool
+        after: AfterGetIPv6Pool
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetIPv6Range:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetIPv6Range
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetIPv6Range
+        after: AfterGetIPv6Range
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetImage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetImage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetImage
+        after: AfterGetImage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetImageShareGroup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetImageShareGroup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetImageShareGroup
+        after: AfterGetImageShareGroup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstance
+        after: AfterGetInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceBackups:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceBackups
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceBackups
+        after: AfterGetInstanceBackups
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceConfig
+        after: AfterGetInstanceConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceConfigInterface:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceConfigInterface
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceConfigInterface
+        after: AfterGetInstanceConfigInterface
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceDisk:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceDisk
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceDisk
+        after: AfterGetInstanceDisk
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceIPAddress
+        after: AfterGetInstanceIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceIPAddresses:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceIPAddresses
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceIPAddresses
+        after: AfterGetInstanceIPAddresses
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceSnapshot:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceSnapshot
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceSnapshot
+        after: AfterGetInstanceSnapshot
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceStats:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceStats
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceStats
+        after: AfterGetInstanceStats
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceStatsByDate:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceStatsByDate
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceStatsByDate
+        after: AfterGetInstanceStatsByDate
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceTransfer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceTransfer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceTransfer
+        after: AfterGetInstanceTransfer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInstanceTransferMonthly:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInstanceTransferMonthly
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInstanceTransferMonthly
+        after: AfterGetInstanceTransferMonthly
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInterface:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInterface
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInterface
+        after: AfterGetInterface
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInterfaceSettings:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInterfaceSettings
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInterfaceSettings
+        after: AfterGetInterfaceSettings
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetInvoice:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetInvoice
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetInvoice
+        after: AfterGetInvoice
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetKernel:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetKernel
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetKernel
+        after: AfterGetKernel
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKECluster:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKECluster
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKECluster
+        after: AfterGetLKECluster
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKEClusterAPLConsoleURL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKEClusterAPLConsoleURL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKEClusterAPLConsoleURL
+        after: AfterGetLKEClusterAPLConsoleURL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKEClusterAPLHealthCheckURL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKEClusterAPLHealthCheckURL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKEClusterAPLHealthCheckURL
+        after: AfterGetLKEClusterAPLHealthCheckURL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKEClusterControlPlaneACL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKEClusterControlPlaneACL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKEClusterControlPlaneACL
+        after: AfterGetLKEClusterControlPlaneACL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKEClusterKubeconfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKEClusterKubeconfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKEClusterKubeconfig
+        after: AfterGetLKEClusterKubeconfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKENodePool:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKENodePool
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKENodePool
+        after: AfterGetLKENodePool
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKENodePoolNode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKENodePoolNode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKENodePoolNode
+        after: AfterGetLKENodePoolNode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKETierVersion:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKETierVersion
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKETierVersion
+        after: AfterGetLKETierVersion
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLKEVersion:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLKEVersion
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLKEVersion
+        after: AfterGetLKEVersion
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLock:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLock
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLock
+        after: AfterGetLock
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLogStream:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLogStream
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLogStream
+        after: AfterGetLogStream
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLogin:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLogin
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLogin
+        after: AfterGetLogin
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLogsDestination:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLogsDestination
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLogsDestination
+        after: AfterGetLogsDestination
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLongviewClient:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLongviewClient
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLongviewClient
+        after: AfterGetLongviewClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLongviewPlan:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLongviewPlan
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLongviewPlan
+        after: AfterGetLongviewPlan
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetLongviewSubscription:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetLongviewSubscription
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetLongviewSubscription
+        after: AfterGetLongviewSubscription
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetMonitorAlertDefinition:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetMonitorAlertDefinition
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetMonitorAlertDefinition
+        after: AfterGetMonitorAlertDefinition
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetMonitorDashboard:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetMonitorDashboard
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetMonitorDashboard
+        after: AfterGetMonitorDashboard
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetMonitorServiceByType:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetMonitorServiceByType
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetMonitorServiceByType
+        after: AfterGetMonitorServiceByType
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetMySQLDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetMySQLDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetMySQLDatabase
+        after: AfterGetMySQLDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetMySQLDatabaseConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetMySQLDatabaseConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetMySQLDatabaseConfig
+        after: AfterGetMySQLDatabaseConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetMySQLDatabaseCredentials:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetMySQLDatabaseCredentials
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetMySQLDatabaseCredentials
+        after: AfterGetMySQLDatabaseCredentials
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetMySQLDatabaseSSL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetMySQLDatabaseSSL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetMySQLDatabaseSSL
+        after: AfterGetMySQLDatabaseSSL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetNodeBalancer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetNodeBalancer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetNodeBalancer
+        after: AfterGetNodeBalancer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetNodeBalancerConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetNodeBalancerConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetNodeBalancerConfig
+        after: AfterGetNodeBalancerConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetNodeBalancerNode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetNodeBalancerNode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetNodeBalancerNode
+        after: AfterGetNodeBalancerNode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetNodeBalancerStats:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetNodeBalancerStats
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetNodeBalancerStats
+        after: AfterGetNodeBalancerStats
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetNodeBalancerVPCConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetNodeBalancerVPCConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetNodeBalancerVPCConfig
+        after: AfterGetNodeBalancerVPCConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetOAuthClient:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetOAuthClient
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetOAuthClient
+        after: AfterGetOAuthClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageBucket:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageBucket
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageBucket
+        after: AfterGetObjectStorageBucket
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageBucketAccess:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageBucketAccess
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageBucketAccess
+        after: AfterGetObjectStorageBucketAccess
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageBucketCert:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageBucketCert
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageBucketCert
+        after: AfterGetObjectStorageBucketCert
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageGlobalQuota:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageGlobalQuota
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageGlobalQuota
+        after: AfterGetObjectStorageGlobalQuota
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageGlobalQuotaUsage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageGlobalQuotaUsage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageGlobalQuotaUsage
+        after: AfterGetObjectStorageGlobalQuotaUsage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageKey:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageKey
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageKey
+        after: AfterGetObjectStorageKey
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageObjectACLConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageObjectACLConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageObjectACLConfig
+        after: AfterGetObjectStorageObjectACLConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageQuota:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageQuota
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageQuota
+        after: AfterGetObjectStorageQuota
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageQuotaUsage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageQuotaUsage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageQuotaUsage
+        after: AfterGetObjectStorageQuotaUsage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetObjectStorageTransfer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetObjectStorageTransfer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetObjectStorageTransfer
+        after: AfterGetObjectStorageTransfer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetPayment:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetPayment
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetPayment
+        after: AfterGetPayment
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetPaymentMethod:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetPaymentMethod
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetPaymentMethod
+        after: AfterGetPaymentMethod
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetPlacementGroup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetPlacementGroup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetPlacementGroup
+        after: AfterGetPlacementGroup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetPostgresDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetPostgresDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetPostgresDatabase
+        after: AfterGetPostgresDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetPostgresDatabaseConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetPostgresDatabaseConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetPostgresDatabaseConfig
+        after: AfterGetPostgresDatabaseConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetPostgresDatabaseCredentials:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetPostgresDatabaseCredentials
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetPostgresDatabaseCredentials
+        after: AfterGetPostgresDatabaseCredentials
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetPostgresDatabaseSSL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetPostgresDatabaseSSL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetPostgresDatabaseSSL
+        after: AfterGetPostgresDatabaseSSL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetPrefixList:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetPrefixList
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetPrefixList
+        after: AfterGetPrefixList
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetProfile:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetProfile
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetProfile
+        after: AfterGetProfile
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetProfileApp:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetProfileApp
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetProfileApp
+        after: AfterGetProfileApp
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetProfileDevice:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetProfileDevice
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetProfileDevice
+        after: AfterGetProfileDevice
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetProfileLogin:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetProfileLogin
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetProfileLogin
+        after: AfterGetProfileLogin
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetProfilePreferences:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetProfilePreferences
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetProfilePreferences
+        after: AfterGetProfilePreferences
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetRegion:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetRegion
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetRegion
+        after: AfterGetRegion
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetRegionAvailability:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetRegionAvailability
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetRegionAvailability
+        after: AfterGetRegionAvailability
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetRegionVPCAvailability:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetRegionVPCAvailability
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetRegionVPCAvailability
+        after: AfterGetRegionVPCAvailability
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetReservedIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetReservedIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetReservedIPAddress
+        after: AfterGetReservedIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetSSHKey:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetSSHKey
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetSSHKey
+        after: AfterGetSSHKey
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetStackscript:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetStackscript
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetStackscript
+        after: AfterGetStackscript
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetTicket:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetTicket
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetTicket
+        after: AfterGetTicket
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetToken
+        after: AfterGetToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetType:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetType
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetType
+        after: AfterGetType
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetUser:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetUser
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetUser
+        after: AfterGetUser
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetUserAccountPermissions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetUserAccountPermissions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetUserAccountPermissions
+        after: AfterGetUserAccountPermissions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetUserGrants:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetUserGrants
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetUserGrants
+        after: AfterGetUserGrants
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetUserRolePermissions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetUserRolePermissions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetUserRolePermissions
+        after: AfterGetUserRolePermissions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetVLANIPAMAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetVLANIPAMAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetVLANIPAMAddress
+        after: AfterGetVLANIPAMAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetVPC:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetVPC
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetVPC
+        after: AfterGetVPC
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetVPCDefaultRanges:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetVPCDefaultRanges
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetVPCDefaultRanges
+        after: AfterGetVPCDefaultRanges
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetVPCSubnet:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetVPCSubnet
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetVPCSubnet
+        after: AfterGetVPCSubnet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GetVolume:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GetVolume
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGetVolume
+        after: AfterGetVolume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_GrantsList:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: GrantsList
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeGrantsList
+        after: AfterGrantsList
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupAddImages:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupAddImages
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupAddImages
+        after: AfterImageShareGroupAddImages
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupAddMember:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupAddMember
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupAddMember
+        after: AfterImageShareGroupAddMember
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupCreateToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupCreateToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupCreateToken
+        after: AfterImageShareGroupCreateToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupGetByToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupGetByToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupGetByToken
+        after: AfterImageShareGroupGetByToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupGetImageShareEntriesByToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupGetImageShareEntriesByToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupGetImageShareEntriesByToken
+        after: AfterImageShareGroupGetImageShareEntriesByToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupGetMember:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupGetMember
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupGetMember
+        after: AfterImageShareGroupGetMember
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupGetToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupGetToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupGetToken
+        after: AfterImageShareGroupGetToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupListImageShareEntries:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupListImageShareEntries
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupListImageShareEntries
+        after: AfterImageShareGroupListImageShareEntries
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupListMembers:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupListMembers
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupListMembers
+        after: AfterImageShareGroupListMembers
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupListTokens:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupListTokens
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupListTokens
+        after: AfterImageShareGroupListTokens
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupRemoveImage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupRemoveImage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupRemoveImage
+        after: AfterImageShareGroupRemoveImage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupRemoveMember:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupRemoveMember
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupRemoveMember
+        after: AfterImageShareGroupRemoveMember
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupRemoveToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupRemoveToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupRemoveToken
+        after: AfterImageShareGroupRemoveToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupUpdateImageShareEntry:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupUpdateImageShareEntry
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupUpdateImageShareEntry
+        after: AfterImageShareGroupUpdateImageShareEntry
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupUpdateMember:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupUpdateMember
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupUpdateMember
+        after: AfterImageShareGroupUpdateMember
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImageShareGroupUpdateToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImageShareGroupUpdateToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImageShareGroupUpdateToken
+        after: AfterImageShareGroupUpdateToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ImportDomain:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ImportDomain
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeImportDomain
+        after: AfterImportDomain
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_InstancesAssignIPs:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: InstancesAssignIPs
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeInstancesAssignIPs
+        after: AfterInstancesAssignIPs
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_JoinBetaProgram:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: JoinBetaProgram
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeJoinBetaProgram
+        after: AfterJoinBetaProgram
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListAccountAvailabilities:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListAccountAvailabilities
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListAccountAvailabilities
+        after: AfterListAccountAvailabilities
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListAccountBetaPrograms:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListAccountBetaPrograms
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListAccountBetaPrograms
+        after: AfterListAccountBetaPrograms
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListAccountServiceTransfer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListAccountServiceTransfer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListAccountServiceTransfer
+        after: AfterListAccountServiceTransfer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListAlertChannels:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListAlertChannels
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListAlertChannels
+        after: AfterListAlertChannels
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListAllMonitorAlertDefinitions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListAllMonitorAlertDefinitions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListAllMonitorAlertDefinitions
+        after: AfterListAllMonitorAlertDefinitions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListAllVPCIPAddresses:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListAllVPCIPAddresses
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListAllVPCIPAddresses
+        after: AfterListAllVPCIPAddresses
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListAllVPCIPv6Addresses:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListAllVPCIPv6Addresses
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListAllVPCIPv6Addresses
+        after: AfterListAllVPCIPv6Addresses
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListBetaPrograms:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListBetaPrograms
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListBetaPrograms
+        after: AfterListBetaPrograms
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListChildAccounts:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListChildAccounts
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListChildAccounts
+        after: AfterListChildAccounts
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListDatabaseEngines:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListDatabaseEngines
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListDatabaseEngines
+        after: AfterListDatabaseEngines
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListDatabaseTypes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListDatabaseTypes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListDatabaseTypes
+        after: AfterListDatabaseTypes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListDatabases:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListDatabases
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListDatabases
+        after: AfterListDatabases
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListDomainRecords:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListDomainRecords
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListDomainRecords
+        after: AfterListDomainRecords
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListDomains:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListDomains
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListDomains
+        after: AfterListDomains
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListEntities:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListEntities
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListEntities
+        after: AfterListEntities
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListEvents:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListEvents
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListEvents
+        after: AfterListEvents
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListFirewallDevices:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListFirewallDevices
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListFirewallDevices
+        after: AfterListFirewallDevices
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListFirewallRuleSets:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListFirewallRuleSets
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListFirewallRuleSets
+        after: AfterListFirewallRuleSets
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListFirewallTemplates:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListFirewallTemplates
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListFirewallTemplates
+        after: AfterListFirewallTemplates
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListFirewalls:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListFirewalls
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListFirewalls
+        after: AfterListFirewalls
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListIPAddresses:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListIPAddresses
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListIPAddresses
+        after: AfterListIPAddresses
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListIPv6Pools:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListIPv6Pools
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListIPv6Pools
+        after: AfterListIPv6Pools
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListIPv6Ranges:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListIPv6Ranges
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListIPv6Ranges
+        after: AfterListIPv6Ranges
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListImageShareGroups:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListImageShareGroups
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListImageShareGroups
+        after: AfterListImageShareGroups
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListImageShareGroupsContainingPrivateImage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListImageShareGroupsContainingPrivateImage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListImageShareGroupsContainingPrivateImage
+        after: AfterListImageShareGroupsContainingPrivateImage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListImages:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListImages
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListImages
+        after: AfterListImages
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInstanceConfigInterfaces:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInstanceConfigInterfaces
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInstanceConfigInterfaces
+        after: AfterListInstanceConfigInterfaces
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInstanceConfigs:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInstanceConfigs
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInstanceConfigs
+        after: AfterListInstanceConfigs
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInstanceDisks:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInstanceDisks
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInstanceDisks
+        after: AfterListInstanceDisks
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInstanceFirewalls:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInstanceFirewalls
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInstanceFirewalls
+        after: AfterListInstanceFirewalls
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInstanceNodeBalancers:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInstanceNodeBalancers
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInstanceNodeBalancers
+        after: AfterListInstanceNodeBalancers
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInstanceVolumes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInstanceVolumes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInstanceVolumes
+        after: AfterListInstanceVolumes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInstances:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInstances
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInstances
+        after: AfterListInstances
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInterfaceFirewalls:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInterfaceFirewalls
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInterfaceFirewalls
+        after: AfterListInterfaceFirewalls
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInterfaces:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInterfaces
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInterfaces
+        after: AfterListInterfaces
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInvoiceItems:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInvoiceItems
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInvoiceItems
+        after: AfterListInvoiceItems
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListInvoices:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListInvoices
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListInvoices
+        after: AfterListInvoices
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListKernels:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListKernels
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListKernels
+        after: AfterListKernels
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLKEClusterAPIEndpoints:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLKEClusterAPIEndpoints
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLKEClusterAPIEndpoints
+        after: AfterListLKEClusterAPIEndpoints
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLKEClusters:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLKEClusters
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLKEClusters
+        after: AfterListLKEClusters
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLKENodePools:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLKENodePools
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLKENodePools
+        after: AfterListLKENodePools
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLKETierVersions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLKETierVersions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLKETierVersions
+        after: AfterListLKETierVersions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLKETypes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLKETypes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLKETypes
+        after: AfterListLKETypes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLKEVersions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLKEVersions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLKEVersions
+        after: AfterListLKEVersions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLocks:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLocks
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLocks
+        after: AfterListLocks
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLogStreamHistory:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLogStreamHistory
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLogStreamHistory
+        after: AfterListLogStreamHistory
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLogStreams:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLogStreams
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLogStreams
+        after: AfterListLogStreams
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLogins:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLogins
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLogins
+        after: AfterListLogins
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLogsDestinationHistory:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLogsDestinationHistory
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLogsDestinationHistory
+        after: AfterListLogsDestinationHistory
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLogsDestinations:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLogsDestinations
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLogsDestinations
+        after: AfterListLogsDestinations
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLongviewClients:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLongviewClients
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLongviewClients
+        after: AfterListLongviewClients
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListLongviewSubscriptions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListLongviewSubscriptions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListLongviewSubscriptions
+        after: AfterListLongviewSubscriptions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMaintenancePolicies:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMaintenancePolicies
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMaintenancePolicies
+        after: AfterListMaintenancePolicies
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMaintenances:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMaintenances
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMaintenances
+        after: AfterListMaintenances
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMonitorAlertDefinitionEntities:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMonitorAlertDefinitionEntities
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMonitorAlertDefinitionEntities
+        after: AfterListMonitorAlertDefinitionEntities
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMonitorAlertDefinitions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMonitorAlertDefinitions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMonitorAlertDefinitions
+        after: AfterListMonitorAlertDefinitions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMonitorDashboards:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMonitorDashboards
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMonitorDashboards
+        after: AfterListMonitorDashboards
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMonitorDashboardsByServiceType:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMonitorDashboardsByServiceType
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMonitorDashboardsByServiceType
+        after: AfterListMonitorDashboardsByServiceType
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMonitorMetricsDefinitionByServiceType:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMonitorMetricsDefinitionByServiceType
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMonitorMetricsDefinitionByServiceType
+        after: AfterListMonitorMetricsDefinitionByServiceType
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMonitorServices:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMonitorServices
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMonitorServices
+        after: AfterListMonitorServices
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListMySQLDatabases:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListMySQLDatabases
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListMySQLDatabases
+        after: AfterListMySQLDatabases
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListNetworkTransferPrices:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListNetworkTransferPrices
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListNetworkTransferPrices
+        after: AfterListNetworkTransferPrices
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListNodeBalancerConfigs:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListNodeBalancerConfigs
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListNodeBalancerConfigs
+        after: AfterListNodeBalancerConfigs
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListNodeBalancerFirewalls:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListNodeBalancerFirewalls
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListNodeBalancerFirewalls
+        after: AfterListNodeBalancerFirewalls
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListNodeBalancerNodes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListNodeBalancerNodes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListNodeBalancerNodes
+        after: AfterListNodeBalancerNodes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListNodeBalancerTypes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListNodeBalancerTypes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListNodeBalancerTypes
+        after: AfterListNodeBalancerTypes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListNodeBalancerVPCConfigs:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListNodeBalancerVPCConfigs
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListNodeBalancerVPCConfigs
+        after: AfterListNodeBalancerVPCConfigs
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListNodeBalancers:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListNodeBalancers
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListNodeBalancers
+        after: AfterListNodeBalancers
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListNotifications:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListNotifications
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListNotifications
+        after: AfterListNotifications
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListOAuthClients:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListOAuthClients
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListOAuthClients
+        after: AfterListOAuthClients
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListObjectStorageBucketContents:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListObjectStorageBucketContents
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListObjectStorageBucketContents
+        after: AfterListObjectStorageBucketContents
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListObjectStorageBuckets:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListObjectStorageBuckets
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListObjectStorageBuckets
+        after: AfterListObjectStorageBuckets
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListObjectStorageBucketsInRegion:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListObjectStorageBucketsInRegion
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListObjectStorageBucketsInRegion
+        after: AfterListObjectStorageBucketsInRegion
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListObjectStorageEndpoints:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListObjectStorageEndpoints
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListObjectStorageEndpoints
+        after: AfterListObjectStorageEndpoints
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListObjectStorageGlobalQuotas:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListObjectStorageGlobalQuotas
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListObjectStorageGlobalQuotas
+        after: AfterListObjectStorageGlobalQuotas
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListObjectStorageKeys:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListObjectStorageKeys
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListObjectStorageKeys
+        after: AfterListObjectStorageKeys
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListObjectStorageQuotas:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListObjectStorageQuotas
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListObjectStorageQuotas
+        after: AfterListObjectStorageQuotas
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListPaymentMethods:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListPaymentMethods
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListPaymentMethods
+        after: AfterListPaymentMethods
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListPayments:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListPayments
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListPayments
+        after: AfterListPayments
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListPlacementGroups:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListPlacementGroups
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListPlacementGroups
+        after: AfterListPlacementGroups
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListPostgresDatabases:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListPostgresDatabases
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListPostgresDatabases
+        after: AfterListPostgresDatabases
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListPrefixLists:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListPrefixLists
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListPrefixLists
+        after: AfterListPrefixLists
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListProfileApps:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListProfileApps
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListProfileApps
+        after: AfterListProfileApps
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListProfileDevices:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListProfileDevices
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListProfileDevices
+        after: AfterListProfileDevices
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListProfileLogins:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListProfileLogins
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListProfileLogins
+        after: AfterListProfileLogins
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListRegions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListRegions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListRegions
+        after: AfterListRegions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListRegionsAvailability:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListRegionsAvailability
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListRegionsAvailability
+        after: AfterListRegionsAvailability
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListRegionsVPCAvailability:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListRegionsVPCAvailability
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListRegionsVPCAvailability
+        after: AfterListRegionsVPCAvailability
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListReservedIPAddresses:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListReservedIPAddresses
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListReservedIPAddresses
+        after: AfterListReservedIPAddresses
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListReservedIPTypes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListReservedIPTypes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListReservedIPTypes
+        after: AfterListReservedIPTypes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListSSHKeys:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListSSHKeys
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListSSHKeys
+        after: AfterListSSHKeys
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListStackscripts:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListStackscripts
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListStackscripts
+        after: AfterListStackscripts
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListTaggedObjects:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListTaggedObjects
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListTaggedObjects
+        after: AfterListTaggedObjects
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListTags:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListTags
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListTags
+        after: AfterListTags
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListTickets:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListTickets
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListTickets
+        after: AfterListTickets
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListTokens:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListTokens
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListTokens
+        after: AfterListTokens
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListTypes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListTypes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListTypes
+        after: AfterListTypes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListUsers:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListUsers
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListUsers
+        after: AfterListUsers
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListVLANs:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListVLANs
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListVLANs
+        after: AfterListVLANs
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListVPCIPAddresses:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListVPCIPAddresses
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListVPCIPAddresses
+        after: AfterListVPCIPAddresses
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListVPCIPv6Addresses:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListVPCIPv6Addresses
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListVPCIPv6Addresses
+        after: AfterListVPCIPv6Addresses
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListVPCSubnets:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListVPCSubnets
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListVPCSubnets
+        after: AfterListVPCSubnets
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListVPCs:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListVPCs
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListVPCs
+        after: AfterListVPCs
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListVolumeTypes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListVolumeTypes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListVolumeTypes
+        after: AfterListVolumeTypes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ListVolumes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ListVolumes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeListVolumes
+        after: AfterListVolumes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_MarkEventsSeen:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: MarkEventsSeen
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeMarkEventsSeen
+        after: AfterMarkEventsSeen
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_MigrateInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: MigrateInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeMigrateInstance
+        after: AfterMigrateInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ModifyObjectStorageBucketAccess:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ModifyObjectStorageBucketAccess
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeModifyObjectStorageBucketAccess
+        after: AfterModifyObjectStorageBucketAccess
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_PasswordResetInstanceDisk:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: PasswordResetInstanceDisk
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforePasswordResetInstanceDisk
+        after: AfterPasswordResetInstanceDisk
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_PatchMySQLDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: PatchMySQLDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforePatchMySQLDatabase
+        after: AfterPatchMySQLDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_PatchPostgresDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: PatchPostgresDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforePatchPostgresDatabase
+        after: AfterPatchPostgresDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RebootInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RebootInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRebootInstance
+        after: AfterRebootInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RebuildInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RebuildInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRebuildInstance
+        after: AfterRebuildInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RebuildNodeBalancerConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RebuildNodeBalancerConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRebuildNodeBalancerConfig
+        after: AfterRebuildNodeBalancerConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RecycleLKEClusterNodes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RecycleLKEClusterNodes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRecycleLKEClusterNodes
+        after: AfterRecycleLKEClusterNodes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RecycleLKENodePool:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RecycleLKENodePool
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRecycleLKENodePool
+        after: AfterRecycleLKENodePool
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RecycleLKENodePoolNode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RecycleLKENodePoolNode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRecycleLKENodePoolNode
+        after: AfterRecycleLKENodePoolNode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RegenerateLKECluster:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RegenerateLKECluster
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRegenerateLKECluster
+        after: AfterRegenerateLKECluster
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RenameInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RenameInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRenameInstance
+        after: AfterRenameInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RenameInstanceConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RenameInstanceConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRenameInstanceConfig
+        after: AfterRenameInstanceConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RenameInstanceDisk:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RenameInstanceDisk
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRenameInstanceDisk
+        after: AfterRenameInstanceDisk
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ReorderInstanceConfigInterfaces:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ReorderInstanceConfigInterfaces
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeReorderInstanceConfigInterfaces
+        after: AfterReorderInstanceConfigInterfaces
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ReplicateImage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ReplicateImage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeReplicateImage
+        after: AfterReplicateImage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RequestAccountServiceTransfer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RequestAccountServiceTransfer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRequestAccountServiceTransfer
+        after: AfterRequestAccountServiceTransfer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RescueInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RescueInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRescueInstance
+        after: AfterRescueInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ReserveIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ReserveIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeReserveIPAddress
+        after: AfterReserveIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResetInstancePassword:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResetInstancePassword
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResetInstancePassword
+        after: AfterResetInstancePassword
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResetMySQLDatabaseCredentials:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResetMySQLDatabaseCredentials
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResetMySQLDatabaseCredentials
+        after: AfterResetMySQLDatabaseCredentials
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResetOAuthClientSecret:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResetOAuthClientSecret
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResetOAuthClientSecret
+        after: AfterResetOAuthClientSecret
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResetPostgresDatabaseCredentials:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResetPostgresDatabaseCredentials
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResetPostgresDatabaseCredentials
+        after: AfterResetPostgresDatabaseCredentials
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResizeInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResizeInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResizeInstance
+        after: AfterResizeInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResizeInstanceDisk:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResizeInstanceDisk
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResizeInstanceDisk
+        after: AfterResizeInstanceDisk
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResizeVolume:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResizeVolume
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResizeVolume
+        after: AfterResizeVolume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_RestoreInstanceBackup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: RestoreInstanceBackup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRestoreInstanceBackup
+        after: AfterRestoreInstanceBackup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResumeMySQLDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResumeMySQLDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResumeMySQLDatabase
+        after: AfterResumeMySQLDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ResumePostgresDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ResumePostgresDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeResumePostgresDatabase
+        after: AfterResumePostgresDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_SecurityQuestionsAnswer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: SecurityQuestionsAnswer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeSecurityQuestionsAnswer
+        after: AfterSecurityQuestionsAnswer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_SecurityQuestionsList:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: SecurityQuestionsList
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeSecurityQuestionsList
+        after: AfterSecurityQuestionsList
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_SendPhoneNumberVerificationCode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: SendPhoneNumberVerificationCode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeSendPhoneNumberVerificationCode
+        after: AfterSendPhoneNumberVerificationCode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_SetDefaultPaymentMethod:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: SetDefaultPaymentMethod
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeSetDefaultPaymentMethod
+        after: AfterSetDefaultPaymentMethod
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ShareIPAddresses:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ShareIPAddresses
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeShareIPAddresses
+        after: AfterShareIPAddresses
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_ShutdownInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: ShutdownInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeShutdownInstance
+        after: AfterShutdownInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_SuspendMySQLDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: SuspendMySQLDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeSuspendMySQLDatabase
+        after: AfterSuspendMySQLDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_SuspendPostgresDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: SuspendPostgresDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeSuspendPostgresDatabase
+        after: AfterSuspendPostgresDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UnassignPlacementGroupLinodes:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UnassignPlacementGroupLinodes
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUnassignPlacementGroupLinodes
+        after: AfterUnassignPlacementGroupLinodes
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateAccount:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateAccount
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateAccount
+        after: AfterUpdateAccount
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateAccountSettings:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateAccountSettings
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateAccountSettings
+        after: AfterUpdateAccountSettings
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateDomain:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateDomain
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateDomain
+        after: AfterUpdateDomain
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateDomainRecord:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateDomainRecord
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateDomainRecord
+        after: AfterUpdateDomainRecord
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateFirewall:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateFirewall
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateFirewall
+        after: AfterUpdateFirewall
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateFirewallRuleSet:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateFirewallRuleSet
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateFirewallRuleSet
+        after: AfterUpdateFirewallRuleSet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateFirewallRules:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateFirewallRules
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateFirewallRules
+        after: AfterUpdateFirewallRules
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateFirewallSettings:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateFirewallSettings
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateFirewallSettings
+        after: AfterUpdateFirewallSettings
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateIPAddress
+        after: AfterUpdateIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateImage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateImage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateImage
+        after: AfterUpdateImage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateImageShareGroup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateImageShareGroup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateImageShareGroup
+        after: AfterUpdateImageShareGroup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateInstance
+        after: AfterUpdateInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateInstanceConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateInstanceConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateInstanceConfig
+        after: AfterUpdateInstanceConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateInstanceConfigInterface:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateInstanceConfigInterface
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateInstanceConfigInterface
+        after: AfterUpdateInstanceConfigInterface
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateInstanceDisk:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateInstanceDisk
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateInstanceDisk
+        after: AfterUpdateInstanceDisk
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateInstanceFirewalls:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateInstanceFirewalls
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateInstanceFirewalls
+        after: AfterUpdateInstanceFirewalls
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateInstanceIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateInstanceIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateInstanceIPAddress
+        after: AfterUpdateInstanceIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateInterface:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateInterface
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateInterface
+        after: AfterUpdateInterface
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateInterfaceSettings:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateInterfaceSettings
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateInterfaceSettings
+        after: AfterUpdateInterfaceSettings
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateLKECluster:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateLKECluster
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateLKECluster
+        after: AfterUpdateLKECluster
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateLKEClusterControlPlaneACL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateLKEClusterControlPlaneACL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateLKEClusterControlPlaneACL
+        after: AfterUpdateLKEClusterControlPlaneACL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateLKENodePool:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateLKENodePool
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateLKENodePool
+        after: AfterUpdateLKENodePool
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateLogStream:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateLogStream
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateLogStream
+        after: AfterUpdateLogStream
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateLogsDestination:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateLogsDestination
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateLogsDestination
+        after: AfterUpdateLogsDestination
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateLongviewClient:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateLongviewClient
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateLongviewClient
+        after: AfterUpdateLongviewClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateLongviewPlan:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateLongviewPlan
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateLongviewPlan
+        after: AfterUpdateLongviewPlan
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateMonitorAlertDefinition:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateMonitorAlertDefinition
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateMonitorAlertDefinition
+        after: AfterUpdateMonitorAlertDefinition
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateMySQLDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateMySQLDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateMySQLDatabase
+        after: AfterUpdateMySQLDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateNodeBalancer:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateNodeBalancer
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateNodeBalancer
+        after: AfterUpdateNodeBalancer
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateNodeBalancerConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateNodeBalancerConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateNodeBalancerConfig
+        after: AfterUpdateNodeBalancerConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateNodeBalancerNode:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateNodeBalancerNode
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateNodeBalancerNode
+        after: AfterUpdateNodeBalancerNode
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateOAuthClient:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateOAuthClient
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateOAuthClient
+        after: AfterUpdateOAuthClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateObjectStorageBucketAccess:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateObjectStorageBucketAccess
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateObjectStorageBucketAccess
+        after: AfterUpdateObjectStorageBucketAccess
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateObjectStorageKey:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateObjectStorageKey
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateObjectStorageKey
+        after: AfterUpdateObjectStorageKey
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateObjectStorageObjectACLConfig:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateObjectStorageObjectACLConfig
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateObjectStorageObjectACLConfig
+        after: AfterUpdateObjectStorageObjectACLConfig
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdatePlacementGroup:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdatePlacementGroup
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdatePlacementGroup
+        after: AfterUpdatePlacementGroup
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdatePostgresDatabase:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdatePostgresDatabase
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdatePostgresDatabase
+        after: AfterUpdatePostgresDatabase
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateProfile:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateProfile
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateProfile
+        after: AfterUpdateProfile
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateProfilePreferences:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateProfilePreferences
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateProfilePreferences
+        after: AfterUpdateProfilePreferences
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateReservedIPAddress:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateReservedIPAddress
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateReservedIPAddress
+        after: AfterUpdateReservedIPAddress
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateSSHKey:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateSSHKey
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateSSHKey
+        after: AfterUpdateSSHKey
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateStackscript:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateStackscript
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateStackscript
+        after: AfterUpdateStackscript
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateToken:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateToken
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateToken
+        after: AfterUpdateToken
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateUser:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateUser
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateUser
+        after: AfterUpdateUser
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateUserGrants:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateUserGrants
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateUserGrants
+        after: AfterUpdateUserGrants
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateUserRolePermissions:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateUserRolePermissions
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateUserRolePermissions
+        after: AfterUpdateUserRolePermissions
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateVPC:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateVPC
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateVPC
+        after: AfterUpdateVPC
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateVPCSubnet:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateVPCSubnet
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateVPCSubnet
+        after: AfterUpdateVPCSubnet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpdateVolume:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpdateVolume
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpdateVolume
+        after: AfterUpdateVolume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpgradeInstance:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpgradeInstance
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpgradeInstance
+        after: AfterUpgradeInstance
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UpgradeInterfaces:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UpgradeInterfaces
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUpgradeInterfaces
+        after: AfterUpgradeInterfaces
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UploadImage:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UploadImage
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUploadImage
+        after: AfterUploadImage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UploadImageToURL:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UploadImageToURL
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUploadImageToURL
+        after: AfterUploadImageToURL
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_UploadObjectStorageBucketCert:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: UploadObjectStorageBucketCert
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeUploadObjectStorageBucketCert
+        after: AfterUploadObjectStorageBucketCert
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_api_VerifyPhoneNumber:
+  target: github.com/linode/linodego/v2
+  version: v2.4.1
+  where:
+    func: VerifyPhoneNumber
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeVerifyPhoneNumber
+        after: AfterVerifyPhoneNumber
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+

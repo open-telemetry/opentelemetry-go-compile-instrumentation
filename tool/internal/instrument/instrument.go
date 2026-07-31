@@ -9,10 +9,10 @@ import (
 
 	"github.com/dave/dst"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRule {
@@ -95,8 +95,11 @@ func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 					ip.Debug("Skip non-func rule due to file-level //otelc:ignore", "rule", r.GetName())
 					continue
 				}
-				funcDecl := ast.FindFuncDecl(root, fr.Func, fr.Recv)
-				if funcDecl == nil || !ast.FuncHasDirective(funcDecl, directiveInstrument) {
+				funcDecl, ok, err1 := ast.FindFuncDecl(root, fr)
+				if err1 != nil {
+					return ex.Wrapf(err1, "finding function %s", fr.Func)
+				}
+				if !ok || !ast.FuncHasDirective(funcDecl, directiveInstrument) {
 					ip.Debug("Skip func rule due to file-level //otelc:ignore", "func", fr.Func, "rule", r.GetName())
 					continue
 				}

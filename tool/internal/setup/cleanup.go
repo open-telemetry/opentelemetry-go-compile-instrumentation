@@ -5,10 +5,10 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"os"
-	"path/filepath"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // Cleanup removes artifacts created by the setup and build phases.
@@ -18,35 +18,51 @@ import (
 // When cleanAll is false, backed-up files are restored and the generated runtime
 // file is removed, but .otelc-build/ is kept for debugging. When cleanAll is
 // true, .otelc-build/ is also removed.
+//
+// Cleanup runs under the build lock; GoBuild's deferred call reuses the
+// surrounding lock via the context marker instead of re-acquiring it.
 func Cleanup(ctx context.Context, cleanAll bool) error {
+	return withBuildLock(ctx, func(ctx context.Context) error {
+		return cleanupLocked(ctx, cleanAll)
+	})
+}
+
+func cleanupLocked(ctx context.Context, cleanAll bool) error {
 	logger := util.LoggerFromContext(ctx)
-
-	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
-
-	// Restore backed-up files before removing .otelc-build/, since backups
-	// live inside .otelc-build/backup/.
-	// Only restore files that were actually backed up: repos without go.work
-	// or go.sum will not have those files in the backup dir, and attempting
-	// to restore absent files would produce spurious warnings.
-	backupDir := util.GetBuildTemp("backup")
-	if util.PathExists(backupDir) {
-		var toRestore []string
-		for _, f := range backupFiles {
-			if util.PathExists(filepath.Join(backupDir, f)) {
-				toRestore = append(toRestore, f)
-			}
-		}
-		if err := util.RestoreFile(toRestore); err != nil {
-			logger.WarnContext(ctx, "failed to restore backed up files", "error", err)
+	stateManager, found := StateManagerFromContext(ctx)
+	if !found {
+		var err error
+		stateManager, err = LoadStateManager()
+		if err != nil {
+			return err
 		}
 	}
 
-	// Remove the generated otel runtime bridge file from the current working directory.
-	if err := os.RemoveAll(OtelcRuntimeFile); err != nil {
-		logger.WarnContext(ctx, "failed to remove otel runtime file", "error", err)
+	reverted := true
+	if stateManager != nil {
+		if err := stateManager.Revert(); err != nil {
+			reverted = false
+			logger.WarnContext(ctx, "failed to revert state", "error", err)
+		}
+
+		// If Revert succeeded, discard the consumed state.
+		if reverted {
+			if discardErr := stateManager.Discard(); discardErr != nil {
+				logger.WarnContext(ctx, "failed to discard consumed state", "error", discardErr)
+			}
+		}
 	}
 
 	if cleanAll {
+		if !reverted {
+			// The manifest and snapshots under .otelc-build/state are the only
+			// way left to restore go.mod/go.sum; deleting them now would strand
+			// the tree with replace directives pointing at removed directories.
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: state could not be fully reverted; "+
+				"original file snapshots remain available for recovery at: %s\n",
+				util.GetBuildTemp(stateDir))
+			return nil
+		}
 		// Remove the entire .otelc-build/ temp directory last.
 		// The extracted instrumentation package lives inside .otelc-build/pkg/,
 		// so this also covers removing it.

@@ -1,0 +1,77 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # anthropics/anthropic-sdk-go instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/anthropics/anthropic-sdk-go/middleware.go     (span + attrs)
+  #   instrumentation/github.com/anthropics/anthropic-sdk-go/semconv/genai.go  (attribute keys)
+  #
+  # The anthropic-sdk-go instrumentation is trace-only: it wraps the SDK HTTP
+  # transport and creates one client span per Messages API call
+  # (`POST /v1/messages`, `gen_ai.operation.name` = `chat`), and records no
+  # metrics. `/v1/messages/count_tokens` and `/v1/messages/batches` are not
+  # instrumented.
+  #
+  # Most attributes are standard upstream OpenTelemetry GenAI attributes
+  # (referenced with `ref:`). `gen_ai.usage.total_tokens` and
+  # `gen_ai.request.is_stream` are shared with the openai-go instrumentation and
+  # are declared in `groups/openai.yaml` (`registry.otelc.gen_ai`). The two
+  # prompt-cache attributes are Anthropic-specific and are declared locally with
+  # `id:` in the attribute group below.
+  #
+  # Notes on conditional attributes:
+  #   - `gen_ai.usage.cache_read.input_tokens` and
+  #     `gen_ai.usage.cache_creation.input_tokens` are recorded only when the
+  #     request actually read from / wrote to the prompt cache. Both are also
+  #     folded into `gen_ai.usage.input_tokens`, which per semconv reports the
+  #     full prompt, unlike Anthropic's raw `input_tokens` field.
+  #   - `gen_ai.usage.total_tokens` is derived (input + output); the Messages
+  #     API reports no total.
+  #   - `gen_ai.response.*` attributes are absent on error responses and on
+  #     server-sent-event responses, which are currently passed through without
+  #     accumulation (see #679). `gen_ai.request.is_stream` is set only on that
+  #     SSE path.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.gen_ai.anthropic
+    type: attribute_group
+    display_name: otelc Anthropic GenAI attributes
+    brief: >
+      Prompt-cache attributes emitted by the anthropic-sdk-go instrumentation that are not covered by the upstream OpenTelemetry
+      GenAI semantic conventions.
+    attributes:
+      - id: gen_ai.usage.cache_read.input_tokens
+        type: int
+        stability: development
+        brief: The number of prompt tokens that were read from the provider's prompt cache.
+        examples: [1024]
+      - id: gen_ai.usage.cache_creation.input_tokens
+        type: int
+        stability: development
+        brief: The number of prompt tokens that were written to the provider's prompt cache.
+        examples: [512]
+
+  - id: span.otelc.gen_ai.anthropic.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: Anthropic client span, one per Messages API call.
+    attributes:
+      - ref: gen_ai.system
+      - ref: gen_ai.provider.name
+      - ref: gen_ai.operation.name
+      - ref: gen_ai.request.model
+      - ref: gen_ai.request.max_tokens
+      - ref: gen_ai.request.temperature
+      - ref: gen_ai.request.top_p
+      - ref: gen_ai.request.top_k
+      - ref: gen_ai.response.id
+      - ref: gen_ai.response.model
+      - ref: gen_ai.response.finish_reasons
+      - ref: gen_ai.usage.input_tokens
+      - ref: gen_ai.usage.output_tokens
+      - ref: gen_ai.usage.total_tokens
+      - ref: gen_ai.usage.cache_read.input_tokens
+      - ref: gen_ai.usage.cache_creation.input_tokens
+      - ref: gen_ai.request.is_stream
+      - ref: error.type

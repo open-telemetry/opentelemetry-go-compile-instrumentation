@@ -1,0 +1,3 @@
+one-of:
+  - has_func: init
+  - {}

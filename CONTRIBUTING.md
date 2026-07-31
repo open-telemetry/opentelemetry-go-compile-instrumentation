@@ -29,13 +29,25 @@ This project uses several tools for development. Most tools will be automaticall
    cd opentelemetry-go-compile-instrumentation
    ```
 
-2. Build the project:
+2. Configure the git merge driver for the instrumentation bundle (run once per clone):
+
+   ```sh
+   make setup-git
+   ```
+
+   `tool/data/otelc-bundle.tgz` is a binary archive generated from `pkg/` and
+   `instrumentation/`, so git cannot merge it and it conflicts on almost every
+   rebase. This registers a merge driver that keeps the current bundle instead
+   of stopping the rebase/merge; you then refresh it with `make package`. See
+   [Keeping the bundle in sync](#keeping-the-bundle-in-sync).
+
+3. Build the project:
 
    ```sh
    make build
    ```
 
-3. Run tests:
+4. Run tests:
 
    ```sh
    make test
@@ -86,6 +98,8 @@ The license header checker has a dedicated CI workflow (`check-license-headers.y
 - `make test-unit` - Run unit tests only with formatted output
 - `make test-integration` - Run integration tests only with formatted output
 - `make test-e2e` - Run end-to-end tests
+- `make test-latestlibbuild` - Build instrumented test apps against the `@latest` version of each instrumented library
+- `make test-latestlibrun` - Bump instrumented test apps to `@latest` and run the full integration suite
 
 Test results are saved to `gotest-unit.log` and `gotest-integration.log` for review.
 
@@ -129,6 +143,43 @@ make all
 ```
 
 This will run: `build`, `format`, `lint`, and `test` in sequence.
+
+### Keeping the bundle in sync
+
+`tool/data/otelc-bundle.tgz` is a reproducible archive of `pkg/` and
+`instrumentation/` that is embedded into `otelc` via `//go:embed`. It must stay
+committed so that `go install go.opentelemetry.io/otelc/tool/cmd/otelc@latest`
+works, but because it is binary, git cannot 3-way merge it — so any branch that
+touches the sources conflicts with `main` on this file.
+
+To make this painless, run `make setup-git` once per clone (see
+[Getting Started](#getting-started)). It registers a custom merge driver
+(defined in `.gitattributes` + `.github/scripts/merge-bundle.sh`) that keeps the
+current ("ours") bundle on conflict so the rebase/merge runs to completion
+without stopping. You then regenerate the bundle from the fully-merged sources:
+
+```sh
+git fetch origin main
+git rebase origin/main   # no longer halts on the bundle
+make package             # regenerate tool/data/otelc-bundle.tgz from merged sources
+git add tool/data/otelc-bundle.tgz && git commit --amend --no-edit
+git push --force-with-lease
+```
+
+Why the driver doesn't regenerate the bundle for you: when git invokes a merge
+driver it has not yet written the *other* merged source files to the working
+tree, so running `make package` at that moment would embed stale sources and
+miss the incoming changes. Regenerating after the rebase/merge completes is the
+only reliable point, hence the explicit `make package` step above.
+
+Notes:
+
+- GitHub's "This branch has conflicts" indicator is computed server-side and
+  does **not** use your local merge driver. Rebase locally as above and push;
+  the conflict disappears once your branch is up to date.
+- The `verify-bundle` CI guarantees the committed bundle matches the sources, so
+  a forgotten `make package` fails CI rather than shipping a stale bundle.
+  Maintainers can also comment `/regenerate-bundle` on a PR to auto-fix it.
 
 ### Tools
 
@@ -197,6 +248,7 @@ This repository requires using one of the following commit types:
 - `fix` for bug fixes
 - `release` when cutting a new release
 - `refactor` for code changes that do not add new features or fix bugs
+- `test` for changes to tests or test infrastructure
 
 Please try to keep the commit title concise, yet specific: they are used to derive the release notes
 for this repository. A good litmus test for whether a pull request title is suitable or not is to
@@ -234,6 +286,10 @@ Here are some examples for the various supported commit types:
   - :information_source: What code is being refactored?
   - :white_check_mark: `refactor: remove unused code`
   - :x: `refactor: improve code readability`
+- `test`:
+  - :information_source: What behavior or test coverage is being added?
+  - :white_check_mark: `test: validate exported span output in basic integration test`
+  - :x: `test: improve tests`
 
 [conv-commit]: https://www.conventionalcommits.org/en/v1.0.0/
 
@@ -343,31 +399,3 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 
 See [RELEASE.md](RELEASE.md) for the full release process, including release
 cadence, tagging conventions, cross-compilation targets, and hotfix guidance.
-
-## Approvers and Maintainers
-
-### Maintainers
-
-- [Huxing Zhang](https://github.com/ralf0131), Alibaba
-- [Kemal Akkoyun](https://github.com/kakkoyun), Datadog
-- [Liu Ziming](https://github.com/123liuziming), Alibaba
-- [Przemyslaw Delewski](https://github.com/pdelewski), Quesma
-- [Romain Marcadier](https://github.com/RomainMuller), Datadog
-
-For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
-
-### Approvers
-
-- [Dario Castañe](https://github.com/darccio), Datadog
-- [Eliott Bouhana](https://github.com/eliottness), Datadog
-- [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
-- [Xabier Martinez](https://github.com/txabman42), Cabify
-- [Yi Yang](https://github.com/y1yang0), Alibaba
-
-For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
-
-### Emeritus maintainers
-
-- [Dinesh Gurumurthy](https://github.com/dineshg13)
-
-For more information about the emeritus role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).

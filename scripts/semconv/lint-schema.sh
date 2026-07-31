@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Validate this project's semantic-convention registry under `schemas/otelc/`.
+#
+# We capture `weaver registry check`'s JSON diagnostic stream and fail on any
+# diagnostic that survives the allowlist in `lint-schema-filter.jq`. The
+# `--future` flag promotes pending warnings (e.g. missing examples on string
+# attributes) to errors so we catch them at PR time rather than in integration
+# logs. Note that weaver exits non-zero when diagnostics exist, so a non-zero
+# exit with parseable diagnostics on stdout is a lint finding, not an
+# execution failure.
+#
+# Usage: lint-schema.sh <oci-bin> <weaver-image> <registry-host-path>
+
+set -euo pipefail
+
+if [ "$#" -ne 3 ]; then
+  echo "usage: $(basename "$0") <oci-bin> <weaver-image> <registry-host-path>" >&2
+  exit 2
+fi
+
+OCI_BIN="$1"
+WEAVER_IMAGE="$2"
+REGISTRY_PATH="$3"
+FILTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lint-schema-filter.jq"
+
+stderr=$(mktemp)
+trap 'rm -f "$stderr"' EXIT
+
+rc=0
+out=$($OCI_BIN run --rm \
+  -v "${REGISTRY_PATH}:/otelc-registry:ro" \
+  -w /otelc-registry \
+  "$WEAVER_IMAGE" registry check \
+    --registry /otelc-registry \
+    --include-unreferenced \
+    --future \
+    --diagnostic-format json \
+    --diagnostic-stdout 2>"$stderr") || rc=$?
+
+# A failure without a parseable diagnostics array is an execution problem
+# (image pull failure, bad mount, ...), not a lint finding.
+if [ "$rc" -ne 0 ] && ! printf '%s' "$out" | jq empty >/dev/null 2>&1; then
+  echo "weaver registry check failed to run (exit $rc):" >&2
+  cat "$stderr" >&2
+  printf '%s\n' "$out" >&2
+  exit 1
+fi
+
+remaining=$(printf '%s' "${out:-[]}" | jq -f "$FILTER")
+
+if [ "$remaining" != "[]" ]; then
+  echo "weaver registry check produced diagnostics:" >&2
+  printf '%s\n' "$remaining" >&2
+  exit 1
+fi
+
+echo "weaver registry check passed: schemas/otelc is valid."

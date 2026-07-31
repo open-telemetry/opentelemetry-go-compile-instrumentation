@@ -14,11 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	pb "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/grpcserver/pb"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/shared/grpcpb/pb"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestGRPCClient(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "grpcclient", "go", "build", "-a")
+
 	testCases := []struct {
 		name           string
 		extraArgs      []string
@@ -45,7 +48,7 @@ func TestGRPCClient(t *testing.T) {
 			server := StartGRPCServer(t)
 
 			args := append([]string{"-addr=" + server.Addr}, tc.extraArgs...)
-			output := f.BuildAndRun("grpcclient", args...)
+			output := f.Run("grpcclient", args...)
 
 			require.Contains(t, output, tc.expectedOutput)
 			span := f.RequireSingleSpan()

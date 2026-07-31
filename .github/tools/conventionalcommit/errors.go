@@ -28,7 +28,7 @@ func (InvalidFormatError) ReviewComment() string {
 		"Please update the title, as apprioriate.\n\n" +
 		"Refer to the [CONTRIBUTING.md][contributing] file for more information.\n\n" +
 		"[cc-spec]: https://www.conventionalcommits.org/en/v1.0.0/\n" +
-		"[contributing]: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/CONTRIBUTING.md#conventional-commits\n"
+		"[contributing]: https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/blob/main/CONTRIBUTING.md#conventional-commits\n"
 }
 
 func (e InvalidCommitType) Error() string {
