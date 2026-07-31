@@ -5,6 +5,7 @@ package gocql
 
 import (
 	"context"
+	"net"
 	"strings"
 	"time"
 
@@ -76,6 +77,24 @@ func (o *otelObserver) ObserveConnect(oc gocql.ObservedConnect) {
 	}
 }
 
+// hostAddress resolves the address to record for a host. HostInfo.Peer() is
+// only populated once a host has been learned about via system.peers/system.local
+// (e.g. hosts already in the cluster's ring), so it is empty for the HostInfo
+// used to dial the very first control connection. ConnectAddress() falls back
+// through rpc/preferred/broadcast/peer addresses, but panics if none are set,
+// so guard it and fall back to no address rather than crashing the app.
+func hostAddress(host *gocql.HostInfo) (addr net.IP) {
+	if peer := host.Peer(); len(peer) > 0 {
+		return peer
+	}
+	defer func() {
+		if recover() != nil {
+			addr = nil
+		}
+	}()
+	return host.ConnectAddress()
+}
+
 func (o *otelObserver) recordQuerySpan(ctx context.Context, q gocql.ObservedQuery) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -110,8 +129,7 @@ func (o *otelObserver) recordQuerySpan(ctx context.Context, q gocql.ObservedQuer
 		attrs = append(attrs, semconv.DBNamespace(q.Keyspace))
 	}
 	if q.Host != nil {
-		peer := q.Host.Peer()
-		if len(peer) > 0 {
+		if peer := hostAddress(q.Host); len(peer) > 0 {
 			attrs = append(attrs, semconv.ServerAddress(peer.String()))
 		}
 		if port := q.Host.Port(); port > 0 {
@@ -164,8 +182,7 @@ func (o *otelObserver) recordBatchSpan(ctx context.Context, b gocql.ObservedBatc
 		attrs = append(attrs, semconv.DBNamespace(b.Keyspace))
 	}
 	if b.Host != nil {
-		peer := b.Host.Peer()
-		if len(peer) > 0 {
+		if peer := hostAddress(b.Host); len(peer) > 0 {
 			attrs = append(attrs, semconv.ServerAddress(peer.String()))
 		}
 		if port := b.Host.Port(); port > 0 {
@@ -204,8 +221,7 @@ func (o *otelObserver) recordConnectSpan(oc gocql.ObservedConnect) {
 		semconv.DBOperationName("CONNECT"),
 	}
 	if oc.Host != nil {
-		peer := oc.Host.Peer()
-		if len(peer) > 0 {
+		if peer := hostAddress(oc.Host); len(peer) > 0 {
 			attrs = append(attrs, semconv.ServerAddress(peer.String()))
 		}
 		if port := oc.Host.Port(); port > 0 {
