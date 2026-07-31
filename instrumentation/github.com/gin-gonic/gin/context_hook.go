@@ -20,11 +20,26 @@ const (
 	nextDepthKey = "otel.gin.next.depth"
 )
 
+// enabledDataKey stores BeforeNext's enabler.Enable() result on the hook
+// context so AfterNext can reuse it instead of re-reading it. BeforeNext and
+// AfterNext share one hook context per (*gin.Context).Next call, so this
+// keeps the pair's gating decision consistent even if the environment
+// variable changes while the call is in flight.
+const enabledDataKey = "otel.gin.enabled"
+
 // BeforeNext runs before (*gin.Context).Next. By the time Next is called,
 // gin's router has already matched the request to a route and populated
 // c.FullPath(). We use this to update the span name from the initial
 // "METHOD" to "METHOD /route/pattern" and record the http.route attribute.
 func BeforeNext(ictx hook.HookContext, c *gin.Context) {
+	// Next is called once per middleware in the chain, so this runs several
+	// times per request. Keep the disabled path free of logging.
+	enabled := enabler.Enable()
+	ictx.SetKeyData(enabledDataKey, enabled)
+	if !enabled {
+		return
+	}
+
 	if c == nil || c.Request == nil {
 		return
 	}
@@ -70,6 +85,13 @@ func BeforeNext(ictx hook.HookContext, c *gin.Context) {
 // AfterNext runs after (*gin.Context).Next returns. It records any errors
 // accumulated via c.Error() during request handling.
 func AfterNext(ictx hook.HookContext) {
+	// Reuse BeforeNext's gating decision so this pair stays balanced against
+	// nextDepthKey even if the environment variable changes mid-call.
+	enabled, _ := ictx.GetKeyData(enabledDataKey).(bool)
+	if !enabled {
+		return
+	}
+
 	c, ok := ictx.GetParam(0).(*gin.Context)
 	if !ok || c == nil || c.Request == nil {
 		return

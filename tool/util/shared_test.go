@@ -115,3 +115,35 @@ func TestVersionInRange(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateVersionRange(t *testing.T) {
+	tests := []struct {
+		name         string
+		versionRange string
+		wantErr      bool
+	}{
+		{name: "empty range", versionRange: "", wantErr: false},
+		{name: "single lower bound", versionRange: "v1.2.3", wantErr: false},
+		{name: "bounded range", versionRange: "v1.0.0,v2.0.0", wantErr: false},
+		{name: "trailing comma", versionRange: "v1.0.0,", wantErr: true},
+		{name: "missing lower bound", versionRange: ",v2.0.0", wantErr: true},
+		{name: "extra comma", versionRange: "v1.0.0,v2.0.0,v3.0.0", wantErr: true},
+		{name: "invalid single version", versionRange: "not-a-version", wantErr: true},
+		{name: "invalid start bound", versionRange: "not-a-version,v2.0.0", wantErr: true},
+		{name: "invalid end bound", versionRange: "v1.0.0,not-a-version", wantErr: true},
+		{name: "reversed range", versionRange: "v2.0.0,v1.0.0", wantErr: true},
+		{name: "equal bounds", versionRange: "v1.0.0,v1.0.0", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateVersionRange(tt.versionRange)
+			if tt.wantErr && err == nil {
+				t.Fatalf("ValidateVersionRange(%q) = nil, want error", tt.versionRange)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("ValidateVersionRange(%q) = %v, want nil", tt.versionRange, err)
+			}
+		})
+	}
+}
