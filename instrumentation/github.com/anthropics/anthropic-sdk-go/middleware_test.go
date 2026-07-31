@@ -18,6 +18,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -96,6 +99,103 @@ func setupTestTracer(t *testing.T) *tracetest.SpanRecorder {
 	tracer = tp.Tracer("test")
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	return sr
+}
+
+// setupTestMeter wires the package-level operationDuration histogram to a
+// manual reader so tests can assert what was recorded.
+func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(mp)
+	var err error
+	operationDuration, err = mp.Meter("test").Float64Histogram(
+		"gen_ai.client.operation.duration", metric.WithUnit("s"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = mp.Shutdown(context.Background())
+		operationDuration = nil
+	})
+	return reader
+}
+
+// durationCount collects the recorded gen_ai.client.operation.duration
+// histogram and returns the total number of measurements across data points.
+func durationCount(t *testing.T, reader *sdkmetric.ManualReader) uint64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "gen_ai.client.operation.duration" {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			require.True(t, ok, "gen_ai.client.operation.duration must be a float64 histogram")
+			var count uint64
+			for _, dp := range hist.DataPoints {
+				count += dp.Count
+			}
+			return count
+		}
+	}
+	return 0
+}
+
+// TestOtelMiddleware_RecordsDuration verifies a successful Messages call emits
+// exactly one gen_ai.client.operation.duration measurement.
+func TestOtelMiddleware_RecordsDuration(t *testing.T) {
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`)),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(1), durationCount(t, reader), "duration should be recorded once on success")
+}
+
+// TestOtelMiddleware_RecordsDurationOnError verifies the duration is recorded
+// even when the call fails, so error latency is observable too.
+func TestOtelMiddleware_RecordsDurationOnError(t *testing.T) {
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Status:     "429 Too Many Requests",
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(1), durationCount(t, reader), "duration should be recorded once on HTTP error")
 }
 
 // TestOtelMiddleware_Messages defines the expected span shape for a
