@@ -43,7 +43,7 @@ func Trampoline() {
     Hook()
 }
 
-//go:linkname Hook github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/hook.MyHook
+//go:linkname Hook go.opentelemetry.io/otelc/sdk/hook.MyHook
 var Hook func()
 ```
 
@@ -89,11 +89,11 @@ packages for matched dependency.
 package main
 
 // Import the SDK for shared utilities
-import _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk"
+import _ "go.opentelemetry.io/otelc/sdk"
 
 // Import hooks for specific third-party libraries
-import _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/hook/redis"
-import _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/hook/gin"
+import _ "go.opentelemetry.io/otelc/sdk/hook/redis"
+import _ "go.opentelemetry.io/otelc/sdk/hook/gin"
 ```
 
 After adding the dependency, `go mod tidy` is run to update the `go.mod` file.

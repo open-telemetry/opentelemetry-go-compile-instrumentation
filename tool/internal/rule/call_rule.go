@@ -10,7 +10,7 @@ import (
 
 	"github.com/valyala/fasttemplate"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"go.opentelemetry.io/otelc/tool/ex"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,6 +70,10 @@ type InstCallRule struct {
 
 	// Path is the module path where helper code referenced by the replacement is located.
 	Path string `json:"path" yaml:"path"`
+
+	// ResolvedPath is the local filesystem path of the package directory resolved
+	// from Path. Populated during the setup phase when Path is non-empty.
+	ResolvedPath string `json:"resolved_path" yaml:"-"`
 }
 
 // funcNamePattern matches qualified function names like "net/http.Get".

@@ -1,0 +1,9 @@
+# Function hook for go.opentelemetry.io/otel
+hook_set_tracer_provider:
+  target: go.opentelemetry.io/otel
+  where:
+    func: SetTracerProvider
+  do:
+    - inject_hooks:
+        before: beforeSetTracerProvider
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel"

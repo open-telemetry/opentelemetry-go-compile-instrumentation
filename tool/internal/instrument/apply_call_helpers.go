@@ -10,7 +10,7 @@ import (
 
 	"github.com/dave/dst"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 // matchesCallRule checks if a call expression matches the rule's criteria.

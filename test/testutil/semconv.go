@@ -130,3 +130,61 @@ func RequireRedisClientSemconv(
 		}
 	}
 }
+
+// RequireGenAIClientSemconv verifies that a GenAI client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
+func RequireGenAIClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	system, operationName, requestModel, providerName string,
+	responseID, responseModel string,
+	finishReasons []string,
+	inputTokens, outputTokens, totalTokens int64,
+) {
+	// Required attributes
+	RequireAttribute(t, span, "gen_ai.system", system)
+	RequireAttribute(t, span, "gen_ai.operation.name", operationName)
+	RequireAttribute(t, span, "gen_ai.request.model", requestModel)
+	// Recommended attributes
+	RequireAttribute(t, span, "gen_ai.provider.name", providerName)
+	RequireAttribute(t, span, "gen_ai.response.id", responseID)
+	RequireAttribute(t, span, "gen_ai.response.model", responseModel)
+	if len(finishReasons) > 0 {
+		RequireAttributeExists(t, span, "gen_ai.response.finish_reasons")
+	}
+	// Usage attributes
+	RequireAttribute(t, span, "gen_ai.usage.input_tokens", inputTokens)
+	RequireAttribute(t, span, "gen_ai.usage.output_tokens", outputTokens)
+	RequireAttribute(t, span, "gen_ai.usage.total_tokens", totalTokens)
+}
+
+// RequireK8SClientSemconv verifies that a K8S informers span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/resource/k8s/
+func RequireK8SClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	podName string,
+	requireNodeName bool,
+) {
+	RequireAttributeExists(t, span, string(semconv.K8SPodUIDKey))
+	RequireAttribute(t, span, string(semconv.K8SPodNameKey), podName)
+	if requireNodeName {
+		RequireAttributeExists(t, span, string(semconv.K8SNodeNameKey))
+	}
+	RequireAttribute(t, span, string(semconv.K8SNamespaceNameKey), "default")
+	RequireAttribute(t, span, "k8s.object.kind", "Pod")
+	RequireAttribute(t, span, "k8s.object.api_version", "v1")
+}
+
+// RequireAWSClientSemconv verifies that an AWS SDK client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/cloud-providers/aws-sdk/
+func RequireAWSClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	requestID string,
+) {
+	// Required attributes
+	RequireAttribute(t, span, "rpc.system.name", "aws-api")
+	// Recommended attributes
+	RequireAttribute(t, span, "aws.request_id", requestID)
+}

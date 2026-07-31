@@ -15,10 +15,10 @@ import (
 	"github.com/dave/dst"
 	"github.com/dave/dst/dstutil"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // applyCallRule transforms function calls at call sites by wrapping them with
@@ -37,7 +37,9 @@ func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		}
 	}
 
-	util.Assert(appendModified || replaceModified, "call rule did not match any call")
+	if !appendModified && !replaceModified {
+		return nil
+	}
 
 	if err := ip.applyCallRuleHelpers(ctx, r, root); err != nil {
 		return err
@@ -131,7 +133,7 @@ func (ip *InstrumentPhase) applyCallRuleHelpers(
 		return nil
 	}
 
-	files, err := callRuleHelperFiles(r.Path, helperNames)
+	files, err := callRuleHelperFiles(r.ResolvedPath, helperNames)
 	if err != nil {
 		return ex.Wrapf(err, "finding helper files for call rule %s at path %s", r.Name, r.Path)
 	}
@@ -206,8 +208,8 @@ func removeLocalFuncNames(names map[string]bool, root *dst.File) {
 	}
 }
 
-func callRuleHelperFiles(path string, names map[string]bool) ([]string, error) {
-	files, err := listRuleFiles(path)
+func callRuleHelperFiles(resolvedPath string, names map[string]bool) ([]string, error) {
+	files, err := util.ListFiles(resolvedPath)
 	if err != nil {
 		return nil, err
 	}

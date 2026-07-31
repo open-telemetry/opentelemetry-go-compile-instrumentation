@@ -1,0 +1,171 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # HTTP instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/net/http/semconv/client.go  (NewHTTPClient / MetricAttributes)
+  #   instrumentation/net/http/semconv/server.go  (NewHTTPServer / MetricAttributes)
+  #
+  # Every metric otelc's net/http instrumentation records is a standard
+  # upstream OpenTelemetry HTTP metric, so all attributes are referenced from
+  # the upstream registry via `ref:`. Declaring them here pins the exact subset
+  # of upstream HTTP telemetry this project emits, which weaver validates
+  # against the pinned upstream dependency. The `http.client.*` groups come
+  # first, followed by the `http.server.*` groups.
+  # ---------------------------------------------------------------------------
+
+  - id: metric.otelc.http.client.request.body.size
+    type: metric
+    metric_name: http.client.request.body.size
+    instrument: histogram
+    unit: By
+    stability: development
+    brief: Size of HTTP client request bodies.
+    attributes:
+      - ref: http.request.method
+      - ref: server.address
+      - ref: server.port
+      - ref: url.scheme
+      - ref: network.protocol.name
+      - ref: network.protocol.version
+      - ref: http.response.status_code
+      - ref: error.type
+
+  - id: metric.otelc.http.client.response.body.size
+    type: metric
+    metric_name: http.client.response.body.size
+    instrument: histogram
+    unit: By
+    stability: development
+    brief: Size of HTTP client response bodies.
+    attributes:
+      - ref: http.request.method
+      - ref: server.address
+      - ref: server.port
+      - ref: url.scheme
+      - ref: network.protocol.name
+      - ref: network.protocol.version
+      - ref: http.response.status_code
+      - ref: error.type
+
+  - id: metric.otelc.http.client.request.duration
+    type: metric
+    metric_name: http.client.request.duration
+    instrument: histogram
+    unit: s
+    stability: development
+    brief: Duration of HTTP client requests.
+    attributes:
+      - ref: http.request.method
+      - ref: server.address
+      - ref: server.port
+      - ref: url.scheme
+      - ref: network.protocol.name
+      - ref: network.protocol.version
+      - ref: http.response.status_code
+      - ref: error.type
+
+  - id: metric.otelc.http.client.active_requests
+    type: metric
+    metric_name: http.client.active_requests
+    instrument: updowncounter
+    unit: "{request}"
+    stability: development
+    brief: Number of active HTTP requests.
+    attributes:
+      - ref: http.request.method
+      - ref: server.address
+      - ref: server.port
+      - ref: url.scheme
+
+  - id: metric.otelc.http.client.open_connections
+    type: metric
+    metric_name: http.client.open_connections
+    instrument: updowncounter
+    unit: "{connection}"
+    stability: development
+    brief: Number of outbound HTTP connections that are currently active or idle on the client.
+    attributes:
+      - ref: server.address
+      - ref: server.port
+      - ref: url.scheme
+      - ref: network.protocol.name
+      - ref: network.protocol.version
+
+  - id: metric.otelc.http.client.connection.duration
+    type: metric
+    metric_name: http.client.connection.duration
+    instrument: histogram
+    unit: s
+    stability: development
+    brief: The duration of the successfully established outbound HTTP connections.
+    attributes:
+      - ref: server.address
+      - ref: server.port
+      - ref: url.scheme
+      - ref: network.protocol.name
+      - ref: network.protocol.version
+
+  - id: metric.otelc.http.server.request.body.size
+    type: metric
+    metric_name: http.server.request.body.size
+    instrument: histogram
+    unit: By
+    stability: development
+    brief: Size of HTTP server request bodies.
+    attributes:
+      - ref: http.request.method
+      - ref: url.scheme
+      - ref: server.address
+      - ref: server.port
+      - ref: network.protocol.name
+      - ref: network.protocol.version
+      - ref: http.response.status_code
+      - ref: error.type
+
+  - id: metric.otelc.http.server.response.body.size
+    type: metric
+    metric_name: http.server.response.body.size
+    instrument: histogram
+    unit: By
+    stability: development
+    brief: Size of HTTP server response bodies.
+    attributes:
+      - ref: http.request.method
+      - ref: url.scheme
+      - ref: server.address
+      - ref: server.port
+      - ref: network.protocol.name
+      - ref: network.protocol.version
+      - ref: http.response.status_code
+      - ref: error.type
+
+  - id: metric.otelc.http.server.request.duration
+    type: metric
+    metric_name: http.server.request.duration
+    instrument: histogram
+    unit: s
+    stability: development
+    brief: Duration of HTTP server requests.
+    attributes:
+      - ref: http.request.method
+      - ref: url.scheme
+      - ref: server.address
+      - ref: server.port
+      - ref: network.protocol.name
+      - ref: network.protocol.version
+      - ref: http.response.status_code
+      - ref: error.type
+
+  - id: metric.otelc.http.server.active_requests
+    type: metric
+    metric_name: http.server.active_requests
+    instrument: updowncounter
+    unit: "{request}"
+    stability: development
+    brief: Number of active HTTP server requests.
+    attributes:
+      - ref: http.request.method
+      - ref: url.scheme
+      - ref: server.address
+      - ref: server.port

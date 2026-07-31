@@ -11,10 +11,13 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestRedisClient(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "redisclient", "go", "build", "-a")
+
 	testCases := []struct {
 		name string
 	}{
@@ -28,7 +31,7 @@ func TestRedisClient(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 			server := StartRedisServer(t)
 
-			output := f.BuildAndRun("redisclient", "-addr="+server.Addr())
+			output := f.Run("redisclient", "-addr="+server.Addr())
 			require.Contains(t, output, "testvalue")
 
 			spans := testutil.AllSpans(f.Traces())

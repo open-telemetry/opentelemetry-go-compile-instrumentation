@@ -1,0 +1,3 @@
+# Error: has_package combined with has_func — explicit composition required
+has_package: main
+has_func: ServeHTTP

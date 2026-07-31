@@ -1,0 +1,34 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # go.mongodb.org/mongo-driver instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/go.mongodb.org/mongo-driver/mongo/client_hook.go
+  #
+  # The mongo-driver instrumentation is a compile-time hook that injects the
+  # upstream `otelmongo` command monitor (go.opentelemetry.io/contrib/.../otelmongo).
+  # That monitor is trace-only (no metrics) and, at its pinned version, emits
+  # the legacy v1.17.0 database conventions (`db.system`, `db.operation`,
+  # `db.name`, `net.peer.*`, `net.transport`, `db.mongodb.collection`) rather
+  # than the current `db.system.name` / `db.namespace` names. These attributes
+  # are deprecated upstream but still referenced here so the contract reflects
+  # what is actually emitted on the wire.
+  #
+  # `db.statement` is intentionally omitted: otelmongo gates it behind
+  # CommandAttributeDisabled, which defaults to true, and this project wires the
+  # monitor with no options -- so the statement is not emitted by default.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.db.mongodb.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: MongoDB client span, one per command (emitted by the injected otelmongo monitor).
+    attributes:
+      - ref: db.system
+      - ref: db.operation
+      - ref: db.name
+      - ref: db.mongodb.collection
+      - ref: net.peer.name
+      - ref: net.peer.port
+      - ref: net.transport

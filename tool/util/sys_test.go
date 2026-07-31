@@ -6,8 +6,11 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunCmd(t *testing.T) {
@@ -228,5 +231,276 @@ func TestGetBuildFlags_Empty(t *testing.T) {
 	result := GetBuildFlags()
 	if result != nil {
 		t.Errorf("GetBuildFlags() with empty env should return nil, got %v", result)
+	}
+}
+
+func TestListFiles_HiddenFileDoesNotSkipSiblings(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	visible1 := filepath.Join(tmpDir, "visible1.txt")
+	hidden := filepath.Join(tmpDir, ".hidden")
+	visible2 := filepath.Join(tmpDir, "visible2.txt")
+
+	for _, file := range []string{visible1, hidden, visible2} {
+		err := os.WriteFile(file, []byte("test"), 0o644)
+		if err != nil {
+			t.Fatalf("failed to create test file %s: %v", file, err)
+		}
+	}
+
+	files, err := ListFiles(tmpDir)
+	if err != nil {
+		t.Fatalf("ListFiles() error = %v", err)
+	}
+
+	var foundVisible1, foundVisible2 bool
+
+	for _, file := range files {
+		switch filepath.Base(file) {
+		case "visible1.txt":
+			foundVisible1 = true
+		case "visible2.txt":
+			foundVisible2 = true
+		case ".hidden":
+			t.Fatalf("hidden file should not be returned")
+		}
+	}
+
+	if !foundVisible1 || !foundVisible2 {
+		t.Fatalf("expected visible sibling files to be returned, got %v", files)
+	}
+}
+
+func TestListFiles_SkipsHiddenDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	hiddenDir := filepath.Join(tmpDir, ".git")
+	err := os.MkdirAll(hiddenDir, 0o755)
+	if err != nil {
+		t.Fatalf("failed to create hidden directory: %v", err)
+	}
+
+	err = os.WriteFile(filepath.Join(hiddenDir, "config"), []byte("test"), 0o644)
+	if err != nil {
+		t.Fatalf("failed to create hidden file: %v", err)
+	}
+
+	visible := filepath.Join(tmpDir, "visible.txt")
+	err = os.WriteFile(visible, []byte("test"), 0o644)
+	if err != nil {
+		t.Fatalf("failed to create visible file: %v", err)
+	}
+
+	files, err := ListFiles(tmpDir)
+	if err != nil {
+		t.Fatalf("ListFiles() error = %v", err)
+	}
+
+	for _, file := range files {
+		if strings.Contains(file, ".git") {
+			t.Fatalf("hidden directory contents should not be returned: %v", files)
+		}
+	}
+
+	var foundVisible bool
+
+	for _, file := range files {
+		if filepath.Base(file) == "visible.txt" {
+			foundVisible = true
+		}
+	}
+
+	if !foundVisible {
+		t.Fatalf("expected visible file to be returned")
+	}
+}
+
+func TestListFiles_HiddenRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	hiddenDir := filepath.Join(tmpDir, ".hidden")
+	require.NoError(t, os.MkdirAll(hiddenDir, 0o755))
+
+	file := filepath.Join(hiddenDir, "file.txt")
+	require.NoError(t, os.WriteFile(file, []byte("hello"), 0o644))
+
+	files, err := ListFiles(hiddenDir)
+	require.NoError(t, err)
+
+	require.Len(t, files, 1)
+	require.Equal(t, file, files[0])
+}
+
+func TestCopyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "src.txt")
+	dst := filepath.Join(tmpDir, "dst.txt")
+	content := []byte("hello world")
+
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatalf("failed to write src: %v", err)
+	}
+
+	if err := CopyFile(src, dst); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("failed to read dst: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("got content %q, want %q", string(got), string(content))
+	}
+}
+
+func TestCopyFileNestedDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "src_nested.txt")
+	dst := filepath.Join(tmpDir, "a", "b", "c", "dst_nested.txt")
+	content := []byte("nested hello")
+
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatalf("failed to write src: %v", err)
+	}
+
+	if err := CopyFile(src, dst); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("failed to read dst: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("got content %q, want %q", string(got), string(content))
+	}
+}
+
+func TestCopyFilePreservesPermissions(t *testing.T) {
+	if IsWindows() {
+		t.Skip("Skipping permission test on Windows")
+	}
+
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "src_perms.txt")
+	dst := filepath.Join(tmpDir, "dst_perms.txt")
+
+	if err := os.WriteFile(src, []byte("perms"), 0o700); err != nil {
+		t.Fatalf("failed to write src: %v", err)
+	}
+
+	if err := CopyFile(src, dst); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("failed to stat dst: %v", err)
+	}
+
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("got perm %o, want %o", info.Mode().Perm(), 0o700)
+	}
+}
+
+func TestCopyFileSourceDoesNotExist(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := CopyFile(
+		filepath.Join(tmpDir, "nonexistent"),
+		filepath.Join(tmpDir, "out"),
+	)
+
+	if err == nil {
+		t.Error("expected error for nonexistent source")
+	}
+}
+
+func TestCopyFileSameFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "same.txt")
+	content := []byte("hello")
+
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatalf("failed to write src: %v", err)
+	}
+
+	if err := CopyFile(src, src); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	got, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("failed to read src: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("got %q, want %q", got, content)
+	}
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		initialData []byte
+		initialPerm os.FileMode
+		writePerm   []os.FileMode
+		wantPerm    os.FileMode
+	}{
+		{
+			name:      "new file uses default permissions",
+			writePerm: nil,
+			wantPerm:  0o644,
+		},
+		{
+			name:      "new file uses provided permissions",
+			writePerm: []os.FileMode{0o600},
+			wantPerm:  0o600,
+		},
+		{
+			name:        "existing file preserves permissions",
+			initialData: []byte("old"),
+			initialPerm: 0o755,
+			writePerm:   nil,
+			wantPerm:    0o755,
+		},
+		{
+			name:        "existing file uses provided permissions",
+			initialData: []byte("old"),
+			initialPerm: 0o755,
+			writePerm:   []os.FileMode{0o600},
+			wantPerm:    0o600,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "test.txt")
+
+			if tt.initialData != nil {
+				require.NoError(t, os.WriteFile(path, tt.initialData, tt.initialPerm))
+				require.NoError(t, os.Chmod(path, tt.initialPerm))
+			}
+			require.NoError(t, WriteFileAtomic(path, []byte("new content"), tt.writePerm...))
+
+			got, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			require.Equal(t, []byte("new content"), got)
+
+			if runtime.GOOS != "windows" {
+				info, statErr := os.Stat(path)
+				require.NoError(t, statErr)
+				require.Equal(t, tt.wantPerm, info.Mode().Perm())
+			}
+
+			matches, matchesErr := filepath.Glob(filepath.Join(filepath.Dir(path), filepath.Base(path)+".tmp-*"))
+			require.NoError(t, matchesErr)
+			require.Empty(t, matches)
+		})
 	}
 }

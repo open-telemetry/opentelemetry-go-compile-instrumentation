@@ -1,0 +1,21 @@
+# Two rules with byte-identical content but different names target the same
+# function. Their content identity (see InstFuncRule.Identity) is therefore
+# equal, so the instrumenter must apply only one of them (de-duplication).
+# Without de-duplication the second rule would emit duplicate trampoline /
+# HookContextImpl declarations and the package would fail to compile.
+dup_one:
+  target: main
+  where:
+    func: Func1
+  do:
+    - inject_hooks:
+        before: H1Before
+        path: testdata/golden/dedup-identical-rules
+dup_two:
+  target: main
+  where:
+    func: Func1
+  do:
+    - inject_hooks:
+        before: H1Before
+        path: testdata/golden/dedup-identical-rules

@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/dave/dst"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"go.opentelemetry.io/otelc/tool/ex"
 )
 
 // DirectiveArg represents a single key:value argument parsed from a directive comment.

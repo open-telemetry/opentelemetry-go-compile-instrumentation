@@ -15,6 +15,7 @@
 package instrument
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,20 +27,33 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"github.com/dave/dst"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/golden"
 )
+
+// helperPkg holds a compiled helper package for use in golden tests.
+type helperPkg struct {
+	importPath string
+	archive    string
+}
 
 const (
 	testdataDir        = "testdata"
 	goldenDir          = "golden"
 	sourceFileName     = "source.go"
+	sourceTestFileName = "source_test.go"
 	rulesFileName      = "rules.yml"
+	importPathFileName = "importpath"
 	mainGoFileName     = "main.go"
+	mainTestFileName   = "main_test.go"
+	otherGoFileName    = "other.go"
 	mainPackage        = "main"
 	buildID            = "foo/bar"
 	compiledOutput     = "_pkg_.a"
@@ -69,17 +83,40 @@ func runTest(t *testing.T, testName string) {
 		slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	)
 
-	sourceFile := filepath.Join(tempDir, mainGoFileName)
-	// Each test case must provide its own source.go in its golden directory.
-	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, sourceFileName)
-	require.NoError(t, util.CopyFile(testSpecificSource, sourceFile),
-		"missing source.go for test %q at %s", testName, testSpecificSource)
+	// Each test case provides its source as source.go (a normal build) or
+	// source_test.go (a test build — a file the Go toolchain only compiles
+	// under `go test`). The chosen name is preserved into the temp dir so the
+	// compiled unit is genuinely a _test.go file, which is what is_test gates
+	// on. This mirrors setup.isTestBuild: test-ness is a source-set property,
+	// not an import-path suffix.
+	srcName, compiledName := sourceFileName, mainGoFileName
+	if testSrc := filepath.Join(testdataDir, goldenDir, testName, sourceTestFileName); util.PathExists(testSrc) {
+		srcName, compiledName = sourceTestFileName, mainTestFileName
+	}
+	isTest := strings.HasSuffix(compiledName, "_test.go")
 
-	ruleSet := loadRulesYAML(t, testName, sourceFile)
+	sourceFile := filepath.Join(tempDir, compiledName)
+	testSpecificSource := filepath.Join(testdataDir, goldenDir, testName, srcName)
+	require.NoError(t, util.CopyFile(testSpecificSource, sourceFile),
+		"missing %s for test %q at %s", srcName, testName, testSpecificSource)
+
+	packageFiles := copyExtraPackageFiles(t, testName, tempDir, sourceFile)
+
+	importPath := testImportPath(t, testName)
+	ruleSet := loadRulesYAML(t, loadRulesParams{
+		testName:     testName,
+		sourceFile:   sourceFile,
+		packageFiles: packageFiles,
+		importPath:   importPath,
+		isTest:       isTest,
+	})
 	writeMatchedJSON(ruleSet)
 
-	args := compileArgs(tempDir, sourceFile)
-	err := Toolexec(ctx, args)
+	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
+	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
+
+	args := compileArgs(tempDir, helpers, importPath, packageFiles...)
+	err := Toolexec(ctx, args, false)
 
 	if testName == invalidReceiver {
 		require.Error(t, err)
@@ -91,16 +128,47 @@ func runTest(t *testing.T, testName string) {
 	verifyGoldenFiles(t, tempDir, testName)
 }
 
-func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet {
-	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, rulesFileName))
+func copyExtraPackageFiles(t *testing.T, testName, tempDir, primaryFile string) []string {
+	t.Helper()
+	files := make([]string, 1, 2)
+	files[0] = primaryFile
+	otherSrc := filepath.Join(testdataDir, goldenDir, testName, otherGoFileName)
+	if !util.PathExists(otherSrc) {
+		return files
+	}
+	otherFile := filepath.Join(tempDir, otherGoFileName)
+	require.NoError(t, util.CopyFile(otherSrc, otherFile))
+	return append(files, otherFile)
+}
+
+type loadRulesParams struct {
+	testName     string
+	sourceFile   string
+	packageFiles []string
+	importPath   string
+	isTest       bool
+}
+
+func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
+	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, p.testName, rulesFileName))
 	require.NoError(t, err)
 
 	var rawRules map[string]map[string]any
 	yaml.Unmarshal(data, &rawRules)
 
+	// Parse the source AST once and reuse it for every rule's where.file gating
+	// below. The gating is per-rule, but the tree is shared, so N rules do not
+	// trigger N reparses of the same file.
+	sourceTree, parseErr := ast.ParseFileFast(p.sourceFile)
+	require.NoError(t, parseErr)
+
 	ruleSet := &rule.InstRuleSet{
-		PackageName:    mainPackage,
-		ModulePath:     mainPackage,
+		// PackageName is the Go package identifier (from the source clause);
+		// ModulePath is the compile-time import path, which Toolexec equality-
+		// checks against the -p flag before applying the set. They coincide for
+		// the default "main" fixtures but differ for a deep-path glob fixture.
+		PackageName:    sourceTree.Name.Name,
+		ModulePath:     p.importPath,
 		FuncRules:      make(map[string][]*rule.InstFuncRule),
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),
@@ -118,66 +186,232 @@ func loadRulesYAML(t *testing.T, testName, sourceFile string) *rule.InstRuleSet 
 	slices.Sort(ruleNames)
 
 	for _, name := range ruleNames {
-		props := rawRules[name]
-		props["name"] = name
-		ruleData, _ := yaml.Marshal(props)
+		propsList, normErr := rule.Normalize(rawRules[name])
+		require.NoError(t, normErr)
+		for _, props := range propsList {
+			props["name"] = name
+			ruleData, _ := yaml.Marshal(props)
 
-		switch {
-		case props["struct"] != nil:
-			r, _ := rule.NewInstStructRule(ruleData, name)
-			ruleSet.StructRules[sourceFile] = append(ruleSet.StructRules[sourceFile], r)
-		case props["file"] != nil:
-			r, _ := rule.NewInstFileRule(ruleData, name)
-			ruleSet.FileRules = append(ruleSet.FileRules, r)
-		case props["directive"] != nil:
-			r, _ := rule.NewInstDirectiveRule(ruleData, name)
-			ruleSet.DirectiveRules[sourceFile] = append(ruleSet.DirectiveRules[sourceFile], r)
-		case props["raw"] != nil:
-			r, _ := rule.NewInstRawRule(ruleData, name)
-			ruleSet.RawRules[sourceFile] = append(ruleSet.RawRules[sourceFile], r)
-		case props["func"] != nil:
-			r, _ := rule.NewInstFuncRule(ruleData, name)
-			ruleSet.FuncRules[sourceFile] = append(ruleSet.FuncRules[sourceFile], r)
-		case props["function_call"] != nil:
-			r, _ := rule.NewInstCallRule(ruleData, name)
-			ruleSet.CallRules[sourceFile] = append(ruleSet.CallRules[sourceFile], r)
-		case props["identifier"] != nil:
-			r, _ := rule.NewInstDeclRule(ruleData, name)
-			ruleSet.DeclRules[sourceFile] = append(ruleSet.DeclRules[sourceFile], r)
+			// The golden harness has no setup phase, so the where.file filter
+			// that setup.preciseMatching would evaluate is applied inline here.
+			// A rule whose file predicate does not match the source is skipped,
+			// exactly as it would be gated out during matching.
+			if !whereFileMatches(t, ruleData, p.isTest, sourceTree) {
+				continue
+			}
+
+			// Mirror the setup-phase package gate: a rule applies only when its
+			// target selects this fixture's import path (exact equality or glob
+			// match). This lets golden fixtures prove glob match vs no-match
+			// against realistic deep import paths, not just "main".
+			if !targetMatches(props, p.importPath) {
+				continue
+			}
+
+			switch {
+			case props["struct"] != nil:
+				r, _ := rule.NewInstStructRule(ruleData, name)
+				ruleSet.StructRules[p.sourceFile] = append(ruleSet.StructRules[p.sourceFile], r)
+			case props["file"] != nil:
+				r, _ := rule.NewInstFileRule(ruleData, name)
+				ruleSet.FileRules = append(ruleSet.FileRules, r)
+			case props["directive"] != nil:
+				r, _ := rule.NewInstDirectiveRule(ruleData, name)
+				ruleSet.DirectiveRules[p.sourceFile] = append(ruleSet.DirectiveRules[p.sourceFile], r)
+			case props["raw"] != nil:
+				r, _ := rule.NewInstRawRule(ruleData, name)
+				ruleSet.RawRules[p.sourceFile] = append(ruleSet.RawRules[p.sourceFile], r)
+			case props["func"] != nil:
+				r, _ := rule.NewInstFuncRule(ruleData, name)
+				ruleSet.FuncRules[p.sourceFile] = append(ruleSet.FuncRules[p.sourceFile], r)
+			case props["function_call"] != nil:
+				r, _ := rule.NewInstCallRule(ruleData, name)
+				for _, file := range p.packageFiles {
+					ruleSet.CallRules[file] = append(ruleSet.CallRules[file], r)
+				}
+			case props["identifier"] != nil:
+				r, _ := rule.NewInstDeclRule(ruleData, name)
+				ruleSet.DeclRules[p.sourceFile] = append(ruleSet.DeclRules[p.sourceFile], r)
+			}
 		}
 	}
 
 	return ruleSet
 }
 
+// whereFileMatches evaluates the rule's where.file predicate against the
+// already-parsed source tree, mirroring the gating that setup.preciseMatching
+// performs. It returns true when there is no file predicate. The golden harness
+// builds the matched rule set by hand (no setup phase), so this keeps fixtures
+// honest: a rule whose file filter does not match is gated out and produces no
+// instrumentation. The caller parses the tree once and shares it across rules.
+//
+// isTest reports whether the fixture is a test build (its source is a
+// source_test.go file), mirroring setup.isTestBuild; the is_test predicate is
+// evaluated against it.
+func whereFileMatches(t *testing.T, ruleData []byte, isTest bool, tree *dst.File) bool {
+	t.Helper()
+
+	var probe struct {
+		Where *rule.WhereDef `yaml:"where"`
+	}
+	require.NoError(t, yaml.Unmarshal(ruleData, &probe))
+	if probe.Where == nil || probe.Where.File == nil {
+		return true
+	}
+
+	return fileFilterMatches(t, probe.Where.File, isTest, tree)
+}
+
+// fileFilterMatches reports whether a where.file predicate matches the parsed
+// source. It covers the predicates exercised by golden fixtures: all-of, one-of
+// and not composition, the has_func / has_struct leaves, and is_test. Filter
+// compilation and match semantics are unit-tested in tool/internal/setup; this
+// is a lightweight stand-in for the golden harness only.
+//
+// isTest reports whether the fixture is a test build, against which the is_test
+// predicate is evaluated (mirrors setup.MatchContext.IsTest).
+//
+// Any predicate this evaluator does not model is rejected with t.Fatalf rather
+// than silently treated as a match: setup.buildFile errors on such predicates,
+// so silently matching here would let a fixture certify instrumentation output
+// that production could never produce.
+func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst.File) bool {
+	t.Helper()
+	// Mirror setup.buildFile's exclusivity rule: a combinator owns the node, so
+	// combining it with a sibling leaf or another combinator is a build-time
+	// error in production. Reject it loudly here too, so an invalid fixture
+	// cannot pass the golden harness when production would refuse the rule.
+	combinators := 0
+	for _, present := range []bool{def.AllOf != nil, def.OneOf != nil, def.Not != nil} {
+		if present {
+			combinators++
+		}
+	}
+	leaf := def.HasFunc != "" || def.HasRecv != "" || def.HasStruct != "" ||
+		def.HasDirective != "" || strings.TrimSpace(def.HasPackage) != "" || def.IsTest != nil
+	if combinators > 1 || (combinators == 1 && leaf) {
+		t.Fatalf("golden fixture combines a where.file combinator with sibling "+
+			"predicates (%+v); setup.buildFile rejects this at build time", def)
+	}
+	// Mirror setup.buildFile's has_recv-requires-has_func rule: has_recv on its
+	// own is a build-time error in production, so reject it here too rather than
+	// letting it fall through to a less specific failure.
+	if def.HasRecv != "" && def.HasFunc == "" {
+		t.Fatalf("golden fixture sets where.file.has_recv without has_func (%+v); "+
+			"setup.buildFile rejects this at build time", def)
+	}
+	// Mirror setup.buildFile's presence semantics: a non-nil combinator slice
+	// (including an explicit empty one-of: [] / all-of: []) is present and owns
+	// the node. An empty one-of matches nothing (vacuous false); an empty all-of
+	// matches vacuously true — the loop is skipped in each case.
+	if def.OneOf != nil {
+		for i := range def.OneOf {
+			if fileFilterMatches(t, &def.OneOf[i], isTest, tree) {
+				return true
+			}
+		}
+		return false
+	}
+	if def.AllOf != nil {
+		for i := range def.AllOf {
+			if !fileFilterMatches(t, &def.AllOf[i], isTest, tree) {
+				return false
+			}
+		}
+		return true
+	}
+	// not is unary: it negates its single inner predicate (mirrors setup.Not).
+	if def.Not != nil {
+		return !fileFilterMatches(t, def.Not, isTest, tree)
+	}
+	switch {
+	case def.HasFunc != "":
+		_, ok, _ := ast.FindFuncDecl(tree, def)
+		return ok
+	case def.HasStruct != "":
+		return ast.FindStructDecl(tree, def.HasStruct) != nil
+	case strings.TrimSpace(def.HasPackage) != "":
+		// Mirror setup.PackageNameFilter: compare the declared package clause,
+		// not the import path (target) and not the build's test-ness (is_test).
+		// TrimSpace mirrors the production guard so whitespace-only values are
+		// treated as absent, consistent with setup.buildFile.
+		return tree.Name.Name == strings.TrimSpace(def.HasPackage)
+	case def.IsTest != nil:
+		return *def.IsTest == isTest
+	default:
+		t.Fatalf("golden fixture uses a where.file predicate the harness cannot "+
+			"evaluate (%+v); extend fileFilterMatches to mirror setup.buildFile", def)
+		return false
+	}
+}
+
+// targetMatches reports whether a rule's target selects importPath, mirroring
+// setup-phase package selection: a glob target matches via MatchGlobTarget, an
+// exact target matches only on equality. A missing, non-string, or empty target
+// never matches, so an invalid fixture fails the golden test instead of silently
+// being applied.
+func targetMatches(props map[string]any, importPath string) bool {
+	target, ok := props["target"].(string)
+	if !ok || strings.TrimSpace(target) == "" {
+		return false
+	}
+	if rule.IsGlobTarget(target) {
+		return rule.MatchGlobTarget(target, importPath)
+	}
+	return target == importPath
+}
+
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
+	// Before writing we want to ensure r.ResolvedPath is set
+	// otherwise ip.instrument() would not know where to look for files.
+	for _, r := range ruleSet.AllFuncRules() {
+		if r.Path != "" {
+			r.ResolvedPath = r.Path
+		}
+	}
+
+	for _, r := range ruleSet.FileRules {
+		if r.Path != "" {
+			r.ResolvedPath = r.Path
+		}
+	}
+
+	for _, r := range ruleSet.AllCallRules() {
+		if r.Path != "" {
+			r.ResolvedPath = r.Path
+		}
+	}
+
 	matchedJSON, _ := json.Marshal([]*rule.InstRuleSet{ruleSet})
 	matchedFile := util.GetMatchedRuleFile()
 	os.MkdirAll(filepath.Dir(matchedFile), 0o755)
 	util.WriteFile(matchedFile, string(matchedJSON))
 }
 
-func compileArgs(tempDir, sourceFile string) []string {
+func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceFiles ...string) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
 
 	// Create importcfg file for the test
 	importCfgPath := filepath.Join(tempDir, "importcfg")
-	createImportCfg(importCfgPath)
+	createImportCfg(importCfgPath, helpers)
 
-	return []string{
+	args := make([]string, 0, 11+len(sourceFiles))
+	args = append(args,
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
-		"-p", mainPackage,
+		"-p", importPath,
 		"-complete",
 		"-buildid", buildID,
 		"-importcfg", importCfgPath,
 		"-pack",
-		sourceFile,
-	}
+	)
+	return append(args, sourceFiles...)
 }
 
-// createImportCfg creates a basic importcfg file with standard library packages.
-func createImportCfg(path string) {
+// createImportCfg creates an importcfg file with standard library packages
+// and any additional helper packages built for the testcase.
+func createImportCfg(path string, helpers []helperPkg) {
 	// Get standard library package locations
 	// We'll use go list to populate common packages
 	ctx := context.Background()
@@ -207,6 +441,11 @@ func createImportCfg(path string) {
 		}
 	}
 
+	// Register testcase-local helper packages
+	for _, h := range helpers {
+		cfg.PackageFile[h.importPath] = h.archive
+	}
+
 	// Write the importcfg file
 	f, err := os.Create(path)
 	if err != nil {
@@ -219,6 +458,41 @@ func createImportCfg(path string) {
 	}
 }
 
+// buildTestcaseHelpers discovers Go helper packages under <testcaseDir>/helpers/,
+// compiles each one via "go list -export -json" and returns the resulting
+// (importPath, archivePath) pairs so they can be added to the importcfg.
+func buildTestcaseHelpers(ctx context.Context, t *testing.T, testcaseDir string) []helperPkg {
+	helpersDir := filepath.Join(testcaseDir, "helpers")
+	entries, readErr := os.ReadDir(helpersDir)
+	if os.IsNotExist(readErr) {
+		return nil
+	}
+	require.NoError(t, readErr, "reading helpers dir %s", helpersDir)
+
+	var out []helperPkg
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pkgPath := "./" + filepath.ToSlash(filepath.Join(helpersDir, e.Name()))
+
+		var stderr bytes.Buffer
+		cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkgPath)
+		cmd.Stderr = &stderr
+		listOut, listErr := cmd.Output()
+		require.NoError(t, listErr, "go list -export -json %s: %s", pkgPath, stderr.String())
+
+		var info struct {
+			ImportPath string `json:"ImportPath"`
+			Export     string `json:"Export"`
+		}
+		require.NoError(t, json.Unmarshal(listOut, &info))
+
+		out = append(out, helperPkg{importPath: info.ImportPath, archive: info.Export})
+	}
+	return out
+}
+
 func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 	entries, _ := os.ReadDir(filepath.Join(testdataDir, goldenDir, testName))
 	for _, entry := range entries {
@@ -229,6 +503,22 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		actual, _ := os.ReadFile(filepath.Join(tempDir, actualFile))
 		golden.Assert(t, string(actual), filepath.Join(goldenDir, testName, entry.Name()))
 	}
+}
+
+// testImportPath returns the compile-time import path for a fixture. A fixture
+// overrides the default "main" by placing a single-line "importpath" file in its
+// golden directory, letting glob fixtures exercise realistic deep import paths
+// (e.g. "example.com/acme/svc/users" matched by target "example.com/acme/**")
+// instead of the trivial single-segment "main".
+func testImportPath(t *testing.T, testName string) string {
+	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, testName, importPathFileName))
+	if os.IsNotExist(err) {
+		return mainPackage
+	}
+	require.NoError(t, err)
+	p := strings.TrimSpace(string(data))
+	require.NotEmpty(t, p, "importpath file for %q must not be empty", testName)
+	return p
 }
 
 func actualFileFromGolden(t *testing.T, goldenName string) string {

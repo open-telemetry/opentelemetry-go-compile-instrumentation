@@ -1,0 +1,10 @@
+kafka_reader_readmessage:
+  target: github.com/segmentio/kafka-go
+  where:
+    func: ReadMessage
+    recv: "*Reader"
+  do:
+    - inject_hooks:
+        before: BeforeReadMessage
+        after: AfterReadMessage
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/consumer"

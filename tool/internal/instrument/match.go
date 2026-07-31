@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // load loads the matched rules from the build temp directory.
@@ -17,6 +17,11 @@ import (
 func (ip *InstrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	f := util.GetMatchedRuleFile()
 	content, err := os.ReadFile(f)
+	if os.IsNotExist(err) {
+		return nil, ex.Newf("no instrumentation configuration found (%s does not exist); "+
+			"run `otelc setup` in the module directory before building with `-toolexec`, "+
+			"or build with `otelc go build` instead", f)
+	}
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read file %s", f)
 	}

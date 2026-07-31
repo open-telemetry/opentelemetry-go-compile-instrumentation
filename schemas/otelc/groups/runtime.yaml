@@ -1,0 +1,27 @@
+# -----------------------------------------------------------------------------
+# Go `runtime` instrumentation emission contract: no telemetry.
+#
+# Source of truth for this file:
+#   instrumentation/runtime/otelc.yaml       (rules)
+#   instrumentation/runtime/runtime_gls.go   (GLS accessors)
+#
+# This instrumentation modifies the Go runtime itself. It adds two fields to
+# the `g` struct (`otel_trace_context`, `otel_baggage_container`), injects the
+# accessors that read and write them, and hooks `newproc1` so a new goroutine
+# inherits its parent's context. That is the goroutine-local storage the
+# `go.opentelemetry.io/otel/sdk/trace` and `go.opentelemetry.io/otel/trace`
+# instrumentations build on (see `groups/otel-sdk.yaml`).
+#
+# It creates no spans, records no metrics, emits no log records, and adds no
+# attributes --- it only makes context propagation across goroutines possible,
+# so the telemetry declared by the *other* group files is correctly parented.
+# Note that the Go runtime metrics (`go.*`) are emitted by the
+# `go.opentelemetry.io/otel/init` instrumentation, not by this one; they are
+# declared in `groups/otel-sdk.yaml`.
+#
+# This file exists so the registry covers every instrumentation in the project
+# (ADR 0006), including the ones whose contract is "emits nothing".
+#
+# See `schemas/otelc/README.md` for the full instrumentation coverage table.
+# -----------------------------------------------------------------------------
+groups: []

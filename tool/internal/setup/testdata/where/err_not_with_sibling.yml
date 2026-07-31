@@ -1,0 +1,3 @@
+not:
+  has_struct: MockConn
+has_func: Connect

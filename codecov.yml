@@ -1,0 +1,34 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Codecov configuration.
+# https://docs.codecov.com/docs/codecov-yaml
+
+# Exclude test helpers from coverage.
+ignore:
+  - "pkg/hook/hooktest"
+
+coverage:
+  status:
+    project:
+      # tool/ module tree
+      tool:
+        flags:
+          - tool
+        # The tool unit flag covers only unit tests. The build-orchestration
+        # code (Setup/BuildWithToolexec/runGoBuild/Pin/findDeps) is exercised
+        # by the integration suite, which uploads under a different flag, so
+        # the unit flag structurally cannot reach 70%. Target the level that
+        # unit tests can realistically sustain; a 1% threshold absorbs the
+        # small drift from merges into main.
+        target: 68%
+        threshold: 1%
+        # informational: false (enforcing). A drop below target blocks the PR.
+        informational: false
+      # pkg/ module tree
+      pkg:
+        flags:
+          - pkg
+        target: 70%
+        # informational: false (enforcing). A drop below target blocks the PR.
+        informational: false

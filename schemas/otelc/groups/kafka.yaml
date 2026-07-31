@@ -1,0 +1,50 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # segmentio/kafka-go instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/segmentio/kafka-go/producer/producer_hook.go
+  #   instrumentation/github.com/segmentio/kafka-go/consumer/consumer_hook.go
+  #   instrumentation/github.com/segmentio/kafka-go/semconv/client.go
+  #
+  # The kafka-go instrumentation is trace-only: it creates one producer span
+  # per sent message and one consumer span per read message, and records no
+  # metrics. Every attribute is standard upstream OpenTelemetry messaging
+  # telemetry, referenced with `ref:`. `messaging.system` is always `kafka`.
+  # Consumer-only attributes (`messaging.consumer.group.name`,
+  # `messaging.destination.partition.id`, `messaging.kafka.offset`) are not set
+  # on producer spans.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.messaging.kafka.producer
+    type: span
+    span_kind: producer
+    stability: development
+    brief: Kafka producer span, one per sent message.
+    attributes:
+      - ref: messaging.system
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: messaging.destination.name
+      - ref: messaging.kafka.message.key
+      - ref: messaging.message.body.size
+      - ref: server.address
+      - ref: server.port
+
+  - id: span.otelc.messaging.kafka.consumer
+    type: span
+    span_kind: consumer
+    stability: development
+    brief: Kafka consumer span, one per read message.
+    attributes:
+      - ref: messaging.system
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: messaging.destination.name
+      - ref: messaging.consumer.group.name
+      - ref: messaging.kafka.message.key
+      - ref: messaging.message.body.size
+      - ref: messaging.destination.partition.id
+      - ref: messaging.kafka.offset
+      - ref: server.address
+      - ref: server.port

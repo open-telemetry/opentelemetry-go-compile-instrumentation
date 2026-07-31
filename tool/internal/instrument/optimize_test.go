@@ -9,10 +9,10 @@ import (
 
 	"github.com/dave/dst"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 // Helper function to parse Go source code into a function declaration
@@ -384,6 +384,31 @@ func TestRemoveBeforeTrampolineCall(t *testing.T) {
 
 	// Verify body contains empty statement
 	assert.Len(t, tjump.ifStmt.Body.List, 1)
+}
+
+func TestRemoveAfterTrampolineDecl(t *testing.T) {
+	funcSrc := `package main
+	func testFunc(param1 string) {}`
+
+	targetFunc := parseFunc(t, funcSrc)
+	tjump := &TJump{
+		target: targetFunc,
+		rule: &rule.InstFuncRule{
+			Func:   targetFunc.Name.Name,
+			Before: "beforeHook",
+		},
+	}
+	afterFuncName := makeName(tjump.rule, tjump.target, false)
+	fileSrc := fmt.Sprintf(`package main
+	func testFunc(param1 string) {}
+	func %s() {}`, afterFuncName)
+	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
+	require.NoError(t, err)
+	require.NotNil(t, ast.FindFuncDeclWithoutRecv(targetFile, afterFuncName))
+
+	err = removeAfterTrampolineDecl(targetFile, tjump)
+	require.NoError(t, err)
+	assert.Nil(t, ast.FindFuncDeclWithoutRecv(targetFile, afterFuncName))
 }
 
 func TestFlattenTJump(t *testing.T) {

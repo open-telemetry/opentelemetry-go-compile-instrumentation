@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
+	"go.opentelemetry.io/otelc/tool/ex"
 )
 
 func runCmd(ctx context.Context, dir string, env []string, args ...string) error {
@@ -63,30 +63,53 @@ func IsUnix() bool {
 }
 
 func CopyFile(src, dst string) error {
-	_, err := os.Stat(filepath.Dir(dst))
-	if os.IsNotExist(err) {
-		err = os.MkdirAll(filepath.Dir(dst), 0o755)
-		if err != nil {
-			return ex.Wrap(err)
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return ex.Wrapf(err, "failed to stat source file %q", src)
+	}
+
+	dstInfo, err := os.Stat(dst)
+	if err == nil {
+		// Avoid self-copy which would otherwise truncate the file.
+		if os.SameFile(srcInfo, dstInfo) {
+			return nil
 		}
+	} else if !os.IsNotExist(err) {
+		return ex.Wrapf(err, "failed to stat destination file %q", dst)
+	}
+
+	err = os.MkdirAll(filepath.Dir(dst), 0o755)
+	if err != nil {
+		return ex.Wrapf(err, "failed to create directory for file %q", dst)
 	}
 
 	srcFile, err := os.Open(src)
 	if err != nil {
-		return ex.Wrap(err)
+		return ex.Wrapf(err, "failed to open source file %q", src)
 	}
 	defer srcFile.Close()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
-		return ex.Wrap(err)
+		return ex.Wrapf(err, "failed to create destination file %q", dst)
 	}
-	defer dstFile.Close()
 
 	_, err = io.Copy(dstFile, srcFile)
 	if err != nil {
-		return ex.Wrap(err)
+		_ = dstFile.Close()
+		return ex.Wrapf(err, "failed to copy file from %q to %q", src, dst)
 	}
+
+	err = dstFile.Close()
+	if err != nil {
+		return ex.Wrapf(err, "failed to close destination file %q", dst)
+	}
+
+	err = os.Chmod(dst, srcInfo.Mode().Perm())
+	if err != nil {
+		return ex.Wrapf(err, "failed to change permissions for file %q", dst)
+	}
+
 	return nil
 }
 
@@ -102,8 +125,12 @@ func ListFiles(dir string) ([]string, error) {
 			return ex.Wrap(err)
 		}
 		// Don't list files under hidden directories
-		if strings.HasPrefix(info.Name(), ".") {
-			return filepath.SkipDir
+		if path != dir && strings.HasPrefix(info.Name(), ".") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+
+			return nil
 		}
 		if !info.IsDir() {
 			files = append(files, path)
@@ -133,6 +160,52 @@ func WriteFile(filePath, content string) error {
 	if err != nil {
 		return ex.Wrap(err)
 	}
+	return nil
+}
+
+// WriteFileAtomic writes data to a file atomically by first writing to a temporary file and then renaming it.
+// Permission precedence: explicit perm argument > existing file's permissions > default 0644.
+func WriteFileAtomic(filePath string, data []byte, perm ...os.FileMode) error {
+	const defaultPerm = 0o644
+	mode := os.FileMode(defaultPerm)
+	if fi, statErr := os.Stat(filePath); statErr == nil {
+		mode = fi.Mode().Perm()
+	}
+	if len(perm) > 0 {
+		mode = perm[0]
+	}
+
+	tmp, createErr := os.CreateTemp(filepath.Dir(filePath), filepath.Base(filePath)+".tmp-*")
+	if createErr != nil {
+		return ex.Wrapf(createErr, "failed to create temporary file for %s", filePath)
+	}
+
+	tmpPath := tmp.Name()
+	defer func() {
+		// If Rename succeeds this will fail with ENOENT, which is fine.
+		_ = os.Remove(tmpPath)
+	}()
+
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		_ = tmp.Close()
+		return ex.Wrapf(writeErr, "failed to write temporary file %s", tmpPath)
+	}
+
+	if closeErr := tmp.Close(); closeErr != nil {
+		return ex.Wrapf(closeErr, "failed to close temporary file %s", tmpPath)
+	}
+
+	if chmodErr := os.Chmod(tmpPath, mode); chmodErr != nil {
+		return ex.Wrapf(chmodErr, "failed to set permissions on temporary file %s", tmpPath)
+	}
+
+	// Atomic replacement on Unix-like systems when source and destination are on
+	// the same filesystem. On non-Unix platforms, os.Rename may replace the file
+	// but the operation is not guaranteed to be atomic.
+	if renameErr := os.Rename(tmpPath, filePath); renameErr != nil {
+		return ex.Wrapf(renameErr, "failed to atomically replace %s", filePath)
+	}
+
 	return nil
 }
 

@@ -12,7 +12,7 @@ between scheduled releases when a critical bug or security issue is found.
 ## Release Shepherd
 
 Each release is owned by a **release shepherd** — one of the project
-[maintainers](CONTRIBUTING.md#maintainers). The shepherd is responsible for
+[maintainers](README.md#maintainers). The shepherd is responsible for
 driving the release end-to-end: tagging, monitoring the workflow, and
 publishing the final release notes.
 
@@ -62,19 +62,19 @@ and watch the `Build and Release` job. It runs the following steps:
 3. Runs `make build-all` — cross-compiles `otelc` for all supported platforms
 4. Creates a GitHub release and uploads the binaries
 
-### 3. Review and publish the release
+### 3. Review and polish the release
 
-The workflow publishes the GitHub release automatically using
+The workflow publishes the GitHub release live immediately using
 `softprops/action-gh-release` with auto-generated release notes. After the
 workflow completes:
 
 1. Open the [Releases page](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/releases)
 2. Review the auto-generated release notes (derived from PR titles since the
    previous tag).
-3. Edit the notes to add context, highlight breaking changes, or group entries
-   as needed.
-4. Publish the release if it was created as a draft, or confirm it looks
-   correct if already published.
+3. Edit the notes in place to add context, highlight breaking changes, or
+   group entries as needed — the release is already public at this point.
+4. Confirm the release page lists all 5 platform binaries as downloadable
+   assets.
 
 ## Cross-Compilation Targets
 

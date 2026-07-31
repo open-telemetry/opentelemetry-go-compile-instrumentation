@@ -1,5 +1,7 @@
 add_raw_code:
   target: main
-  func: Func1
-  raw: "_ = 123"
-
+  where:
+    func: Func1
+  do:
+    - inject_code:
+        raw: "_ = 123"
