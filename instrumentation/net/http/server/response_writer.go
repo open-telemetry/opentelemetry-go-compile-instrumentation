@@ -10,6 +10,15 @@ import (
 	"net/http"
 )
 
+// Compile-time assertions that writerWrapper satisfies the optional interfaces
+// an http.ResponseWriter may implement.
+var (
+	_ http.ResponseWriter = (*writerWrapper)(nil)
+	_ http.Hijacker       = (*writerWrapper)(nil)
+	_ http.Flusher        = (*writerWrapper)(nil)
+	_ http.Pusher         = (*writerWrapper)(nil)
+)
+
 // writerWrapper wraps http.ResponseWriter to capture the status code
 type writerWrapper struct {
 	http.ResponseWriter
@@ -52,10 +61,17 @@ func (w *writerWrapper) Flush() {
 	}
 }
 
-// Pusher implements the http.Pusher interface
-func (w *writerWrapper) Pusher() http.Pusher {
+// Push implements the http.Pusher interface, forwarding to the underlying
+// ResponseWriter when it supports HTTP/2 server push and returning
+// http.ErrNotSupported otherwise.
+func (w *writerWrapper) Push(target string, opts *http.PushOptions) error {
 	if pusher, ok := w.ResponseWriter.(http.Pusher); ok {
-		return pusher
+		return pusher.Push(target, opts)
 	}
-	return nil
+	return http.ErrNotSupported
+}
+
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (w *writerWrapper) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
