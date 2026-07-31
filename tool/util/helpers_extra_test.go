@@ -99,22 +99,6 @@ func TestNormalizePath(t *testing.T) {
 	assert.Equal(t, ".", NormalizePath(""))
 }
 
-func TestWriteFile(t *testing.T) {
-	t.Run("writes content", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "out.txt")
-		require.NoError(t, WriteFile(path, "hello world"))
-		data, err := os.ReadFile(path)
-		require.NoError(t, err)
-		assert.Equal(t, "hello world", string(data))
-	})
-
-	t.Run("errors on unwritable path", func(t *testing.T) {
-		// A path whose parent directory does not exist cannot be created.
-		bad := filepath.Join(t.TempDir(), "no-such-dir", "out.txt")
-		require.Error(t, WriteFile(bad, "x"))
-	})
-}
-
 func TestAssertPasses(t *testing.T) {
 	// A satisfied assertion must not exit the process.
 	assert.NotPanics(t, func() {

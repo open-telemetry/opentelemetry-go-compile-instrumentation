@@ -446,25 +446,6 @@ func TestCopyFileSameFile(t *testing.T) {
 	}
 }
 
-func TestWriteFile(t *testing.T) {
-	t.Run("successful write", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "test.txt")
-		content := "hello world"
-		err := WriteFile(path, content)
-		require.NoError(t, err)
-
-		got, readErr := os.ReadFile(path)
-		require.NoError(t, readErr)
-		require.Equal(t, content, string(got))
-	})
-
-	t.Run("create error", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "nonexistent", "test.txt")
-		err := WriteFile(path, "content")
-		require.Error(t, err)
-	})
-}
-
 func TestWriteFileAtomic(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
