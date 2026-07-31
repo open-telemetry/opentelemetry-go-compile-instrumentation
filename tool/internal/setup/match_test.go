@@ -529,6 +529,25 @@ func TestMultipleRuleFiles(t *testing.T) {
 	require.Equal(t, "h1", rules[0].GetName())
 }
 
+func TestLoadRules_InvalidVersionRange(t *testing.T) {
+	content := `broken:
+  target: main
+  version: "v1.0.0,"
+  func: Example
+  raw: "_ = 1"`
+
+	p := writeCustomRules(t, "broken.yaml", content)
+	t.Setenv(util.EnvOtelcRules, "")
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = p
+
+	_, err := sp.loadRules(t.Context(), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `rule "broken"`)
+	assert.Contains(t, err.Error(), `version "v1.0.0,"`)
+}
+
 func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	// A single YAML entry whose do: sequence carries multiple modifiers expands
 	// into one rule per modifier, all sharing the entry name. loadCustomRules
