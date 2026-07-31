@@ -61,7 +61,7 @@ func BenchmarkParsePackageName(b *testing.B) {
 	}
 }
 
-func TestWriteFile(t *testing.T) {
+func TestWriteFile_Basic(t *testing.T) {
 	f, err := ParseFile("ast_test.go")
 	require.NoError(t, err)
 
