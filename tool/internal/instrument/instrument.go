@@ -65,6 +65,71 @@ func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 	}
 }
 
+// skipRuleForFileIgnore reports whether r must be skipped because file-level
+// //otelc:ignore is in effect and r does not opt back in via //otelc:instrument.
+func (ip *InstrumentPhase) skipRuleForFileIgnore(root *dst.File, r rule.InstRule) (bool, error) {
+	fr, isFuncRule := r.(*rule.InstFuncRule)
+	if !isFuncRule {
+		ip.Debug("Skip non-func rule due to file-level //otelc:ignore", "rule", r.GetName())
+		return true, nil
+	}
+	funcDecl, ok, err := ast.FindFuncDecl(root, fr)
+	if err != nil {
+		return false, ex.Wrapf(err, "finding function %s", fr.Func)
+	}
+	if !ok || !ast.FuncHasDirective(funcDecl, directiveInstrument) {
+		ip.Debug("Skip func rule due to file-level //otelc:ignore", "func", fr.Func, "rule", r.GetName())
+		return true, nil
+	}
+	return false, nil
+}
+
+// instrumentFile applies rules to a single file and reports whether any of
+// them is a function rule (i.e. whether a globals file is needed).
+func (ip *InstrumentPhase) instrumentFile(ctx context.Context, file string, rules []rule.InstRule) (bool, error) {
+	// Group rules by file, then parse the target file once
+	root, err := ip.parseFile(file)
+	if err != nil {
+		return false, ex.Wrapf(err, "parsing file %s", file)
+	}
+
+	fileIgnored := ast.FileLeadHasDirective(root, directiveIgnore)
+	if fileIgnored {
+		ip.Debug("File-level //otelc:ignore found, only //otelc:instrument functions will be instrumented",
+			"file", file)
+	}
+
+	hasFuncRule := false
+	// Apply the rules to the target file
+	for _, r := range rules {
+		if fileIgnored {
+			skip, err1 := ip.skipRuleForFileIgnore(root, r)
+			if err1 != nil {
+				return false, err1
+			}
+			if skip {
+				continue
+			}
+		}
+		funcRule, err1 := ip.applyOneRule(ctx, r, root)
+		if err1 != nil {
+			return false, ex.Wrapf(err1, "applying rule %s", r.GetName())
+		}
+		hasFuncRule = hasFuncRule || funcRule
+	}
+	// Since trampoline-jump-if is performance-critical, perform AST level
+	// optimization for them before writing to file
+	if err = ip.optimizeTJumps(); err != nil {
+		return false, ex.Wrapf(err, "optimizing trampoline jumps for %s", file)
+	}
+	// Once all func rules targeting this file are applied, write instrumented
+	// AST to new file and replace the original file in the compile command
+	if err = ip.writeInstrumented(root, file); err != nil {
+		return false, ex.Wrapf(err, "writing instrumented file %s", file)
+	}
+	return hasFuncRule, nil
+}
+
 func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
@@ -76,50 +141,11 @@ func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		}
 	}
 	for file, rules := range groupRules(ip.workDir, rset) {
-		// Group rules by file, then parse the target file once
-		root, err := ip.parseFile(file)
+		fileHasFuncRule, err := ip.instrumentFile(ctx, file, rules)
 		if err != nil {
-			return ex.Wrapf(err, "parsing file %s", file)
+			return err
 		}
-
-		fileIgnored := ast.FileLeadHasDirective(root, directiveIgnore)
-		if fileIgnored {
-			ip.Debug("File-level //otelc:ignore found, only //otelc:instrument functions will be instrumented", "file", file)
-		}
-
-		// Apply the rules to the target file
-		for _, r := range rules {
-			if fileIgnored {
-				fr, isFuncRule := r.(*rule.InstFuncRule)
-				if !isFuncRule {
-					ip.Debug("Skip non-func rule due to file-level //otelc:ignore", "rule", r.GetName())
-					continue
-				}
-				funcDecl, ok, err1 := ast.FindFuncDecl(root, fr)
-				if err1 != nil {
-					return ex.Wrapf(err1, "finding function %s", fr.Func)
-				}
-				if !ok || !ast.FuncHasDirective(funcDecl, directiveInstrument) {
-					ip.Debug("Skip func rule due to file-level //otelc:ignore", "func", fr.Func, "rule", r.GetName())
-					continue
-				}
-			}
-			funcRule, err1 := ip.applyOneRule(ctx, r, root)
-			if err1 != nil {
-				return ex.Wrapf(err1, "applying rule %s", r.GetName())
-			}
-			hasFuncRule = hasFuncRule || funcRule
-		}
-		// Since trampoline-jump-if is performance-critical, perform AST level
-		// optimization for them before writing to file
-		if err = ip.optimizeTJumps(); err != nil {
-			return ex.Wrapf(err, "optimizing trampoline jumps for %s", file)
-		}
-		// Once all func rules targeting this file are applied, write instrumented
-		// AST to new file and replace the original file in the compile command
-		if err = ip.writeInstrumented(root, file); err != nil {
-			return ex.Wrapf(err, "writing instrumented file %s", file)
-		}
+		hasFuncRule = hasFuncRule || fileHasFuncRule
 	}
 
 	// Write globals file if any function is instrumented because injected code
