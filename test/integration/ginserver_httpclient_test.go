@@ -39,7 +39,7 @@ func TestGinServerHTTPClient(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Wait for the spans from the frontend, client, and backend to be flushed
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(3)
 
 	// We expect exactly 1 trace with 3 spans:
 	// 1. Gin server (Frontend)
