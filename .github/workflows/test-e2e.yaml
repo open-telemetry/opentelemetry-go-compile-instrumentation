@@ -46,8 +46,6 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make test-e2e/coverage
-        env:
-          OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache
       - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
 
   test-e2e:
@@ -76,7 +74,7 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # ratchet:arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore otelc Go cache
+      - name: Cache otelc Go cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: test/.otelc-gocache
