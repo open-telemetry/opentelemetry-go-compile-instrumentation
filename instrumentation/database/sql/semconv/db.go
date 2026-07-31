@@ -46,7 +46,7 @@ func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {
 		attrs = append(attrs, semconv.DBSystemNameMySQL)
 	case "postgres", "postgresql", "pgx", "lib/pq":
 		attrs = append(attrs, semconv.DBSystemNamePostgreSQL)
-	case "sqlite3":
+	case "sqlite3", "sqlite":
 		attrs = append(attrs, semconv.DBSystemNameSQLite)
 	case "clickhouse":
 		attrs = append(attrs, semconv.DBSystemNameClickHouse)

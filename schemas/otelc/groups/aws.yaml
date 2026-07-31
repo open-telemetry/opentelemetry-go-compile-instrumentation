@@ -1,0 +1,77 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # aws-sdk-go-v2 instrumentation emission contract.
+  #
+  # Source of truth for this file (otelaws v0.69.0, the version pinned in
+  # instrumentation/github.com/aws/aws-sdk-go-v2/go.mod):
+  #   instrumentation/github.com/aws/aws-sdk-go-v2/config_hook.go  (hook)
+  #   go.opentelemetry.io/contrib/.../otelaws@v0.69.0/aws.go                (span + attrs)
+  #   go.opentelemetry.io/contrib/.../otelaws@v0.69.0/attributes.go         (attribute keys)
+  #   go.opentelemetry.io/contrib/.../otelaws@v0.69.0/dynamodbattributes.go (DynamoDB attrs)
+  #
+  # The hook wraps config.LoadDefaultConfig and appends the otelaws middlewares
+  # to aws.Config.APIOptions, so every service client built from that config is
+  # traced. otelaws v0.69.0 is trace-only: it creates one client span per AWS
+  # API call (span name "<Service>.<Operation>") and records NO metrics.
+  #
+  # otelaws v0.69.0 uses upstream semconv v1.41.0, newer than this project's
+  # pinned version (see .semconv-version). Two attributes it emits are therefore
+  # not present in the pinned upstream registry and are declared locally with
+  # `id:` below: `rpc.system.name` (the merged form of the older `rpc.system`)
+  # and `aws.region`. Everything else references upstream via `ref:`.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.aws
+    type: attribute_group
+    display_name: otelc AWS attributes
+    brief: >
+      AWS attributes emitted by the aws-sdk-go-v2 instrumentation that are not covered by the pinned upstream OpenTelemetry
+      semantic conventions.
+    attributes:
+      - id: rpc.system.name
+        type: string
+        stability: development
+        brief: >
+          Identifies the RPC system as the AWS API. This is the merged form of the older upstream `rpc.system` attribute,
+          emitted by the newer semconv that otelaws tracks.
+        examples: [aws-api]
+      - id: aws.region
+        type: string
+        stability: development
+        brief: The AWS region the client used to serve the request.
+        examples: [us-east-1]
+
+  - id: span.otelc.aws.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: AWS SDK for Go v2 client span, one per AWS API call (span name "<Service>.<Operation>").
+    attributes:
+      # Emitted for every AWS service.
+      - ref: rpc.system.name
+      - ref: rpc.method
+      - ref: aws.region
+      - ref: http.response.status_code
+      - ref: aws.request_id
+      - ref: error.type
+      # DynamoDB-specific attributes (the only service with a dedicated
+      # attribute builder). `db.system.name` is set on every DynamoDB call; the
+      # `aws.dynamodb.*` attributes are listed as the union any DynamoDB
+      # operation may carry, each set only for the operations that supply it.
+      - ref: db.system.name
+      - ref: aws.dynamodb.table_names
+      - ref: aws.dynamodb.attribute_definitions
+      - ref: aws.dynamodb.consistent_read
+      - ref: aws.dynamodb.exclusive_start_table
+      - ref: aws.dynamodb.global_secondary_indexes
+      - ref: aws.dynamodb.global_secondary_index_updates
+      - ref: aws.dynamodb.index_name
+      - ref: aws.dynamodb.limit
+      - ref: aws.dynamodb.local_secondary_indexes
+      - ref: aws.dynamodb.projection
+      - ref: aws.dynamodb.provisioned_read_capacity
+      - ref: aws.dynamodb.provisioned_write_capacity
+      - ref: aws.dynamodb.scan_forward
+      - ref: aws.dynamodb.segment
+      - ref: aws.dynamodb.select
+      - ref: aws.dynamodb.total_segments
