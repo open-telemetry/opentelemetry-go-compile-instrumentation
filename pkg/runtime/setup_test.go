@@ -39,6 +39,14 @@ func TestLogLevel(t *testing.T) {
 		{"error", slog.LevelError},
 		{"", slog.LevelInfo},        // unset defaults to info
 		{"unknown", slog.LevelInfo}, // unrecognized value defaults to info
+		// Values are normalized per the OTel SDK env-var spec: case-insensitive
+		// and trimmed of surrounding whitespace.
+		{"DEBUG", slog.LevelDebug},
+		{"Info", slog.LevelInfo},
+		{"WARN", slog.LevelWarn},
+		{"eRrOr", slog.LevelError},
+		{" debug ", slog.LevelDebug},
+		{"  WARN  ", slog.LevelWarn},
 	}
 
 	for _, tt := range tests {
