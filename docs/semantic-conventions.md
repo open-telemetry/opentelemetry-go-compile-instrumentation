@@ -83,7 +83,7 @@ Validating the local registry (`make lint-schema`) requires:
 - **Docker** (or Podman — set `OCI_BIN=podman`). Weaver runs from the `otel/weaver` OCI image, so no host install is needed. Override the image/version with `WEAVER_IMAGE=otel/weaver:vX.Y.Z`.
 - **`jq`** — used to filter weaver's diagnostics. Install via `brew install jq` / `apt-get install jq`.
 
-The upstream-tracking targets (`make semantic-conventions/diff`, `make semantic-conventions/resolve`) instead use a locally installed weaver binary:
+The upstream-tracking targets (`make semantic-conventions/diff`, `make semantic-conventions/resolve`, plus the `make registry-diff` and `make registry-resolve` aliases) instead use a locally installed weaver binary:
 
 ```bash
 make weaver-install
@@ -118,6 +118,8 @@ Compare the current version against the latest to see available updates:
 ```bash
 make registry-diff
 ```
+
+(`make semantic-conventions/diff` runs the same command.)
 
 This command automatically:
 

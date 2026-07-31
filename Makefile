@@ -881,3 +881,9 @@ semantic-conventions/resolve:
 	else \
 		echo "⚠️  Unable to check latest version"; \
 	fi
+
+registry-diff: ## Alias for semantic-conventions/diff
+registry-diff: semantic-conventions/diff
+
+registry-resolve: ## Alias for semantic-conventions/resolve
+registry-resolve: semantic-conventions/resolve
