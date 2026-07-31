@@ -40,8 +40,11 @@ jobs:
       - name: Run govulncheck
         run: make govulncheck
 
-  # Instrumentation modules. Split out and kept separate because a vuln reachable
-  # from injected instrumentation code is higher-impact than one in tooling.
+  # Instrumented integration-test binaries. Split out and kept hard-blocking
+  # because a vuln reachable from injected instrumentation is higher-impact
+  # than one in tooling. Uses govulncheck -mode=binary after otelc go build so
+  # //go:build ignore sources and field-injection modules (e.g. database/sql)
+  # are included — source scans of instrumentation/ miss both.
   govulncheck-instrumentation:
     name: govulncheck (instrumentation)
     runs-on: ubuntu-latest
@@ -55,5 +58,5 @@ jobs:
         with:
           go-version: stable
           cache-dependency-path: "**/go.mod"
-      - name: Run govulncheck
+      - name: Build otelc and scan instrumented test apps
         run: make govulncheck-instrumentation

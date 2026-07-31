@@ -29,14 +29,17 @@ TOOLS_DIR = .tools
 GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
 
-# Modules scanned by govulncheck for known Go CVEs (tool version pinned in
+# Modules/apps scanned by govulncheck for known Go CVEs (tool version pinned in
 # .tools/go.mod, Renovate-managed like every other .tools binary).
 # Core modules: root module (covers tool/) plus every pkg/ module.
-# Instrumentation modules are scanned by a separate target/CI job because a vuln
-# reachable from injected instrumentation code is higher-impact than one in tool/.
-# Test apps and demos are intentionally excluded (pinned example deps).
+# Instrumentation is scanned separately via instrumented integration-test binaries
+# (see govulncheck-instrumentation): source scans skip //go:build ignore files and
+# cannot typecheck modules that need compile-time field injection (e.g. database/sql).
+# Demos are intentionally excluded (pinned example deps).
 GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
-GOVULNCHECK_INSTR_MODULES := $(shell find instrumentation -type f -name 'go.mod' -exec dirname {} \; | sort)
+# Top-level integration apps only (skip nested modules such as
+# test/apps/gincustom/instrumentation).
+GOVULNCHECK_TEST_APPS := $(shell find test/apps -mindepth 1 -maxdepth 1 -type d | sort)
 
 # OTel Weaver execution for the local semantic-convention registry under
 # schemas/otelc/. Weaver runs from an OCI image (no host install required);
@@ -437,10 +440,35 @@ govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulner
 	@echo "Running govulncheck across $(words $(GOVULNCHECK_CORE_MODULES)) core modules..."
 	$(call run_govulncheck,$(GOVULNCHECK_CORE_MODULES))
 
+# Build each integration test app with otelc, then scan the resulting binary.
+# Binary mode sees injected instrumentation (including //go:build ignore sources
+# and field-injection modules like database/sql) that source mode cannot analyze.
 .ONESHELL:
-govulncheck-instrumentation: $(GOVULNCHECK) ## Scan instrumentation modules for known Go vulnerabilities
-	@echo "Running govulncheck across $(words $(GOVULNCHECK_INSTR_MODULES)) instrumentation modules..."
-	$(call run_govulncheck,$(GOVULNCHECK_INSTR_MODULES))
+govulncheck-instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps (binary mode) for known Go vulnerabilities
+	@echo "Running govulncheck -mode=binary across $(words $(GOVULNCHECK_TEST_APPS)) instrumented test apps..."
+	@set -uo pipefail
+	@status=0
+	@app_bin=app$(EXT)
+	@cleanup() { \
+		find test/apps -mindepth 2 -maxdepth 2 \( -name "$$app_bin" -o -name '.otelc-build.lock' \) -delete 2>/dev/null || true; \
+		find test/apps -type d -name '.otelc-build' -exec rm -rf {} + 2>/dev/null || true; \
+	}; \
+	trap cleanup EXIT; \
+	for appdir in $(GOVULNCHECK_TEST_APPS); do \
+		app=$$(basename "$$appdir"); \
+		echo "==> otelc go build $$app"; \
+		if ! (cd "$$appdir" && "$(CURDIR)/$(BINARY_NAME)$(EXT)" go build -a -o "$$app_bin" .); then \
+			echo "govulncheck-instrumentation: failed to build $$app"; \
+			status=1; \
+			continue; \
+		fi; \
+		echo "==> govulncheck -mode=binary $$app"; \
+		if ! "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin"; then \
+			status=1; \
+		fi; \
+	done; \
+	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found or build failed"; exit 1; fi; \
+	echo "govulncheck: no reachable vulnerabilities found"
 
 ##@ Benchmarking
 
