@@ -27,13 +27,15 @@ for the `otel.instrumentation.go` mechanism that makes this explicit and source-
 3. **Tool files** (`otel.instrumentation.go` / `otelc.tool.go`) — when the project declares
    instrumentations explicitly. See [External Configuration Sources](external-configuration.md).
 4. **Module-local `.otel.yml` / `.otel.yaml`** — CI/CD-oriented instrumentation selection. The
-   file is translated into a generated `otel.instrumentation.go` through `otelc pin`; if a tool
-   file already exists, it takes precedence and the YAML file is ignored.
+   AutoPin flow temporarily translates the file into `otel.instrumentation.go`. Running
+   `otelc pin` directly validates and optionally prunes the YAML without creating a tool file.
+   If the same module already has a tool file, that file takes precedence.
 5. **Embedded defaults** — the instrumentation bundle built into `otelc`, applied when none of
    the above are present.
 
-Each source entirely replaces those below it. There is no merging: when `--rules` is provided,
-tool files, `.otel.yml`, and the embedded bundle are not consulted.
+`OTELC_RULES` and `--rules` replace all import-driven sources. Tool files and `.otel.yml` are
+selected independently per module, and their resulting rule sets are merged across a
+multi-module workspace.
 
 ### Using `--rules` for development and debugging
 

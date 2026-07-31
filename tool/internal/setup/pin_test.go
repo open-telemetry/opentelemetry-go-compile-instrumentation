@@ -788,7 +788,7 @@ func TestUpdatePinnedProjects_NoInstrumentation(t *testing.T) {
 		nil,
 	)
 
-	_, err := updatePinnedProjects(t.Context(), []string{toolFile}, PinOptions{
+	err := updatePinnedProjects(t.Context(), []string{toolFile}, PinOptions{
 		Prune: true,
 	})
 
@@ -824,7 +824,7 @@ replace example.com/foo => %s
 		"example.com/foo",
 	)
 
-	_, err := updatePinnedProjects(
+	err := updatePinnedProjects(
 		t.Context(),
 		[]string{filepath.Join(root, ToolFileCanonical)},
 		PinOptions{},
@@ -867,7 +867,7 @@ func TestUpdatePinnedProjects_InvalidRule(t *testing.T) {
 		0o644,
 	))
 
-	_, err := updatePinnedProjects(
+	err := updatePinnedProjects(
 		t.Context(),
 		[]string{toolFile},
 		PinOptions{
@@ -943,7 +943,7 @@ func main() {
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
 }
 
-func TestGeneratePinnedProjectsFromOtelYAML(t *testing.T) {
+func TestProcessOtelYAMLFiles_AutoPin(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
@@ -966,10 +966,13 @@ replace example.com/foo => %s
 	writeInstrumentationModule(t, filepath.Join(dir, "foo"), "example.com/foo", true, nil)
 	writeOtelYAMLFile(t, filepath.Join(dir, OtelYAMLCanonical), "example.com/foo")
 
-	result, err := generatePinnedProjectsFromOtelYAML(
+	originalYAML, err := os.ReadFile(filepath.Join(dir, OtelYAMLCanonical))
+	require.NoError(t, err)
+
+	result, err := processOtelYAMLFiles(
 		t.Context(),
 		map[string]string{dir: filepath.Join(dir, OtelYAMLCanonical)},
-		PinOptions{},
+		PinOptions{AutoPin: true},
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -987,6 +990,10 @@ replace example.com/foo => %s
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/tool/cmd/otelc")
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
 	require.Contains(t, string(goMod), "example.com/foo")
+
+	afterYAML, err := os.ReadFile(filepath.Join(dir, OtelYAMLCanonical))
+	require.NoError(t, err)
+	require.YAMLEq(t, string(originalYAML), string(afterYAML))
 }
 
 func TestPinLocked_ToolFilePrecedesOtelYAML(t *testing.T) {
@@ -1023,4 +1030,107 @@ replace example.com/bar => %s
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"example.com/foo"`)
 	require.NotContains(t, string(data), `"example.com/bar"`)
+}
+
+func TestPinLocked_MixedWorkspaceSources(t *testing.T) {
+	tmp := t.TempDir()
+	toolModule := filepath.Join(tmp, "tool-module")
+	yamlModule := filepath.Join(tmp, "yaml-module")
+	foo := filepath.Join(tmp, "foo")
+	bar := filepath.Join(tmp, "bar")
+
+	writeInstrumentationModule(t, foo, "example.com/foo", true, nil)
+	writeInstrumentationModule(t, bar, "example.com/bar", true, nil)
+	writeInstrumentationModule(t, toolModule, "example.com/tool-app", false, map[string]string{
+		"example.com/foo": foo,
+	})
+	writeInstrumentationModule(t, yamlModule, "example.com/yaml-app", false, map[string]string{
+		"example.com/bar": bar,
+	})
+	require.NoError(t, os.Remove(filepath.Join(yamlModule, ToolFileCanonical)))
+	writeOtelYAMLFile(t, filepath.Join(yamlModule, OtelYAMLCanonical), "example.com/bar")
+
+	_, err := pinLocked(t.Context(), PinOptions{
+		ModuleDirs: map[string]bool{toolModule: true, yamlModule: true},
+		AutoPin:    true,
+		Prune:      true,
+	})
+	require.NoError(t, err)
+
+	toolData, err := os.ReadFile(filepath.Join(toolModule, ToolFileCanonical))
+	require.NoError(t, err)
+	require.Contains(t, string(toolData), `"example.com/foo"`)
+
+	yamlToolData, err := os.ReadFile(filepath.Join(yamlModule, ToolFileCanonical))
+	require.NoError(t, err)
+	require.Contains(t, string(yamlToolData), `"example.com/bar"`)
+}
+
+func TestPinLocked_YAMLPruning(t *testing.T) {
+	for _, prune := range []bool{false, true} {
+		t.Run(fmt.Sprintf("prune_%t", prune), func(t *testing.T) {
+			tmp := t.TempDir()
+			app := filepath.Join(tmp, "app")
+			valid := filepath.Join(tmp, "valid")
+			invalid := filepath.Join(tmp, "invalid")
+
+			writeInstrumentationModule(t, valid, "example.com/valid", true, nil)
+			writeInstrumentationModule(t, invalid, "example.com/invalid", false, nil)
+			writeInstrumentationModule(t, app, "example.com/app", false, map[string]string{
+				"example.com/valid":   valid,
+				"example.com/invalid": invalid,
+			})
+			require.NoError(t, os.Remove(filepath.Join(app, ToolFileCanonical)))
+			yamlPath := filepath.Join(app, OtelYAMLCanonical)
+			writeOtelYAMLFile(t, yamlPath, "example.com/valid", "example.com/invalid")
+
+			_, err := pinLocked(t.Context(), PinOptions{
+				ModuleDirs: map[string]bool{app: true},
+				Prune:      prune,
+			})
+			require.NoError(t, err)
+			_, statErr := os.Stat(filepath.Join(app, ToolFileCanonical))
+			require.ErrorIs(t, statErr, os.ErrNotExist)
+
+			data, err := os.ReadFile(yamlPath)
+			require.NoError(t, err)
+			require.Contains(t, string(data), "example.com/valid")
+			if prune {
+				require.NotContains(t, string(data), "example.com/invalid")
+			} else {
+				require.Contains(t, string(data), "example.com/invalid")
+			}
+		})
+	}
+}
+
+func TestAutoPin_RestoresYAMLWorkspace(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	app := filepath.Join(tmp, "app")
+	instrumentation := filepath.Join(tmp, "instrumentation")
+
+	writeInstrumentationModule(t, instrumentation, "example.com/instrumentation", true, nil)
+	writeInstrumentationModule(t, app, "example.com/app", false, map[string]string{
+		"example.com/instrumentation": instrumentation,
+	})
+	require.NoError(t, os.Remove(filepath.Join(app, ToolFileCanonical)))
+	yamlPath := filepath.Join(app, OtelYAMLCanonical)
+	writeOtelYAMLFile(t, yamlPath, "example.com/instrumentation")
+	originalYAML, err := os.ReadFile(yamlPath)
+	require.NoError(t, err)
+
+	stateManager := NewStateManager()
+	ctx := ContextWithStateManager(t.Context(), stateManager)
+	_, err = AutoPin(ctx, map[string]bool{app: true}, subcmdBuild, []string{"."})
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(app, ToolFileCanonical))
+
+	require.NoError(t, stateManager.Revert())
+	_, statErr := os.Stat(filepath.Join(app, ToolFileCanonical))
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+	afterYAML, err := os.ReadFile(yamlPath)
+	require.NoError(t, err)
+	require.YAMLEq(t, string(originalYAML), string(afterYAML))
 }

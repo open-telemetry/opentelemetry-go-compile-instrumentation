@@ -34,9 +34,12 @@ the imports in that file, resolves each one as a Go package, and loads the rule 
 there.
 
 For CI/CD workflows that should not persist a tool file in the repository, `otelc` also accepts
-module-local `.otel.yml` / `.otel.yaml` files with an `instrumentations:` list. `otelc` turns
-that list into a generated `otel.instrumentation.go` and then follows the same resolution
-protocol documented here. If both a tool file and a `.otel.yml` file exist, the tool file wins.
+module-local `.otel.yml` / `.otel.yaml` files with an `instrumentations:` list. During AutoPin,
+`otelc` temporarily turns that list into an `otel.instrumentation.go` and follows the same
+resolution protocol documented here. The generated file and dependency changes are restored
+after the build. Running `otelc pin` directly validates the YAML and, when pruning is enabled,
+removes invalid imports from it without creating a tool file. If both files exist in one module,
+the tool file wins for that module.
 
 This approach mirrors how [DataDog Orchestrion](https://github.com/DataDog/orchestrion)
 manages its instrumentation configuration with `orchestrion.tool.go`, and it realizes the
@@ -103,8 +106,9 @@ For current limitations around committing generated instrumentation files, see
 > file must live in `github.com/example/foo`.
 
 For multi-module Go workspaces built in a single `otelc` invocation, `otelc` discovers tool
-files in every module root that is part of the build. The rule sets from all discovered tool
-files are unioned together.
+files and `.otel.yml` files independently in every module root that is part of the build. A tool
+file takes precedence over YAML only in its own module. The rule sets selected across all modules
+are unioned together.
 
 ## Per-Package Rule Files
 
@@ -163,8 +167,9 @@ files. Packages outside that reachable set are never loaded.
 ## Rule Source Precedence
 
 The full precedence model is documented in [Rule Sources and Precedence](configuration.md#rule-sources-and-precedence).
-In short: `OTELC_RULES` > `--rules` > tool files > `.otel.yml` > embedded defaults. Each source
-entirely replaces those below it; there is no merging.
+In short: `OTELC_RULES` > `--rules` > module-local tool file > module-local `.otel.yml` > embedded
+defaults. Global rule overrides replace import-driven selection; module-local sources are selected
+per module and merged across a workspace.
 
 ## Errors and Diagnostics
 

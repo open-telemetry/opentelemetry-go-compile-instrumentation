@@ -102,20 +102,6 @@ func findOtelYAMLFile(moduleDir string) (string, error) {
 	}
 }
 
-func findOtelYAMLFiles(moduleDirs map[string]bool) (map[string]string, error) {
-	otelYAMLFiles := make(map[string]string, len(moduleDirs))
-	for dir := range moduleDirs {
-		otelYAMLFile, err := findOtelYAMLFile(dir)
-		if err != nil {
-			return nil, err
-		}
-		if otelYAMLFile != "" {
-			otelYAMLFiles[dir] = otelYAMLFile
-		}
-	}
-	return otelYAMLFiles, nil
-}
-
 const packagesLoadTimeout = 30 * time.Second
 
 // resolveInstrumentationConfigs resolves instrumentation configs for the given import paths.
