@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gocql/gocql"
+	"github.com/apache/cassandra-gocql-driver/v2"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	instrumentationName = "go.opentelemetry.io/otelc/instrumentation/github.com/gocql/gocql"
+	instrumentationName = "go.opentelemetry.io/otelc/instrumentation/github.com/apache/cassandra-gocql-driver/v2"
 	instrumentationKey  = "GOCQL"
 )
 
