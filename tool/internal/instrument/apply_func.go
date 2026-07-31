@@ -12,10 +12,10 @@ import (
 
 	"github.com/dave/dst"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
@@ -70,7 +70,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 				// Collect only (for further use)
 				for _, name := range field.Names {
 					if name.Name == ast.IdentIgnore {
-						name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
+						name.Name = fmt.Sprintf("%s%d", ignoredRetValName, idx)
 						idx++
 					}
 					retVals = append(retVals, name.Name)

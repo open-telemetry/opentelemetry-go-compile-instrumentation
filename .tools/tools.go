@@ -4,7 +4,7 @@
 //go:build tools
 // +build tools
 
-package tools // import "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tools"
+package tools // import "go.opentelemetry.io/otelc/tools"
 
 import (
 	_ "github.com/campoy/embedmd/v2"

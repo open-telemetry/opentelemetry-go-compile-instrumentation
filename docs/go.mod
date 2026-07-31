@@ -5,6 +5,6 @@
 // only present to make sure the go toolchain does not bring this directory
 // into the GOCACHE servers, and never accounts for it when computing codebase
 // checksums.
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/_docs
+module go.opentelemetry.io/otelc/_docs
 
 go 1.25.0

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go.opentelemetry.io/otelc/tool/ex"
 	"golang.org/x/mod/semver"
 )
 
@@ -23,8 +24,16 @@ const (
 	// EnvOtelcDebug enables debug-level logging when set to "1".
 	// Set automatically when --debug is used; propagated to child processes.
 	EnvOtelcDebug = "OTELC_DEBUG"
-	BuildTempDir  = ".otelc-build"
-	OtelcRoot     = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
+	// command otelc itself ran (e.g. `go list -export`).
+	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
+	BuildTempDir           = ".otelc-build"
+	BuildLockFile          = BuildTempDir + ".lock"
+	OtelcRoot              = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot           = OtelcRoot + "/pkg"
+	OtelcInstRoot          = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot       = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe           = "otelc"
 )
 
 func GetMatchedRuleFile() string {
@@ -52,6 +61,29 @@ func GetOtelcWorkDir() string {
 		return wd
 	}
 	return wd
+}
+
+// DiscoverWorkDir finds the work directory prepared by `otelc setup` when
+// otelc runs as a bare `-toolexec` (OTELC_WORK_DIR unset because the build
+// was started by `go build`).
+//
+// Needed because the go toolchain runs some tools (asm, cgo) from the package
+// source directory, which may be the read-only module cache.
+func DiscoverWorkDir(dir string) string {
+	dir = filepath.Clean(dir)
+	for {
+		if PathExists(filepath.Join(dir, BuildTempDir)) {
+			return dir
+		}
+		if PathExists(filepath.Join(dir, "go.mod")) {
+			return ""
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
@@ -91,6 +123,41 @@ func EncodeBuildFlags(flags []string) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// ValidateVersionRange validates the supported rule version syntax.
+//
+// Supported forms:
+//   - "" (empty string): match all versions
+//   - "v1.2.3": minimal supported version (>= v1.2.3)
+//   - "v1.2.3,v2.0.0": half-open range [v1.2.3, v2.0.0)
+func ValidateVersionRange(versionRange string) error {
+	if versionRange == "" {
+		return nil
+	}
+
+	if strings.Count(versionRange, ",") > 1 {
+		return ex.Newf("version %q must contain at most one comma", versionRange)
+	}
+
+	if startInclusive, endExclusive, ok := strings.Cut(versionRange, ","); ok {
+		if strings.TrimSpace(startInclusive) == "" || strings.TrimSpace(endExclusive) == "" {
+			return ex.Newf("version %q must use non-empty start and end bounds", versionRange)
+		}
+		if !semver.IsValid(startInclusive) || !semver.IsValid(endExclusive) {
+			return ex.Newf("version %q must use valid semantic versions", versionRange)
+		}
+		if semver.Compare(startInclusive, endExclusive) >= 0 {
+			return ex.Newf("version %q must have a lower bound below the upper bound", versionRange)
+		}
+		return nil
+	}
+
+	if !semver.IsValid(versionRange) {
+		return ex.Newf("version %q must be a valid semantic version", versionRange)
+	}
+
+	return nil
 }
 
 // VersionInRange checks if a given version is within a specified version range.

@@ -13,16 +13,17 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/k3s"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestK8SClient(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("k3s not supported on windows")
 	}
+	testcontainers.SkipIfProviderIsNotHealthy(t)
 
-	// Enable parallelization
 	t.Parallel()
+	testutil.Build(t, "", "k8sclient", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
 	StartK3sCluster(t, f)

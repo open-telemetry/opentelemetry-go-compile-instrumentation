@@ -15,11 +15,12 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestGinServer(t *testing.T) {
 	t.Parallel()
+	testutil.Build(t, "", "ginserver", "go", "build", "-a")
 
 	testCases := []struct {
 		name       string
@@ -102,7 +103,7 @@ func TestGinServer(t *testing.T) {
 			require.NoError(t, resp.Body.Close())
 			require.Equal(t, tc.wantStatus, resp.StatusCode)
 
-			testutil.WaitForSpanFlush(t)
+			f.WaitForSpans(1)
 
 			f.RequireTraceCount(1)
 			f.RequireSpansPerTrace(1)

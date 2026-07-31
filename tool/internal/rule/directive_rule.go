@@ -6,8 +6,8 @@ package rule
 import (
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/valyala/fasttemplate"
+	"go.opentelemetry.io/otelc/tool/ex"
 	"gopkg.in/yaml.v3"
 )
 

@@ -1,8 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build !windows
-
 // Package setup tests verify that the addDeps function generates
 // the expected otelc.runtime.go file by comparing against golden files.
 //
@@ -17,53 +15,85 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"gotest.tools/v3/golden"
 )
 
 func TestAddDeps(t *testing.T) {
 	tests := []struct {
-		name       string
-		matched    []*rule.InstRuleSet
-		goldenFile string // Empty means no file should be generated
+		name        string
+		matched     []*rule.InstRuleSet
+		packageName string
+		goldenFile  string // Empty means no file should be generated
 	}{
 		{
-			name:       "empty_matched_rules",
-			matched:    []*rule.InstRuleSet{},
-			goldenFile: "",
+			name:        "empty_matched_rules",
+			matched:     []*rule.InstRuleSet{},
+			packageName: "main",
+			goldenFile:  "",
 		},
 		{
 			name: "single_func_rule",
 			matched: []*rule.InstRuleSet{
 				newTestRuleSet(
 					"github.com/example/pkg",
-					newTestFuncRule("github.com/example/pkg", "github.com/example/pkg"),
+					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg", "github.com/example/pkg")},
+					nil,
 				),
 			},
-			goldenFile: "single_func_rule.otelc.runtime.go.golden",
+			packageName: "main",
+			goldenFile:  "single_func_rule.otelc.runtime.go.golden",
 		},
 		{
-			name: "no_func_rules",
+			name: "single_file_rule",
 			matched: []*rule.InstRuleSet{
-				newTestRuleSet("github.com/example/pkg"),
+				newTestRuleSet(
+					"github.com/example/pkg",
+					nil,
+					[]*rule.InstFileRule{newTestFileRule("github.com/example/pkg", "github.com/example/pkg")},
+				),
 			},
-			goldenFile: "",
+			packageName: "main",
+			goldenFile:  "single_file_rule.otelc.runtime.go.golden",
+		},
+		{
+			name: "no_rules",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet("github.com/example/pkg", nil, nil),
+			},
+			packageName: "main",
+			goldenFile:  "",
 		},
 		{
 			name: "multiple_rule_sets",
 			matched: []*rule.InstRuleSet{
 				newTestRuleSet(
 					"github.com/example/pkg1",
-					newTestFuncRule("github.com/example/pkg1", "github.com/example/pkg1"),
+					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg1", "github.com/example/pkg1")},
+					[]*rule.InstFileRule{newTestFileRule("github.com/example/pkg2", "github.com/example/pkg2")},
 				),
 				newTestRuleSet(
 					"github.com/example/pkg2",
-					newTestFuncRule("github.com/example/pkg2", "github.com/example/pkg2"),
+					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg3", "github.com/example/pkg3")},
+					[]*rule.InstFileRule{newTestFileRule("github.com/example/pkg4", "github.com/example/pkg4")},
 				),
 			},
-			goldenFile: "multiple_rule_sets.otelc.runtime.go.golden",
+			packageName: "main",
+			goldenFile:  "multiple_rule_sets.otelc.runtime.go.golden",
+		},
+		{
+			name: "non_main_package_name",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"github.com/example/pkg",
+					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg", "github.com/example/pkg")},
+					nil,
+				),
+			},
+			packageName: "mypkg",
+			goldenFile:  "non_main_package_name.otelc.runtime.go.golden",
 		},
 	}
 
@@ -72,7 +102,10 @@ func TestAddDeps(t *testing.T) {
 			tmpDir := t.TempDir()
 			sp := newTestSetupPhase()
 
-			err := sp.addDeps(tt.matched, tmpDir)
+			stateManager := NewStateManager()
+			ctx := ContextWithStateManager(t.Context(), stateManager)
+
+			err := sp.addDeps(ctx, tt.matched, tmpDir, tt.packageName)
 			require.NoError(t, err)
 
 			runtimeFilePath := filepath.Join(tmpDir, OtelcRuntimeFile)
@@ -86,6 +119,8 @@ func TestAddDeps(t *testing.T) {
 			actual, err := os.ReadFile(runtimeFilePath)
 			require.NoError(t, err)
 
+			require.Contains(t, stateManager.files, runtimeFilePath)
+
 			golden.Assert(t, string(actual), tt.goldenFile)
 		})
 	}
@@ -95,7 +130,8 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	matched := []*rule.InstRuleSet{
 		newTestRuleSet(
 			"github.com/example/pkg",
-			newTestFuncRule("github.com/example/pkg", "github.com/example/pkg"),
+			[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg", "github.com/example/pkg")},
+			nil,
 		),
 	}
 
@@ -103,6 +139,6 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	invalidPath := filepath.Join(t.TempDir(), "nonexistent", "subdir")
 	sp := newTestSetupPhase()
 
-	err := sp.addDeps(matched, invalidPath)
+	err := sp.addDeps(t.Context(), matched, invalidPath, "main")
 	assert.Error(t, err)
 }

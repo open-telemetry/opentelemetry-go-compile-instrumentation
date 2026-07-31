@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 // TestBumpAppsToLatest bumps each test app's instrumented direct dependencies
@@ -22,7 +22,7 @@ import (
 // calls rebuild every app after the bump.
 func TestBumpAppsToLatest(t *testing.T) {
 	appsRoot := filepath.Join("..", "apps")
-	rulesRoot := filepath.Join("..", "..", "pkg", "instrumentation")
+	rulesRoot := filepath.Join("..", "..", "instrumentation")
 	targets := testutil.InstrumentedTargets(t, rulesRoot)
 
 	entries, err := os.ReadDir(appsRoot)

@@ -22,14 +22,24 @@ func TestNormalizePath(t *testing.T) {
 		want string
 	}{
 		{
-			name: "pkg_temp dir",
-			in:   "pkg_temp",
-			want: "pkg",
+			name: "pkg temp dir",
+			in:   pkgTempDir,
+			want: unzippedPkgDir,
 		},
 		{
-			name: "pkg_temp file",
-			in:   "pkg_temp/rules.yaml",
-			want: "pkg/rules.yaml",
+			name: "pkg temp file",
+			in:   pkgTempDir + "/rules.yaml",
+			want: unzippedPkgDir + "/rules.yaml",
+		},
+		{
+			name: "instrumentation temp dir",
+			in:   instTempDir,
+			want: unzippedInstDir,
+		},
+		{
+			name: "instrumentation temp file",
+			in:   instTempDir + "/http/client/config.yaml",
+			want: unzippedInstDir + "/http/client/config.yaml",
 		},
 		{
 			name: "normal path unchanged",
@@ -37,9 +47,14 @@ func TestNormalizePath(t *testing.T) {
 			want: "other/file.yaml",
 		},
 		{
-			name: "clean path",
-			in:   "pkg_temp/../pkg_temp/test.yaml",
-			want: "pkg/test.yaml",
+			name: "clean pkg path",
+			in:   pkgTempDir + "/../" + pkgTempDir + "/test.yaml",
+			want: unzippedPkgDir + "/test.yaml",
+		},
+		{
+			name: "clean instrumentation path",
+			in:   instTempDir + "/../" + instTempDir + "/test.yaml",
+			want: unzippedInstDir + "/test.yaml",
 		},
 	}
 
@@ -163,7 +178,7 @@ func TestExtractGZip_Normal(t *testing.T) {
 	require.NoError(t, tw.Close())
 	require.NoError(t, gz.Close())
 
-	err = extractGZip(tarBuf.Bytes(), tmpDir)
+	err = extractGZip(&tarBuf, tmpDir)
 	require.NoError(t, err)
 
 	bs, err := os.ReadFile(filepath.Join(tmpDir, "pkg", "test.yaml"))
@@ -252,7 +267,7 @@ func TestExtractGZip_SkipsZipSlip(t *testing.T) {
 			require.NoError(t, tw.Close())
 			require.NoError(t, gz.Close())
 
-			require.NoError(t, extractGZip(tarBuf.Bytes(), tmpDir))
+			require.NoError(t, extractGZip(&tarBuf, tmpDir))
 
 			checkPath := tt.checkPath(tmpDir)
 			_, err = os.Stat(checkPath)

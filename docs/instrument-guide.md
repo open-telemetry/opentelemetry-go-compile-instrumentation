@@ -12,9 +12,20 @@ The process consists of three main steps:
 
 ## 1. Define Rules
 
-Rules are defined in YAML format and stored in `pkg/instrumentation/<library-name>/<library-name>.yaml`. This file tells `otelc` which functions to instrument.
+Rules are defined in YAML format and stored under `instrumentation/<import_path>/`. This file tells `otelc` which functions to instrument.
 
-Create a new file `pkg/instrumentation/<library-name>/<library-name>.yaml`. Below is an example configuration for instrumenting a function `NewServer`:
+Create a new file under `instrumentation/<import_path>/.../otelc.yaml`, where `<import_path>` is the Go import path of the library being instrumented.
+
+Rule files must be named either `otelc.yaml` or `*.otelc.yaml`.
+
+For example:
+
+```text
+instrumentation/google.golang.org/grpc/server/otelc.yaml
+instrumentation/google.golang.org/grpc/client/client.otelc.yaml
+```
+
+Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
 inject_to_grpc_newserver:
@@ -26,7 +37,7 @@ inject_to_grpc_newserver:
     - inject_hooks:
         before: BeforeNewServer
         after: AfterNewServer
-        path: github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/grpc/server
+        path: go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server
 ```
 
 - `target`: Import path of the package to instrument.
@@ -45,7 +56,7 @@ Hook functions are standard Go functions. We place them in the package specified
 
 ### Hook Definition
 
-The first parameter must always be `inst.HookContext`.
+The first parameter must always be `hook.HookContext`.
 
 - **Before Hook**: Parameters match the target function's arguments.
 - **After Hook**: Parameters match the target function's return values.
@@ -62,24 +73,77 @@ Hook implementation:
 package server
 
 import (
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"go.opentelemetry.io/otelc/pkg/hook"
 	"google.golang.org/grpc"
 )
 
 // BeforeNewServer matches the arguments of NewServer
-func BeforeNewServer(ictx inst.HookContext, opts ...grpc.ServerOption) {
+func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
 	// Logic to execute before the original function
 }
 
 // AfterNewServer matches the return value of NewServer
-func AfterNewServer(ictx inst.HookContext, server *grpc.Server) {
+func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
 	// Logic to execute after the original function
 }
 ```
 
 If we cannot import a specific type (e.g., it is unexported), we can use `interface{}` in the hook signature.
 
+### Runtime Enable/Disable Gate
+
+Every instrumentation must be switchable at runtime through
+`OTEL_GO_ENABLED_INSTRUMENTATIONS` / `OTEL_GO_DISABLED_INSTRUMENTATIONS` (see
+[Configuration](configuration.md)). This is not automatic: the hooks are always woven into
+the binary at build time, so each instrumentation is responsible for checking whether it is
+enabled before doing any work.
+
+Declare an `instrumentationKey` and an enabler in the instrumentation package:
+
+```go
+const instrumentationKey = "GRPC"
+
+type grpcServerEnabler struct{}
+
+func (g grpcServerEnabler) Enable() bool {
+	return runtime.Instrumented(instrumentationKey)
+}
+
+var serverEnabler = grpcServerEnabler{}
+```
+
+Then return early from **every** exported hook before it touches any state:
+
+```go
+func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
+	if !serverEnabler.Enable() {
+		return
+	}
+	// ...
+}
+```
+
+Notes:
+
+- The key is matched case-insensitively, so `instrumentationKey = "GRPC"` is written as
+  `grpc` in the environment variable.
+- Packages that instrument two sides of the same library share one key. `grpc/client` and
+  `grpc/server` are both `GRPC`; `kafka-go/producer` and `kafka-go/consumer` are both
+  `KAFKA`.
+- Gate paired before/after hooks at the same point, so any bookkeeping they share (depth
+  counters, `ictx.SetData` values) stays balanced when the instrumentation is disabled.
+- When a before/after pair shares one `hook.HookContext` (one call in, one call out), have
+  the before hook store its `Enable()` result via `ictx.SetKeyData` and have the after hook
+  read it back instead of calling `Enable()` again. Otherwise a call whose environment
+  variable changes mid-flight sees the before hook and after hook disagree, desyncing
+  whatever they gate together.
+- Cover the gate in unit tests with `t.Setenv`, asserting both that a disabled
+  instrumentation emits nothing and that an explicitly enabled one still works.
+
 ### Limitations
+
+The constraints below apply to hook implementations. For runtime symptoms (spans not
+appearing, instrumentation not applied), see [Troubleshooting](troubleshooting.md).
 
 When implementing hooks, we must adhere to certain limitations:
 
@@ -120,7 +184,7 @@ At runtime:
 
 ##### 1) Runtime GLS accessors
 
-`pkg/instrumentation/runtime/runtime_gls.go` provides low-level accessors:
+`instrumentation/runtime/runtime_gls.go` provides low-level accessors:
 
 - `GetTraceContextFromGLS()`
 - `SetTraceContextToGLS(interface{})`
@@ -131,7 +195,7 @@ It also defines `OtelContextCloner` for goroutine propagation logic.
 
 ##### 2) Injected trace context holder
 
-`pkg/instrumentation/otel/sdk/trace/otel_trace_context.go` defines an internal linked-list based trace context container in GLS:
+`instrumentation/go.opentelemetry.io/otel/sdk/trace/otel_trace_context.go` defines an internal linked-list based trace context container in GLS:
 
 - add span to current goroutine context
 - delete span when ended
@@ -145,7 +209,7 @@ The max chain size is configurable:
 
 ##### 3) Hook integration points
 
-Configured in `pkg/instrumentation/otel/hook/hooks.yaml` and implemented in `pkg/instrumentation/otel/hook/`:
+Configured in `instrumentation/go.opentelemetry.io/otel/hook/hooks.yaml` and implemented in `instrumentation/go.opentelemetry.io/otel/hook/`:
 
 - `tracer_setup.go`: add span to GLS after span creation
 - `span_setup.go`: remove span from GLS before span end
@@ -176,7 +240,7 @@ We verify the instrumentation through unit and integration tests.
 Create standard Go tests (`*_test.go`) alongside the hook functions to verify logic.
 
 ```bash
-go test ./pkg/instrumentation/<library>/...
+go test ./instrumentation/<import_path>/...
 ```
 
 ### Integration Tests
@@ -195,11 +259,20 @@ To run integration tests:
 make test-integration
 ```
 
-## 4. Verify
+## 4. Register the Instrumentation
 
-Check that your instrumentation package have following elements:
+If your PR adds a new user-facing instrumentation, create a PR to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.
 
-- A rule YAML `pkg/instrumentation/<library-name>/<library-name>.yaml` with a correct `target` and version range.
-- Hook implementation under `pkg/instrumentation/<library>/...`
+Follow the [OpenTelemetry Registry contribution guide](https://opentelemetry.io/ecosystem/registry/adding/).
+
+Not every instrumentation package should be listed. Internal helper packages (for example, `basic`, `runtime`, or packages that only provide implementation details for other instrumentations) generally do not need registry entries.
+
+## 5. Verify
+
+Check that your instrumentation package has the following elements:
+
+- A rule YAML under `instrumentation/<import_path>/.../otelc..yaml` with a correct `target` and version range.
+- Hook implementation under `instrumentation/<import_path>/...`.
 - Unit tests alongside the hooks for logic-level behavior.
 - Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
+- If applicable, a PR has been opened to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.

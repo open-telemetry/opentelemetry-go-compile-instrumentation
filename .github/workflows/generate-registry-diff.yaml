@@ -3,7 +3,7 @@ name: Generate Registry Diff
 on:
   pull_request:
     paths:
-      - 'pkg/instrumentation/**/semconv/**'
+      - 'instrumentation/**/semconv/**'
       - '.semconv-version'
 
 permissions:

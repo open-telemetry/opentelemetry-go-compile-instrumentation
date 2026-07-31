@@ -46,7 +46,7 @@ This means the latest release of an upstream instrumented library introduced a *
 ## Remediation
 
 1. Identify the failing test and the upstream library version that caused the break.
-2. Cap the existing rule's version range in the relevant \`pkg/instrumentation/.../*.yaml\` file.
+2. Cap the existing rule's version range in the relevant \`instrumentation/.../*.yaml\` file.
 3. Open a new rule entry for the new version range and update the hook implementation.
 4. Close this issue once the fix lands on \`main\`.
 

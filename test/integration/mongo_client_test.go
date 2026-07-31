@@ -14,10 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/testutil"
+	"go.opentelemetry.io/otelc/test/testutil"
 )
 
 func TestMongoClient(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "mongoclient", "go", "build", "-a")
+
 	testCases := []struct {
 		name string
 	}{
@@ -31,7 +34,7 @@ func TestMongoClient(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 			addr := StartMockMongoServer(t)
 
-			output := f.BuildAndRun("mongoclient", "-uri=mongodb://"+addr)
+			output := f.Run("mongoclient", "-uri=mongodb://"+addr)
 			require.Contains(t, output, "MongoDB operations completed successfully")
 
 			spans := testutil.AllSpans(f.Traces())

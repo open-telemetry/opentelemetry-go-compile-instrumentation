@@ -6,7 +6,6 @@ package testutil
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
@@ -40,9 +39,9 @@ func newCmd(ctx context.Context, dir string, env []string, args ...string) *exec
 	return cmd
 }
 
-// otelcPath returns the absolute path to the otelc binary, assuming the
+// OtelcPath returns the absolute path to the otelc binary, assuming the
 // caller's working directory is a sibling of the repo's otelc output.
-func otelcPath() (string, error) {
+func OtelcPath() (string, error) {
 	binName := otelcBinName
 	if util.IsWindows() {
 		binName += ".exe"
@@ -62,59 +61,84 @@ func appOutputName() string {
 	return appBinName
 }
 
+// appsPath returns the path to the test apps directory.
+func appsPath() (string, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(pwd, "..", "apps"), nil
+}
+
 // Build builds the application with the instrumentation tool. The built binary
-// is registered for cleanup via t.Cleanup.
-func Build(t *testing.T, appDir string, args ...string) {
+// is registered for cleanup via t.Cleanup. Standard test apps use
+// OTELC_TEST_GOCACHE/<app> as GOCACHE when OTELC_TEST_GOCACHE is set, and drop
+// -a so warm builds can reuse that per-app cache. Custom appsDir builds keep
+// the caller's arguments and environment unchanged.
+func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
-	otelc, err := otelcPath()
+	otelc, err := OtelcPath()
 	require.NoError(t, err)
+
+	standardAppsDir := appsDir == ""
+	var env []string
+	if standardAppsDir {
+		cacheRoot := os.Getenv("OTELC_TEST_GOCACHE")
+		if cacheRoot != "" {
+			cacheDir := filepath.Join(cacheRoot, app)
+			require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+			env = append(os.Environ(), "GOCACHE="+cacheDir)
+
+			// Dropping -a lets warm builds reuse this app-local cache without sharing
+			// compiled objects across different instrumentation configs.
+			filteredArgs := make([]string, 0, len(args))
+			for _, arg := range args {
+				if arg != "-a" {
+					filteredArgs = append(filteredArgs, arg)
+				}
+			}
+			args = filteredArgs
+		}
+	}
 
 	output := appOutputName()
 	args = append(args, "-o", output)
 	args = append([]string{otelc}, args...)
 
-	cmd := newCmd(t.Context(), appDir, nil, args...)
+	if standardAppsDir {
+		var err error
+		appsDir, err = appsPath()
+		require.NoError(t, err)
+	}
+	appDir := filepath.Join(appsDir, app)
+
+	cmd := newCmd(t.Context(), appDir, env, args...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 	t.Cleanup(func() {
 		_ = os.Remove(filepath.Join(appDir, output))
+		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
+		// Left behind only when the otelc subprocess was killed mid-run
+		// (release removes it on every normal exit).
+		_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
 	})
-}
-
-// BuildAppAt builds the app at the given directory using context ctx. Intended
-// for use from TestMain where no *testing.T is available. The caller is
-// responsible for cleaning up the built binary via CleanupAppAt.
-func BuildAppAt(ctx context.Context, appDir string) error {
-	otelc, err := otelcPath()
-	if err != nil {
-		return fmt.Errorf("locate otelc: %w", err)
-	}
-
-	output := appOutputName()
-	args := []string{otelc, "go", "build", "-a", "-o", output}
-
-	cmd := newCmd(ctx, appDir, nil, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("otelc build in %s: %w\n%s", appDir, err, string(out))
-	}
-	return nil
-}
-
-// CleanupAppAt removes the binary that BuildAppAt produced in appDir.
-func CleanupAppAt(appDir string) {
-	_ = os.Remove(filepath.Join(appDir, appOutputName()))
 }
 
 // Run runs the application and returns the output. It waits for the
 // application to complete. If env is nil, the parent process env is used.
-func Run(t *testing.T, dir string, env []string, args ...string) string {
+func Run(t *testing.T, appsDir, app string, env []string, args ...string) string {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
 		appName += ".exe"
 	}
-	cmd := newCmd(t.Context(), dir, env, append([]string{appName}, args...)...)
+	if appsDir == "" {
+		var err error
+		appsDir, err = appsPath()
+		require.NoError(t, err)
+	}
+	appDir := filepath.Join(appsDir, app)
+	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 	return string(out)
@@ -123,13 +147,19 @@ func Run(t *testing.T, dir string, env []string, args ...string) string {
 // Start starts the application but does not wait for it to complete. If env
 // is nil, the parent process env is used. Stdout and stderr are captured and
 // logged when the test fails, so that app crashes are visible in CI output.
-func Start(t *testing.T, dir string, env []string, args ...string) {
+func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exec.Cmd {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
 		appName += ".exe"
 	}
-	cmd := newCmd(t.Context(), dir, env, append([]string{appName}, args...)...)
+	if appsDir == "" {
+		var err error
+		appsDir, err = appsPath()
+		require.NoError(t, err)
+	}
+	appDir := filepath.Join(appsDir, app)
+	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -145,4 +175,6 @@ func Start(t *testing.T, dir string, env []string, args ...string) {
 			t.Logf("app output:\n%s", buf.String())
 		}
 	})
+
+	return cmd
 }

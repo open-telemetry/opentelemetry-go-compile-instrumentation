@@ -15,8 +15,8 @@ import (
 	"github.com/dave/dst/dstutil"
 	"github.com/valyala/fasttemplate"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	toolast "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/ex"
+	toolast "go.opentelemetry.io/otelc/tool/internal/ast"
 )
 
 // callTemplate represents a code template that can be used to wrap or transform

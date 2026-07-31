@@ -9,9 +9,9 @@ import (
 	"github.com/dave/dst"
 	"github.com/dave/dst/dstutil"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // applyCallRule transforms function calls at call sites by wrapping them with
@@ -30,7 +30,9 @@ func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		}
 	}
 
-	util.Assert(appendModified || replaceModified, "call rule did not match any call")
+	if !appendModified && !replaceModified {
+		return nil
+	}
 
 	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
 		return err
