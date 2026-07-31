@@ -63,7 +63,7 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 	require.NoError(t, err)
 
 	resp := &http.Response{
-		StatusCode: 200,
+		StatusCode: 200, Header: make(http.Header),
 		Body:       io.NopCloser(bytes.NewBufferString(`{}`)),
 	}
 
@@ -82,6 +82,7 @@ func TestOtelMiddleware_ErrorResponse(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: 400,
 		Status:     "400 Bad Request",
+		Header:     make(http.Header),
 		Body:       io.NopCloser(bytes.NewBufferString(`{}`)),
 	}
 
