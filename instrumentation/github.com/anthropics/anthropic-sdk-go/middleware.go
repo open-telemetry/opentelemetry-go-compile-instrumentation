@@ -5,7 +5,6 @@ package anthropic
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic-sdk-go/semconv"
@@ -123,6 +123,18 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 		req = req.WithContext(ctx)
 
+		// Record the operation duration on every exit path below (success,
+		// transport error, HTTP error, or SSE fallback). Registered here so it
+		// only fires once a span exists, never for the pass-through returns
+		// above. error.type is not yet a dimension; that follows once the
+		// metric grows an error attribute (#679 follow-up).
+		defer func() {
+			if operationDuration != nil {
+				operationDuration.Record(ctx, time.Since(start).Seconds(),
+					metric.WithAttributes(baseAttrs...))
+			}
+		}()
+
 		resp, err := next(req)
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
@@ -148,18 +160,13 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			return resp, nil
 		}
 
-		handleNonStreamingResponse(ctx, resp, span, start)
+		handleNonStreamingResponse(resp, span)
 
 		return resp, nil
 	}
 }
 
-func handleNonStreamingResponse(
-	_ context.Context,
-	resp *http.Response,
-	span trace.Span,
-	_ time.Time,
-) {
+func handleNonStreamingResponse(resp *http.Response, span trace.Span) {
 	defer span.End()
 
 	if resp.Body == nil {
