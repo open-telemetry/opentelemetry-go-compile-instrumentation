@@ -103,7 +103,7 @@ func TestGinServer(t *testing.T) {
 			require.NoError(t, resp.Body.Close())
 			require.Equal(t, tc.wantStatus, resp.StatusCode)
 
-			testutil.WaitForSpanFlush(t)
+			f.WaitForSpans(1)
 
 			f.RequireTraceCount(1)
 			f.RequireSpansPerTrace(1)
