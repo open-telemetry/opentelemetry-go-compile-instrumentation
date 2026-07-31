@@ -423,22 +423,17 @@ check-golden-files: package
 
 ##@ Security
 
-# Run govulncheck (built from .tools) over a list of module dirs; $(1) = dirs.
-define run_govulncheck
-	@set -uo pipefail
-	@status=0; \
-	for moddir in $(1); do \
-		echo "==> govulncheck $$moddir"; \
-		(cd "$$moddir" && $(GOVULNCHECK) ./...) || status=1; \
-	done; \
-	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found"; exit 1; fi; \
-	echo "govulncheck: no reachable vulnerabilities found"
-endef
-
 .ONESHELL:
 govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulnerabilities
 	@echo "Running govulncheck across $(words $(GOVULNCHECK_CORE_MODULES)) core modules..."
-	$(call run_govulncheck,$(GOVULNCHECK_CORE_MODULES))
+	@set -uo pipefail
+	@status=0
+	@for moddir in $(GOVULNCHECK_CORE_MODULES); do \
+		echo "==> govulncheck $$moddir"; \
+		(cd "$$moddir" && "$(GOVULNCHECK)" ./...) || status=1; \
+	done; \
+	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found"; exit 1; fi; \
+	echo "govulncheck: no reachable vulnerabilities found"
 
 # Build each integration test app with otelc, then scan the resulting binary.
 # Binary mode sees injected instrumentation (including //go:build ignore sources
