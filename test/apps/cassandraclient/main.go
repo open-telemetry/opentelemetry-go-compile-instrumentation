@@ -11,7 +11,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/apache/cassandra-gocql-driver/v2"
+	"github.com/gocql/gocql"
 )
 
 var (
