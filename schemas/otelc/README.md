@@ -10,6 +10,7 @@ schemas/otelc/
 ├── registry_manifest.yaml   # registry metadata + pinned upstream semconv dependency
 ├── groups/                  # one file per instrumentation (metrics, spans, attributes)
 │   ├── http.yaml            # net/http client & server metrics
+│   ├── aws.yaml             # aws-sdk-go-v2 client spans (trace-only)
 │   ├── grpc.yaml            # google.golang.org/grpc client & server metrics + spans
 │   ├── database-sql.yaml    # database/sql client spans
 │   ├── redis.yaml           # redis/go-redis (v9) client spans
