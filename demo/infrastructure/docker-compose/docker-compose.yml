@@ -291,7 +291,7 @@ services:
     command: run --quiet /scripts/grpc-load-test.js
     volumes:
       - ./k6:/scripts:ro
-      - ../../grpc/server/greeter.proto:/proto/greeter.proto:ro
+      - ../../app/grpc/server/greeter.proto:/proto/greeter.proto:ro
     networks:
       - observability
     depends_on:
