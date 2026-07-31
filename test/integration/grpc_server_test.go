@@ -59,7 +59,7 @@ func TestGRPCServer(t *testing.T) {
 
 			client := NewGRPCClient(t, addr)
 			tc.exercise(t, client)
-			testutil.WaitForSpanFlush(t)
+			f.WaitForSpans(1)
 
 			span := f.RequireSingleSpan()
 			testutil.RequireGRPCServerSemconv(t, span, "greeter.Greeter", tc.method, 0)
@@ -93,7 +93,7 @@ func TestGRPCServer(t *testing.T) {
 
 			require.NoError(t, srv.Cmd.Process.Signal(tc.sig))
 			waitForProcessExit(t, srv.Cmd, 10*time.Second)
-			testutil.WaitForSpanFlush(t)
+			f.WaitForSpans(1)
 
 			spans := testutil.AllSpans(f.Traces())
 			require.NotEmpty(t, spans, "expected spans to be flushed on %s shutdown", tc.name)

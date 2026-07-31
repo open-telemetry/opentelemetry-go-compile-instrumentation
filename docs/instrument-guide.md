@@ -90,6 +90,56 @@ func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
 
 If we cannot import a specific type (e.g., it is unexported), we can use `interface{}` in the hook signature.
 
+### Runtime Enable/Disable Gate
+
+Every instrumentation must be switchable at runtime through
+`OTEL_GO_ENABLED_INSTRUMENTATIONS` / `OTEL_GO_DISABLED_INSTRUMENTATIONS` (see
+[Configuration](configuration.md)). This is not automatic: the hooks are always woven into
+the binary at build time, so each instrumentation is responsible for checking whether it is
+enabled before doing any work.
+
+Declare an `instrumentationKey` and an enabler in the instrumentation package:
+
+```go
+const instrumentationKey = "GRPC"
+
+type grpcServerEnabler struct{}
+
+func (g grpcServerEnabler) Enable() bool {
+	return runtime.Instrumented(instrumentationKey)
+}
+
+var serverEnabler = grpcServerEnabler{}
+```
+
+Then return early from **every** exported hook before it touches any state:
+
+```go
+func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
+	if !serverEnabler.Enable() {
+		return
+	}
+	// ...
+}
+```
+
+Notes:
+
+- The key is matched case-insensitively, so `instrumentationKey = "GRPC"` is written as
+  `grpc` in the environment variable.
+- Packages that instrument two sides of the same library share one key. `grpc/client` and
+  `grpc/server` are both `GRPC`; `kafka-go/producer` and `kafka-go/consumer` are both
+  `KAFKA`.
+- Gate paired before/after hooks at the same point, so any bookkeeping they share (depth
+  counters, `ictx.SetData` values) stays balanced when the instrumentation is disabled.
+- When a before/after pair shares one `hook.HookContext` (one call in, one call out), have
+  the before hook store its `Enable()` result via `ictx.SetKeyData` and have the after hook
+  read it back instead of calling `Enable()` again. Otherwise a call whose environment
+  variable changes mid-flight sees the before hook and after hook disagree, desyncing
+  whatever they gate together.
+- Cover the gate in unit tests with `t.Setenv`, asserting both that a disabled
+  instrumentation emits nothing and that an explicitly enabled one still works.
+
 ### Limitations
 
 The constraints below apply to hook implementations. For runtime symptoms (spans not

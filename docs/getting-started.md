@@ -24,7 +24,7 @@ No manual code changes required.
 
    ```bash
    cd demo/app/basic
-   ../../otelc go build
+   ../../../otelc go build
    ./basic
    ```
 
