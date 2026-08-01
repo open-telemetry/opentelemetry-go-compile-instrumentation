@@ -3,7 +3,7 @@
 
 package hook
 
-// !!! pkg/hook/context.go will auto-sync to tool/internal/instrument/api.tmpl
+// !!! This file must stay byte-for-byte identical to tool/internal/instrument/api.tmpl (enforced by TestAPITemplateMatchesHookContext in tool/internal/instrument/api_tmpl_test.go).
 type HookContext interface {
 	// Set the skip call flag, can be used to skip the original function call
 	SetSkipCall(bool)
