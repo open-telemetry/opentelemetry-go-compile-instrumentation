@@ -68,6 +68,8 @@ go.opentelemetry.io/contrib/exporters/autoexport v0.69.0 h1:R3jsCoTIzv0BiYNhW0ax
 go.opentelemetry.io/contrib/exporters/autoexport v0.69.0/go.mod h1:m07gqyr2QhQxKOKb5vqKCCBtLH3uqlNYR7PU/FISXVU=
 go.opentelemetry.io/contrib/instrumentation/go.mongodb.org/mongo-driver/mongo/otelmongo v0.52.0 h1:OlF/Imldgj1AMRL0W18Fx+bckgHbkJb1M3/m9HdF84g=
 go.opentelemetry.io/contrib/instrumentation/go.mongodb.org/mongo-driver/mongo/otelmongo v0.52.0/go.mod h1:VMFHHABIjcnnc2tOWQbgSZiSIMclBbaZ8rHexaAOljA=
+go.opentelemetry.io/contrib/instrumentation/go.mongodb.org/mongo-driver/mongo/otelmongo v0.69.0 h1:v/giipsL85BMk0dXuHXanAkkMqP0i1tiqxsBxgCjcw8=
+go.opentelemetry.io/contrib/instrumentation/go.mongodb.org/mongo-driver/mongo/otelmongo v0.69.0/go.mod h1:FT5Sh1EsiLOcn1fp+YEGInAzT2pVzq6C7mc2BEsH76Y=
 go.opentelemetry.io/contrib/instrumentation/runtime v0.69.0 h1:MtkMsuRo3zEXTTMALfyrszwCDZTkB6wolyPjbwFAdq0=
 go.opentelemetry.io/contrib/instrumentation/runtime v0.69.0/go.mod h1:FYTxnpsm+UPD0erZNq20GvnM8T2YQHiHtT2vokdpoac=
 go.opentelemetry.io/contrib/propagators/autoprop v0.69.0 h1:3gzAeb5dgGzwB7hXutgJ07Xsv3v4Wc0llV8AaMc0wiQ=
