@@ -144,25 +144,6 @@ func ListFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-func WriteFile(filePath, content string) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return ex.Wrap(err)
-	}
-	defer func(file *os.File) {
-		err = file.Close()
-		if err != nil {
-			ex.Fatal(err)
-		}
-	}(file)
-
-	_, err = file.WriteString(content)
-	if err != nil {
-		return ex.Wrap(err)
-	}
-	return nil
-}
-
 // WriteFileAtomic writes data to a file atomically by first writing to a temporary file and then renaming it.
 // Permission precedence: explicit perm argument > existing file's permissions > default 0644.
 func WriteFileAtomic(filePath string, data []byte, perm ...os.FileMode) error {
