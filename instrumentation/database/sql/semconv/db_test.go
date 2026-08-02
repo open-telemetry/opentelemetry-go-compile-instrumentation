@@ -78,6 +78,25 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
+			name: "sqlite driver (modernc.org/sqlite registers under \"sqlite\", not \"sqlite3\")",
+			req: DatabaseSqlRequest{
+				OpType:     "SELECT",
+				Sql:        "SELECT * FROM items",
+				Endpoint:   "sqlite",
+				DriverName: "sqlite",
+				Dsn:        "file:test.db",
+				DbName:     "test",
+			},
+			expected: map[string]any{
+				"db.system.name":    "sqlite",
+				"db.operation.name": "SELECT",
+				"db.namespace":      "test",
+				"server.address":    "sqlite",
+				"network.transport": "tcp",
+				"db.query.text":     "SELECT * FROM items",
+			},
+		},
+		{
 			name: "clickhouse driver maps to clickhouse system name",
 			req: DatabaseSqlRequest{
 				OpType:     "SELECT",

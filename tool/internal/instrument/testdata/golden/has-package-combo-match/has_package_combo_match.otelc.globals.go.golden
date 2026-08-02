@@ -26,13 +26,17 @@ type HookContext interface {
 	GetParamCount() int
 	// Get the original function parameter at index idx
 	GetParam(idx int) interface{}
-	// Change the original function parameter at index idx
+	// Change the original function parameter at index idx. Passing a nil val
+	// stores nil for an interface-typed parameter, and resets a non-nilable
+	// parameter (e.g. int or a struct) to its zero value.
 	SetParam(idx int, val interface{})
 	// Number of original function return values
 	GetReturnValCount() int
 	// Get the original function return value at index idx
 	GetReturnVal(idx int) interface{}
-	// Change the original function return value at index idx
+	// Change the original function return value at index idx. Passing a nil val
+	// stores nil for an interface-typed return value, and resets a non-nilable
+	// return value (e.g. int or a struct) to its zero value.
 	SetReturnVal(idx int, val interface{})
 	// Get the original function name
 	GetFuncName() string
