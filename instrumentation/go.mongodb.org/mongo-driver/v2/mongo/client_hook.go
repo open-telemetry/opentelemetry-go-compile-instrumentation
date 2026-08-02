@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	instrumentationKey = "MONGODB"
+	instrumentationKey = "MONGODB_V2"
 )
 
 type mongoEnabler struct{}

@@ -22,14 +22,14 @@ func TestMongoEnabler(t *testing.T) {
 		{
 			name: "enabled explicitly",
 			setupEnv: func(t *testing.T) {
-				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB_V2")
 			},
 			expected: true,
 		},
 		{
 			name: "disabled explicitly",
 			setupEnv: func(t *testing.T) {
-				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "MONGODB")
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "MONGODB_V2")
 			},
 			expected: false,
 		},
@@ -50,14 +50,14 @@ func TestMongoEnabler(t *testing.T) {
 		{
 			name: "enabled with multiple instrumentations",
 			setupEnv: func(t *testing.T) {
-				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "REDIS,MONGODB,GRPC")
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "REDIS,MONGODB_V2,GRPC")
 			},
 			expected: true,
 		},
 		{
 			name: "disabled with multiple instrumentations",
 			setupEnv: func(t *testing.T) {
-				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "MONGODB,GRPC")
+				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "MONGODB_V2,GRPC")
 			},
 			expected: false,
 		},
@@ -75,7 +75,7 @@ func TestMongoEnabler(t *testing.T) {
 
 func TestBeforeConnect(t *testing.T) {
 	t.Run("injects monitor when opts is empty", func(t *testing.T) {
-		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
+		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB_V2")
 
 		mockCtx := hooktest.NewMockHookContext()
 
@@ -88,7 +88,7 @@ func TestBeforeConnect(t *testing.T) {
 	})
 
 	t.Run("injects monitor into all provided options", func(t *testing.T) {
-		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
+		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB_V2")
 
 		optA := options.Client()
 		optB := options.Client()
@@ -104,7 +104,7 @@ func TestBeforeConnect(t *testing.T) {
 	})
 
 	t.Run("does not overwrite an existing monitor", func(t *testing.T) {
-		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
+		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB_V2")
 
 		existing := &event.CommandMonitor{}
 		opt := options.Client().SetMonitor(existing)
@@ -119,7 +119,7 @@ func TestBeforeConnect(t *testing.T) {
 	})
 
 	t.Run("does nothing when instrumentation is disabled", func(t *testing.T) {
-		t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "MONGODB")
+		t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "MONGODB_V2")
 
 		mockCtx := hooktest.NewMockHookContext()
 
