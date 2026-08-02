@@ -7,6 +7,12 @@ import (
 	_ "unsafe"
 
 	"go.opentelemetry.io/otel/trace"
+
+	// otel_trace_context.go (marked `//go:build ignore`, consumed by otelc
+	// during instrumentation) imports this for its logger. `go mod tidy`
+	// can't see imports in ignored files, so import it here to keep it in
+	// go.mod.
+	_ "go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 //go:linkname traceContextAddSpan go.opentelemetry.io/otel/sdk/trace.traceContextAddSpan

@@ -123,12 +123,22 @@ SDK reads standard OTel environment variables at startup. There is no `otelc`-sp
 configuration for exporters, samplers, or resource attributes — set those through the
 [OTel SDK environment variable specification](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
 
-One `otelc`-specific runtime knob is `OTEL_GLS_MAX_SPANS`, which controls the depth of the
-goroutine-local storage (GLS) span stack. Instrumentation that does not pass `context.Context`
-through all call boundaries relies on GLS to propagate trace context. Increasing
-`OTEL_GLS_MAX_SPANS` beyond the default accommodates deeper call stacks; see
-[GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for
-the operational constraints.
+Two `otelc`-specific runtime knobs bound the goroutine-local storage (GLS) span tracker.
+Instrumentation that does not pass `context.Context` through all call boundaries relies on GLS
+to propagate trace context:
+
+- `OTEL_GLS_MAX_SPANS` (default `1000`) controls the depth of a single goroutine's local span
+  stack. Once a goroutine's *live* (unended) span count reaches this limit, further spans are
+  not tracked for implicit propagation: `trace.SpanFromContext(context.Background())` on that
+  goroutine keeps returning the span that was already on top of the stack until it ends and the
+  stack drops back below the limit. This is logged at debug level
+  (`OTEL_LOG_LEVEL=debug`); increase the limit if legitimately deep call stacks trigger it.
+- `OTEL_GLS_MAX_SPAN_STATES` (default `100000`) bounds the shared span lifecycle map used across
+  all goroutines to recognize when a span has ended. Once it is full, the oldest tracked entry is
+  evicted (also logged at debug level) to make room for new spans.
+
+See [GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for the
+operational constraints.
 
 ## Verifying Your Configuration
 
