@@ -127,4 +127,17 @@ func TestBeforeConnect(t *testing.T) {
 
 		assert.Nil(t, mockCtx.GetParam(0), "param 0 (opts) should be left untouched when instrumentation is disabled")
 	})
+
+	t.Run("does not panic on nil options", func(t *testing.T) {
+		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB_V2")
+
+		mockCtx := hooktest.NewMockHookContext()
+
+		BeforeConnect(mockCtx, nil)
+
+		newOpts, ok := mockCtx.GetParam(0).([]*options.ClientOptions)
+		require.True(t, ok, "param 0 should be updated with a []*options.ClientOptions")
+		require.Len(t, newOpts, 1)
+		assert.Nil(t, newOpts[0], "first option should still be nil")
+	})
 }

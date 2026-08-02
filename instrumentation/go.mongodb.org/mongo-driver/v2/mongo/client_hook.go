@@ -39,6 +39,9 @@ func BeforeConnect(ictx hook.HookContext, opts ...*options.ClientOptions) {
 
 	// Inject monitor to all existing options
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		if opt.Monitor == nil {
 			opt.SetMonitor(monitor)
 		}
