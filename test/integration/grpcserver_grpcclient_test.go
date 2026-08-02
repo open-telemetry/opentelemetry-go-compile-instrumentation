@@ -41,7 +41,7 @@ func TestGRPCServerGRPCClient(t *testing.T) {
 	require.Contains(t, resp.GetMessage(), "frontend calling backend")
 
 	// Wait for the spans from the frontend, client, and backend to be flushed
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(3)
 
 	// We expect exactly 1 trace with 3 spans:
 	// 1. gRPC server (Frontend)
