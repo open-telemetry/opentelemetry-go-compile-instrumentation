@@ -63,13 +63,13 @@ func (c *HookContextImpl1353090234) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl1353090234) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.params[0].(*int)) = val.(int)
+		if val == nil {
+			*(c.params[0].(*int)) = *new(int)
+		} else {
+			*(c.params[0].(*int)) = val.(int)
+		}
 	}
 }
 
@@ -82,13 +82,13 @@ func (c *HookContextImpl1353090234) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl1353090234) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.returnVals[0].(*error)) = val.(error)
+		if val == nil {
+			*(c.returnVals[0].(*error)) = *new(error)
+		} else {
+			*(c.returnVals[0].(*error)) = val.(error)
+		}
 	}
 }
 func (c *HookContextImpl1353090234) GetParamCount() int     { return len(c.params) }
