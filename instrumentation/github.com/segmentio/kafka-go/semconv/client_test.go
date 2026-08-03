@@ -27,7 +27,8 @@ func TestKafkaMessageKey(t *testing.T) {
 		{name: "ascii", key: []byte("order-1"), expected: "order-1"},
 		{name: "utf8", key: []byte("\u20ac"), expected: "\u20ac"},
 		{name: "empty", key: []byte{}, expected: ""},
-		{name: "invalid utf8", key: []byte{0xff, 0xfe, 0xfd}, expected: ""},
+		{name: "invalid utf8", key: []byte{0xff, 0xfe, 0xfd}, expected: "\uFFFD"},
+		{name: "invalid utf8 preserves valid text", key: []byte{'o', 0xff, 'k'}, expected: "o\uFFFDk"},
 		{name: "null byte", key: []byte{0x00}, expected: "\x00"},
 	}
 

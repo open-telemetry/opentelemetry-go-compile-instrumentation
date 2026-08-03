@@ -125,7 +125,7 @@ func TestReadMessage_InvalidUTF8MessageKey(t *testing.T) {
 		Topic:     "orders",
 		Partition: 3,
 		Offset:    42,
-		Key:       []byte{0xff, 0xfe, 0xfd},
+		Key:       []byte{'o', 0xff, 'k'},
 		Value:     []byte("hello"),
 	}
 
@@ -137,8 +137,7 @@ func TestReadMessage_InvalidUTF8MessageKey(t *testing.T) {
 	require.Len(t, spans, 1)
 
 	m := spanAttrs(spans[0])
-	_, hasKey := m["messaging.kafka.message.key"]
-	assert.False(t, hasKey)
+	assert.Equal(t, "o\uFFFDk", m["messaging.kafka.message.key"])
 }
 
 func TestReadMessage_RecordsError(t *testing.T) {

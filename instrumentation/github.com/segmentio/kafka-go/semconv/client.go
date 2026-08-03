@@ -6,7 +6,7 @@ package semconv
 import (
 	"net"
 	"strconv"
-	"unicode/utf8"
+	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -49,12 +49,10 @@ type KafkaRequest struct {
 	HasOffset bool
 }
 
-// KafkaMessageKey returns a Kafka message key as UTF-8, or "" when it is not valid UTF-8.
+// KafkaMessageKey returns a Kafka message key as a valid UTF-8 string.
+// Invalid UTF-8 sequences are replaced with the Unicode replacement character.
 func KafkaMessageKey(key []byte) string {
-	if !utf8.Valid(key) {
-		return ""
-	}
-	return string(key)
+	return strings.ToValidUTF8(string(key), "\uFFFD")
 }
 
 // KafkaRequestTraceAttrs returns the trace attributes for a Kafka client
