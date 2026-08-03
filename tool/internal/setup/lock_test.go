@@ -148,4 +148,3 @@ func TestAcquireBuildLockMissingWorkDirIsNoop(t *testing.T) {
 	release()
 	assert.False(t, util.PathExists(missing), "no-op acquisition must not create the work dir")
 }
-
