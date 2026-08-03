@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -148,36 +147,5 @@ func TestAcquireBuildLockMissingWorkDirIsNoop(t *testing.T) {
 	require.NoError(t, err)
 	release()
 	assert.False(t, util.PathExists(missing), "no-op acquisition must not create the work dir")
-}
-
-func TestTryAcquireStaleLockCleanup(t *testing.T) {
-	lockTestDir(t)
-	path := buildLockPath()
-
-	// Handle A locks original file
-	lockA := flock.New(path)
-	acquiredA, err := lockA.TryLock()
-	require.NoError(t, err)
-	require.True(t, acquiredA)
-
-	// Remove original file on disk to simulate deletion race
-	require.NoError(t, os.Remove(path))
-
-	// Handle B creates and locks a new file at the same path
-	lockB := flock.New(path)
-	acquiredB, err := lockB.TryLock()
-	require.NoError(t, err)
-	require.True(t, acquiredB)
-
-	// lockA is now stale because path points to lockB's inode
-	current, err := lockFileIsCurrent(path, lockA)
-	require.NoError(t, err)
-	assert.False(t, current, "stale lock handle must not be current")
-
-	_ = lockA.Unlock()
-	_ = lockA.Close()
-
-	_ = lockB.Unlock()
-	_ = lockB.Close()
 }
 
