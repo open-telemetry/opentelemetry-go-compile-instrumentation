@@ -20,13 +20,13 @@ func TestRunCmd(t *testing.T) {
 		expectErr bool
 	}{
 		{
-			name:      "simple echo command",
-			args:      []string{"echo", "hello"},
+			name:      "simple go command",
+			args:      []string{"go", "version"},
 			expectErr: false,
 		},
 		{
 			name:      "command with multiple arguments",
-			args:      []string{"echo", "hello", "world"},
+			args:      []string{"go", "env", "GOOS"},
 			expectErr: false,
 		},
 		{
