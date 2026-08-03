@@ -33,6 +33,8 @@ jobs:
               - 'tool/**'
               - 'pkg/**'
               - 'test/**'
+              - 'instrumentation/**/*.yaml'
+              - 'instrumentation/**/*.yml'
               - '.github/workflows/test-integration.yaml'
 
   test-integration-coverage:
