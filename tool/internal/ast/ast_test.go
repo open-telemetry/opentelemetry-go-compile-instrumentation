@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"errors"
 	"go/parser"
 	"os"
 	"path/filepath"
@@ -58,4 +59,63 @@ func BenchmarkParsePackageName(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestWriteFile_Basic(t *testing.T) {
+	f, err := ParseFile("ast_test.go")
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "out.go")
+	err = WriteFile(outPath, f)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "package ast")
+}
+
+func TestWriteFile_CreateError(t *testing.T) {
+	f, err := ParseFile("ast_test.go")
+	require.NoError(t, err)
+
+	err = WriteFile(filepath.Join(t.TempDir(), "nonexistent", "out.go"), f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create file")
+}
+
+type mockWriteCloser struct {
+	writeErr error
+	closeErr error
+}
+
+func (m *mockWriteCloser) Write(p []byte) (int, error) {
+	if m.writeErr != nil {
+		return 0, m.writeErr
+	}
+	return len(p), nil
+}
+
+func (m *mockWriteCloser) Close() error {
+	return m.closeErr
+}
+
+func TestWriteFile_WriteError(t *testing.T) {
+	f, err := ParseFile("ast_test.go")
+	require.NoError(t, err)
+
+	mock := &mockWriteCloser{writeErr: errors.New("disk write error")}
+	err = writeFile(mock, "out.go", f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write to file")
+}
+
+func TestWriteFile_CloseError(t *testing.T) {
+	f, err := ParseFile("ast_test.go")
+	require.NoError(t, err)
+
+	mock := &mockWriteCloser{closeErr: errors.New("flush close error")}
+	err = writeFile(mock, "out.go", f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to close file")
 }
