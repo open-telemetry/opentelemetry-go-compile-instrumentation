@@ -45,9 +45,15 @@ func TestParseCdDir(t *testing.T) {
 			expectedOk:  true,
 		},
 		{
-			name:        "cd command with comment",
+			name:        "cd command with spaces",
+			line:        "cd /tmp/test project with spaces",
+			expectedDir: "/tmp/test project with spaces",
+			expectedOk:  true,
+		},
+		{
+			name:        "cd command with hash in path",
 			line:        "cd /home/user/project # build comment",
-			expectedDir: "/home/user/project",
+			expectedDir: "/home/user/project # build comment",
 			expectedOk:  true,
 		},
 		{
@@ -57,10 +63,31 @@ func TestParseCdDir(t *testing.T) {
 			expectedOk:  true,
 		},
 		{
-			name:        "cd with Windows path",
-			line:        "cd C:\\Users\\test\\project",
-			expectedDir: "C:\\Users\\test\\project",
+			name:        "cd with Windows path containing spaces",
+			line:        "cd C:\\Users\\test user\\project",
+			expectedDir: "C:\\Users\\test user\\project",
 			expectedOk:  true,
+		},
+		{
+			name:        "cd with trailing whitespace",
+			line:        "cd /home/user/project  \r",
+			expectedDir: "/home/user/project",
+			expectedOk:  true,
+		},
+		{
+			name:       "cd without directory",
+			line:       "cd",
+			expectedOk: false,
+		},
+		{
+			name:       "cd with empty directory",
+			line:       "cd   ",
+			expectedOk: false,
+		},
+		{
+			name:       "command beginning with cd",
+			line:       "cdrom /home/user/project",
+			expectedOk: false,
 		},
 		{
 			name:        "not a cd command",
@@ -200,6 +227,29 @@ cd /home/user/project/pkg/cgopkg
 				"/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg",
 				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go",
 			},
+		},
+		{
+			name: "cd path with spaces included",
+			buildPlanContent: `
+cd /tmp/test project with spaces
+/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg
+/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go
+`,
+			expectedCommands: []string{
+				"cd /tmp/test project with spaces",
+				"/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg",
+				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go",
+			},
+		},
+		{
+			name: "malformed cd commands ignored",
+			buildPlanContent: `
+cd
+` + "cd   \n" + `
+cdrom
+cdrom /project/src
+`,
+			expectedCommands: nil,
 		},
 		{
 			name: "multiple cgo packages",

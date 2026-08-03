@@ -37,12 +37,15 @@ func (d *Dependency) String() string {
 
 // parseCdDir extracts the directory path from a "cd" command line.
 func parseCdDir(line string) (string, bool) {
-	if !strings.HasPrefix(strings.ToLower(line), "cd") {
+	const prefix = "cd "
+	if !strings.HasPrefix(strings.ToLower(line), prefix) {
 		return "", false
 	}
-	const cdCommandSplitLimit = 2 // Split "cd dir" into [dir, rest] to ignore trailing comments
-	parts := strings.SplitN(line[3:], " ", cdCommandSplitLimit)
-	return strings.TrimSpace(parts[0]), true
+	dir := strings.TrimSpace(line[len(prefix):])
+	if dir == "" {
+		return "", false
+	}
+	return dir, true
 }
 
 // findCommands scans the build plan log and returns relevant commands
