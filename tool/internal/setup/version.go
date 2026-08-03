@@ -24,8 +24,6 @@ func warnUnresolvedVersionSkip(warn func(string, ...any), depImportPath, version
 	if warn == nil {
 		return
 	}
-	args := make([]any, 0, 4+len(attrs))
-	args = append(args, "dep", depImportPath, "version_range", versionRange)
-	args = append(args, attrs...)
+	args := append([]any{"dep", depImportPath, "version_range", versionRange}, attrs...)
 	warn(unresolvedVersionSkipMsg, args...)
 }

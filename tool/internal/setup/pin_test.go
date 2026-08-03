@@ -546,6 +546,22 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 		},
 		{
+			name: "glob target mismatch",
+			deps: []*Dependency{
+				{
+					ImportPath: "other.com/foo",
+					Version:    "v1.2.3",
+				},
+			},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target:       "example.com/*",
+					VersionRange: "v1.2.3",
+				}},
+			},
+			want: map[string]bool{},
+		},
+		{
 			name: "root target",
 			deps: []*Dependency{
 				{
@@ -935,14 +951,32 @@ func TestUpdatePinnedProjects_InvalidRule(t *testing.T) {
 func TestGeneratePinnedProjects(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, dir)
-	os.MkdirAll(util.GetBuildTempDir(), 0o755) // ensure .otelc-build exists
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755)) // ensure .otelc-build exists
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "go.mod"),
 		[]byte(`module example.com/test
 
 go 1.25
+
+require github.com/anthropics/anthropic-sdk-go v0.0.0-00010101000000-000000000000
+replace github.com/anthropics/anthropic-sdk-go => ./anthropic
 `),
+		0o644,
+	))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "anthropic"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "anthropic", "go.mod"),
+		[]byte(`module github.com/anthropics/anthropic-sdk-go
+
+go 1.25
+`),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "anthropic", "main.go"),
+		[]byte(`package anthropic`),
 		0o644,
 	))
 

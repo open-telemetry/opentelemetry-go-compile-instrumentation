@@ -316,39 +316,24 @@ func matchInstrumentationImports(
 	// Record the first unresolved-version skip per instrumentation module.
 	// Warnings are emitted after matching so we only complain when the module
 	// was not imported by any other rule/dep (avoids false positives).
-	type unresolvedSkip struct {
-		dep          string
-		versionRange string
-	}
 	skipped := make(map[string]unresolvedSkip)
 
 	// Match only on target + version.
 	for _, dep := range deps {
 		for modPath, rules := range ruleset {
 			for _, r := range rules {
-				switch {
-				case rule.IsRootTarget(r.Target):
-					// always add root targets
-					// they will be further matched in setup phase
+				tm := instrumentationRuleMatchesDep(dep, r)
+				if tm.isRoot {
+					// always add root targets; they are further matched in setup
 					imports[modPath] = true
 					continue
-				case rule.IsGlobTarget(r.Target):
-					if !rule.MatchGlobTarget(r.Target, dep.ImportPath) {
-						continue
-					}
-				case r.Target != dep.ImportPath:
+				}
+				if !tm.matched {
 					continue
 				}
 
 				if !util.VersionInRange(dep.Version, r.VersionRange) {
-					if unresolvedVersionSkip(dep.Version, r.VersionRange) {
-						if _, ok := skipped[modPath]; !ok {
-							skipped[modPath] = unresolvedSkip{
-								dep:          dep.ImportPath,
-								versionRange: r.VersionRange,
-							}
-						}
-					}
+					recordUnresolvedSkip(skipped, modPath, dep, r.VersionRange)
 					continue
 				}
 
@@ -357,18 +342,67 @@ func matchInstrumentationImports(
 		}
 	}
 
-	if warn != nil {
-		for modPath, s := range skipped {
-			if imports[modPath] {
-				continue
-			}
-			warnUnresolvedVersionSkip(warn, s.dep, s.versionRange,
-				"instrumentation", modPath,
-			)
-		}
-	}
-
+	emitUnresolvedSkipWarnings(warn, imports, skipped)
 	return imports
+}
+
+type unresolvedSkip struct {
+	dep          string
+	versionRange string
+}
+
+type instrumentationTargetMatch struct {
+	matched bool
+	isRoot  bool
+}
+
+// instrumentationRuleMatchesDep reports whether r's target matches dep.
+// Root targets always pin the instrumentation module.
+func instrumentationRuleMatchesDep(dep *Dependency, r yamlRule) instrumentationTargetMatch {
+	switch {
+	case rule.IsRootTarget(r.Target):
+		return instrumentationTargetMatch{matched: true, isRoot: true}
+	case rule.IsGlobTarget(r.Target):
+		return instrumentationTargetMatch{matched: rule.MatchGlobTarget(r.Target, dep.ImportPath)}
+	default:
+		return instrumentationTargetMatch{matched: r.Target == dep.ImportPath}
+	}
+}
+
+func recordUnresolvedSkip(
+	skipped map[string]unresolvedSkip,
+	modPath string,
+	dep *Dependency,
+	versionRange string,
+) {
+	if !unresolvedVersionSkip(dep.Version, versionRange) {
+		return
+	}
+	if _, ok := skipped[modPath]; ok {
+		return
+	}
+	skipped[modPath] = unresolvedSkip{
+		dep:          dep.ImportPath,
+		versionRange: versionRange,
+	}
+}
+
+func emitUnresolvedSkipWarnings(
+	warn func(msg string, args ...any),
+	imports map[string]bool,
+	skipped map[string]unresolvedSkip,
+) {
+	if warn == nil {
+		return
+	}
+	for modPath, s := range skipped {
+		if imports[modPath] {
+			continue
+		}
+		warnUnresolvedVersionSkip(warn, s.dep, s.versionRange,
+			"instrumentation", modPath,
+		)
+	}
 }
 
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
