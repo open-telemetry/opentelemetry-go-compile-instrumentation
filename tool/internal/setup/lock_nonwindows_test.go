@@ -8,7 +8,9 @@ package setup
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
@@ -24,31 +26,47 @@ func TestIsTransientLockFileError(t *testing.T) {
 
 func TestTryAcquireStaleLockCleanup(t *testing.T) {
 	lockTestDir(t)
+	tmpDir := t.TempDir()
 	path := buildLockPath()
 
-	// Handle A locks original file
+	// 1. Verify lockFileIsCurrent returns false for stale lock handles
 	lockA := flock.New(path)
 	acquiredA, err := lockA.TryLock()
 	require.NoError(t, err)
 	require.True(t, acquiredA)
 
-	// Remove original file on disk to simulate deletion race (supported on POSIX)
 	require.NoError(t, os.Remove(path))
 
-	// Handle B creates and locks a new file at the same path
 	lockB := flock.New(path)
 	acquiredB, err := lockB.TryLock()
 	require.NoError(t, err)
 	require.True(t, acquiredB)
 
-	// lockA is now stale because path points to lockB's inode
 	current, err := lockFileIsCurrent(path, lockA)
 	require.NoError(t, err)
 	assert.False(t, current, "stale lock handle must not be current")
 
 	_ = lockA.Unlock()
 	_ = lockA.Close()
-
 	_ = lockB.Unlock()
 	_ = lockB.Close()
+
+	// 2. Directly invoke tryAcquire under unlinked file condition to exercise
+	// the !current cleanup path inside tryAcquire.
+	raceFile := filepath.Join(tmpDir, "racefile.lock")
+	require.NoError(t, os.WriteFile(raceFile, []byte("data"), 0o644))
+
+	go func() {
+		time.Sleep(1 * time.Millisecond)
+		_ = os.Remove(raceFile)
+	}()
+
+	l, acq, _, err := tryAcquire(raceFile)
+	require.NoError(t, err)
+	if !acq {
+		assert.Nil(t, l, "tryAcquire must return nil handle on stale lock cleanup")
+	} else {
+		_ = l.Unlock()
+		_ = l.Close()
+	}
 }
