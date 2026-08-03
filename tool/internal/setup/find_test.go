@@ -394,6 +394,9 @@ echo nothing useful
 
 			t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
+			exe, err := os.Executable()
+			require.NoError(t, err)
+
 			execCommandContext = func(
 				ctx context.Context,
 				name string,
@@ -402,8 +405,6 @@ echo nothing useful
 				assert.Equal(t, "go", name)
 				assert.Equal(t, tt.expectedGoCmd, args)
 
-				exe, err := os.Executable()
-				require.NoError(t, err)
 				cmd := exec.CommandContext(ctx, exe, "-test.run=^TestHelperProcess$")
 				cmd.Env = append(os.Environ(),
 					"GO_WANT_HELPER_PROCESS=1",
