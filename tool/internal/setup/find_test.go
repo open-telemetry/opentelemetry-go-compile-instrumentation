@@ -431,7 +431,10 @@ func TestFindModVersion(t *testing.T) {
 		},
 		{
 			name: "windows-style module cache path",
-			path: `C:\go\pkg\mod\github.com\foo\bar@v9.0.0\client.go`,
+			// Use /-separated form so this exercises the same path shape
+			// filepath.ToSlash produces on Windows, without depending on GOOS
+			// (filepath.ToSlash is a no-op when the host separator is already /).
+			path: "C:/go/pkg/mod/github.com/foo/bar@v9.0.0/client.go",
 			want: "v9.0.0",
 		},
 		{
@@ -456,12 +459,4 @@ func TestFindModVersion(t *testing.T) {
 			assert.Equal(t, tt.want, findModVersion(tt.path))
 		})
 	}
-}
-
-func TestUnresolvedVersionSkip(t *testing.T) {
-	assert.True(t, unresolvedVersionSkip("", "v1.0.0"))
-	assert.True(t, unresolvedVersionSkip("", "v1.0.0,v2.0.0"))
-	assert.False(t, unresolvedVersionSkip("v1.0.0", "v1.0.0"))
-	assert.False(t, unresolvedVersionSkip("", ""))
-	assert.False(t, unresolvedVersionSkip("v1.0.0", ""))
 }

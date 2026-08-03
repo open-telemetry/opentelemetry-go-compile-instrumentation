@@ -112,13 +112,6 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
 
-// unresolvedVersionSkip reports whether a version-gated rule is being skipped
-// because the dependency version could not be resolved from its compile path
-// (common for replace/local/vendor sources that lack an @vX.Y.Z/ segment).
-func unresolvedVersionSkip(depVersion, ruleVersion string) bool {
-	return depVersion == "" && ruleVersion != ""
-}
-
 type targetRule struct {
 	target string
 	rule   rule.InstRule
@@ -198,10 +191,9 @@ func (sp *SetupPhase) runMatch(
 	for _, r := range relevantRules {
 		if !matchVersion(dep, r) {
 			if unresolvedVersionSkip(dep.Version, r.GetVersion()) {
-				sp.Warn("skipping version-gated rule because dependency version is unresolved",
+				// Per-rule: setup drops individual rules, so each skip is actionable.
+				warnUnresolvedVersionSkip(sp.Warn, dep.ImportPath, r.GetVersion(),
 					"rule", r.GetName(),
-					"dep", dep.ImportPath,
-					"version_range", r.GetVersion(),
 				)
 			}
 			continue

@@ -595,28 +595,79 @@ func TestMatchInstrumentationImports(t *testing.T) {
 }
 
 func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
-	deps := []*Dependency{{
-		ImportPath: "example.com/foo",
-		Version:    "",
-	}}
-	rules := map[string][]yamlRule{
-		"example.com/instrumentation/foo": {{
-			Target:       "example.com/foo",
-			VersionRange: "v1.0.0",
-		}},
-	}
+	t.Run("warns when instrumentation is fully skipped", func(t *testing.T) {
+		deps := []*Dependency{{
+			ImportPath: "example.com/foo",
+			Version:    "",
+		}}
+		rules := map[string][]yamlRule{
+			"example.com/instrumentation/foo": {{
+				Target:       "example.com/foo",
+				VersionRange: "v1.0.0",
+			}},
+		}
 
-	var warned bool
-	var warnedMsg string
-	got := matchInstrumentationImports(deps, rules, func(msg string, args ...any) {
-		warned = true
-		warnedMsg = msg
-		_ = args
+		var warned bool
+		var warnedMsg string
+		got := matchInstrumentationImports(deps, rules, func(msg string, args ...any) {
+			warned = true
+			warnedMsg = msg
+			_ = args
+		})
+
+		require.Empty(t, got)
+		require.True(t, warned)
+		require.Contains(t, warnedMsg, "unresolved")
 	})
 
-	require.Empty(t, got)
-	require.True(t, warned)
-	require.Contains(t, warnedMsg, "unresolved")
+	t.Run("no warn when another rule still imports the module", func(t *testing.T) {
+		// One dep fails version gate (empty version); another dep under the
+		// same instrumentation module matches an unversioned rule. The module
+		// must be imported and must not emit a skip warning.
+		deps := []*Dependency{
+			{ImportPath: "example.com/foo/v1", Version: ""},
+			{ImportPath: "example.com/foo/v1/sub", Version: "v1.0.0"},
+		}
+		rules := map[string][]yamlRule{
+			"example.com/instrumentation/foo": {
+				{Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
+				{Target: "example.com/foo/v1/sub", VersionRange: ""},
+			},
+		}
+
+		var warned bool
+		got := matchInstrumentationImports(deps, rules, func(msg string, args ...any) {
+			warned = true
+			_ = msg
+			_ = args
+		})
+
+		require.Equal(t, map[string]bool{"example.com/instrumentation/foo": true}, got)
+		require.False(t, warned)
+	})
+
+	t.Run("warns once per instrumentation module", func(t *testing.T) {
+		deps := []*Dependency{{
+			ImportPath: "example.com/foo",
+			Version:    "",
+		}}
+		rules := map[string][]yamlRule{
+			"example.com/instrumentation/foo": {
+				{Target: "example.com/foo", VersionRange: "v1.0.0"},
+				{Target: "example.com/foo", VersionRange: "v2.0.0"},
+			},
+		}
+
+		warnCount := 0
+		got := matchInstrumentationImports(deps, rules, func(msg string, args ...any) {
+			warnCount++
+			_ = msg
+			_ = args
+		})
+
+		require.Empty(t, got)
+		require.Equal(t, 1, warnCount)
+	})
 }
 
 func TestLoadMinimalRules_HappyPath(t *testing.T) {

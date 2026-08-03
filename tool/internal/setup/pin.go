@@ -313,6 +313,15 @@ func matchInstrumentationImports(
 ) map[string]bool {
 	imports := make(map[string]bool)
 
+	// Record the first unresolved-version skip per instrumentation module.
+	// Warnings are emitted after matching so we only complain when the module
+	// was not imported by any other rule/dep (avoids false positives).
+	type unresolvedSkip struct {
+		dep          string
+		versionRange string
+	}
+	skipped := make(map[string]unresolvedSkip)
+
 	// Match only on target + version.
 	for _, dep := range deps {
 		for modPath, rules := range ruleset {
@@ -332,18 +341,30 @@ func matchInstrumentationImports(
 				}
 
 				if !util.VersionInRange(dep.Version, r.VersionRange) {
-					if warn != nil && unresolvedVersionSkip(dep.Version, r.VersionRange) {
-						warn("skipping version-gated instrumentation because dependency version is unresolved",
-							"instrumentation", modPath,
-							"dep", dep.ImportPath,
-							"version_range", r.VersionRange,
-						)
+					if unresolvedVersionSkip(dep.Version, r.VersionRange) {
+						if _, ok := skipped[modPath]; !ok {
+							skipped[modPath] = unresolvedSkip{
+								dep:          dep.ImportPath,
+								versionRange: r.VersionRange,
+							}
+						}
 					}
 					continue
 				}
 
 				imports[modPath] = true
 			}
+		}
+	}
+
+	if warn != nil {
+		for modPath, s := range skipped {
+			if imports[modPath] {
+				continue
+			}
+			warnUnresolvedVersionSkip(warn, s.dep, s.versionRange,
+				"instrumentation", modPath,
+			)
 		}
 	}
 
