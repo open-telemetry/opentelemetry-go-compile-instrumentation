@@ -380,7 +380,7 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 	matchedJSON, _ := json.Marshal([]*rule.InstRuleSet{ruleSet})
 	matchedFile := util.GetMatchedRuleFile()
 	os.MkdirAll(filepath.Dir(matchedFile), 0o755)
-	util.WriteFile(matchedFile, string(matchedJSON))
+	_ = os.WriteFile(matchedFile, matchedJSON, 0o644)
 }
 
 func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceFiles ...string) []string {
