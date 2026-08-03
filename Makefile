@@ -636,7 +636,9 @@ test-integration: build build-demo
 test-latestlibbuild: build ## Run LatestLibBuild tests
 	@echo "Running LatestLibBuild tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ./gotest-latestlibbuild.log
+	# 40m: instrumented builds run sequentially, and linodego alone can take
+	# several minutes on Windows.
+	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags latestlibbuild ./latestlibbuild/... 2>&1 | tee ./gotest-latestlibbuild.log
 
 .ONESHELL:
 test-latestlibrun: build ## Run LatestLibRun tests (bump apps to @latest then run integration suite)
