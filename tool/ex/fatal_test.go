@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -91,7 +90,7 @@ func TestMain(m *testing.M) {
 // non-zero exit, which every Fatal path produces).
 func runFatalCase(t *testing.T, name string) (string, error) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestMain") //nolint:gosec // os.Args[0] is this test binary
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain")
 	cmd.Env = append(os.Environ(), "EX_FATAL_CASE="+name)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -130,6 +129,6 @@ func TestFatalf(t *testing.T) {
 	out, err := runFatalCase(t, "fatalf")
 	assert.Equal(t, 1, exitCode(t, err))
 	assert.Contains(t, out, "formatted fatal 7")
-	assert.True(t, strings.Contains(out, "Stack:"),
+	assert.Contains(t, out, "Stack:",
 		"Fatalf builds a stackful error, so a stack section should be printed")
 }
