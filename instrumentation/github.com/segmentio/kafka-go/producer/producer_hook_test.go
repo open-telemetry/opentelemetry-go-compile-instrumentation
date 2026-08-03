@@ -96,6 +96,24 @@ func TestBeforeWriteMessages_InjectsHeadersAndStartsSpans(t *testing.T) {
 	assert.Equal(t, "k1", m["messaging.kafka.message.key"])
 }
 
+func TestBeforeWriteMessages_InvalidUTF8MessageKey(t *testing.T) {
+	sr := setupTest(t)
+
+	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders"}
+	msgs := []kafka.Message{{Key: []byte{0xff, 0xfe, 0xfd}, Value: []byte("hello")}}
+
+	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
+	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	AfterWriteMessages(ictx, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	m := spanAttrs(spans[0])
+	_, hasKey := m["messaging.kafka.message.key"]
+	assert.False(t, hasKey)
+}
+
 func TestAfterWriteMessages_RecordsError(t *testing.T) {
 	sr := setupTest(t)
 
