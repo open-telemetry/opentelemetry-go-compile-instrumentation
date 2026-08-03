@@ -288,8 +288,8 @@ func TestInterceptToolVersionWriteError(t *testing.T) {
 	f, err := os.Create(filepath.Join(t.TempDir(), "closed"))
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
-	os.Stdout = f
-	t.Cleanup(func() { os.Stdout = oldStdout })
+	os.Stdout = f                               //nolint:reassign // interceptToolVersion writes to os.Stdout; replace it with a closed file to force a write error
+	t.Cleanup(func() { os.Stdout = oldStdout }) //nolint:reassign // restore the original os.Stdout
 
 	err = interceptToolVersion(ctx, []string{goCompileToolPath(t), "-V=full"})
 	require.Error(t, err)
