@@ -112,6 +112,34 @@ func TestReadMessage_LinksToProducerAndSetsAttrs(t *testing.T) {
 	assert.Equal(t, int64(42), m["messaging.kafka.offset"])
 }
 
+func TestReadMessage_InvalidUTF8MessageKey(t *testing.T) {
+	sr := setupTest(t)
+
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "orders",
+	})
+	t.Cleanup(func() { _ = r.Close() })
+
+	msg := kafka.Message{
+		Topic:     "orders",
+		Partition: 3,
+		Offset:    42,
+		Key:       []byte{'o', 0xff, 'k'},
+		Value:     []byte("hello"),
+	}
+
+	ictx := hooktest.NewMockHookContext(r, context.Background())
+	BeforeReadMessage(ictx, r, context.Background())
+	AfterReadMessage(ictx, msg, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	m := spanAttrs(spans[0])
+	assert.Equal(t, "o\uFFFDk", m["messaging.kafka.message.key"])
+}
+
 func TestReadMessage_RecordsError(t *testing.T) {
 	sr := setupTest(t)
 

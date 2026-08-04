@@ -11,7 +11,9 @@
   customManagers: [
     {
       customType: 'regex',
-      fileMatch: ['^Makefile$'],
+      managerFilePatterns: [
+        '/^Makefile$/',
+      ],
       matchStrings: [
         'WEAVER_IMAGE\\s*\\?=\\s*(?<depName>[^:]+):v(?<currentValue>[^\\s]+)',
       ],
@@ -37,6 +39,28 @@
       matchPackageNames: [
         '*',
       ],
+    },
+    {
+      // Each instrumentation module deliberately targets a single major of the
+      // library it instruments, so supporting a new major means adding a new
+      // module directory (openai-go -> openai-go/v2 -> openai-go/v3), never
+      // bumping in place. Renovate's Go major update instead adds the new
+      // major's module path alongside the old one; `go mod tidy` strips it
+      // again because no code imports it, so such a PR can never go green.
+      // When a new major gains its own module directory, list its path here.
+      matchManagers: [
+        'gomod',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ],
+      matchPackageNames: [
+        'github.com/openai/openai-go',
+        'github.com/openai/openai-go/v2',
+        'github.com/openai/openai-go/v3',
+        'go.mongodb.org/mongo-driver',
+      ],
+      enabled: false,
     },
   ],
   labels: [

@@ -10,7 +10,7 @@ Unlike traditional HTTP instrumentation that requires manual wrapper code, this 
 
 ✅ **Zero Code Changes**: Automatic instrumentation without modifying application code
 ✅ **Universal Coverage**: Instruments ALL HTTP calls, including stdlib internals
-✅ **W3C Trace Context**: Automatic context propagation between services
+✅ **Context Propagation**: Automatic context propagation between services, using the propagators selected by `OTEL_PROPAGATORS` (W3C Trace Context and Baggage by default)
 ✅ **Semantic Conventions**: Follows OpenTelemetry HTTP semantic conventions
 ✅ **Client & Server**: Complete instrumentation for both HTTP clients and servers
 ✅ **Status Code Capture**: Accurate response status code tracking
@@ -271,7 +271,7 @@ Service A: HTTP GET
 ```go
 func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http.Request) {
     // 1. Check if instrumentation is enabled
-    // 2. Filter out OTel exporter requests (prevent infinite loops)inst.HookContext
+    // 2. Filter out OTel exporter requests (prevent infinite loops)
     // 3. Build NetHttpRequest from http.Request
     // 4. Start instrumentation span
     // 5. Inject trace context into headers

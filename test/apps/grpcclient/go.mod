@@ -6,7 +6,7 @@ replace go.opentelemetry.io/otelc/test/shared/grpcpb => ../../shared/grpcpb
 
 require (
 	go.opentelemetry.io/otelc/test/shared/grpcpb v0.0.0-00010101000000-000000000000
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 )
 
 require (

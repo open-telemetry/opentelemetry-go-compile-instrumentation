@@ -143,10 +143,12 @@ func tryAcquire(path string) (*flock.Flock, bool, bool, error) {
 	current, err := lockFileIsCurrent(path, lock)
 	if err != nil {
 		_ = lock.Unlock()
+		_ = lock.Close()
 		return nil, false, leftover, err
 	}
 	if !current {
 		_ = lock.Unlock()
+		_ = lock.Close()
 		return nil, false, leftover, nil
 	}
 	return lock, true, leftover, nil

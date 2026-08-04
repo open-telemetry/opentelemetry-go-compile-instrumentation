@@ -5,8 +5,16 @@ package instrument
 
 import (
 	"context"
+	goast "go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"strings"
 	"testing"
 
+	"github.com/dave/dst"
+	"github.com/dave/dst/decorator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -121,7 +129,7 @@ func TestCollectReturnValues(t *testing.T) {
 		{
 			name:     "underscore return values",
 			src:      "package main\nfunc F() (_ int, _ string) { return }",
-			expected: []string{"_ignoredParam0", "_ignoredParam1"},
+			expected: []string{"_ignoredRetVal0", "_ignoredRetVal1"},
 		},
 	}
 
@@ -132,4 +140,89 @@ func TestCollectReturnValues(t *testing.T) {
 			assert.Equal(t, tt.expected, retVals)
 		})
 	}
+}
+
+// Regression for #736: a blank param/receiver and a blank named return share
+// one scope, so the two collectors must not rename them to the same identifier.
+func TestCollectNamesNoCollision(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "blank param and blank named return",
+			src:  "package main\nfunc F(_ int) (_ error) { return nil }",
+		},
+		{
+			name: "unnamed param and blank named return",
+			src:  "package main\nfunc F(int) (_ error) { return nil }",
+		},
+		{
+			name: "unnamed receiver and blank named return",
+			src:  "package main\ntype T struct{}\nfunc (T) M() (_ error) { return nil }",
+		},
+		{
+			name: "unnamed param and unnamed return (control)",
+			src:  "package main\nfunc F(int) (int) { return 0 }",
+		},
+		{
+			name: "multiple blanks on both sides",
+			src:  "package main\nfunc F(_ int, _ string) (_ error, _ bool) { return nil, false }",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, funcDecl := parseFileFunc(t, tt.src)
+
+			// Mirror insertTJump: returns are collected first, then arguments.
+			retVals := collectReturnValues(funcDecl)
+			args := collectArguments(funcDecl)
+
+			seen := make(map[string]struct{})
+			for _, name := range append(append([]string{}, retVals...), args...) {
+				require.NotEqual(t, ast.IdentIgnore, name, "blank binding was left unnamed")
+				_, dup := seen[name]
+				require.Falsef(t, dup, "binding %q generated in two positions", name)
+				seen[name] = struct{}{}
+			}
+
+			requireTypeChecks(t, renderFile(t, file))
+		})
+	}
+}
+
+// parseFileFunc parses source into a file and returns it alongside the first
+// function declaration it contains.
+func parseFileFunc(t *testing.T, source string) (*dst.File, *dst.FuncDecl) {
+	t.Helper()
+	parser := ast.NewAstParser()
+	file, err := parser.ParseSource(source)
+	require.NoError(t, err)
+	for _, decl := range file.Decls {
+		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
+			return file, funcDecl
+		}
+	}
+	require.Fail(t, "no function declaration found in source")
+	return nil, nil
+}
+
+// renderFile restores a dst.File back to Go source code.
+func renderFile(t *testing.T, file *dst.File) string {
+	t.Helper()
+	var buf strings.Builder
+	require.NoError(t, decorator.Fprint(&buf, file))
+	return buf.String()
+}
+
+// requireTypeChecks fails the test unless src is valid, type-correct Go.
+func requireTypeChecks(t *testing.T, src string) {
+	t.Helper()
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, "src.go", src, parser.AllErrors)
+	require.NoErrorf(t, err, "generated code does not parse:\n%s", src)
+	conf := types.Config{Importer: importer.Default()}
+	_, err = conf.Check("main", fset, []*goast.File{parsed}, nil)
+	require.NoErrorf(t, err, "generated code does not type-check:\n%s", src)
 }

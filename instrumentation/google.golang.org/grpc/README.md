@@ -10,7 +10,7 @@ Unlike traditional gRPC instrumentation that requires manually adding intercepto
 
 ✅ **Zero Code Changes**: Automatic instrumentation without modifying application code
 ✅ **Universal Coverage**: Instruments ALL gRPC calls, including internal services
-✅ **W3C Trace Context**: Automatic context propagation via gRPC metadata
+✅ **Context Propagation**: Automatic context propagation via gRPC metadata, using the propagators selected by `OTEL_PROPAGATORS` (W3C Trace Context and Baggage by default)
 ✅ **Semantic Conventions**: Follows OpenTelemetry RPC semantic conventions v1.37.0
 ✅ **Client & Server**: Complete instrumentation for both gRPC clients and servers
 ✅ **Status Code Capture**: Accurate gRPC status code tracking

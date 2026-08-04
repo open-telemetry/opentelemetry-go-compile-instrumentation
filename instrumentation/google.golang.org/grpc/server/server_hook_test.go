@@ -12,12 +12,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 	"go.opentelemetry.io/otelc/pkg/runtime"
@@ -230,6 +233,101 @@ func TestServerStatsHandler_Integration(t *testing.T) {
 	server := grpc.NewServer(newOpts...)
 	t.Cleanup(server.Stop)
 	assert.NotNil(t, server)
+}
+
+func TestServerStatsHandler_HandleRPC_PayloadEvents(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+	)
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newServerStatsHandler()
+
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+		FullMethodName: "/grpc.testing.TestService/UnaryCall",
+	})
+	require.NotNil(t, ctx)
+
+	// Drive the message-lifecycle events that HandleRPC handles before End.
+	// These previously had no coverage; they must not panic and must count
+	// messages on the gRPC context.
+	handler.HandleRPC(ctx, &stats.Begin{BeginTime: time.Now()})
+	handler.HandleRPC(ctx, &stats.InPayload{Length: 128})
+	handler.HandleRPC(ctx, &stats.InPayload{Length: 64})
+	handler.HandleRPC(ctx, &stats.OutPayload{Length: 256})
+	handler.HandleRPC(ctx, &stats.OutHeader{})
+
+	gctx, ok := ctx.Value(gRPCContextKey{}).(*gRPCContext)
+	require.True(t, ok, "expected gRPC context to be set by TagRPC")
+	assert.Equal(t, int64(2), gctx.inMessages, "two InPayload events should be counted")
+	assert.Equal(t, int64(1), gctx.outMessages, "one OutPayload event should be counted")
+
+	// End the RPC so the span is finished and exported.
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-50 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	spans := exporter.GetSpans()
+	assert.NotEmpty(t, spans, "expected the RPC span to be exported after End")
+}
+
+func TestServerStatsHandler_HandleRPC_WithError(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+	)
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newServerStatsHandler()
+
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+		FullMethodName: "/grpc.testing.TestService/UnaryCall",
+	})
+	require.NotNil(t, ctx)
+
+	// End with an error exercises the error-status branch of HandleRPC.
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-50 * time.Millisecond),
+		EndTime:   time.Now(),
+		Error:     status.Error(codes.Internal, "boom"),
+	})
+
+	spans := exporter.GetSpans()
+	require.NotEmpty(t, spans, "expected span to be exported")
+	assert.Equal(t, otelcodes.Error, spans[0].Status.Code, "errored RPC should set span status to Error")
+}
+
+func TestServerStatsHandler_HandleRPC_NilContextIsNoop(t *testing.T) {
+	handler := newServerStatsHandler()
+
+	// A context with no span / no gRPC context must not panic.
+	assert.NotPanics(t, func() {
+		handler.HandleRPC(t.Context(), &stats.InPayload{Length: 10})
+		handler.HandleRPC(t.Context(), &stats.OutPayload{Length: 10})
+		handler.HandleRPC(t.Context(), &stats.OutHeader{})
+	})
 }
 
 func TestServerStatsHandler_TagConn(t *testing.T) {

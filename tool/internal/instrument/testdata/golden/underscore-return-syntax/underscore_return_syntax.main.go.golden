@@ -5,11 +5,11 @@ package main
 
 import _ "unsafe"
 
-func UnderscoreReturnFunc() (_ignoredParam0 int, _ignoredParam1 error) {
+func UnderscoreReturnFunc() (_ignoredRetVal0 int, _ignoredRetVal1 error) {
 	//line <generated>:1
 	if false {
 	} else {
-		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(&HookContextImpl2035128499{params: []interface{}{}, returnVals: []interface{}{&_ignoredParam0, &_ignoredParam1}}, &_ignoredParam0, &_ignoredParam1)
+		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(&HookContextImpl2035128499{params: []interface{}{}, returnVals: []interface{}{&_ignoredRetVal0, &_ignoredRetVal1}}, &_ignoredRetVal0, &_ignoredRetVal1)
 	}
 	//line main.go:7:2
 	return 0, nil
@@ -60,10 +60,6 @@ func (c *HookContextImpl2035128499) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl2035128499) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }
@@ -79,15 +75,19 @@ func (c *HookContextImpl2035128499) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl2035128499) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.returnVals[0].(*int)) = val.(int)
+		if val == nil {
+			*(c.returnVals[0].(*int)) = *new(int)
+		} else {
+			*(c.returnVals[0].(*int)) = val.(int)
+		}
 	case 1:
-		*(c.returnVals[1].(*error)) = val.(error)
+		if val == nil {
+			*(c.returnVals[1].(*error)) = *new(error)
+		} else {
+			*(c.returnVals[1].(*error)) = val.(error)
+		}
 	}
 }
 func (c *HookContextImpl2035128499) GetParamCount() int     { return len(c.params) }

@@ -74,10 +74,6 @@ func (c *HookContextImpl2498065262) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl2498065262) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }
@@ -89,10 +85,6 @@ func (c *HookContextImpl2498065262) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl2498065262) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }
@@ -171,10 +163,6 @@ func (c *HookContextImpl619637533) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl619637533) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }
@@ -186,10 +174,6 @@ func (c *HookContextImpl619637533) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl619637533) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }
@@ -290,10 +274,6 @@ func (c *HookContextImpl2195172342) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl2195172342) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }
@@ -305,10 +285,6 @@ func (c *HookContextImpl2195172342) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl2195172342) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }

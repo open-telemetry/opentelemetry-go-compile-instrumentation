@@ -36,7 +36,7 @@ func TestAcquireBuildLockExcludes(t *testing.T) {
 	// A second acquisition must not proceed while the first is held. The
 	// goroutine never touches t after the test can have completed: its
 	// error goes over a channel, and its context is canceled on cleanup.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	var second atomic.Bool
 	done := make(chan error, 1)

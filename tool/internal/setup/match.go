@@ -90,6 +90,9 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 			if err3 := rule.ValidateTarget(r.GetTarget()); err3 != nil {
 				return nil, ex.Wrapf(err3, "rule %q", name)
 			}
+			if err3 := util.ValidateVersionRange(r.GetVersion()); err3 != nil {
+				return nil, ex.Wrapf(err3, "rule %q", name)
+			}
 			rules = append(rules, r)
 		}
 	}

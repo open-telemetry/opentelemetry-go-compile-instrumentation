@@ -18,6 +18,27 @@ func attrMap(attrs []attribute.KeyValue) map[string]attribute.Value {
 	return m
 }
 
+func TestKafkaMessageKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      []byte
+		expected string
+	}{
+		{name: "ascii", key: []byte("order-1"), expected: "order-1"},
+		{name: "utf8", key: []byte("\u20ac"), expected: "\u20ac"},
+		{name: "empty", key: []byte{}, expected: ""},
+		{name: "invalid utf8", key: []byte{0xff, 0xfe, 0xfd}, expected: "\uFFFD"},
+		{name: "invalid utf8 preserves valid text", key: []byte{'o', 0xff, 'k'}, expected: "o\uFFFDk"},
+		{name: "null byte", key: []byte{0x00}, expected: "\x00"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, KafkaMessageKey(tt.key))
+		})
+	}
+}
+
 func TestKafkaRequestTraceAttrs_Producer(t *testing.T) {
 	attrs := KafkaRequestTraceAttrs(KafkaRequest{
 		Endpoint:        "broker.example.com:9092",
