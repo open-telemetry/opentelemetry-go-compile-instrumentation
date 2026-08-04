@@ -7,6 +7,7 @@ package trace
 
 import (
 	"container/list"
+	"log/slog"
 	"os"
 	"runtime"
 	"strconv"
@@ -15,8 +16,6 @@ import (
 	_ "unsafe"
 
 	trace "go.opentelemetry.io/otel/trace"
-
-	otelruntime "go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 //go:linkname registerTraceAndSpanIDFunc go.opentelemetry.io/otelc/pkg/runtime.RegisterTraceAndSpanIDFunc
@@ -24,6 +23,19 @@ func registerTraceAndSpanIDFunc(f func() (string, string))
 
 //go:linkname registerSpanFromGLSFunc go.opentelemetry.io/otelc/pkg/runtime.RegisterSpanFromGLSFunc
 func registerSpanFromGLSFunc(f func() trace.Span)
+
+// otelcLogger is reached by linkname, like the register funcs above, rather than
+// by importing pkg/runtime: that package imports go.opentelemetry.io/otel/sdk/trace,
+// so an import edge from this injected file closes a cycle and the build fails at
+// link time with a pkg/runtime fingerprint mismatch.
+//
+// Call it at each use site rather than caching it in a package var. Without an
+// import edge Go does not order pkg/runtime's init() before this package's, so a
+// var initializer would run first, latch the slog.Default() fallback, and silently
+// discard OTEL_LOG_LEVEL=debug output.
+//
+//go:linkname otelcLogger go.opentelemetry.io/otelc/pkg/runtime.Logger
+func otelcLogger() *slog.Logger
 
 const defaultGLSMaxSpans = 1000
 
@@ -33,7 +45,6 @@ const defaultGLSMaxSpans = 1000
 const defaultMaxSpanStates = 100_000
 
 var (
-	logger          = otelruntime.Logger()
 	otelGLSMaxSpans = defaultGLSMaxSpans
 	maxSpanStates   = defaultMaxSpanStates
 )
@@ -114,7 +125,7 @@ func evictOldestLocked() {
 		delete(spanStates.states, key)
 	}
 	spanStates.order.Remove(front)
-	logger.Debug("GLS span state tracker at capacity, evicting oldest entry",
+	otelcLogger().Debug("GLS span state tracker at capacity, evicting oldest entry",
 		"limit", maxSpanStates)
 }
 
@@ -178,7 +189,7 @@ func (tc *traceContext) add(span trace.Span) bool {
 			// lookup on this goroutine keeps returning whatever was already
 			// on top of the stack until it compacts below the limit. Surface
 			// that instead of dropping it silently.
-			logger.Debug("GLS span stack at capacity, span not tracked for implicit propagation",
+			otelcLogger().Debug("GLS span stack at capacity, span not tracked for implicit propagation",
 				"limit", otelGLSMaxSpans)
 			return false
 		}
