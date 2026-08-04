@@ -412,8 +412,8 @@ func TestExtractBuildFlags(t *testing.T) {
 		},
 		{
 			name:     "trimpath flag",
-			args:     []string{"build", trimpathFlag, "./..."},
-			expected: []string{trimpathFlag},
+			args:     []string{"build", "-trimpath", "./..."},
+			expected: []string{"-trimpath"},
 		},
 		{
 			name:     "trimpath false",
