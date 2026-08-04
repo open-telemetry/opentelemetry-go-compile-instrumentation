@@ -42,10 +42,11 @@ func TestHTTPServerDBClient(t *testing.T) {
 	httpServerSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsServer,
 		testutil.HasAttribute(string(semconv.URLPathKey), "/hello"),
+		testutil.HasAttribute(string(semconv.HTTPResponseStatusCodeKey), int64(200)),
 	)
 	sqlClientSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "SELECT"),
+		testutil.HasAttribute(string(semconv.DBOperationNameKey), "SELECT"),
 	)
 
 	require.Equal(t, httpClientSpan.TraceID(), httpServerSpan.TraceID(), "HTTP client and server must share a trace ID")
