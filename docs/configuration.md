@@ -135,7 +135,13 @@ to propagate trace context:
   (`OTEL_LOG_LEVEL=debug`); increase the limit if legitimately deep call stacks trigger it.
 - `OTEL_GLS_MAX_SPAN_STATES` (default `100000`) bounds the shared span lifecycle map used across
   all goroutines to recognize when a span has ended. Once it is full, the oldest tracked entry is
-  evicted (also logged at debug level) to make room for new spans.
+  evicted (also logged at debug level) to make room for new spans. Eviction marks that entry
+  ended, so a span still in flight loses implicit propagation and spans started under it are no
+  longer linked to it as parent. Raise the limit if a workload keeps more spans concurrently in
+  flight than the default allows.
+- `OTEL_LOG_LEVEL` (values: `debug`, `info`, `warn`, `error`; default `info`) controls the
+  verbosity of `otelc`'s own runtime logging, including the GLS eviction and per-goroutine cap
+  messages above. Set it to `debug` to surface them.
 
 See [GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for the
 operational constraints.
