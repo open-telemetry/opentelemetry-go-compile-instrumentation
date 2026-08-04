@@ -24,13 +24,17 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 	if err != nil {
 		return ex.Wrap(err)
 	}
-	funcs := ast.FindFuncsByDirective(root, r.Directive)
-	for _, funcDecl := range funcs {
+	matches, err := ast.FindFuncsByDirective(root, r.Directive)
+	if err != nil {
+		return ex.Wrap(err)
+	}
+	for _, match := range matches {
+		funcDecl := match.Func
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
 		)
-		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl))
+		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, match.Args))
 		if err != nil {
 			return ex.Wrapf(err, "rendering template for func %s", funcDecl.Name.Name)
 		}

@@ -69,7 +69,7 @@ func TestRenderDirective(t *testing.T) {
 			tmpl, err := rule.ParseDirectiveTemplate(tt.template)
 			require.NoError(t, err)
 
-			result, err := renderDirective(tmpl, newFuncTemplateData(funcDecl))
+			result, err := renderDirective(tmpl, newFuncTemplateData(funcDecl, nil))
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
@@ -100,7 +100,7 @@ func TestRenderDirective_OutOfRangeArgument(t *testing.T) {
 	tmpl, err := rule.ParseDirectiveTemplate("{{.FuncArgument 0}}")
 	require.NoError(t, err)
 
-	_, err = renderDirective(tmpl, newFuncTemplateData(funcDecl))
+	_, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, nil))
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")

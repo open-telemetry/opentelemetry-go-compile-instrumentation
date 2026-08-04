@@ -135,23 +135,37 @@ func FileHasDirective(file *dst.File, directive string) bool {
 	return found
 }
 
+// FuncDirectiveMatch pairs a function declaration matched by
+// FindFuncsByDirective with the key:value arguments parsed from its matching
+// directive comment
+type FuncDirectiveMatch struct {
+	Func *dst.FuncDecl
+	Args []DirectiveArg
+}
+
 // FindFuncsByDirective returns all top-level function declarations whose
-// leading decorations contain the specified directive comment.
-func FindFuncsByDirective(file *dst.File, directive string) []*dst.FuncDecl {
-	var funcs []*dst.FuncDecl
+// leading decorations contain the specified directive comment, together with
+// the directive's key:value arguments for each match.
+func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatch, error) {
+	var matches []FuncDirectiveMatch
 	for _, decl := range file.Decls {
 		funcDecl, ok := decl.(*dst.FuncDecl)
 		if !ok {
 			continue
 		}
 		for _, dec := range funcDecl.Decs.Start {
-			if MatchDirective(dec, directive) {
-				funcs = append(funcs, funcDecl)
-				break
+			if !MatchDirective(dec, directive) {
+				continue
 			}
+			args, err := ParseDirectiveArgs(dec, directive)
+			if err != nil {
+				return nil, ex.Wrapf(err, "parsing directive args for func %s", funcDecl.Name.Name)
+			}
+			matches = append(matches, FuncDirectiveMatch{Func: funcDecl, Args: args})
+			break
 		}
 	}
-	return funcs
+	return matches, nil
 }
 
 // tokenize splits input on whitespace, respecting double-quoted strings.

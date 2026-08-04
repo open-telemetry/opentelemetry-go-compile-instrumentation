@@ -14,7 +14,8 @@ import (
 // return values to text/template renderers. Argument and return collection
 // mutates the underlying FuncDecl.
 type funcTemplateData struct {
-	funcDecl *dst.FuncDecl
+	funcDecl      *dst.FuncDecl
+	directiveArgs []ast.DirectiveArg
 
 	argsCollected bool
 	args          []string
@@ -23,8 +24,11 @@ type funcTemplateData struct {
 	rets          []string
 }
 
-func newFuncTemplateData(funcDecl *dst.FuncDecl) *funcTemplateData {
-	return &funcTemplateData{funcDecl: funcDecl}
+// newFuncTemplateData builds the template data for funcDecl. directiveArgs
+// are the key:value arguments parsed from the directive comment that matched
+// funcDecl (nil for callers that don't have directive args, e.g. raw rules).
+func newFuncTemplateData(funcDecl *dst.FuncDecl, directiveArgs []ast.DirectiveArg) *funcTemplateData {
+	return &funcTemplateData{funcDecl: funcDecl, directiveArgs: directiveArgs}
 }
 
 // FuncName returns the matched function's name. Template usage: {{.FuncName}}
@@ -129,4 +133,23 @@ func (d *funcTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// DirectiveArgs returns the key:value arguments parsed from the directive
+// comment that matched this function. Template usage:
+// {{ range .DirectiveArgs }}{{.Key}}={{.Value}} {{ end }}
+func (d *funcTemplateData) DirectiveArgs() []ast.DirectiveArg {
+	return d.directiveArgs
+}
+
+// DirectiveArg returns the value of the first directive argument with the
+// given key, or "" if the directive comment has no such argument. Template
+// usage: {{ .DirectiveArg "span.name" }}
+func (d *funcTemplateData) DirectiveArg(key string) string {
+	for _, arg := range d.directiveArgs {
+		if arg.Key == key {
+			return arg.Value
+		}
+	}
+	return ""
 }
