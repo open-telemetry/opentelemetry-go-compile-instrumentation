@@ -947,15 +947,23 @@ This rule instruments functions annotated with a magic comment (a "directive") b
 
 **Modifier (`do: - expand_directive:`):**
 
-- `template` (string, required): Go statements to prepend to each matching function body. Rendered with [fasttemplate](https://github.com/valyala/fasttemplate) using `{{` / `}}` delimiters. The only supported placeholder is `{{FuncName}}`, which is replaced with the name of the annotated function.
+- `template` (string, required): Go statements to prepend to each matching function body. Rendered with Go's standard [text/template](https://pkg.go.dev/text/template) using `{{` / `}}` delimiters. Supported placeholders are the shared function template variables listed below, referenced as fields on the template's `.` (e.g. `{{.FuncName}}`). Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent.
 
 Top-level `imports` (map[string]string, optional): Additional imports needed by the injected code. Same format as [Top-level fields](#top-level-fields).
 
 **Template Placeholders:**
 
-| Placeholder    | Replaced with                      |
-| -------------- | ---------------------------------- |
-| `{{FuncName}}` | The name of the annotated function |
+| Placeholder              | Replaced with                                                            |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `{{.FuncName}}`          | The name of the annotated function                                       |
+| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver |
+| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                      |
+| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                         |
+| `{{.FuncReturnCount}}`   | The number of return values                                              |
+
+Unnamed parameters and return values (e.g. `func(int, string)`) and blank (`_`) names are assigned a synthetic name the first time a template references them, so they can be read via `{{.FuncArgument N}}` / `{{.FuncReturn N}}` like any other. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with an error.
+
+Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are available alongside the placeholders above. Note that every `{{ ... }}` span is parsed as a template action, so incidental adjacent Go braces (e.g. a composite literal like `[]Point{{X: 1, Y: 2}}`) will fail to parse — the same limitation Datadog/orchestrion's `code.Template` has for the same reason.
 
 **Example:**
 
@@ -967,15 +975,15 @@ span_directive:
   do:
     - expand_directive:
         template: |-
-          println("span start: {{FuncName}}")
-          defer println("span end: {{FuncName}}")
+          println("span start: {{ .FuncName }}, arg0={{ .FuncArgument 0 }}")
+          defer println("span end: {{ .FuncName }}")
 ```
 
 Given this source file:
 
 ```go
 //otelc:span
-func foo() {
+func foo(name string) {
     println("hello")
 }
 ```
@@ -984,8 +992,8 @@ The instrumented output becomes:
 
 ```go
 //otelc:span
-func foo() {
-    println("span start: foo")
+func foo(name string) {
+    println("span start: foo, arg0=name")
     defer println("span end: foo")
     println("hello")
 }
@@ -997,7 +1005,7 @@ func foo() {
 - The `//` must not be followed by a space (i.e., `//otelc:span`, not `// otelc:span`).
 - The `directive` field must not include the leading `//`.
 - Functions without the directive comment are not affected.
-- Multiple functions in the same file can carry the directive; each gets the template applied independently with its own `{{FuncName}}`.
+- Multiple functions in the same file can carry the directive; each gets the template applied independently with its own placeholder values.
 
 ### 6. File Addition Rule
 

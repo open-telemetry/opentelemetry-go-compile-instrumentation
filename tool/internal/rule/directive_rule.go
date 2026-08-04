@@ -6,14 +6,13 @@ package rule
 import (
 	"strings"
 
-	"github.com/valyala/fasttemplate"
 	"go.opentelemetry.io/otelc/tool/ex"
 	"gopkg.in/yaml.v3"
 )
 
 // InstDirectiveRule represents a rule that instruments functions annotated with
 // magic comments (e.g., //otelc:span) by prepending templated Go code into
-// their bodies. The template supports {{FuncName}} as a placeholder.
+// their bodies. The template supports {{.FuncName}} as a placeholder.
 type InstDirectiveRule struct {
 	InstBaseRule `yaml:",inline"`
 
@@ -49,7 +48,7 @@ func (r *InstDirectiveRule) validate() error {
 	if strings.TrimSpace(r.Template) == "" {
 		return ex.Newf("template cannot be empty")
 	}
-	if _, err := fasttemplate.NewTemplate(r.Template, "{{", "}}"); err != nil {
+	if _, err := ParseDirectiveTemplate(r.Template); err != nil {
 		return ex.Wrapf(err, "invalid template syntax")
 	}
 	return nil

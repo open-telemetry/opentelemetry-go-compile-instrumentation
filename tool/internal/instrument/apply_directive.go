@@ -5,18 +5,13 @@ package instrument
 
 import (
 	"context"
-	"io"
 
 	"github.com/dave/dst"
-	"github.com/valyala/fasttemplate"
+
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
-
-type directiveTemplateData struct {
-	FuncName string // Name of the annotated function
-}
 
 // applyDirectiveRule finds all functions annotated with the directive, renders
 // the template for each, and prepends the resulting Go statements into the
@@ -25,7 +20,7 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
 		return err
 	}
-	tmpl, err := fasttemplate.NewTemplate(r.Template, "{{", "}}")
+	tmpl, err := rule.ParseDirectiveTemplate(r.Template)
 	if err != nil {
 		return ex.Wrap(err)
 	}
@@ -35,7 +30,7 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
 		)
-		snippet, err = renderDirective(tmpl, directiveTemplateData{FuncName: funcDecl.Name.Name})
+		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl))
 		if err != nil {
 			return ex.Wrapf(err, "rendering template for func %s", funcDecl.Name.Name)
 		}
@@ -53,13 +48,6 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 
 // renderDirective executes the template with the given data and returns the
 // resulting Go source snippet.
-func renderDirective(tmpl *fasttemplate.Template, data directiveTemplateData) (string, error) {
-	return tmpl.ExecuteFuncStringWithErr(func(w io.Writer, tag string) (int, error) {
-		switch tag {
-		case "FuncName":
-			return io.WriteString(w, data.FuncName)
-		default:
-			return 0, ex.Newf("unknown template tag %q", tag)
-		}
-	})
+func renderDirective(tmpl *rule.DirectiveTemplate, data *funcTemplateData) (string, error) {
+	return tmpl.Execute(data)
 }
