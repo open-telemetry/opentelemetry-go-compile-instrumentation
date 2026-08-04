@@ -1,5 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import _ "unsafe"
@@ -15,6 +16,7 @@ func InterfacePassthrough(v interface{}) (r any) {
 	//line main.go:9:2
 	return v
 }
+
 func main() {}
 
 //line <generated>:1
@@ -37,6 +39,7 @@ func (c *HookContextImpl3881633898) GetKeyData(key string) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl3881633898) SetKeyData(key string, val interface{}) {
 	m, ok := c.data.(map[string]interface{})
 	if !ok || m == nil {
@@ -45,6 +48,7 @@ func (c *HookContextImpl3881633898) SetKeyData(key string, val interface{}) {
 	}
 	m[key] = val
 }
+
 func (c *HookContextImpl3881633898) HasKeyData(key string) bool {
 	if m, ok := c.data.(map[string]interface{}); ok {
 		_, ok := m[key]
@@ -52,6 +56,7 @@ func (c *HookContextImpl3881633898) HasKeyData(key string) bool {
 	}
 	return false
 }
+
 func (c *HookContextImpl3881633898) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -59,12 +64,14 @@ func (c *HookContextImpl3881633898) GetParam(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl3881633898) SetParam(idx int, val interface{}) {
 	switch idx {
 	case 0:
 		c.params[0] = val
 	}
 }
+
 func (c *HookContextImpl3881633898) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -72,6 +79,7 @@ func (c *HookContextImpl3881633898) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl3881633898) SetReturnVal(idx int, val interface{}) {
 	switch idx {
 	case 0:
@@ -106,6 +114,7 @@ func OtelBeforeTrampoline_InterfacePassthrough3881633898(param0 *interface{}) (h
 	}
 	return hookContext, hookContext.skipCall
 }
+
 func OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext HookContext, arg0 *any) {
 	defer func() {
 		if err := recover(); err != nil {

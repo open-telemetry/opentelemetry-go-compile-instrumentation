@@ -1,5 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
+
 package main_test
 
 import _ "unsafe"
@@ -42,6 +43,7 @@ func (c *HookContextImpl2215449730) GetKeyData(key string) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl2215449730) SetKeyData(key string, val interface{}) {
 	m, ok := c.data.(map[string]interface{})
 	if !ok || m == nil {
@@ -50,6 +52,7 @@ func (c *HookContextImpl2215449730) SetKeyData(key string, val interface{}) {
 	}
 	m[key] = val
 }
+
 func (c *HookContextImpl2215449730) HasKeyData(key string) bool {
 	if m, ok := c.data.(map[string]interface{}); ok {
 		_, ok := m[key]
@@ -57,15 +60,18 @@ func (c *HookContextImpl2215449730) HasKeyData(key string) bool {
 	}
 	return false
 }
+
 func (c *HookContextImpl2215449730) GetParam(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
+
 func (c *HookContextImpl2215449730) SetParam(idx int, val interface{}) {
 	switch idx {
 	}
 }
+
 func (c *HookContextImpl2215449730) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -73,6 +79,7 @@ func (c *HookContextImpl2215449730) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
+
 func (c *HookContextImpl2215449730) SetReturnVal(idx int, val interface{}) {
 	switch idx {
 	case 0:
@@ -111,6 +118,7 @@ func OtelBeforeTrampoline_ExternalHelper2215449730() (hookContext *HookContextIm
 	}
 	return hookContext, hookContext.skipCall
 }
+
 func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
