@@ -50,6 +50,7 @@ signals an undeclared instrumentation.
 | `github.com/openai/openai-go` (v1/v2/v3)            | `openai.yaml`       | GenAI client spans                                                     |
 | `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |
 | `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
+| `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
 | `github.com/gin-gonic/gin`                          | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
 | `go.opentelemetry.io/otel/init`                     | `otel-sdk.yaml`     | Go runtime metrics (`go.*`)                                            |
 | `go.opentelemetry.io/otel`                          | `otel-sdk.yaml`     | nothing — guards the global tracer provider                            |
