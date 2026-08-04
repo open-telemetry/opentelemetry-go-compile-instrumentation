@@ -3,8 +3,8 @@ module go.opentelemetry.io/otelc/instrumentation/github.com/aws/aws-sdk-go-v2
 go 1.25.0
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.42.1
-	github.com/aws/smithy-go v1.27.4
+	github.com/aws/aws-sdk-go-v2 v1.43.3
+	github.com/aws/smithy-go v1.27.6
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws v0.69.0
 	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
@@ -69,7 +69,7 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/grpc v1.81.1 // indirect
+	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

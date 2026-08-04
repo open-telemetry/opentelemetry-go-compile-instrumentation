@@ -120,6 +120,13 @@ func RequireAttribute(t *testing.T, s ptrace.Span, key string, expected any) {
 	require.Equal(t, expected, v, "Attribute %q mismatch in span %q", key, s.Name())
 }
 
+// RequireAttributeContains asserts a span has an attribute containing the expected value.
+func RequireAttributeContains(t *testing.T, s ptrace.Span, key string, expected any) {
+	v, ok := Attrs(s)[key]
+	require.True(t, ok, "Attribute %q not found in span %q", key, s.Name())
+	require.Contains(t, v, expected, "Attribute %q in span %q does not contain value", key, s.Name())
+}
+
 // RequireAttributeExists asserts a span has an attribute.
 func RequireAttributeExists(t *testing.T, s ptrace.Span, key string) {
 	_, ok := Attrs(s)[key]

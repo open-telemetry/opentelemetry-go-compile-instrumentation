@@ -3,7 +3,7 @@ module go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic
 go 1.25.0
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.57.0
+	github.com/anthropics/anthropic-sdk-go v1.61.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0

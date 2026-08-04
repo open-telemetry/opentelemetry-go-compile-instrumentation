@@ -391,7 +391,8 @@ func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceF
 	createImportCfg(importCfgPath, helpers)
 
 	args := make([]string, 0, 11+len(sourceFiles))
-	args = append(args,
+	args = append(
+		args,
 		filepath.Join(strings.TrimSpace(string(output)), "compile"),
 		"-o", filepath.Join(tempDir, compiledOutput),
 		"-p", importPath,
@@ -494,8 +495,15 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 			continue
 		}
 		actualFile := actualFileFromGolden(t, entry.Name())
-		actual, _ := os.ReadFile(filepath.Join(tempDir, actualFile))
-		golden.Assert(t, string(actual), filepath.Join(goldenDir, testName, entry.Name()))
+		actualBytes, err := os.ReadFile(filepath.Join(tempDir, actualFile))
+		require.NoError(t, err, "read actual file %s", filepath.Join(tempDir, actualFile))
+
+		goldenPath := filepath.Join(goldenDir, testName, entry.Name())
+
+		// The dave/dst stringifier occasionally introduces CRLF on Windows.
+		// We normalize the generated string to LF before comparing to the .gitattributes LF golden file.
+		actualNorm := strings.ReplaceAll(string(actualBytes), "\r\n", "\n")
+		golden.Assert(t, actualNorm, goldenPath)
 	}
 }
 
