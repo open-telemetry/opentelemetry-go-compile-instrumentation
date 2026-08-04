@@ -156,7 +156,7 @@ func AfterReadMessage(ictx hook.HookContext, msg kafka.Message, err error) {
 		Destination:     topic,
 		Operation:       semconv.KafkaOperationReceive,
 		ConsumerGroupID: data.groupID,
-		MessageKey:      string(msg.Key),
+		MessageKey:      semconv.KafkaMessageKey(msg.Key),
 		MessageBodySize: len(msg.Value),
 		Partition:       msg.Partition,
 		Offset:          msg.Offset,

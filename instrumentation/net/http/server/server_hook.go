@@ -71,9 +71,8 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 	// Get trace attributes from semconv
 	attrs := semconv.HTTPServerRequestTraceAttrs("", r)
 
-	// Get HTTP route from r.Pattern (Go 1.22+)
-	route := semconv.HTTPRoute(r.Pattern)
-	spanName := semconv.HTTPServerSpanName(r.Method, route)
+	// Route isn't known until ServeMux matches. AfterServeHTTP renames the span.
+	spanName := semconv.HTTPServerSpanName(r.Method, "")
 
 	// Start span
 	ctx, span := tracer.Start(ctx,
@@ -81,11 +80,6 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(attrs...),
 	)
-
-	// Add route attribute if available
-	if route != "" {
-		span.SetAttributes(semconv.HTTPServerRoute(route))
-	}
 
 	// Wrap ResponseWriter to capture status code
 	wrapper := &writerWrapper{
@@ -117,6 +111,15 @@ func AfterServeHTTP(ictx hook.HookContext) {
 		return
 	}
 	defer span.End()
+
+	// ServeMux fills in r.Pattern on the same request after the span was created.
+	// Stays empty for routers that name the span themselves (gin, chi).
+	if r, ok := ictx.GetParam(requestIndex).(*http.Request); ok && r != nil && span.IsRecording() {
+		if route := semconv.HTTPRoute(r.Pattern); route != "" {
+			span.SetName(semconv.HTTPServerSpanName(r.Method, route))
+			span.SetAttributes(semconv.HTTPServerRoute(route))
+		}
+	}
 
 	// Extract status code from wrapped ResponseWriter
 	statusCode := http.StatusOK

@@ -61,7 +61,7 @@ func TestHTTPServerKafkaClient(t *testing.T) {
 		t,
 		f.Traces(),
 		testutil.IsServer,
-		func(s ptrace.Span) bool { return s.Name() == "GET" },
+		func(s ptrace.Span) bool { return s.Name() == "GET /produce" },
 	)
 	kafkaProducerSpan := testutil.RequireSpan(
 		t,
