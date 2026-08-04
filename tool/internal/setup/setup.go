@@ -450,10 +450,10 @@ const trimpathFlag = "-trimpath"
 //
 //nolint:gochecknoglobals // private lookup table
 var buildContextBoolFlags = map[string]bool{
-	"-race":     true, // Race detector
-	"-msan":     true, // Memory sanitizer
-	"-cover":    true, // Coverage
-	"-asan":     true, // Address sanitizer
+	"-race":      true, // Race detector
+	"-msan":      true, // Memory sanitizer
+	"-cover":     true, // Coverage
+	"-asan":      true, // Address sanitizer
 	trimpathFlag: true, // Remove file system paths from compiled archives
 }
 
