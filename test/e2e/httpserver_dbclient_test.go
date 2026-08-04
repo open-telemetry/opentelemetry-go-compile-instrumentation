@@ -25,7 +25,10 @@ func TestHTTPServerDBClient(t *testing.T) {
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
 
 	f.BuildAndRun("httpclient", "-addr", addr, "-name", "test")
-	testutil.WaitForSpanFlush(t)
+
+	// BuildAndRun returns once the client exits, but the server span ends after
+	// the response is written, so it may still be in flight. Wait for all three.
+	f.WaitForSpans(3)
 
 	// One distributed trace with three spans:
 	// HTTP client -> HTTP server -> SQL client
