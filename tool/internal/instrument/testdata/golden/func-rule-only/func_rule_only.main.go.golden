@@ -1,6 +1,5 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import _ "unsafe"
@@ -32,27 +31,26 @@ func (c *HookContextImpl2313790154) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl2313790154) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl2313790154) GetData() interface{}     { return c.data }
 func (c *HookContextImpl2313790154) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	return c.data.(map[string]interface{})[key]
+	return nil
 }
-
 func (c *HookContextImpl2313790154) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
-
 func (c *HookContextImpl2313790154) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	return false
 }
-
 func (c *HookContextImpl2313790154) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -62,7 +60,6 @@ func (c *HookContextImpl2313790154) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2313790154) SetParam(idx int, val interface{}) {
 	switch idx {
 	case 0:
@@ -79,7 +76,6 @@ func (c *HookContextImpl2313790154) SetParam(idx int, val interface{}) {
 		}
 	}
 }
-
 func (c *HookContextImpl2313790154) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -89,7 +85,6 @@ func (c *HookContextImpl2313790154) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2313790154) SetReturnVal(idx int, val interface{}) {
 	switch idx {
 	case 0:
@@ -134,7 +129,6 @@ func OtelBeforeTrampoline_Func12313790154(param0 *string, param1 *int) (hookCont
 	}
 	return hookContext, hookContext.skipCall
 }
-
 func OtelAfterTrampoline_Func12313790154(hookContext HookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {

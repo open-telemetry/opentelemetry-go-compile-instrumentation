@@ -1,6 +1,5 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import _ "unsafe"
@@ -14,7 +13,6 @@ func UnderscoreReturnFunc() (_ignoredRetVal0 int, _ignoredRetVal1 error) {
 	//line main.go:7:2
 	return 0, nil
 }
-
 func main() {}
 
 //line <generated>:1
@@ -32,38 +30,35 @@ func (c *HookContextImpl2035128499) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl2035128499) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl2035128499) GetData() interface{}     { return c.data }
 func (c *HookContextImpl2035128499) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	return c.data.(map[string]interface{})[key]
+	return nil
 }
-
 func (c *HookContextImpl2035128499) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
-
 func (c *HookContextImpl2035128499) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	return false
 }
-
 func (c *HookContextImpl2035128499) GetParam(idx int) interface{} {
 	switch idx {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2035128499) SetParam(idx int, val interface{}) {
 	switch idx {
 	}
 }
-
 func (c *HookContextImpl2035128499) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -73,7 +68,6 @@ func (c *HookContextImpl2035128499) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2035128499) SetReturnVal(idx int, val interface{}) {
 	switch idx {
 	case 0:
@@ -94,7 +88,6 @@ func (c *HookContextImpl2035128499) GetParamCount() int     { return len(c.param
 func (c *HookContextImpl2035128499) GetReturnValCount() int { return len(c.returnVals) }
 func (c *HookContextImpl2035128499) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl2035128499) GetPackageName() string { return c.packageName }
-
 func OtelAfterTrampoline_UnderscoreReturnFunc2035128499(hookContext HookContext, arg0 *int, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {

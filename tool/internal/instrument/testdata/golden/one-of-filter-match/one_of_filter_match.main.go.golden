@@ -1,6 +1,5 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-
 // This package supports multiple SQL backends behind one Open entry point. The
 // one-of filter instruments Open in any file that declares one of the known
 // backend driver types. This file declares PostgresDriver, so Open is matched
@@ -38,27 +37,26 @@ func (c *HookContextImpl2733714658) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl2733714658) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl2733714658) GetData() interface{}     { return c.data }
 func (c *HookContextImpl2733714658) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	return c.data.(map[string]interface{})[key]
+	return nil
 }
-
 func (c *HookContextImpl2733714658) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
-
 func (c *HookContextImpl2733714658) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	return false
 }
-
 func (c *HookContextImpl2733714658) GetParam(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -66,7 +64,6 @@ func (c *HookContextImpl2733714658) GetParam(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2733714658) SetParam(idx int, val interface{}) {
 	switch idx {
 	case 0:
@@ -77,7 +74,6 @@ func (c *HookContextImpl2733714658) SetParam(idx int, val interface{}) {
 		}
 	}
 }
-
 func (c *HookContextImpl2733714658) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
@@ -85,7 +81,6 @@ func (c *HookContextImpl2733714658) GetReturnVal(idx int) interface{} {
 	}
 	return nil
 }
-
 func (c *HookContextImpl2733714658) SetReturnVal(idx int, val interface{}) {
 	switch idx {
 	case 0:
@@ -124,7 +119,6 @@ func OtelBeforeTrampoline_Open2733714658(param0 *string) (hookContext *HookConte
 	}
 	return hookContext, hookContext.skipCall
 }
-
 func OtelAfterTrampoline_Open2733714658(hookContext HookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
