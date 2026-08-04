@@ -62,13 +62,19 @@ func TestOtelSDKSpanFromContext(t *testing.T) {
 	// the drop must be observable via a debug log line instead of failing
 	// silently, and implicit lookups must keep returning the last
 	// successfully tracked span rather than something undefined.
+	//
+	// The cap is 2, not 1: the net/http server instrumentation has already
+	// pushed a span for the request onto the handler's goroutine, so 2 is what
+	// leaves room for "live-first" and makes "live-second" the span that gets
+	// dropped (see liveCapHandler).
 	f = testutil.NewTestFixture(t)
 	f.SetEnv("OTELSDK_PATHS", "livecap")
-	f.SetEnv("OTEL_GLS_MAX_SPANS", "1")
+	f.SetEnv("OTEL_GLS_MAX_SPANS", "2")
 	f.SetEnv("OTEL_LOG_LEVEL", "debug")
 	output = f.Run("otelsdk")
 	require.Contains(t, output, "OTEL_SDK_LIVECAP: stale-parent-is-first=true",
-		"live-second must not be admitted once live-first fills the OTEL_GLS_MAX_SPANS=1 stack")
+		"live-second must not be admitted once the server span and live-first fill the "+
+			"OTEL_GLS_MAX_SPANS=2 stack")
 	require.Contains(t, output, "GLS span stack at capacity, span not tracked for implicit propagation",
 		"the dropped span must be logged at debug level, not silently discarded")
 

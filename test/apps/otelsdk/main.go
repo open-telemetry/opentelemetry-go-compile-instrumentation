@@ -120,11 +120,18 @@ func compactHandler(w http.ResponseWriter, r *http.Request) {
 
 // liveCapHandler exercises the per-goroutine OTEL_GLS_MAX_SPANS cap when the
 // stack is full of genuinely live (unended) spans, unlike compactHandler
-// where ended spans below the top get compacted away to make room. With
-// OTEL_GLS_MAX_SPANS=1, "live-second" can never be admitted once
-// "live-first" is on the stack, so implicit lookups must keep returning
-// "live-first" (stale but observable) rather than something undefined, and
-// the drop must be logged instead of silent.
+// where ended spans below the top get compacted away to make room.
+//
+// The handler goroutine does not start empty: the net/http server
+// instrumentation has already pushed its own span for this request. So the cap
+// has to be OTEL_GLS_MAX_SPANS=2 for this scenario to be about "live-second" —
+// the server span plus "live-first" fill the stack, and "live-second" is the
+// one that can never be admitted. Implicit lookups must then keep returning
+// "live-first" (stale but observable) rather than something undefined, and the
+// drop must be logged instead of silent.
+//
+// At OTEL_GLS_MAX_SPANS=1 the server span alone already fills the stack, so
+// both spans below are dropped and the lookup returns the server span instead.
 func liveCapHandler(w http.ResponseWriter, r *http.Request) {
 	_, first := otel.Tracer("livecap").Start(context.Background(), "live-first")
 	_, second := otel.Tracer("livecap").Start(context.Background(), "live-second")
