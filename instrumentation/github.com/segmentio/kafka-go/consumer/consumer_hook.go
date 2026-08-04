@@ -61,6 +61,9 @@ type headerCarrier struct {
 
 // Get returns the value of the first header matching key, or "" if absent.
 func (c headerCarrier) Get(key string) string {
+	if c.headers == nil || *c.headers == nil {
+		return ""
+	}
 	for _, h := range *c.headers {
 		if h.Key == key {
 			return string(h.Value)
@@ -71,6 +74,9 @@ func (c headerCarrier) Get(key string) string {
 
 // Set replaces any existing header with key, otherwise appends a new one.
 func (c headerCarrier) Set(key, value string) {
+	if c.headers == nil {
+		return
+	}
 	for i := range *c.headers {
 		if (*c.headers)[i].Key == key {
 			(*c.headers)[i].Value = []byte(value)
@@ -82,6 +88,9 @@ func (c headerCarrier) Set(key, value string) {
 
 // Keys lists the header keys carried by this carrier.
 func (c headerCarrier) Keys() []string {
+	if c.headers == nil || *c.headers == nil {
+		return nil
+	}
 	keys := make([]string, 0, len(*c.headers))
 	for _, h := range *c.headers {
 		keys = append(keys, h.Key)

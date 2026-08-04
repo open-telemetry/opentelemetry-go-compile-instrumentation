@@ -224,3 +224,13 @@ func TestExtractContext(t *testing.T) {
 	assert.True(t, extractedSc.IsSampled())
 	assert.True(t, extractedSc.IsRemote())
 }
+
+func TestHeaderCarrier_NilHeaders(t *testing.T) {
+	hc := headerCarrier{headers: nil}
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "", hc.Get("traceparent"))
+		assert.Nil(t, hc.Keys())
+		hc.Set("traceparent", "v1")
+	})
+}

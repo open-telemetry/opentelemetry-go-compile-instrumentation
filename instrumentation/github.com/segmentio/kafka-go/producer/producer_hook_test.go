@@ -162,6 +162,16 @@ func TestHeaderCarrier_SetGetKeys(t *testing.T) {
 	assert.ElementsMatch(t, []string{"traceparent", "baggage"}, hc.Keys())
 }
 
+func TestHeaderCarrier_NilHeaders(t *testing.T) {
+	hc := headerCarrier{headers: nil}
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "", hc.Get("traceparent"))
+		assert.Nil(t, hc.Keys())
+		hc.Set("traceparent", "v1")
+	})
+}
+
 // TestAfterWriteMessages_PartialFailure verifies that when WriteMessages returns
 // kafka.WriteErrors (a []error aligned with the message slice), only the spans for
 // messages that actually failed are marked as Error; the spans for successful
