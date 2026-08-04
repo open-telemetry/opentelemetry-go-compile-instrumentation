@@ -34,12 +34,13 @@ jobs:
               - '.github/workflows/test-latestlibbuild.yaml'
 
   test-latestlibbuild:
-    name: LatestLibBuild Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
+    name: LatestLibBuild Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }} shard ${{ matrix.shard }})
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
+        shard: [0, 1]
         platform:
           - os: ubuntu-latest
             arch: amd64
@@ -61,6 +62,8 @@ jobs:
       - name: Build and test
         env:
           GOARCH: ${{ matrix.platform.arch }}
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: "2"
         run: make test-latestlibbuild
 
   done:
