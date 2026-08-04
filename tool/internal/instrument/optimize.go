@@ -204,20 +204,26 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
 // 2. The HookContext parameter is only used as a receiver for method calls
 func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
 	// The hook context parameter is always the first parameter of the hook function.
-	hookContextParam := hookFunc.Type.Params.List[0].Names[0].Name
+	hookContextParam := ""
+	if len(hookFunc.Type.Params.List[0].Names) > 0 {
+		hookContextParam = hookFunc.Type.Params.List[0].Names[0].Name
+	}
 
-	// Check if the hook function explicitly calls SetSkipCall on the hook context.
-	// If found, the trampoline-jump-if cannot be flattened.
+	if hookContextParam == "" {
+		return true // Unnamed parameter cannot be referenced
+	}
+
+	// Check if the hook function references SetSkipCall on the hook context.
+	// If found, the trampoline-jump-if cannot be flattened. Match the bare
+	// selector rather than requiring a CallExpr, so the method-value form
+	// (f := ctx.SetSkipCall) is caught too: the escape analysis below treats
+	// it as a valid receiver use and would otherwise allow flattening.
 	found := false
 	dst.Inspect(hookFunc, func(node dst.Node) bool {
 		if found {
 			return false
 		}
-		call, isCall := node.(*dst.CallExpr)
-		if !isCall {
-			return true
-		}
-		sel, isSel := call.Fun.(*dst.SelectorExpr)
+		sel, isSel := node.(*dst.SelectorExpr)
 		if !isSel {
 			return true
 		}

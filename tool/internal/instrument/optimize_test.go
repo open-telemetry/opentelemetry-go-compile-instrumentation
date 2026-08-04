@@ -504,12 +504,52 @@ func TestFlattenTJump(t *testing.T) {
 			validate:      nil,
 		},
 		{
-			name: "flatten despite unrelated SetSkipCall",
+			name: "flatten despite unrelated identifier substring",
 			hookSrc: `package main
 			func hookFunc(ctx HookContext, arg1 string) {
 				var mySetSkipCall string
 				_ = mySetSkipCall
+			}`,
+			canFlatten:    true,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "flatten despite unrelated receiver call",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
 				req.Header.SetSkipCall()
+			}`,
+			canFlatten:    true,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "flatten with differently named context param",
+			hookSrc: `package main
+			func hookFunc(ictx HookContext, arg1 string) {
+				req.Header.SetSkipCall()
+			}`,
+			canFlatten:    true,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "do not flatten when method value of SetSkipCall is used",
+			hookSrc: `package main
+			func hookFunc(ctx HookContext, arg1 string) {
+				f := ctx.SetSkipCall
+				f(true)
+			}`,
+			canFlatten:    false,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "flatten unnamed context param without panic",
+			hookSrc: `package main
+			func hookFunc(HookContext, string) {
+				other.SetSkipCall(true)
 			}`,
 			canFlatten:    true,
 			removedOnExit: false,
