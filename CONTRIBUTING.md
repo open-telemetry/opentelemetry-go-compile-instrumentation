@@ -22,6 +22,16 @@ This project uses several tools for development. Most tools will be automaticall
 
 ### Getting Started
 
+> **Windows/WSL contributors:** make sure `core.autocrlf` is `false` before
+> cloning (`git config --global core.autocrlf false`). CI runs on Windows as
+> well as Linux and macOS, and a clone with `core.autocrlf` enabled checks out
+> source files with CRLF line endings. That changes how blank lines are
+> preserved when the AST-based code generator writes output, which then fails
+> to match the (LF) golden files under `testdata/golden`, even though the
+> generated code is correct. If you already cloned with `autocrlf` on, re-clone
+> after changing the setting rather than trying to fix the line endings of an
+> existing checkout.
+
 1. Clone the repository:
 
    ```sh

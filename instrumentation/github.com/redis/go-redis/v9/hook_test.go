@@ -33,54 +33,54 @@ func TestGetRedisV9Statement(t *testing.T) {
 	tests := []struct {
 		name     string
 		cmd      redis.Cmder
-		contains string
+		expected string
 	}{
 		{
 			name:     "GET command",
 			cmd:      redis.NewCmd(context.Background(), "get", "mykey"),
-			contains: "get mykey",
+			expected: "get mykey",
 		},
 		{
 			name:     "SET command with value",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", "myvalue"),
-			contains: "set mykey myvalue",
+			expected: "set mykey myvalue",
 		},
 		{
 			name:     "HSET command",
 			cmd:      redis.NewCmd(context.Background(), "hset", "myhash", "field1", "value1"),
-			contains: "hset myhash field1 value1",
+			expected: "hset myhash field1 value1",
 		},
 		{
 			name:     "DEL command",
 			cmd:      redis.NewCmd(context.Background(), "del", "key1", "key2"),
-			contains: "del key1 key2",
+			expected: "del key1 key2",
 		},
 		{
 			name:     "command with nil arg",
 			cmd:      redis.NewCmd(context.Background(), "set", nil),
-			contains: "set <nil>",
+			expected: "set <nil>",
 		},
 		{
 			name:     "command with int arg",
 			cmd:      redis.NewCmd(context.Background(), "expire", "mykey", 60),
-			contains: "expire mykey 60",
+			expected: "expire mykey 60",
 		},
 		{
 			name:     "command with bool arg true",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", true),
-			contains: "set mykey true",
+			expected: "set mykey true",
 		},
 		{
 			name:     "command with bool arg false",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", false),
-			contains: "set mykey false",
+			expected: "set mykey false",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := getRedisV9Statement(tt.cmd)
-			assert.Contains(t, result, tt.contains)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
