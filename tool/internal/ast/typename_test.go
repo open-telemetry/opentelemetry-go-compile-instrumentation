@@ -157,3 +157,29 @@ func TestFieldListContainsType(t *testing.T) {
 	_, err := fieldListContainsType(fields, "[]invalid")
 	assert.Error(t, err)
 }
+
+func TestMatchesTypeName(t *testing.T) {
+	ctxType := &dst.SelectorExpr{
+		X:   &dst.Ident{Name: "context"},
+		Sel: &dst.Ident{Name: "Context"},
+	}
+
+	matched, err := MatchesTypeName(ctxType, "context.Context")
+	require.NoError(t, err)
+	assert.True(t, matched)
+
+	matched, err = MatchesTypeName(ctxType, "io.Reader")
+	require.NoError(t, err)
+	assert.False(t, matched)
+
+	_, err = MatchesTypeName(ctxType, "[]invalid")
+	assert.Error(t, err)
+}
+
+func TestMatchesTypeName_UnsupportedNodeDoesNotMatch(t *testing.T) {
+	sliceType := &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}}
+
+	matched, err := MatchesTypeName(sliceType, "context.Context")
+	require.NoError(t, err)
+	assert.False(t, matched)
+}

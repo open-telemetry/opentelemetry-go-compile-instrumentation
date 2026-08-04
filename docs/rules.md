@@ -953,13 +953,15 @@ Top-level `imports` (map[string]string, optional): Additional imports needed by 
 
 **Template Placeholders:**
 
-| Placeholder              | Replaced with                                                            |
-| ------------------------ | ------------------------------------------------------------------------- |
-| `{{.FuncName}}`          | The name of the annotated function                                       |
-| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver |
-| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                      |
-| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                         |
-| `{{.FuncReturnCount}}`   | The number of return values                                              |
+| Placeholder                    | Replaced with                                                              |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `{{.FuncName}}`                 | The name of the annotated function                                         |
+| `{{.FuncArgument N}}`           | The identifier of the N-th (0-indexed) parameter, excluding the receiver    |
+| `{{.FuncReturn N}}`             | The identifier of the N-th (0-indexed) return value                        |
+| `{{.FuncArgumentCount}}`        | The number of parameters, excluding the receiver                           |
+| `{{.FuncReturnCount}}`          | The number of return values                                                |
+| `{{.FuncArgumentOfType type}}`  | The first parameter (excluding the receiver) matching the given type, or "" |
+| `{{.FuncReturnOfType type}}`    | The first return value matching the given type, or ""                      |
 
 Unnamed parameters and return values (e.g. `func(int, string)`) and blank (`_`) names are assigned a synthetic name the first time a template references them, so they can be read via `{{.FuncArgument N}}` / `{{.FuncReturn N}}` like any other. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with an error.
 
@@ -1006,6 +1008,7 @@ func foo(name string) {
 - The `directive` field must not include the leading `//`.
 - Functions without the directive comment are not affected.
 - Multiple functions in the same file can carry the directive; each gets the template applied independently with its own placeholder values.
+- `FuncArgumentOfType` and `FuncReturnOfType` match on syntactic type name only (e.g. `context.Context`, `*http.Request`, `error`).
 
 ### 6. File Addition Rule
 
