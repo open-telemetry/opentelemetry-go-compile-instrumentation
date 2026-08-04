@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"go.opentelemetry.io/otelc/test/testutil"
 )
@@ -62,6 +63,9 @@ func TestHTTPServer(t *testing.T) {
 				"1.1",
 				"127.0.0.1",
 			)
+
+			testutil.RequireAttribute(t, span, string(semconv.HTTPRouteKey), tc.path)
+			require.Equal(t, tc.method+" "+tc.path, span.Name())
 		})
 	}
 }
