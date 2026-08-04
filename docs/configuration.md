@@ -134,7 +134,8 @@ configuration for exporters, samplers, or resource attributes — set those thro
 - **`OTEL_GO_SIMPLE_SPAN_PROCESSOR`** — set to `true` to use `SimpleSpanProcessor` instead of
   the default `BatchSpanProcessor` for the trace exporter, exporting each span immediately
   rather than in batches. Useful for debugging when you need spans to appear without waiting
-  for a batch timeout, at the cost of export throughput.
+  for a batch timeout, at the cost of export throughput. Must be exactly the lowercase string
+  `true`; unlike `OTEL_SDK_DISABLED` below, other values (`True`, `TRUE`, `1`) are ignored.
 
 One standard OTel variable worth calling out explicitly is **`OTEL_SDK_DISABLED`**: set to
 `true` (case-insensitive) to disable the injected SDK entirely — no providers are installed
