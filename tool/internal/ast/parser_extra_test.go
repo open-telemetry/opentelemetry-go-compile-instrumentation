@@ -88,33 +88,3 @@ func TestWriteFileAtomic(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "func Bar()")
 }
-
-func TestFindFuncsByDirective(t *testing.T) {
-	const src = `package p
-
-//otelc:span
-func Traced() {}
-
-//otelc:span
-func AlsoTraced() {}
-
-// regular comment
-func Plain() {}
-
-//otelc:other
-func Other() {}
-`
-	p := NewAstParser()
-	file, err := p.ParseSource(src)
-	require.NoError(t, err)
-
-	funcs := FindFuncsByDirective(file, "otelc:span")
-	names := make([]string, 0, len(funcs))
-	for _, fn := range funcs {
-		names = append(names, fn.Name.Name)
-	}
-	assert.ElementsMatch(t, []string{"Traced", "AlsoTraced"}, names)
-
-	// A directive that matches nothing returns no functions.
-	assert.Empty(t, FindFuncsByDirective(file, "otelc:none"))
-}

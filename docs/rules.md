@@ -953,17 +953,17 @@ Top-level `imports` (map[string]string, optional): Additional imports needed by 
 
 **Template Placeholders:**
 
-| Placeholder                    | Replaced with                                                              |
+| Placeholder                     | Replaced with                                                               |
 | ------------------------------- | --------------------------------------------------------------------------- |
-| `{{.FuncName}}`                 | The name of the annotated function                                         |
+| `{{.FuncName}}`                 | The name of the annotated function                                          |
 | `{{.FuncArgument N}}`           | The identifier of the N-th (0-indexed) parameter, excluding the receiver    |
-| `{{.FuncReturn N}}`             | The identifier of the N-th (0-indexed) return value                        |
-| `{{.FuncArgumentCount}}`        | The number of parameters, excluding the receiver                           |
-| `{{.FuncReturnCount}}`          | The number of return values                                                |
+| `{{.FuncReturn N}}`             | The identifier of the N-th (0-indexed) return value                         |
+| `{{.FuncArgumentCount}}`        | The number of parameters, excluding the receiver                            |
+| `{{.FuncReturnCount}}`          | The number of return values                                                 |
 | `{{.FuncArgumentOfType type}}`  | The first parameter (excluding the receiver) matching the given type, or "" |
-| `{{.FuncReturnOfType type}}`    | The first return value matching the given type, or ""                      |
-| `{{.DirectiveArgs}}`            | The `key:value` arguments parsed from the matched directive comment        |
-| `{{.DirectiveArg key}}`         | The value of the named directive argument, or "" if not present           |
+| `{{.FuncReturnOfType type}}`    | The first return value matching the given type, or ""                       |
+| `{{.DirectiveArgs}}`            | The `key:value` arguments parsed from the matched directive comment         |
+| `{{.DirectiveArg key}}`         | The value of the named directive argument, or "" if not present            |
 
 Unnamed parameters and return values (e.g. `func(int, string)`) and blank (`_`) names are assigned a synthetic name the first time a template references them, so they can be read via `{{.FuncArgument N}}` / `{{.FuncReturn N}}` like any other. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with an error.
 
