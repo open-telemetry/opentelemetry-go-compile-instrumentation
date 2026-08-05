@@ -5,3 +5,4 @@ wrap_sizeof_call:
   do:
     - wrap_call:
         replace: "Wrapper({{ . }})"
+        path: testdata/golden/call-rule-only

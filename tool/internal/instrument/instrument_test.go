@@ -377,6 +377,12 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 		}
 	}
 
+	for _, r := range ruleSet.AllCallRules() {
+		if r.Path != "" {
+			r.ResolvedPath = r.Path
+		}
+	}
+
 	matchedJSON, _ := json.Marshal([]*rule.InstRuleSet{ruleSet})
 	matchedFile := util.GetMatchedRuleFile()
 	os.MkdirAll(filepath.Dir(matchedFile), 0o755)

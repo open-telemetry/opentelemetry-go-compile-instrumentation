@@ -5,11 +5,6 @@ package main
 
 import "unsafe"
 
-func Wrapper(size uintptr) uintptr {
-	println("Wrapped!")
-	return size
-}
-
 func CallSizeof() {
 	x := 42
 	size := Wrapper(unsafe.Sizeof(x))

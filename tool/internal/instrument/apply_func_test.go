@@ -22,6 +22,14 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
+func TestHasCompileArg(t *testing.T) {
+	ip := newTestPhase()
+	ip.compileArgs = []string{"/tmp/foo.go", "/tmp/bar.go"}
+
+	assert.True(t, ip.hasCompileArg("/tmp/foo.go"))
+	assert.False(t, ip.hasCompileArg("/tmp/baz.go"))
+}
+
 func TestApplyFuncRuleSignatureFilterMismatchIsLookupMiss(t *testing.T) {
 	parser := ast.NewAstParser()
 	root, err := parser.ParseSource(`package main

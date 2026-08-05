@@ -87,6 +87,7 @@ func TestInstRuleSetAdders(t *testing.T) {
 	irs.AddStructRule(fileA, &InstStructRule{Struct: "S1"})
 	irs.AddStructRule(fileB, &InstStructRule{Struct: "S2"})
 	irs.AddCallRule(fileA, &InstCallRule{})
+	irs.AddCallRule(fileB, &InstCallRule{})
 	irs.AddDirectiveRule(fileA, &InstDirectiveRule{})
 	irs.AddDeclRule(fileA, &InstDeclRule{})
 	irs.AddFileRule(&InstFileRule{})
@@ -96,6 +97,7 @@ func TestInstRuleSetAdders(t *testing.T) {
 	assert.Len(t, irs.FuncRules[fileB], 1)
 	assert.Len(t, irs.StructRules[fileA], 1)
 	assert.Len(t, irs.CallRules[fileA], 1)
+	assert.Len(t, irs.CallRules[fileB], 1)
 	assert.Len(t, irs.DirectiveRules[fileA], 1)
 	assert.Len(t, irs.DeclRules[fileA], 1)
 	assert.Len(t, irs.FileRules, 1)
@@ -107,12 +109,17 @@ func TestInstRuleSetAdders(t *testing.T) {
 	// AllStructRules flattens every file's struct rules.
 	allStructs := irs.AllStructRules()
 	assert.Len(t, allStructs, 2)
+
+	// AllCallRules flattens every file's call rules.
+	allCalls := irs.AllCallRules()
+	assert.Len(t, allCalls, 2)
 }
 
 func TestInstRuleSetAllRulesEmpty(t *testing.T) {
 	irs := NewInstRuleSet("m")
 	assert.Empty(t, irs.AllFuncRules())
 	assert.Empty(t, irs.AllStructRules())
+	assert.Empty(t, irs.AllCallRules())
 }
 
 func TestInstRuleSetSetters(t *testing.T) {

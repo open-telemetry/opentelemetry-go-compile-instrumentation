@@ -73,6 +73,12 @@ func TestResolveRulePaths(t *testing.T) {
 		FileRules: []*rule.InstFileRule{{
 			Path: "example.com/test/hooks",
 		}},
+		CallRules: map[string][]*rule.InstCallRule{
+			// A call rule with no Path (the common case) is skipped entirely.
+			"bar": {{}, {
+				Path: "example.com/test/hooks",
+			}},
+		},
 	}
 
 	err := resolveRulePaths(
@@ -84,6 +90,35 @@ func TestResolveRulePaths(t *testing.T) {
 
 	require.Equal(t, hooksDir, rs.AllFuncRules()[0].ResolvedPath)
 	require.Equal(t, hooksDir, rs.FileRules[0].ResolvedPath)
+	require.Empty(t, rs.CallRules["bar"][0].ResolvedPath)
+	require.Equal(t, hooksDir, rs.CallRules["bar"][1].ResolvedPath)
+}
+
+func TestResolveRulePaths_CallRuleNotFound(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte("module example.com/test\n\ngo 1.25\n"),
+		0o644,
+	))
+
+	rs := &rule.InstRuleSet{
+		CallRules: map[string][]*rule.InstCallRule{
+			"bar": {{
+				Path: "example.com/test/doesnotexist",
+			}},
+		},
+	}
+
+	err := resolveRulePaths(
+		t.Context(),
+		[]*rule.InstRuleSet{rs},
+		map[string]bool{dir: true},
+	)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "failed to resolve import path")
 }
 
 func TestResolveRulePaths_NotFound(t *testing.T) {

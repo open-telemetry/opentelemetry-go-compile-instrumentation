@@ -5,5 +5,6 @@ wrap_sizeof_with_strings:
   do:
     - wrap_call:
         replace: "(func() uintptr { fmt.Println(\"Wrapped!\"); return {{ . }} })()"
+        path: testdata/golden/call-rule-with-import
   imports:
     fmt: "fmt"

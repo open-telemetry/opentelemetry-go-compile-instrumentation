@@ -230,3 +230,16 @@ func (irs *InstRuleSet) AllStructRules() []*InstStructRule {
 	}
 	return rules
 }
+
+// AllCallRules returns all call rules from the rule set as a flat slice.
+func (irs *InstRuleSet) AllCallRules() []*InstCallRule {
+	n := 0
+	for _, rs := range irs.CallRules {
+		n += len(rs)
+	}
+	rules := make([]*InstCallRule, 0, n)
+	for _, rs := range irs.CallRules {
+		rules = append(rules, rs...)
+	}
+	return rules
+}
