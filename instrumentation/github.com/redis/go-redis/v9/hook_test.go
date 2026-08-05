@@ -206,6 +206,11 @@ func TestProcessHook_RecordsError(t *testing.T) {
 	span := spans[0]
 	assert.Equal(t, codes.Error, span.Status().Code)
 	assert.Contains(t, span.Status().Description, "connection refused")
+
+	// Check that error was recorded
+	events := span.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "exception", events[0].Name)
 }
 
 func TestProcessHook_RedisNilNotError(t *testing.T) {
@@ -331,6 +336,11 @@ func TestProcessPipelineHook_RecordsError(t *testing.T) {
 
 	span := spans[0]
 	assert.Equal(t, codes.Error, span.Status().Code)
+
+	// Check that error was recorded
+	events := span.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "exception", events[0].Name)
 }
 
 func TestProcessPipelineHook_Disabled(t *testing.T) {
