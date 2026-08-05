@@ -4,13 +4,11 @@
 package ast
 
 import (
-	"fmt"
 	"regexp"
 
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // typeNameRe parses type-name strings of the form [*][pkg.]Name.
@@ -69,7 +67,6 @@ func (t parsedTypeName) matches(node dst.Expr) bool {
 	default:
 		// Unsupported AST node types (chan, func, map, slice, array, interface
 		// literals) cannot be matched by type-name filters.
-		util.Unimplemented(fmt.Sprintf("signature filter: unsupported type node %T", node))
 		return false
 	}
 }
