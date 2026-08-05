@@ -156,7 +156,7 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	if !ok {
 		return nil, false, ex.Newf("unexpected %T value", r)
 	}
-	ok, err := funcDeclMatchesFilters(funcDecl, rr, importAliasMap(root))
+	ok, err := funcDeclMatchesFilters(funcDecl, rr, root)
 	if err != nil {
 		return nil, false, err
 	}
@@ -332,7 +332,11 @@ func AddStructField(decl dst.Decl, name, t string) {
 // Qualified type names are resolved against imports, which maps the local
 // identifier used at a use site to its real import path (see importAliasMap).
 // Matching is therefore relative to the enclosing file's import declarations.
-func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, imports map[string]string) (bool, error) {
+func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, root *dst.File) (bool, error) {
+	if r.Signature == nil && r.SignatureContains == nil && r.Result == "" && r.LastResult == "" && r.Param == "" {
+		return true, nil
+	}
+	imports := importAliasMap(root)
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
