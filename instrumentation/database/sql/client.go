@@ -199,6 +199,8 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	if !clientEnabler.Enable() {
 		return
 	}
+	defer instrumentEnd(ictx, err)
+
 	if tx == nil || ictx.GetData() == nil {
 		return
 	}
@@ -214,7 +216,6 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	tx.DriverName = dbRequest.DriverName
 	tx.DSN = dbRequest.Dsn
 	tx.DbName = dbRequest.DbName
-	instrumentEnd(ictx, err)
 }
 
 func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Context) {
