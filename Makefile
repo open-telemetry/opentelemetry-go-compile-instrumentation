@@ -14,7 +14,7 @@ SHELL := /bin/bash
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
-        benchmark/codspeed benchmark/threshold govulncheck govulncheck-instrumentation
+        benchmark/codspeed benchmark/threshold govulncheck govulncheck/instrumentation
 
 # Constant variables
 BINARY_NAME := otelc
@@ -33,7 +33,7 @@ INTEGRATION_TEST_RUN ?= .
 # .tools/go.mod, Renovate-managed like every other .tools binary).
 # Core modules: root module (covers tool/) plus every pkg/ module.
 # Instrumentation is scanned separately via instrumented integration-test binaries
-# (see govulncheck-instrumentation): source scans skip //go:build ignore files and
+# (see govulncheck/instrumentation): source scans skip //go:build ignore files and
 # cannot typecheck modules that need compile-time field injection (e.g. database/sql).
 # Demos are intentionally excluded (pinned example deps).
 GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
@@ -449,7 +449,7 @@ govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps
 		app=$$(basename "$$appdir"); \
 		echo "==> otelc go build $$app"; \
 		if ! (cd "$$appdir" && "$$otelc" go build -a -o "$$app_bin" .); then \
-			echo "govulncheck-instrumentation: failed to build $$app"; \
+			echo "govulncheck/instrumentation: failed to build $$app"; \
 			status=1; \
 			(cd "$$appdir" && "$$otelc" cleanup) || true; \
 			continue; \

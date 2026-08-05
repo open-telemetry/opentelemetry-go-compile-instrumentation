@@ -59,4 +59,4 @@ jobs:
           go-version: stable
           cache-dependency-path: "**/go.mod"
       - name: Build otelc and scan instrumented test apps
-        run: make govulncheck-instrumentation
+        run: make govulncheck/instrumentation
