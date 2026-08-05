@@ -58,4 +58,5 @@ func TestGRPCServerDBClient(t *testing.T) {
 	)
 	require.Equal(t, grpcClientSpan.SpanID(), grpcServerSpan.ParentSpanID(), "gRPC server parent must be gRPC client")
 	require.Equal(t, grpcServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be gRPC server")
+	require.True(t, grpcClientSpan.ParentSpanID().IsEmpty(), "gRPC client span must be the trace root")
 }
