@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -22,13 +23,19 @@ import (
 func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
 	cache := make(map[string]string)
 
+	dirs := make([]string, 0, len(moduleDirs))
+	for dir := range moduleDirs {
+		dirs = append(dirs, dir)
+	}
+	slices.Sort(dirs)
+
 	resolve := func(goPath string) (string, error) {
 		if dir, ok := cache[goPath]; ok {
 			return dir, nil
 		}
 
 		var lastErr error
-		for moduleDir := range moduleDirs {
+		for _, moduleDir := range dirs {
 			pkgs, err := packages.Load(&packages.Config{
 				Mode:    packages.NeedFiles,
 				Context: ctx,
