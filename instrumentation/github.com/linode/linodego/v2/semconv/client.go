@@ -84,8 +84,13 @@ func LinodegoRequestTraceAttrs(req LinodegoRequest) []attribute.KeyValue {
 }
 
 // LinodegoOperationTraceAttrs returns attributes for a public API method span.
-func LinodegoOperationTraceAttrs(operation string) []attribute.KeyValue {
-	server := DefaultServerAddress
+// serverAddress is the host the client is actually configured to call; when
+// empty (e.g. it could not be determined) it defaults to DefaultServerAddress.
+func LinodegoOperationTraceAttrs(operation, serverAddress string) []attribute.KeyValue {
+	server := strings.TrimSpace(serverAddress)
+	if server == "" {
+		server = DefaultServerAddress
+	}
 	attrs := []attribute.KeyValue{
 		semconv.ServerAddress(server),
 	}
@@ -173,7 +178,7 @@ func NewMetrics(meter metric.Meter) Metrics {
 // MetricAttributes returns moderate-cardinality attributes for linodego metrics.
 //
 // Included (bounded sets):
-//   - server.address — fixed default host
+//   - server.address — the configured client host (falls back to the default when unknown)
 //   - code.function.name — public Client method (finite API surface, ~hundreds)
 //   - http.response.status_code — when known (HTTP status range)
 //
@@ -182,9 +187,14 @@ func NewMetrics(meter metric.Meter) Metrics {
 //   - resource UIDs, request IDs, etc.
 //
 // Per-request HTTP method/path detail stays on spans (and optional net/http metrics).
-func MetricAttributes(operation string, statusCode int) []attribute.KeyValue {
+func MetricAttributes(operation string, statusCode int, serverAddress string) []attribute.KeyValue {
+	server := strings.TrimSpace(serverAddress)
+	if server == "" {
+		server = DefaultServerAddress
+	}
+
 	attrs := make([]attribute.KeyValue, 0, 3)
-	attrs = append(attrs, semconv.ServerAddress(DefaultServerAddress))
+	attrs = append(attrs, semconv.ServerAddress(server))
 	if op := strings.TrimSpace(operation); op != "" {
 		attrs = append(attrs, semconv.CodeFunctionName(op))
 	}
@@ -195,9 +205,9 @@ func MetricAttributes(operation string, statusCode int) []attribute.KeyValue {
 }
 
 // RecordOperationDuration records public API method duration in seconds.
-func (m Metrics) RecordOperationDuration(ctx context.Context, seconds float64, operation string, statusCode int) {
+func (m Metrics) RecordOperationDuration(ctx context.Context, seconds float64, operation string, statusCode int, serverAddress string) {
 	if m.operationDuration == nil {
 		return
 	}
-	m.operationDuration.Record(ctx, seconds, metric.WithAttributes(MetricAttributes(operation, statusCode)...))
+	m.operationDuration.Record(ctx, seconds, metric.WithAttributes(MetricAttributes(operation, statusCode, serverAddress)...))
 }

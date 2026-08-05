@@ -191,6 +191,64 @@ func TestBeforeAfterDoRequest_PlainError(t *testing.T) {
 	assert.Equal(t, "network down", got.Status().Description)
 }
 
+func TestHostFromClient(t *testing.T) {
+	assert.Empty(t, hostFromClient(nil))
+
+	c, err := linodego.NewClient(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "api.linode.com", hostFromClient(&c))
+
+	c.SetBaseURL("https://my-mock-linode-api.example.com")
+	assert.Equal(t, "my-mock-linode-api.example.com", hostFromClient(&c))
+}
+
+func TestBeforeAfterDoRequest_CustomServerAddress(t *testing.T) {
+	sr, _ := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	c, err := linodego.NewClient(nil)
+	require.NoError(t, err)
+	c.SetBaseURL("https://my-mock-linode-api.example.com")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(&c, parent, "GET", "linode/instances/1", nil, nil)
+
+	BeforeDoRequest(ictx, &c, parent, "GET", "linode/instances/1", nil, nil)
+	AfterDoRequest(ictx, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	attrs := attrMap(spans[0].Attributes())
+	assert.Equal(t, "my-mock-linode-api.example.com", attrs["server.address"])
+}
+
+func TestPublicMethodHooks_CustomServerAddress(t *testing.T) {
+	sr, reader := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	c, err := linodego.NewClient(nil)
+	require.NoError(t, err)
+	c.SetBaseURL("https://my-mock-linode-api.example.com")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(&c, parent, 123)
+	ictx.FuncName = "GetInstance"
+
+	BeforeAPICall2(ictx, &c, parent, 123)
+	AfterAPICall2(ictx, nil, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	attrs := attrMap(spans[0].Attributes())
+	assert.Equal(t, "my-mock-linode-api.example.com", attrs["server.address"])
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	addr, ok := metricAttr(rm, "linodego.client.operation.duration", "server.address")
+	require.True(t, ok, "expected server.address on operation duration metric")
+	assert.Equal(t, "my-mock-linode-api.example.com", addr)
+}
+
 func TestBeforeDoRequest_Disabled(t *testing.T) {
 	sr, _ := setupTestProviders(t)
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "linodego")
@@ -289,4 +347,26 @@ func hasMetric(rm metricdata.ResourceMetrics, name string) bool {
 		}
 	}
 	return false
+}
+
+// metricAttr returns the string value of the given attribute key on the
+// first data point of the named histogram metric.
+func metricAttr(rm metricdata.ResourceMetrics, metricName, key string) (string, bool) {
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != metricName {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			if !ok {
+				continue
+			}
+			for _, dp := range hist.DataPoints {
+				if v, ok := dp.Attributes.Value(attribute.Key(key)); ok {
+					return v.AsString(), true
+				}
+			}
+		}
+	}
+	return "", false
 }
