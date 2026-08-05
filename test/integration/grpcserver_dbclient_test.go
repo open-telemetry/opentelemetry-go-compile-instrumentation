@@ -43,7 +43,7 @@ func TestGRPCServerDBClient(t *testing.T) {
 	require.Equal(t, "frontend querying database", resp.GetMessage())
 
 	// Wait for the spans to be flushed
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(2)
 
 	// We expect exactly 1 trace with 2 spans:
 	// 1. gRPC server (Frontend)

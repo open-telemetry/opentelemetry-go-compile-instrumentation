@@ -39,7 +39,7 @@ func TestGinServerHTTPClient(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Wait for the spans from the frontend, client, and backend to be flushed
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(3)
 
 	// We expect exactly 1 trace with 3 spans:
 	// 1. Gin server (Frontend)
@@ -50,7 +50,9 @@ func TestGinServerHTTPClient(t *testing.T) {
 
 	ginServerSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, func(s ptrace.Span) bool { return s.Name() == "GET /hello" })
 	httpClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
-	backendServerSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, func(s ptrace.Span) bool { return s.Name() == "GET" })
+	backendServerSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, func(s ptrace.Span) bool {
+		return s.Name() == "GET /api/backend"
+	})
 
 	// Assert on propagation (parent-child relationships)
 	require.Equal(t, ginServerSpan.TraceID(), httpClientSpan.TraceID(), "trace ID mismatch")
