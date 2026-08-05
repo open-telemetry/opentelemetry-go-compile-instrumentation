@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -29,8 +30,9 @@ const (
 // Files that do not exist when tracked are recorded and removed during Revert if
 // they are later created.
 //
-// StateManager is not safe for concurrent use.
+// StateManager is safe for concurrent use.
 type StateManager struct {
+	mu    sync.Mutex
 	files map[string]bool // true = existed when tracked
 }
 
@@ -167,24 +169,32 @@ func (s *StateManager) Track(path string) error {
 	}
 
 	abs = filepath.Clean(abs)
+
+	s.mu.Lock()
 	if _, ok := s.files[abs]; ok {
+		s.mu.Unlock()
 		return nil
 	}
 
 	// If the file doesn't exist, mark it for removal
 	if !util.PathExists(abs) {
 		s.files[abs] = false
-		return s.Commit()
+		err = s.commitLocked()
+		s.mu.Unlock()
+		return err
 	}
 
 	// If the file exists, snapshot it
 	dst := filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(abs))
 	if err = util.CopyFile(abs, dst); err != nil {
+		s.mu.Unlock()
 		return ex.Wrapf(err, "failed to snapshot %s", abs)
 	}
 
 	s.files[abs] = true
-	return s.Commit()
+	err = s.commitLocked()
+	s.mu.Unlock()
+	return err
 }
 
 // Commit persists the tracked state to disk so it can be restored by a future
@@ -194,6 +204,12 @@ func (s *StateManager) Track(path string) error {
 // Track calls Commit automatically; calling it directly is only needed to
 // re-persist after external changes.
 func (s *StateManager) Commit() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commitLocked()
+}
+
+func (s *StateManager) commitLocked() error {
 	if len(s.files) == 0 {
 		return nil
 	}
@@ -232,6 +248,9 @@ func (s *StateManager) Commit() error {
 // successful Revert: the state is consumed, and leaving it behind would let a
 // later `otelc cleanup` re-apply snapshots from a finished build.
 func (s *StateManager) Discard() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if len(s.files) == 0 {
 		return nil
 	}
@@ -251,6 +270,9 @@ func (s *StateManager) Discard() error {
 // Files that originally existed are restored from their snapshots. Files that
 // did not exist when tracked are removed if they exist.
 func (s *StateManager) Revert() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if len(s.files) == 0 {
 		return nil
 	}
@@ -273,3 +295,4 @@ func (s *StateManager) Revert() error {
 
 	return err
 }
+
