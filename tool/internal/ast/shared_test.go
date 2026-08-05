@@ -22,9 +22,21 @@ const MaxRetries = 3
 
 type MyStruct struct{ x int }
 
+type GenSingle[T any] struct{ val T }
+
+type GenMulti[T, U any] struct{ t T; u U }
+
 func TopLevel(a, b int) int { return a + b }
 
 func (s *MyStruct) Method() error { return nil }
+
+func (g GenSingle[T]) SingleVal() T { return g.val }
+
+func (g *GenSingle[T]) SinglePtr() T { return g.val }
+
+func (g GenMulti[T, U]) MultiVal() (T, U) { return g.t, g.u }
+
+func (g *GenMulti[T, U]) MultiPtr() (T, U) { return g.t, g.u }
 `
 
 func parseSharedFixture(t *testing.T) *dst.File {
@@ -38,10 +50,17 @@ func parseSharedFixture(t *testing.T) *dst.File {
 func TestListFuncDecls(t *testing.T) {
 	file := parseSharedFixture(t)
 	decls := ListFuncDecls(file)
-	require.Len(t, decls, 2)
-	names := []string{decls[0].Name.Name, decls[1].Name.Name}
+	require.Len(t, decls, 6)
+	names := make([]string, 0, len(decls))
+	for _, decl := range decls {
+		names = append(names, decl.Name.Name)
+	}
 	assert.Contains(t, names, "TopLevel")
 	assert.Contains(t, names, "Method")
+	assert.Contains(t, names, "SingleVal")
+	assert.Contains(t, names, "SinglePtr")
+	assert.Contains(t, names, "MultiVal")
+	assert.Contains(t, names, "MultiPtr")
 }
 
 func TestFindFuncDeclWithoutRecv(t *testing.T) {
@@ -76,6 +95,78 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Signature: &sig,
 		}
 
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Method", fn.Name.Name)
+	})
+
+	t.Run("matches single param generic value receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "SingleVal",
+			Recv: "GenSingle",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "SingleVal", fn.Name.Name)
+	})
+
+	t.Run("matches single param generic pointer receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "SinglePtr",
+			Recv: "*GenSingle",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "SinglePtr", fn.Name.Name)
+	})
+
+	t.Run("matches multi param generic value receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "MultiVal",
+			Recv: "GenMulti",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "MultiVal", fn.Name.Name)
+	})
+
+	t.Run("matches multi param generic pointer receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "MultiPtr",
+			Recv: "*GenMulti",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "MultiPtr", fn.Name.Name)
+	})
+
+	t.Run("matches InstRawRule", func(t *testing.T) {
+		r := &rule.InstRawRule{
+			Func: "Method",
+			Recv: "*MyStruct",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Method", fn.Name.Name)
+	})
+
+	t.Run("matches FilterDef", func(t *testing.T) {
+		r := &rule.FilterDef{
+			HasFunc: "Method",
+			HasRecv: "*MyStruct",
+		}
 		fn, ok, err := FindFuncDecl(file, r)
 		require.NoError(t, err)
 		require.True(t, ok)
