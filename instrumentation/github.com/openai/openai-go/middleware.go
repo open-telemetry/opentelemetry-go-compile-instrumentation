@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -145,6 +146,10 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			model, spanAttrs = parseEmbeddingRequest(bodyBytes)
 		}
 
+		if model == "" {
+			return next(req)
+		}
+
 		spanName := opName + " " + model
 		baseAttrs := []attribute.KeyValue{
 			semconv.GenAISystem("openai"),
@@ -171,6 +176,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		}
 
 		if resp.StatusCode >= 400 {
+			span.RecordError(errors.New(resp.Status))
 			span.SetStatus(codes.Error, resp.Status)
 			span.SetAttributes(attribute.String("error.type", resp.Status))
 			span.End()
