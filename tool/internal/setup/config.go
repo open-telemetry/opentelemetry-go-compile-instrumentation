@@ -24,10 +24,10 @@ import (
 
 const (
 	// Allowed names for the instrumentation config file.
-	ToolFileCanonical = "otel.instrumentation.go"
-	ToolFileAlias     = "otelc.tool.go"
-	OtelYAMLCanonical = ".otel.yml"
-	OtelYAMLAlias     = ".otel.yaml"
+	ToolFileCanonical            = "otel.instrumentation.go"
+	ToolFileAlias                = "otelc.tool.go"
+	InstrumentationYAMLCanonical = "otel.instrumentation.yml"
+	InstrumentationYAMLAlias     = "otel.instrumentation.yaml"
 )
 
 type InstrumentationConfig struct {
@@ -79,9 +79,9 @@ func findToolFiles(moduleDirs map[string]bool) ([]string, error) {
 	return toolFiles, nil
 }
 
-func findOtelYAMLFile(moduleDir string) (string, error) {
-	canonical := filepath.Join(moduleDir, OtelYAMLCanonical)
-	alias := filepath.Join(moduleDir, OtelYAMLAlias)
+func findInstrumentationYAMLFile(moduleDir string) (string, error) {
+	canonical := filepath.Join(moduleDir, InstrumentationYAMLCanonical)
+	alias := filepath.Join(moduleDir, InstrumentationYAMLAlias)
 
 	canonicalExists := util.PathExists(canonical)
 	aliasExists := util.PathExists(alias)
@@ -89,9 +89,9 @@ func findOtelYAMLFile(moduleDir string) (string, error) {
 	switch {
 	case canonicalExists && aliasExists:
 		return "", ex.Newf(
-			"both %q and %q exist; only one module-local .otel config file is allowed",
-			OtelYAMLCanonical,
-			OtelYAMLAlias,
+			"both %q and %q exist; only one instrumentation YAML file is allowed",
+			InstrumentationYAMLCanonical,
+			InstrumentationYAMLAlias,
 		)
 	case canonicalExists:
 		return canonical, nil

@@ -86,7 +86,7 @@ func TestFindToolFile(t *testing.T) {
 	}
 }
 
-func TestFindOtelYAMLFile(t *testing.T) {
+func TestFindInstrumentationYAMLFile(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		setup   func(string)
@@ -101,34 +101,34 @@ func TestFindOtelYAMLFile(t *testing.T) {
 			name: "canonical",
 			setup: func(dir string) {
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, OtelYAMLCanonical),
+					filepath.Join(dir, InstrumentationYAMLCanonical),
 					nil,
 					0o644,
 				))
 			},
-			want: OtelYAMLCanonical,
+			want: InstrumentationYAMLCanonical,
 		},
 		{
 			name: "alias",
 			setup: func(dir string) {
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, OtelYAMLAlias),
+					filepath.Join(dir, InstrumentationYAMLAlias),
 					nil,
 					0o644,
 				))
 			},
-			want: OtelYAMLAlias,
+			want: InstrumentationYAMLAlias,
 		},
 		{
 			name: "both",
 			setup: func(dir string) {
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, OtelYAMLCanonical),
+					filepath.Join(dir, InstrumentationYAMLCanonical),
 					nil,
 					0o644,
 				))
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, OtelYAMLAlias),
+					filepath.Join(dir, InstrumentationYAMLAlias),
 					nil,
 					0o644,
 				))
@@ -140,7 +140,7 @@ func TestFindOtelYAMLFile(t *testing.T) {
 			dir := t.TempDir()
 			tt.setup(dir)
 
-			got, err := findOtelYAMLFile(dir)
+			got, err := findInstrumentationYAMLFile(dir)
 			if tt.wantErr {
 				require.Error(t, err)
 				return

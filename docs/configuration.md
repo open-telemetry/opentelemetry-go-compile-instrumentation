@@ -54,14 +54,14 @@ OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
    set.
 3. **Tool files** (`otel.instrumentation.go` / `otelc.tool.go`) — when the project declares
    instrumentations explicitly. See [External Configuration Sources](external-configuration.md).
-4. **Module-local `.otel.yml` / `.otel.yaml`** — CI/CD-oriented instrumentation selection. The
+4. **Module-local `otel.instrumentation.yml` / `otel.instrumentation.yaml`** — CI/CD-oriented instrumentation selection. The
    AutoPin flow temporarily translates the file into `otel.instrumentation.go`. Running
    `otelc pin` directly validates and optionally prunes the YAML without creating a tool file.
-   If the same module already has a tool file, that file takes precedence.
+   If the same module already has a tool file, imports from both files are merged and deduplicated.
 5. **Embedded defaults** — the instrumentation bundle built into `otelc`, applied when none of
    the above are present.
 
-`OTELC_RULES` and `--rules` replace all import-driven sources. Tool files and `.otel.yml` are
+`OTELC_RULES` and `--rules` replace all import-driven sources. Tool files and instrumentation YAML are
 selected independently per module, and their resulting rule sets are merged across a
 multi-module workspace.
 
@@ -97,7 +97,7 @@ OTELC_RULES=ci-rules/ otelc go build .
 > `--rules` and `OTELC_RULES` are intended for development and debugging, not for production
 > configuration. For stable, versioned instrumentation, use the `otel.instrumentation.go`
 > mechanism described in [External Configuration Sources](external-configuration.md). Use
-> `.otel.yml` / `.otel.yaml` when instrumentation selection must be injected without persisting a
+> `otel.instrumentation.yml` / `otel.instrumentation.yaml` when instrumentation selection must be injected without persisting a
 > tool file in source control.
 
 ## Narrowing What Gets Instrumented
