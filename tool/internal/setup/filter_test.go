@@ -124,6 +124,11 @@ func NotAStruct() {}
 	if (&setup.StructFilter{Struct: "Reader"}).Match(ctx) {
 		t.Fatal("StructFilter.Match(Reader) = true, want false")
 	}
+	// Interfaces no longer match, so `not: has_struct` now *includes* files
+	// declaring an interface of that name, where it previously excluded them.
+	if !(&setup.Not{Inner: &setup.StructFilter{Struct: "Reader"}}).Match(ctx) {
+		t.Fatal("Not(StructFilter(Reader)).Match = false, want true")
+	}
 	if (&setup.StructFilter{Struct: "NotAStruct"}).Match(ctx) {
 		t.Fatal("StructFilter.Match(NotAStruct) = true, want false")
 	}

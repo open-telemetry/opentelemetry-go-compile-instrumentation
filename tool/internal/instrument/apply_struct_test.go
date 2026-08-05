@@ -39,7 +39,8 @@ func TestApplyStructRule_NonStructType_ReturnsError(t *testing.T) {
 	err := newTestPhase().applyStructRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Foo")
+	assert.Contains(t, err.Error(), `can not find struct "Foo"`)
+	assert.Contains(t, err.Error(), "not a struct type")
 }
 
 func TestApplyStructRule_GroupedTypeBlock_TargetsNamedStruct(t *testing.T) {
