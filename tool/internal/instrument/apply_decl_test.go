@@ -198,4 +198,3 @@ func TestApplyDeclRule_EmptyKind_FunctionTarget(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is not a var or const declaration")
 }
-
