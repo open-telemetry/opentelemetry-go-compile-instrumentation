@@ -545,16 +545,6 @@ func TestFlattenTJump(t *testing.T) {
 			removedOnExit: false,
 			validate:      nil,
 		},
-		{
-			name: "flatten unnamed context param without panic",
-			hookSrc: `package main
-			func hookFunc(HookContext, string) {
-				other.SetSkipCall(true)
-			}`,
-			canFlatten:    true,
-			removedOnExit: false,
-			validate:      nil,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

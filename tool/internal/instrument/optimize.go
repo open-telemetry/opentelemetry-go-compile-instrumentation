@@ -204,14 +204,7 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
 // 2. The HookContext parameter is only used as a receiver for method calls
 func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
 	// The hook context parameter is always the first parameter of the hook function.
-	hookContextParam := ""
-	if len(hookFunc.Type.Params.List[0].Names) > 0 {
-		hookContextParam = hookFunc.Type.Params.List[0].Names[0].Name
-	}
-
-	if hookContextParam == "" {
-		return true // Unnamed parameter cannot be referenced
-	}
+	hookContextParam := hookFunc.Type.Params.List[0].Names[0].Name
 
 	// Check if the hook function references SetSkipCall on the hook context.
 	// If found, the trampoline-jump-if cannot be flattened. Match the bare
