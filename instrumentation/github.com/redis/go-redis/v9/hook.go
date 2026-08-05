@@ -74,6 +74,7 @@ func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 
 		err := next(ctx, cmd)
 		if err != nil && !errors.Is(err, redis.Nil) {
+			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
 		return err
@@ -121,6 +122,7 @@ func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 
 		err := next(ctx, cmds)
 		if err != nil && !errors.Is(err, redis.Nil) {
+			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
 		return err
@@ -150,11 +152,6 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 	if err := cmd.Err(); err != nil && !errors.Is(err, redis.Nil) {
 		b = append(b, ": "...)
 		b = append(b, err.Error()...)
-	}
-
-	if cmd, ok := cmd.(*redis.Cmd); ok {
-		b = append(b, ": "...)
-		b = redisV9AppendArg(b, cmd.Name())
 	}
 
 	return string(b)

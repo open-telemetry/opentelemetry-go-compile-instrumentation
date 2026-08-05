@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	plan := os.Getenv("GO_HELPER_BUILD_PLAN")
+	if plan != "" {
+		fmt.Fprintln(os.Stderr, plan)
+	}
+	if os.Getenv("GO_HELPER_BUILD_FAILS") == "1" {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
 
 func TestParseCdDir(t *testing.T) {
 	tests := []struct {
@@ -379,20 +394,26 @@ echo nothing useful
 
 			t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
+			exe, err := os.Executable()
+			require.NoError(t, err)
+
 			execCommandContext = func(
-				_ context.Context,
+				ctx context.Context,
 				name string,
 				args ...string,
 			) *exec.Cmd {
 				assert.Equal(t, "go", name)
 				assert.Equal(t, tt.expectedGoCmd, args)
 
-				script := "cat <<'EOF' >&2\n" + tt.buildPlan + "\nEOF\n"
+				cmd := exec.CommandContext(ctx, exe, "-test.run=^TestHelperProcess$")
+				cmd.Env = append(os.Environ(),
+					"GO_WANT_HELPER_PROCESS=1",
+					"GO_HELPER_BUILD_PLAN="+tt.buildPlan,
+				)
 				if tt.buildFails {
-					script += "\nexit 1\n"
+					cmd.Env = append(cmd.Env, "GO_HELPER_BUILD_FAILS=1")
 				}
-
-				return exec.Command("sh", "-c", script)
+				return cmd
 			}
 
 			subcommand := tt.subcommand

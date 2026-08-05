@@ -41,6 +41,9 @@ func BeforeConnect(ictx hook.HookContext, ctx context.Context, opts ...*options.
 
 	// Inject monitor to all existing options
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		if opt.Monitor == nil {
 			opt.SetMonitor(monitor)
 		}
@@ -67,6 +70,9 @@ func BeforeNewClient(ictx hook.HookContext, opts ...*options.ClientOptions) {
 
 	// Inject monitor to all existing options
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		if opt.Monitor == nil {
 			opt.SetMonitor(monitor)
 		}
