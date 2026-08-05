@@ -123,12 +123,24 @@ SDK reads standard OTel environment variables at startup. There is no `otelc`-sp
 configuration for exporters, samplers, or resource attributes — set those through the
 [OTel SDK environment variable specification](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
 
-One `otelc`-specific runtime knob is `OTEL_GLS_MAX_SPANS`, which controls the depth of the
-goroutine-local storage (GLS) span stack. Instrumentation that does not pass `context.Context`
-through all call boundaries relies on GLS to propagate trace context. Increasing
-`OTEL_GLS_MAX_SPANS` beyond the default accommodates deeper call stacks; see
-[GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for
-the operational constraints.
+`otelc`-specific runtime knobs beyond the standard OTel variables:
+
+- **`OTEL_GLS_MAX_SPANS`** — controls the depth of the goroutine-local storage (GLS) span
+  stack. Instrumentation that does not pass `context.Context` through all call boundaries
+  relies on GLS to propagate trace context. Increasing `OTEL_GLS_MAX_SPANS` beyond the default
+  accommodates deeper call stacks; see
+  [GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for the
+  operational constraints.
+- **`OTEL_GO_SIMPLE_SPAN_PROCESSOR`** — set to `true` to use `SimpleSpanProcessor` instead of
+  the default `BatchSpanProcessor` for the trace exporter, exporting each span immediately
+  rather than in batches. Useful for debugging when you need spans to appear without waiting
+  for a batch timeout, at the cost of export throughput. Must be exactly the lowercase string
+  `true`; unlike `OTEL_SDK_DISABLED` below, other values (`True`, `TRUE`, `1`) are ignored.
+
+One standard OTel variable worth calling out explicitly is **`OTEL_SDK_DISABLED`**: set to
+`true` (case-insensitive) to disable the injected SDK entirely — no providers are installed
+and no telemetry is collected or exported. Every other value, including unset, leaves the SDK
+enabled.
 
 ## Verifying Your Configuration
 

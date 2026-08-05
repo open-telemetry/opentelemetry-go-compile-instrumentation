@@ -114,6 +114,30 @@ func TestTypeNameMatches(t *testing.T) {
 			node:    &dst.InterfaceType{Methods: &dst.FieldList{}},
 			want:    true,
 		},
+		{
+			name:    "unsupported array type node returns false without panic",
+			typeStr: "string",
+			node:    &dst.ArrayType{Elt: &dst.Ident{Name: "string"}},
+			want:    false,
+		},
+		{
+			name:    "unsupported map type node returns false without panic",
+			typeStr: "string",
+			node:    &dst.MapType{Key: &dst.Ident{Name: "string"}, Value: &dst.Ident{Name: "int"}},
+			want:    false,
+		},
+		{
+			name:    "unsupported chan type node returns false without panic",
+			typeStr: "int",
+			node:    &dst.ChanType{Value: &dst.Ident{Name: "int"}},
+			want:    false,
+		},
+		{
+			name:    "unsupported func type node returns false without panic",
+			typeStr: "error",
+			node:    &dst.FuncType{},
+			want:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -143,6 +167,8 @@ func TestFieldListContainsType(t *testing.T) {
 				},
 			},
 			{Type: &dst.Ident{Name: "error"}},
+			{Type: &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}}},
+			{Type: &dst.MapType{Key: &dst.Ident{Name: "string"}, Value: &dst.Ident{Name: "string"}}},
 		},
 	}
 
