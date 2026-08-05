@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
-// Helper function to parse Go source code into a function declaration
+// Helper function to parse Go source code into a function decl
 func parseFunc(t *testing.T, source string) *dst.FuncDecl {
 	parser := ast.NewAstParser()
 	file, err := parser.ParseSource(source)
