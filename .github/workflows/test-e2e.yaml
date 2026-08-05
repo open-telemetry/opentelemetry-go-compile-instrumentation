@@ -33,6 +33,8 @@ jobs:
               - 'pkg/**'
               - 'test/**'
               - 'demo/**'
+              - 'instrumentation/**/*.yaml'
+              - 'instrumentation/**/*.yml'
               - '.github/workflows/test-e2e.yaml'
 
   test-e2e-coverage:

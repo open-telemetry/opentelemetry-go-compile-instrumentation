@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -163,6 +164,125 @@ func TestBeforeNext_NonRecordingSpanDoesNotBurnGate(t *testing.T) {
 		attrs[string(a.Key)] = a.Value.AsInterface()
 	}
 	assert.Equal(t, "/users/:id", attrs["http.route"])
+}
+
+func TestBeforeNext_DisabledInstrumentation(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin")
+
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	ended := sr.Ended()[0]
+
+	assert.Equal(t, "GET", ended.Name(),
+		"span name must not be rewritten when gin instrumentation is disabled")
+
+	attrs := make(map[string]any)
+	for _, a := range ended.Attributes() {
+		attrs[string(a.Key)] = a.Value.AsInterface()
+	}
+	assert.NotContains(t, attrs, "http.route",
+		"http.route must not be set when gin instrumentation is disabled")
+}
+
+func TestBeforeNext_NotInEnabledList(t *testing.T) {
+	// An allow-list that covers the HTTP server instrumentation but not gin:
+	// the server span is still produced, but gin must not enrich it.
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, "GET", sr.Ended()[0].Name(),
+		"span name must not be rewritten when gin is absent from the enabled list")
+}
+
+func TestBeforeNext_InEnabledList(t *testing.T) {
+	// Guards the opposite direction: the gate must not suppress enrichment
+	// when gin is explicitly enabled.
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp,gin")
+
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, "GET /users/:id", sr.Ended()[0].Name(),
+		"span name must be enriched when gin is in the enabled list")
+}
+
+func TestAfterNext_DisabledInstrumentation(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin")
+
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	_ = c.Error(errors.New("db connection lost"))
+
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	ended := sr.Ended()[0]
+
+	assert.Equal(t, codes.Unset, ended.Status().Code,
+		"span status must not be set when gin instrumentation is disabled")
+	assert.Empty(t, ended.Events(),
+		"gin errors must not be recorded when gin instrumentation is disabled")
+}
+
+func TestAfterNext_UsesBeforeNextGateDecision(t *testing.T) {
+	// gin is enabled when BeforeNext runs.
+	sr, tr := setupContextTracer(t)
+
+	_, span := tr.Start(context.Background(), "GET")
+	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
+
+	ictx := hooktest.NewMockHookContext(c)
+	BeforeNext(ictx, c)
+
+	// The environment changes to disabled before Next returns. AfterNext must
+	// still honor the decision BeforeNext made for this call, not re-read the
+	// environment, or the depth counter and the enrichment it gates would
+	// desync mid-request.
+	require.NoError(t, os.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin"))
+	t.Cleanup(func() { _ = os.Unsetenv("OTEL_GO_DISABLED_INSTRUMENTATIONS") })
+
+	_ = c.Error(errors.New("db connection lost"))
+	AfterNext(ictx)
+
+	span.End()
+	require.Len(t, sr.Ended(), 1)
+	ended := sr.Ended()[0]
+
+	assert.Equal(t, "GET /users/:id", ended.Name(),
+		"span name enriched by BeforeNext must stand even if gin is disabled before AfterNext runs")
+	assert.Equal(t, codes.Error, ended.Status().Code,
+		"AfterNext must record errors using BeforeNext's gate decision, not a fresh environment read")
 }
 
 func TestAfterNext_RecordsGinErrors(t *testing.T) {

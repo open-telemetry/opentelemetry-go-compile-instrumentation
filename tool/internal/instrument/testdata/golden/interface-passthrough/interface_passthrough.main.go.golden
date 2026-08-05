@@ -1,0 +1,139 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import _ "unsafe"
+
+// interface{}/any params and returns take the passthrough path in the
+// generated SetParam/SetReturnVal (stored directly, no pointer, no nil check).
+func InterfacePassthrough(v interface{}) (r any) {
+	//line <generated>:1
+	if hookContext3881633898, _ := OtelBeforeTrampoline_InterfacePassthrough3881633898(&v); false {
+	} else {
+		defer OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext3881633898, &r)
+	}
+	//line main.go:9:2
+	return v
+}
+
+func main() {}
+
+//line <generated>:1
+type HookContextImpl3881633898 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl3881633898) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl3881633898) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl3881633898) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl3881633898) GetData() interface{}     { return c.data }
+func (c *HookContextImpl3881633898) GetKeyData(key string) interface{} {
+	if c.data == nil {
+		return nil
+	}
+	return c.data.(map[string]interface{})[key]
+}
+
+func (c *HookContextImpl3881633898) SetKeyData(key string, val interface{}) {
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+	c.data.(map[string]interface{})[key] = val
+}
+
+func (c *HookContextImpl3881633898) HasKeyData(key string) bool {
+	if c.data == nil {
+		return false
+	}
+	_, ok := c.data.(map[string]interface{})[key]
+	return ok
+}
+
+func (c *HookContextImpl3881633898) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return c.params[0]
+	}
+	return nil
+}
+
+func (c *HookContextImpl3881633898) SetParam(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		c.params[0] = val
+	}
+}
+
+func (c *HookContextImpl3881633898) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return c.returnVals[0]
+	}
+	return nil
+}
+
+func (c *HookContextImpl3881633898) SetReturnVal(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		c.returnVals[0] = val
+	}
+}
+func (c *HookContextImpl3881633898) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl3881633898) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl3881633898) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl3881633898) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_InterfacePassthrough3881633898(param0 *interface{}) (hookContext *HookContextImpl3881633898, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "H15InterfaceBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl3881633898{}
+	hookContext.params = []interface{}{param0}
+	hookContext.funcName = "InterfacePassthrough"
+	hookContext.packageName = "main"
+	if H15InterfaceBefore != nil {
+		H15InterfaceBefore(hookContext, *param0)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext HookContext, arg0 *any) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "H15InterfaceAfter")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl3881633898).returnVals = []interface{}{arg0}
+	if H15InterfaceAfter != nil {
+		H15InterfaceAfter(hookContext, *arg0)
+	}
+}
+
+//go:linkname H15InterfaceBefore testdata/golden/interface-passthrough.H15InterfaceBefore
+func H15InterfaceBefore(hookContext HookContext, param0 interface{})
+
+//go:linkname H15InterfaceAfter testdata/golden/interface-passthrough.H15InterfaceAfter
+func H15InterfaceAfter(hookContext HookContext, arg0 interface{})
