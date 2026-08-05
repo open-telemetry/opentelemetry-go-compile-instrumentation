@@ -64,7 +64,7 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 		}
 		// No import context at all (imports == nil, e.g. hand-built AST nodes in
 		// tests with no backing *dst.File): compare against importPath's last
-		// segment. Note this cannot rescue a mis-keyed map — a tail match here
+		// segment. Note this cannot rescue a miskeyed map — a tail match here
 		// would imply ident.Name is a key, so the lookup above would have hit.
 		return importPathTail(t.importPath) == ident.Name && t.name == n.Sel.Name
 

@@ -4,12 +4,25 @@
 package ast
 
 import (
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	switch os.Getenv("AST_FATAL_CASE") {
+	case "unsupported-type-node":
+		tn := parsedTypeName{name: "X"}
+		tn.matches(&dst.ChanType{}, nil)
+		os.Exit(0) // unreachable: matches always exits via util.Unimplemented above
+	default:
+		os.Exit(m.Run())
+	}
+}
 
 func TestParseTypeName(t *testing.T) {
 	tests := []struct {
@@ -234,6 +247,20 @@ func TestTypeNameMatches_ImportAliasResolution(t *testing.T) {
 	})
 }
 
+// TestMatchesUnsupportedNodeType covers the default case which
+// is normally unreachable (every dst.Expr type produced by the parser
+// for a type position is handled explicitly). See TestMain.
+func TestMatchesUnsupportedNodeType(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain") //nolint:noctx // test-only re-exec of the current test binary
+	cmd.Env = append(os.Environ(), "AST_FATAL_CASE=unsupported-type-node")
+	out, err := cmd.CombinedOutput()
+
+	var ee *exec.ExitError
+	require.ErrorAs(t, err, &ee, "an unsupported type node should cause a non-zero exit")
+	assert.Equal(t, 1, ee.ExitCode())
+	assert.Contains(t, string(out), "Unimplemented: signature filter: unsupported type node *dst.ChanType")
+}
+
 func TestImportAliasMap(t *testing.T) {
 	t.Run("nil file returns nil", func(t *testing.T) {
 		assert.Nil(t, importAliasMap(nil))
@@ -260,6 +287,97 @@ func f(r *http.Request, r2 *althttp.Request) {}
 		assert.Equal(t, "net/http", imports["althttp"])
 		assert.NotContains(t, imports, "_")
 		assert.NotContains(t, imports, ".")
+	})
+
+	t.Run("module version suffix is not the package name", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"github.com/golang-jwt/jwt/v5"
+	"gopkg.in/yaml.v3"
+)
+
+func f(t *jwt.Token, n *yaml.Node) {}
+`)
+		require.NoError(t, err)
+
+		imports := importAliasMap(file)
+		assert.Equal(t, "github.com/golang-jwt/jwt/v5", imports["jwt"])
+		assert.Equal(t, "gopkg.in/yaml.v3", imports["yaml"])
+	})
+
+	t.Run("distinct modules sharing a version suffix do not collide", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"github.com/a/foo/v2"
+	"github.com/b/bar/v2"
+)
+
+func f(x *foo.T, y *bar.T) {}
+`)
+		require.NoError(t, err)
+
+		imports := importAliasMap(file)
+		assert.Len(t, imports, 2)
+		assert.Equal(t, "github.com/a/foo/v2", imports["foo"])
+		assert.Equal(t, "github.com/b/bar/v2", imports["bar"])
+	})
+
+	t.Run("package name unrelated to import path is not resolved by convention", func(t *testing.T) {
+		// github.com/redis/go-redis/v9 declares package "redis", not "go-redis".
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		imports := importAliasMap(file)
+		assert.NotContains(t, imports, "redis")
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["go-redis"])
+	})
+
+	t.Run("v-prefixed last segment that is not a version suffix is preserved", func(t *testing.T) {
+		// "vault" starts with 'v' like a version suffix, but the rest isn't
+		// digits, so it must be treated as the package name, not stripped.
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/hashicorp/vault"
+
+func f(c *vault.Client) {}
+`)
+		require.NoError(t, err)
+
+		imports := importAliasMap(file)
+		assert.Equal(t, "github.com/hashicorp/vault", imports["vault"])
+	})
+
+	t.Run("import spec with a nil path is skipped", func(t *testing.T) {
+		file := &dst.File{Imports: []*dst.ImportSpec{
+			{Path: nil},
+			{Path: &dst.BasicLit{Value: `"net/http"`}},
+		}}
+
+		imports := importAliasMap(file)
+		assert.Len(t, imports, 1)
+		assert.Equal(t, "net/http", imports["http"])
+	})
+
+	t.Run("import spec with an unquotable path is skipped", func(t *testing.T) {
+		file := &dst.File{Imports: []*dst.ImportSpec{
+			{Path: &dst.BasicLit{Value: "not-a-quoted-string"}},
+			{Path: &dst.BasicLit{Value: `"net/http"`}},
+		}}
+
+		imports := importAliasMap(file)
+		assert.Len(t, imports, 1)
+		assert.Equal(t, "net/http", imports["http"])
 	})
 }
 
