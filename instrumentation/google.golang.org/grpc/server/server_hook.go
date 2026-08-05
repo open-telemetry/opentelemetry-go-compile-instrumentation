@@ -220,6 +220,9 @@ func (h *serverStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 				code, msg := grpcsemconv.ServerStatus(s)
 				span.SetStatus(code, msg)
 			}
+			if rs.Error != nil {
+				span.RecordError(rs.Error)
+			}
 			span.SetAttributes(statusAttr)
 			span.End()
 		}

@@ -218,6 +218,60 @@ func TestOtelMiddleware_NilBody(t *testing.T) {
 	assert.Len(t, spans, 0, "nil body should skip instrumentation")
 }
 
+func TestOtelMiddleware_InvalidRequestJSON(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte("not json"))),
+	)
+
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{}`))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	spans := sr.Ended()
+	assert.Empty(t, spans, "unparsable request body should skip instrumentation")
+}
+
+func TestOtelMiddleware_MissingModel(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(`{"max_tokens":10}`))),
+	)
+
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{}`))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	spans := sr.Ended()
+	assert.Empty(t, spans, "valid JSON missing the model field should skip instrumentation")
+}
+
 func TestOtelMiddleware_NextError(t *testing.T) {
 	sr := setupTestTracer(t)
 
