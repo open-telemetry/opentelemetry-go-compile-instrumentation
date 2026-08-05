@@ -242,7 +242,7 @@ func TestOtelMiddleware_InvalidRequestJSON(t *testing.T) {
 	require.NotNil(t, resp)
 
 	spans := sr.Ended()
-	assert.Empty(t, spans, "unparseable request body should skip instrumentation")
+	assert.Empty(t, spans, "unparsable request body should skip instrumentation")
 }
 
 func TestOtelMiddleware_MissingModel(t *testing.T) {
