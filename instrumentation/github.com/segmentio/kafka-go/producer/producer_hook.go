@@ -126,7 +126,7 @@ func BeforeWriteMessages(
 			Endpoint:        endpoint,
 			Destination:     topic,
 			Operation:       semconv.KafkaOperationSend,
-			MessageKey:      string(msgs[i].Key),
+			MessageKey:      semconv.KafkaMessageKey(msgs[i].Key),
 			MessageBodySize: len(msgs[i].Value),
 		}
 		msgCtx, span := tracer.Start(ctx, topic+" send",
