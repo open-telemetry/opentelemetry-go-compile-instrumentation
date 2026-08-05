@@ -178,6 +178,139 @@ func TestStreamingReader_FirstTokenLatency(t *testing.T) {
 	assert.True(t, hasTimeToFirst, "should have time_to_first_token attribute")
 }
 
+// eofWithFinalChunkReader returns the given data and io.EOF from the same
+// Read call, with no trailing newline after the data. This mirrors what a
+// lot of real io.Readers do once the underlying connection is closed right
+// after the last chunk.
+type eofWithFinalChunkReader struct {
+	data []byte
+	sent bool
+}
+
+func (r *eofWithFinalChunkReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, io.EOF
+	}
+	r.sent = true
+	n := copy(p, r.data)
+	return n, io.EOF
+}
+
+func (r *eofWithFinalChunkReader) Close() error {
+	return nil
+}
+
+func TestStreamingReader_FinalChunkWithoutTrailingNewline(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	ctx, span := tr.Start(t.Context(), "test-no-trailing-newline")
+
+	// No trailing "\n" after this chunk, and no separate "[DONE]" line.
+	streamData := "data: {\"id\":\"final\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}"
+
+	body := &eofWithFinalChunkReader{data: []byte(streamData)}
+	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+
+	_, _ = io.ReadAll(reader)
+	reader.Close()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "gen_ai.response.id", "final")
+	assertInt64Attribute(t, attrs, "gen_ai.usage.output_tokens", 5)
+	assertSliceAttribute(t, attrs, "gen_ai.response.finish_reasons", []string{"stop"})
+}
+
+func TestStreamingReader_FinalChunkWithoutTrailingNewline_Completion(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	ctx, span := tr.Start(t.Context(), "test-no-trailing-newline-completion")
+
+	// No trailing "\n" after this chunk, and no separate "[DONE]" line.
+	streamData := "data: {\"id\":\"cmpl-final\",\"model\":\"gpt-3.5-turbo-instruct\",\"choices\":[{\"text\":\"Hi\",\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":4,\"total_tokens\":13}}"
+
+	body := &eofWithFinalChunkReader{data: []byte(streamData)}
+	reader := newStreamingReader(
+		body,
+		span,
+		time.Now(),
+		"gpt-3.5-turbo-instruct",
+		"text_completion",
+		"openai",
+		opCompletion,
+		ctx,
+	)
+
+	_, _ = io.ReadAll(reader)
+	reader.Close()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "gen_ai.response.id", "cmpl-final")
+	assertInt64Attribute(t, attrs, "gen_ai.usage.output_tokens", 4)
+	assertSliceAttribute(t, attrs, "gen_ai.response.finish_reasons", []string{"length"})
+}
+
+// dataThenEOFReader hands back its payload with a nil error. A caller that
+// stops there never triggers the Read path's flush, because that only runs
+// once Read reports a non-nil error.
+type dataThenEOFReader struct {
+	data []byte
+	sent bool
+}
+
+func (r *dataThenEOFReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, io.EOF
+	}
+	r.sent = true
+	n := copy(p, r.data)
+	return n, nil
+}
+
+func (r *dataThenEOFReader) Close() error {
+	return nil
+}
+
+// A caller that reads what it needs and closes without draining to EOF must
+// still get the final chunk, so Close has to flush the line buffer for the
+// same reason Read does.
+func TestStreamingReader_CloseWithoutDrainingFlushesFinalChunk(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	ctx, span := tr.Start(t.Context(), "test-close-without-draining")
+
+	// No trailing "\n" and no "[DONE]" line, so this chunk only leaves the
+	// line buffer if something flushes it explicitly.
+	streamData := "data: {\"id\":\"closed-early\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2,\"total_tokens\":9}}"
+
+	body := &dataThenEOFReader{data: []byte(streamData)}
+	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+
+	buf := make([]byte, len(streamData))
+	n, err := reader.Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, len(streamData), n)
+
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "gen_ai.response.id", "closed-early")
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 7)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.output_tokens", 2)
+	assertSliceAttribute(t, attrs, "gen_ai.response.finish_reasons", []string{"stop"})
+}
+
 func TestParseSSELine(t *testing.T) {
 	tests := []struct {
 		name    string
