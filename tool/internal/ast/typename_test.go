@@ -251,7 +251,7 @@ func TestTypeNameMatches_ImportAliasResolution(t *testing.T) {
 // is normally unreachable (every dst.Expr type produced by the parser
 // for a type position is handled explicitly). See TestMain.
 func TestMatchesUnsupportedNodeType(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=TestMain") //nolint:noctx // test-only re-exec of the current test binary
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain")
 	cmd.Env = append(os.Environ(), "AST_FATAL_CASE=unsupported-type-node")
 	out, err := cmd.CombinedOutput()
 
