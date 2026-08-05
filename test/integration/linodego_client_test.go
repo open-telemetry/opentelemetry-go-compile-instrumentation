@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,6 +42,7 @@ func TestLinodegoClient(t *testing.T) {
 	t.Run("smoke", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		server := startLinodeMockAPI(t)
+		serverAddress := mustHost(t, server.URL)
 
 		output := f.Run("linodegoclient", "-addr="+server.URL, "-mode=smoke", "-id=123")
 		require.Contains(t, output, "regions count=")
@@ -54,7 +56,7 @@ func TestLinodegoClient(t *testing.T) {
 				testutil.IsClient,
 				testutil.HasName("linodego."+op.operation),
 			)
-			requireLinodegoOperationSemconv(t, opSpan, op.operation)
+			requireLinodegoOperationSemconv(t, opSpan, op.operation, serverAddress)
 
 			reqSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
@@ -67,7 +69,7 @@ func TestLinodegoClient(t *testing.T) {
 			if !strings.HasPrefix(path, "/") {
 				path = "/" + path
 			}
-			requireLinodegoRequestSemconv(t, reqSpan, parts[0], path)
+			requireLinodegoRequestSemconv(t, reqSpan, parts[0], path, serverAddress)
 		}
 
 		// Sanity: more than a single GetInstance pair of spans.
@@ -79,6 +81,7 @@ func TestLinodegoClient(t *testing.T) {
 	t.Run("not_found", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		server := startLinodeMockAPI(t)
+		serverAddress := mustHost(t, server.URL)
 
 		_ = f.Run("linodegoclient", "-addr="+server.URL, "-mode=not_found", "-id=999")
 
@@ -86,7 +89,7 @@ func TestLinodegoClient(t *testing.T) {
 			testutil.IsClient,
 			testutil.HasName("linodego.GetInstance"),
 		)
-		requireLinodegoOperationSemconv(t, opSpan, "GetInstance")
+		requireLinodegoOperationSemconv(t, opSpan, "GetInstance", serverAddress)
 		attrs := testutil.Attrs(opSpan)
 		require.Equal(t, int64(404), attrs["http.response.status_code"])
 		require.Equal(t, "404", attrs["error.type"])
@@ -102,21 +105,31 @@ func TestLinodegoClient(t *testing.T) {
 	})
 }
 
-func requireLinodegoOperationSemconv(t *testing.T, span ptrace.Span, operation string) {
+func requireLinodegoOperationSemconv(t *testing.T, span ptrace.Span, operation, serverAddress string) {
 	t.Helper()
 	require.Equal(t, ptrace.SpanKindClient, span.Kind())
 	attrs := testutil.Attrs(span)
 	require.Equal(t, operation, attrs["code.function.name"])
-	require.Equal(t, "api.linode.com", attrs["server.address"])
+	require.Equal(t, serverAddress, attrs["server.address"])
 }
 
-func requireLinodegoRequestSemconv(t *testing.T, span ptrace.Span, method, path string) {
+func requireLinodegoRequestSemconv(t *testing.T, span ptrace.Span, method, path, serverAddress string) {
 	t.Helper()
 	require.Equal(t, ptrace.SpanKindClient, span.Kind())
 	attrs := testutil.Attrs(span)
 	require.Equal(t, method, attrs["http.request.method"])
 	require.Equal(t, path, attrs["url.path"])
-	require.Equal(t, "api.linode.com", attrs["server.address"])
+	require.Equal(t, serverAddress, attrs["server.address"])
+}
+
+// mustHost extracts the host:port from a test server URL, matching how the
+// linodego instrumentation derives server.address from the client's
+// configured base URL.
+func mustHost(t *testing.T, rawURL string) string {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	require.NoError(t, err)
+	return u.Host
 }
 
 // startLinodeMockAPI serves minimal Linode API JSON for the smoke-suite paths.
