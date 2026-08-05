@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/internal/streaming"
 )
 
 func TestStreamingReader_ChatChunks(t *testing.T) {
@@ -326,7 +327,7 @@ func TestParseSSELine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			payload, done := parseSSELine(tt.line)
+			payload, done := streaming.ParseSSELine(tt.line)
 			assert.Equal(t, tt.isDone, done)
 			if tt.payload != nil {
 				assert.Equal(t, tt.payload, payload)
