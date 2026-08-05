@@ -963,7 +963,7 @@ Top-level `imports` (map[string]string, optional): Additional imports needed by 
 | `{{.FuncArgumentOfType type}}`  | The first parameter (excluding the receiver) matching the given type, or "" |
 | `{{.FuncReturnOfType type}}`    | The first return value matching the given type, or ""                       |
 | `{{.DirectiveArgs}}`            | The `key:value` arguments parsed from the matched directive comment         |
-| `{{.DirectiveArg key}}`         | The value of the named directive argument, or "" if not present            |
+| `{{.DirectiveArg key}}`         | The value of the named directive argument, or "" if not present             |
 
 Unnamed parameters and return values (e.g. `func(int, string)`) and blank (`_`) names are assigned a synthetic name the first time a template references them, so they can be read via `{{.FuncArgument N}}` / `{{.FuncReturn N}}` like any other. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with an error.
 
