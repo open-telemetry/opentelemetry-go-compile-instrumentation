@@ -4,13 +4,11 @@
 package ast
 
 import (
-	"fmt"
 	"regexp"
 
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // typeNameRe parses type-name strings of the form [*][pkg.]Name.
@@ -37,7 +35,7 @@ func parseTypeName(s string) (parsedTypeName, error) {
 	return parsedTypeName{pointer: m[1] == "*", importPath: m[2], name: m[3]}, nil
 }
 
-// matches reports whether the dst.Expr node represents this type.
+// matches reports whether node is exactly this type (no composite traversal).
 func (t parsedTypeName) matches(node dst.Expr) bool {
 	switch n := node.(type) {
 	case *dst.Ident:
@@ -63,15 +61,44 @@ func (t parsedTypeName) matches(node dst.Expr) bool {
 		return !t.pointer && t.matches(n.X)
 
 	case *dst.InterfaceType:
-		// Only the empty interface matches "any".
+		// Only the empty interface matches "any"; named interfaces never match.
 		return len(n.Methods.List) == 0 && t.importPath == "" && t.name == "any"
 
 	default:
-		// Unsupported AST node types (chan, func, map, slice, array, interface
-		// literals) cannot be matched by type-name filters.
-		util.Unimplemented(fmt.Sprintf("signature filter: unsupported type node %T", node))
 		return false
 	}
+}
+
+// matchesContainedIn reports whether this type appears in node, traversing
+// composite types such as slices, channels, maps, and function signatures.
+func (t parsedTypeName) matchesContainedIn(node dst.Expr) bool {
+	if t.matches(node) {
+		return true
+	}
+	switch n := node.(type) {
+	case *dst.ArrayType:
+		return t.matchesContainedIn(n.Elt)
+	case *dst.ChanType:
+		return t.matchesContainedIn(n.Value)
+	case *dst.MapType:
+		return t.matchesContainedIn(n.Key) || t.matchesContainedIn(n.Value)
+	case *dst.FuncType:
+		return typeExprListContainsMatch(t, n.Params) || typeExprListContainsMatch(t, n.Results)
+	default:
+		return false
+	}
+}
+
+func typeExprListContainsMatch(t parsedTypeName, fields *dst.FieldList) bool {
+	if fields == nil {
+		return false
+	}
+	for _, field := range fields.List {
+		if t.matchesContainedIn(field.Type) {
+			return true
+		}
+	}
+	return false
 }
 
 // fieldListContainsType reports whether any field in fields has a type that
@@ -85,7 +112,7 @@ func fieldListContainsType(fields *dst.FieldList, typeStr string) (bool, error) 
 		return false, err
 	}
 	for _, field := range fields.List {
-		if tn.matches(field.Type) {
+		if tn.matchesContainedIn(field.Type) {
 			return true, nil
 		}
 	}
