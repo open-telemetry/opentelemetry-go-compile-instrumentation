@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -302,7 +303,8 @@ func TestGenerateOtelInstrumentationGo(t *testing.T) {
 			actual, readErr := os.ReadFile(outPath)
 			require.NoError(t, readErr)
 
-			golden.Assert(t, string(actual), tt.goldenFile)
+			actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+			golden.Assert(t, actualNorm, tt.goldenFile)
 		})
 	}
 }

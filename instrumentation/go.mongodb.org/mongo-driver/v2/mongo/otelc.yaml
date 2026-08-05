@@ -1,0 +1,8 @@
+mongodb_v2_hook_connect:
+  target: go.mongodb.org/mongo-driver/v2/mongo
+  where:
+    func: Connect
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        path: "go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/v2/mongo"
