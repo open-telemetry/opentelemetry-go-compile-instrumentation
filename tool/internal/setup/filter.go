@@ -68,6 +68,7 @@ var (
 	_ Filter = (*StructFilter)(nil)
 	_ Filter = (*PackageNameFilter)(nil)
 	_ Filter = (*IsTestFilter)(nil)
+	_ Filter = (*DirectiveFilter)(nil)
 )
 
 // FuncFilter matches source files that declare the named function or method.
@@ -93,7 +94,9 @@ type StructFilter struct {
 }
 
 func (f *StructFilter) Match(ctx *MatchContext) bool {
-	return ast.FindStructDecl(ctx.AST, f.Struct) != nil
+	// Only true structs match; an interface or alias of the same name does not.
+	// This inverts under `not`, which now includes files it once excluded.
+	return ast.FindStructType(ctx.AST, f.Struct) != nil
 }
 
 // PackageNameFilter matches source files whose declared package clause equals
@@ -108,6 +111,15 @@ type PackageNameFilter struct {
 
 func (f *PackageNameFilter) Match(ctx *MatchContext) bool {
 	return ctx.AST.Name.Name == f.Name
+}
+
+// DirectiveFilter matches source files that contain the specified directive.
+type DirectiveFilter struct {
+	Directive string
+}
+
+func (f *DirectiveFilter) Match(ctx *MatchContext) bool {
+	return ast.FileHasLeadingDirective(ctx.AST, f.Directive)
 }
 
 // IsTestFilter selects or excludes test builds — compilations the Go toolchain
@@ -306,7 +318,7 @@ func buildFile(def *rule.FilterDef) (Filter, error) {
 	case def.HasStruct != "":
 		return &StructFilter{Struct: def.HasStruct}, nil
 	case def.HasDirective != "":
-		return nil, ex.Newf("where.file.has_directive is not yet supported")
+		return &DirectiveFilter{Directive: def.HasDirective}, nil
 	case strings.TrimSpace(def.HasPackage) != "":
 		return &PackageNameFilter{Name: strings.TrimSpace(def.HasPackage)}, nil
 	case def.IsTest != nil:

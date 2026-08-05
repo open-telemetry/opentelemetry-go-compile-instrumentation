@@ -135,6 +135,17 @@ func FileHasDirective(file *dst.File, directive string) bool {
 	return found
 }
 
+// FileHasLeadingDirective returns true if the file contains a leading run of comments
+// before the package clause that matches the given directive.
+func FileHasLeadingDirective(file *dst.File, directive string) bool {
+	for _, dec := range file.Decs.Start {
+		if MatchDirective(dec, directive) {
+			return true
+		}
+	}
+	return false
+}
+
 // FindFuncsByDirective returns all top-level function declarations whose
 // leading decorations contain the specified directive comment.
 func FindFuncsByDirective(file *dst.File, directive string) []*dst.FuncDecl {

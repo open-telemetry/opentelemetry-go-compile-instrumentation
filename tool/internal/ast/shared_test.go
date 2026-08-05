@@ -323,3 +323,44 @@ func TestFindNamedDecl(t *testing.T) {
 		assert.Nil(t, node)
 	})
 }
+
+func TestFindStructType(t *testing.T) {
+	t.Run("finds a plain struct", func(t *testing.T) {
+		assert.NotNil(t, FindStructType(parseSharedFixture(t), "MyStruct"))
+	})
+
+	t.Run("nil for interface, alias, or missing type", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type Iface interface{ M() }
+type Alias = int
+type Plain struct{ x int }
+`)
+		require.NoError(t, err)
+		assert.Nil(t, FindStructType(src, "Iface"))
+		assert.Nil(t, FindStructType(src, "Alias"))
+		assert.Nil(t, FindStructType(src, "Nope"))
+		assert.NotNil(t, FindStructType(src, "Plain"))
+	})
+
+	t.Run("resolves the named struct in a grouped type block", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type (
+	First  = int
+	Second struct{ a int }
+)
+`)
+		require.NoError(t, err)
+		assert.Nil(t, FindStructType(src, "First"))
+		assert.NotNil(t, FindStructType(src, "Second"))
+	})
+
+	t.Run("resolves generic structs", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type Gen[T any] struct{ v T }
+type GenMulti[K comparable, V any] struct{ m map[K]V }
+`)
+		require.NoError(t, err)
+		assert.NotNil(t, FindStructType(src, "Gen"))
+		assert.NotNil(t, FindStructType(src, "GenMulti"))
+	})
+}

@@ -63,18 +63,20 @@ jobs:
       # flag-scoped statuses in codecov.yml would measure the whole repo.
       - name: Upload tool coverage report
         if: needs.changes.outputs.tool == 'true'
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5
         with:
           files: coverage-tool.txt
           disable_search: true
           flags: tool
+          fail_ci_if_error: true
       - name: Upload pkg coverage report
         if: needs.changes.outputs.pkg == 'true'
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5
         with:
           files: coverage-pkg.txt
           disable_search: true
           flags: pkg
+          fail_ci_if_error: true
 
   test-unit:
     name: Unit Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
@@ -113,12 +115,29 @@ jobs:
     steps:
       - name: Check result
         run: |
-          result="${{ needs.test-unit.result }}"
-          echo "Test result: $result"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "✅ Tests passed or were skipped"
-            exit 0
-          else
-            echo "❌ Tests failed"
+          changes_result="${{ needs.changes.result }}"
+          code_changed="${{ needs.changes.outputs.code }}"
+          coverage_result="${{ needs.test-unit-coverage.result }}"
+          unit_result="${{ needs.test-unit.result }}"
+          echo "Changes result: $changes_result"
+          echo "Code changed: $code_changed"
+          echo "Coverage result: $coverage_result"
+          echo "Unit result: $unit_result"
+          if [[ "$changes_result" != "success" ]]; then
+            echo "❌ Change detection failed"
             exit 1
           fi
+          if [[ "$code_changed" == "false" ]]; then
+            echo "✅ No relevant code changes; tests skipped"
+            exit 0
+          fi
+          if [[ "$code_changed" != "true" ]]; then
+            echo "❌ Unexpected change detection output: $code_changed"
+            exit 1
+          fi
+          if [[ "$coverage_result" == "success" && "$unit_result" == "success" ]]; then
+            echo "✅ Tests passed"
+            exit 0
+          fi
+          echo "❌ Tests failed"
+          exit 1
