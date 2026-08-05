@@ -13,6 +13,7 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,7 +122,8 @@ func TestAddDeps(t *testing.T) {
 
 			require.Contains(t, stateManager.files, runtimeFilePath)
 
-			golden.Assert(t, string(actual), tt.goldenFile)
+			actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+			golden.Assert(t, actualNorm, tt.goldenFile)
 		})
 	}
 }

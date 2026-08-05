@@ -6,7 +6,6 @@ package setup
 import (
 	"context"
 	"encoding/json"
-	"os"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -86,21 +85,15 @@ func (sp *SetupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, mo
 		return ex.Wrapf(err, "resolving rule paths")
 	}
 
-	f := util.GetMatchedRuleFile()
-	file, err := os.Create(f)
-	if err != nil {
-		return ex.Wrapf(err, "failed to create file %s", f)
-	}
-	defer file.Close()
-
 	bs, err := json.Marshal(matched)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal rules to JSON")
 	}
 
-	_, err = file.Write(bs)
+	f := util.GetMatchedRuleFile()
+	err = util.WriteFileAtomic(f, bs)
 	if err != nil {
-		return ex.Wrapf(err, "failed to write JSON to file %s", f)
+		return ex.Wrapf(err, "failed to write matched rules to file %s", f)
 	}
 	sp.Info("Stored matched sets", "path", f)
 	return nil

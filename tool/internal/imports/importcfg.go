@@ -92,16 +92,30 @@ func parse(r io.Reader) (ImportConfig, error) {
 	return reg, nil
 }
 
+type writeCloser interface {
+	io.Writer
+	io.Closer
+}
+
 // WriteFile writes the content of the ImportConfig to the provided file,
 // in the format expected by the Go toolchain commands.
 func (r *ImportConfig) WriteFile(filename string) error {
 	file, err := os.Create(filename)
 	if err != nil {
-		return err
+		return ex.Wrapf(err, "failed to create file %s", filename)
 	}
-	defer file.Close()
+	return r.writeFile(file, filename)
+}
 
-	return r.write(file)
+func (r *ImportConfig) writeFile(w writeCloser, filename string) error {
+	if err := r.write(w); err != nil {
+		_ = w.Close()
+		return ex.Wrapf(err, "failed to write to file %s", filename)
+	}
+	if err := w.Close(); err != nil {
+		return ex.Wrapf(err, "failed to close file %s", filename)
+	}
+	return nil
 }
 
 // write writes the content of the ImportConfig to the provided writer,
