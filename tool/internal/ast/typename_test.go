@@ -255,6 +255,7 @@ func f(r *http.Request, r2 *althttp.Request) {}
 		require.NoError(t, err)
 
 		imports := importAliasMap(file)
+		assert.Len(t, imports, 2)
 		assert.Equal(t, "net/http", imports["http"])
 		assert.Equal(t, "net/http", imports["althttp"])
 		assert.NotContains(t, imports, "_")

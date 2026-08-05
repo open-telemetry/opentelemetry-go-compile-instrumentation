@@ -328,6 +328,10 @@ func AddStructField(decl dst.Decl, name, t string) {
 // Matching uses structural comparison of dst.Expr nodes (no type checker).
 // For the scalar-type filters this means an exact type-name match rather than
 // full interface-satisfaction checking.
+//
+// Qualified type names are resolved against imports, which maps the local
+// identifier used at a use site to its real import path (see importAliasMap).
+// Matching is therefore relative to the enclosing file's import declarations.
 func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, imports map[string]string) (bool, error) {
 	ft := funcDecl.Type
 

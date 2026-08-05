@@ -62,8 +62,10 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 		if resolved, importOk := imports[ident.Name]; importOk {
 			return t.importPath == resolved && t.name == n.Sel.Name
 		}
-		// No import context resolved this qualifier (nil/incomplete imports
-		// map): fall back to comparing against importPath's last segment
+		// No import context at all (imports == nil, e.g. hand-built AST nodes in
+		// tests with no backing *dst.File): compare against importPath's last
+		// segment. Note this cannot rescue a mis-keyed map — a tail match here
+		// would imply ident.Name is a key, so the lookup above would have hit.
 		return importPathTail(t.importPath) == ident.Name && t.name == n.Sel.Name
 
 	case *dst.StarExpr:
@@ -116,6 +118,12 @@ func fieldListContainsType(fields *dst.FieldList, typeStr string, imports map[st
 //   - distinct import paths that happen to share a last path segment (e.g.
 //     "text/template" vs "html/template", both conventionally "template")
 //
+// This deliberately duplicates tool/internal/imports.parseFile rather than reusing
+// it: that resolves unaliased imports with pkgload.ResolvePackageName (a
+// go/packages load that ex.Fatalf's on failure), which is too costly and too fatal
+// for the setup/match path, where this runs for every compiled package in the build.
+// The cost is that the default name here is a syntactic guess; see importPathTail.
+//
 // Returns nil when file is nil.
 func importAliasMap(file *dst.File) map[string]string {
 	if file == nil {
@@ -123,6 +131,9 @@ func importAliasMap(file *dst.File) map[string]string {
 	}
 	aliases := make(map[string]string, len(file.Imports))
 	for _, imp := range file.Imports {
+		if imp.Path == nil {
+			continue
+		}
 		path, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
 			continue
@@ -141,12 +152,37 @@ func importAliasMap(file *dst.File) map[string]string {
 	return aliases
 }
 
-// importPathTail returns the last path segment of an import path, which is
-// conventionally (but not necessarily) that package's default identifier,
-// e.g. "net/http" -> "http".
+// importPathTail returns the local identifier conventionally used to reference
+// an import path: its last segment, ignoring a Go module major-version suffix
+// ("/v2".."/vN", or gopkg.in's ".vN"), which is part of the module path but not
+// of the package name, e.g. "net/http" -> "http", "github.com/x/jwt/v5" -> "jwt".
+//
+// This is a convention, not a guarantee: a package may declare a name unrelated
+// to its path (e.g. "github.com/redis/go-redis/v9" declares "redis"). Such
+// packages are matched only when the importing file aliases them explicitly.
 func importPathTail(path string) string {
+	if i := strings.LastIndexByte(path, '/'); i >= 0 && isMajorVersion(path[i+1:]) {
+		path = path[:i]
+	}
 	if i := strings.LastIndexByte(path, '/'); i >= 0 {
-		return path[i+1:]
+		path = path[i+1:]
+	}
+	// gopkg.in style: "yaml.v3" -> "yaml".
+	if i := strings.LastIndexByte(path, '.'); i >= 0 && isMajorVersion(path[i+1:]) {
+		path = path[:i]
 	}
 	return path
+}
+
+// isMajorVersion reports whether s is a module major-version element ("v2", "v11").
+func isMajorVersion(s string) bool {
+	if len(s) < 2 || s[0] != 'v' {
+		return false
+	}
+	for _, c := range []byte(s[1:]) {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
