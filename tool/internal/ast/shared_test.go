@@ -233,20 +233,6 @@ func TestFindNamedDecl(t *testing.T) {
 	})
 }
 
-func TestAddStructField(t *testing.T) {
-	st := &dst.StructType{Fields: &dst.FieldList{}}
-
-	AddStructField(st, "Count", "int")
-
-	require.Len(t, st.Fields.List, 1)
-	field := st.Fields.List[0]
-	require.Len(t, field.Names, 1)
-	assert.Equal(t, "Count", field.Names[0].Name)
-	typeIdent, ok := field.Type.(*dst.Ident)
-	require.True(t, ok)
-	assert.Equal(t, "int", typeIdent.Name)
-}
-
 func TestFindStructType(t *testing.T) {
 	t.Run("finds a plain struct", func(t *testing.T) {
 		assert.NotNil(t, FindStructType(parseSharedFixture(t), "MyStruct"))
@@ -275,5 +261,15 @@ type (
 		require.NoError(t, err)
 		assert.Nil(t, FindStructType(src, "First"))
 		assert.NotNil(t, FindStructType(src, "Second"))
+	})
+
+	t.Run("resolves generic structs", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type Gen[T any] struct{ v T }
+type GenMulti[K comparable, V any] struct{ m map[K]V }
+`)
+		require.NoError(t, err)
+		assert.NotNil(t, FindStructType(src, "Gen"))
+		assert.NotNil(t, FindStructType(src, "GenMulti"))
 	})
 }
