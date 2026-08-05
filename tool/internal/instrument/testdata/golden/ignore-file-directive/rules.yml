@@ -1,0 +1,13 @@
+hook_skipped:
+  target: main
+  func: SkippedFunc
+  before: HBefore
+  after: HAfter
+  path: testdata/golden/ignore-file-directive
+
+hook_forced:
+  target: main
+  func: ForcedFunc
+  before: HBefore
+  after: HAfter
+  path: testdata/golden/ignore-file-directive
