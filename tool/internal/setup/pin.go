@@ -642,6 +642,48 @@ type modulePinConfig struct {
 	yamlFile  string
 }
 
+func addToolFileImports(toolFile string, imports map[string]bool) error {
+	p := ast.NewAstParser()
+	f, err := p.Parse(toolFile, parser.ParseComments)
+	if err != nil {
+		return ex.Wrapf(err, "parsing tool file %s", toolFile)
+	}
+
+	existing, err := loadToolFileImports(toolFile)
+	if err != nil {
+		return err
+	}
+
+	var importDecl *dst.GenDecl
+	for _, decl := range f.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if ok && genDecl.Tok == token.IMPORT {
+			importDecl = genDecl
+			break
+		}
+	}
+
+	for _, importPath := range sortedImportPaths(imports) {
+		if existing[importPath] {
+			continue
+		}
+		spec := &dst.ImportSpec{
+			Name: ast.Ident(ast.IdentIgnore),
+			Path: &dst.BasicLit{Kind: token.STRING, Value: strconv.Quote(importPath)},
+		}
+		if importDecl == nil {
+			importDecl = &dst.GenDecl{Tok: token.IMPORT}
+			f.Decls = append([]dst.Decl{importDecl}, f.Decls...)
+		}
+		importDecl.Specs = append(importDecl.Specs, spec)
+	}
+
+	if err = ast.WriteFileAtomic(toolFile, f); err != nil {
+		return ex.Wrapf(err, "writing %s", toolFile)
+	}
+	return nil
+}
+
 func materializeModuleConfigs(
 	ctx context.Context,
 	configs []modulePinConfig,
@@ -670,9 +712,12 @@ func materializeModuleConfigs(
 		toolFile := config.toolFile
 		if toolFile == "" {
 			toolFile = filepath.Join(config.moduleDir, ToolFileCanonical)
-		}
-		if writeErr := ast.WriteFileAtomic(toolFile, generateOtelInstrumentationGo(imports, opts)); writeErr != nil {
-			return nil, nil, ex.Wrapf(writeErr, "writing %s", toolFile)
+			generated := generateOtelInstrumentationGo(imports, opts)
+			if writeErr := ast.WriteFileAtomic(toolFile, generated); writeErr != nil {
+				return nil, nil, ex.Wrapf(writeErr, "writing %s", toolFile)
+			}
+		} else if addErr := addToolFileImports(toolFile, yamlImports); addErr != nil {
+			return nil, nil, addErr
 		}
 		if _, ensureErr := ensureOtelcRequire(config.moduleDir, util.Version); ensureErr != nil {
 			return nil, nil, ex.Wrapf(ensureErr, "ensuring otelc require in go.mod in %s", config.moduleDir)

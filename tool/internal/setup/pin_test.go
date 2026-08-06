@@ -6,6 +6,7 @@ package setup
 import (
 	"bytes"
 	"fmt"
+	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -1031,16 +1032,61 @@ replace example.com/bar => %s
 
 	writeInstrumentationModule(t, filepath.Join(dir, "foo"), "example.com/foo", true, nil)
 	writeInstrumentationModule(t, filepath.Join(dir, "bar"), "example.com/bar", true, nil)
-	writeToolFile(t, filepath.Join(dir, ToolFileCanonical), "example.com/foo")
+	toolFile := filepath.Join(dir, ToolFileCanonical)
+	require.NoError(t, os.WriteFile(toolFile, []byte(`//go:build tools
+
+package tools
+
+import _ "example.com/foo"
+
+// keep this comment
+const Sentinel = "keep-me"
+
+func Hello() string {
+	return Sentinel
+}
+`), 0o644))
 	writeOtelYAMLFile(t, filepath.Join(dir, InstrumentationYAMLCanonical), "example.com/bar")
 
 	_, err := pinLocked(t.Context(), PinOptions{ModuleDirs: map[string]bool{dir: true}})
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(filepath.Join(dir, ToolFileCanonical))
+	data, err := os.ReadFile(toolFile)
 	require.NoError(t, err)
-	require.Contains(t, string(data), `"example.com/foo"`)
-	require.Contains(t, string(data), `"example.com/bar"`)
+	contents := string(data)
+	require.Equal(t, 1, strings.Count(contents, `"example.com/foo"`))
+	require.Equal(t, 1, strings.Count(contents, `"example.com/bar"`))
+	require.Contains(t, contents, "// keep this comment")
+	require.Contains(t, contents, `const Sentinel = "keep-me"`)
+	require.Contains(t, contents, "func Hello() string")
+	_, err = ast.NewAstParser().Parse(toolFile, parser.ParseComments)
+	require.NoError(t, err)
+}
+
+func TestAddToolFileImports_PreservesDeclarationsWithoutImportBlock(t *testing.T) {
+	toolFile := filepath.Join(t.TempDir(), ToolFileCanonical)
+	require.NoError(t, os.WriteFile(toolFile, []byte(`//go:build tools
+
+package tools
+
+// keep this comment
+const Sentinel = "keep-me"
+`), 0o644))
+
+	require.NoError(t, addToolFileImports(toolFile, map[string]bool{
+		"example.com/bar": true,
+		"example.com/foo": true,
+	}))
+
+	data, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	contents := string(data)
+	require.Equal(t, 1, strings.Count(contents, `_ "example.com/bar"`))
+	require.Equal(t, 1, strings.Count(contents, `_ "example.com/foo"`))
+	require.Contains(t, contents, "// keep this comment")
+	require.Contains(t, contents, `const Sentinel = "keep-me"`)
+	_, err = ast.NewAstParser().Parse(toolFile, parser.ParseComments)
+	require.NoError(t, err)
 }
 
 func TestPinLocked_MixedWorkspaceSources(t *testing.T) {
