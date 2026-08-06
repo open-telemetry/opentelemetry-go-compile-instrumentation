@@ -45,7 +45,10 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 		return err
 	}
 
-	spec := util.AssertType[*dst.ValueSpec](node)
+	spec, ok := node.(*dst.ValueSpec)
+	if !ok {
+		return ex.Newf("declaration %q (kind: %q) is not a var or const declaration", r.Identifier, r.Kind)
+	}
 
 	if r.Wrap != "" {
 		if err := wrapDeclValues(spec, r.Wrap); err != nil {
