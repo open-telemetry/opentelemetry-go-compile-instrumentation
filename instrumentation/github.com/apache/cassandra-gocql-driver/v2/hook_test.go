@@ -214,6 +214,14 @@ func TestOtelObserver_ObserveBatch(t *testing.T) {
 	assert.Equal(t, "BATCH", attrMap["db.operation.name"])
 	assert.Equal(t, "batch_ks", attrMap["db.namespace"])
 	assert.Equal(t, "INSERT INTO a VALUES (1); UPDATE b SET x = 2", attrMap["db.query.text"])
+
+	var batchSize int64
+	for _, a := range span.Attributes() {
+		if a.Key == "db.operation.batch.size" {
+			batchSize = a.Value.AsInt64()
+		}
+	}
+	assert.Equal(t, int64(2), batchSize)
 }
 
 func TestOtelObserver_ObserveBatchWithError(t *testing.T) {
@@ -271,7 +279,7 @@ func TestOtelObserver_ObserveConnect(t *testing.T) {
 
 	assert.Equal(t, "cassandra", attrMap["db.system.name"])
 	assert.Equal(t, "CONNECT", attrMap["db.operation.name"])
-	assert.Equal(t, codes.Ok, span.Status().Code)
+	assert.Equal(t, codes.Unset, span.Status().Code)
 }
 
 func TestOtelObserver_ObserveConnectWithError(t *testing.T) {
@@ -296,4 +304,22 @@ func TestOtelObserver_ObserveConnectWithError(t *testing.T) {
 
 	assert.Equal(t, codes.Error, span.Status().Code)
 	assert.Equal(t, "dial tcp: connection refused", span.Status().Description)
+}
+
+func TestParseOpName(t *testing.T) {
+	tests := []struct {
+		name string
+		stmt string
+		want string
+	}{
+		{"select", "SELECT * FROM users", "SELECT"},
+		{"lowercase", "select * from users", "SELECT"},
+		{"empty", "", ""},
+		{"whitespace only", "   ", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parseOpName(tt.stmt))
+		})
+	}
 }

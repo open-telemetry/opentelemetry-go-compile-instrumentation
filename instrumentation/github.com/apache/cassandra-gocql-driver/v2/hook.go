@@ -5,18 +5,16 @@ package gocql
 
 import (
 	"context"
-	"net"
 	"strings"
 	"time"
 
 	"github.com/apache/cassandra-gocql-driver/v2"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
+	gocqlsemconv "go.opentelemetry.io/otelc/instrumentation/github.com/apache/cassandra-gocql-driver/v2/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
@@ -77,24 +75,6 @@ func (o *otelObserver) ObserveConnect(oc gocql.ObservedConnect) {
 	}
 }
 
-// hostAddress resolves the address to record for a host. HostInfo.Peer() is
-// only populated once a host has been learned about via system.peers/system.local
-// (e.g. hosts already in the cluster's ring), so it is empty for the HostInfo
-// used to dial the very first control connection. ConnectAddress() falls back
-// through rpc/preferred/broadcast/peer addresses, but panics if none are set,
-// so guard it and fall back to no address rather than crashing the app.
-func hostAddress(host *gocql.HostInfo) (addr net.IP) {
-	if peer := host.Peer(); len(peer) > 0 {
-		return peer
-	}
-	defer func() {
-		if recover() != nil {
-			addr = nil
-		}
-	}()
-	return host.ConnectAddress()
-}
-
 func (o *otelObserver) recordQuerySpan(ctx context.Context, q gocql.ObservedQuery) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -120,30 +100,20 @@ func (o *otelObserver) recordQuerySpan(ctx context.Context, q gocql.ObservedQuer
 	)
 	defer span.End(trace.WithTimestamp(endTime))
 
-	attrs := []attribute.KeyValue{
-		semconv.DBSystemNameCassandra,
-		semconv.DBOperationName(opName),
-		semconv.DBQueryText(q.Statement),
-	}
-	if q.Keyspace != "" {
-		attrs = append(attrs, semconv.DBNamespace(q.Keyspace))
+	req := gocqlsemconv.QueryRequest{
+		OpName:    opName,
+		Statement: q.Statement,
+		Keyspace:  q.Keyspace,
 	}
 	if q.Host != nil {
-		if peer := hostAddress(q.Host); len(peer) > 0 {
-			attrs = append(attrs, semconv.ServerAddress(peer.String()))
-		}
-		if port := q.Host.Port(); port > 0 {
-			attrs = append(attrs, semconv.ServerPort(port))
-		}
+		req.Host = q.Host.ConnectAddress()
+		req.Port = q.Host.Port()
 	}
-
-	span.SetAttributes(attrs...)
+	span.SetAttributes(gocqlsemconv.QueryClientTraceAttrs(req)...)
 
 	if q.Err != nil {
 		span.RecordError(q.Err)
 		span.SetStatus(codes.Error, q.Err.Error())
-	} else {
-		span.SetStatus(codes.Ok, "")
 	}
 }
 
@@ -171,32 +141,20 @@ func (o *otelObserver) recordBatchSpan(ctx context.Context, b gocql.ObservedBatc
 	)
 	defer span.End(trace.WithTimestamp(endTime))
 
-	stmtText := strings.Join(b.Statements, "; ")
-
-	attrs := []attribute.KeyValue{
-		semconv.DBSystemNameCassandra,
-		semconv.DBOperationName("BATCH"),
-		semconv.DBQueryText(stmtText),
-	}
-	if b.Keyspace != "" {
-		attrs = append(attrs, semconv.DBNamespace(b.Keyspace))
+	req := gocqlsemconv.BatchRequest{
+		Statement: strings.Join(b.Statements, "; "),
+		BatchSize: len(b.Statements),
+		Keyspace:  b.Keyspace,
 	}
 	if b.Host != nil {
-		if peer := hostAddress(b.Host); len(peer) > 0 {
-			attrs = append(attrs, semconv.ServerAddress(peer.String()))
-		}
-		if port := b.Host.Port(); port > 0 {
-			attrs = append(attrs, semconv.ServerPort(port))
-		}
+		req.Host = b.Host.ConnectAddress()
+		req.Port = b.Host.Port()
 	}
-
-	span.SetAttributes(attrs...)
+	span.SetAttributes(gocqlsemconv.BatchClientTraceAttrs(req)...)
 
 	if b.Err != nil {
 		span.RecordError(b.Err)
 		span.SetStatus(codes.Error, b.Err.Error())
-	} else {
-		span.SetStatus(codes.Ok, "")
 	}
 }
 
@@ -216,39 +174,29 @@ func (o *otelObserver) recordConnectSpan(oc gocql.ObservedConnect) {
 	)
 	defer span.End(trace.WithTimestamp(endTime))
 
-	attrs := []attribute.KeyValue{
-		semconv.DBSystemNameCassandra,
-		semconv.DBOperationName("CONNECT"),
-	}
+	req := gocqlsemconv.ConnectRequest{}
 	if oc.Host != nil {
-		if peer := hostAddress(oc.Host); len(peer) > 0 {
-			attrs = append(attrs, semconv.ServerAddress(peer.String()))
-		}
-		if port := oc.Host.Port(); port > 0 {
-			attrs = append(attrs, semconv.ServerPort(port))
-		}
+		req.Host = oc.Host.ConnectAddress()
+		req.Port = oc.Host.Port()
 	}
-
-	span.SetAttributes(attrs...)
+	span.SetAttributes(gocqlsemconv.ConnectClientTraceAttrs(req)...)
 
 	if oc.Err != nil {
 		span.RecordError(oc.Err)
 		span.SetStatus(codes.Error, oc.Err.Error())
-	} else {
-		span.SetStatus(codes.Ok, "")
 	}
 }
 
 func parseOpName(stmt string) string {
 	stmt = strings.TrimSpace(stmt)
 	if stmt == "" {
-		return "SELECT"
+		return ""
 	}
 	fields := strings.Fields(stmt)
 	if len(fields) > 0 {
 		return strings.ToUpper(fields[0])
 	}
-	return "SELECT"
+	return ""
 }
 
 // BeforeNewSession is invoked before gocql.NewSession creates a session from a

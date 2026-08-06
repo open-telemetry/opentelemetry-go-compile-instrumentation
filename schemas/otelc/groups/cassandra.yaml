@@ -1,0 +1,53 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # apache/cassandra-gocql-driver (v2) instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/apache/cassandra-gocql-driver/v2/hook.go             (span lifecycle)
+  #   instrumentation/github.com/apache/cassandra-gocql-driver/v2/semconv/cassandra.go (*ClientTraceAttrs)
+  #
+  # The gocql instrumentation is trace-only: it creates one client span per
+  # query, one per batch, and one per connection attempt, and records no
+  # metrics. Every attribute is standard upstream OpenTelemetry database
+  # telemetry, referenced with `ref:`. `db.system.name` is always `cassandra`.
+  # `db.namespace` and `server.port` are emitted only when known. The batch
+  # span additionally carries `db.operation.batch.size`.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.db.cassandra.query
+    type: span
+    span_kind: client
+    stability: development
+    brief: gocql client span, one per CQL query.
+    attributes:
+      - ref: db.system.name
+      - ref: db.operation.name
+      - ref: db.namespace
+      - ref: db.query.text
+      - ref: server.address
+      - ref: server.port
+
+  - id: span.otelc.db.cassandra.batch
+    type: span
+    span_kind: client
+    stability: development
+    brief: gocql client span, one per CQL batch.
+    attributes:
+      - ref: db.system.name
+      - ref: db.operation.name
+      - ref: db.operation.batch.size
+      - ref: db.namespace
+      - ref: db.query.text
+      - ref: server.address
+      - ref: server.port
+
+  - id: span.otelc.db.cassandra.connect
+    type: span
+    span_kind: client
+    stability: development
+    brief: gocql client span, one per connection attempt to a Cassandra host.
+    attributes:
+      - ref: db.system.name
+      - ref: db.operation.name
+      - ref: server.address
+      - ref: server.port
