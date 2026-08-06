@@ -11,18 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFindStructDecl(t *testing.T) {
-	file := parseSharedFixture(t)
-
-	t.Run("finds existing struct", func(t *testing.T) {
-		decl := FindStructDecl(file, "MyStruct")
-		require.NotNil(t, decl)
-	})
-	t.Run("returns nil for missing struct", func(t *testing.T) {
-		assert.Nil(t, FindStructDecl(file, "Nope"))
-	})
-}
-
 func TestMakeAndIsUnusedIdent(t *testing.T) {
 	id := Ident("foo")
 	assert.False(t, IsUnusedIdent(id))
@@ -69,14 +57,12 @@ type S struct {
 	file, err := p.ParseSource(src)
 	require.NoError(t, err)
 
-	decl := FindStructDecl(file, "S")
-	require.NotNil(t, decl)
+	st := FindStructType(file, "S")
+	require.NotNil(t, st)
 
-	AddStructField(decl, "B", "string")
+	AddStructField(st, "B", "string")
 
 	// The struct now has two fields, the new one named B of type string.
-	ty := decl.Specs[0].(*dst.TypeSpec)
-	st := ty.Type.(*dst.StructType)
 	require.Len(t, st.Fields.List, 2)
 	newField := st.Fields.List[1]
 	require.Len(t, newField.Names, 1)

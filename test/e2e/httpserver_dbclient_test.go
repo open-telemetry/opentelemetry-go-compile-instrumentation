@@ -58,4 +58,5 @@ func TestHTTPServerDBClient(t *testing.T) {
 	)
 	require.Equal(t, httpClientSpan.SpanID(), httpServerSpan.ParentSpanID(), "HTTP server parent must be HTTP client")
 	require.Equal(t, httpServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be HTTP server")
+	require.True(t, httpClientSpan.ParentSpanID().IsEmpty(), "HTTP client span must be the trace root")
 }
