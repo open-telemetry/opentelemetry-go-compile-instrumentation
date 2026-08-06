@@ -22,3 +22,9 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace go.opentelemetry.io/otelc/pkg => ../../../../../../pkg
+
+replace go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go => ../..
+
+replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../../../pkg/runtime
