@@ -504,6 +504,24 @@ func TestFlattenTJump(t *testing.T) {
 			validate:      nil,
 		},
 		{
+			name: "can flatten with unnamed HookContext param",
+			hookSrc: `package main
+			func hookFunc(HookContext, string) {
+			}`,
+			canFlatten:    true,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
+			name: "can flatten with no parameters",
+			hookSrc: `package main
+			func hookFunc() {
+			}`,
+			canFlatten:    true,
+			removedOnExit: false,
+			validate:      nil,
+		},
+		{
 			name: "flatten despite unrelated identifier substring",
 			hookSrc: `package main
 			func hookFunc(ctx HookContext, arg1 string) {
