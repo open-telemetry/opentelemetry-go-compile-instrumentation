@@ -5,6 +5,7 @@ package v3
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -420,4 +422,108 @@ func assertSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, 
 		}
 	}
 	t.Errorf("attribute %q not found", key)
+}
+
+// erroringReader returns a prefix of data on the first Read and readErr on
+// subsequent reads, simulating a connection that drops mid-stream.
+type erroringReader struct {
+	data    []byte
+	sent    bool
+	readErr error
+}
+
+func (r *erroringReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, r.readErr
+	}
+	r.sent = true
+	n := copy(p, r.data)
+	return n, nil
+}
+
+func (r *erroringReader) Close() error {
+	return nil
+}
+
+// A mid-stream network failure must surface on the span as an error, with a
+// recorded exception and an ["error"] finish reason, instead of ending the
+// span as a successful 200.
+func TestStreamingReader_AbortOnReadError(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	ctx, span := tr.Start(t.Context(), "test-abort-read-error")
+
+	// A chunk with content but no finish_reason: the generation is still in
+	// progress when the connection drops.
+	streamData := "data: {\"id\":\"ab\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"
+	body := &erroringReader{data: []byte(streamData), readErr: errors.New("connection reset")}
+	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+
+	_, err := io.ReadAll(reader)
+	require.Error(t, err)
+	reader.Close()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	s := spans[0]
+	assert.Equal(t, codes.Error, s.Status().Code)
+	assert.Equal(t, "stream aborted", s.Status().Description)
+	require.Len(t, s.Events(), 1)
+	assert.Equal(t, "exception", s.Events()[0].Name)
+	assertSliceAttribute(t, s.Attributes(), "gen_ai.response.finish_reasons", []string{"error"})
+}
+
+// Closing the reader before a finish reason or the [DONE] marker is a
+// premature abort: the span must be marked errored rather than recorded as a
+// success.
+func TestStreamingReader_AbortOnCloseBeforeCompletion(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	ctx, span := tr.Start(t.Context(), "test-abort-close")
+
+	streamData := "data: {\"id\":\"ab2\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"
+	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
+	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+
+	// Drain the partial chunk but never let the stream complete.
+	buf := make([]byte, len(streamData))
+	_, err := reader.Read(buf)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	s := spans[0]
+	assert.Equal(t, codes.Error, s.Status().Code)
+	assert.Equal(t, "stream aborted", s.Status().Description)
+	assertSliceAttribute(t, s.Attributes(), "gen_ai.response.finish_reasons", []string{"error"})
+}
+
+// Closing after a finish reason was delivered is a normal end: no error
+// status even though the [DONE] marker was never received.
+func TestStreamingReader_CloseAfterFinishReasonIsNormal(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	ctx, span := tr.Start(t.Context(), "test-close-after-finish")
+
+	streamData := "data: {\"id\":\"ok\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n"
+	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
+	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+
+	buf := make([]byte, len(streamData))
+	_, err := reader.Read(buf)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	s := spans[0]
+	assert.NotEqual(t, codes.Error, s.Status().Code)
+	assertSliceAttribute(t, s.Attributes(), "gen_ai.response.finish_reasons", []string{"stop"})
 }

@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3/semconv"
@@ -35,7 +37,13 @@ type streamingReader struct {
 	provider      string
 	op            operationType
 	done          atomic.Bool
+	completed     atomic.Bool
 }
+
+// errStreamAborted is reported when a stream is torn down (e.g. client
+// cancellation or a context deadline) before a finish reason or the [DONE]
+// marker was received.
+var errStreamAborted = errors.New("stream aborted")
 
 func newStreamingReader(
 	body io.ReadCloser,
@@ -74,7 +82,7 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 		// final line. On any other read error the buffered bytes may be a
 		// truncated mid-chunk fragment, so leave them unparsed rather than
 		// attaching stale attributes to a span that ended in failure.
-		r.finalize(err == io.EOF)
+		r.finalize(err == io.EOF, err)
 	}
 
 	return n, err
@@ -82,7 +90,11 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 
 func (r *streamingReader) Close() error {
 	if r.done.CompareAndSwap(false, true) {
-		r.finalize(true)
+		// Always flush the line buffer: a caller that stops reading before
+		// EOF must still get the final chunk's attributes. finalize decides
+		// whether the stream completed (finish reason or [DONE] seen) or was
+		// torn down prematurely after flushing.
+		r.finalize(true, errStreamAborted)
 	}
 	if r.reader != nil {
 		return r.reader.Close()
@@ -90,9 +102,23 @@ func (r *streamingReader) Close() error {
 	return nil
 }
 
-func (r *streamingReader) finalize(flush bool) {
+func (r *streamingReader) finalize(flush bool, err error) {
 	if flush {
 		r.flushRemaining()
+	}
+
+	// A stream is only complete once a finish reason or the [DONE] marker was
+	// received. Anything else is a premature abort and must not be recorded
+	// as a successful generation.
+	completed := r.completed.Load() || len(r.reasons) > 0
+	if !completed {
+		if len(r.reasons) == 0 {
+			r.reasons = []string{"error"}
+		}
+		r.span.SetStatus(codes.Error, "stream aborted")
+		if err != nil && !errors.Is(err, io.EOF) {
+			r.span.RecordError(err)
+		}
 	}
 
 	r.span.SetAttributes(
@@ -131,7 +157,11 @@ func (r *streamingReader) flushRemaining() {
 	}
 
 	payload, done := parseSSELine(line)
-	if done || payload == nil {
+	if done {
+		r.completed.Store(true)
+		return
+	}
+	if payload == nil {
 		return
 	}
 	r.processChunk(payload)
@@ -165,6 +195,7 @@ func (r *streamingReader) processSSELines() {
 
 		payload, done := parseSSELine(line)
 		if done {
+			r.completed.Store(true)
 			continue
 		}
 		if payload != nil {
