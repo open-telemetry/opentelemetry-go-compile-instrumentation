@@ -70,7 +70,11 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 	}
 
 	if err != nil && r.done.CompareAndSwap(false, true) {
-		r.finalize()
+		// Only a clean EOF means lineBuffer holds a complete, unterminated
+		// final line. On any other read error the buffered bytes may be a
+		// truncated mid-chunk fragment, so leave them unparsed rather than
+		// attaching stale attributes to a span that ended in failure.
+		r.finalize(err == io.EOF)
 	}
 
 	return n, err
@@ -78,7 +82,7 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 
 func (r *streamingReader) Close() error {
 	if r.done.CompareAndSwap(false, true) {
-		r.finalize()
+		r.finalize(true)
 	}
 	if r.reader != nil {
 		return r.reader.Close()
@@ -86,7 +90,11 @@ func (r *streamingReader) Close() error {
 	return nil
 }
 
-func (r *streamingReader) finalize() {
+func (r *streamingReader) finalize(flush bool) {
+	if flush {
+		r.flushRemaining()
+	}
+
 	r.span.SetAttributes(
 		semconv.GenAIResponseFinishReasons(r.reasons),
 		semconv.GenAIUsageInputTokens(r.inputTokens),
@@ -105,6 +113,28 @@ func (r *streamingReader) finalize() {
 	}
 
 	r.span.End()
+}
+
+// flushRemaining parses whatever is left in lineBuffer as a final line. The
+// underlying reader can report an error (typically io.EOF) right after the
+// last data line, with no trailing newline to trigger processSSELines, so
+// that last chunk would otherwise sit unparsed in lineBuffer forever.
+func (r *streamingReader) flushRemaining() {
+	if r.lineBuffer == nil || r.lineBuffer.Len() == 0 {
+		return
+	}
+
+	line := bytes.TrimSpace(r.lineBuffer.Bytes())
+	r.lineBuffer.Reset()
+	if len(line) == 0 {
+		return
+	}
+
+	payload, done := parseSSELine(line)
+	if done || payload == nil {
+		return
+	}
+	r.processChunk(payload)
 }
 
 func (r *streamingReader) processSSELines() {

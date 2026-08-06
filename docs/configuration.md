@@ -142,6 +142,16 @@ to propagate trace context:
 - `OTEL_LOG_LEVEL` (values: `debug`, `info`, `warn`, `error`; default `info`) controls the
   verbosity of `otelc`'s own runtime logging, including the GLS eviction and per-goroutine cap
   messages above. Set it to `debug` to surface them.
+- **`OTEL_GO_SIMPLE_SPAN_PROCESSOR`** — set to `true` to use `SimpleSpanProcessor` instead of
+  the default `BatchSpanProcessor` for the trace exporter, exporting each span immediately
+  rather than in batches. Useful for debugging when you need spans to appear without waiting
+  for a batch timeout, at the cost of export throughput. Must be exactly the lowercase string
+  `true`; unlike `OTEL_SDK_DISABLED` below, other values (`True`, `TRUE`, `1`) are ignored.
+
+One standard OTel variable worth calling out explicitly is **`OTEL_SDK_DISABLED`**: set to
+`true` (case-insensitive) to disable the injected SDK entirely — no providers are installed
+and no telemetry is collected or exported. Every other value, including unset, leaves the SDK
+enabled.
 
 See [GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for the
 operational constraints.

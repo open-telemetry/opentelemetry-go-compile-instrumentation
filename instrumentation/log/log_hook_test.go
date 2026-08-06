@@ -4,6 +4,7 @@
 package log
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -172,21 +173,44 @@ func TestBeforeLogOutput_EmptyOutput(t *testing.T) {
 	assert.Empty(t, result)
 }
 
-func TestBeforeLogOutput_PreservesNewline(t *testing.T) {
-	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
-		return "abc123", "def456"
-	})
-	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
-		return "", ""
-	})
+func TestBeforeLogOutput_PreservesLineEnding(t *testing.T) {
+	tests := []struct {
+		name        string
+		lineEnding  string
+		wantContain string
+	}{
+		{
+			name:        "LF",
+			lineEnding:  "\n",
+			wantContain: "msg trace_id=abc123 span_id=def456\n",
+		},
+		{
+			name:        "CRLF",
+			lineEnding:  "\r\n",
+			wantContain: "msg trace_id=abc123 span_id=def456\r\n",
+		},
+	}
 
-	ictx := hooktest.NewMockHookContext()
-	originalAppend := func(b []byte) []byte { return append(b, []byte("msg\n")...) }
-	BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+				return "abc123", "def456"
+			})
+			t.Cleanup(func() {
+				runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+					return "", ""
+				})
+			})
 
-	wrappedFn := ictx.GetParam(3)
-	wrapped := wrappedFn.(func([]byte) []byte)
-	result := string(wrapped([]byte{}))
-	assert.True(t, result[len(result)-1] == '\n')
-	assert.Contains(t, result, "trace_id=abc123")
+			ictx := hooktest.NewMockHookContext()
+			originalAppend := func(b []byte) []byte { return append(b, []byte("msg"+tt.lineEnding)...) }
+			BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+
+			wrappedFn := ictx.GetParam(3)
+			wrapped := wrappedFn.(func([]byte) []byte)
+			result := string(wrapped([]byte{}))
+			assert.True(t, strings.HasSuffix(result, tt.lineEnding))
+			assert.Contains(t, result, tt.wantContain)
+		})
+	}
 }

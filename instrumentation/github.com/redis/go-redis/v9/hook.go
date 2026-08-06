@@ -74,6 +74,7 @@ func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 
 		err := next(ctx, cmd)
 		if err != nil && !errors.Is(err, redis.Nil) {
+			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
 		return err
@@ -121,6 +122,7 @@ func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 
 		err := next(ctx, cmds)
 		if err != nil && !errors.Is(err, redis.Nil) {
+			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 		}
 		return err

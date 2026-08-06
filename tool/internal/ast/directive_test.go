@@ -301,3 +301,40 @@ func (T) Bar() {}
 		})
 	}
 }
+
+func TestFileHasLeadingDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		directive string
+		expected  bool
+	}{
+		{
+			name: "directive on function",
+			src: `package p
+//otelc:span
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  false,
+		},
+		{
+			name: "file level directive",
+			src: `//otelc:span
+package p
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, FileHasLeadingDirective(tree, tt.directive))
+		})
+	}
+}
