@@ -5,6 +5,7 @@ package testutil
 
 import (
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 const (
 	defaultReadinessTimeout  = 10 * time.Second
 	defaultReadinessInterval = 100 * time.Millisecond
-	defaultSpanPollTimeout  = 3 * time.Second
+	defaultSpanPollTimeout   = 3 * time.Second
 	defaultSpanPollInterval  = 25 * time.Millisecond
 )
 
@@ -51,14 +52,41 @@ func pollForSpans(c *Collector, minSpans int, timeout time.Duration) bool {
 	return false
 }
 
+var (
+	allocatedPortsMu sync.Mutex
+	allocatedPorts   = make(map[int]time.Time)
+)
+
 // FreePort returns a port the OS just assigned for "localhost:0". The
 // listener is closed before returning, so the test app can bind to it.
-// There is a tiny race window between close and rebind; acceptable for CI.
+// There is a tiny race window between close and rebind; defended against
+// concurrent allocations by keeping a registry of recently returned ports.
 func FreePort(t *testing.T) int {
 	t.Helper()
-	lis, err := net.Listen("tcp", "localhost:0")
-	require.NoError(t, err)
-	port := lis.Addr().(*net.TCPAddr).Port
-	require.NoError(t, lis.Close())
-	return port
+
+	allocatedPortsMu.Lock()
+	now := time.Now()
+	for p, allocatedAt := range allocatedPorts {
+		if now.Sub(allocatedAt) > 30*time.Second {
+			delete(allocatedPorts, p)
+		}
+	}
+	allocatedPortsMu.Unlock()
+
+	for {
+		lis, err := net.Listen("tcp", "localhost:0")
+		require.NoError(t, err)
+		port := lis.Addr().(*net.TCPAddr).Port
+		require.NoError(t, lis.Close())
+
+		allocatedPortsMu.Lock()
+		if _, exists := allocatedPorts[port]; !exists {
+			allocatedPorts[port] = time.Now()
+			allocatedPortsMu.Unlock()
+			return port
+		}
+		allocatedPortsMu.Unlock()
+
+		time.Sleep(10 * time.Millisecond)
+	}
 }
