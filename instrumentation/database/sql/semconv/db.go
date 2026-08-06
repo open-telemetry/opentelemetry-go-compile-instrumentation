@@ -6,6 +6,7 @@ package semconv
 import (
 	"net"
 	"strconv"
+	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -19,6 +20,21 @@ type DatabaseSqlRequest struct {
 	Dsn        string
 	Params     []any
 	DbName     string
+}
+
+// SqlOperation extracts the SQL operation name (e.g. "SELECT", "INSERT") from
+// the first whitespace-delimited token of the query string, upper-cased.
+// An empty or whitespace-only query returns an empty string.
+func SqlOperation(query string) string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return ""
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToUpper(fields[0])
 }
 
 func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {

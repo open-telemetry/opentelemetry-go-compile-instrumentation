@@ -289,3 +289,74 @@ func TestDbClientRequestTraceAttrs_ContainsExpectedKeys(t *testing.T) {
 		assert.True(t, keySet[key], "expected key %s not found in attributes", key)
 	}
 }
+
+func TestSqlOperation(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{
+			name:  "select query",
+			query: "SELECT * FROM users",
+			want:  "SELECT",
+		},
+		{
+			name:  "insert query",
+			query: "INSERT INTO users VALUES (1)",
+			want:  "INSERT",
+		},
+		{
+			name:  "update query",
+			query: "UPDATE users SET name='x' WHERE id=1",
+			want:  "UPDATE",
+		},
+		{
+			name:  "delete query",
+			query: "DELETE FROM users WHERE id=1",
+			want:  "DELETE",
+		},
+		{
+			name:  "lowercase is uppercased",
+			query: "select 1",
+			want:  "SELECT",
+		},
+		{
+			name:  "leading whitespace is trimmed",
+			query: "  SELECT 1",
+			want:  "SELECT",
+		},
+		{
+			name:  "empty string returns empty",
+			query: "",
+			want:  "",
+		},
+		{
+			name:  "whitespace-only returns empty",
+			query: "   ",
+			want:  "",
+		},
+		{
+			name:  "single token",
+			query: "COMMIT",
+			want:  "COMMIT",
+		},
+		{
+			name:  "start transaction",
+			query: "START TRANSACTION",
+			want:  "START",
+		},
+		{
+			name:  "ping pseudo-op",
+			query: "ping",
+			want:  "PING",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SqlOperation(tt.query)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

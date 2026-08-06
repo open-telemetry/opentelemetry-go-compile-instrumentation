@@ -129,6 +129,9 @@ build/pkg: ## Build all pkg modules to verify compilation
 build/instrumentation: ## Build all instrumentation modules to verify compilation
 	@echo "Building instrumentation modules..."
 	@set -euo pipefail
+	@# Excludes "runtime" and "database/sql" root: client.go references struct fields that only
+	@# exist after otelc inject them (e.g. sql.DB.Endpoint), so the root package does not
+	@# compile as plain Go. The dsnparse and semconv sub-packages build fine on their own.
 	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
 	for moddir in $$INSTR_MODULES; do \
 		echo "Building $$moddir..."; \
@@ -469,7 +472,9 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	done
 
 # Notes on test-unit/instrumentation implementation:
-# - Excludes "runtime" and "database/sql" modules (have build errors because of compile-time field injection).
+# - Excludes "runtime" and "database/sql" root package (have build errors because of compile-time field injection).
+# - The database/sql sub-packages (dsnparse, semconv) type-check fine without otelc
+#   and are tested explicitly below so they are not silently skipped by the exclusion.
 # - Skips modules without test files to avoid empty test output.
 # - Uses go test -C to run tests without changing directories (cleaner, more reliable).
 # - Does NOT use gotestfmt because v2.5.0 has a bug that causes panics when go test
@@ -490,6 +495,14 @@ test-unit/instrumentation: package ## Run unit tests for instrumentation modules
 		(cd "$$moddir" && go mod tidy); \
 		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
+	@# Test the database/sql sub-packages that compile without otelc-injected fields.
+	@# The root package (instrumentation/database/sql) is intentionally excluded: client.go
+	@# references struct fields (e.g. sql.DB.Endpoint) that only exist after otelc injects
+	@# them at compile time, so it cannot be compiled as plain Go.
+	@echo "Testing instrumentation/database/sql sub-packages (dsnparse, semconv)..."
+	@(cd instrumentation/database/sql && go mod tidy)
+	go test -C "instrumentation/database/sql" -v -shuffle=on -timeout=5m -count=1 \
+		./dsnparse/... ./semconv/... 2>&1 | tee -a ./gotest-unit-instrumentation.log
 
 .ONESHELL:
 test-unit/helper: ## Run unit tests for test helper packages
@@ -545,6 +558,8 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 
 # Same implementation as test-unit/instrumentation but with coverage flags.
 # Coverage files from each module are merged into a single coverage-instrumentation.txt file.
+# The database/sql root package is excluded (compile-time field injection); dsnparse and semconv
+# sub-packages are tested explicitly so their coverage is captured.
 .ONESHELL:
 test-unit/instrumentation/coverage: package ## Run unit tests with coverage for instrumentation modules only
 	@echo "Running instrumentation unit tests with coverage..."
@@ -560,6 +575,11 @@ test-unit/instrumentation/coverage: package ## Run unit tests with coverage for 
 		(cd "$$moddir" && go mod tidy); \
 		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
+	@# Test the database/sql sub-packages that compile without otelc-injected fields.
+	@echo "Testing instrumentation/database/sql sub-packages (dsnparse, semconv) with coverage..."
+	@(cd instrumentation/database/sql && go mod tidy)
+	go test -C "instrumentation/database/sql" -v -shuffle=on -timeout=5m -count=1 \
+		./dsnparse/... ./semconv/... -coverprofile=instrumentation/database/sql/coverage.txt -covermode=atomic 2>&1 | tee -a ./gotest-unit-instrumentation.log
 	@echo "Merging coverage files into coverage-instrumentation.txt..."
 	@echo "mode: atomic" > coverage-instrumentation.txt
 	@find instrumentation -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-instrumentation.txt 2>/dev/null || true
