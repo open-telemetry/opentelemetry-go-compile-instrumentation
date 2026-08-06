@@ -9,12 +9,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+var buildMu sync.Mutex
 
 const (
 	otelcBinName = "otelc"
@@ -77,17 +81,22 @@ func appsPath() (string, error) {
 // the caller's arguments and environment unchanged.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
+	buildMu.Lock()
+	defer buildMu.Unlock()
+
 	otelc, err := OtelcPath()
 	require.NoError(t, err)
 
 	standardAppsDir := appsDir == ""
-	var env []string
+	env := os.Environ()
 	if standardAppsDir {
 		cacheRoot := os.Getenv("OTELC_TEST_GOCACHE")
+		if cacheRoot == "" {
+			cacheRoot = filepath.Join(util.GetOtelcWorkDir(), "test", "testutil", ".gocache")
+		}
 		if cacheRoot != "" {
-			cacheDir := filepath.Join(cacheRoot, app)
-			require.NoError(t, os.MkdirAll(cacheDir, 0o755))
-			env = append(os.Environ(), "GOCACHE="+cacheDir)
+			require.NoError(t, os.MkdirAll(cacheRoot, 0o755))
+			env = setEnv(env, "GOCACHE", cacheRoot)
 
 			// Dropping -a lets warm builds reuse this app-local cache without sharing
 			// compiled objects across different instrumentation configs.
@@ -101,6 +110,13 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 		}
 	}
 
+	env = setEnv(env, "GOWORK", "off")
+
+	tmpDir := filepath.Join(util.GetOtelcWorkDir(), "test", "testutil", ".tmp")
+	require.NoError(t, os.MkdirAll(tmpDir, 0o755))
+	env = setEnv(env, "TMP", tmpDir)
+	env = setEnv(env, "TEMP", tmpDir)
+
 	output := appOutputName()
 	args = append(args, "-o", output)
 	args = append([]string{otelc}, args...)
@@ -109,6 +125,17 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 		var err error
 		appsDir, err = appsPath()
 		require.NoError(t, err)
+
+		sanitized := strings.ReplaceAll(t.Name(), "/", "_")
+		tempAppName := app + "_" + sanitized
+		srcDir := filepath.Join(appsDir, app)
+		dstDir := filepath.Join(appsDir, tempAppName)
+
+		require.NoError(t, copyDir(srcDir, dstDir))
+		t.Cleanup(func() {
+			_ = os.RemoveAll(dstDir)
+		})
+		app = tempAppName
 	}
 	appDir := filepath.Join(appsDir, app)
 
@@ -136,6 +163,8 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 		var err error
 		appsDir, err = appsPath()
 		require.NoError(t, err)
+		sanitized := strings.ReplaceAll(t.Name(), "/", "_")
+		app = app + "_" + sanitized
 	}
 	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
@@ -157,6 +186,8 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 		var err error
 		appsDir, err = appsPath()
 		require.NoError(t, err)
+		sanitized := strings.ReplaceAll(t.Name(), "/", "_")
+		app = app + "_" + sanitized
 	}
 	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
@@ -177,4 +208,51 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 	})
 
 	return cmd
+}
+
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == ".otelc-build" || name == "app" || name == "app.exe" || name == ".otelc-build.lock" {
+			continue
+		}
+		srcPath := filepath.Join(src, name)
+		dstPath := filepath.Join(dst, name)
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dstPath, data, info.Mode()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func setEnv(env []string, key, val string) []string {
+	prefix := strings.ToLower(key) + "="
+	for i, entry := range env {
+		if strings.HasPrefix(strings.ToLower(entry), prefix) {
+			env[i] = key + "=" + val
+			return env
+		}
+	}
+	return append(env, key+"="+val)
 }

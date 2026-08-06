@@ -28,6 +28,7 @@ import (
 // trace. Both processes export to the same in-process OTLP collector, so a
 // single trace with two spans (one Producer, one Consumer) is produced.
 func TestKafka(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("kafka testcontainer not supported on windows")
 	}
