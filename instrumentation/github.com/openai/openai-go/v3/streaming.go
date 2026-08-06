@@ -90,11 +90,16 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 
 func (r *streamingReader) Close() error {
 	if r.done.CompareAndSwap(false, true) {
-		// Always flush the line buffer: a caller that stops reading before
-		// EOF must still get the final chunk's attributes. finalize decides
-		// whether the stream completed (finish reason or [DONE] seen) or was
-		// torn down prematurely after flushing.
-		r.finalize(true, errStreamAborted)
+		// Flush the line buffer first: a caller that stops reading before
+		// EOF must still get the final chunk's attributes, and the flush may
+		// itself recover the finish reason or [DONE] marker. Then decide
+		// whether the stream completed or was torn down prematurely.
+		r.flushRemaining()
+		if r.completed.Load() || len(r.reasons) > 0 {
+			r.finalize(false, nil)
+		} else {
+			r.finalize(false, errStreamAborted)
+		}
 	}
 	if r.reader != nil {
 		return r.reader.Close()
@@ -107,16 +112,20 @@ func (r *streamingReader) finalize(flush bool, err error) {
 		r.flushRemaining()
 	}
 
-	// A stream is only complete once a finish reason or the [DONE] marker was
-	// received. Anything else is a premature abort and must not be recorded
-	// as a successful generation.
+	// A stream is complete once a finish reason or the [DONE] marker was
+	// received. It is still an error when the stream terminates with a
+	// transport error (e.g. truncated chunked encoding / io.ErrUnexpectedEOF
+	// after the last chunk but before [DONE]): the host application will
+	// surface that error, so telemetry must record it too instead of
+	// reporting a successful 200.
 	completed := r.completed.Load() || len(r.reasons) > 0
-	if !completed {
+	hardErr := err != nil && !errors.Is(err, io.EOF)
+	if !completed || hardErr {
 		if len(r.reasons) == 0 {
 			r.reasons = []string{"error"}
 		}
 		r.span.SetStatus(codes.Error, "stream aborted")
-		if err != nil && !errors.Is(err, io.EOF) {
+		if hardErr {
 			r.span.RecordError(err)
 		}
 	}

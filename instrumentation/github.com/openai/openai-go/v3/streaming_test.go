@@ -527,3 +527,34 @@ func TestStreamingReader_CloseAfterFinishReasonIsNormal(t *testing.T) {
 	assert.NotEqual(t, codes.Error, s.Status().Code)
 	assertSliceAttribute(t, s.Attributes(), "gen_ai.response.finish_reasons", []string{"stop"})
 }
+
+// A transport failure after the final chunk was delivered (but before the
+// [DONE] marker) must still be recorded as an error: the host application
+// sees the truncated stream as a failure, so telemetry must not report a
+// successful 200 even though a finish_reason was already parsed.
+func TestStreamingReader_TruncatedAfterFinishReasonIsError(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	ctx, span := tr.Start(t.Context(), "test-truncated-after-finish")
+
+	streamData := "data: {\"id\":\"trunc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n"
+	body := &erroringReader{data: []byte(streamData), readErr: io.ErrUnexpectedEOF}
+	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+
+	_, err := io.ReadAll(reader)
+	require.Error(t, err)
+	reader.Close()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	s := spans[0]
+	assert.Equal(t, codes.Error, s.Status().Code)
+	assert.Equal(t, "stream aborted", s.Status().Description)
+	require.Len(t, s.Events(), 1)
+	assert.Equal(t, "exception", s.Events()[0].Name)
+	// The real finish reason is preserved; the transport error is what made
+	// this an aborted stream.
+	assertSliceAttribute(t, s.Attributes(), "gen_ai.response.finish_reasons", []string{"stop"})
+}
