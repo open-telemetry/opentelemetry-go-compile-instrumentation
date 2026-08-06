@@ -225,12 +225,37 @@ func trackAddedImports(packages map[string]string) error {
 	return nil
 }
 
+// getAddedImportTrackingFiles scans the build temp directory for per-process import tracking files.
+// It uses os.ReadDir instead of filepath.Glob to avoid path globbing errors when
+// working directory paths contain special characters (e.g., brackets).
+func getAddedImportTrackingFiles() ([]string, error) {
+	dir := util.GetBuildTempDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, ex.Wrapf(err, "reading build temp directory %s", dir)
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, "added_imports.") && strings.HasSuffix(name, ".json") {
+			files = append(files, filepath.Join(dir, name))
+		}
+	}
+	return files, nil
+}
+
 // CleanupImportTrackingFiles removes import tracking files from previous builds.
 // Should be called at the start of a new build to clean up stale files from prior runs.
 // This is exported for use by the setup phase.
 func CleanupImportTrackingFiles() {
-	pattern := util.GetAddedImportsPattern()
-	files, err := filepath.Glob(pattern)
+	files, err := getAddedImportTrackingFiles()
 	if err != nil {
 		return
 	}
@@ -243,12 +268,11 @@ func CleanupImportTrackingFiles() {
 // loadAddedImports discovers and merges all per-process import tracking files.
 func loadAddedImports(ctx context.Context) (map[string]string, error) {
 	logger := util.LoggerFromContext(ctx)
-	pattern := util.GetAddedImportsPattern()
 
 	// Find all per-process import files
-	files, err := filepath.Glob(pattern)
+	files, err := getAddedImportTrackingFiles()
 	if err != nil {
-		return nil, ex.Wrapf(err, "globbing import files")
+		return nil, ex.Wrapf(err, "finding import files")
 	}
 
 	if len(files) == 0 {
