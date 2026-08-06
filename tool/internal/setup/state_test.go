@@ -455,10 +455,10 @@ func TestStateManagerConcurrentTrack(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines)
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(routineID int) {
 			defer wg.Done()
-			for j := 0; j < filesPerGoroutine; j++ {
+			for j := range filesPerGoroutine {
 				filename := filepath.Join(tmp, fmt.Sprintf("file_%d_%d.txt", routineID, j))
 				if j%2 == 0 {
 					_ = os.WriteFile(filename, []byte("data"), 0o644)
@@ -476,4 +476,3 @@ func TestStateManagerConcurrentTrack(t *testing.T) {
 
 	assert.Equal(t, numGoroutines*filesPerGoroutine, fileCount)
 }
-

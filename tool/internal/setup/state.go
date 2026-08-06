@@ -171,30 +171,26 @@ func (s *StateManager) Track(path string) error {
 	abs = filepath.Clean(abs)
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, ok := s.files[abs]; ok {
-		s.mu.Unlock()
 		return nil
 	}
 
 	// If the file doesn't exist, mark it for removal
 	if !util.PathExists(abs) {
 		s.files[abs] = false
-		err = s.commitLocked()
-		s.mu.Unlock()
-		return err
+		return s.commitLocked()
 	}
 
 	// If the file exists, snapshot it
 	dst := filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(abs))
 	if err = util.CopyFile(abs, dst); err != nil {
-		s.mu.Unlock()
 		return ex.Wrapf(err, "failed to snapshot %s", abs)
 	}
 
 	s.files[abs] = true
-	err = s.commitLocked()
-	s.mu.Unlock()
-	return err
+	return s.commitLocked()
 }
 
 // Commit persists the tracked state to disk so it can be restored by a future
@@ -295,4 +291,3 @@ func (s *StateManager) Revert() error {
 
 	return err
 }
-
