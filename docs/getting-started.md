@@ -129,6 +129,7 @@ The following libraries are automatically instrumented:
 | `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
 | `github.com/anthropics/anthropic-sdk-go` | GenAI spans |
 | `github.com/segmentio/kafka-go` | Kafka messaging spans |
+| `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
 
 ## Learn More
 
