@@ -1,0 +1,16 @@
+name: "instrumentation-github-com-openai-openai-go"
+display_name: "OpenAI SDK"
+source_path: "instrumentation/github.com/openai/openai-go"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go"
+target_module: "github.com/openai/openai-go"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

@@ -1,0 +1,16 @@
+name: "instrumentation-go-mongodb-org-mongo-driver-mongo"
+display_name: "MongoDB"
+source_path: "instrumentation/go.mongodb.org/mongo-driver/mongo"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/mongo"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/mongo"
+target_module: "go.mongodb.org/mongo-driver/mongo"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/mongo"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

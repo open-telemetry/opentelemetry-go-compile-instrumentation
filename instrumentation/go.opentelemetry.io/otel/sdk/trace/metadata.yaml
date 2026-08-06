@@ -1,0 +1,17 @@
+name: "instrumentation-go-opentelemetry-io-otel-sdk-trace"
+display_name: "OpenTelemetry SDK Trace"
+source_path: "instrumentation/go.opentelemetry.io/otel/sdk/trace"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+target_module: "go.opentelemetry.io/otel/sdk/trace"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic
+hidden: true

@@ -1,0 +1,16 @@
+name: "instrumentation-github-com-apache-cassandra-gocql-driver-v2"
+display_name: "Cassandra (gocql v2)"
+source_path: "instrumentation/github.com/apache/cassandra-gocql-driver/v2"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/github.com/apache/cassandra-gocql-driver/v2"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/github.com/apache/cassandra-gocql-driver/v2"
+target_module: "github.com/apache/cassandra-gocql-driver/v2"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/github.com/apache/cassandra-gocql-driver/v2"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

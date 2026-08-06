@@ -1,0 +1,16 @@
+name: "instrumentation-github-com-gin-gonic-gin"
+display_name: "Gin"
+source_path: "instrumentation/github.com/gin-gonic/gin"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/github.com/gin-gonic/gin"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/github.com/gin-gonic/gin"
+target_module: "github.com/gin-gonic/gin"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/github.com/gin-gonic/gin"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

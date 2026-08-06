@@ -1,0 +1,16 @@
+name: "instrumentation-database-sql"
+display_name: "database/sql"
+source_path: "instrumentation/database/sql"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/database/sql"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/database/sql"
+target_module: "database/sql"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/database/sql"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

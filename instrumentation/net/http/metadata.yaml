@@ -1,0 +1,17 @@
+name: "instrumentation-net-http"
+display_name: "net/http"
+source_path: "instrumentation/net/http"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/net/http"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/net/http/client"
+  - path: "go.opentelemetry.io/otelc/instrumentation/net/http/server"
+target_module: "net/http"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/net/http"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

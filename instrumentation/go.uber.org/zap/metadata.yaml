@@ -1,0 +1,16 @@
+name: "instrumentation-go-uber-org-zap"
+display_name: "Zap"
+source_path: "instrumentation/go.uber.org/zap"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/go.uber.org/zap"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/go.uber.org/zap"
+target_module: "go.uber.org/zap"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/go.uber.org/zap"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic
