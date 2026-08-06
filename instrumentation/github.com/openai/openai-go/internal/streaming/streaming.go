@@ -137,7 +137,7 @@ func (r *StreamingReader) flushRemaining() {
 		return
 	}
 
-	payload, done := ParseSSELine(line)
+	payload, done := parseSSELine(line)
 	if done || payload == nil {
 		return
 	}
@@ -170,7 +170,7 @@ func (r *StreamingReader) processSSELines() {
 			continue
 		}
 
-		payload, done := ParseSSELine(line)
+		payload, done := parseSSELine(line)
 		if done {
 			continue
 		}
@@ -185,7 +185,7 @@ func (r *StreamingReader) processSSELines() {
 	}
 }
 
-func ParseSSELine(line []byte) ([]byte, bool) {
+func parseSSELine(line []byte) ([]byte, bool) {
 	if !bytes.HasPrefix(line, []byte("data: ")) {
 		return nil, false
 	}
