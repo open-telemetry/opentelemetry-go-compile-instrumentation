@@ -446,7 +446,7 @@ func TestStateManagerCommitIsAtomicAndSorted(t *testing.T) {
 
 func TestStateManagerConcurrentTrack(t *testing.T) {
 	tmp := t.TempDir()
-	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
 
 	s := NewStateManager()
 	const numGoroutines = 20
@@ -461,9 +461,9 @@ func TestStateManagerConcurrentTrack(t *testing.T) {
 			for j := range filesPerGoroutine {
 				filename := filepath.Join(tmp, fmt.Sprintf("file_%d_%d.txt", routineID, j))
 				if j%2 == 0 {
-					_ = os.WriteFile(filename, []byte("data"), 0o644)
+					assert.NoError(t, os.WriteFile(filename, []byte("data"), 0o644))
 				}
-				_ = s.Track(filename)
+				assert.NoError(t, s.Track(filename))
 			}
 		}(i)
 	}
