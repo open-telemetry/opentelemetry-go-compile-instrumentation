@@ -91,9 +91,6 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 	env := os.Environ()
 	if standardAppsDir {
 		cacheRoot := os.Getenv("OTELC_TEST_GOCACHE")
-		if cacheRoot == "" {
-			cacheRoot = filepath.Join(util.GetOtelcWorkDir(), "test", "testutil", ".gocache")
-		}
 		if cacheRoot != "" {
 			require.NoError(t, os.MkdirAll(cacheRoot, 0o755))
 			env = setEnv(env, "GOCACHE", cacheRoot)
@@ -111,11 +108,6 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 	}
 
 	env = setEnv(env, "GOWORK", "off")
-
-	tmpDir := filepath.Join(util.GetOtelcWorkDir(), "test", "testutil", ".tmp")
-	require.NoError(t, os.MkdirAll(tmpDir, 0o755))
-	env = setEnv(env, "TMP", tmpDir)
-	env = setEnv(env, "TEMP", tmpDir)
 
 	output := appOutputName()
 	args = append(args, "-o", output)
