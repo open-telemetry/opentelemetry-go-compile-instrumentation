@@ -61,8 +61,13 @@ func TestStripCompleteFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Make a copy of original args to verify they are not mutated
+			origArgs := make([]string, len(tt.args))
+			copy(origArgs, tt.args)
+
 			result := stripCompleteFlag(tt.args)
 			assert.Equal(t, tt.expected, result)
+			assert.Equal(t, origArgs, tt.args, "original slice should not be mutated")
 		})
 	}
 }
