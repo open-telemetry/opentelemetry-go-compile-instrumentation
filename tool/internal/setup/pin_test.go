@@ -825,7 +825,7 @@ func TestUpdatePinnedProjects_InvalidRule(t *testing.T) {
 func TestGeneratePinnedProjects(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, dir)
-	os.MkdirAll(util.GetBuildTempDir(), 0o755) // ensure .otelc-build exists
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755)) // ensure .otelc-build exists
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "go.mod"),
