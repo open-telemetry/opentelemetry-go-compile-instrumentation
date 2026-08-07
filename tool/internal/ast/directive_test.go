@@ -209,6 +209,44 @@ func TestParseDirectiveArgs(t *testing.T) {
 	}
 }
 
+func TestFindFuncsByDirective(t *testing.T) {
+	src := `package p
+//otelc:span span.name:"custom-op" tag:foo
+func Foo() {}
+
+//otelc:span
+func Bar() {}
+
+func Baz() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 2)
+
+	assert.Equal(t, "Foo", matches[0].Func.Name.Name)
+	assert.Equal(t, []DirectiveArg{{Key: "span.name", Value: "custom-op"}, {Key: "tag", Value: "foo"}}, matches[0].Args)
+
+	assert.Equal(t, "Bar", matches[1].Func.Name.Name)
+	assert.Empty(t, matches[1].Args)
+}
+
+func TestFindFuncsByDirective_NoMatches(t *testing.T) {
+	src := `package p
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+}
+
 func writeGoTempFile(t *testing.T, src string) string {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "*.go")

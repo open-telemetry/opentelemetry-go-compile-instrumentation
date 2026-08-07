@@ -84,7 +84,7 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 
 	default:
 		// Unsupported AST node types (chan, func, map, slice, array, interface
-		// literals) cannot be matched by type-name filters.
+		// literals) can never satisfy a plain type-name filter.
 		return false
 	}
 }
@@ -106,6 +106,18 @@ func fieldListContainsType(fields *dst.FieldList, typeStr string, imports map[st
 		}
 	}
 	return false, nil
+}
+
+// MatchesTypeName reports whether node's type matches the type-name string typeStr.
+// Returns an error when typeStr cannot be parsed. Matching is done without
+// import-alias resolution (nil imports), matching the fallback behavior
+// described on matches.
+func MatchesTypeName(node dst.Expr, typeStr string) (bool, error) {
+	tn, err := parseTypeName(typeStr)
+	if err != nil {
+		return false, err
+	}
+	return tn.matches(node, nil), nil
 }
 
 // importAliasMap builds a map from the local identifier used to reference an

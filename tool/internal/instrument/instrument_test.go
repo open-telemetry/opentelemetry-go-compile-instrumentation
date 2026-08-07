@@ -419,7 +419,7 @@ func createImportCfg(path string, helpers []helperPkg) {
 	}
 
 	// Resolve common standard library packages that might be needed
-	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io"}
+	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io", "context"}
 	for _, pkg := range commonPkgs {
 		cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkg)
 		output, err := cmd.Output()
