@@ -251,8 +251,13 @@ func (r *streamingReader) processChatChunk(payload []byte) {
 			r.reasons = append(r.reasons, c.FinishReason)
 		}
 		if captureContentEnabled() && c.Delta.Content != "" {
-			if r.capturedStream.Len()+len(c.Delta.Content) <= maxResponseBodySize {
-				r.capturedStream.WriteString(c.Delta.Content)
+			rem := maxResponseBodySize - r.capturedStream.Len()
+			if rem > 0 {
+				if len(c.Delta.Content) <= rem {
+					r.capturedStream.WriteString(c.Delta.Content)
+				} else {
+					r.capturedStream.WriteString(c.Delta.Content[:rem])
+				}
 			}
 		}
 	}
