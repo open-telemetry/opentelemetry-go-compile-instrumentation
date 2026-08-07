@@ -178,10 +178,6 @@ func ListFuncDecls(root *dst.File) []*dst.FuncDecl {
 	return funcDecls
 }
 
-func FindStructDecl(root *dst.File, structName string) *dst.GenDecl {
-	return FindTypeDecl(root, structName)
-}
-
 // FindVarDecl finds a package-level variable declaration by name.
 // Returns the enclosing GenDecl and the matching ValueSpec, or nil if not found.
 func FindVarDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
@@ -310,12 +306,32 @@ func IsEllipsis(t dst.Expr) bool {
 	return ok
 }
 
-func AddStructField(decl dst.Decl, name, t string) {
-	gen := util.AssertType[*dst.GenDecl](decl)
-	fd := Field(name, Ident(t))
-	ty := util.AssertType[*dst.TypeSpec](gen.Specs[0])
-	st := util.AssertType[*dst.StructType](ty.Type)
-	st.Fields.List = append(st.Fields.List, fd)
+// FindStructType returns the *dst.StructType declared under name, or nil if there
+// is no such top-level type or the named type is not a struct (e.g. an interface,
+// alias, or named non-struct type). Unlike FindTypeDecl it resolves the specific
+// spec by name, so it is correct for grouped `type ( ... )` blocks.
+func FindStructType(root *dst.File, name string) *dst.StructType {
+	gen := FindTypeDecl(root, name)
+	if gen == nil {
+		return nil
+	}
+	for _, spec := range gen.Specs {
+		ts, ok := spec.(*dst.TypeSpec)
+		if !ok || ts.Name.Name != name {
+			continue
+		}
+		st, ok := ts.Type.(*dst.StructType)
+		if !ok {
+			return nil
+		}
+		return st
+	}
+	return nil
+}
+
+// AddStructField appends a field named name of type t to the given struct.
+func AddStructField(st *dst.StructType, name, t string) {
+	st.Fields.List = append(st.Fields.List, Field(name, Ident(t)))
 }
 
 // funcDeclMatchesFilters reports whether funcDecl satisfies all signature

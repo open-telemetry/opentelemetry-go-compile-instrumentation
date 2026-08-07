@@ -4,25 +4,12 @@
 package ast
 
 import (
-	"os"
-	"os/exec"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestMain(m *testing.M) {
-	switch os.Getenv("AST_FATAL_CASE") {
-	case "unsupported-type-node":
-		tn := parsedTypeName{name: "X"}
-		tn.matches(&dst.ChanType{}, nil)
-		os.Exit(0) // unreachable: matches always exits via util.Unimplemented above
-	default:
-		os.Exit(m.Run())
-	}
-}
 
 func TestParseTypeName(t *testing.T) {
 	tests := []struct {
@@ -145,6 +132,30 @@ func TestTypeNameMatches(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name:    "unsupported array type node returns false without panic",
+			typeStr: "string",
+			node:    &dst.ArrayType{Elt: &dst.Ident{Name: "string"}},
+			want:    false,
+		},
+		{
+			name:    "unsupported map type node returns false without panic",
+			typeStr: "string",
+			node:    &dst.MapType{Key: &dst.Ident{Name: "string"}, Value: &dst.Ident{Name: "int"}},
+			want:    false,
+		},
+		{
+			name:    "unsupported chan type node returns false without panic",
+			typeStr: "int",
+			node:    &dst.ChanType{Value: &dst.Ident{Name: "int"}},
+			want:    false,
+		},
+		{
+			name:    "unsupported func type node returns false without panic",
+			typeStr: "error",
+			node:    &dst.FuncType{},
+			want:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -245,20 +256,6 @@ func TestTypeNameMatches_ImportAliasResolution(t *testing.T) {
 		assert.False(t, textTemplate.matches(node, importsHTML))
 		assert.True(t, htmlTemplate.matches(node, importsHTML))
 	})
-}
-
-// TestMatchesUnsupportedNodeType covers the default case which
-// is normally unreachable (every dst.Expr type produced by the parser
-// for a type position is handled explicitly). See TestMain.
-func TestMatchesUnsupportedNodeType(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=TestMain")
-	cmd.Env = append(os.Environ(), "AST_FATAL_CASE=unsupported-type-node")
-	out, err := cmd.CombinedOutput()
-
-	var ee *exec.ExitError
-	require.ErrorAs(t, err, &ee, "an unsupported type node should cause a non-zero exit")
-	assert.Equal(t, 1, ee.ExitCode())
-	assert.Contains(t, string(out), "Unimplemented: signature filter: unsupported type node *dst.ChanType")
 }
 
 func TestImportAliasMap(t *testing.T) {
@@ -399,6 +396,8 @@ func TestFieldListContainsType(t *testing.T) {
 				},
 			},
 			{Type: &dst.Ident{Name: "error"}},
+			{Type: &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}}},
+			{Type: &dst.MapType{Key: &dst.Ident{Name: "string"}, Value: &dst.Ident{Name: "string"}}},
 		},
 	}
 

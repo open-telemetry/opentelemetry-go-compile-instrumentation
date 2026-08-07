@@ -356,8 +356,8 @@ func (sp *SetupPhase) matchOneRule(
 			sp.Info("Match func rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstStructRule:
-		structDecl := ast.FindStructDecl(tree, rt.Struct)
-		if structDecl != nil {
+		structType := ast.FindStructType(tree, rt.Struct)
+		if structType != nil {
 			set.AddStructRule(source, rt)
 			sp.Info("Match struct rule", "rule", rt, "dep", dep)
 		}

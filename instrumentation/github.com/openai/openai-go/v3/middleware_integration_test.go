@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -217,6 +218,60 @@ func TestOtelMiddleware_NilBody(t *testing.T) {
 	assert.Len(t, spans, 0, "nil body should skip instrumentation")
 }
 
+func TestOtelMiddleware_InvalidRequestJSON(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte("not json"))),
+	)
+
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{}`))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	spans := sr.Ended()
+	assert.Empty(t, spans, "unparsable request body should skip instrumentation")
+}
+
+func TestOtelMiddleware_MissingModel(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(`{"max_tokens":10}`))),
+	)
+
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{}`))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	spans := sr.Ended()
+	assert.Empty(t, spans, "valid JSON missing the model field should skip instrumentation")
+}
+
 func TestOtelMiddleware_NextError(t *testing.T) {
 	sr := setupTestTracer(t)
 
@@ -242,6 +297,60 @@ func TestOtelMiddleware_NextError(t *testing.T) {
 
 	span := spans[0]
 	assert.Equal(t, "chat gpt-4", span.Name())
+
+	events := span.Events()
+	require.Len(t, events, 1, "expected exception event for transport error")
+	assert.Equal(t, "exception", events[0].Name)
+}
+
+func TestOtelMiddleware_HTTPErrorStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		statusCode  int
+		status      string
+		contentType string
+	}{
+		{"rate limit", 429, "429 Too Many Requests", "application/json"},
+		{"server error", 500, "500 Internal Server Error", "application/json"},
+		{"streaming error", 500, "500 Internal Server Error", "text/event-stream"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := setupTestTracer(t)
+			middleware := OtelMiddleware()
+
+			reqBody := `{"model":"gpt-4"}`
+			req, _ := http.NewRequest(
+				"POST",
+				"http://api.openai.com/v1/chat/completions",
+				io.NopCloser(bytes.NewReader([]byte(reqBody))),
+			)
+
+			next := func(r *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: tt.statusCode,
+					Status:     tt.status,
+					Header:     http.Header{"Content-Type": []string{tt.contentType}},
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			}
+
+			resp, err := middleware(req, next)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+
+			span := spans[0]
+			assert.Equal(t, otelcodes.Error, span.Status().Code)
+
+			events := span.Events()
+			require.Len(t, events, 1, "expected exception event for HTTP error status")
+			assert.Equal(t, "exception", events[0].Name)
+		})
+	}
 }
 
 func TestOtelMiddleware_RequestBodyReadError(t *testing.T) {
