@@ -94,6 +94,11 @@ func TestCollectArguments(t *testing.T) {
 			src:      "package main\ntype T struct{}\nfunc (T) F(int, string) {}",
 			expected: []string{"_ignoredParam0", "_ignoredParam1", "_ignoredParam2"},
 		},
+		{
+			name:     "underscore param collides with existing synthetic-looking param name",
+			src:      "package main\nfunc F(_ignoredParam0 int, _ string) {}",
+			expected: []string{"_ignoredParam0", "_ignoredParam1"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -129,6 +134,11 @@ func TestCollectReturnValues(t *testing.T) {
 		{
 			name:     "underscore return values",
 			src:      "package main\nfunc F() (_ int, _ string) { return }",
+			expected: []string{"_ignoredRetVal0", "_ignoredRetVal1"},
+		},
+		{
+			name:     "underscore return collides with existing synthetic-looking return name",
+			src:      "package main\nfunc F() (_ignoredRetVal0 error, _ bool) { return nil, false }",
 			expected: []string{"_ignoredRetVal0", "_ignoredRetVal1"},
 		},
 	}
@@ -168,6 +178,14 @@ func TestCollectNamesNoCollision(t *testing.T) {
 		{
 			name: "multiple blanks on both sides",
 			src:  "package main\nfunc F(_ int, _ string) (_ error, _ bool) { return nil, false }",
+		},
+		{
+			name: "blank param collides with existing synthetic-looking param name",
+			src:  "package main\nfunc F(_ignoredParam0 int, _ string) {}",
+		},
+		{
+			name: "blank return collides with existing synthetic-looking return name",
+			src:  "package main\nfunc F() (_ignoredRetVal0 error, _ bool) { return nil, false }",
 		},
 	}
 
