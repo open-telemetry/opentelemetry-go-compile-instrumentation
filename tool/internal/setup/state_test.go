@@ -5,9 +5,11 @@ package setup
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -440,4 +442,37 @@ func TestStateManagerCommitIsAtomicAndSorted(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, string(first), string(second), "manifest serialization must be deterministic")
 	assert.False(t, util.PathExists(util.GetBuildTemp(stateFileName)+".tmp"), "no temp file left behind")
+}
+
+func TestStateManagerConcurrentTrack(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	s := NewStateManager()
+	const numGoroutines = 20
+	const filesPerGoroutine = 10
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for i := range numGoroutines {
+		go func(routineID int) {
+			defer wg.Done()
+			for j := range filesPerGoroutine {
+				filename := filepath.Join(tmp, fmt.Sprintf("file_%d_%d.txt", routineID, j))
+				if j%2 == 0 {
+					assert.NoError(t, os.WriteFile(filename, []byte("data"), 0o644))
+				}
+				assert.NoError(t, s.Track(filename))
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	s.mu.Lock()
+	fileCount := len(s.files)
+	s.mu.Unlock()
+
+	assert.Equal(t, numGoroutines*filesPerGoroutine, fileCount)
 }
