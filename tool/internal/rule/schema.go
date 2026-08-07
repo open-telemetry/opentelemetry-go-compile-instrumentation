@@ -12,7 +12,7 @@ type Selector string
 // per docs/rules.md, declares the rule type.
 type Modifier string
 
-// Point selectors that may appear under where (or as legacy flat fields).
+// Selector keys in the structured rule schema (where selectors, file/combinator keys, plus top-level target/version).
 const (
 	SelectorTarget            Selector = "target"
 	SelectorVersion           Selector = "version"
@@ -74,7 +74,7 @@ const (
 	CombNot   = string(SelectorNot)
 
 	// RawField is the modifier-output key produced by normalize for raw rules
-	// (inject_code payload). It is not a where selector; match.go shares it.
+	// (inject_code payload). It is not a where selector; tool/internal/setup/match.go shares it.
 	RawField = "raw"
 )
 
@@ -88,40 +88,27 @@ const (
 // file group, and combinators). target/version are intentionally included so
 // IsValidSelector can distinguish "known but misplaced" from "unknown";
 // normalizeWhere still rejects them inside where.
-var selectors = map[Selector]struct{}{
-	SelectorTarget:            {},
-	SelectorVersion:           {},
-	SelectorFunc:              {},
-	SelectorRecv:              {},
-	SelectorStruct:            {},
-	SelectorFunctionCall:      {},
-	SelectorDirective:         {},
-	SelectorKind:              {},
-	SelectorIdentifier:        {},
-	SelectorSignature:         {},
-	SelectorSignatureContains: {},
-	SelectorResult:            {},
-	SelectorLastResult:        {},
-	SelectorParam:             {},
-	SelectorPattern:           {},
-	SelectorPlacement:         {},
-	SelectorFile:              {},
-	SelectorAllOf:             {},
-	SelectorOneOf:             {},
-	SelectorNot:               {},
+
+//nolint:gochecknoglobals // lookup set derived from AllSelectors(); intentionally package-level so IsValidSelector can query it without reconstruction
+var selectors = toSet(AllSelectors())
+
+// toSet builds a lookup set from an ordered slice, so the set can never
+// drift from the slice it is derived from.
+func toSet[T comparable](items []T) map[T]struct{} {
+	set := make(map[T]struct{}, len(items))
+	for _, item := range items {
+		set[item] = struct{}{}
+	}
+	return set
 }
 
-var modifiers = map[Modifier]struct{}{
-	ModifierInjectHooks:     {},
-	ModifierInjectCode:      {},
-	ModifierAddStructFields: {},
-	ModifierAddFile:         {},
-	ModifierWrapCall:        {},
-	ModifierExpandDirective: {},
-	ModifierAssignValue:     {},
-}
+//nolint:gochecknoglobals // lookup set derived from AllModifiers(); intentionally package-level so IsValidModifier can query it without reconstruction
+var modifiers = toSet(AllModifiers())
 
-// IsValidSelector reports whether s is a known where-clause key.
+// IsValidSelector reports whether s is part of the rule schema's selector
+// vocabulary. This includes target/version, which are valid selectors but
+// are rejected specifically when used inside a where block — see
+// normalizeWhere.
 func IsValidSelector(s string) bool {
 	_, ok := selectors[Selector(s)]
 	return ok

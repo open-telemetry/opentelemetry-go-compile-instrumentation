@@ -56,14 +56,47 @@ func TestAllModifiersComplete(t *testing.T) {
 }
 
 func TestStringAliasesMatchTypedConstants(t *testing.T) {
-	assert.Equal(t, string(SelectorFunc), SelFunc)
-	assert.Equal(t, string(SelectorFile), WhereFile)
-	assert.Equal(t, string(SelectorAllOf), CombAllOf)
-	assert.Equal(t, string(ModifierInjectHooks), "inject_hooks")
-	assert.Equal(t, string(ModifierInjectCode), "inject_code")
-	assert.Equal(t, string(ModifierAddStructFields), "add_struct_fields")
-	assert.Equal(t, string(ModifierAddFile), "add_file")
-	assert.Equal(t, string(ModifierWrapCall), "wrap_call")
-	assert.Equal(t, string(ModifierExpandDirective), "expand_directive")
-	assert.Equal(t, string(ModifierAssignValue), "assign_value")
+	selectorCases := []struct {
+		alias string
+		typed Selector
+	}{
+		{SelTarget, SelectorTarget},
+		{SelVersion, SelectorVersion},
+		{SelFunc, SelectorFunc},
+		{SelRecv, SelectorRecv},
+		{SelStruct, SelectorStruct},
+		{SelFunctionCall, SelectorFunctionCall},
+		{SelDirective, SelectorDirective},
+		{SelKind, SelectorKind},
+		{SelIdentifier, SelectorIdentifier},
+		{SelSignature, SelectorSignature},
+		{SelSignatureContains, SelectorSignatureContains},
+		{SelResult, SelectorResult},
+		{SelLastResult, SelectorLastResult},
+		{SelParam, SelectorParam},
+		{SelPattern, SelectorPattern},
+		{SelPlacement, SelectorPlacement},
+		{WhereFile, SelectorFile},
+		{CombAllOf, SelectorAllOf},
+		{CombOneOf, SelectorOneOf},
+		{CombNot, SelectorNot},
+	}
+	for _, c := range selectorCases {
+		assert.Equalf(t, string(c.typed), c.alias, "alias must equal string(%v)", c.typed)
+	}
+	modifierCases := []struct {
+		alias string
+		typed Modifier
+	}{
+		{"inject_hooks", ModifierInjectHooks},
+		{"inject_code", ModifierInjectCode},
+		{"add_struct_fields", ModifierAddStructFields},
+		{"add_file", ModifierAddFile},
+		{"wrap_call", ModifierWrapCall},
+		{"expand_directive", ModifierExpandDirective},
+		{"assign_value", ModifierAssignValue},
+	}
+	for _, c := range modifierCases {
+		assert.Equalf(t, string(c.typed), c.alias, "alias must equal string(%v)", c.typed)
+	}
 }
