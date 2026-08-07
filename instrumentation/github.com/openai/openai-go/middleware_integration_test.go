@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -349,6 +350,8 @@ func TestOtelMiddleware_HTTPErrorStatus(t *testing.T) {
 			events := span.Events()
 			require.Len(t, events, 1, "expected exception event for HTTP error status")
 			assert.Equal(t, "exception", events[0].Name)
+
+			assertAttribute(t, span.Attributes(), "error.type", strconv.Itoa(tt.statusCode))
 		})
 	}
 }
