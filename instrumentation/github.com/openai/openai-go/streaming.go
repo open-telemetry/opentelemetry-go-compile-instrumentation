@@ -8,9 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
@@ -34,7 +36,8 @@ type streamingReader struct {
 	opName        string
 	provider      string
 	op            operationType
-	done          atomic.Bool
+	done           atomic.Bool
+	capturedStream strings.Builder
 }
 
 func newStreamingReader(
@@ -110,6 +113,12 @@ func (r *streamingReader) finalize(flush bool) {
 	if !r.first.IsZero() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
 		r.span.SetAttributes(semconv.GenAIResponseTimeToFirstToken(firstTokenUs))
+	}
+
+	if captureContentEnabled() && r.capturedStream.Len() > 0 {
+		r.span.AddEvent("gen_ai.content.completion", trace.WithAttributes(
+			attribute.String("gen_ai.completion", r.capturedStream.String()),
+		))
 	}
 
 	r.span.End()
@@ -240,6 +249,16 @@ func (r *streamingReader) processChatChunk(payload []byte) {
 	for _, c := range chunk.Choices {
 		if c.FinishReason != "" {
 			r.reasons = append(r.reasons, c.FinishReason)
+		}
+		if captureContentEnabled() && c.Delta.Content != "" {
+			rem := maxResponseBodySize - r.capturedStream.Len()
+			if rem > 0 {
+				if len(c.Delta.Content) <= rem {
+					r.capturedStream.WriteString(c.Delta.Content)
+				} else {
+					r.capturedStream.WriteString(c.Delta.Content[:rem])
+				}
+			}
 		}
 	}
 }
