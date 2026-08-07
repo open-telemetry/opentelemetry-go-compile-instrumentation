@@ -10,48 +10,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// Structured top-level keys.
-const (
-	KeyWhere = "where"
-	KeyDo    = "do"
-)
-
-// where selectors (hoisted to flat by normalizeWhere).
-const (
-	SelTarget       = "target"
-	SelVersion      = "version"
-	SelFunc         = "func"
-	SelRecv         = "recv"
-	SelStruct       = "struct"
-	SelFunctionCall = "function_call"
-	SelDirective    = "directive"
-	SelKind         = "kind"
-	SelIdentifier   = "identifier"
-
-	// Signature match-narrowing selectors for func rules (see InstFuncRule).
-	SelSignature         = "signature"
-	SelSignatureContains = "signature_contains"
-	SelResult            = "result"
-	SelLastResult        = "last_result"
-	SelParam             = "param"
-
-	// Raw match-narrowing selector for raw rules (see InstRawRule).
-	SelPattern   = "pattern"
-	SelPlacement = "placement"
-)
-
-// where sub-groups / combinators (preserved nested under flat).
-const (
-	WhereFile = "file"
-	CombAllOf = "all-of"
-	CombOneOf = "one-of"
-	CombNot   = "not"
-)
-
-// RawField is the modifier-output key produced by normalize for raw rules.
-// It is not a where selector; exposed here so match.go can share the literal.
-const RawField = "raw"
-
 // Normalize detects the structured target/version + where + do format defined
 // in ADR-0003 and expands it into one or more flat rule maps expected by the
 // existing rule constructors. If the fields map contains neither "where" nor
@@ -160,10 +118,6 @@ func normalizeWhere(common, where map[string]any) (map[string]any, error) {
 	normalized := make(map[string]any)
 	for key, value := range where {
 		switch key {
-		case SelFunc, SelRecv, SelStruct, SelFunctionCall, SelDirective, SelKind, SelIdentifier,
-			SelSignature, SelSignatureContains, SelResult, SelLastResult, SelParam,
-			SelPattern, SelPlacement:
-			common[key] = value
 		case WhereFile:
 			if _, ok := value.(map[string]any); !ok {
 				return nil, ex.Newf("where.file must be a map")
@@ -172,7 +126,10 @@ func normalizeWhere(common, where map[string]any) (map[string]any, error) {
 		case CombAllOf, CombOneOf, CombNot:
 			normalized[key] = value
 		default:
-			return nil, ex.Newf("unsupported where key %q", key)
+			if !IsValidSelector(key) {
+				return nil, ex.Newf("unsupported where key %q", key)
+			}
+			common[key] = value
 		}
 	}
 
@@ -211,7 +168,10 @@ func normalizeDoSequence(items []any) ([]map[string]any, error) {
 		if len(modifierMap) != 1 {
 			return nil, ex.Newf("do[%d] must contain exactly one modifier key", idx)
 		}
-		for _, modifierRaw := range modifierMap {
+		for modifierName, modifierRaw := range modifierMap {
+			if !IsValidModifier(modifierName) {
+				return nil, ex.Newf("unsupported do modifier %q", modifierName)
+			}
 			modifierFields, hasModifierFields := modifierRaw.(map[string]any)
 			if !hasModifierFields {
 				return nil, ex.Newf("do[%d] modifier payload must be a map", idx)
@@ -233,7 +193,10 @@ func normalizeDoMap(modifier map[string]any) ([]map[string]any, error) {
 				"use the sequence form for multiple modifiers",
 		)
 	}
-	for _, modifierRaw := range modifier {
+	for modifierName, modifierRaw := range modifier {
+		if !IsValidModifier(modifierName) {
+			return nil, ex.Newf("unsupported do modifier %q", modifierName)
+		}
 		modifierFields, ok := modifierRaw.(map[string]any)
 		if !ok {
 			return nil, ex.Newf("do modifier payload must be a map")
