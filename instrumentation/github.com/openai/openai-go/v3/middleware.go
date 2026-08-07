@@ -10,11 +10,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3/semconv"
@@ -178,7 +180,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		if resp.StatusCode >= 400 {
 			span.RecordError(errors.New(resp.Status))
 			span.SetStatus(codes.Error, resp.Status)
-			span.SetAttributes(attribute.String("error.type", resp.Status))
+			span.SetAttributes(otelsemconv.ErrorTypeKey.String(strconv.Itoa(resp.StatusCode)))
 			span.End()
 			return resp, nil
 		}

@@ -200,6 +200,37 @@ func TestFindFuncDeclForRule(t *testing.T) {
 	})
 }
 
+// TestFindFuncDeclForRule_QualifiedParamType is an end-to-end regression test
+// for the bug where a where.param/where.result filter naming a type from a
+// multi-segment import path (e.g. "*net/http.Request", as opposed to a
+// single-segment stdlib package like "io" or "context") never matched,
+// because the matcher compared the bare package identifier written at the
+// call site ("http") against the filter's full import path ("net/http")
+// instead of resolving it via the file's own imports. This silently broke any
+// rule targeting a handler-shaped function such as
+// func(w http.ResponseWriter, r *http.Request).
+func TestFindFuncDeclForRule_QualifiedParamType(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource(`package main
+
+import "net/http"
+
+func handleRoot(w http.ResponseWriter, r *http.Request) {}
+`)
+	require.NoError(t, err)
+
+	r := &rule.InstFuncRule{
+		Func:  "handleRoot",
+		Param: "*net/http.Request",
+	}
+
+	fn, ok, err := FindFuncDecl(file, r)
+	require.NoError(t, err)
+	require.True(t, ok, `where.param: "*net/http.Request" should match a *http.Request parameter`)
+	require.NotNil(t, fn)
+	assert.Equal(t, "handleRoot", fn.Name.Name)
+}
+
 func TestFindVarDecl(t *testing.T) {
 	file := parseSharedFixture(t)
 
