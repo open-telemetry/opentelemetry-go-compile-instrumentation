@@ -246,6 +246,70 @@ go 1.21
 	)
 }
 
+func TestSyncDeps_NestedModule(t *testing.T) {
+	goMod := `module example.com/test
+
+go 1.21
+`
+	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+
+	// Add a nested module with no otelc.yaml of its own inside the matched
+	// instrumentation module's directory, mirroring a shared internal
+	// package used by several versioned copies of one instrumentation.
+	nestedDir := filepath.Join(buildTempDir, unzippedInstDir, "net", "http", "client", "internal", "shared")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	nestedModule := util.OtelcInstRoot + "/net/http/client/internal/shared"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(nestedDir, "go.mod"),
+		[]byte("module "+nestedModule+"\ngo 1.21\n"),
+		0o644,
+	))
+
+	require.NoError(t, syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir))
+
+	content, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+	got := string(content)
+
+	assert.Contains(t, got, "replace "+nestedModule+" => "+nestedDir)
+}
+
+func TestDiscoverNestedModuleReplaces(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempDir, "go.mod"),
+		[]byte("module example.com/outer\ngo 1.21\n"),
+		0o644,
+	))
+
+	nestedDir := filepath.Join(tempDir, "internal", "shared")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(nestedDir, "go.mod"),
+		[]byte("module example.com/outer/internal/shared\ngo 1.21\n"),
+		0o644,
+	))
+
+	nested, err := discoverNestedModuleReplaces(tempDir)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"example.com/outer/internal/shared": nestedDir,
+	}, nested)
+}
+
+func TestDiscoverNestedModuleReplaces_NoNested(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempDir, "go.mod"),
+		[]byte("module example.com/outer\ngo 1.21\n"),
+		0o644,
+	))
+
+	nested, err := discoverNestedModuleReplaces(tempDir)
+	require.NoError(t, err)
+	assert.Empty(t, nested)
+}
+
 func TestSyncDeps_ExistingReplace(t *testing.T) {
 	goMod := fmt.Sprintf(`module example.com/test
 
