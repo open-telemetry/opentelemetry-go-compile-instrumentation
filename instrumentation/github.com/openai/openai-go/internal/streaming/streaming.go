@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package v2
+package streaming
 
 import (
 	"bytes"
@@ -13,10 +13,17 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v2/semconv"
+	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
 )
 
-type streamingReader struct {
+type OperationType string
+
+const (
+	OpChat       OperationType = "chat"
+	OpCompletion OperationType = "completion"
+)
+
+type StreamingReader struct {
 	reader        io.ReadCloser
 	teeReader     io.Reader
 	logBuffer     *bytes.Buffer
@@ -33,19 +40,19 @@ type streamingReader struct {
 	model         string
 	opName        string
 	provider      string
-	op            operationType
+	op            OperationType
 	done          atomic.Bool
 }
 
-func newStreamingReader(
+func NewStreamingReader(
 	body io.ReadCloser,
 	span trace.Span,
 	start time.Time,
 	model, opName, provider string,
-	op operationType,
+	op OperationType,
 	_ context.Context,
-) *streamingReader {
-	return &streamingReader{
+) *StreamingReader {
+	return &StreamingReader{
 		reader:   body,
 		start:    start,
 		span:     span,
@@ -56,7 +63,7 @@ func newStreamingReader(
 	}
 }
 
-func (r *streamingReader) Read(p []byte) (n int, err error) {
+func (r *StreamingReader) Read(p []byte) (n int, err error) {
 	if r.teeReader == nil {
 		r.logBuffer = &bytes.Buffer{}
 		r.lineBuffer = &bytes.Buffer{}
@@ -80,7 +87,7 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 	return n, err
 }
 
-func (r *streamingReader) Close() error {
+func (r *StreamingReader) Close() error {
 	if r.done.CompareAndSwap(false, true) {
 		r.finalize(true)
 	}
@@ -90,7 +97,7 @@ func (r *streamingReader) Close() error {
 	return nil
 }
 
-func (r *streamingReader) finalize(flush bool) {
+func (r *StreamingReader) finalize(flush bool) {
 	if flush {
 		r.flushRemaining()
 	}
@@ -119,7 +126,7 @@ func (r *streamingReader) finalize(flush bool) {
 // underlying reader can report an error (typically io.EOF) right after the
 // last data line, with no trailing newline to trigger processSSELines, so
 // that last chunk would otherwise sit unparsed in lineBuffer forever.
-func (r *streamingReader) flushRemaining() {
+func (r *StreamingReader) flushRemaining() {
 	if r.lineBuffer == nil || r.lineBuffer.Len() == 0 {
 		return
 	}
@@ -137,7 +144,7 @@ func (r *streamingReader) flushRemaining() {
 	r.processChunk(payload)
 }
 
-func (r *streamingReader) processSSELines() {
+func (r *StreamingReader) processSSELines() {
 	if r.logBuffer == nil || r.logBuffer.Len() == 0 {
 		return
 	}
@@ -189,20 +196,20 @@ func parseSSELine(line []byte) ([]byte, bool) {
 	return payload, false
 }
 
-func (r *streamingReader) processChunk(payload []byte) {
+func (r *StreamingReader) processChunk(payload []byte) {
 	if r.first.IsZero() {
 		r.first = time.Now()
 	}
 
 	switch r.op {
-	case opChat:
+	case OpChat:
 		r.processChatChunk(payload)
-	case opCompletion:
+	case OpCompletion:
 		r.processCompletionChunk(payload)
 	}
 }
 
-func (r *streamingReader) processChatChunk(payload []byte) {
+func (r *StreamingReader) processChatChunk(payload []byte) {
 	var chunk struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
@@ -244,7 +251,7 @@ func (r *streamingReader) processChatChunk(payload []byte) {
 	}
 }
 
-func (r *streamingReader) processCompletionChunk(payload []byte) {
+func (r *StreamingReader) processCompletionChunk(payload []byte) {
 	var chunk struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
