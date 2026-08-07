@@ -8,6 +8,7 @@ import (
 	"fmt"
 	goversion "go/version"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,9 +189,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		if nestedErr != nil {
 			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
 		}
-		for modPath, modDir := range nested {
-			replaces[modPath] = modDir
-		}
+		maps.Copy(replaces, nested)
 	}
 
 	// Add replace directive for special pkg module
