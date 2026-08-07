@@ -18,7 +18,11 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-var buildMu sync.Mutex
+var (
+	buildMu   sync.Mutex
+	sandboxMu sync.Mutex
+	sandboxes = make(map[string]bool)
+)
 
 const (
 	otelcBinName = "otelc"
@@ -74,6 +78,36 @@ func appsPath() (string, error) {
 	return filepath.Join(pwd, "..", "apps"), nil
 }
 
+func sandboxPath(t *testing.T) (string, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	tName := t.Name()
+	if idx := strings.Index(tName, "/"); idx != -1 {
+		tName = tName[:idx]
+	}
+	sanitized := strings.ReplaceAll(tName, "/", "_")
+	return filepath.Join(pwd, "..", ".tmp_"+sanitized), nil
+}
+
+func initSandbox(t *testing.T, sandboxDir string) {
+	sandboxMu.Lock()
+	defer sandboxMu.Unlock()
+
+	if sandboxes[sandboxDir] {
+		return
+	}
+
+	t.Cleanup(func() {
+		_ = os.RemoveAll(sandboxDir)
+		sandboxMu.Lock()
+		delete(sandboxes, sandboxDir)
+		sandboxMu.Unlock()
+	})
+	sandboxes[sandboxDir] = true
+}
+
 // Build builds the application with the instrumentation tool. The built binary
 // is registered for cleanup via t.Cleanup. Standard test apps use
 // OTELC_TEST_GOCACHE/<app> as GOCACHE when OTELC_TEST_GOCACHE is set, and drop
@@ -90,6 +124,8 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 	standardAppsDir := appsDir == ""
 	env := os.Environ()
 	if standardAppsDir {
+		env = setEnv(env, "GOWORK", "off")
+
 		cacheRoot := os.Getenv("OTELC_TEST_GOCACHE")
 		if cacheRoot != "" {
 			require.NoError(t, os.MkdirAll(cacheRoot, 0o755))
@@ -107,29 +143,27 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 		}
 	}
 
-	env = setEnv(env, "GOWORK", "off")
-
 	output := appOutputName()
 	args = append(args, "-o", output)
 	args = append([]string{otelc}, args...)
 
+	var appDir string
 	if standardAppsDir {
-		var err error
+		sandboxDir, err := sandboxPath(t)
+		require.NoError(t, err)
+		initSandbox(t, sandboxDir)
+
 		appsDir, err = appsPath()
 		require.NoError(t, err)
 
-		sanitized := strings.ReplaceAll(t.Name(), "/", "_")
-		tempAppName := app + "_" + sanitized
 		srcDir := filepath.Join(appsDir, app)
-		dstDir := filepath.Join(appsDir, tempAppName)
+		dstDir := filepath.Join(sandboxDir, app)
 
 		require.NoError(t, copyDir(srcDir, dstDir))
-		t.Cleanup(func() {
-			_ = os.RemoveAll(dstDir)
-		})
-		app = tempAppName
+		appDir = dstDir
+	} else {
+		appDir = filepath.Join(appsDir, app)
 	}
-	appDir := filepath.Join(appsDir, app)
 
 	cmd := newCmd(t.Context(), appDir, env, args...)
 	out, err := cmd.CombinedOutput()
@@ -151,14 +185,14 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 	if util.IsWindows() {
 		appName += ".exe"
 	}
+	var appDir string
 	if appsDir == "" {
-		var err error
-		appsDir, err = appsPath()
+		sandboxDir, err := sandboxPath(t)
 		require.NoError(t, err)
-		sanitized := strings.ReplaceAll(t.Name(), "/", "_")
-		app = app + "_" + sanitized
+		appDir = filepath.Join(sandboxDir, app)
+	} else {
+		appDir = filepath.Join(appsDir, app)
 	}
-	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
@@ -174,14 +208,14 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 	if util.IsWindows() {
 		appName += ".exe"
 	}
+	var appDir string
 	if appsDir == "" {
-		var err error
-		appsDir, err = appsPath()
+		sandboxDir, err := sandboxPath(t)
 		require.NoError(t, err)
-		sanitized := strings.ReplaceAll(t.Name(), "/", "_")
-		app = app + "_" + sanitized
+		appDir = filepath.Join(sandboxDir, app)
+	} else {
+		appDir = filepath.Join(appsDir, app)
 	}
-	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 
 	var buf bytes.Buffer

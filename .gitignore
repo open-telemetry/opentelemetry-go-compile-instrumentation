@@ -45,3 +45,4 @@ schemas/otelc/.deps/
 # Test build cache and workspaces
 test/testutil/.gocache/
 test/testutil/.tmp/
+test/.tmp_*/
