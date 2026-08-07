@@ -95,6 +95,21 @@ func TestGenerateErrors(t *testing.T) {
 	}
 }
 
+func TestGenerateMissingRoot(t *testing.T) {
+	_, err := Generate(filepath.Join(t.TempDir(), "missing"))
+	require.ErrorContains(t, err, "generating manifest")
+}
+
+func TestLoadModulePathMissingFile(t *testing.T) {
+	_, err := loadModulePath(filepath.Join(t.TempDir(), "go.mod"))
+	require.ErrorContains(t, err, "reading")
+}
+
+func TestLoadModuleEntriesMissingDirectory(t *testing.T) {
+	_, err := loadModuleEntries(filepath.Join(t.TempDir(), "missing"), "example.com/missing")
+	require.ErrorContains(t, err, "opening module root")
+}
+
 func TestIsRuleFile(t *testing.T) {
 	tests := map[string]bool{
 		"otelc.yaml":        true,

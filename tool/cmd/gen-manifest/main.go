@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"go.opentelemetry.io/otelc/tool/internal/manifest"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const generatedFilePerm = 0o644
@@ -31,45 +31,8 @@ func run() error {
 		return fmt.Errorf("marshal instrumentation manifest: %w", err)
 	}
 	content = append(content, '\n')
-	if err = writeFileAtomic("tool/data/instrumentation-manifest.json", content); err != nil {
+	if err = util.WriteFileAtomic("tool/data/instrumentation-manifest.json", content, generatedFilePerm); err != nil {
 		return fmt.Errorf("write instrumentation manifest: %w", err)
 	}
-	return nil
-}
-
-func writeFileAtomic(path string, content []byte) (err error) {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".instrumentation-manifest-*.json")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		if tmp != nil {
-			if closeErr := tmp.Close(); err == nil {
-				err = closeErr
-			}
-		}
-		if tmpPath == "" {
-			return
-		}
-		if removeErr := os.Remove(tmpPath); err == nil && !os.IsNotExist(removeErr) {
-			err = removeErr
-		}
-	}()
-
-	if err = tmp.Chmod(generatedFilePerm); err != nil {
-		return err
-	}
-	if _, err = tmp.Write(content); err != nil {
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	tmp = nil
-	if err = os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	tmpPath = ""
 	return nil
 }
