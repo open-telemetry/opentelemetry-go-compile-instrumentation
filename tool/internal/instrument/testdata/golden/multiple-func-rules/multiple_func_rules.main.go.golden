@@ -39,22 +39,32 @@ func (c *HookContextImpl3592294264) GetKeyData(key string) interface{} {
 	if c.data == nil {
 		return nil
 	}
-	return c.data.(map[string]interface{})[key]
+	m, ok := c.data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return m[key]
 }
 
 func (c *HookContextImpl3592294264) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
 
 func (c *HookContextImpl3592294264) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	m, ok := c.data.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	_, exists := m[key]
+	return exists
 }
 
 func (c *HookContextImpl3592294264) GetParam(idx int) interface{} {
@@ -182,22 +192,32 @@ func (c *HookContextImpl1830170046) GetKeyData(key string) interface{} {
 	if c.data == nil {
 		return nil
 	}
-	return c.data.(map[string]interface{})[key]
+	m, ok := c.data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return m[key]
 }
 
 func (c *HookContextImpl1830170046) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
 
 func (c *HookContextImpl1830170046) HasKeyData(key string) bool {
 	if c.data == nil {
 		return false
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	m, ok := c.data.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	_, exists := m[key]
+	return exists
 }
 
 func (c *HookContextImpl1830170046) GetParam(idx int) interface{} {

@@ -69,6 +69,37 @@ func TestMockHookContext_KeyDataOperations(t *testing.T) {
 	}
 }
 
+func TestMockHookContext_KeyDataSafety(t *testing.T) {
+	t.Run("non-map data type safety", func(t *testing.T) {
+		ctx := hooktest.NewMockHookContext()
+		ctx.SetData("not-a-map")
+
+		// Must not panic when data is a non-map type
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("unexpected panic during key data access on non-map data: %v", r)
+			}
+		}()
+
+		if ctx.HasKeyData("foo") {
+			t.Errorf("expected HasKeyData(\"foo\") to be false for non-map data")
+		}
+		if ctx.GetKeyData("foo") != nil {
+			t.Errorf("expected GetKeyData(\"foo\") to be nil for non-map data")
+		}
+
+		// SetKeyData must safely re-initialize data to a map without panicking
+		ctx.SetKeyData("k1", "v1")
+
+		if !ctx.HasKeyData("k1") {
+			t.Errorf("expected HasKeyData(\"k1\") to be true after SetKeyData")
+		}
+		if ctx.GetKeyData("k1") != "v1" {
+			t.Errorf("expected GetKeyData(\"k1\") to be \"v1\", got %v", ctx.GetKeyData("k1"))
+		}
+	})
+}
+
 func TestMockHookContext_ParamOperationsAndBounds(t *testing.T) {
 	ctx := hooktest.NewMockHookContext()
 
