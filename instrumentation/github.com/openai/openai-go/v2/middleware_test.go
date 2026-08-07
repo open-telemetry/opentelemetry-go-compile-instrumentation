@@ -73,10 +73,49 @@ func TestOperationName(t *testing.T) {
 }
 
 func TestParseChatRequest(t *testing.T) {
-	body := []byte(`{"model":"gpt-4","max_tokens":100,"temperature":0.7}`)
-	model, attrs := parseChatRequest(body)
-	assert.Equal(t, "gpt-4", model)
-	assert.NotEmpty(t, attrs)
+	tests := []struct {
+		name      string
+		body      string
+		wantModel string
+		wantMax   int64
+	}{
+		{
+			name:      "max_tokens",
+			body:      `{"model":"gpt-4","max_tokens":100,"temperature":0.7}`,
+			wantModel: "gpt-4",
+			wantMax:   100,
+		},
+		{
+			name:      "max_completion_tokens",
+			body:      `{"model":"o1-mini","max_completion_tokens":50}`,
+			wantModel: "o1-mini",
+			wantMax:   50,
+		},
+		{
+			name:      "prefer max_completion_tokens",
+			body:      `{"model":"gpt-4","max_tokens":100,"max_completion_tokens":50}`,
+			wantModel: "gpt-4",
+			wantMax:   50,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model, attrs := parseChatRequest([]byte(tt.body))
+			assert.Equal(t, tt.wantModel, model)
+
+			var gotMax *int64
+			for _, a := range attrs {
+				if a.Key == "gen_ai.request.max_tokens" {
+					v := a.Value.AsInt64()
+					gotMax = &v
+					break
+				}
+			}
+			if assert.NotNil(t, gotMax) {
+				assert.Equal(t, tt.wantMax, *gotMax)
+			}
+		})
+	}
 }
 
 func TestParseChatRequest_Invalid(t *testing.T) {
