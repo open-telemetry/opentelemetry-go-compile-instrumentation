@@ -377,4 +377,27 @@ func TestCleanupImportTrackingFiles(t *testing.T) {
 		// Should not panic
 		CleanupImportTrackingFiles()
 	})
+
+	t.Run("handles work directory paths with glob characters", func(t *testing.T) {
+		tempDir := filepath.Join(t.TempDir(), "project-[dev]")
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+		buildDir := util.GetBuildTempDir()
+		err := os.MkdirAll(buildDir, 0o755)
+		require.NoError(t, err)
+
+		file1 := filepath.Join(buildDir, "added_imports.1234.json")
+		data1, _ := json.Marshal(map[string]string{"fmt": "/path/to/fmt.a"})
+		require.NoError(t, os.WriteFile(file1, data1, 0o644))
+
+		result, err := loadAddedImports(t.Context())
+		require.NoError(t, err)
+
+		expected := map[string]string{"fmt": "/path/to/fmt.a"}
+		assert.Equal(t, expected, result)
+
+		CleanupImportTrackingFiles()
+		_, statErr := os.Stat(file1)
+		assert.True(t, os.IsNotExist(statErr), "tracking file should be cleaned up")
+	})
 }
