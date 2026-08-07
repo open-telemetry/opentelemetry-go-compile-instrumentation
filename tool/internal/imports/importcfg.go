@@ -36,10 +36,20 @@ func ParseImportCfg(filename string) (ImportConfig, error) {
 	return parse(file)
 }
 
+// maxImportCfgLineSize is the maximum accepted length of a single importcfg
+// line. bufio.Scanner's default limit is bufio.MaxScanTokenSize (64 KiB),
+// which is too small for large build configurations.
+const maxImportCfgLineSize = 10 << 20 // 10 MiB
+
 // parse parses the importcfg data from the provided reader.
 func parse(r io.Reader) (ImportConfig, error) {
 	var reg ImportConfig
 	scanner := bufio.NewScanner(r)
+	// Allow importcfg lines larger than bufio.MaxScanTokenSize (64 KiB), which
+	// can occur in large build configurations with long package import paths
+	// or complex import maps. Without this, scanning fails with
+	// bufio.ErrTooLong ("token too long").
+	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), maxImportCfgLineSize)
 	scanner.Split(bufio.ScanLines)
 
 	for scanner.Scan() {
