@@ -73,9 +73,19 @@ func FreePort(t *testing.T) int {
 	}
 	allocatedPortsMu.Unlock()
 
-	for {
+	const maxAttempts = 100
+	for i := 0; i < maxAttempts; i++ {
+		select {
+		case <-t.Context().Done():
+			t.Fatalf("FreePort: context cancelled: %v", t.Context().Err())
+		default:
+		}
+
 		lis, err := net.Listen("tcp", "localhost:0")
-		require.NoError(t, err)
+		if err != nil {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
 		port := lis.Addr().(*net.TCPAddr).Port
 		require.NoError(t, lis.Close())
 
@@ -89,4 +99,7 @@ func FreePort(t *testing.T) int {
 
 		time.Sleep(10 * time.Millisecond)
 	}
+
+	t.Fatalf("FreePort: failed to allocate a unique free port after %d attempts", maxAttempts)
+	return 0
 }
