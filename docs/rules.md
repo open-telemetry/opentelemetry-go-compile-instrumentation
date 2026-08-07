@@ -140,11 +140,14 @@ instrument_sql_exec:
   compile with normal builds, so `is_test` cannot gate that code.
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
+- `has_directive` matches source files that contain the specified Go compiler directive
+  in the file's leading run of comments (before the `package` clause). Directives
+  attached to declarations or other AST nodes are not treated as file-level directives.
 - During the setup phase, leaf predicates (`has_func`, `has_recv`,
-  `has_struct`, `has_package`, `is_test`) and the `where.file` combinators
-  documented below are executed. `has_directive`, and combinators placed at the
-  top level of `where` (outside `where.file`), are validated but return a
-  descriptive "not yet supported" error at build time.
+  `has_struct`, `has_directive`, `has_package`, `is_test`) and the `where.file` combinators
+  documented below are executed. Combinators placed at the top level of `where`
+  (outside `where.file`) are validated but return a descriptive "not yet supported"
+  error at build time.
 
 **`has_package` example — filter within a glob-matched package family:**
 

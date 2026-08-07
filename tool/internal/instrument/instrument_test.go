@@ -330,7 +330,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 		_, ok, _ := ast.FindFuncDecl(tree, def)
 		return ok
 	case def.HasStruct != "":
-		return ast.FindStructDecl(tree, def.HasStruct) != nil
+		return ast.FindStructType(tree, def.HasStruct) != nil
 	case strings.TrimSpace(def.HasPackage) != "":
 		// Mirror setup.PackageNameFilter: compare the declared package clause,
 		// not the import path (target) and not the build's test-ness (is_test).

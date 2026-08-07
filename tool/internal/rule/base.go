@@ -43,8 +43,12 @@ type FilterDef struct {
 
 	HasFunc      string `json:"has_func,omitempty"      yaml:"has_func,omitempty"`      // match files that declare this function
 	HasRecv      string `json:"has_recv,omitempty"      yaml:"has_recv,omitempty"`      // narrow has_func to this receiver type; requires has_func
-	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`    // match files that declare this struct type
 	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"` // match files carrying this //go: directive (validated, not yet executed)
+
+	// HasStruct matches files declaring this name as a struct type; an interface
+	// or alias of the same name does not. This inverts under not, which selects
+	// files it would otherwise skip when the name is an interface.
+	HasStruct string `json:"has_struct,omitempty" yaml:"has_struct,omitempty"`
 
 	// HasPackage matches source files whose declared package clause equals this
 	// name. The declared name is read from the parsed AST (the `package foo`
