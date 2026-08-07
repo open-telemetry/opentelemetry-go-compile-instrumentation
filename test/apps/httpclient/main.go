@@ -17,12 +17,18 @@ import (
 var (
 	addr = flag.String("addr", "http://localhost:8080", "The server address")
 	name = flag.String("name", "world", "The name to greet")
+	path = flag.String("path", "", "The path to request (defaults to /hello?name={name})")
 )
 
 func main() {
 	flag.Parse()
 
-	url := fmt.Sprintf("%s/hello?name=%s", *addr, *name)
+	var url string
+	if *path != "" {
+		url = fmt.Sprintf("%s%s", *addr, *path)
+	} else {
+		url = fmt.Sprintf("%s/hello?name=%s", *addr, *name)
+	}
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatalf("failed to make request: %v", err)
