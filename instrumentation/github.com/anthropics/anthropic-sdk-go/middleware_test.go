@@ -555,6 +555,8 @@ func TestOtelMiddleware_TransportError(t *testing.T) {
 	events := spans[0].Events()
 	require.Len(t, events, 1, "expected exception event for transport error")
 	assert.Equal(t, "exception", events[0].Name)
+
+	assertAttribute(t, spans[0].Attributes(), "error.type", "*errors.errorString")
 }
 
 func TestOtelMiddleware_SkipsNilBody(t *testing.T) {
