@@ -302,6 +302,13 @@ func TestOtelMiddleware_NextError(t *testing.T) {
 	events := span.Events()
 	require.Len(t, events, 1, "expected exception event for transport error")
 	assert.Equal(t, "exception", events[0].Name)
+
+	// GenAI semconv makes error.type conditionally required whenever the
+	// operation ends in an error. RecordError only produces the exception event
+	// above, and nested HTTP client instrumentation is suppressed here, so the
+	// middleware has to set the attribute itself.
+	assertAttribute(t, span.Attributes(), "error.type", "*errors.errorString")
+	assert.Equal(t, otelcodes.Error, span.Status().Code)
 }
 
 func TestOtelMiddleware_HTTPErrorStatus(t *testing.T) {

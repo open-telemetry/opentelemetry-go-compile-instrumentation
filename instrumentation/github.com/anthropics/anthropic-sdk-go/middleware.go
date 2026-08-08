@@ -138,6 +138,10 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		resp, err := next(req)
 		if err != nil {
+			// error.type is conditionally required when the operation ends in an
+			// error. RecordError only adds an exception event, and nested HTTP
+			// client instrumentation is suppressed here, so nothing else sets it.
+			span.SetAttributes(semconv.ErrorType(err))
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
 			span.End()
