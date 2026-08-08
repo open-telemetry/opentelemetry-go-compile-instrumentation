@@ -76,4 +76,13 @@ func TestLogsLogrus(t *testing.T) {
 	spanIDPattern := regexp.MustCompile(`"span_id":"[a-f0-9]{16}"`)
 	spanMatches := spanIDPattern.FindAllString(output, -1)
 	require.NotEmpty(t, spanMatches, "Expected span_id to be injected into logrus messages")
+
+	t.Run("AfterLogrusNew hook does not panic during logrus init", func(t *testing.T) {
+		// This currently panics and is silently recovered by the hook
+		// trampoline.
+		t.Skip("known issue: AfterLogrusNew panics during logrus's own package init")
+
+		require.NotContains(t, output, "failed to exec After hook",
+			"instrumentation hook panicked and was silently recovered:\n%s", output)
+	})
 }
