@@ -62,3 +62,11 @@ It also defines `OtelContextCloner` for goroutine propagation logic.
 * Each instrumentation module is applied independently based on the application's build graph.
 * The GLS fallback only applies when `go.opentelemetry.io/otel/trace` instrumentation is present.
 * This mechanism is intended for compile-time instrumentation internals; it is not a public API contract.
+* A goroutine's local span stack is bounded by `OTEL_GLS_MAX_SPANS` (default 1000). Once a
+  goroutine's live (unended) span count reaches this limit, further spans are not tracked for
+  implicit propagation, and `SpanFromContext(context.Background())` on that goroutine keeps
+  returning whatever was already on top of the stack. This is logged at debug level rather than
+  failing silently.
+* Span end-state is tracked in a map shared across all goroutines, bounded by
+  `OTEL_GLS_MAX_SPAN_STATES` (default 100000). Once full, the oldest tracked entry is evicted
+  deterministically (logged at debug level) to make room for new spans.

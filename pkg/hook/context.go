@@ -9,13 +9,16 @@ type HookContext interface {
 	SetSkipCall(bool)
 	// Get the skip call flag, can be used to skip the original function call
 	IsSkipCall() bool
-	// Set the data field, can be used to pass information between Before and After hooks
+	// Set the data field, can be used to pass information between Before and After hooks.
+	// SetData and SetKeyData are mutually exclusive views of the same underlying field: calling
+	// SetData replaces whatever SetKeyData had stored, and calling SetKeyData after SetData(val)
+	// discards val and starts a fresh key-value map. The last writer wins.
 	SetData(interface{})
 	// Get the data field, can be used to pass information between Before and After hooks
 	GetData() interface{}
 	// Get a value from the data field by key
 	GetKeyData(key string) interface{}
-	// Set a key-value pair in the data field
+	// Set a key-value pair in the data field. See SetData for how this interacts with it.
 	SetKeyData(key string, val interface{})
 	// Check if a key exists in the data field
 	HasKeyData(key string) bool
