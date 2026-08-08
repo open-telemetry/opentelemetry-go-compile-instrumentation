@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -122,11 +123,7 @@ func updateGenerateDirective(f *dst.File, opts PinOptions) {
 
 func generateOtelInstrumentationGo(imports map[string]bool, opts PinOptions) *dst.File {
 	// Create a slice of import paths and sort them
-	importPaths := make([]string, 0, len(imports))
-	for path := range imports {
-		importPaths = append(importPaths, path)
-	}
-	slices.Sort(importPaths)
+	importPaths := sortedImportPaths(imports)
 
 	// Use the sorted import paths to create import specs
 	importSpecs := make([]dst.Spec, 0, len(importPaths))
@@ -164,6 +161,136 @@ func generateOtelInstrumentationGo(imports map[string]bool, opts PinOptions) *ds
 			},
 		},
 	}
+}
+
+type otelYAMLConfig struct {
+	Instrumentations []string `yaml:"instrumentations"`
+}
+
+type fileBackup struct {
+	path    string
+	data    []byte
+	mode    fs.FileMode
+	existed bool
+}
+
+func sortedImportPaths(imports map[string]bool) []string {
+	importPaths := make([]string, 0, len(imports))
+	for path := range imports {
+		importPaths = append(importPaths, path)
+	}
+	slices.Sort(importPaths)
+	return importPaths
+}
+
+func sortedStringsMapKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func loadOtelYAMLImports(path string) (map[string]bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading %s", path)
+	}
+
+	var cfg otelYAMLConfig
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder.KnownFields(true)
+	if decodeErr := decoder.Decode(&cfg); decodeErr != nil {
+		return nil, ex.Wrapf(decodeErr, "parsing %s", path)
+	}
+	var extra any
+	if decodeErr := decoder.Decode(&extra); decodeErr == nil {
+		return nil, ex.Newf("%s: multiple YAML documents are not allowed", path)
+	} else if !errors.Is(decodeErr, io.EOF) {
+		return nil, ex.Wrapf(decodeErr, "parsing %s", path)
+	}
+
+	imports := make(map[string]bool, len(cfg.Instrumentations))
+	for _, instrumentation := range cfg.Instrumentations {
+		instrumentation = strings.TrimSpace(instrumentation)
+		if instrumentation == "" {
+			return nil, ex.Newf("%s: instrumentations must not contain empty import paths", path)
+		}
+		imports[instrumentation] = true
+	}
+
+	return imports, nil
+}
+
+func writeOtelYAMLImports(path string, imports map[string]bool) error {
+	cfg := otelYAMLConfig{Instrumentations: sortedImportPaths(imports)}
+	data, err := yaml.Marshal(&cfg)
+	if err != nil {
+		return ex.Wrapf(err, "marshalling %s", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return ex.Wrapf(err, "stating %s", path)
+	}
+	if err = os.WriteFile(path, data, info.Mode().Perm()); err != nil {
+		return ex.Wrapf(err, "writing %s", path)
+	}
+	return nil
+}
+
+func loadToolFileImports(path string) (map[string]bool, error) {
+	p := ast.NewAstParser()
+	f, err := p.Parse(path, parser.ImportsOnly)
+	if err != nil {
+		return nil, ex.Wrapf(err, "parsing tool file %s", path)
+	}
+	paths, err := collectImports(path, f, make(map[string]bool))
+	if err != nil {
+		return nil, err
+	}
+	imports := make(map[string]bool, len(paths))
+	for _, importPath := range paths {
+		imports[importPath] = true
+	}
+	return imports, nil
+}
+
+func mergeImports(importSets ...map[string]bool) map[string]bool {
+	merged := make(map[string]bool)
+	for _, imports := range importSets {
+		for importPath := range imports {
+			merged[importPath] = true
+		}
+	}
+	return merged
+}
+
+func backupFile(path string) (fileBackup, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return fileBackup{path: path}, nil
+	}
+	if err != nil {
+		return fileBackup{}, ex.Wrapf(err, "stating %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fileBackup{}, ex.Wrapf(err, "reading %s", path)
+	}
+	return fileBackup{path: path, data: data, mode: info.Mode(), existed: true}, nil
+}
+
+func restoreFiles(backups []fileBackup) error {
+	var err error
+	for _, backup := range backups {
+		if backup.existed {
+			err = ex.Join(err, os.WriteFile(backup.path, backup.data, backup.mode.Perm()))
+		} else if removeErr := os.Remove(backup.path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = ex.Join(err, removeErr)
+		}
+	}
+	return err
 }
 
 type yamlRule struct {
@@ -375,7 +502,7 @@ func updatePinnedProjects(
 	ctx context.Context,
 	toolFiles []string,
 	opts PinOptions,
-) (*PinResult, error) {
+) error {
 	logger := util.LoggerFromContext(ctx)
 	prunedImports := make(map[string]map[string]bool, len(toolFiles))
 
@@ -433,13 +560,237 @@ func updatePinnedProjects(
 		},
 	)
 	if walkErr != nil {
-		return nil, walkErr
+		return walkErr
 	}
 
 	for _, toolFile := range toolFiles {
 		if err := updateToolFile(ctx, toolFile, prunedImports[toolFile], opts); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func invalidInstrumentationImports(
+	ctx context.Context,
+	toolFiles []string,
+	validateRules bool,
+) (map[string]map[string]bool, error) {
+	logger := util.LoggerFromContext(ctx)
+	invalid := make(map[string]map[string]bool, len(toolFiles))
+
+	err := walkInstrumentation(ctx, toolFiles, func(v *InstrumentationVisit) (bool, error) {
+		var reason error
+		if v.Config.Error != nil {
+			if !errors.Is(v.Config.Error, ErrNotInstrumentation) {
+				return false, v.Config.Error
+			}
+			reason = v.Config.Error
+		} else if validateRules {
+			for _, ruleFile := range v.Config.RuleFiles {
+				content, readErr := os.ReadFile(ruleFile)
+				if readErr != nil {
+					return false, ex.Wrapf(readErr, "reading %s", ruleFile)
+				}
+				if _, parseErr := parseRuleFromYaml(content); parseErr != nil {
+					reason = parseErr
+					break
+				}
+			}
+		}
+
+		if reason == nil {
+			return true, nil
+		}
+
+		logger.WarnContext(ctx, "invalid instrumentation import",
+			"importPath", v.Config.ImportPath,
+			"toolFile", v.ToolFile,
+			"reason", reason)
+		_, _ = fmt.Fprintf(os.Stderr, "Invalid instrumentation import %s from %s: %v\n",
+			v.Config.ImportPath, v.ToolFile, reason)
+		if slices.Contains(toolFiles, v.ToolFile) {
+			if invalid[v.ToolFile] == nil {
+				invalid[v.ToolFile] = make(map[string]bool)
+			}
+			invalid[v.ToolFile][v.Config.ImportPath] = true
+		}
+		return false, nil
+	})
+
+	return invalid, err
+}
+
+func backupOtelYAMLValidationFiles(otelYAMLFiles map[string]string) ([]fileBackup, error) {
+	var backups []fileBackup
+	for moduleDir := range otelYAMLFiles {
+		for _, name := range []string{"go.mod", "go.sum", ToolFileCanonical} {
+			backup, err := backupFile(filepath.Join(moduleDir, name))
+			if err != nil {
+				return nil, err
+			}
+			backups = append(backups, backup)
+		}
+	}
+	return backups, nil
+}
+
+type modulePinConfig struct {
+	moduleDir string
+	toolFile  string
+	yamlFile  string
+}
+
+func addToolFileImports(toolFile string, imports map[string]bool) error {
+	p := ast.NewAstParser()
+	f, err := p.Parse(toolFile, parser.ParseComments)
+	if err != nil {
+		return ex.Wrapf(err, "parsing tool file %s", toolFile)
+	}
+
+	existing, err := loadToolFileImports(toolFile)
+	if err != nil {
+		return err
+	}
+
+	var importDecl *dst.GenDecl
+	for _, decl := range f.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if ok && genDecl.Tok == token.IMPORT {
+			importDecl = genDecl
+			break
+		}
+	}
+
+	for _, importPath := range sortedImportPaths(imports) {
+		if existing[importPath] {
+			continue
+		}
+		spec := &dst.ImportSpec{
+			Name: ast.Ident(ast.IdentIgnore),
+			Path: &dst.BasicLit{Kind: token.STRING, Value: strconv.Quote(importPath)},
+		}
+		if importDecl == nil {
+			importDecl = &dst.GenDecl{Tok: token.IMPORT}
+			f.Decls = append([]dst.Decl{importDecl}, f.Decls...)
+		}
+		importDecl.Specs = append(importDecl.Specs, spec)
+	}
+
+	if err = ast.WriteFileAtomic(toolFile, f); err != nil {
+		return ex.Wrapf(err, "writing %s", toolFile)
+	}
+	return nil
+}
+
+func materializeModuleConfigs(
+	ctx context.Context,
+	configs []modulePinConfig,
+	opts PinOptions,
+) (map[string]map[string]bool, []string, error) {
+	importsByModule := make(map[string]map[string]bool, len(configs))
+	toolFiles := make([]string, 0, len(configs))
+	for _, config := range configs {
+		var toolImports, yamlImports map[string]bool
+		var err error
+		if config.toolFile != "" {
+			toolImports, err = loadToolFileImports(config.toolFile)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		if config.yamlFile != "" {
+			yamlImports, err = loadOtelYAMLImports(config.yamlFile)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		imports := mergeImports(toolImports, yamlImports)
+		importsByModule[config.moduleDir] = imports
+
+		toolFile := config.toolFile
+		if toolFile == "" {
+			toolFile = filepath.Join(config.moduleDir, ToolFileCanonical)
+			generated := generateOtelInstrumentationGo(imports, opts)
+			if writeErr := ast.WriteFileAtomic(toolFile, generated); writeErr != nil {
+				return nil, nil, ex.Wrapf(writeErr, "writing %s", toolFile)
+			}
+		} else if addErr := addToolFileImports(toolFile, yamlImports); addErr != nil {
+			return nil, nil, addErr
+		}
+		if _, ensureErr := ensureOtelcRequire(config.moduleDir, util.Version); ensureErr != nil {
+			return nil, nil, ex.Wrapf(ensureErr, "ensuring otelc require in go.mod in %s", config.moduleDir)
+		}
+		if syncErr := syncDeps(ctx, imports, config.moduleDir); syncErr != nil {
+			return nil, nil, ex.Wrapf(syncErr, "syncing dependencies in %s", config.moduleDir)
+		}
+		keepForDebug(ctx, toolFile)
+		toolFiles = append(toolFiles, toolFile)
+	}
+	return importsByModule, toolFiles, nil
+}
+
+func applyOtelYAMLValidation(
+	otelYAMLFiles map[string]string,
+	importsByModule map[string]map[string]bool,
+	invalid map[string]map[string]bool,
+	opts PinOptions,
+) error {
+	for _, moduleDir := range sortedStringsMapKeys(otelYAMLFiles) {
+		toolFile := filepath.Join(moduleDir, ToolFileCanonical)
+		for importPath := range invalid[toolFile] {
+			delete(importsByModule[moduleDir], importPath)
+		}
+
+		if opts.AutoPin {
+			generated := generateOtelInstrumentationGo(importsByModule[moduleDir], opts)
+			if writeErr := ast.WriteFileAtomic(toolFile, generated); writeErr != nil {
+				return ex.Wrapf(writeErr, "writing %s", toolFile)
+			}
+		} else if opts.Prune {
+			if writeErr := writeOtelYAMLImports(otelYAMLFiles[moduleDir], importsByModule[moduleDir]); writeErr != nil {
+				return writeErr
+			}
+		}
+	}
+	return nil
+}
+
+func processOtelYAMLFiles(
+	ctx context.Context,
+	otelYAMLFiles map[string]string,
+	opts PinOptions,
+) (*PinResult, error) {
+	if err := extractOtelcBundle(); err != nil {
+		return nil, ex.Wrapf(err, "extracting otelc package")
+	}
+
+	var backups []fileBackup
+	if !opts.AutoPin {
+		var err error
+		backups, err = backupOtelYAMLValidationFiles(otelYAMLFiles)
+		if err != nil {
 			return nil, err
 		}
+		defer func() { _ = restoreFiles(backups) }()
+	}
+
+	configs := make([]modulePinConfig, 0, len(otelYAMLFiles))
+	for _, moduleDir := range sortedStringsMapKeys(otelYAMLFiles) {
+		configs = append(configs, modulePinConfig{moduleDir: moduleDir, yamlFile: otelYAMLFiles[moduleDir]})
+	}
+	importsByModule, toolFiles, err := materializeModuleConfigs(ctx, configs, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	invalid, err := invalidInstrumentationImports(ctx, toolFiles, opts.Validate)
+	if err != nil {
+		return nil, err
+	}
+	if err = applyOtelYAMLValidation(otelYAMLFiles, importsByModule, invalid, opts); err != nil {
+		return nil, err
 	}
 
 	return &PinResult{}, nil
@@ -538,6 +889,8 @@ type PinOptions struct {
 	// ModuleDirs is the set of module directories to search for tool files
 	// If empty, module directories will be found using opts.Args
 	ModuleDirs map[string]bool
+	// AutoPin reports that Pin is running as part of the clean-room build flow.
+	AutoPin bool
 }
 
 type PinResult struct {
@@ -561,45 +914,109 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	return result, err
 }
 
+func findPinModuleDirs(ctx context.Context, opts *PinOptions) (map[string]bool, error) {
+	if len(opts.ModuleDirs) > 0 {
+		return opts.ModuleDirs, nil
+	}
+	args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
+	if err != nil {
+		return nil, ex.Wrapf(err, "preparing vendored build")
+	}
+	opts.Args = args
+	pkgs, err := getBuildPackages(ctx, opts.Args)
+	if err != nil {
+		return nil, ex.Wrapf(err, "getting build packages")
+	}
+	moduleDirs, err := pkgload.FindModuleDirs(ctx, pkgs)
+	if err != nil {
+		return nil, ex.Wrapf(err, "finding module directories")
+	}
+	return moduleDirs, nil
+}
+
+func discoverPinConfigs(moduleDirs map[string]bool) ([]modulePinConfig, map[string]string, map[string]bool, error) {
+	configs := make([]modulePinConfig, 0, len(moduleDirs))
+	yamlOnly := make(map[string]string)
+	unconfigured := make(map[string]bool)
+	for _, moduleDir := range sortedStringsMapKeys(moduleDirs) {
+		toolFile, err := findToolFile(moduleDir)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		yamlFile, err := findInstrumentationYAMLFile(moduleDir)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if toolFile == "" && yamlFile == "" {
+			unconfigured[moduleDir] = true
+			continue
+		}
+		configs = append(configs, modulePinConfig{moduleDir: moduleDir, toolFile: toolFile, yamlFile: yamlFile})
+		if toolFile == "" {
+			yamlOnly[moduleDir] = yamlFile
+		}
+	}
+	return configs, yamlOnly, unconfigured, nil
+}
+
+func processPinConfigs(
+	ctx context.Context,
+	configs []modulePinConfig,
+	yamlOnly map[string]string,
+	opts PinOptions,
+) error {
+	if len(yamlOnly) > 0 && !opts.AutoPin {
+		if _, err := processOtelYAMLFiles(ctx, yamlOnly, opts); err != nil {
+			return err
+		}
+	}
+	materialized := configs
+	if !opts.AutoPin && len(yamlOnly) > 0 {
+		materialized = make([]modulePinConfig, 0, len(configs)-len(yamlOnly))
+		for _, config := range configs {
+			if config.toolFile != "" {
+				materialized = append(materialized, config)
+			}
+		}
+	}
+	if len(materialized) == 0 {
+		return nil
+	}
+	if err := extractOtelcBundle(); err != nil {
+		return ex.Wrapf(err, "extracting otelc package")
+	}
+	_, toolFiles, err := materializeModuleConfigs(ctx, materialized, opts)
+	if err != nil {
+		return err
+	}
+	return updatePinnedProjects(ctx, toolFiles, opts)
+}
+
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
-	moduleDirs := opts.ModuleDirs
-	// moduleDirs being empty means Pin was invoked as a standalone command
-	// (not as part of a setup run), so use opts.Args to find module directories.
-	if len(moduleDirs) == 0 {
-		// For same reason as Setup, we have to check vendoring state before
-		// forcing module mode and rewriting vendor/ paths to module mode.
-		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
-		if err != nil {
-			return nil, ex.Wrapf(err, "preparing vendored build")
+	moduleDirs, err := findPinModuleDirs(ctx, &opts)
+	if err != nil {
+		return nil, err
+	}
+	configs, yamlOnly, unconfigured, err := discoverPinConfigs(moduleDirs)
+	if err != nil {
+		return nil, err
+	}
+	if len(configs) > 0 {
+		if err = processPinConfigs(ctx, configs, yamlOnly, opts); err != nil {
+			return nil, err
 		}
-		opts.Args = args
-
-		// Use opts.Args to find module directories
-		pkgs, getErr := getBuildPackages(ctx, opts.Args)
-		if getErr != nil {
-			return nil, ex.Wrapf(getErr, "getting build packages")
+		if len(unconfigured) > 0 {
+			if _, err = generatePinnedProjects(ctx, unconfigured, opts); err != nil {
+				return nil, err
+			}
 		}
-
-		moduleDirs, err = pkgload.FindModuleDirs(ctx, pkgs)
-		if err != nil {
-			return nil, ex.Wrapf(err, "finding module directories")
-		}
+		return &PinResult{}, nil
 	}
 
-	toolFiles, findToolErr := findToolFiles(moduleDirs)
-	if findToolErr != nil {
-		return nil, findToolErr
+	if len(unconfigured) > 0 {
+		return generatePinnedProjects(ctx, unconfigured, opts)
 	}
-
-	// Existing otel.instrumentation.go / otelc.tool.go files found?
-	// Validate and update them in-place.
-	if len(toolFiles) > 0 {
-		return updatePinnedProjects(ctx, toolFiles, opts)
-	}
-
-	// Otherwise, infer instrumentations from the dependency graph and
-	// generate fresh tool files.
-	return generatePinnedProjects(ctx, moduleDirs, opts)
+	return &PinResult{}, nil
 }
 
 // AutoPin is a convenience function that automatically tracks generated/modified files before calling Pin
@@ -623,6 +1040,7 @@ func AutoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string,
 		Args:       args,
 		Subcommand: subcommand,
 		ModuleDirs: moduleDirs,
+		AutoPin:    true,
 	})
 
 	return pinResult, pinErr

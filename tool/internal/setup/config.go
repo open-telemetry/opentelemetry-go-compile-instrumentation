@@ -24,8 +24,10 @@ import (
 
 const (
 	// Allowed names for the instrumentation config file.
-	ToolFileCanonical = "otel.instrumentation.go"
-	ToolFileAlias     = "otelc.tool.go"
+	ToolFileCanonical            = "otel.instrumentation.go"
+	ToolFileAlias                = "otelc.tool.go"
+	InstrumentationYAMLCanonical = "otel.instrumentation.yml"
+	InstrumentationYAMLAlias     = "otel.instrumentation.yaml"
 )
 
 type InstrumentationConfig struct {
@@ -75,6 +77,29 @@ func findToolFiles(moduleDirs map[string]bool) ([]string, error) {
 	// Sort for deterministic rule loading.
 	slices.Sort(toolFiles)
 	return toolFiles, nil
+}
+
+func findInstrumentationYAMLFile(moduleDir string) (string, error) {
+	canonical := filepath.Join(moduleDir, InstrumentationYAMLCanonical)
+	alias := filepath.Join(moduleDir, InstrumentationYAMLAlias)
+
+	canonicalExists := util.PathExists(canonical)
+	aliasExists := util.PathExists(alias)
+
+	switch {
+	case canonicalExists && aliasExists:
+		return "", ex.Newf(
+			"both %q and %q exist; only one instrumentation YAML file is allowed",
+			InstrumentationYAMLCanonical,
+			InstrumentationYAMLAlias,
+		)
+	case canonicalExists:
+		return canonical, nil
+	case aliasExists:
+		return alias, nil
+	default:
+		return "", nil
+	}
 }
 
 const packagesLoadTimeout = 30 * time.Second
