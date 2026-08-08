@@ -102,6 +102,31 @@ func TestStandardizeHTTPMethod(t *testing.T) {
 	}
 }
 
+func TestSpanMethod(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"GET", "GET"},
+		{"get", "GET"},
+		{"QUERY", "QUERY"},
+		{"CUSTOM", "HTTP"},
+		{"", "HTTP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, SpanMethod(tt.input))
+		})
+	}
+}
+
+func TestHTTPClientSpanName(t *testing.T) {
+	assert.Equal(t, "POST", HTTPClientSpanName("POST"))
+	assert.Equal(t, "HTTP", HTTPClientSpanName("CUSTOM"))
+	assert.Equal(t, "HTTP", HTTPClientSpanName(""))
+}
+
 func TestMethodLookup(t *testing.T) {
 	tests := []struct {
 		method string

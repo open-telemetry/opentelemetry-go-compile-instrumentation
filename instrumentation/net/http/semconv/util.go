@@ -135,3 +135,30 @@ func StandardizeHTTPMethod(method string) string {
 	}
 	return method
 }
+
+// requestMethodAttrs returns http.request.method and, when needed,
+// http.request.method_original. Unknown and empty methods use _OTHER.
+func requestMethodAttrs(method string) (attribute.KeyValue, attribute.KeyValue) {
+	if method == "" {
+		return upstream.HTTPRequestMethodOther, attribute.KeyValue{}
+	}
+	if attr, ok := MethodLookup[method]; ok {
+		return attr, attribute.KeyValue{}
+	}
+
+	orig := upstream.HTTPRequestMethodOriginal(method)
+	if attr, ok := MethodLookup[strings.ToUpper(method)]; ok {
+		return attr, orig
+	}
+	return upstream.HTTPRequestMethodOther, orig
+}
+
+// SpanMethod returns the method token used in HTTP span names.
+// Unknown methods become "HTTP" per the semantic conventions.
+func SpanMethod(method string) string {
+	method = strings.ToUpper(method)
+	if _, ok := MethodLookup[method]; !ok {
+		return "HTTP"
+	}
+	return method
+}

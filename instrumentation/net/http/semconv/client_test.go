@@ -19,9 +19,10 @@ import (
 
 func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 	tests := []struct {
-		name     string
-		req      *http.Request
-		expected map[string]interface{}
+		name       string
+		req        *http.Request
+		expected   map[string]interface{}
+		unexpected []string
 	}{
 		{
 			name: "basic GET request",
@@ -82,6 +83,38 @@ func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 				"url.scheme":          "https",
 			},
 		},
+		{
+			name: "unknown method",
+			req: &http.Request{
+				Method: "CUSTOM",
+				URL: &url.URL{
+					Scheme: "https",
+					Host:   "example.com",
+					Path:   "/api",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"http.request.method":          "_OTHER",
+				"http.request.method_original": "CUSTOM",
+			},
+		},
+		{
+			name: "empty method",
+			req: &http.Request{
+				Method: "",
+				URL: &url.URL{
+					Scheme: "https",
+					Host:   "example.com",
+					Path:   "/api",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"http.request.method": "_OTHER",
+			},
+			unexpected: []string{"http.request.method_original"},
+		},
 	}
 
 	client := NewHTTPClient(nil)
@@ -100,6 +133,10 @@ func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 				actualVal, ok := attrMap[key]
 				require.True(t, ok, "expected attribute %s not found", key)
 				assert.Equal(t, expectedVal, actualVal, "attribute %s value mismatch", key)
+			}
+			for _, key := range tt.unexpected {
+				_, ok := attrMap[key]
+				assert.False(t, ok, "unexpected attribute %s", key)
 			}
 		})
 	}

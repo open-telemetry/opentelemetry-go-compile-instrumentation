@@ -84,9 +84,8 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 	attrs := semconv.HTTPClientRequestTraceAttrs(req)
 
 	// Start span
-	spanName := req.Method
 	ctx, span := tracer.Start(ctx,
-		spanName,
+		semconv.HTTPClientSpanName(req.Method),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
