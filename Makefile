@@ -10,7 +10,7 @@ SHELL := /bin/bash
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
-        test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
+        check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
@@ -28,6 +28,8 @@ API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
 GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
+TOOL_COVERAGE_THRESHOLD ?= 68
+PKG_COVERAGE_THRESHOLD ?= 70
 
 # OTel Weaver execution for the local semantic-convention registry under
 # schemas/otelc/. Weaver runs from an OCI image (no host install required);
@@ -564,6 +566,32 @@ test-unit/instrumentation/coverage: package ## Run unit tests with coverage for 
 	@echo "mode: atomic" > coverage-instrumentation.txt
 	@find instrumentation -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-instrumentation.txt 2>/dev/null || true
 	@find instrumentation -name "coverage.txt" -delete 2>/dev/null || true
+
+.ONESHELL:
+check-coverage: test-unit/tool/coverage test-unit/pkg/coverage ## Verify the unit test coverage floor for tool and pkg modules
+	@echo "Checking unit test coverage floors..."
+	set -euo pipefail
+	for coverage_file in coverage-tool.txt coverage-pkg.txt; do \
+		case "$$coverage_file" in \
+			coverage-tool.txt) threshold="$(TOOL_COVERAGE_THRESHOLD)" ;; \
+			coverage-pkg.txt) threshold="$(PKG_COVERAGE_THRESHOLD)" ;; \
+			*) echo "Unexpected coverage report: $$coverage_file"; exit 1 ;; \
+		esac; \
+		if [[ ! -f "$$coverage_file" ]]; then \
+			echo "Missing coverage report: $$coverage_file"; \
+			exit 1; \
+		fi; \
+		coverage_value=$$(awk '/^mode:/ { next } { total += $$2; if ($$3 > 0) covered += $$2 } END { if (total > 0) printf "%.1f", (covered / total) * 100; else print "0.0" }' "$$coverage_file"); \
+		if [[ -z "$$coverage_value" ]]; then \
+			echo "Unable to determine coverage for $$coverage_file"; \
+			exit 1; \
+		fi; \
+		awk -v coverage="$$coverage_value" -v threshold="$$threshold" 'BEGIN { exit (coverage + 0 >= threshold + 0) ? 0 : 1 }' || { \
+			echo "Coverage $$coverage_file is below $$threshold%: $$coverage_value%"; \
+			exit 1; \
+		}; \
+		echo "$$coverage_file: $$coverage_value% (threshold $$threshold%)"; \
+	done
 
 .ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
