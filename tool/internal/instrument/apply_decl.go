@@ -24,20 +24,10 @@ func parseValueExpr(exprSource string) (dst.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(file.Decls) == 0 {
-		return nil, ex.Newf("invalid value expression %q: no declarations produced", exprSource)
-	}
-	genDecl, ok := file.Decls[0].(*dst.GenDecl)
-	if !ok || len(genDecl.Specs) == 0 {
-		return nil, ex.Newf("invalid value expression %q: not a general declaration", exprSource)
-	}
-	valueSpec, ok := genDecl.Specs[0].(*dst.ValueSpec)
-	if !ok || len(valueSpec.Values) != 1 {
-		numValues := 0
-		if valueSpec != nil {
-			numValues = len(valueSpec.Values)
-		}
-		return nil, ex.Newf("invalid value expression %q: expected 1 value, got %d", exprSource, numValues)
+	genDecl := util.AssertType[*dst.GenDecl](file.Decls[0])
+	valueSpec := util.AssertType[*dst.ValueSpec](genDecl.Specs[0])
+	if len(valueSpec.Values) != 1 {
+		return nil, ex.Newf("invalid value expression %q: expected 1 value, got %d", exprSource, len(valueSpec.Values))
 	}
 	return valueSpec.Values[0], nil
 }
