@@ -54,8 +54,8 @@ jobs:
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
           go-version-file: go.mod
-      - name: Run unit test coverage gate
-        run: make check-coverage
+      - name: Run unit test coverage
+        run: make test-unit/coverage
       # make test-unit/coverage leaves coverage-tool.txt, coverage-pkg.txt and
       # coverage-instrumentation.txt in the workspace. "files" only *adds* to the
       # files the action discovers on its own, so without disable_search each

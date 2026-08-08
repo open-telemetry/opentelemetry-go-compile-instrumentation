@@ -10,7 +10,7 @@ SHELL := /bin/bash
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
-	        check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
+        check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
@@ -523,7 +523,7 @@ test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage test-unit/ins
 test-unit/tool/coverage: package ## Run unit tests with coverage for tool modules only
 	@echo "Running tool unit tests with coverage..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=10m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log
+	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log
 
 .ONESHELL:
 test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules only
