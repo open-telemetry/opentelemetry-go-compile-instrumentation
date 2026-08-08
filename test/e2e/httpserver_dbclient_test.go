@@ -16,6 +16,7 @@ import (
 )
 
 func TestHTTPServerDBClient(t *testing.T) {
+	t.Parallel()
 	f := testutil.NewTestFixture(t)
 
 	frontPort := testutil.FreePort(t)
