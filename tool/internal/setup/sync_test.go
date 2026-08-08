@@ -337,6 +337,32 @@ func TestDiscoverNestedModuleReplaces_MalformedNestedGoMod(t *testing.T) {
 	assert.Nil(t, nested)
 }
 
+func TestDiscoverNestedModuleReplaces_SkipsTestdataVendorAndHiddenDirs(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempDir, "go.mod"),
+		[]byte("module example.com/outer\ngo 1.21\n"),
+		0o644,
+	))
+
+	// A malformed go.mod under each skipped directory would fail the walk
+	// if it were visited, so this also proves the directories are pruned
+	// rather than just their go.mod being ignored some other way.
+	for _, dir := range []string{"testdata", "vendor", ".git"} {
+		skippedDir := filepath.Join(tempDir, dir)
+		require.NoError(t, os.MkdirAll(skippedDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(skippedDir, "go.mod"),
+			[]byte("this is not a valid go.mod file"),
+			0o644,
+		))
+	}
+
+	nested, err := discoverNestedModuleReplaces(tempDir)
+	require.NoError(t, err)
+	assert.Empty(t, nested)
+}
+
 func TestSyncDeps_NestedModuleDiscoveryError(t *testing.T) {
 	goMod := `module example.com/test
 

@@ -135,7 +135,14 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || d.Name() != "go.mod" || path == topGoMod {
+		if d.IsDir() {
+			name := d.Name()
+			if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" || filepath.Clean(path) == filepath.Clean(topGoMod) {
 			return nil
 		}
 
