@@ -73,17 +73,20 @@ func TestOperationName(t *testing.T) {
 }
 
 func TestParseChatRequest(t *testing.T) {
+	temp07 := 0.7
 	tests := []struct {
 		name      string
 		body      string
 		wantModel string
 		wantMax   int64
+		wantTemp  *float64
 	}{
 		{
 			name:      "max_tokens",
 			body:      `{"model":"gpt-4","max_tokens":100,"temperature":0.7}`,
 			wantModel: "gpt-4",
 			wantMax:   100,
+			wantTemp:  &temp07,
 		},
 		{
 			name:      "max_completion_tokens",
@@ -104,15 +107,26 @@ func TestParseChatRequest(t *testing.T) {
 			assert.Equal(t, tt.wantModel, model)
 
 			var gotMax *int64
+			var gotTemp *float64
 			for _, a := range attrs {
-				if a.Key == "gen_ai.request.max_tokens" {
+				switch a.Key {
+				case "gen_ai.request.max_tokens":
 					v := a.Value.AsInt64()
 					gotMax = &v
-					break
+				case "gen_ai.request.temperature":
+					v := a.Value.AsFloat64()
+					gotTemp = &v
 				}
 			}
 			if assert.NotNil(t, gotMax) {
 				assert.Equal(t, tt.wantMax, *gotMax)
+			}
+			if tt.wantTemp != nil {
+				if assert.NotNil(t, gotTemp) {
+					assert.InDelta(t, *tt.wantTemp, *gotTemp, 1e-9)
+				}
+			} else {
+				assert.Nil(t, gotTemp)
 			}
 		})
 	}
