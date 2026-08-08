@@ -73,22 +73,13 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 				return nil, ex.Wrap(err1)
 			}
 
+			// target is the sole package selector and is required (docs/rules.md).
+			// Each rule type validates it (empty check plus glob syntax) via
+			// InstBaseRule.validateBase during construction below, so no further
+			// target validation is needed here.
 			r, err2 := createRuleFromFields(raw, name, flatFields)
 			if err2 != nil {
 				return nil, err2
-			}
-			// target is the sole package selector and is required (docs/rules.md).
-			// An empty or whitespace-only target would land under exactRules[""]
-			// and silently never match any real import path, so reject it loudly
-			// at load time instead.
-			if strings.TrimSpace(r.GetTarget()) == "" {
-				return nil, ex.Newf("rule %q has an empty target; target is required", name)
-			}
-			// Reject ambiguous/invalid glob targets at load time so a bad rule
-			// fails loudly during parsing rather than silently matching nothing
-			// during the setup phase.
-			if err3 := rule.ValidateTarget(r.GetTarget()); err3 != nil {
-				return nil, ex.Wrapf(err3, "rule %q", name)
 			}
 			if err3 := util.ValidateVersionRange(r.GetVersion()); err3 != nil {
 				return nil, ex.Wrapf(err3, "rule %q", name)

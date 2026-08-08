@@ -85,6 +85,18 @@ new_field:
 			yaml:    "target: main\n  bad: [unterminated",
 			wantErr: true,
 		},
+		{
+			name:    "empty target is rejected",
+			ruleID:  "struct6",
+			yaml:    "target: \"\"\nstruct: MyStruct",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace-only target is rejected",
+			ruleID:  "struct7",
+			yaml:    "target: \"   \"\nstruct: MyStruct",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

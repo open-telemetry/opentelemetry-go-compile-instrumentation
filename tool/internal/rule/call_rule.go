@@ -126,6 +126,9 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 }
 
 func (r *InstCallRule) validate() error {
+	if err := r.validateBase(); err != nil {
+		return err
+	}
 	// FunctionCall format already validated in NewInstCallRule
 	if strings.TrimSpace(r.FunctionCall) == "" {
 		return ex.Newf("function_call cannot be empty")

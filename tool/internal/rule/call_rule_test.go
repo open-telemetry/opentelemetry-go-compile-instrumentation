@@ -23,6 +23,7 @@ func TestNewInstCallRule(t *testing.T) {
 		{
 			name: "replace only",
 			yaml: `
+target: main
 function_call: net/http.Get
 replace: "wrapper({{ . }})"
 `,
@@ -38,6 +39,7 @@ replace: "wrapper({{ . }})"
 		{
 			name: "append_args only",
 			yaml: `
+target: main
 function_call: net/http.Get
 append_args: ["ctx"]
 `,
@@ -52,6 +54,7 @@ append_args: ["ctx"]
 		{
 			name: "append_args with variadic_type",
 			yaml: `
+target: main
 function_call: google.golang.org/grpc.Dial
 append_args: ["myOpt"]
 variadic_type: "grpc.DialOption"
@@ -65,6 +68,7 @@ variadic_type: "grpc.DialOption"
 		{
 			name: "both replace and append_args",
 			yaml: `
+target: main
 function_call: net/http.Get
 replace: "wrapper({{ . }})"
 append_args: ["ctx"]
@@ -78,6 +82,7 @@ append_args: ["ctx"]
 		{
 			name: "name from YAML overrides argument",
 			yaml: `
+target: main
 name: yaml_name
 function_call: net/http.Get
 replace: "wrapper({{ . }})"
@@ -90,6 +95,7 @@ replace: "wrapper({{ . }})"
 		{
 			name: "invalid function_call format",
 			yaml: `
+target: main
 function_call: NoPackagePath
 replace: "wrapper({{ . }})"
 `,
@@ -100,6 +106,7 @@ replace: "wrapper({{ . }})"
 		{
 			name: "neither replace nor append_args",
 			yaml: `
+target: main
 function_call: net/http.Get
 `,
 			ruleName:    "bad",
@@ -109,6 +116,7 @@ function_call: net/http.Get
 		{
 			name: "replace without placeholder",
 			yaml: `
+target: main
 function_call: net/http.Get
 replace: "noPlaceholder()"
 `,
@@ -119,6 +127,7 @@ replace: "noPlaceholder()"
 		{
 			name: "empty append_args entry",
 			yaml: `
+target: main
 function_call: net/http.Get
 append_args: [""]
 `,
@@ -129,6 +138,7 @@ append_args: [""]
 		{
 			name: "whitespace-only append_args entry",
 			yaml: `
+target: main
 function_call: net/http.Get
 append_args: ["   "]
 `,
@@ -139,6 +149,7 @@ append_args: ["   "]
 		{
 			name: "invalid replace syntax",
 			yaml: `
+target: main
 function_call: net/http.Get
 replace: "wrapper({{ . }}) {{ unclosed"
 `,
@@ -151,6 +162,28 @@ replace: "wrapper({{ . }}) {{ unclosed"
 			yaml:     `{bad yaml [`,
 			ruleName: "bad",
 			wantErr:  true,
+		},
+		{
+			name: "empty target",
+			yaml: `
+function_call: net/http.Get
+target: ""
+replace: "wrapper({{ . }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "target cannot be empty",
+		},
+		{
+			name: "whitespace-only target",
+			yaml: `
+function_call: net/http.Get
+target: "   "
+replace: "wrapper({{ . }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "target cannot be empty",
 		},
 	}
 
