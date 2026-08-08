@@ -133,6 +133,9 @@ to propagate trace context:
   goroutine keeps returning the span that was already on top of the stack until it ends and the
   stack drops back below the limit. This is logged at debug level
   (`OTEL_LOG_LEVEL=debug`); increase the limit if legitimately deep call stacks trigger it.
+  Values must be positive integers; any other value (including `0`, negative numbers, and
+  non-numeric strings) is silently ignored and the default is used. For example,
+  `OTEL_GLS_MAX_SPANS=2000` allows up to 2000 live spans per goroutine.
 - `OTEL_GLS_MAX_SPAN_STATES` (default `100000`) bounds the shared span lifecycle map used across
   all goroutines to recognize when a span has ended. Once it is full, the oldest tracked entry is
   evicted (also logged at debug level) to make room for new spans. Eviction marks that entry
