@@ -136,15 +136,7 @@ func AfterDoRequest(ictx hook.HookContext, err error) {
 	defer span.End()
 
 	if err != nil {
-		span.RecordError(err)
-		if code, ok := semconv.StatusCodeFromError(err); ok {
-			span.SetAttributes(semconv.LinodegoErrorTraceAttrs(err)...)
-			if sc, desc := semconv.HTTPClientStatus(code); sc != codes.Unset {
-				span.SetStatus(sc, desc)
-			}
-		} else {
-			span.SetStatus(codes.Error, err.Error())
-		}
+		finishSpanWithError(span, err)
 		logger.Debug("AfterDoRequest error", "error", err)
 	}
 

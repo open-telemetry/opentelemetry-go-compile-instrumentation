@@ -143,6 +143,9 @@ func LinodegoErrorTraceAttrs(err error) []attribute.KeyValue {
 // net/http wrap transport errors (e.g. fmt.Errorf("...: %w", err),
 // *url.Error) and the wrapper type is rarely what callers want to alert on.
 func ErrorType(err error) attribute.KeyValue {
+	if err == nil {
+		return attribute.KeyValue{}
+	}
 	for {
 		unwrapped := errors.Unwrap(err)
 		if unwrapped == nil {
@@ -152,6 +155,9 @@ func ErrorType(err error) attribute.KeyValue {
 	}
 
 	t := reflect.TypeOf(err)
+	if t == nil {
+		return semconv.ErrorTypeOther
+	}
 	var value string
 	if t.PkgPath() == "" && t.Name() == "" {
 		// Likely a builtin type.
@@ -238,9 +244,19 @@ func MetricAttributes(operation string, statusCode int, errorType string) []attr
 // errorType is the error.type attribute value for failures that carry no
 // HTTP status code; pass "" for a successful call or one already identified
 // by statusCode.
-func (m Metrics) RecordOperationDuration(ctx context.Context, seconds float64, operation string, statusCode int, errorType string) {
+func (m Metrics) RecordOperationDuration(
+	ctx context.Context,
+	seconds float64,
+	operation string,
+	statusCode int,
+	errorType string,
+) {
 	if m.operationDuration == nil {
 		return
 	}
-	m.operationDuration.Record(ctx, seconds, metric.WithAttributes(MetricAttributes(operation, statusCode, errorType)...))
+	m.operationDuration.Record(
+		ctx,
+		seconds,
+		metric.WithAttributes(MetricAttributes(operation, statusCode, errorType)...),
+	)
 }
