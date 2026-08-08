@@ -5,10 +5,12 @@ package gocql
 
 import (
 	"context"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/apache/cassandra-gocql-driver/v2"
+	gocql "github.com/apache/cassandra-gocql-driver/v2"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
@@ -39,7 +41,11 @@ type otelObserver struct {
 	tracer      trace.Tracer
 }
 
-func newOtelObserver(userQuery gocql.QueryObserver, userBatch gocql.BatchObserver, userConnect gocql.ConnectObserver) *otelObserver {
+func newOtelObserver(
+	userQuery gocql.QueryObserver,
+	userBatch gocql.BatchObserver,
+	userConnect gocql.ConnectObserver,
+) *otelObserver {
 	return &otelObserver{
 		userQuery:   userQuery,
 		userBatch:   userBatch,
@@ -80,10 +86,7 @@ func (o *otelObserver) recordQuerySpan(ctx context.Context, q gocql.ObservedQuer
 		ctx = context.Background()
 	}
 	opName := parseOpName(q.Statement)
-	spanName := opName
-	if q.Keyspace != "" {
-		spanName = q.Keyspace + "." + opName
-	}
+	spanName := querySpanName(opName, q.Keyspace)
 
 	startTime := q.Start
 	if startTime.IsZero() {
@@ -121,10 +124,7 @@ func (o *otelObserver) recordBatchSpan(ctx context.Context, b gocql.ObservedBatc
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	spanName := "BATCH"
-	if b.Keyspace != "" {
-		spanName = b.Keyspace + ".BATCH"
-	}
+	spanName := batchSpanName(b.Keyspace)
 
 	startTime := b.Start
 	if startTime.IsZero() {
@@ -168,17 +168,20 @@ func (o *otelObserver) recordConnectSpan(oc gocql.ObservedConnect) {
 		endTime = time.Now()
 	}
 
-	_, span := o.tracer.Start(context.Background(), "CONNECT",
-		trace.WithTimestamp(startTime),
-		trace.WithSpanKind(trace.SpanKindClient),
-	)
-	defer span.End(trace.WithTimestamp(endTime))
-
 	req := gocqlsemconv.ConnectRequest{}
 	if oc.Host != nil {
 		req.Host = oc.Host.ConnectAddress()
 		req.Port = oc.Host.Port()
 	}
+
+	spanName := connectSpanName(req.Host, req.Port)
+
+	_, span := o.tracer.Start(context.Background(), spanName,
+		trace.WithTimestamp(startTime),
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
+	defer span.End(trace.WithTimestamp(endTime))
+
 	span.SetAttributes(gocqlsemconv.ConnectClientTraceAttrs(req)...)
 
 	if oc.Err != nil {
@@ -187,8 +190,39 @@ func (o *otelObserver) recordConnectSpan(oc gocql.ObservedConnect) {
 	}
 }
 
+func querySpanName(opName, keyspace string) string {
+	if opName != "" && keyspace != "" {
+		return opName + " " + keyspace
+	}
+	if opName != "" {
+		return opName
+	}
+	if keyspace != "" {
+		return keyspace
+	}
+	return "cassandra"
+}
+
+func batchSpanName(keyspace string) string {
+	if keyspace != "" {
+		return "BATCH " + keyspace
+	}
+	return "BATCH"
+}
+
+func connectSpanName(host net.IP, port int) string {
+	if len(host) > 0 {
+		addr := host.String()
+		if port > 0 {
+			return "CONNECT " + net.JoinHostPort(addr, strconv.Itoa(port))
+		}
+		return "CONNECT " + addr
+	}
+	return "CONNECT"
+}
+
 func parseOpName(stmt string) string {
-	stmt = strings.TrimSpace(stmt)
+	stmt = stripLeadingComments(stmt)
 	if stmt == "" {
 		return ""
 	}
@@ -197,6 +231,30 @@ func parseOpName(stmt string) string {
 		return strings.ToUpper(fields[0])
 	}
 	return ""
+}
+
+func stripLeadingComments(stmt string) string {
+	for {
+		stmt = strings.TrimSpace(stmt)
+		if strings.HasPrefix(stmt, "/*") {
+			end := strings.Index(stmt, "*/")
+			if end == -1 {
+				return ""
+			}
+			stmt = stmt[end+2:]
+			continue
+		}
+		if strings.HasPrefix(stmt, "--") || strings.HasPrefix(stmt, "//") {
+			end := strings.IndexAny(stmt, "\r\n")
+			if end == -1 {
+				return ""
+			}
+			stmt = stmt[end:]
+			continue
+		}
+		break
+	}
+	return stmt
 }
 
 // BeforeNewSession is invoked before gocql.NewSession creates a session from a

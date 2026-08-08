@@ -50,7 +50,7 @@ func TestCassandraClient(t *testing.T) {
 		testutil.IsClient,
 		testutil.HasAttribute("db.operation.name", "INSERT"),
 	)
-	require.Equal(t, "testks.INSERT", insertSpan.Name())
+	require.Equal(t, "INSERT testks", insertSpan.Name())
 	insertAttrs := testutil.Attrs(insertSpan)
 	testutil.RequireAttribute(t, insertSpan, "db.system.name", "cassandra")
 	testutil.RequireAttribute(t, insertSpan, "db.namespace", "testks")
@@ -62,7 +62,7 @@ func TestCassandraClient(t *testing.T) {
 		testutil.IsClient,
 		testutil.HasAttribute("db.operation.name", "SELECT"),
 	)
-	require.Equal(t, "testks.SELECT", selectSpan.Name())
+	require.Equal(t, "SELECT testks", selectSpan.Name())
 	require.Contains(t, testutil.Attrs(selectSpan)["db.query.text"], "SELECT name FROM users")
 
 	// Batch telemetry: both batch statements are joined into one span.
@@ -70,7 +70,7 @@ func TestCassandraClient(t *testing.T) {
 		testutil.IsClient,
 		testutil.HasAttribute("db.operation.name", "BATCH"),
 	)
-	require.Equal(t, "testks.BATCH", batchSpan.Name())
+	require.Equal(t, "BATCH testks", batchSpan.Name())
 	testutil.RequireAttribute(t, batchSpan, "db.system.name", "cassandra")
 	testutil.RequireAttribute(t, batchSpan, "db.namespace", "testks")
 	require.Contains(t, testutil.Attrs(batchSpan)["db.query.text"], "INSERT INTO users")
