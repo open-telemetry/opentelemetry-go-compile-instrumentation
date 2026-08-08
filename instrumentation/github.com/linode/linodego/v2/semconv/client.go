@@ -205,9 +205,19 @@ func MetricAttributes(operation string, statusCode int, serverAddress string) []
 }
 
 // RecordOperationDuration records public API method duration in seconds.
-func (m Metrics) RecordOperationDuration(ctx context.Context, seconds float64, operation string, statusCode int, serverAddress string) {
+func (m Metrics) RecordOperationDuration(
+	ctx context.Context,
+	seconds float64,
+	operation string,
+	statusCode int,
+	serverAddress string,
+) {
 	if m.operationDuration == nil {
 		return
 	}
-	m.operationDuration.Record(ctx, seconds, metric.WithAttributes(MetricAttributes(operation, statusCode, serverAddress)...))
+	m.operationDuration.Record(
+		ctx,
+		seconds,
+		metric.WithAttributes(MetricAttributes(operation, statusCode, serverAddress)...),
+	)
 }

@@ -40,7 +40,7 @@ func beforeAPICall(ictx hook.HookContext, params ...interface{}) {
 	var serverAddress string
 	if len(params) > 0 {
 		if client, ok := params[0].(*linodego.Client); ok {
-			serverAddress = hostFromClient(client)
+			serverAddress = getHostURL(client)
 		}
 	}
 

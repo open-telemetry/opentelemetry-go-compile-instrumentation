@@ -191,15 +191,15 @@ func TestBeforeAfterDoRequest_PlainError(t *testing.T) {
 	assert.Equal(t, "network down", got.Status().Description)
 }
 
-func TestHostFromClient(t *testing.T) {
-	assert.Empty(t, hostFromClient(nil))
+func TestGetHostURL(t *testing.T) {
+	assert.Empty(t, getHostURL(nil))
 
 	c, err := linodego.NewClient(nil)
 	require.NoError(t, err)
-	assert.Equal(t, "api.linode.com", hostFromClient(&c))
+	assert.Equal(t, "api.linode.com", getHostURL(&c))
 
 	c.SetBaseURL("https://my-mock-linode-api.example.com")
-	assert.Equal(t, "my-mock-linode-api.example.com", hostFromClient(&c))
+	assert.Equal(t, "my-mock-linode-api.example.com", getHostURL(&c))
 }
 
 func TestBeforeAfterDoRequest_CustomServerAddress(t *testing.T) {

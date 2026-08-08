@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"reflect"
 	"sync"
+	_ "unsafe"
 
 	"github.com/linode/linodego/v2"
 	"go.opentelemetry.io/otel"
@@ -54,11 +55,22 @@ const (
 )
 
 var (
-	logger   = runtime.Logger()
-	tracer   trace.Tracer
-	metrics  semconv.Metrics
-	initOnce sync.Once
+	logger     = runtime.Logger()
+	tracer     trace.Tracer
+	metrics    semconv.Metrics
+	initOnce   sync.Once
+	getHostURL = defaultHostURLGetter
 )
+
+// setHostURLGetter is called via go:linkname by host_extractor.go (injected into package linodego)
+// to replace the reflection fallback with direct access to Client.hostURL.
+//
+//go:linkname setHostURLGetter go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2.setHostURLGetter
+func setHostURLGetter(fn func(*linodego.Client) string) {
+	if fn != nil {
+		getHostURL = fn
+	}
+}
 
 // linodegoEnabler controls whether library instrumentation is enabled.
 type linodegoEnabler struct{}
@@ -69,13 +81,10 @@ func (linodegoEnabler) Enable() bool {
 
 var enabler = linodegoEnabler{}
 
-// hostFromClient returns the API host a linodego.Client is currently
-// configured to call. linodego has no exported getter for the host set via
-// SetBaseURL/UseURL, so this reads the unexported hostURL field by
-// reflection; it never panics and returns "" (letting callers fall back to
-// semconv.DefaultServerAddress) if the field is missing or unreadable, e.g.
-// after an upstream linodego field rename.
-func hostFromClient(client *linodego.Client) (host string) {
+// defaultHostURLGetter returns the API host a linodego.Client is currently
+// configured to call. Used as a fallback during unit testing when otelc
+// rules are not active.
+func defaultHostURLGetter(client *linodego.Client) (host string) {
 	if client == nil {
 		return ""
 	}
@@ -138,7 +147,7 @@ func BeforeDoRequest(
 	req := semconv.LinodegoRequest{
 		Method:        method,
 		Endpoint:      endpoint,
-		ServerAddress: hostFromClient(client),
+		ServerAddress: getHostURL(client),
 	}
 	attrs := semconv.LinodegoRequestTraceAttrs(req)
 	spanName := semconv.SpanName(method, endpoint)
