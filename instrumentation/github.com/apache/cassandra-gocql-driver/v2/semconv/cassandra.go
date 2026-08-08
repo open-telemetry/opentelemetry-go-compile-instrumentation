@@ -23,8 +23,10 @@ type QueryRequest struct {
 func QueryClientTraceAttrs(req QueryRequest) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		semconv.DBSystemNameCassandra,
-		semconv.DBOperationName(req.OpName),
 		semconv.DBQueryText(req.Statement),
+	}
+	if req.OpName != "" {
+		attrs = append(attrs, semconv.DBOperationName(req.OpName))
 	}
 	if req.Keyspace != "" {
 		attrs = append(attrs, semconv.DBNamespace(req.Keyspace))

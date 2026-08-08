@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/cassandra-gocql-driver/v2"
+	gocql "github.com/apache/cassandra-gocql-driver/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -141,7 +141,7 @@ func TestOtelObserver_ObserveQuery(t *testing.T) {
 	require.Len(t, spans, 1)
 	span := spans[0]
 
-	assert.Equal(t, "my_keyspace.SELECT", span.Name())
+	assert.Equal(t, "SELECT my_keyspace", span.Name())
 
 	attrMap := make(map[string]string)
 	for _, a := range span.Attributes() {
@@ -203,7 +203,7 @@ func TestOtelObserver_ObserveBatch(t *testing.T) {
 	require.Len(t, spans, 1)
 	span := spans[0]
 
-	assert.Equal(t, "batch_ks.BATCH", span.Name())
+	assert.Equal(t, "BATCH batch_ks", span.Name())
 
 	attrMap := make(map[string]string)
 	for _, a := range span.Attributes() {
@@ -316,6 +316,10 @@ func TestParseOpName(t *testing.T) {
 		{"lowercase", "select * from users", "SELECT"},
 		{"empty", "", ""},
 		{"whitespace only", "   ", ""},
+		{"block comment", "/* comment */ SELECT * FROM users", "SELECT"},
+		{"multi-line block comment", "/* line 1\n line 2 */ INSERT INTO users ...", "INSERT"},
+		{"line comment dash", "-- comment\nSELECT * FROM users", "SELECT"},
+		{"line comment slash", "// comment\nDELETE FROM users", "DELETE"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

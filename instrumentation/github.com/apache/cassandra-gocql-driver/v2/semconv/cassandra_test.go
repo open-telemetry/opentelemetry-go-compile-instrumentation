@@ -42,9 +42,8 @@ func TestQueryClientTraceAttrs(t *testing.T) {
 				Statement: "",
 			},
 			expected: map[string]interface{}{
-				"db.system.name":    "cassandra",
-				"db.operation.name": "",
-				"db.query.text":     "",
+				"db.system.name": "cassandra",
+				"db.query.text":  "",
 			},
 		},
 	}
