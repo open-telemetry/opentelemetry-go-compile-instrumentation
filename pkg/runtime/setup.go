@@ -337,9 +337,9 @@ func setupSignalHandler() {
 				logger.Info("OpenTelemetry SDK shutdown completed successfully")
 			}
 
-			// After shutdown completes, exit cleanly.
-			signal.Reset(signals...)
-			os.Exit(0)
+			// Stop relaying signals to sigCh so host application signal handlers
+			// can proceed naturally without forcing process exit via os.Exit.
+			signal.Stop(sigCh)
 		}()
 	})
 }

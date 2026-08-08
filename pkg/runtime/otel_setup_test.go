@@ -92,3 +92,19 @@ func TestInstrumented(t *testing.T) {
 		})
 	}
 }
+
+func TestInstrumented_OTelSDKDisabled(t *testing.T) {
+	t.Setenv("OTEL_SDK_DISABLED", "true")
+	assert.False(t, Instrumented("nethttp"))
+	assert.False(t, Instrumented("grpc"))
+
+	t.Setenv("OTEL_SDK_DISABLED", "false")
+	assert.True(t, Instrumented("nethttp"))
+}
+
+func BenchmarkInstrumented(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = Instrumented("nethttp")
+	}
+}
