@@ -49,7 +49,7 @@ func TestHTTPServerDBClient(t *testing.T) {
 		t,
 		f.Traces(),
 		testutil.IsServer,
-		func(s ptrace.Span) bool { return s.Name() == "GET" },
+		func(s ptrace.Span) bool { return s.Name() == "GET /hello" },
 	)
 	sqlClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
 

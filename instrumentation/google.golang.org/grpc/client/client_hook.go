@@ -255,6 +255,9 @@ func (h *clientStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 				code, msg := grpcsemconv.ClientStatus(s)
 				span.SetStatus(code, msg)
 			}
+			if rs.Error != nil {
+				span.RecordError(rs.Error)
+			}
 			span.SetAttributes(statusAttr)
 			span.End()
 		}

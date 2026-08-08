@@ -480,33 +480,52 @@ func TestOtelMiddleware_ResponseBodyReadError(t *testing.T) {
 }
 
 func TestOtelMiddleware_HTTPError(t *testing.T) {
-	sr := setupTestTracer(t)
-
-	middleware := OtelMiddleware()
-
-	req, _ := http.NewRequest(
-		"POST",
-		"http://api.anthropic.com/v1/messages",
-		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
-	)
-
-	next := func(r *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: 429,
-			Status:     "429 Too Many Requests",
-			Header:     http.Header{},
-			Body:       io.NopCloser(strings.NewReader("")),
-		}, nil
+	tests := []struct {
+		name        string
+		statusCode  int
+		status      string
+		contentType string
+	}{
+		{"rate limit", 429, "429 Too Many Requests", "application/json"},
+		{"server error", 500, "500 Internal Server Error", "application/json"},
+		{"streaming error", 500, "500 Internal Server Error", "text/event-stream"},
 	}
 
-	resp, err := middleware(req, next)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := setupTestTracer(t)
 
-	spans := sr.Ended()
-	require.Len(t, spans, 1)
-	assertAttribute(t, spans[0].Attributes(), "error.type", "429 Too Many Requests")
-	assert.Equal(t, codes.Error, spans[0].Status().Code)
+			middleware := OtelMiddleware()
+
+			req, _ := http.NewRequest(
+				"POST",
+				"http://api.anthropic.com/v1/messages",
+				io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+			)
+
+			next := func(r *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: tt.statusCode,
+					Status:     tt.status,
+					Header:     http.Header{"Content-Type": []string{tt.contentType}},
+					Body:       io.NopCloser(strings.NewReader("")),
+				}, nil
+			}
+
+			resp, err := middleware(req, next)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+			assertAttribute(t, spans[0].Attributes(), "error.type", tt.status)
+			assert.Equal(t, codes.Error, spans[0].Status().Code)
+
+			events := spans[0].Events()
+			require.Len(t, events, 1, "expected exception event for HTTP error status")
+			assert.Equal(t, "exception", events[0].Name)
+		})
+	}
 }
 
 func TestOtelMiddleware_TransportError(t *testing.T) {
@@ -532,6 +551,10 @@ func TestOtelMiddleware_TransportError(t *testing.T) {
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
 	assert.Equal(t, codes.Error, spans[0].Status().Code)
+
+	events := spans[0].Events()
+	require.Len(t, events, 1, "expected exception event for transport error")
+	assert.Equal(t, "exception", events[0].Name)
 }
 
 func TestOtelMiddleware_SkipsNilBody(t *testing.T) {

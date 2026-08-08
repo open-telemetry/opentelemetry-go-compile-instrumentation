@@ -6,6 +6,7 @@ package anthropic
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -144,6 +145,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		}
 
 		if resp.StatusCode >= 400 {
+			span.RecordError(errors.New(resp.Status))
 			span.SetStatus(codes.Error, resp.Status)
 			span.SetAttributes(attribute.String("error.type", resp.Status))
 			span.End()
