@@ -246,6 +246,146 @@ go 1.21
 	)
 }
 
+func TestSyncDeps_NestedModule(t *testing.T) {
+	goMod := `module example.com/test
+
+go 1.21
+`
+	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+
+	// Add a nested module with no otelc.yaml of its own inside the matched
+	// instrumentation module's directory, mirroring a shared internal
+	// package used by several versioned copies of one instrumentation.
+	nestedDir := filepath.Join(buildTempDir, unzippedInstDir, "net", "http", "client", "internal", "shared")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	nestedModule := util.OtelcInstRoot + "/net/http/client/internal/shared"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(nestedDir, "go.mod"),
+		[]byte("module "+nestedModule+"\ngo 1.21\n"),
+		0o644,
+	))
+
+	require.NoError(t, syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir))
+
+	content, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+	got := string(content)
+
+	assert.Contains(t, got, "replace "+nestedModule+" => "+nestedDir)
+}
+
+func TestDiscoverNestedModuleReplaces(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempDir, "go.mod"),
+		[]byte("module example.com/outer\ngo 1.21\n"),
+		0o644,
+	))
+
+	nestedDir := filepath.Join(tempDir, "internal", "shared")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(nestedDir, "go.mod"),
+		[]byte("module example.com/outer/internal/shared\ngo 1.21\n"),
+		0o644,
+	))
+
+	nested, err := discoverNestedModuleReplaces(tempDir)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"example.com/outer/internal/shared": nestedDir,
+	}, nested)
+}
+
+func TestDiscoverNestedModuleReplaces_NoNested(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempDir, "go.mod"),
+		[]byte("module example.com/outer\ngo 1.21\n"),
+		0o644,
+	))
+
+	nested, err := discoverNestedModuleReplaces(tempDir)
+	require.NoError(t, err)
+	assert.Empty(t, nested)
+}
+
+func TestDiscoverNestedModuleReplaces_WalkError(t *testing.T) {
+	nested, err := discoverNestedModuleReplaces(filepath.Join(t.TempDir(), "does-not-exist"))
+	require.Error(t, err)
+	assert.Nil(t, nested)
+}
+
+func TestDiscoverNestedModuleReplaces_MalformedNestedGoMod(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempDir, "go.mod"),
+		[]byte("module example.com/outer\ngo 1.21\n"),
+		0o644,
+	))
+
+	nestedDir := filepath.Join(tempDir, "internal", "shared")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(nestedDir, "go.mod"),
+		[]byte("this is not a valid go.mod file"),
+		0o644,
+	))
+
+	nested, err := discoverNestedModuleReplaces(tempDir)
+	require.Error(t, err)
+	assert.Nil(t, nested)
+}
+
+func TestDiscoverNestedModuleReplaces_SkipsTestdataVendorAndHiddenDirs(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempDir, "go.mod"),
+		[]byte("module example.com/outer\ngo 1.21\n"),
+		0o644,
+	))
+
+	// A malformed go.mod under each skipped directory would fail the walk
+	// if it were visited, so this also proves the directories are pruned
+	// rather than just their go.mod being ignored some other way.
+	for _, dir := range []string{"testdata", "vendor", ".git"} {
+		skippedDir := filepath.Join(tempDir, dir)
+		require.NoError(t, os.MkdirAll(skippedDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(skippedDir, "go.mod"),
+			[]byte("this is not a valid go.mod file"),
+			0o644,
+		))
+	}
+
+	nested, err := discoverNestedModuleReplaces(tempDir)
+	require.NoError(t, err)
+	assert.Empty(t, nested)
+}
+
+func TestSyncDeps_NestedModuleDiscoveryError(t *testing.T) {
+	goMod := `module example.com/test
+
+go 1.21
+`
+	tempDir, buildTempDir, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+
+	// Malformed go.mod inside the matched instrumentation module's directory
+	// makes discoverNestedModuleReplaces fail, which syncDeps must surface
+	// rather than silently drop.
+	nestedDir := filepath.Join(buildTempDir, unzippedInstDir, "net", "http", "client", "internal", "shared")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(nestedDir, "go.mod"),
+		[]byte("this is not a valid go.mod file"),
+		0o644,
+	))
+
+	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "discovering nested modules under")
+}
+
 func TestSyncDeps_ExistingReplace(t *testing.T) {
 	goMod := fmt.Sprintf(`module example.com/test
 

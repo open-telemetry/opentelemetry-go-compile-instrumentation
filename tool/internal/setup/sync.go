@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	goversion "go/version"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +119,48 @@ func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) 
 	return nil
 }
 
+// discoverNestedModuleReplaces walks dir for go.mod files nested inside it
+// (excluding dir's own go.mod), returning a map of module path to directory.
+// This picks up local helper modules that live inside an instrumentation
+// module's tree but carry no otelc.yaml of their own — e.g. a package shared
+// between several versioned copies of one instrumentation — so they never
+// match as an instrumentation import on their own. Without a replace
+// directive for them here, a downstream consumer's "go mod tidy" tries to
+// fetch them from a real module proxy and fails.
+func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
+	nested := make(map[string]string)
+	topGoMod := filepath.Join(dir, "go.mod")
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" || filepath.Clean(path) == filepath.Clean(topGoMod) {
+			return nil
+		}
+
+		modFile, parseErr := parseGoMod(path)
+		if parseErr != nil {
+			return ex.Wrapf(parseErr, "loading %s", path)
+		}
+
+		nested[modFile.Module.Mod.Path] = filepath.Dir(path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return nested, nil
+}
+
 func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
 	if len(modPaths) == 0 {
 		return nil
@@ -138,6 +182,21 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		if path, isEmbedded := strings.CutPrefix(m, util.OtelcInstRoot+"/"); isEmbedded {
 			replaces[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
 		}
+	}
+
+	// Some matched instrumentation modules have their own nested local
+	// modules (see discoverNestedModuleReplaces). Add replace directives for
+	// those too, so "go mod tidy" below doesn't try to fetch them remotely.
+	matchedDirs := make([]string, 0, len(replaces))
+	for _, dir := range replaces {
+		matchedDirs = append(matchedDirs, dir)
+	}
+	for _, dir := range matchedDirs {
+		nested, nestedErr := discoverNestedModuleReplaces(dir)
+		if nestedErr != nil {
+			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
+		}
+		maps.Copy(replaces, nested)
 	}
 
 	// Add replace directive for special pkg module
