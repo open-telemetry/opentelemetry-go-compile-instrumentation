@@ -617,6 +617,42 @@ func findAttribute(attrs []attribute.KeyValue, key string) (attribute.Value, boo
 	return attribute.Value{}, false
 }
 
+// A transport failure (dial refused, connection reset) ends the operation in an
+// error, so GenAI semconv requires error.type on the span. RecordError only adds
+// an exception event, and the nested HTTP client instrumentation is suppressed
+// here, so the middleware is the only thing that can set it.
+func TestOtelMiddleware_TransportErrorSetsErrorType(t *testing.T) {
+	sr := setupTestTracer(t)
+	setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+
+	transportErr := errors.New("dial tcp: connection refused")
+	next := func(r *http.Request) (*http.Response, error) {
+		return nil, transportErr
+	}
+
+	resp, err := middleware(req, next)
+	require.ErrorIs(t, err, transportErr)
+	assert.Nil(t, resp)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	assertAttribute(t, spans[0].Attributes(), "error.type", "*errors.errorString")
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+
+	events := spans[0].Events()
+	require.Len(t, events, 1, "expected exception event for transport error")
+	assert.Equal(t, "exception", events[0].Name)
+}
+
 func assertAttribute(t *testing.T, attrs []attribute.KeyValue, key, expected string) {
 	t.Helper()
 	val, ok := findAttribute(attrs, key)
