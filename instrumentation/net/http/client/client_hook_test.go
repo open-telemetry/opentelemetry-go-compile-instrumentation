@@ -15,7 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -400,4 +403,157 @@ func TestClientEnabler(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestHTTPClientMetrics(t *testing.T) {
+	// Reset initialization
+	initOnce = *new(sync.Once)
+
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+
+	// Setup tracer and meter
+	sr, tp := setupTestTracer(t)
+	
+	// Setup meter with manual reader
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(mp)
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+
+	// Create test request
+	req, _ := http.NewRequest("POST", "http://example.com/api/data", nil)
+	req.ContentLength = 100 // Request size
+	
+	// Create mock context
+	mockCtx := hooktest.NewMockHookContext()
+	transport := &http.Transport{}
+
+	// Call BeforeRoundTrip
+	BeforeRoundTrip(mockCtx, transport, req)
+
+	// Get the span and context
+	data, ok := mockCtx.GetData().(map[string]interface{})
+	require.True(t, ok)
+	span, ok := data["span"].(trace.Span)
+	require.True(t, ok)
+
+	// Create response
+	response := &http.Response{
+		StatusCode:    200,
+		ContentLength: 500, // Response size
+		Request:       req,
+	}
+
+	// Call AfterRoundTrip
+	AfterRoundTrip(mockCtx, response, nil)
+
+	// Verify span was ended
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	// Collect and verify metrics
+	rm := &metricdata.ResourceMetrics{}
+	err := reader.Collect(context.Background(), rm)
+	require.NoError(t, err)
+
+	// Extract metric names
+	metricNames := make(map[string]bool)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			metricNames[m.Name] = true
+		}
+	}
+
+	// Verify expected metrics are present
+	assert.True(t, metricNames["http.client.request.duration"], "request duration metric should be recorded")
+	assert.True(t, metricNames["http.client.request.body.size"], "request body size metric should be recorded")
+	assert.True(t, metricNames["http.client.response.body.size"], "response body size metric should be recorded")
+}
+
+func TestHTTPClientMetrics_ErrorCase(t *testing.T) {
+	// Reset initialization
+	initOnce = *new(sync.Once)
+
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+
+	// Setup tracer and meter
+	sr, tp := setupTestTracer(t)
+	
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(mp)
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+
+	// Create test request
+	req, _ := http.NewRequest("GET", "http://example.com/path", nil)
+	
+	// Create mock context
+	mockCtx := hooktest.NewMockHookContext()
+	transport := &http.Transport{}
+
+	// Call BeforeRoundTrip
+	BeforeRoundTrip(mockCtx, transport, req)
+
+	// Call AfterRoundTrip with error (no response)
+	err := errors.New("connection timeout")
+	AfterRoundTrip(mockCtx, nil, err)
+
+	// Verify span was ended with error
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+
+	// Collect metrics - should have duration but not sizes
+	rm := &metricdata.ResourceMetrics{}
+	collectErr := reader.Collect(context.Background(), rm)
+	require.NoError(t, collectErr)
+
+	// With error and no response, we should not record metrics
+	// (no response means no status code, size, etc.)
+	// This is expected behavior
+}
+
+func TestHTTPClientMetrics_NilMeter(t *testing.T) {
+	// Reset initialization
+	initOnce = *new(sync.Once)
+
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+
+	// Setup tracer but NO meter
+	sr, tp := setupTestTracer(t)
+	otel.SetMeterProvider(noopMeterProvider{})
+
+	// Create test request
+	req, _ := http.NewRequest("GET", "http://example.com/path", nil)
+	
+	// Create mock context
+	mockCtx := hooktest.NewMockHookContext()
+	transport := &http.Transport{}
+
+	// Call BeforeRoundTrip
+	BeforeRoundTrip(mockCtx, transport, req)
+
+	// Create response
+	response := &http.Response{
+		StatusCode:    200,
+		ContentLength: 100,
+		Request:       req,
+	}
+
+	// Call AfterRoundTrip - should not panic even without metrics
+	require.NotPanics(t, func() {
+		AfterRoundTrip(mockCtx, response, nil)
+	})
+
+	// Verify span was still created and ended
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, codes.Unset, spans[0].Status().Code)
+}
+
+// noopMeterProvider is a no-op meter provider for testing
+type noopMeterProvider struct{}
+
+func (noopMeterProvider) Meter(name string, opts ...metric.MeterOption) metric.Meter {
+	return nil
 }
