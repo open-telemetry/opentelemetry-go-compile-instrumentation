@@ -59,3 +59,27 @@ func TestWaitForSpans_timesOut(t *testing.T) {
 	ok := pollForSpans(c, 1, 50*time.Millisecond)
 	assert.False(t, ok)
 }
+
+func TestFreePort(t *testing.T) {
+	t.Run("basic", func(t *testing.T) {
+		port := FreePort(t)
+		assert.Greater(t, port, 0)
+	})
+
+	t.Run("concurrent", func(t *testing.T) {
+		const numGoroutines = 50
+		ports := make(chan int, numGoroutines)
+		for i := 0; i < numGoroutines; i++ {
+			go func() {
+				ports <- FreePort(t)
+			}()
+		}
+
+		allocated := make(map[int]bool)
+		for i := 0; i < numGoroutines; i++ {
+			port := <-ports
+			assert.False(t, allocated[port], "duplicate port returned: %d", port)
+			allocated[port] = true
+		}
+	})
+}
