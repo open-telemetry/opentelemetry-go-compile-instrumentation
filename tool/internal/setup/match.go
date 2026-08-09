@@ -90,6 +90,9 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 			if err3 := rule.ValidateTarget(r.GetTarget()); err3 != nil {
 				return nil, ex.Wrapf(err3, "rule %q", name)
 			}
+			if err3 := util.ValidateVersionRange(r.GetVersion()); err3 != nil {
+				return nil, ex.Wrapf(err3, "rule %q", name)
+			}
 			rules = append(rules, r)
 		}
 	}
@@ -353,8 +356,8 @@ func (sp *SetupPhase) matchOneRule(
 			sp.Info("Match func rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstStructRule:
-		structDecl := ast.FindStructDecl(tree, rt.Struct)
-		if structDecl != nil {
+		structType := ast.FindStructType(tree, rt.Struct)
+		if structType != nil {
 			set.AddStructRule(source, rt)
 			sp.Info("Match struct rule", "rule", rt, "dep", dep)
 		}

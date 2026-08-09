@@ -34,9 +34,14 @@ func TestLogLevel(t *testing.T) {
 		expected slog.Level
 	}{
 		{"debug", slog.LevelDebug},
+		{"DEBUG", slog.LevelDebug},
+		{"Debug", slog.LevelDebug},
 		{"info", slog.LevelInfo},
+		{"Info", slog.LevelInfo},
 		{"warn", slog.LevelWarn},
+		{" WARN ", slog.LevelWarn},
 		{"error", slog.LevelError},
+		{"ERROR", slog.LevelError},
 		{"", slog.LevelInfo},        // unset defaults to info
 		{"unknown", slog.LevelInfo}, // unrecognized value defaults to info
 	}
