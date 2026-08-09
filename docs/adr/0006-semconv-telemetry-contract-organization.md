@@ -18,6 +18,17 @@ version, pinned in `.semconv-version` and mirrored in
 `schemas/otelc/registry_manifest.yaml`. CI guards also require the Go
 `semconv/vX.Y.Z` imports to match the same version.
 
+The registry introduces two related but distinct forms of conformance:
+
+- declared-contract validity: `make lint-schema` verifies that the local
+  registry resolves against the pinned upstream semantic conventions;
+- runtime-emission conformance: instrumentation tests verify that telemetry
+  emitted at runtime matches the declared contract.
+
+Static Weaver validation does not execute instrumentation or observe exported
+telemetry. Runtime verification therefore remains necessary, and its coverage
+is limited to the execution paths exercised by tests.
+
 Follow-up work tracked in
 [#728](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/728)
 needs a stable answer to two questions before Tier 2/3 registry-driven code
@@ -41,6 +52,8 @@ default without introducing project-specific aggregation tooling.
 
 Adopt a centralized organization for otelc's telemetry contract registry.
 
+- The registry is the authoritative declaration of telemetry emitted by
+  in-repository instrumentations.
 - All telemetry contract files live under `schemas/otelc/groups/`.
 - The unit of ownership is an instrumentation family, represented by one YAML
   file. A family may cover multiple modules when they describe one shared
@@ -61,8 +74,16 @@ Adopt a centralized organization for otelc's telemetry contract registry.
   instrumentations emit the same standard metric, that metric must be owned by
   one shared family contract instead of being duplicated across multiple local
   group files.
+- Instrumentation tests must verify that emitted telemetry conforms to the
+  registry across each materially distinct emission path, including applicable
+  conditional and error paths.
+- Static registry validation and runtime-emission verification are
+  complementary requirements. The runtime enforcement mechanism, such as
+  Weaver live-check, generated assertions, or registry-aware test helpers, is
+  deferred to follow-up work.
 - Code generation from the registry is explicitly deferred to follow-up work;
-  this ADR defines the registry layout and versioning rules only.
+  this ADR defines the registry layout, versioning rules, and verification
+  boundary only.
 
 ## Consequences
 
@@ -72,6 +93,11 @@ Adopt a centralized organization for otelc's telemetry contract registry.
   independent per-instrumentation version drift.
 - Contributors have a clear rule: every telemetry-emitting instrumentation must
   be represented in `schemas/otelc/groups/`.
+- `make lint-schema` proves that the declared registry is internally valid, but
+  it does not prove that runtime telemetry conforms to that declaration.
+- Runtime verification is only as complete as the scenarios exercised by the
+  tests. Follow-up enforcement must account for path-sensitive telemetry,
+  including attributes emitted only conditionally or on error paths.
 - Registry files are not colocated with the instrumentations they describe,
   which trades local proximity for a simpler, tool-compatible registry.
 - Migration windows that need dual-emit or validation against multiple
