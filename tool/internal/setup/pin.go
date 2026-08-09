@@ -293,6 +293,10 @@ func restoreFiles(backups []fileBackup) error {
 	return err
 }
 
+func restoreOtelYAMLValidationFiles(result *PinResult, pinErr error, backups []fileBackup) (*PinResult, error) {
+	return result, ex.Join(pinErr, restoreFiles(backups))
+}
+
 type yamlRule struct {
 	Target       string `yaml:"target"`
 	VersionRange string `yaml:"version"`
@@ -622,10 +626,11 @@ func invalidInstrumentationImports(
 	return invalid, err
 }
 
-func backupOtelYAMLValidationFiles(otelYAMLFiles map[string]string) ([]fileBackup, error) {
+func backupOtelYAMLValidationFiles(configs []modulePinConfig) ([]fileBackup, error) {
 	var backups []fileBackup
-	for moduleDir := range otelYAMLFiles {
-		for _, name := range []string{"go.mod", "go.sum", ToolFileCanonical} {
+	for _, config := range configs {
+		moduleDir := config.moduleDir
+		for _, name := range []string{"go.mod", "go.sum", ToolFileCanonical, ToolFileAlias} {
 			backup, err := backupFile(filepath.Join(moduleDir, name))
 			if err != nil {
 				return nil, err
@@ -759,7 +764,7 @@ func applyOtelYAMLValidation(
 
 func processOtelYAMLFiles(
 	ctx context.Context,
-	otelYAMLFiles map[string]string,
+	configs []modulePinConfig,
 	opts PinOptions,
 ) (*PinResult, error) {
 	if err := extractOtelcBundle(); err != nil {
@@ -769,31 +774,30 @@ func processOtelYAMLFiles(
 	var backups []fileBackup
 	if !opts.AutoPin {
 		var err error
-		backups, err = backupOtelYAMLValidationFiles(otelYAMLFiles)
+		backups, err = backupOtelYAMLValidationFiles(configs)
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = restoreFiles(backups) }()
 	}
 
-	configs := make([]modulePinConfig, 0, len(otelYAMLFiles))
-	for _, moduleDir := range sortedStringsMapKeys(otelYAMLFiles) {
-		configs = append(configs, modulePinConfig{moduleDir: moduleDir, yamlFile: otelYAMLFiles[moduleDir]})
+	otelYAMLFiles := make(map[string]string, len(configs))
+	for _, config := range configs {
+		otelYAMLFiles[config.moduleDir] = config.yamlFile
 	}
 	importsByModule, toolFiles, err := materializeModuleConfigs(ctx, configs, opts)
 	if err != nil {
-		return nil, err
+		return restoreOtelYAMLValidationFiles(nil, err, backups)
 	}
 
 	invalid, err := invalidInstrumentationImports(ctx, toolFiles, opts.Validate)
 	if err != nil {
-		return nil, err
+		return restoreOtelYAMLValidationFiles(nil, err, backups)
 	}
 	if err = applyOtelYAMLValidation(otelYAMLFiles, importsByModule, invalid, opts); err != nil {
-		return nil, err
+		return restoreOtelYAMLValidationFiles(nil, err, backups)
 	}
 
-	return &PinResult{}, nil
+	return restoreOtelYAMLValidationFiles(&PinResult{}, nil, backups)
 }
 
 func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opts PinOptions) (*PinResult, error) {
@@ -934,47 +938,50 @@ func findPinModuleDirs(ctx context.Context, opts *PinOptions) (map[string]bool, 
 	return moduleDirs, nil
 }
 
-func discoverPinConfigs(moduleDirs map[string]bool) ([]modulePinConfig, map[string]string, map[string]bool, error) {
+func discoverPinConfigs(moduleDirs map[string]bool) ([]modulePinConfig, map[string]bool, error) {
 	configs := make([]modulePinConfig, 0, len(moduleDirs))
-	yamlOnly := make(map[string]string)
 	unconfigured := make(map[string]bool)
 	for _, moduleDir := range sortedStringsMapKeys(moduleDirs) {
 		toolFile, err := findToolFile(moduleDir)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		yamlFile, err := findInstrumentationYAMLFile(moduleDir)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		if toolFile == "" && yamlFile == "" {
 			unconfigured[moduleDir] = true
 			continue
 		}
 		configs = append(configs, modulePinConfig{moduleDir: moduleDir, toolFile: toolFile, yamlFile: yamlFile})
-		if toolFile == "" {
-			yamlOnly[moduleDir] = yamlFile
-		}
 	}
-	return configs, yamlOnly, unconfigured, nil
+	return configs, unconfigured, nil
 }
 
 func processPinConfigs(
 	ctx context.Context,
 	configs []modulePinConfig,
-	yamlOnly map[string]string,
 	opts PinOptions,
 ) error {
-	if len(yamlOnly) > 0 && !opts.AutoPin {
-		if _, err := processOtelYAMLFiles(ctx, yamlOnly, opts); err != nil {
-			return err
+	if !opts.AutoPin {
+		yamlConfigs := make([]modulePinConfig, 0, len(configs))
+		for _, config := range configs {
+			if config.yamlFile != "" {
+				yamlConfigs = append(yamlConfigs, config)
+			}
+		}
+		if len(yamlConfigs) > 0 {
+			if _, err := processOtelYAMLFiles(ctx, yamlConfigs, opts); err != nil {
+				return err
+			}
 		}
 	}
 	materialized := configs
-	if !opts.AutoPin && len(yamlOnly) > 0 {
-		materialized = make([]modulePinConfig, 0, len(configs)-len(yamlOnly))
+	if !opts.AutoPin {
+		materialized = make([]modulePinConfig, 0, len(configs))
 		for _, config := range configs {
-			if config.toolFile != "" {
+			if config.yamlFile == "" {
 				materialized = append(materialized, config)
 			}
 		}
@@ -997,12 +1004,12 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	configs, yamlOnly, unconfigured, err := discoverPinConfigs(moduleDirs)
+	configs, unconfigured, err := discoverPinConfigs(moduleDirs)
 	if err != nil {
 		return nil, err
 	}
 	if len(configs) > 0 {
-		if err = processPinConfigs(ctx, configs, yamlOnly, opts); err != nil {
+		if err = processPinConfigs(ctx, configs, opts); err != nil {
 			return nil, err
 		}
 		if len(unconfigured) > 0 {

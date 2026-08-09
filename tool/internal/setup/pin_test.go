@@ -983,7 +983,7 @@ replace example.com/foo => %s
 
 	result, err := processOtelYAMLFiles(
 		t.Context(),
-		map[string]string{dir: filepath.Join(dir, InstrumentationYAMLCanonical)},
+		[]modulePinConfig{{moduleDir: dir, yamlFile: filepath.Join(dir, InstrumentationYAMLCanonical)}},
 		PinOptions{AutoPin: true},
 	)
 	require.NoError(t, err)
@@ -1055,12 +1055,75 @@ func Hello() string {
 	require.NoError(t, err)
 	contents := string(data)
 	require.Equal(t, 1, strings.Count(contents, `"example.com/foo"`))
-	require.Equal(t, 1, strings.Count(contents, `"example.com/bar"`))
+	require.NotContains(t, contents, `"example.com/bar"`)
+	yamlImports, err := loadOtelYAMLImports(filepath.Join(dir, InstrumentationYAMLCanonical))
+	require.NoError(t, err)
+	require.True(t, yamlImports["example.com/bar"])
 	require.Contains(t, contents, "// keep this comment")
 	require.Contains(t, contents, `const Sentinel = "keep-me"`)
 	require.Contains(t, contents, "func Hello() string")
 	_, err = ast.NewAstParser().Parse(toolFile, parser.ParseComments)
 	require.NoError(t, err)
+}
+
+func TestPinLocked_RestoresAliasToolFileAfterYAMLValidation(t *testing.T) {
+	tmp := t.TempDir()
+	app := filepath.Join(tmp, "app")
+	foo := filepath.Join(tmp, "foo")
+
+	writeInstrumentationModule(t, foo, "example.com/foo", true, nil)
+	writeInstrumentationModule(t, app, "example.com/app", false, map[string]string{
+		"example.com/foo": foo,
+	})
+	canonical := filepath.Join(app, ToolFileCanonical)
+	alias := filepath.Join(app, ToolFileAlias)
+	require.NoError(t, os.Rename(canonical, alias))
+	writeOtelYAMLFile(t, filepath.Join(app, InstrumentationYAMLCanonical), "example.com/foo")
+
+	original, err := os.ReadFile(alias)
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(alias, 0o600))
+
+	_, err = pinLocked(t.Context(), PinOptions{ModuleDirs: map[string]bool{app: true}})
+	require.NoError(t, err)
+
+	after, err := os.ReadFile(alias)
+	require.NoError(t, err)
+	require.Equal(t, original, after)
+	info, err := os.Stat(alias)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	require.NoFileExists(t, canonical)
+}
+
+func TestPinLocked_RestoresAliasToolFileOnYAMLValidationFailure(t *testing.T) {
+	tmp := t.TempDir()
+	app := filepath.Join(tmp, "app")
+	missing := filepath.Join(tmp, "missing")
+
+	writeInstrumentationModule(t, app, "example.com/app", false, map[string]string{
+		"example.com/missing": missing,
+	})
+	canonical := filepath.Join(app, ToolFileCanonical)
+	alias := filepath.Join(app, ToolFileAlias)
+	require.NoError(t, os.Rename(canonical, alias))
+	writeOtelYAMLFile(t, filepath.Join(app, InstrumentationYAMLCanonical), "example.com/missing")
+
+	originalTool, err := os.ReadFile(alias)
+	require.NoError(t, err)
+	originalMod, err := os.ReadFile(filepath.Join(app, "go.mod"))
+	require.NoError(t, err)
+
+	_, err = pinLocked(t.Context(), PinOptions{ModuleDirs: map[string]bool{app: true}})
+	require.Error(t, err)
+
+	afterTool, readErr := os.ReadFile(alias)
+	require.NoError(t, readErr)
+	require.Equal(t, originalTool, afterTool)
+	afterMod, readErr := os.ReadFile(filepath.Join(app, "go.mod"))
+	require.NoError(t, readErr)
+	require.Equal(t, originalMod, afterMod)
+	require.NoFileExists(t, canonical)
 }
 
 func TestAddToolFileImports_PreservesDeclarationsWithoutImportBlock(t *testing.T) {
