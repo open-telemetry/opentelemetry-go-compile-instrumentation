@@ -384,6 +384,11 @@ instrumentations: []
 	}
 }
 
+func TestLoadOtelYAMLImportsReadError(t *testing.T) {
+	_, err := loadOtelYAMLImports(filepath.Join(t.TempDir(), "missing.yml"))
+	require.ErrorContains(t, err, "reading")
+}
+
 func TestWriteOtelYAMLImports(t *testing.T) {
 	path := filepath.Join(t.TempDir(), InstrumentationYAMLCanonical)
 	require.NoError(t, os.WriteFile(path, []byte("instrumentations: []\n"), 0o600))
@@ -428,6 +433,21 @@ func TestBackupAndRestoreFiles(t *testing.T) {
 	require.Equal(t, []byte("original"), data)
 	require.NoFileExists(t, created)
 	require.NoError(t, restoreFiles([]fileBackup{createdBackup}))
+}
+
+func TestRestoreOtelYAMLValidationFilesJoinsErrors(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "keep"), []byte("data"), 0o644))
+	result := &PinResult{}
+
+	got, err := restoreOtelYAMLValidationFiles(
+		result,
+		fmt.Errorf("pin failed"),
+		[]fileBackup{{path: dir}},
+	)
+	require.Same(t, result, got)
+	require.ErrorContains(t, err, "pin failed")
+	require.Error(t, err)
 }
 
 func TestEnsureOtelcRequire(t *testing.T) {
@@ -1529,4 +1549,10 @@ func TestAutoPin_RestoresYAMLWorkspace(t *testing.T) {
 	afterYAML, err := os.ReadFile(yamlPath)
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(originalYAML, afterYAML))
+}
+
+func TestAutoPinRequiresStateManager(t *testing.T) {
+	result, err := AutoPin(t.Context(), map[string]bool{"module": true}, subcmdBuild, nil)
+	require.Nil(t, result)
+	require.ErrorContains(t, err, "state manager not found")
 }
