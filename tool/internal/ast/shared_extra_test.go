@@ -53,24 +53,24 @@ func TestFuncDeclMatchesFilters_SignatureParseError(t *testing.T) {
 
 	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		Signature: &rule.FuncSignature{Args: []string{"[]invalid"}},
-	})
+	}, nil)
 	require.Error(t, err)
 
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		SignatureContains: &rule.FuncSignature{Args: []string{"[]invalid"}},
-	})
+	}, nil)
 	require.Error(t, err)
 
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		SignatureContains: &rule.FuncSignature{Returns: []string{"[]invalid"}},
-	})
+	}, nil)
 	require.Error(t, err)
 }
 
 func TestFuncDeclMatchesFilters_LastResultNoResults(t *testing.T) {
 	decl := makeFuncDecl(nil, nil)
 
-	ok, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "error"})
+	ok, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "error"}, nil)
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
