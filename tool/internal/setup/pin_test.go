@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -381,6 +382,52 @@ instrumentations: []
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestWriteOtelYAMLImports(t *testing.T) {
+	path := filepath.Join(t.TempDir(), InstrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(path, []byte("instrumentations: []\n"), 0o600))
+
+	require.NoError(t, writeOtelYAMLImports(path, map[string]bool{
+		"example.com/z": true,
+		"example.com/a": true,
+	}))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Less(t, strings.Index(string(data), "example.com/a"), strings.Index(string(data), "example.com/z"))
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(path)
+		require.NoError(t, statErr)
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
+
+	err = writeOtelYAMLImports(filepath.Join(t.TempDir(), "missing", InstrumentationYAMLCanonical), nil)
+	require.ErrorContains(t, err, "stating")
+}
+
+func TestBackupAndRestoreFiles(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "existing")
+	created := filepath.Join(dir, "created")
+	require.NoError(t, os.WriteFile(existing, []byte("original"), 0o600))
+
+	existingBackup, err := backupFile(existing)
+	require.NoError(t, err)
+	createdBackup, err := backupFile(created)
+	require.NoError(t, err)
+	require.True(t, existingBackup.existed)
+	require.False(t, createdBackup.existed)
+
+	require.NoError(t, os.WriteFile(existing, []byte("changed"), 0o644))
+	require.NoError(t, os.WriteFile(created, []byte("temporary"), 0o644))
+	require.NoError(t, restoreFiles([]fileBackup{existingBackup, createdBackup}))
+
+	data, err := os.ReadFile(existing)
+	require.NoError(t, err)
+	require.Equal(t, []byte("original"), data)
+	require.NoFileExists(t, created)
+	require.NoError(t, restoreFiles([]fileBackup{createdBackup}))
 }
 
 func TestEnsureOtelcRequire(t *testing.T) {
@@ -1066,6 +1113,92 @@ func Hello() string {
 	require.NoError(t, err)
 }
 
+func TestPinLocked_PrunePreservesToolAndYAMLOwnership(t *testing.T) {
+	tmp := t.TempDir()
+	app := filepath.Join(tmp, "app")
+	toolInstrumentation := filepath.Join(tmp, "tool")
+	yamlInstrumentation := filepath.Join(tmp, "yaml")
+
+	writeInstrumentationModule(t, toolInstrumentation, "example.com/tool", true, nil)
+	writeInstrumentationModule(t, yamlInstrumentation, "example.com/yaml", true, nil)
+	writeInstrumentationModule(t, app, "example.com/app", false, map[string]string{
+		"example.com/tool": toolInstrumentation,
+		"example.com/yaml": yamlInstrumentation,
+	})
+	toolFile := filepath.Join(app, ToolFileCanonical)
+	writeToolFile(t, toolFile, "example.com/tool")
+	yamlFile := filepath.Join(app, InstrumentationYAMLCanonical)
+	writeOtelYAMLFile(t, yamlFile, "example.com/yaml")
+	originalTool, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+
+	_, err = pinLocked(t.Context(), PinOptions{
+		ModuleDirs: map[string]bool{app: true},
+		Prune:      true,
+	})
+	require.NoError(t, err)
+
+	afterTool, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Equal(t, originalTool, afterTool)
+	yamlImports, err := loadOtelYAMLImports(yamlFile)
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{"example.com/yaml": true}, yamlImports)
+}
+
+func TestPinLocked_ExplicitConfigurationSuppressesWorkspaceInference(t *testing.T) {
+	tmp := t.TempDir()
+	configured := filepath.Join(tmp, "configured")
+	unconfigured := filepath.Join(tmp, "unconfigured")
+	instrumentation := filepath.Join(tmp, "instrumentation")
+
+	writeInstrumentationModule(t, instrumentation, "example.com/instrumentation", true, nil)
+	writeInstrumentationModule(t, configured, "example.com/configured", false, map[string]string{
+		"example.com/instrumentation": instrumentation,
+	})
+	writeInstrumentationModule(t, unconfigured, "example.com/unconfigured", false, nil)
+
+	_, err := pinLocked(t.Context(), PinOptions{ModuleDirs: map[string]bool{
+		configured:   true,
+		unconfigured: true,
+	}})
+	require.NoError(t, err)
+	require.NoFileExists(t, filepath.Join(unconfigured, ToolFileCanonical))
+}
+
+func TestDiscoverPinConfigs(t *testing.T) {
+	tmp := t.TempDir()
+	toolOnly := filepath.Join(tmp, "a-tool")
+	yamlOnly := filepath.Join(tmp, "b-yaml")
+	both := filepath.Join(tmp, "c-both")
+	unconfigured := filepath.Join(tmp, "d-unconfigured")
+	for _, dir := range []string{toolOnly, yamlOnly, both, unconfigured} {
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+	}
+	writeToolFile(t, filepath.Join(toolOnly, ToolFileCanonical), "example.com/tool")
+	writeOtelYAMLFile(t, filepath.Join(yamlOnly, InstrumentationYAMLCanonical), "example.com/yaml")
+	writeToolFile(t, filepath.Join(both, ToolFileAlias), "example.com/tool")
+	writeOtelYAMLFile(t, filepath.Join(both, InstrumentationYAMLAlias), "example.com/yaml")
+
+	configs, unconfiguredDirs, err := discoverPinConfigs(map[string]bool{
+		unconfigured: true,
+		both:         true,
+		yamlOnly:     true,
+		toolOnly:     true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []modulePinConfig{
+		{moduleDir: toolOnly, toolFile: filepath.Join(toolOnly, ToolFileCanonical)},
+		{moduleDir: yamlOnly, yamlFile: filepath.Join(yamlOnly, InstrumentationYAMLCanonical)},
+		{
+			moduleDir: both,
+			toolFile:  filepath.Join(both, ToolFileAlias),
+			yamlFile:  filepath.Join(both, InstrumentationYAMLAlias),
+		},
+	}, configs)
+	require.Equal(t, map[string]bool{unconfigured: true}, unconfiguredDirs)
+}
+
 func TestPinLocked_RestoresAliasToolFileAfterYAMLValidation(t *testing.T) {
 	tmp := t.TempDir()
 	app := filepath.Join(tmp, "app")
@@ -1092,7 +1225,9 @@ func TestPinLocked_RestoresAliasToolFileAfterYAMLValidation(t *testing.T) {
 	require.Equal(t, original, after)
 	info, err := os.Stat(alias)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 	require.NoFileExists(t, canonical)
 }
 
@@ -1150,6 +1285,46 @@ const Sentinel = "keep-me"
 	require.Contains(t, contents, `const Sentinel = "keep-me"`)
 	_, err = ast.NewAstParser().Parse(toolFile, parser.ParseComments)
 	require.NoError(t, err)
+}
+
+func TestAddToolFileImports_DeduplicatesExistingBlock(t *testing.T) {
+	toolFile := filepath.Join(t.TempDir(), ToolFileCanonical)
+	writeToolFile(t, toolFile, "example.com/foo")
+
+	require.NoError(t, addToolFileImports(toolFile, map[string]bool{
+		"example.com/foo": true,
+		"example.com/bar": true,
+	}))
+
+	data, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(string(data), `"example.com/foo"`))
+	require.Equal(t, 1, strings.Count(string(data), `"example.com/bar"`))
+}
+
+func TestInvalidInstrumentationImports_ValidatesRules(t *testing.T) {
+	tmp := t.TempDir()
+	app := filepath.Join(tmp, "app")
+	instrumentation := filepath.Join(tmp, "instrumentation")
+	toolFile := writeInstrumentationModule(t, app, "example.com/app", false, map[string]string{
+		"example.com/instrumentation": instrumentation,
+	})
+	writeInstrumentationModule(t, instrumentation, "example.com/instrumentation", false, nil)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(instrumentation, "invalid.otelc.yml"),
+		[]byte("invalid: yaml: {"),
+		0o644,
+	))
+
+	invalid, err := invalidInstrumentationImports(t.Context(), []string{toolFile}, true)
+	require.NoError(t, err)
+	require.Equal(t, map[string]map[string]bool{
+		toolFile: {"example.com/instrumentation": true},
+	}, invalid)
+
+	invalid, err = invalidInstrumentationImports(t.Context(), []string{toolFile}, false)
+	require.NoError(t, err)
+	require.Empty(t, invalid)
 }
 
 func TestPinLocked_MixedWorkspaceSources(t *testing.T) {
