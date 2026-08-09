@@ -23,7 +23,6 @@ func TestGenAIOperationName(t *testing.T) {
 }
 
 func TestGenAIRequestModel(t *testing.T) {
-<<<<<<< HEAD
 	kv := GenAIRequestModel("claude-3-5-sonnet")
 	assert.Equal(t, attribute.Key("gen_ai.request.model"), kv.Key)
 	assert.Equal(t, "claude-3-5-sonnet", kv.Value.AsString())
@@ -75,11 +74,6 @@ func TestGenAIUsageCacheCreationInputTokens(t *testing.T) {
 	kv := GenAIUsageCacheCreationInputTokens(32)
 	assert.Equal(t, attribute.Key("gen_ai.usage.cache_creation.input_tokens"), kv.Key)
 	assert.Equal(t, int64(32), kv.Value.AsInt64())
-=======
-	kv := GenAIRequestModel("claude-sonnet-4-5")
-	assert.Equal(t, attribute.Key("gen_ai.request.model"), kv.Key)
-	assert.Equal(t, "claude-sonnet-4-5", kv.Value.AsString())
->>>>>>> 41f1438 (feat(genai): add server.address and server.port to GenAI spans (#1024))
 }
 
 func TestGenAIProviderName(t *testing.T) {
@@ -88,7 +82,6 @@ func TestGenAIProviderName(t *testing.T) {
 	assert.Equal(t, "anthropic", kv.Value.AsString())
 }
 
-<<<<<<< HEAD
 func TestGenAIRequestMaxTokens(t *testing.T) {
 	kv := GenAIRequestMaxTokens(1024)
 	assert.Equal(t, attribute.Key("gen_ai.request.max_tokens"), kv.Key)
@@ -123,7 +116,8 @@ func TestGenAIResponseTimeToFirstToken(t *testing.T) {
 	kv := GenAIResponseTimeToFirstToken(1500)
 	assert.Equal(t, attribute.Key("gen_ai.response.time_to_first_token"), kv.Key)
 	assert.Equal(t, int64(1500), kv.Value.AsInt64())
-=======
+}
+
 func TestServerAddress(t *testing.T) {
 	kv := ServerAddress("api.anthropic.com")
 	assert.Equal(t, attribute.Key("server.address"), kv.Key)
@@ -134,5 +128,4 @@ func TestServerPort(t *testing.T) {
 	kv := ServerPort(8080)
 	assert.Equal(t, attribute.Key("server.port"), kv.Key)
 	assert.Equal(t, int64(8080), kv.Value.AsInt64())
->>>>>>> 41f1438 (feat(genai): add server.address and server.port to GenAI spans (#1024))
 }
