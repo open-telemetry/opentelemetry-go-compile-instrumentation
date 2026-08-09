@@ -1199,6 +1199,83 @@ func TestDiscoverPinConfigs(t *testing.T) {
 	require.Equal(t, map[string]bool{unconfigured: true}, unconfiguredDirs)
 }
 
+func TestMaterializeModuleConfigsErrors(t *testing.T) {
+	t.Run("malformed tool file", func(t *testing.T) {
+		dir := t.TempDir()
+		toolFile := filepath.Join(dir, ToolFileCanonical)
+		require.NoError(t, os.WriteFile(toolFile, []byte("not go"), 0o644))
+
+		_, err := materializeModuleConfigs(t.Context(), []modulePinConfig{{
+			moduleDir: dir,
+			toolFile:  toolFile,
+		}}, PinOptions{})
+		require.ErrorContains(t, err, "parsing tool file")
+	})
+
+	t.Run("malformed yaml", func(t *testing.T) {
+		dir := t.TempDir()
+		yamlFile := filepath.Join(dir, InstrumentationYAMLCanonical)
+		require.NoError(t, os.WriteFile(yamlFile, []byte("instrumentations: ["), 0o644))
+
+		_, err := materializeModuleConfigs(t.Context(), []modulePinConfig{{
+			moduleDir: dir,
+			yamlFile:  yamlFile,
+		}}, PinOptions{})
+		require.ErrorContains(t, err, "parsing")
+	})
+}
+
+func TestProcessPinConfigsMalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	yamlFile := filepath.Join(dir, InstrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(yamlFile, []byte("instrumentations: ["), 0o644))
+
+	err := processPinConfigs(t.Context(), []modulePinConfig{{
+		moduleDir: dir,
+		yamlFile:  yamlFile,
+	}}, PinOptions{})
+	require.ErrorContains(t, err, "parsing")
+}
+
+func TestFindPinModuleDirsUsesProvidedModules(t *testing.T) {
+	moduleDirs := map[string]bool{"example": true}
+	opts := PinOptions{ModuleDirs: moduleDirs}
+
+	got, err := findPinModuleDirs(t.Context(), &opts)
+	require.NoError(t, err)
+	require.Equal(t, moduleDirs, got)
+}
+
+func TestFindPinModuleDirsDiscoversModule(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.25\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+
+	opts := PinOptions{Args: []string{"."}}
+	moduleDirs, err := findPinModuleDirs(t.Context(), &opts)
+	require.NoError(t, err)
+	require.Len(t, moduleDirs, 1)
+	for moduleDir := range moduleDirs {
+		require.Equal(t, filepath.Clean(dir), filepath.Clean(moduleDir))
+	}
+}
+
+func TestPinLockedEmptyModuleDirs(t *testing.T) {
+	result, err := pinLocked(t.Context(), PinOptions{ModuleDirs: map[string]bool{"missing": true}})
+	require.Error(t, err)
+	require.Nil(t, result)
+}
+
 func TestPinLocked_RestoresAliasToolFileAfterYAMLValidation(t *testing.T) {
 	tmp := t.TempDir()
 	app := filepath.Join(tmp, "app")
