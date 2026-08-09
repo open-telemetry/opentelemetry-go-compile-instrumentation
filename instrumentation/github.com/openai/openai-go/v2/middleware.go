@@ -266,10 +266,12 @@ func parseChatRequest(body []byte) (string, []attribute.KeyValue) {
 
 func parseCompletionRequest(body []byte) (string, []attribute.KeyValue) {
 	var req struct {
-		Model       string   `json:"model"`
-		MaxTokens   *int64   `json:"max_tokens,omitempty"`
-		Temperature *float64 `json:"temperature,omitempty"`
-		TopP        *float64 `json:"top_p,omitempty"`
+		Model            string   `json:"model"`
+		MaxTokens        *int64   `json:"max_tokens,omitempty"`
+		Temperature      *float64 `json:"temperature,omitempty"`
+		TopP             *float64 `json:"top_p,omitempty"`
+		FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
+		PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		return "", nil
@@ -284,6 +286,12 @@ func parseCompletionRequest(body []byte) (string, []attribute.KeyValue) {
 	}
 	if req.TopP != nil {
 		attrs = append(attrs, semconv.GenAIRequestTopP(*req.TopP))
+	}
+	if req.FrequencyPenalty != nil {
+		attrs = append(attrs, semconv.GenAIRequestFrequencyPenalty(*req.FrequencyPenalty))
+	}
+	if req.PresencePenalty != nil {
+		attrs = append(attrs, semconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
 	}
 	return req.Model, attrs
 }
