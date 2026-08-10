@@ -45,9 +45,15 @@ func TestParseCdDir(t *testing.T) {
 			expectedOk:  true,
 		},
 		{
-			name:        "cd command with comment",
+			name:        "cd command with spaces",
+			line:        "cd /tmp/test project with spaces",
+			expectedDir: "/tmp/test project with spaces",
+			expectedOk:  true,
+		},
+		{
+			name:        "cd command with hash in path",
 			line:        "cd /home/user/project # build comment",
-			expectedDir: "/home/user/project",
+			expectedDir: "/home/user/project # build comment",
 			expectedOk:  true,
 		},
 		{
@@ -57,10 +63,31 @@ func TestParseCdDir(t *testing.T) {
 			expectedOk:  true,
 		},
 		{
-			name:        "cd with Windows path",
-			line:        "cd C:\\Users\\test\\project",
-			expectedDir: "C:\\Users\\test\\project",
+			name:        "cd with Windows path containing spaces",
+			line:        "cd C:\\Users\\test user\\project",
+			expectedDir: "C:\\Users\\test user\\project",
 			expectedOk:  true,
+		},
+		{
+			name:        "cd with trailing whitespace",
+			line:        "cd /home/user/project  \r",
+			expectedDir: "/home/user/project",
+			expectedOk:  true,
+		},
+		{
+			name:       "cd without directory",
+			line:       "cd",
+			expectedOk: false,
+		},
+		{
+			name:       "cd with empty directory",
+			line:       "cd   ",
+			expectedOk: false,
+		},
+		{
+			name:       "command beginning with cd",
+			line:       "cdrom /home/user/project",
+			expectedOk: false,
 		},
 		{
 			name:        "not a cd command",
@@ -202,6 +229,29 @@ cd /home/user/project/pkg/cgopkg
 			},
 		},
 		{
+			name: "cd path with spaces included",
+			buildPlanContent: `
+cd /tmp/test project with spaces
+/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg
+/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go
+`,
+			expectedCommands: []string{
+				"cd /tmp/test project with spaces",
+				"/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg",
+				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go",
+			},
+		},
+		{
+			name: "malformed cd commands ignored",
+			buildPlanContent: `
+cd
+` + "cd   \n" + `
+cdrom
+cdrom /project/src
+`,
+			expectedCommands: nil,
+		},
+		{
 			name: "multiple cgo packages",
 			buildPlanContent: `
 cd /project/pkg/cgo1
@@ -286,6 +336,66 @@ C:/Go/pkg/tool/windows_amd64/compile.exe -o C:/tmp/out.a -p main -buildid abc ma
 			assert.Equal(t, tt.expectedCommands, commands)
 		})
 	}
+}
+
+func TestFindDepsResolvesCgoSourceFromSpacedDirectory(t *testing.T) {
+	oldExec := execCommandContext
+	t.Cleanup(func() {
+		execCommandContext = oldExec
+	})
+
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	sourceDir := filepath.Join(workDir, "source with spaces")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	sourceFile := filepath.Join(sourceDir, "sample.go")
+	require.NoError(t, os.WriteFile(sourceFile, []byte("package sample\n"), 0o644))
+
+	objDir := filepath.Join(workDir, "go-build", "b001")
+	generatedFile := filepath.Join(objDir, "sample.cgo1.go")
+	buildPlan := fmt.Sprintf(`
+cd %s
+.../cgo -objdir "%s" -importpath example.com/sample
+.../compile -o "%s" -p example.com/sample -buildid test "%s"
+`,
+		filepath.ToSlash(sourceDir),
+		filepath.ToSlash(objDir),
+		filepath.ToSlash(filepath.Join(objDir, "_pkg_.a")),
+		filepath.ToSlash(generatedFile),
+	)
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	execCommandContext = func(
+		ctx context.Context,
+		name string,
+		args ...string,
+	) *exec.Cmd {
+		assert.Equal(t, "go", name)
+		assert.Equal(t, []string{"build", "-a", "-x", "-n", "./..."}, args)
+
+		cmd := exec.CommandContext(ctx, exe, "-test.run=^TestHelperProcess$")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"GO_HELPER_BUILD_PLAN="+buildPlan,
+		)
+		return cmd
+	}
+
+	deps, err := findDeps(t.Context(), subcmdBuild, []string{"./..."})
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "example.com/sample", deps[0].ImportPath)
+	require.Len(t, deps[0].Sources, 1)
+
+	expectedSource, err := filepath.EvalSymlinks(sourceFile)
+	require.NoError(t, err)
+	actualSource, err := filepath.EvalSymlinks(deps[0].Sources[0])
+	require.NoError(t, err)
+	assert.Equal(t, expectedSource, actualSource)
+	assert.Equal(t, "sample.cgo1.go", deps[0].CgoFiles[deps[0].Sources[0]])
 }
 
 func TestListBuildPlan(t *testing.T) {

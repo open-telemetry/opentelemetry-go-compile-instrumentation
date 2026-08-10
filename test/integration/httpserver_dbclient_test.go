@@ -49,11 +49,12 @@ func TestHTTPServerDBClient(t *testing.T) {
 		t,
 		f.Traces(),
 		testutil.IsServer,
-		func(s ptrace.Span) bool { return s.Name() == "GET" },
+		func(s ptrace.Span) bool { return s.Name() == "GET /hello" },
 	)
 	sqlClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
 
 	// Assert on propagation (parent-child relationships)
 	require.Equal(t, httpServerSpan.TraceID(), sqlClientSpan.TraceID(), "trace ID mismatch")
 	require.Equal(t, httpServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be HTTP server")
+	require.True(t, httpServerSpan.ParentSpanID().IsEmpty(), "HTTP server span must be the trace root")
 }

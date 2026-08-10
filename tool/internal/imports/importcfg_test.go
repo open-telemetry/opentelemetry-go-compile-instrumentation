@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -179,6 +180,19 @@ func (r *errorReader) Read(p []byte) (int, error) {
 		return n, r.err
 	}
 	return n, nil
+}
+
+func TestParse_LongLine(t *testing.T) {
+	// Lines in importcfg files can exceed bufio.MaxScanTokenSize (64 KiB) in
+	// large build configurations with long package import paths or complex
+	// import maps. parse must not fail with bufio.ErrTooLong in that case.
+	longPath := "example.com/" + strings.Repeat("a", 128*1024)
+	input := "packagefile " + longPath + "=/path/to/pkg.a\n"
+
+	cfg, err := parse(bytes.NewReader([]byte(input)))
+	require.NoError(t, err)
+
+	assert.Equal(t, "/path/to/pkg.a", cfg.PackageFile[longPath])
 }
 
 func TestParse_ScannerError(t *testing.T) {

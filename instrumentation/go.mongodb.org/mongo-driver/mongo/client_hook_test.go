@@ -127,6 +127,19 @@ func TestBeforeConnect(t *testing.T) {
 
 		assert.Nil(t, mockCtx.GetParam(1), "param 1 (opts) should be left untouched when instrumentation is disabled")
 	})
+
+	t.Run("does not panic on nil options", func(t *testing.T) {
+		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
+
+		mockCtx := hooktest.NewMockHookContext(t.Context())
+
+		BeforeConnect(mockCtx, t.Context(), nil)
+
+		newOpts, ok := mockCtx.GetParam(1).([]*options.ClientOptions)
+		require.True(t, ok, "param 1 should be updated with a []*options.ClientOptions")
+		require.Len(t, newOpts, 1)
+		assert.Nil(t, newOpts[0], "first option should still be nil")
+	})
 }
 
 func TestBeforeNewClient(t *testing.T) {
@@ -182,5 +195,18 @@ func TestBeforeNewClient(t *testing.T) {
 		BeforeNewClient(mockCtx)
 
 		assert.Equal(t, 0, mockCtx.GetParamCount(), "no param should be set when instrumentation is disabled")
+	})
+
+	t.Run("does not panic on nil options", func(t *testing.T) {
+		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
+
+		mockCtx := hooktest.NewMockHookContext()
+
+		BeforeNewClient(mockCtx, nil)
+
+		newOpts, ok := mockCtx.GetParam(0).([]*options.ClientOptions)
+		require.True(t, ok, "param 0 should be updated with a []*options.ClientOptions")
+		require.Len(t, newOpts, 1)
+		assert.Nil(t, newOpts[0], "first option should still be nil")
 	})
 }

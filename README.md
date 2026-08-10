@@ -38,7 +38,7 @@ Just prefix the original `go build` command with `otelc`.
 
 ```bash
 cd demo/app/basic
-../../otelc go build
+../../../otelc go build
 ./basic
 [... output ...]
 ```
