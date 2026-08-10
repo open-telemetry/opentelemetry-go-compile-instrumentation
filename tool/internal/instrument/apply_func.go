@@ -49,11 +49,13 @@ func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
 	return nil
 }
 
-// syntheticNamer returns a generator of "prefixN" identifiers that are
-// guaranteed not to collide with any name already declared in funcDecl's
-// signature (receiver, parameters, and results) or with a name it has
-// already generated.
-func syntheticNamer(funcDecl *dst.FuncDecl) func(prefix string, idx *int) string {
+// syntheticNamer returns a generator of "prefix_hash_N" identifiers. hash is
+// a per-rule value (see InstFuncRule.Identity) folded into every generated
+// name to prevent conflicts with other identifiers.
+// The signature (receiver, parameters, and results) is still checked defensively
+// so the generator never reuses a name that is already declared there or one
+// it has already generated.
+func syntheticNamer(funcDecl *dst.FuncDecl, hash string) func(prefix string, idx *int) string {
 	taken := make(map[string]bool)
 	for _, list := range []*dst.FieldList{funcDecl.Recv, funcDecl.Type.Params, funcDecl.Type.Results} {
 		if list == nil {
@@ -67,7 +69,7 @@ func syntheticNamer(funcDecl *dst.FuncDecl) func(prefix string, idx *int) string
 	}
 	return func(prefix string, idx *int) string {
 		for {
-			name := fmt.Sprintf("%s%d", prefix, *idx)
+			name := fmt.Sprintf("%s_%s_%d", prefix, hash, *idx)
 			*idx++
 			if !taken[name] {
 				taken[name] = true
@@ -77,12 +79,12 @@ func syntheticNamer(funcDecl *dst.FuncDecl) func(prefix string, idx *int) string
 	}
 }
 
-func collectReturnValues(funcDecl *dst.FuncDecl) []string {
+func collectReturnValues(funcDecl *dst.FuncDecl, hash string) []string {
 	// Add explicit names for return values, they can be further referenced if
 	// we're willing
 	var retVals []string // nil by default
 	if retList := funcDecl.Type.Results; retList != nil {
-		next := syntheticNamer(funcDecl)
+		next := syntheticNamer(funcDecl, hash)
 		idx := 0
 		for _, field := range retList.List {
 			util.Assert(field.Type != nil, "why not otherwise")
@@ -109,9 +111,9 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 	return retVals
 }
 
-func collectArguments(funcDecl *dst.FuncDecl) []string {
+func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 	args := make([]string, 0)
-	next := syntheticNamer(funcDecl)
+	next := syntheticNamer(funcDecl, hash)
 	idx := 0
 	if ast.HasReceiver(funcDecl) {
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
@@ -241,10 +243,10 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	ip.targetFunc = funcDecl
 
 	// Collect return values from target function
-	retVals := collectReturnValues(funcDecl)
+	retVals := collectReturnValues(funcDecl, t.Identity())
 
 	// Collect all arguments from target function, including the receiver
-	args := collectArguments(funcDecl)
+	args := collectArguments(funcDecl, t.Identity())
 
 	// Generate the trampoline-jump-if. The trampoline-jump-if is a conditional
 	// jump that jumps to the trampoline function, it looks something like this
