@@ -44,7 +44,6 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 		if err != nil {
 			return ex.Wrapf(err, "parsing rendered template for func %s", funcDecl.Name.Name)
 		}
-		renameReturnValues(funcDecl)
 		funcDecl.Body.List = append(stmts, funcDecl.Body.List...)
 		ip.Info("Apply directive rule", "rule", r, "func", funcDecl.Name.Name)
 	}
