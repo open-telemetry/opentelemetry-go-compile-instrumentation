@@ -11,7 +11,7 @@ import (
 )
 
 // Compile-time assertion that HeaderCarrier implements propagation.TextMapCarrier.
-var _ propagation.TextMapCarrier = (*HeaderCarrier)(nil)
+var _ propagation.TextMapCarrier = HeaderCarrier{}
 
 // HeaderCarrier adapts Kafka message headers to the OpenTelemetry TextMapCarrier
 // interface so trace context can be propagated through Kafka messages.
