@@ -121,8 +121,8 @@ func TestWriteGoMod(t *testing.T) {
 
 	// Create a modfile
 	mf := &modfile.File{}
-	mf.AddModuleStmt("example.com/test")
-	mf.AddGoStmt("1.21")
+	require.NoError(t, mf.AddModuleStmt("example.com/test"))
+	require.NoError(t, mf.AddGoStmt("1.21"))
 	err := mf.AddRequire("github.com/stretchr/testify", "v1.8.4")
 	require.NoError(t, err)
 
