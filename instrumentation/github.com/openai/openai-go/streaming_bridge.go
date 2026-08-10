@@ -4,7 +4,6 @@
 package v1
 
 import (
-	"context"
 	"io"
 	"time"
 
@@ -22,9 +21,7 @@ func newStreamingReader(
 	body io.ReadCloser,
 	span trace.Span,
 	start time.Time,
-	model, opName, provider string,
 	op operationType,
-	ctx context.Context,
 ) io.ReadCloser {
 	var streamingOp streaming.OperationType
 	switch op {
@@ -33,5 +30,5 @@ func newStreamingReader(
 	case opCompletion:
 		streamingOp = streaming.OpCompletion
 	}
-	return streaming.NewStreamingReader(body, span, start, model, opName, provider, streamingOp, ctx)
+	return streaming.NewStreamingReader(body, span, start, streamingOp)
 }

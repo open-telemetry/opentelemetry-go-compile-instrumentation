@@ -10,7 +10,6 @@ package streaming
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"sync/atomic"
@@ -41,9 +40,6 @@ type StreamingReader struct {
 	responseModel string
 	reasons       []string
 	span          trace.Span
-	model         string
-	opName        string
-	provider      string
 	op            OperationType
 	done          atomic.Bool
 }
@@ -52,18 +48,13 @@ func NewStreamingReader(
 	body io.ReadCloser,
 	span trace.Span,
 	start time.Time,
-	model, opName, provider string,
 	op OperationType,
-	_ context.Context,
 ) *StreamingReader {
 	return &StreamingReader{
-		reader:   body,
-		start:    start,
-		span:     span,
-		model:    model,
-		opName:   opName,
-		provider: provider,
-		op:       op,
+		reader: body,
+		start:  start,
+		span:   span,
+		op:     op,
 	}
 }
 
