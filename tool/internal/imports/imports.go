@@ -219,3 +219,26 @@ func CollectPaths(ctx context.Context, root *dst.File, buildFlags ...string) map
 	}
 	return paths
 }
+
+// Paths returns every import path declared in the file, without resolving package
+// names. Prefer this over CollectPaths when only the path strings are needed.
+func Paths(root *dst.File) []string {
+	if root == nil {
+		return nil
+	}
+	var paths []string
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			importSpec, isImport := spec.(*dst.ImportSpec)
+			if !isImport || importSpec.Path == nil {
+				continue
+			}
+			paths = append(paths, strings.Trim(importSpec.Path.Value, `"`))
+		}
+	}
+	return paths
+}

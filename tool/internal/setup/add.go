@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 
@@ -14,7 +15,9 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
@@ -28,23 +31,111 @@ var requiredImports = map[string]string{
 	"unsafe":        "_",           // The golinkname tag depends on unsafe
 }
 
-func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []dst.Decl {
-	var imports map[string]string
-	if len(funcRules) > 0 {
-		imports = maps.Clone(requiredImports) // clone required imports to avoid mutating the global map
-		for _, m := range funcRules {
-			imports[m.Path] = ast.IdentIgnore
+// registerBlankImport records path as a blank import in otelc.runtime.go so
+// go build includes it in the action graph before toolexec runs.
+func registerBlankImport(dst map[string]string, path string) {
+	if path == "" || path == "C" {
+		return
+	}
+	dst[path] = ast.IdentIgnore
+}
+
+func registerRuleImports(dst, ruleImports map[string]string) {
+	for _, path := range ruleImports {
+		registerBlankImport(dst, path)
+	}
+}
+
+// collectRuntimeImports gathers every import that instrumentation may introduce
+// into a compile unit. go build finalizes its action graph before toolexec, so
+// these paths must appear as blank imports in otelc.runtime.go.
+func collectRuntimeImports(matched []*rule.InstRuleSet) (map[string]string, []*rule.InstFuncRule, error) {
+	importsMap := make(map[string]string)
+	funcRules := make([]*rule.InstFuncRule, 0)
+
+	for _, m := range matched {
+		for _, r := range m.AllFuncRules() {
+			funcRules = append(funcRules, r)
+			registerBlankImport(importsMap, r.Path)
+			registerRuleImports(importsMap, r.Imports)
 		}
-	} else {
-		imports = make(map[string]string)
+		for _, r := range m.FileRules {
+			registerBlankImport(importsMap, r.Path)
+			registerRuleImports(importsMap, r.Imports)
+			if err := collectFileRuleSourceImports(importsMap, r); err != nil {
+				return nil, nil, err
+			}
+		}
+		for _, rs := range m.RawRules {
+			for _, r := range rs {
+				registerRuleImports(importsMap, r.Imports)
+			}
+		}
+		for _, rs := range m.StructRules {
+			for _, r := range rs {
+				registerRuleImports(importsMap, r.Imports)
+			}
+		}
+		for _, rs := range m.CallRules {
+			for _, r := range rs {
+				registerRuleImports(importsMap, r.Imports)
+			}
+		}
+		for _, rs := range m.DirectiveRules {
+			for _, r := range rs {
+				registerRuleImports(importsMap, r.Imports)
+			}
+		}
+		for _, rs := range m.DeclRules {
+			for _, r := range rs {
+				registerRuleImports(importsMap, r.Imports)
+			}
+		}
 	}
-	for _, m := range fileRules {
-		imports[m.Path] = ast.IdentIgnore
+
+	if len(funcRules) > 0 {
+		maps.Copy(importsMap, requiredImports)
 	}
-	importDecls := make([]dst.Decl, 0, len(imports))
-	// Sort the keys to ensure deterministic order
-	for _, k := range slices.Sorted(maps.Keys(imports)) {
-		importDecls = append(importDecls, ast.ImportDecl(imports[k], k))
+
+	return importsMap, funcRules, nil
+}
+
+// collectFileRuleSourceImports parses the add_file source (often //go:build ignore)
+// and blank-registers its imports. Blank-importing rule.Path alone only pulls the
+// stub package into the build graph, not dependencies of the ignored implementation.
+func collectFileRuleSourceImports(dst map[string]string, r *rule.InstFileRule) error {
+	if r.ResolvedPath == "" || r.File == "" {
+		return nil
+	}
+
+	file := filepath.Join(r.ResolvedPath, r.File)
+	if !util.PathExists(file) {
+		return ex.Newf("file %s not found in %s for rule %s", r.File, r.ResolvedPath, r.Name)
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return ex.Wrapf(err, "reading rule source file %s", file)
+	}
+
+	root, err := ast.NewAstParser().ParseSource(ast.StripBuildIgnore(string(data)))
+	if err != nil {
+		return ex.Wrapf(err, "parsing rule source file %s", file)
+	}
+
+	for _, path := range imports.Paths(root) {
+		registerBlankImport(dst, path)
+	}
+	return nil
+}
+
+func genImportDecl(importsMap map[string]string) []dst.Decl {
+	if len(importsMap) == 0 {
+		return nil
+	}
+	importDecls := make([]dst.Decl, 0, len(importsMap))
+	for _, k := range slices.Sorted(maps.Keys(importsMap)) {
+		importDecls = append(importDecls, ast.ImportDecl(importsMap[k], k))
 	}
 	return importDecls
 }
@@ -113,22 +204,18 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
-func (sp *SetupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, packagePath, packageName string) error {
-	funcRules := []*rule.InstFuncRule{}
-	fileRules := []*rule.InstFileRule{}
-	for _, m := range matched {
-		funcRules = append(funcRules, m.AllFuncRules()...)
-		fileRules = append(fileRules, m.FileRules...)
-	}
-	if len(funcRules) == 0 && len(fileRules) == 0 {
+func (sp *SetupPhase) addDeps(
+	ctx context.Context,
+	importsMap map[string]string,
+	funcRules []*rule.InstFuncRule,
+	packagePath, packageName string,
+) error {
+	importDecls := genImportDecl(importsMap)
+	varDecls := genVarDecl(funcRules)
+	if len(importDecls) == 0 && len(varDecls) == 0 {
 		return nil
 	}
 
-	// Add required imports
-	importDecls := genImportDecl(funcRules, fileRules)
-	// Generate the variable declarations that used by otel runtime
-	varDecls := genVarDecl(funcRules)
-	// Build the ast
 	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), packageName)
 	otelcRuntimeFilePath := filepath.Join(packagePath, OtelcRuntimeFile)
 	// Track file in state manager

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -91,7 +92,7 @@ const marker = "//go:build ignore"
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, stripBuildIgnoreTag(tt.input))
+			assert.Equal(t, tt.expected, ast.StripBuildIgnore(tt.input))
 		})
 	}
 }
@@ -228,4 +229,42 @@ func SubHelper() {}
 	require.NoError(t, err)
 	assert.Contains(t, string(outData), "package targetpkg")
 	assert.Contains(t, string(outData), "func SubHelper()")
+}
+
+func TestApplyFileRule_MergesTopLevelImports(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+
+	content := `//go:build ignore
+
+package sourcepkg
+
+import "fmt"
+
+func Helper() { fmt.Println("hi") }
+`
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &InstrumentPhase{
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workDir: workDir,
+	}
+
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "test_file_rule_imports",
+			Imports: map[string]string{"log": "log"},
+		},
+		File:         "helper.go",
+		Path:         "example.com/mypkg",
+		ResolvedPath: srcDir,
+	}
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.NoError(t, err)
+
+	outData, err := os.ReadFile(filepath.Join(workDir, "otelc.helper.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(outData), `"fmt"`)
+	assert.Contains(t, string(outData), `"log"`)
 }

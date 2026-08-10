@@ -6,7 +6,6 @@ package instrument
 import (
 	"context"
 	"fmt"
-	"go/build/constraint"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,21 +15,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
-
-// stripBuildIgnoreTag removes genuine "//go:build ignore" constraint lines
-// from content, line by line. It leaves every other occurrence of that text —
-// inside a string literal, inside comment prose, anywhere that isn't itself a
-// build-constraint line — untouched. See #1069: a whole-file substring
-// replace corrupted both of those.
-func stripBuildIgnoreTag(content string) string {
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if constraint.IsGoBuild(line) {
-			lines[i] = ""
-		}
-	}
-	return strings.Join(lines, "\n")
-}
 
 // applyFileRule introduces the new file to the target package at compile time.
 func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
@@ -45,12 +29,17 @@ func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 	if err != nil {
 		return ex.Wrapf(err, "reading rule source file %s", file)
 	}
-	root, err := ast.NewAstParser().ParseSource(stripBuildIgnoreTag(string(data)))
+	root, err := ast.NewAstParser().ParseSource(ast.StripBuildIgnore(string(data)))
 	if err != nil {
 		return ex.Wrapf(err, "parsing rule source file %s", file)
 	}
 	// Always rename the package name to the target package name
 	root.Name.Name = pkgName
+
+	// Merge optional top-level imports: into the added file (see docs/rules.md).
+	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+		return err
+	}
 
 	// The file being added has its own imports that need to be in importcfg.
 	// Without this, the compiler will fail with "could not import X" errors.
