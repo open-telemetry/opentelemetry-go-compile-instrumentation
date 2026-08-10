@@ -274,6 +274,46 @@ go 1.21
 	assert.Contains(t, got, "replace "+nestedModule+" => "+nestedDir)
 }
 
+// TestSyncDeps_SiblingNestedModule mirrors the real openai-go layout: v1, v2,
+// v3 sit side by side, and their shared internal/streaming module lives
+// under v1's directory rather than under whichever version was actually
+// matched. A consumer depending only on v2 must still get a replace
+// directive for the sibling module discovered under the matched directory's
+// parent, not just under the matched directory itself.
+func TestSyncDeps_SiblingNestedModule(t *testing.T) {
+	goMod := `module example.com/test
+
+go 1.21
+`
+	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"github.com/openai/openai-go/v2"})
+
+	// internal/streaming lives under the parent of the matched v2 directory
+	// (i.e. under github.com/openai/openai-go/), as a sibling of v2, not a
+	// descendant of it.
+	siblingDir := filepath.Join(
+		buildTempDir, unzippedInstDir, "github.com", "openai", "openai-go", "internal", "streaming",
+	)
+	require.NoError(t, os.MkdirAll(siblingDir, 0o755))
+	siblingModule := util.OtelcInstRoot + "/github.com/openai/openai-go/internal/streaming"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(siblingDir, "go.mod"),
+		[]byte("module "+siblingModule+"\ngo 1.21\n"),
+		0o644,
+	))
+
+	require.NoError(t, syncDeps(
+		t.Context(),
+		map[string]bool{util.OtelcInstRoot + "/github.com/openai/openai-go/v2": true},
+		tempDir,
+	))
+
+	content, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+	got := string(content)
+
+	assert.Contains(t, got, "replace "+siblingModule+" => "+siblingDir)
+}
+
 func TestDiscoverNestedModuleReplaces(t *testing.T) {
 	tempDir := t.TempDir()
 	require.NoError(t, os.WriteFile(

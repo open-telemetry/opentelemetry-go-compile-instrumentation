@@ -127,6 +127,12 @@ func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) 
 // match as an instrumentation import on their own. Without a replace
 // directive for them here, a downstream consumer's "go mod tidy" tries to
 // fetch them from a real module proxy and fails.
+//
+// The walk can pick up modules the consumer never actually requires — e.g.
+// a matched v1 directory that nests v2/v3 copies inside it, or, with the
+// parent-directory walk in syncDeps, sibling instrumentations under a
+// shared parent. That's intentional and harmless: "go mod tidy" ignores a
+// replace directive for a module that isn't in the build list.
 func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 	nested := make(map[string]string)
 	topGoMod := filepath.Join(dir, "go.mod")
@@ -185,13 +191,22 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	}
 
 	// Some matched instrumentation modules have their own nested local
-	// modules (see discoverNestedModuleReplaces). Add replace directives for
-	// those too, so "go mod tidy" below doesn't try to fetch them remotely.
-	matchedDirs := make([]string, 0, len(replaces))
+	// modules (see discoverNestedModuleReplaces) — either inside the matched
+	// module's own directory, or as a sibling shared by several versioned
+	// copies of one instrumentation (e.g. openai-go's v1/v2/v3 all sharing
+	// openai-go/internal/streaming, which sits under v1's directory, a
+	// sibling of v2/ and v3/ rather than a descendant of either). Walking
+	// each matched directory's parent in addition to the directory itself
+	// catches both shapes. The parent walk can also re-discover sibling
+	// version directories or unrelated instrumentations under a shared
+	// parent; a replace directive for a module the consumer doesn't
+	// actually require is harmless, since "go mod tidy" ignores it.
+	walkDirs := make(map[string]bool, len(replaces)*2)
 	for _, dir := range replaces {
-		matchedDirs = append(matchedDirs, dir)
+		walkDirs[dir] = true
+		walkDirs[filepath.Dir(dir)] = true
 	}
-	for _, dir := range matchedDirs {
+	for dir := range walkDirs {
 		nested, nestedErr := discoverNestedModuleReplaces(dir)
 		if nestedErr != nil {
 			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
