@@ -16,8 +16,20 @@ import (
 )
 
 func TestIsSetup(t *testing.T) {
-	// isSetup is currently a stub that always reports false.
+	// By default, no setup file exists.
 	assert.False(t, isSetup())
+
+	// Set up a mock environment
+	dir := newModuleDir(t)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	
+	// Create the build temp dir and the matched file
+	matchedFile := util.GetMatchedRuleFile()
+	require.NoError(t, os.MkdirAll(filepath.Dir(matchedFile), 0o755))
+	require.NoError(t, os.WriteFile(matchedFile, []byte("{}"), 0o644))
+
+	// isSetup should now report true
+	assert.True(t, isSetup())
 }
 
 // newModuleDir creates a minimal Go module in a fresh temp directory and
