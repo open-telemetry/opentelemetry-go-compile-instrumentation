@@ -55,7 +55,7 @@ func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
 // The signature (receiver, parameters, and results) is still checked defensively
 // so the generator never reuses a name that is already declared there or one
 // it has already generated.
-func syntheticNamer(funcDecl *dst.FuncDecl, hash string) func(prefix string, idx *int) string {
+func syntheticNamer(funcDecl *dst.FuncDecl, hash string) func(prefix string) string {
 	taken := make(map[string]bool)
 	for _, list := range []*dst.FieldList{funcDecl.Recv, funcDecl.Type.Params, funcDecl.Type.Results} {
 		if list == nil {
@@ -67,10 +67,11 @@ func syntheticNamer(funcDecl *dst.FuncDecl, hash string) func(prefix string, idx
 			}
 		}
 	}
-	return func(prefix string, idx *int) string {
+	idx := 0
+	return func(prefix string) string {
 		for {
-			name := fmt.Sprintf("%s_%s_%d", prefix, hash, *idx)
-			*idx++
+			name := fmt.Sprintf("%s_%s_%d", prefix, hash, idx)
+			idx++
 			if !taken[name] {
 				taken[name] = true
 				return name
@@ -85,13 +86,12 @@ func collectReturnValues(funcDecl *dst.FuncDecl, hash string) []string {
 	var retVals []string // nil by default
 	if retList := funcDecl.Type.Results; retList != nil {
 		next := syntheticNamer(funcDecl, hash)
-		idx := 0
 		for _, field := range retList.List {
 			util.Assert(field.Type != nil, "why not otherwise")
 			if field.Names == nil {
 				// Unnamed Return Values, e.g. func() (int, string)
 				// Rename (for referenceability)
-				name := next(unnamedRetValName, &idx)
+				name := next(unnamedRetValName)
 				field.Names = []*dst.Ident{ast.Ident(name)}
 				// Collect (for further use)
 				retVals = append(retVals, name)
@@ -100,7 +100,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl, hash string) []string {
 				// Collect only (for further use)
 				for _, name := range field.Names {
 					if name.Name == ast.IdentIgnore {
-						name.Name = next(ignoredRetValName, &idx)
+						name.Name = next(ignoredRetValName)
 					}
 					retVals = append(retVals, name.Name)
 				}
@@ -114,7 +114,6 @@ func collectReturnValues(funcDecl *dst.FuncDecl, hash string) []string {
 func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 	args := make([]string, 0)
 	next := syntheticNamer(funcDecl, hash)
-	idx := 0
 	if ast.HasReceiver(funcDecl) {
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
 			// Named receiver, e.g. func (r R) F() {}
@@ -122,7 +121,7 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 			args = append(args, receiver)
 		} else {
 			// Unnamed receiver, e.g. func (R) F() {}
-			receiver := next(ignoredParam, &idx)
+			receiver := next(ignoredParam)
 			funcDecl.Recv.List[0].Names = []*dst.Ident{ast.Ident(receiver)}
 			args = append(args, receiver)
 		}
@@ -132,14 +131,14 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 		if field.Names == nil {
 			// Unnamed Parameters, e.g. func(int, string){}
 			// Assign a name for these parameters and collect it then
-			name := next(ignoredParam, &idx)
+			name := next(ignoredParam)
 			field.Names = []*dst.Ident{ast.Ident(name)}
 			args = append(args, name)
 		} else {
 			// Named Parameters, e.g. func(a int, b string){}
 			for _, name := range field.Names {
 				if name.Name == ast.IdentIgnore {
-					name.Name = next(ignoredParam, &idx)
+					name.Name = next(ignoredParam)
 				}
 				args = append(args, name.Name)
 			}
