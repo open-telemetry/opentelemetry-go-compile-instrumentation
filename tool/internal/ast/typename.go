@@ -108,16 +108,26 @@ func fieldListContainsType(fields *dst.FieldList, typeStr string, imports map[st
 	return false, nil
 }
 
-// MatchesTypeName reports whether node's type matches the type-name string typeStr.
-// Returns an error when typeStr cannot be parsed. Matching is done without
-// import-alias resolution (nil imports), matching the fallback behavior
-// described on matches.
-func MatchesTypeName(node dst.Expr, typeStr string) (bool, error) {
+// MatchesTypeName reports whether node's type matches the type-name string
+// typeStr. imports resolves the local identifier used at node's use site to
+// its real import path; see ImportAliasMap. Pass nil when no import context
+// is available
+// Returns an error when typeStr cannot be parsed.
+func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (bool, error) {
 	tn, err := parseTypeName(typeStr)
 	if err != nil {
 		return false, err
 	}
-	return tn.matches(node, nil), nil
+	return tn.matches(node, imports), nil
+}
+
+// ImportAliasMap builds a map from the local identifier used to reference an
+// imported package within file to that package's real import path. See imports on
+// MatchesTypeName for how to use the result, and importAliasMap for the
+// resolution rules.
+// Returns nil when file is nil.
+func ImportAliasMap(file *dst.File) map[string]string {
+	return importAliasMap(file)
 }
 
 // importAliasMap builds a map from the local identifier used to reference an

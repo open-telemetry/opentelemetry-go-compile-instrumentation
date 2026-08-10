@@ -16,6 +16,7 @@ import (
 type funcTemplateData struct {
 	funcDecl      *dst.FuncDecl
 	directiveArgs []ast.DirectiveArg
+	imports       map[string]string
 
 	argsCollected bool
 	args          []string
@@ -27,8 +28,13 @@ type funcTemplateData struct {
 // newFuncTemplateData builds the template data for funcDecl. directiveArgs
 // are the key:value arguments parsed from the directive comment that matched
 // funcDecl (nil for callers that don't have directive args, e.g. raw rules).
-func newFuncTemplateData(funcDecl *dst.FuncDecl, directiveArgs []ast.DirectiveArg) *funcTemplateData {
-	return &funcTemplateData{funcDecl: funcDecl, directiveArgs: directiveArgs}
+// imports resolves the local identifiers used in funcDecl's enclosing file to
+// their real import paths (see ast.ImportAliasMap); if nil, FuncArgumentOfType
+// and FuncReturnOfType fall back to matching against a type name's package tail.
+func newFuncTemplateData(
+	funcDecl *dst.FuncDecl, directiveArgs []ast.DirectiveArg, imports map[string]string,
+) *funcTemplateData {
+	return &funcTemplateData{funcDecl: funcDecl, directiveArgs: directiveArgs, imports: imports}
 }
 
 // FuncName returns the matched function's name. Template usage: {{.FuncName}}
@@ -98,7 +104,7 @@ func (d *funcTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
 	idx := 0
 	for _, field := range d.funcDecl.Type.Params.List {
 		for range field.Names {
-			matched, err := ast.MatchesTypeName(field.Type, typeStr)
+			matched, err := ast.MatchesTypeName(field.Type, typeStr, d.imports)
 			if err != nil {
 				return "", err
 			}
@@ -122,7 +128,7 @@ func (d *funcTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	idx := 0
 	for _, field := range d.funcDecl.Type.Results.List {
 		for range field.Names {
-			matched, err := ast.MatchesTypeName(field.Type, typeStr)
+			matched, err := ast.MatchesTypeName(field.Type, typeStr, d.imports)
 			if err != nil {
 				return "", err
 			}

@@ -28,13 +28,14 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 	if err != nil {
 		return ex.Wrap(err)
 	}
+	imports := ast.ImportAliasMap(root)
 	for _, match := range matches {
 		funcDecl := match.Func
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
 		)
-		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, match.Args))
+		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, match.Args, imports))
 		if err != nil {
 			return ex.Wrapf(err, "rendering template for func %s", funcDecl.Name.Name)
 		}

@@ -419,22 +419,22 @@ func TestMatchesTypeName(t *testing.T) {
 		Sel: &dst.Ident{Name: "Context"},
 	}
 
-	matched, err := MatchesTypeName(ctxType, "context.Context")
+	matched, err := MatchesTypeName(ctxType, "context.Context", nil)
 	require.NoError(t, err)
 	assert.True(t, matched)
 
-	matched, err = MatchesTypeName(ctxType, "io.Reader")
+	matched, err = MatchesTypeName(ctxType, "io.Reader", nil)
 	require.NoError(t, err)
 	assert.False(t, matched)
 
-	_, err = MatchesTypeName(ctxType, "[]invalid")
+	_, err = MatchesTypeName(ctxType, "[]invalid", nil)
 	assert.Error(t, err)
 }
 
 func TestMatchesTypeName_UnsupportedNodeDoesNotMatch(t *testing.T) {
 	sliceType := &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}}
 
-	matched, err := MatchesTypeName(sliceType, "context.Context")
+	matched, err := MatchesTypeName(sliceType, "context.Context", nil)
 	require.NoError(t, err)
 	assert.False(t, matched)
 }

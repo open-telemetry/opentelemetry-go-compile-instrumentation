@@ -17,16 +17,23 @@ import (
 
 // Helper function to parse Go source code into a function decl
 func parseFunc(t *testing.T, source string) *dst.FuncDecl {
+	funcDecl, _ := parseFuncWithImports(t, source)
+	return funcDecl
+}
+
+// Helper function to parse Go source code into a function decl, alongside
+// its enclosing file's import alias map (see ast.ImportAliasMap).
+func parseFuncWithImports(t *testing.T, source string) (*dst.FuncDecl, map[string]string) {
 	parser := ast.NewAstParser()
 	file, err := parser.ParseSource(source)
 	require.NoError(t, err)
 	for _, decl := range file.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
-			return funcDecl
+			return funcDecl, ast.ImportAliasMap(file)
 		}
 	}
 	require.Fail(t, "no function declaration found in source")
-	return nil
+	return nil, nil
 }
 
 // Helper function to parse Go snippet into statements
