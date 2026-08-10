@@ -5,6 +5,7 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -442,12 +443,23 @@ func TestRestoreOtelYAMLValidationFilesJoinsErrors(t *testing.T) {
 
 	got, err := restoreOtelYAMLValidationFiles(
 		result,
-		fmt.Errorf("pin failed"),
+		errors.New("pin failed"),
 		[]fileBackup{{path: dir}},
 	)
 	require.Same(t, result, got)
 	require.ErrorContains(t, err, "pin failed")
 	require.Error(t, err)
+}
+
+func TestLoadOtelYAMLImportsMalformedSecondDocument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), InstrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(path, []byte(`instrumentations: []
+---
+instrumentations: [
+`), 0o644))
+
+	_, err := loadOtelYAMLImports(path)
+	require.ErrorContains(t, err, "parsing")
 }
 
 func TestEnsureOtelcRequire(t *testing.T) {
@@ -1219,6 +1231,26 @@ func TestDiscoverPinConfigs(t *testing.T) {
 	require.Equal(t, map[string]bool{unconfigured: true}, unconfiguredDirs)
 }
 
+func TestDiscoverPinConfigsConflicts(t *testing.T) {
+	t.Run("tool files", func(t *testing.T) {
+		dir := t.TempDir()
+		writeToolFile(t, filepath.Join(dir, ToolFileCanonical), "example.com/canonical")
+		writeToolFile(t, filepath.Join(dir, ToolFileAlias), "example.com/alias")
+
+		_, _, err := discoverPinConfigs(map[string]bool{dir: true})
+		require.Error(t, err)
+	})
+
+	t.Run("yaml files", func(t *testing.T) {
+		dir := t.TempDir()
+		writeOtelYAMLFile(t, filepath.Join(dir, InstrumentationYAMLCanonical), "example.com/canonical")
+		writeOtelYAMLFile(t, filepath.Join(dir, InstrumentationYAMLAlias), "example.com/alias")
+
+		_, _, err := discoverPinConfigs(map[string]bool{dir: true})
+		require.Error(t, err)
+	})
+}
+
 func TestMaterializeModuleConfigsErrors(t *testing.T) {
 	t.Run("malformed tool file", func(t *testing.T) {
 		dir := t.TempDir()
@@ -1257,6 +1289,39 @@ func TestProcessPinConfigsMalformedYAML(t *testing.T) {
 	require.ErrorContains(t, err, "parsing")
 }
 
+func TestProcessPinConfigsAutoPinMaterializeError(t *testing.T) {
+	dir := t.TempDir()
+	toolFile := filepath.Join(dir, ToolFileCanonical)
+	require.NoError(t, os.WriteFile(toolFile, []byte("not go"), 0o644))
+
+	err := processPinConfigs(t.Context(), []modulePinConfig{{
+		moduleDir: dir,
+		toolFile:  toolFile,
+	}}, PinOptions{AutoPin: true})
+	require.ErrorContains(t, err, "parsing tool file")
+}
+
+func TestBackupOtelYAMLValidationFilesError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "go.mod"), 0o755))
+
+	_, err := backupOtelYAMLValidationFiles([]modulePinConfig{{moduleDir: dir}})
+	require.ErrorContains(t, err, "reading")
+}
+
+func TestApplyOtelYAMLValidationPruneWriteError(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir := filepath.Join(dir, "module")
+
+	err := applyOtelYAMLValidation(
+		map[string]string{moduleDir: filepath.Join(dir, "missing.yml")},
+		map[string]map[string]bool{moduleDir: {}},
+		nil,
+		PinOptions{Prune: true},
+	)
+	require.ErrorContains(t, err, "stating")
+}
+
 func TestFindPinModuleDirsUsesProvidedModules(t *testing.T) {
 	moduleDirs := map[string]bool{"example": true}
 	opts := PinOptions{ModuleDirs: moduleDirs}
@@ -1288,6 +1353,31 @@ func TestFindPinModuleDirsDiscoversModule(t *testing.T) {
 	for moduleDir := range moduleDirs {
 		require.Equal(t, filepath.Clean(dir), filepath.Clean(moduleDir))
 	}
+}
+
+func TestPinLockedFindModuleDirsError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.25\n"),
+		0o644,
+	))
+
+	result, err := pinLocked(t.Context(), PinOptions{Args: []string{"./does-not-exist"}})
+	require.Nil(t, result)
+	require.ErrorContains(t, err, "getting build packages")
+}
+
+func TestPinLockedDiscoveryConflict(t *testing.T) {
+	dir := t.TempDir()
+	writeToolFile(t, filepath.Join(dir, ToolFileCanonical), "example.com/canonical")
+	writeToolFile(t, filepath.Join(dir, ToolFileAlias), "example.com/alias")
+
+	result, err := pinLocked(t.Context(), PinOptions{ModuleDirs: map[string]bool{dir: true}})
+	require.Nil(t, result)
+	require.Error(t, err)
 }
 
 func TestPinLockedEmptyModuleDirs(t *testing.T) {
