@@ -154,8 +154,11 @@ func TestCollectReturnValues(t *testing.T) {
 			expected: []string{syntheticIgnoredRetVal(0), syntheticIgnoredRetVal(1)},
 		},
 		{
-			name:     "underscore return collides with existing synthetic-looking return name",
-			src:      fmt.Sprintf("package main\nfunc F() (%s error, _ bool) { return nil, false }", syntheticIgnoredRetVal(0)),
+			name: "underscore return collides with existing synthetic-looking return name",
+			src: fmt.Sprintf(
+				"package main\nfunc F() (%s error, _ bool) { return nil, false }",
+				syntheticIgnoredRetVal(0),
+			),
 			expected: []string{syntheticIgnoredRetVal(0), syntheticIgnoredRetVal(1)},
 		},
 	}
@@ -202,7 +205,10 @@ func TestCollectNamesNoCollision(t *testing.T) {
 		},
 		{
 			name: "blank return collides with existing synthetic-looking return name",
-			src:  fmt.Sprintf("package main\nfunc F() (%s error, _ bool) { return nil, false }", syntheticIgnoredRetVal(0)),
+			src: fmt.Sprintf(
+				"package main\nfunc F() (%s error, _ bool) { return nil, false }",
+				syntheticIgnoredRetVal(0),
+			),
 		},
 	}
 
