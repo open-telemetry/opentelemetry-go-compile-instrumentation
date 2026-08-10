@@ -7,12 +7,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"go.opentelemetry.io/otelc/tool/data"
 )
 
 func TestGenerate(t *testing.T) {
@@ -23,6 +22,9 @@ later:
   target: example.com/target
   version: v2.0.0
 earlier:
+  target: example.com/target
+  version: v1.0.0
+duplicate:
   target: example.com/target
   version: v1.0.0
 empty:
@@ -110,6 +112,20 @@ func TestLoadModuleEntriesMissingDirectory(t *testing.T) {
 	require.ErrorContains(t, err, "opening module root")
 }
 
+func TestLoadModuleEntriesRejectsEscapingRuleSymlink(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "module")
+	require.NoError(t, os.Mkdir(moduleDir, 0o755))
+	external := filepath.Join(root, "external.otelc.yaml")
+	require.NoError(t, os.WriteFile(external, []byte("rule:\n  target: example.com/external\n"), 0o644))
+	if err := os.Symlink(external, filepath.Join(moduleDir, "escaped.otelc.yaml")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err := loadModuleEntries(moduleDir, "example.com/module")
+	require.Error(t, err)
+}
+
 func TestIsRuleFile(t *testing.T) {
 	tests := map[string]bool{
 		"otelc.yaml":        true,
@@ -135,9 +151,40 @@ func TestLoad(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
 
-	var decoded Manifest
-	require.NoError(t, json.Unmarshal(data.GetManifestJSON(), &decoded))
-	require.Equal(t, decoded, got)
+	for _, entry := range got {
+		assert.NotEmpty(t, entry.ModulePath)
+		assert.NotEmpty(t, entry.Target)
+	}
+	assert.True(t, slices.IsSortedFunc(got, compareEntries))
+	assert.Len(t, slices.Compact(slices.Clone(got)), len(got))
+}
+
+func TestEntryOmitsEmptyVersionRange(t *testing.T) {
+	content, err := json.Marshal(Entry{ModulePath: "example.com/module", Target: "example.com/target"})
+	require.NoError(t, err)
+	assert.NotContains(t, string(content), "versionRange")
+}
+
+func compareEntries(a, b Entry) int {
+	if a.ModulePath < b.ModulePath {
+		return -1
+	}
+	if a.ModulePath > b.ModulePath {
+		return 1
+	}
+	if a.Target < b.Target {
+		return -1
+	}
+	if a.Target > b.Target {
+		return 1
+	}
+	if a.VersionRange < b.VersionRange {
+		return -1
+	}
+	if a.VersionRange > b.VersionRange {
+		return 1
+	}
+	return 0
 }
 
 func writeModule(t *testing.T, root, relative, modulePath string) {

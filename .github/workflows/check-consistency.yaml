@@ -35,6 +35,8 @@ jobs:
               - 'tool/internal/instrument/api.tmpl'
               - 'tool/internal/instrument/testdata/**'
               - 'instrumentation/**/go.mod'
+              - 'instrumentation/**/otelc.yml'
+              - 'instrumentation/**/otelc.yaml'
               - 'instrumentation/**/*.otelc.yml'
               - 'instrumentation/**/*.otelc.yaml'
               - 'tool/internal/manifest/**'

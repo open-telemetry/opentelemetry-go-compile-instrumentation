@@ -5,6 +5,8 @@ package manifest
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,10 +19,13 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 )
 
+// Entry describes a distinct instrumentation module, target package, and
+// minimum version bound.
 type Entry struct {
-	ModulePath   string `json:"modulePath"`
-	Target       string `json:"target"`
-	VersionRange string `json:"versionRange"`
+	ModulePath string `json:"modulePath"`
+	Target     string `json:"target"`
+	// VersionRange is a minimum version bound. Empty means all versions.
+	VersionRange string `json:"versionRange,omitempty"`
 }
 
 type Manifest []Entry
@@ -64,6 +69,7 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 		}
 		return strings.Compare(a.VersionRange, b.VersionRange)
 	})
+	manifest = slices.Compact(manifest)
 	return manifest, nil
 }
 
@@ -98,15 +104,16 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 	}
 	defer root.Close()
 
-	err = filepath.WalkDir(moduleDir, func(path string, d os.DirEntry, err error) error {
+	rootFS := root.FS()
+	err = fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if path != moduleDir {
-				if _, statErr := os.Stat(filepath.Join(path, "go.mod")); statErr == nil {
-					return filepath.SkipDir
-				} else if !os.IsNotExist(statErr) {
+			if path != "." {
+				if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
+					return fs.SkipDir
+				} else if !errors.Is(statErr, fs.ErrNotExist) {
 					return statErr
 				}
 			}
@@ -116,11 +123,7 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			return nil
 		}
 
-		relative, relativeErr := filepath.Rel(moduleDir, path)
-		if relativeErr != nil {
-			return ex.Wrapf(relativeErr, "resolving rule file %s", path)
-		}
-		content, readErr := root.ReadFile(relative)
+		content, readErr := fs.ReadFile(rootFS, path)
 		if readErr != nil {
 			return ex.Wrapf(readErr, "reading rule file %s", path)
 		}

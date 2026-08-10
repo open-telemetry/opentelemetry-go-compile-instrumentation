@@ -3,11 +3,14 @@
 
 package data
 
-import _ "embed"
+import (
+	"bytes"
+	_ "embed"
+)
 
 //go:embed instrumentation-manifest.json
 var manifestJSON []byte
 
 func GetManifestJSON() []byte {
-	return manifestJSON
+	return bytes.Clone(manifestJSON)
 }

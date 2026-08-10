@@ -201,13 +201,16 @@ manifest: ## Generate the instrumentation manifest
 verify-manifest: ## Verify the instrumentation manifest is up to date
 	@echo "Checking instrumentation manifest is up to date..."
 	@set -euo pipefail
-	@$(MAKE) manifest
-	@if ! git diff --exit-code -- tool/data/instrumentation-manifest.json; then \
+	@tmp=$$(mktemp); \
+	cp tool/data/instrumentation-manifest.json "$$tmp"; \
+	trap 'cp "$$tmp" tool/data/instrumentation-manifest.json; rm -f "$$tmp"' EXIT; \
+	$(MAKE) manifest; \
+	if ! cmp -s "$$tmp" tool/data/instrumentation-manifest.json; then \
 		echo "Error: instrumentation manifest is stale"; \
 		echo "Run 'make manifest' to regenerate it"; \
 		exit 1; \
-	fi
-	@echo "Instrumentation manifest is up to date"
+	fi; \
+	echo "Instrumentation manifest is up to date"
 
 build-demo: ## Build all demos
 build-demo: build-demo-grpc build-demo-http

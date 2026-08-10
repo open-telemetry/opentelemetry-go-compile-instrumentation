@@ -27,7 +27,14 @@ func TestGetBundleReader(t *testing.T) {
 }
 
 func TestGetManifestJSON(t *testing.T) {
-	content := GetManifestJSON()
-	require.NotEmpty(t, content)
-	assert.True(t, json.Valid(content))
+	original := GetManifestJSON()
+	require.NotEmpty(t, original)
+	assert.True(t, json.Valid(original))
+
+	mutable := GetManifestJSON()
+	require.Equal(t, original, mutable)
+	mutable[0] ^= 0xff
+
+	assert.NotEqual(t, original, mutable)
+	assert.Equal(t, original, GetManifestJSON())
 }

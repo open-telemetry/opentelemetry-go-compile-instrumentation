@@ -21,6 +21,8 @@ func main() {
 	}
 }
 
+// run expects the repository root as its working directory. The manifest
+// source and output paths are both relative to it, as guaranteed by make.
 func run() error {
 	generated, err := manifest.Generate("instrumentation")
 	if err != nil {
