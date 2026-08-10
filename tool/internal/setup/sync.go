@@ -201,7 +201,9 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	// version directories or unrelated instrumentations under a shared
 	// parent; a replace directive for a module the consumer doesn't
 	// actually require is harmless, since "go mod tidy" ignores it.
-	walkDirs := make(map[string]bool, len(replaces)*2)
+	// Capacity hint: each matched dir contributes itself plus its parent.
+	const dirsPerMatch = 2
+	walkDirs := make(map[string]bool, len(replaces)*dirsPerMatch)
 	for _, dir := range replaces {
 		walkDirs[dir] = true
 		walkDirs[filepath.Dir(dir)] = true
