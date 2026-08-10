@@ -21,12 +21,12 @@ import (
 
 var frontPort = flag.Int("front-port", 8080, "port for HTTP frontend")
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	db, err := sql.Open("testdb", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8")
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
 
@@ -50,7 +50,7 @@ func main() {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("frontend server failed: %v", err)
+			return fmt.Errorf("frontend server failed: %w", err)
 		}
 	}()
 
@@ -62,6 +62,14 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("server shutdown failed: %v", err)
+		return fmt.Errorf("server shutdown failed: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
 	}
 }

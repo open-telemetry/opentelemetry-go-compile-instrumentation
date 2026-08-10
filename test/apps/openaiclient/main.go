@@ -8,8 +8,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
+	"os"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -21,7 +23,7 @@ var (
 	model  = flag.String("model", "gpt-4", "The model to use")
 )
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	client := openai.NewClient(
@@ -36,8 +38,16 @@ func main() {
 		Model: openai.ChatModel(*model),
 	})
 	if err != nil {
-		log.Fatalf("failed to create chat completion: %v", err)
+		return fmt.Errorf("failed to create chat completion: %w", err)
 	}
 
 	slog.Info("response", "content", completion.Choices[0].Message.Content)
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

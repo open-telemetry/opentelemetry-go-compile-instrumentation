@@ -8,9 +8,11 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
+	"os"
 	"time"
 
 	"google.golang.org/grpc"
@@ -26,12 +28,12 @@ var (
 	count  = flag.Int("count", 1, "Number of requests to make (for streaming)")
 )
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	conn, err := grpc.NewClient(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("failed to connect: %v", err)
+		return fmt.Errorf("failed to connect: %w", err)
 	}
 	defer conn.Close()
 
@@ -49,7 +51,7 @@ func main() {
 func doUnary(ctx context.Context, client pb.GreeterClient) {
 	resp, err := client.SayHello(ctx, &pb.HelloRequest{Name: *name})
 	if err != nil {
-		log.Fatalf("failed to call SayHello: %v", err)
+		return fmt.Errorf("failed to call SayHello: %w", err)
 	}
 	slog.Info("greeting", "message", resp.GetMessage())
 }
@@ -57,17 +59,17 @@ func doUnary(ctx context.Context, client pb.GreeterClient) {
 func doStreaming(ctx context.Context, client pb.GreeterClient) {
 	stream, err := client.SayHelloStream(ctx)
 	if err != nil {
-		log.Fatalf("failed to call SayHelloStream: %v", err)
+		return fmt.Errorf("failed to call SayHelloStream: %w", err)
 	}
 
 	// Send requests
 	for i := 0; i < *count; i++ {
 		if err := stream.Send(&pb.HelloRequest{Name: *name}); err != nil {
-			log.Fatalf("failed to send: %v", err)
+			return fmt.Errorf("failed to send: %w", err)
 		}
 	}
 	if err := stream.CloseSend(); err != nil {
-		log.Fatalf("failed to close send: %v", err)
+		return fmt.Errorf("failed to close send: %w", err)
 	}
 
 	// Receive responses
@@ -77,8 +79,16 @@ func doStreaming(ctx context.Context, client pb.GreeterClient) {
 			break
 		}
 		if err != nil {
-			log.Fatalf("failed to receive: %v", err)
+			return fmt.Errorf("failed to receive: %w", err)
 		}
 		slog.Info("stream response", "message", resp.GetMessage())
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
 	}
 }

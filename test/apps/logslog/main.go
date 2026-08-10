@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -14,10 +15,10 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-func main() {
+func run() error {
 	exporter, err := stdouttrace.New(stdouttrace.WithWriter(os.Stdout))
 	if err != nil {
-		log.Fatalf("failed to create exporter: %v", err)
+		return fmt.Errorf("failed to create exporter: %w", err)
 	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
@@ -40,4 +41,12 @@ func main() {
 	log.Print("standard log message 3")
 
 	span.End()
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

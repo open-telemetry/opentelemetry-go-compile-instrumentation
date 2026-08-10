@@ -199,7 +199,7 @@ func requestedPaths() []string {
 	return []string{"otel", "worker", "compact"}
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 	addr := fmt.Sprintf(":%s", *port)
 
@@ -222,22 +222,30 @@ func main() {
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return fmt.Errorf("failed to listen: %w", err)
 	}
 	go func() {
 		if err := http.Serve(ln, nil); err != nil {
-			log.Fatalf("failed to serve: %v", err)
+			return fmt.Errorf("failed to serve: %w", err)
 		}
 	}()
 
 	for _, path := range requestedPaths() {
 		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%s/%s", *port, path))
 		if err != nil {
-			log.Fatalf("request to %s failed: %v", path, err)
+			return fmt.Errorf("request to %s failed: %w", path, err)
 		}
 		resp.Body.Close()
 	}
 
 	// Give time for span export
 	time.Sleep(1 * time.Second)
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

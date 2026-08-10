@@ -8,8 +8,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
+	"os"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -21,7 +23,7 @@ var (
 	model  = flag.String("model", "claude-sonnet-4-5", "The model to use")
 )
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	client := anthropic.NewClient(
@@ -37,12 +39,20 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("failed to create message: %v", err)
+		return fmt.Errorf("failed to create message: %w", err)
 	}
 
 	for _, block := range message.Content {
 		if text, ok := block.AsAny().(anthropic.TextBlock); ok {
 			slog.Info("response", "content", text.Text)
 		}
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
 	}
 }

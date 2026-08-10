@@ -10,8 +10,10 @@ import (
 	"context"
 	"database/sql"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
+	"os"
 
 	_ "go.opentelemetry.io/otelc/test/shared/testdb"
 )
@@ -22,12 +24,12 @@ var (
 	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, prepare, all")
 )
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	db, err := sql.Open(*driverName, *dsn)
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
 
@@ -51,10 +53,18 @@ func main() {
 		doPrepare(ctx, db)
 		doTx(ctx, db)
 	default:
-		log.Fatalf("unknown operation: %s", *op)
+		return fmt.Errorf("unknown operation: %s", *op)
 	}
 
 	slog.Info("database operations completed successfully")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func doPing(ctx context.Context, db *sql.DB) {

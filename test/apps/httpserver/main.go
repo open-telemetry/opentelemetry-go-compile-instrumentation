@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 var port = flag.String("port", "8080", "The server port")
@@ -22,12 +23,20 @@ func greetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	addr := fmt.Sprintf(":%s", *port)
 	http.HandleFunc("/hello", greetHandler)
 	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		return fmt.Errorf("failed to serve: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
 	}
 }

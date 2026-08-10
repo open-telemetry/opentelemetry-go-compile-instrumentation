@@ -72,19 +72,19 @@ func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloRe
 	return &pb.HelloReply{Message: "frontend produced message to kafka"}, nil
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *frontPort))
 	if err != nil {
-		log.Fatalf("failed to listen on frontPort: %v", err)
+		return fmt.Errorf("failed to listen on frontPort: %w", err)
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterGreeterServer(grpcServer, &server{})
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Fatalf("frontend server failed: %v", err)
+			return fmt.Errorf("frontend server failed: %w", err)
 		}
 	}()
 
@@ -94,4 +94,12 @@ func main() {
 	<-ctx.Done()
 
 	grpcServer.GracefulStop()
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

@@ -12,6 +12,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"os"
 )
 
 var (
@@ -19,20 +20,28 @@ var (
 	name = flag.String("name", "world", "The name to greet")
 )
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	url := fmt.Sprintf("%s/hello?name=%s", *addr, *name)
 	resp, err := http.Get(url)
 	if err != nil {
-		log.Fatalf("failed to make request: %v", err)
+		return fmt.Errorf("failed to make request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("failed to read response: %v", err)
+		return fmt.Errorf("failed to read response: %w", err)
 	}
 
 	slog.Info("response", "body", string(body))
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

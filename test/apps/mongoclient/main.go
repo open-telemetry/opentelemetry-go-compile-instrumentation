@@ -8,8 +8,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
+	"os"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -24,7 +26,7 @@ var (
 	uri     = flag.String("uri", "mongodb://localhost:27017", "MongoDB connection URI")
 )
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	ctx := context.Background()
@@ -37,7 +39,7 @@ func main() {
 	case "2":
 		v2(ctx)
 	default:
-		log.Fatalf("invalid version: %v", *version)
+		return fmt.Errorf("invalid version: %v", *version)
 	}
 
 	slog.Info("MongoDB operations completed successfully")
@@ -46,11 +48,11 @@ func main() {
 func v1(ctx context.Context) {
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(*uri))
 	if err != nil {
-		log.Fatalf("failed to connect to MongoDB: %v", err)
+		return fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 	defer func() {
 		if err := client.Disconnect(ctx); err != nil {
-			log.Fatalf("failed to disconnect from MongoDB: %v", err)
+			return fmt.Errorf("failed to disconnect from MongoDB: %w", err)
 		}
 	}()
 
@@ -62,18 +64,18 @@ func v1(ctx context.Context) {
 		{Key: "status", Value: "active"},
 	})
 	if err != nil {
-		log.Fatalf("failed to insert document: %v", err)
+		return fmt.Errorf("failed to insert document: %w", err)
 	}
 }
 
 func v2(ctx context.Context) {
 	client, err := mongov2.Connect(optionsv2.Client().ApplyURI(*uri))
 	if err != nil {
-		log.Fatalf("failed to connect to MongoDB: %v", err)
+		return fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 	defer func() {
 		if err := client.Disconnect(ctx); err != nil {
-			log.Fatalf("failed to disconnect from MongoDB: %v", err)
+			return fmt.Errorf("failed to disconnect from MongoDB: %w", err)
 		}
 	}()
 
@@ -85,6 +87,14 @@ func v2(ctx context.Context) {
 		{Key: "status", Value: "active"},
 	})
 	if err != nil {
-		log.Fatalf("failed to insert document: %v", err)
+		return fmt.Errorf("failed to insert document: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
 	}
 }

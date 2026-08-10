@@ -38,25 +38,25 @@ func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloRe
 	return &pb.HelloReply{Message: "frontend querying database"}, nil
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	db, err := sql.Open("testdb", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8")
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
 
 	lis, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *frontPort))
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return fmt.Errorf("failed to listen: %w", err)
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterGreeterServer(grpcServer, &server{db: db})
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Fatalf("frontend server failed: %v", err)
+			return fmt.Errorf("frontend server failed: %w", err)
 		}
 	}()
 
@@ -66,4 +66,12 @@ func main() {
 	<-ctx.Done()
 
 	grpcServer.GracefulStop()
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

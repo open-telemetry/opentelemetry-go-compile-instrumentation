@@ -8,15 +8,17 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
+	"os"
 
 	"github.com/redis/go-redis/v9"
 )
 
 var addr = flag.String("addr", "localhost:6379", "The Redis server address")
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	ctx := context.Background()
@@ -29,21 +31,29 @@ func main() {
 	// SET command
 	err := rdb.Set(ctx, "testkey", "testvalue", 0).Err()
 	if err != nil {
-		log.Fatalf("failed to set key: %v", err)
+		return fmt.Errorf("failed to set key: %w", err)
 	}
 	slog.Info("SET", "key", "testkey", "value", "testvalue")
 
 	// GET command
 	val, err := rdb.Get(ctx, "testkey").Result()
 	if err != nil {
-		log.Fatalf("failed to get key: %v", err)
+		return fmt.Errorf("failed to get key: %w", err)
 	}
 	slog.Info("GET", "key", "testkey", "value", val)
 
 	// DEL command
 	err = rdb.Del(ctx, "testkey").Err()
 	if err != nil {
-		log.Fatalf("failed to del key: %v", err)
+		return fmt.Errorf("failed to del key: %w", err)
 	}
 	slog.Info("DEL", "key", "testkey")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

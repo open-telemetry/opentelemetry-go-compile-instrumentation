@@ -45,27 +45,27 @@ func (s *frontendServer) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb
 	return &pb.HelloReply{Message: "frontend calling backend, response: " + resp.GetMessage()}, nil
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	// Start backend
 	backLis, err := net.Listen("tcp", fmt.Sprintf(":%d", *backPort))
 	if err != nil {
-		log.Fatalf("failed to listen on backPort: %v", err)
+		return fmt.Errorf("failed to listen on backPort: %w", err)
 	}
 	backGrpcServer := grpc.NewServer()
 	pb.RegisterGreeterServer(backGrpcServer, &backendServer{})
 
 	go func() {
 		if err := backGrpcServer.Serve(backLis); err != nil {
-			log.Fatalf("backend server failed: %v", err)
+			return fmt.Errorf("backend server failed: %w", err)
 		}
 	}()
 
 	// Connect to backend
 	conn, err := grpc.NewClient(fmt.Sprintf("127.0.0.1:%d", *backPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("failed to connect to backend: %v", err)
+		return fmt.Errorf("failed to connect to backend: %w", err)
 	}
 	defer conn.Close()
 	client := pb.NewGreeterClient(conn)
@@ -73,14 +73,14 @@ func main() {
 	// Start frontend
 	frontLis, err := net.Listen("tcp", fmt.Sprintf(":%d", *frontPort))
 	if err != nil {
-		log.Fatalf("failed to listen on frontPort: %v", err)
+		return fmt.Errorf("failed to listen on frontPort: %w", err)
 	}
 	frontGrpcServer := grpc.NewServer()
 	pb.RegisterGreeterServer(frontGrpcServer, &frontendServer{backendClient: client})
 
 	go func() {
 		if err := frontGrpcServer.Serve(frontLis); err != nil {
-			log.Fatalf("frontend server failed: %v", err)
+			return fmt.Errorf("frontend server failed: %w", err)
 		}
 	}()
 
@@ -91,4 +91,12 @@ func main() {
 
 	backGrpcServer.GracefulStop()
 	frontGrpcServer.GracefulStop()
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

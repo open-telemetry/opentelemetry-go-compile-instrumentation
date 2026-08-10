@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -20,20 +21,20 @@ import (
 
 const eventTimeout = 10 * time.Second
 
-func main() {
+func run() error {
 	kubeConfigYaml := os.Getenv("KUBECONFIG_YAML")
 	if kubeConfigYaml == "" {
-		log.Fatal("KUBECONFIG_YAML environment variable is not set")
+		return fmt.Errorf("KUBECONFIG_YAML environment variable is not set")
 	}
 
 	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeConfigYaml))
 	if err != nil {
-		log.Fatalf("Failed to build kubeconfig: %v", err)
+		return fmt.Errorf("Failed to build kubeconfig: %w", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Fatalf("Failed to create Kubernetes client: %v", err)
+		return fmt.Errorf("Failed to create Kubernetes client: %w", err)
 	}
 
 	stopCh := make(chan struct{})
@@ -120,13 +121,13 @@ func main() {
 	// create a pod
 	_, err = clientset.CoreV1().Pods(corev1.NamespaceDefault).Create(ctx, &pod, metav1.CreateOptions{})
 	if err != nil {
-		log.Fatalf("Failed to create pod: %v", err)
+		return fmt.Errorf("Failed to create pod: %w", err)
 	}
 
 	select {
 	case <-addedCh:
 	case <-time.After(eventTimeout):
-		log.Fatalf("Timed out waiting for pod creation event")
+		return fmt.Errorf("Timed out waiting for pod creation event")
 	}
 
 	// update the pod
@@ -141,7 +142,7 @@ func main() {
 		return err
 	})
 	if err != nil {
-		log.Fatalf("Failed to update pod: %v", err)
+		return fmt.Errorf("Failed to update pod: %w", err)
 	}
 
 	select {
@@ -155,7 +156,7 @@ func main() {
 		GracePeriodSeconds: new(int64),
 	})
 	if err != nil {
-		log.Fatalf("Failed to delete pod: %v", err)
+		return fmt.Errorf("Failed to delete pod: %w", err)
 	}
 
 	select {
@@ -166,4 +167,12 @@ func main() {
 
 	close(stopCh)
 	factory.Shutdown()
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

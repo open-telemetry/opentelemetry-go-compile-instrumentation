@@ -27,7 +27,7 @@ func backendHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "backend says hello")
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 	gin.SetMode(gin.ReleaseMode)
 
@@ -40,7 +40,7 @@ func main() {
 	}
 	go func() {
 		if err := backendServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("backend error: %v", err)
+			return fmt.Errorf("backend error: %w", err)
 		}
 	}()
 
@@ -73,7 +73,7 @@ func main() {
 
 	go func() {
 		if err := frontendServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("frontend error: %v", err)
+			return fmt.Errorf("frontend error: %w", err)
 		}
 	}()
 
@@ -84,4 +84,12 @@ func main() {
 
 	backendServer.Shutdown(context.Background())
 	frontendServer.Shutdown(context.Background())
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

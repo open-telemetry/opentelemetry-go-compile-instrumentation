@@ -13,6 +13,7 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"os"
 
 	"go.opentelemetry.io/otelc/test/shared/grpcpb/pb"
 	"google.golang.org/grpc"
@@ -45,13 +46,13 @@ func (s *server) SayHelloStream(stream pb.Greeter_SayHelloStreamServer) error {
 	}
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	addr := fmt.Sprintf(":%d", *port)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return fmt.Errorf("failed to listen: %w", err)
 	}
 	defer lis.Close()
 
@@ -60,6 +61,14 @@ func main() {
 
 	slog.Info("server started", "address", lis.Addr())
 	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		return fmt.Errorf("failed to serve: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
 	}
 }

@@ -28,12 +28,12 @@ var (
 	id   = flag.Int("id", 123, "Resource ID used by get operations")
 )
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	client, err := linodego.NewClient(http.DefaultClient)
 	if err != nil {
-		log.Fatalf("failed to create client: %v", err)
+		return fmt.Errorf("failed to create client: %w", err)
 	}
 	client.SetToken("test-token")
 	// Avoid response cache so each ListRegions call hits the wire in tests.
@@ -41,7 +41,7 @@ func main() {
 
 	apiRoot := *addr + "/v4"
 	if _, err := client.UseURL(apiRoot); err != nil {
-		log.Fatalf("failed to set API URL %q: %v", apiRoot, err)
+		return fmt.Errorf("failed to set API URL %q: %w", apiRoot, err)
 	}
 
 	ctx := context.Background()
@@ -52,7 +52,7 @@ func main() {
 	case "smoke":
 		runSmoke(ctx, client, *id)
 	default:
-		log.Fatalf("unknown mode %q (want smoke|not_found)", *mode)
+		return fmt.Errorf("unknown mode %q (want smoke|not_found)", *mode)
 	}
 }
 
@@ -118,10 +118,18 @@ func runNotFound(ctx context.Context, client linodego.Client, resourceID int) {
 		slog.Info("get_instance_error", "id", resourceID, "error", err.Error())
 		return
 	}
-	log.Fatalf("expected GetInstance(%d) to fail", resourceID)
+	return fmt.Errorf("expected GetInstance(%d) to fail", resourceID)
 }
 
 func fail(op string, err error) {
 	fmt.Fprintf(os.Stderr, "%s error: %v\n", op, err)
-	log.Fatalf("%s failed: %v", op, err)
+	return fmt.Errorf("%s failed: %w", op, err)
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
 }

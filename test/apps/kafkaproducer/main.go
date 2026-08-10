@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -26,7 +27,7 @@ func brokers() []string {
 	return []string{"localhost:9092"}
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -67,6 +68,14 @@ func writeMessage(ctx context.Context, key, value string) {
 	defer w.Close()
 
 	if err := w.WriteMessages(ctx, kafka.Message{Key: []byte(key), Value: []byte(value)}); err != nil {
-		log.Fatalf("failed to write messages: %v", err)
+		return fmt.Errorf("failed to write messages: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
 	}
 }

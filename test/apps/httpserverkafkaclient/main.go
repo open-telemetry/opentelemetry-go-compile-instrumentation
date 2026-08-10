@@ -41,7 +41,7 @@ func ensureTopic(ctx context.Context, topic string) {
 	})
 }
 
-func main() {
+func run() error {
 	flag.Parse()
 
 	topic := "test-topic-http"
@@ -80,7 +80,7 @@ func main() {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("frontend server failed: %v", err)
+			return fmt.Errorf("frontend server failed: %w", err)
 		}
 	}()
 
@@ -92,6 +92,14 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("server shutdown failed: %v", err)
+		return fmt.Errorf("server shutdown failed: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("error: %v\n", err)
+		os.Exit(1)
 	}
 }
