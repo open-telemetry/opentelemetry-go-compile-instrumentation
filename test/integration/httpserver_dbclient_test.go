@@ -56,4 +56,5 @@ func TestHTTPServerDBClient(t *testing.T) {
 	// Assert on propagation (parent-child relationships)
 	require.Equal(t, httpServerSpan.TraceID(), sqlClientSpan.TraceID(), "trace ID mismatch")
 	require.Equal(t, httpServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be HTTP server")
+	require.True(t, httpServerSpan.ParentSpanID().IsEmpty(), "HTTP server span must be the trace root")
 }
