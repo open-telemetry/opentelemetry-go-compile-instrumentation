@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -487,7 +488,8 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
 	f := generateOtelInstrumentationGo(imports, opts)
-	for moduleDir := range moduleDirs {
+	dirs := slices.Sorted(maps.Keys(moduleDirs))
+	for _, moduleDir := range dirs {
 		path := filepath.Join(moduleDir, ToolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
