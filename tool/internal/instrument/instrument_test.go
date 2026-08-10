@@ -173,6 +173,7 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),
 		CallRules:      make(map[string][]*rule.InstCallRule),
+		LitRules:       make(map[string][]*rule.InstLitRule),
 		DirectiveRules: make(map[string][]*rule.InstDirectiveRule),
 		DeclRules:      make(map[string][]*rule.InstDeclRule),
 		FileRules:      make([]*rule.InstFileRule, 0),
@@ -228,6 +229,11 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 				r, _ := rule.NewInstCallRule(ruleData, name)
 				for _, file := range p.packageFiles {
 					ruleSet.CallRules[file] = append(ruleSet.CallRules[file], r)
+				}
+			case props["struct_literal"] != nil:
+				r, _ := rule.NewInstLitRule(ruleData, name)
+				for _, file := range p.packageFiles {
+					ruleSet.LitRules[file] = append(ruleSet.LitRules[file], r)
 				}
 			case props["identifier"] != nil:
 				r, _ := rule.NewInstDeclRule(ruleData, name)

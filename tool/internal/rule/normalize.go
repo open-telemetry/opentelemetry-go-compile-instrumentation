@@ -18,15 +18,16 @@ const (
 
 // where selectors (hoisted to flat by normalizeWhere).
 const (
-	SelTarget       = "target"
-	SelVersion      = "version"
-	SelFunc         = "func"
-	SelRecv         = "recv"
-	SelStruct       = "struct"
-	SelFunctionCall = "function_call"
-	SelDirective    = "directive"
-	SelKind         = "kind"
-	SelIdentifier   = "identifier"
+	SelTarget        = "target"
+	SelVersion       = "version"
+	SelFunc          = "func"
+	SelRecv          = "recv"
+	SelStruct        = "struct"
+	SelStructLiteral = "struct_literal"
+	SelFunctionCall  = "function_call"
+	SelDirective     = "directive"
+	SelKind          = "kind"
+	SelIdentifier    = "identifier"
 
 	// Signature match-narrowing selectors for func rules (see InstFuncRule).
 	SelSignature         = "signature"
@@ -160,7 +161,7 @@ func normalizeWhere(common, where map[string]any) (map[string]any, error) {
 	normalized := make(map[string]any)
 	for key, value := range where {
 		switch key {
-		case SelFunc, SelRecv, SelStruct, SelFunctionCall, SelDirective, SelKind, SelIdentifier,
+		case SelFunc, SelRecv, SelStruct, SelStructLiteral, SelFunctionCall, SelDirective, SelKind, SelIdentifier,
 			SelSignature, SelSignatureContains, SelResult, SelLastResult, SelParam,
 			SelPattern, SelPlacement:
 			common[key] = value

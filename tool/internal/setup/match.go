@@ -48,6 +48,8 @@ func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.
 		return rule.NewInstFuncRule(raw, name)
 	case fields[rule.SelFunctionCall] != nil:
 		return rule.NewInstCallRule(raw, name)
+	case fields[rule.SelStructLiteral] != nil:
+		return rule.NewInstLitRule(raw, name)
 	case fields[rule.SelIdentifier] != nil:
 		return rule.NewInstDeclRule(raw, name)
 	default:
@@ -378,6 +380,13 @@ func (sp *SetupPhase) matchOneRule(
 		// Files without matching calls are a no-op in applyCallRule.
 		set.AddCallRule(source, rt)
 		sp.Info("Match call rule", "rule", rt, "dep", dep)
+	case *rule.InstLitRule:
+		// Literal rules are added unconditionally for the same reason as call
+		// rules: resolving the literal's type to an import path needs the file's
+		// import aliases, which are only read during the instrument phase.
+		// Files without matching literals are a no-op in applyLitRule.
+		set.AddLitRule(source, rt)
+		sp.Info("Match literal rule", "rule", rt, "dep", dep)
 	case *rule.InstDirectiveRule:
 		if ast.FileHasDirective(tree, rt.Directive) {
 			set.AddDirectiveRule(source, rt)
