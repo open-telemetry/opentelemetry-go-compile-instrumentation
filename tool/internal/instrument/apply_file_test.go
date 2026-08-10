@@ -246,7 +246,7 @@ func Helper() { fmt.Println("hi") }
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
 
 	ip := &InstrumentPhase{
-		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:  slog.New(slog.DiscardHandler),
 		workDir: workDir,
 	}
 

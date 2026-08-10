@@ -46,6 +46,34 @@ func registerRuleImports(dst, ruleImports map[string]string) {
 	}
 }
 
+func collectRuleSetBaseImports(dst map[string]string, m *rule.InstRuleSet) {
+	for _, rs := range m.RawRules {
+		for _, r := range rs {
+			registerRuleImports(dst, r.Imports)
+		}
+	}
+	for _, rs := range m.StructRules {
+		for _, r := range rs {
+			registerRuleImports(dst, r.Imports)
+		}
+	}
+	for _, rs := range m.CallRules {
+		for _, r := range rs {
+			registerRuleImports(dst, r.Imports)
+		}
+	}
+	for _, rs := range m.DirectiveRules {
+		for _, r := range rs {
+			registerRuleImports(dst, r.Imports)
+		}
+	}
+	for _, rs := range m.DeclRules {
+		for _, r := range rs {
+			registerRuleImports(dst, r.Imports)
+		}
+	}
+}
+
 // collectRuntimeImports gathers every import that instrumentation may introduce
 // into a compile unit. go build finalizes its action graph before toolexec, so
 // these paths must appear as blank imports in otelc.runtime.go.
@@ -66,31 +94,7 @@ func collectRuntimeImports(matched []*rule.InstRuleSet) (map[string]string, []*r
 				return nil, nil, err
 			}
 		}
-		for _, rs := range m.RawRules {
-			for _, r := range rs {
-				registerRuleImports(importsMap, r.Imports)
-			}
-		}
-		for _, rs := range m.StructRules {
-			for _, r := range rs {
-				registerRuleImports(importsMap, r.Imports)
-			}
-		}
-		for _, rs := range m.CallRules {
-			for _, r := range rs {
-				registerRuleImports(importsMap, r.Imports)
-			}
-		}
-		for _, rs := range m.DirectiveRules {
-			for _, r := range rs {
-				registerRuleImports(importsMap, r.Imports)
-			}
-		}
-		for _, rs := range m.DeclRules {
-			for _, r := range rs {
-				registerRuleImports(importsMap, r.Imports)
-			}
-		}
+		collectRuleSetBaseImports(importsMap, m)
 	}
 
 	if len(funcRules) > 0 {
