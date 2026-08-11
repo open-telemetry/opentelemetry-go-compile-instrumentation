@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -25,9 +26,9 @@ func newTestPhase() *InstrumentPhase {
 	}
 }
 
-// --- wrapDeclValues helper tests ---
+// --- wrapDeclValue helper tests ---
 
-func TestWrapDeclValues_Success(t *testing.T) {
+func TestWrapDeclValue_Success(t *testing.T) {
 	// Simulate: var X = someCall()
 	spec := &dst.ValueSpec{
 		Names: []*dst.Ident{{Name: "X"}},
@@ -36,7 +37,7 @@ func TestWrapDeclValues_Success(t *testing.T) {
 		},
 	}
 
-	err := wrapDeclValues(spec, "wrapper({{ . }})")
+	err := wrapDeclValue(spec, "wrapper({{ . }})", 0)
 
 	require.NoError(t, err)
 	require.Len(t, spec.Values, 1)
@@ -50,10 +51,10 @@ func TestWrapDeclValues_Success(t *testing.T) {
 	require.True(t, ok, "expected inner argument to be a call expression")
 }
 
-func TestWrapDeclValues_MultipleValues(t *testing.T) {
+func TestWrapDeclValue_MultipleValues(t *testing.T) {
 	// Simulate: var a, b = val1, val2
 	// Go requires len(Values) == len(Names) when initializers are present.
-	// Each value is wrapped independently.
+	// Only the initializer belonging to the targeted name is wrapped.
 	spec := &dst.ValueSpec{
 		Names: []*dst.Ident{{Name: "a"}, {Name: "b"}},
 		Values: []dst.Expr{
@@ -62,39 +63,40 @@ func TestWrapDeclValues_MultipleValues(t *testing.T) {
 		},
 	}
 
-	err := wrapDeclValues(spec, "inc({{ . }})")
+	err := wrapDeclValue(spec, "inc({{ . }})", 1)
 
 	require.NoError(t, err)
 	require.Len(t, spec.Values, 2)
-	for i, v := range spec.Values {
-		call, ok := v.(*dst.CallExpr)
-		require.True(t, ok, "index %d: expected *dst.CallExpr, got %T", i, v)
-		fn, ok := call.Fun.(*dst.Ident)
-		require.True(t, ok)
-		assert.Equal(t, "inc", fn.Name)
-	}
+	untouched, ok := spec.Values[0].(*dst.BasicLit)
+	require.True(t, ok, "expected sibling to stay a literal, got %T", spec.Values[0])
+	assert.Equal(t, "1", untouched.Value)
+	call, ok := spec.Values[1].(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", spec.Values[1])
+	fn, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "inc", fn.Name)
 }
 
-func TestWrapDeclValues_NoInitializer(t *testing.T) {
+func TestWrapDeclValue_NoInitializer(t *testing.T) {
 	// Simulate: var X int  (no initializer)
 	spec := &dst.ValueSpec{
 		Names:  []*dst.Ident{{Name: "X"}},
 		Values: nil,
 	}
 
-	err := wrapDeclValues(spec, "wrapper({{ . }})")
+	err := wrapDeclValue(spec, "wrapper({{ . }})", 0)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "wrap requires an existing initializer")
 }
 
-func TestWrapDeclValues_InvalidTemplate(t *testing.T) {
+func TestWrapDeclValue_InvalidTemplate(t *testing.T) {
 	spec := &dst.ValueSpec{
 		Names:  []*dst.Ident{{Name: "X"}},
 		Values: []dst.Expr{&dst.Ident{Name: "x"}},
 	}
 
-	err := wrapDeclValues(spec, "func {{ . }}")
+	err := wrapDeclValue(spec, "func {{ . }}", 0)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to wrap expression")
@@ -197,4 +199,80 @@ func TestApplyDeclRule_EmptyKind_FunctionTarget(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is not a var or const declaration")
+}
+
+// --- multi-name ValueSpec tests ---
+
+func parseTestFile(t *testing.T, source string) *dst.File {
+	t.Helper()
+	file, err := ast.NewAstParser().ParseSource(source)
+	require.NoError(t, err)
+	return file
+}
+
+func TestDeclRuleDoesNotClobberSiblingNames(t *testing.T) {
+	file := parseTestFile(t, "package main\n\nvar alpha, beta = 1, 2\n")
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_alpha"},
+		Kind:         "var",
+		Identifier:   "alpha",
+		Replace:      "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.Contains(t, renderFile(t, file), "var alpha, beta = 99, 2")
+}
+
+func TestDeclRuleWrapDoesNotClobberSiblingNames(t *testing.T) {
+	file := parseTestFile(t, "package main\n\nvar alpha, beta = 1, 2\n")
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_beta"},
+		Kind:         "var",
+		Identifier:   "beta",
+		Wrap:         "double({{ . }})",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.Contains(t, renderFile(t, file), "var alpha, beta = 1, double(2)")
+}
+
+// A tuple-valued initializer gives two names one value, so no single
+// initializer belongs to the targeted name. Both advices refuse it rather than
+// rewrite the declaration into a different shape.
+const tupleValuedSource = "package main\n\nfunc pair() (int, int) { return 1, 2 }\n\nvar alpha, beta = pair()\n"
+
+func TestDeclRuleReplaceRejectsTupleValuedInitializer(t *testing.T) {
+	file := parseTestFile(t, tupleValuedSource)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_alpha"},
+		Kind:         "var",
+		Identifier:   "alpha",
+		Replace:      "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "declares 2 names but has 1 initializers")
+	assert.Contains(t, renderFile(t, file), "var alpha, beta = pair()", "declaration must be left untouched")
+}
+
+func TestDeclRuleWrapRejectsTupleValuedInitializer(t *testing.T) {
+	file := parseTestFile(t, tupleValuedSource)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_alpha"},
+		Kind:         "var",
+		Identifier:   "alpha",
+		Wrap:         "double({{ . }})",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "declares 2 names but has 1 initializers")
+	assert.Contains(t, renderFile(t, file), "var alpha, beta = pair()", "declaration must be left untouched")
 }
