@@ -123,8 +123,7 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 				// so it falls into this branch, but "_" cannot have its
 				// address taken during trampoline generation the way a named
 				// receiver can. Assign it a generated name instead.
-				receiver = fmt.Sprintf("%s%d", ignoredParam, idx)
-				idx++
+				receiver = next(ignoredParam)
 				recv.Names[0].Name = receiver
 			}
 			args = append(args, receiver)
