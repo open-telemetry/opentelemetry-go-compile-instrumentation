@@ -15,9 +15,25 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+// renameReturnValues deliberately does not salt with a rule hash: raw and
+// directive rules reference the resulting name literally, in their injected
+// code, by its bare positional form. For example,
+// instrumentation/runtime/otelc.yaml's goroutine_propagate rule references
+// runtime.newproc1's first unnamed return value as "_unnamedRetVal0". Salting
+// this name broke every build that instruments runtime.newproc1.
+func TestRenameReturnValuesUsesStableBareNames(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\nfunc F() (int, string) { return 0, \"\" }")
+
+	renameReturnValues(funcDecl)
+
+	names := []string{funcDecl.Type.Results.List[0].Names[0].Name, funcDecl.Type.Results.List[1].Names[0].Name}
+	assert.Equal(t, []string{unnamedRetValName + "0", unnamedRetValName + "1"}, names)
+}
 
 func TestInsertRawAtPattern(t *testing.T) {
 	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))

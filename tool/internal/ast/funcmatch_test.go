@@ -39,9 +39,13 @@ func selector(pkg, name string) *dst.SelectorExpr {
 	return &dst.SelectorExpr{X: ident(pkg), Sel: ident(name)}
 }
 
+// mustMatch matches decl against r with no import context (nil), i.e. as if
+// decl's enclosing file were unavailable. Type filters resolve via the
+// import-path-tail fallback in this mode; see TestFuncDeclMatchesFilters_ImportAliasResolution
+// for matching with a real *dst.File's import declarations.
 func mustMatch(t *testing.T, decl *dst.FuncDecl, r *rule.InstFuncRule) bool {
 	t.Helper()
-	ok, err := funcDeclMatchesFilters(decl, r)
+	ok, err := funcDeclMatchesFilters(decl, r, nil)
 	require.NoError(t, err)
 	return ok
 }
@@ -233,12 +237,12 @@ func TestFuncDeclMatchesFilters_InvalidTypeReturnsError(t *testing.T) {
 		[]*dst.Field{field(ident("error"))},
 	)
 
-	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"})
+	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"}, nil)
 	require.Error(t, err)
 
-	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"})
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"}, nil)
 	require.Error(t, err)
 
-	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"})
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"}, nil)
 	require.Error(t, err)
 }

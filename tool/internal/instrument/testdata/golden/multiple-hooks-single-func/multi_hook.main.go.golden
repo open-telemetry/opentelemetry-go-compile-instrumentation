@@ -5,13 +5,13 @@ package main
 
 import _ "unsafe"
 
-func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+func Func1(p1 string, p2 int) (_unnamedRetVal_155800511_0 float32, _unnamedRetVal_155800511_1 error) {
 	//line <generated>:1
 	if OtelBeforeTrampoline_Func1155800511(&p1, &p2); false {
 	} else {
 		if false {
 		} else {
-			defer OtelAfterTrampoline_Func11412092233(&HookContextImpl1412092233{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal0, &_unnamedRetVal1}}, &_unnamedRetVal0, &_unnamedRetVal1)
+			defer OtelAfterTrampoline_Func11412092233(&HookContextImpl1412092233{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1}}, &_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1)
 		}
 	}
 	//line main.go:7:2
@@ -35,14 +35,10 @@ func (c *HookContextImpl155800511) IsSkipCall() bool         { return c.skipCall
 func (c *HookContextImpl155800511) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl155800511) GetData() interface{}     { return c.data }
 func (c *HookContextImpl155800511) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return m[key]
+	return nil
 }
 
 func (c *HookContextImpl155800511) SetKeyData(key string, val interface{}) {
@@ -55,15 +51,11 @@ func (c *HookContextImpl155800511) SetKeyData(key string, val interface{}) {
 }
 
 func (c *HookContextImpl155800511) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	_, exists := m[key]
-	return exists
+	return false
 }
 
 func (c *HookContextImpl155800511) GetParam(idx int) interface{} {
@@ -166,14 +158,10 @@ func (c *HookContextImpl1412092233) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl1412092233) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl1412092233) GetData() interface{}     { return c.data }
 func (c *HookContextImpl1412092233) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return m[key]
+	return nil
 }
 
 func (c *HookContextImpl1412092233) SetKeyData(key string, val interface{}) {
@@ -186,15 +174,11 @@ func (c *HookContextImpl1412092233) SetKeyData(key string, val interface{}) {
 }
 
 func (c *HookContextImpl1412092233) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	_, exists := m[key]
-	return exists
+	return false
 }
 
 func (c *HookContextImpl1412092233) GetParam(idx int) interface{} {

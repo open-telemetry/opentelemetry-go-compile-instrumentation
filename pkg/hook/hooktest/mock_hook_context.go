@@ -40,26 +40,18 @@ func (m *MockHookContext) SetKeyData(key string, val interface{}) {
 }
 
 func (m *MockHookContext) GetKeyData(key string) interface{} {
-	if m.data == nil {
-		return nil
+	if dataMap, ok := m.data.(map[string]interface{}); ok {
+		return dataMap[key]
 	}
-	dataMap, ok := m.data.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return dataMap[key]
+	return nil
 }
 
 func (m *MockHookContext) HasKeyData(key string) bool {
-	if m.data == nil {
-		return false
+	if dataMap, ok := m.data.(map[string]interface{}); ok {
+		_, ok := dataMap[key]
+		return ok
 	}
-	dataMap, ok := m.data.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	_, exists := dataMap[key]
-	return exists
+	return false
 }
 
 func (m *MockHookContext) GetParamCount() int { return len(m.Params) }

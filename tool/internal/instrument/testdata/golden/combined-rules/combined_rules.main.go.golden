@@ -7,12 +7,12 @@ import _ "unsafe"
 
 type T struct{ NewField string }
 
-func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+func Func1(p1 string, p2 int) (_unnamedRetVal_2706976935_0 float32, _unnamedRetVal_2706976935_1 error) {
 	_ = 789
 	//line <generated>:1
 	if hookContext2706976935, _ := OtelBeforeTrampoline_Func12706976935(&p1, &p2); false {
 	} else {
-		defer OtelAfterTrampoline_Func12706976935(hookContext2706976935, &_unnamedRetVal0, &_unnamedRetVal1)
+		defer OtelAfterTrampoline_Func12706976935(hookContext2706976935, &_unnamedRetVal_2706976935_0, &_unnamedRetVal_2706976935_1)
 	}
 	//line main.go:9:2
 	println("Hello, World!")
@@ -35,14 +35,10 @@ func (c *HookContextImpl2706976935) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl2706976935) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl2706976935) GetData() interface{}     { return c.data }
 func (c *HookContextImpl2706976935) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return m[key]
+	return nil
 }
 
 func (c *HookContextImpl2706976935) SetKeyData(key string, val interface{}) {
@@ -55,15 +51,11 @@ func (c *HookContextImpl2706976935) SetKeyData(key string, val interface{}) {
 }
 
 func (c *HookContextImpl2706976935) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	_, exists := m[key]
-	return exists
+	return false
 }
 
 func (c *HookContextImpl2706976935) GetParam(idx int) interface{} {

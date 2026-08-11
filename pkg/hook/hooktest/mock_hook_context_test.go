@@ -4,10 +4,15 @@
 package hooktest_test
 
 import (
+	"reflect"
 	"testing"
 
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
+
+type customState struct {
+	field string
+}
 
 func TestMockHookContext_ConstructorAndGetters(t *testing.T) {
 	ctx := hooktest.NewMockHookContext("arg1", "arg2")
@@ -69,35 +74,49 @@ func TestMockHookContext_KeyDataOperations(t *testing.T) {
 	}
 }
 
-func TestMockHookContext_KeyDataSafety(t *testing.T) {
-	t.Run("non-map data type safety", func(t *testing.T) {
-		ctx := hooktest.NewMockHookContext()
-		ctx.SetData("not-a-map")
+func TestMockHookContext_KeyData_NonMapData(t *testing.T) {
+	mock := hooktest.NewMockHookContext()
 
-		// Must not panic when data is a non-map type
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("unexpected panic during key data access on non-map data: %v", r)
-			}
-		}()
+	// 1. Initial state (nil data)
+	if mock.GetKeyData("foo") != nil {
+		t.Errorf("expected GetKeyData to return nil for uninitialized data")
+	}
+	if mock.HasKeyData("foo") {
+		t.Errorf("expected HasKeyData to return false for uninitialized data")
+	}
 
-		if ctx.HasKeyData("foo") {
-			t.Errorf("expected HasKeyData(\"foo\") to be false for non-map data")
-		}
-		if ctx.GetKeyData("foo") != nil {
-			t.Errorf("expected GetKeyData(\"foo\") to be nil for non-map data")
-		}
+	// 2. Set custom non-map data (struct)
+	state := customState{field: "bar"}
+	mock.SetData(state)
+	if !reflect.DeepEqual(mock.GetData(), state) {
+		t.Errorf("expected GetData to return stored customState")
+	}
 
-		// SetKeyData must safely re-initialize data to a map without panicking
-		ctx.SetKeyData("k1", "v1")
+	// Calling GetKeyData / HasKeyData on struct data should not panic
+	if mock.GetKeyData("foo") != nil {
+		t.Errorf("expected GetKeyData to return nil when data is a struct")
+	}
+	if mock.HasKeyData("foo") {
+		t.Errorf("expected HasKeyData to return false when data is a struct")
+	}
 
-		if !ctx.HasKeyData("k1") {
-			t.Errorf("expected HasKeyData(\"k1\") to be true after SetKeyData")
-		}
-		if ctx.GetKeyData("k1") != "v1" {
-			t.Errorf("expected GetKeyData(\"k1\") to be \"v1\", got %v", ctx.GetKeyData("k1"))
-		}
-	})
+	// Calling SetKeyData should gracefully re-initialize data map
+	mock.SetKeyData("k1", "v1")
+	if !mock.HasKeyData("k1") {
+		t.Errorf("expected HasKeyData('k1') to return true after SetKeyData")
+	}
+	if mock.GetKeyData("k1") != "v1" {
+		t.Errorf("expected GetKeyData('k1') to return 'v1'")
+	}
+
+	// 3. Set primitive non-map data (string)
+	mock.SetData("primitive string")
+	if mock.GetKeyData("k1") != nil {
+		t.Errorf("expected GetKeyData to return nil when data is a string")
+	}
+	if mock.HasKeyData("k1") {
+		t.Errorf("expected HasKeyData to return false when data is a string")
+	}
 }
 
 func TestMockHookContext_ParamOperationsAndBounds(t *testing.T) {

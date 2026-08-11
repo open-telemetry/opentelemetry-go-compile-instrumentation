@@ -9,11 +9,11 @@ import _ "unsafe"
 // as part of `go test`. The is_test: true rule matches that test build and the
 // golden captures the injected trampolines — the positive counterpart to
 // is-test-filter-no-match, where the same rule is gated out of a normal build.
-func ProcessRequest(req string) (_unnamedRetVal0 error) {
+func ProcessRequest(req string) (_unnamedRetVal_2587785677_0 error) {
 	//line <generated>:1
 	if hookContext2587785677, _ := OtelBeforeTrampoline_ProcessRequest2587785677(&req); false {
 	} else {
-		defer OtelAfterTrampoline_ProcessRequest2587785677(hookContext2587785677, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_ProcessRequest2587785677(hookContext2587785677, &_unnamedRetVal_2587785677_0)
 	}
 	//line main_test.go:11:2
 	println("processing:", req)
@@ -36,14 +36,10 @@ func (c *HookContextImpl2587785677) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl2587785677) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl2587785677) GetData() interface{}     { return c.data }
 func (c *HookContextImpl2587785677) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return m[key]
+	return nil
 }
 
 func (c *HookContextImpl2587785677) SetKeyData(key string, val interface{}) {
@@ -56,15 +52,11 @@ func (c *HookContextImpl2587785677) SetKeyData(key string, val interface{}) {
 }
 
 func (c *HookContextImpl2587785677) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	_, exists := m[key]
-	return exists
+	return false
 }
 
 func (c *HookContextImpl2587785677) GetParam(idx int) interface{} {

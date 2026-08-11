@@ -1,0 +1,121 @@
+[
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/database/sql",
+    "target": "database/sql"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic-sdk-go",
+    "target": "github.com/anthropics/anthropic-sdk-go",
+    "versionRange": "v1.0.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/aws/aws-sdk-go-v2",
+    "target": "github.com/aws/aws-sdk-go-v2/config"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/gin-gonic/gin",
+    "target": "github.com/gin-gonic/gin"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2",
+    "target": "github.com/linode/linodego/v2",
+    "versionRange": "v2.0.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2",
+    "target": "github.com/linode/linodego/v2",
+    "versionRange": "v2.4.1"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go",
+    "target": "github.com/openai/openai-go"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v2",
+    "target": "github.com/openai/openai-go/v2"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3",
+    "target": "github.com/openai/openai-go/v3"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9",
+    "target": "github.com/redis/go-redis/v9"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/consumer",
+    "target": "github.com/segmentio/kafka-go"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/producer",
+    "target": "github.com/segmentio/kafka-go"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/sirupsen/logrus",
+    "target": "github.com/sirupsen/logrus",
+    "versionRange": "v1.4.2"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/mongo",
+    "target": "go.mongodb.org/mongo-driver/mongo"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/v2/mongo",
+    "target": "go.mongodb.org/mongo-driver/v2/mongo"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel",
+    "target": "go.opentelemetry.io/otel"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init",
+    "target": "main"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace",
+    "target": "go.opentelemetry.io/otel/sdk/trace",
+    "versionRange": "v1.44.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/trace",
+    "target": "go.opentelemetry.io/otel/trace"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/client",
+    "target": "google.golang.org/grpc"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server",
+    "target": "google.golang.org/grpc"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go",
+    "target": "k8s.io/client-go/tools/cache",
+    "versionRange": "v0.34.0,v0.36.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go",
+    "target": "k8s.io/client-go/tools/cache",
+    "versionRange": "v0.35.0,v0.36.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/log",
+    "target": "log"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/log/slog",
+    "target": "log/slog"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/net/http/client",
+    "target": "net/http"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/net/http/server",
+    "target": "net/http"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/runtime",
+    "target": "runtime"
+  }
+]

@@ -34,14 +34,10 @@ func (c *HookContextImpl3881633898) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl3881633898) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl3881633898) GetData() interface{}     { return c.data }
 func (c *HookContextImpl3881633898) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return m[key]
+	return nil
 }
 
 func (c *HookContextImpl3881633898) SetKeyData(key string, val interface{}) {
@@ -54,15 +50,11 @@ func (c *HookContextImpl3881633898) SetKeyData(key string, val interface{}) {
 }
 
 func (c *HookContextImpl3881633898) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	_, exists := m[key]
-	return exists
+	return false
 }
 
 func (c *HookContextImpl3881633898) GetParam(idx int) interface{} {

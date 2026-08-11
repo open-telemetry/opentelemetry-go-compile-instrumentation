@@ -5,11 +5,11 @@ package main
 
 import _ "unsafe"
 
-func UnderscoreReturnFunc() (_ignoredRetVal0 int, _ignoredRetVal1 error) {
+func UnderscoreReturnFunc() (_ignoredRetVal_2035128499_0 int, _ignoredRetVal_2035128499_1 error) {
 	//line <generated>:1
 	if false {
 	} else {
-		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(&HookContextImpl2035128499{params: []interface{}{}, returnVals: []interface{}{&_ignoredRetVal0, &_ignoredRetVal1}}, &_ignoredRetVal0, &_ignoredRetVal1)
+		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(&HookContextImpl2035128499{params: []interface{}{}, returnVals: []interface{}{&_ignoredRetVal_2035128499_0, &_ignoredRetVal_2035128499_1}}, &_ignoredRetVal_2035128499_0, &_ignoredRetVal_2035128499_1)
 	}
 	//line main.go:7:2
 	return 0, nil
@@ -32,14 +32,10 @@ func (c *HookContextImpl2035128499) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl2035128499) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl2035128499) GetData() interface{}     { return c.data }
 func (c *HookContextImpl2035128499) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return m[key]
+	return nil
 }
 
 func (c *HookContextImpl2035128499) SetKeyData(key string, val interface{}) {
@@ -52,15 +48,11 @@ func (c *HookContextImpl2035128499) SetKeyData(key string, val interface{}) {
 }
 
 func (c *HookContextImpl2035128499) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	m, ok := c.data.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	_, exists := m[key]
-	return exists
+	return false
 }
 
 func (c *HookContextImpl2035128499) GetParam(idx int) interface{} {
