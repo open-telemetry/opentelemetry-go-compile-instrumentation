@@ -46,7 +46,11 @@ func initProfiling(ctx context.Context, cmd *cli.Command) (context.Context, erro
 
 	// Guard against placing profiles inside .otelc-build/ which Cleanup removes.
 	buildTemp := util.GetBuildTempDir()
-	if strings.HasPrefix(profilePath, buildTemp) {
+	rel, err := filepath.Rel(buildTemp, profilePath)
+	if err != nil {
+		return ctx, ex.Wrapf(err, "resolve profile path relative to build temp directory")
+	}
+	if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
 		return ctx, ex.Newf(
 			"profile-path %q must not be inside the build temp directory %q",
 			profilePath, buildTemp,

@@ -68,6 +68,27 @@ func TestInitProfiling(t *testing.T) {
 		assert.Contains(t, err.Error(), "build temp")
 	})
 
+	t.Run("profile-path matching build temp errors", func(t *testing.T) {
+		activeSession = nil
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		err := runInitProfiling(t, "--profile", "cpu", "--profile-path", util.GetBuildTempDir())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "build temp")
+	})
+
+	t.Run("profile-path sharing build temp prefix starts a session", func(t *testing.T) {
+		activeSession = nil
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		profDir := util.GetBuildTempDir() + "-profiles"
+
+		require.NoError(t, runInitProfiling(t, "--profile", "cpu", "--profile-path", profDir))
+		require.NotNil(t, activeSession)
+		require.NoError(t, activeSession.Stop())
+		activeSession = nil
+	})
+
 	t.Run("valid profile starts a session and sets env", func(t *testing.T) {
 		activeSession = nil
 		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
