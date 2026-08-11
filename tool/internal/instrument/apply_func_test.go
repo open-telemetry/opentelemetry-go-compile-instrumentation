@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"fmt"
 	goast "go/ast"
 	"go/importer"
 	"go/parser"
@@ -43,6 +44,22 @@ func Target(value string) error { return nil }
 	assert.Contains(t, err.Error(), "can not find function Target")
 }
 
+// testHash stands in for InstFuncRule.Identity() in these unit tests, since
+// they exercise collectArguments/collectReturnValues without a real rule.
+const testHash = "42"
+
+func syntheticParam(idx int) string {
+	return fmt.Sprintf("%s_%s_%d", ignoredParam, testHash, idx)
+}
+
+func syntheticUnnamedRetVal(idx int) string {
+	return fmt.Sprintf("%s_%s_%d", unnamedRetValName, testHash, idx)
+}
+
+func syntheticIgnoredRetVal(idx int) string {
+	return fmt.Sprintf("%s_%s_%d", ignoredRetValName, testHash, idx)
+}
+
 func TestCollectArguments(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -62,7 +79,7 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed params (len(Names) == 0)",
 			src:      "package main\nfunc F(int, string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1"},
+			expected: []string{syntheticParam(0), syntheticParam(1)},
 		},
 		{
 			name:     "mixed named and unnamed params via group",
@@ -72,7 +89,7 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "underscore params",
 			src:      "package main\nfunc F(_ int, _ string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1"},
+			expected: []string{syntheticParam(0), syntheticParam(1)},
 		},
 		{
 			name:     "named receiver",
@@ -82,7 +99,7 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed receiver",
 			src:      "package main\ntype T struct{}\nfunc (T) F() {}",
-			expected: []string{"_ignoredParam0"},
+			expected: []string{syntheticParam(0)},
 		},
 		{
 			name:     "underscore receiver",
@@ -97,14 +114,19 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed receiver with unnamed params",
 			src:      "package main\ntype T struct{}\nfunc (T) F(int, string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1", "_ignoredParam2"},
+			expected: []string{syntheticParam(0), syntheticParam(1), syntheticParam(2)},
+		},
+		{
+			name:     "underscore param collides with existing synthetic-looking param name",
+			src:      fmt.Sprintf("package main\nfunc F(%s int, _ string) {}", syntheticParam(0)),
+			expected: []string{syntheticParam(0), syntheticParam(1)},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			funcDecl := parseFunc(t, tt.src)
-			args := collectArguments(funcDecl)
+			args := collectArguments(funcDecl, testHash)
 			assert.Equal(t, tt.expected, args)
 		})
 	}
@@ -129,19 +151,27 @@ func TestCollectReturnValues(t *testing.T) {
 		{
 			name:     "unnamed return values",
 			src:      "package main\nfunc F() (int, string) { return 0, \"\" }",
-			expected: []string{"_unnamedRetVal0", "_unnamedRetVal1"},
+			expected: []string{syntheticUnnamedRetVal(0), syntheticUnnamedRetVal(1)},
 		},
 		{
 			name:     "underscore return values",
 			src:      "package main\nfunc F() (_ int, _ string) { return }",
-			expected: []string{"_ignoredRetVal0", "_ignoredRetVal1"},
+			expected: []string{syntheticIgnoredRetVal(0), syntheticIgnoredRetVal(1)},
+		},
+		{
+			name: "underscore return collides with existing synthetic-looking return name",
+			src: fmt.Sprintf(
+				"package main\nfunc F() (%s error, _ bool) { return nil, false }",
+				syntheticIgnoredRetVal(0),
+			),
+			expected: []string{syntheticIgnoredRetVal(0), syntheticIgnoredRetVal(1)},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			funcDecl := parseFunc(t, tt.src)
-			retVals := collectReturnValues(funcDecl)
+			retVals := collectReturnValues(funcDecl, testHash)
 			assert.Equal(t, tt.expected, retVals)
 		})
 	}
@@ -178,6 +208,17 @@ func TestCollectNamesNoCollision(t *testing.T) {
 			name: "multiple blanks on both sides",
 			src:  "package main\nfunc F(_ int, _ string) (_ error, _ bool) { return nil, false }",
 		},
+		{
+			name: "blank param collides with existing synthetic-looking param name",
+			src:  fmt.Sprintf("package main\nfunc F(%s int, _ string) {}", syntheticParam(0)),
+		},
+		{
+			name: "blank return collides with existing synthetic-looking return name",
+			src: fmt.Sprintf(
+				"package main\nfunc F() (%s error, _ bool) { return nil, false }",
+				syntheticIgnoredRetVal(0),
+			),
+		},
 	}
 
 	for _, tt := range tests {
@@ -185,8 +226,8 @@ func TestCollectNamesNoCollision(t *testing.T) {
 			file, funcDecl := parseFileFunc(t, tt.src)
 
 			// Mirror insertTJump: returns are collected first, then arguments.
-			retVals := collectReturnValues(funcDecl)
-			args := collectArguments(funcDecl)
+			retVals := collectReturnValues(funcDecl, testHash)
+			args := collectArguments(funcDecl, testHash)
 
 			seen := make(map[string]struct{})
 			for _, name := range append(append([]string{}, retVals...), args...) {
@@ -199,6 +240,31 @@ func TestCollectNamesNoCollision(t *testing.T) {
 			requireTypeChecks(t, renderFile(t, file))
 		})
 	}
+}
+
+// Regression for #1014: syntheticNamer previously only checked names against
+// the function's own signature, so a blank param/return could still be
+// renamed to something that shadows a package-level identifier written in
+// the bare "prefixN" style the old scheme produced. Salting every generated
+// name with the rule's identity hash means it can never collide with that
+// bare form, so the global is never shadowed - without having to resolve
+// every identifier visible in the function's scope.
+func TestSyntheticNamesDoNotShadowBareStyleGlobal(t *testing.T) {
+	src := "package main\n" +
+		"var _ignoredParam0 = \"important\"\n" +
+		"func foo(_ int, _ignoredParam1 string) string { return _ignoredParam0 }"
+	funcDecl := parseFunc(t, src)
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "foo-rule"},
+		Func:         "foo",
+		Before:       "BeforeFoo",
+		Path:         "example.com/hook",
+	}
+
+	args := collectArguments(funcDecl, funcRule.Identity())
+	assert.NotContains(t, args, "_ignoredParam0", "synthetic name must not shadow the package-level global")
+	assert.Equal(t, "_ignoredParam1", args[1], "named param must be left untouched")
 }
 
 // parseFileFunc parses source into a file and returns it alongside the first
