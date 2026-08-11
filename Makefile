@@ -28,6 +28,10 @@ INTEGRATION_TEST_RUN ?= .
 TOOL_COVERAGE_THRESHOLD ?= 68
 PKG_COVERAGE_THRESHOLD ?= 70
 
+# Temporary source-checkout bridge for built-in instrumentation modules.
+# Remove with #983 when these modules are resolved by versioned requirements.
+export OTELC_SOURCE_ROOT := $(CURDIR)
+
 # OTel Weaver execution for the local semantic-convention registry under
 # schemas/otelc/. Weaver runs from an OCI image (no host install required);
 # override OCI_BIN=podman or WEAVER_IMAGE=... to use a different runtime/version.
@@ -157,7 +161,7 @@ install: manifest ## Install otelc to $$GOPATH/bin
 	@echo "Installing otelc..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
-	OTELC_SOURCE_ROOT=$(CURDIR) go install -ldflags "-X $(MODULE_PATH)/tool/util.Version=$(VERSION) -X $(MODULE_PATH)/tool/util.CommitHash=$(COMMIT_HASH) -X $(MODULE_PATH)/tool/util.BuildTime=$(BUILD_TIME)" ./$(TOOL_DIR)
+	go install -ldflags "-X $(MODULE_PATH)/tool/util.Version=$(VERSION) -X $(MODULE_PATH)/tool/util.CommitHash=$(COMMIT_HASH) -X $(MODULE_PATH)/tool/util.BuildTime=$(BUILD_TIME)" ./$(TOOL_DIR)
 
 manifest: ## Generate the instrumentation manifest
 	@echo "Generating instrumentation manifest..."
@@ -568,7 +572,7 @@ test-integration: build build-demo
 	set -euo pipefail
 	# 40m: linodego public-method instrumentation rewrites ~450 *Client methods per
 	# instrumented build; under coverage (all tests, no shards) wall time exceeds 20m.
-	OTELC_SOURCE_ROOT=$(CURDIR) go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
+	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-latestlibbuild: build ## Run LatestLibBuild tests
@@ -610,7 +614,7 @@ test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
 	# See test-integration: linodego builds need >20m when the suite is unsharded.
-	OTELC_SOURCE_ROOT=$(CURDIR) go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests

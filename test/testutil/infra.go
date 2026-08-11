@@ -37,20 +37,22 @@ func newCmd(ctx context.Context, dir string, env []string, args ...string) *exec
 	} else {
 		cmd.Env = env
 	}
-	if root := os.Getenv("OTELC_SOURCE_ROOT"); root != "" {
-		const prefix = "OTELC_SOURCE_ROOT="
-		hasRoot := false
-		for _, value := range cmd.Env {
-			if strings.HasPrefix(value, prefix) {
-				hasRoot = true
-				break
-			}
-		}
-		if !hasRoot {
-			cmd.Env = append(cmd.Env, prefix+root)
+	cmd.Env = withSourceRoot(cmd.Env)
+	return cmd
+}
+
+func withSourceRoot(env []string) []string {
+	root := os.Getenv("OTELC_SOURCE_ROOT")
+	if root == "" {
+		return env
+	}
+	const prefix = "OTELC_SOURCE_ROOT="
+	for _, value := range env {
+		if strings.HasPrefix(value, prefix) {
+			return env
 		}
 	}
-	return cmd
+	return append(env, prefix+root)
 }
 
 // OtelcPath returns the absolute path to the otelc binary, assuming the
