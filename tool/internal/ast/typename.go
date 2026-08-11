@@ -121,15 +121,6 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 	return tn.matches(node, imports), nil
 }
 
-// ImportAliasMap builds a map from the local identifier used to reference an
-// imported package within file to that package's real import path. See imports on
-// MatchesTypeName for how to use the result, and importAliasMap for the
-// resolution rules.
-// Returns nil when file is nil.
-func ImportAliasMap(file *dst.File) map[string]string {
-	return importAliasMap(file)
-}
-
 // importAliasMap builds a map from the local identifier used to reference an
 // imported package within file (its explicit alias, or its default package
 // name when unaliased) to that package's real import path. It correctly disambiguates:
@@ -144,7 +135,7 @@ func ImportAliasMap(file *dst.File) map[string]string {
 // The cost is that the default name here is a syntactic guess; see importPathTail.
 //
 // Returns nil when file is nil.
-func importAliasMap(file *dst.File) map[string]string {
+func ImportAliasMap(file *dst.File) map[string]string {
 	if file == nil {
 		return nil
 	}

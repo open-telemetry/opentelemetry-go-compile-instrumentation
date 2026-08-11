@@ -352,7 +352,7 @@ func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, root *
 	if r.Signature == nil && r.SignatureContains == nil && r.Result == "" && r.LastResult == "" && r.Param == "" {
 		return true, nil
 	}
-	imports := importAliasMap(root)
+	imports := ImportAliasMap(root)
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
