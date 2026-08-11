@@ -83,6 +83,7 @@ func FreePort(t *testing.T) int {
 
 		lis, err := net.Listen("tcp", "localhost:0")
 		if err != nil {
+			t.Logf("FreePort: listen attempt %d/%d failed: %v", i+1, maxAttempts, err)
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}

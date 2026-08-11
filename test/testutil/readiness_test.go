@@ -5,6 +5,7 @@ package testutil
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -66,20 +67,22 @@ func TestFreePort(t *testing.T) {
 		assert.Greater(t, port, 0)
 	})
 
-	t.Run("concurrent", func(t *testing.T) {
-		const numGoroutines = 50
-		ports := make(chan int, numGoroutines)
-		for i := 0; i < numGoroutines; i++ {
-			go func() {
-				ports <- FreePort(t)
-			}()
-		}
+	const numGoroutines = 50
+	ports := make(chan int, numGoroutines)
 
-		allocated := make(map[int]bool)
+	t.Run("concurrent", func(t *testing.T) {
 		for i := 0; i < numGoroutines; i++ {
-			port := <-ports
-			assert.False(t, allocated[port], "duplicate port returned: %d", port)
-			allocated[port] = true
+			t.Run(fmt.Sprintf("goroutine-%d", i), func(t *testing.T) {
+				t.Parallel()
+				ports <- FreePort(t)
+			})
 		}
 	})
+
+	close(ports)
+	allocated := make(map[int]bool)
+	for port := range ports {
+		assert.False(t, allocated[port], "duplicate port returned: %d", port)
+		allocated[port] = true
+	}
 }
