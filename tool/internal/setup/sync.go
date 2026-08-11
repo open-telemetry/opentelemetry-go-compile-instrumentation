@@ -198,6 +198,10 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 }
 
 func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
+	if len(modPaths) == 0 {
+		return nil
+	}
+
 	sourceRoot, err := repositorySourceRoot()
 	if err != nil {
 		return err

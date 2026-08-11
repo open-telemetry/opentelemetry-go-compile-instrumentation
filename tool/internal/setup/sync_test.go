@@ -167,6 +167,49 @@ func TestSyncDeps_NoMods(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestSyncDeps_NoModsOutsideRepository(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("OTELC_SOURCE_ROOT", "")
+	require.NoError(t, syncDeps(t.Context(), nil, t.TempDir()))
+}
+
+func TestRepositorySourceRoot(t *testing.T) {
+	repositoryDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(repositoryDir, "go.mod"), []byte("module example.com/repo\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(repositoryDir, "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repositoryDir, "pkg", "go.mod"), []byte("module example.com/repo/pkg\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(repositoryDir, "instrumentation"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(repositoryDir, "instrumentation", "go.mod"),
+		[]byte("module example.com/repo/instrumentation\n"),
+		0o644,
+	))
+
+	t.Run("environment", func(t *testing.T) {
+		t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+		got, err := repositorySourceRoot()
+		require.NoError(t, err)
+		require.Equal(t, repositoryDir, got)
+	})
+
+	t.Run("parent", func(t *testing.T) {
+		t.Setenv("OTELC_SOURCE_ROOT", "")
+		nested := filepath.Join(repositoryDir, "test", "app")
+		require.NoError(t, os.MkdirAll(nested, 0o755))
+		t.Chdir(nested)
+
+		got, err := repositorySourceRoot()
+		require.NoError(t, err)
+		require.Equal(t, repositoryDir, got)
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		t.Setenv("OTELC_SOURCE_ROOT", t.TempDir())
+		_, err := repositorySourceRoot()
+		require.ErrorContains(t, err, "otelc source checkout not found")
+	})
+}
+
 //nolint:revive // if we add named returns then nonamedreturns will complain
 func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, string, string) {
 	tempDir := t.TempDir()
