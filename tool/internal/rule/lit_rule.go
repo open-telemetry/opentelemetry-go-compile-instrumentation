@@ -14,15 +14,9 @@ import (
 
 // InstLitField represents a single field to set on a matched composite literal.
 //
-// Value and Wrap split the two cases a literal presents. Wrap says what to do
-// with the value the literal already assigns to the field; Value says what the
-// field becomes when the literal does not mention it at all. At least one must
-// be set, and unlike assign_value's mutually exclusive replace/wrap, both may
-// be set together to cover both cases in one entry:
-//
-//	value only → the field is set, overriding any existing value
-//	wrap only  → an existing value is wrapped; a literal omitting the field is skipped
-//	both       → an existing value is wrapped, and the field is set where absent
+// At least one of Value or Wrap must be set. Unlike assign_value's mutually
+// exclusive replace/wrap, both may be set together, because whether a field is
+// present varies from one literal to the next.
 type InstLitField struct {
 	// Name is the field name to set.
 	Name string `json:"name" yaml:"name"`
@@ -38,8 +32,7 @@ type InstLitField struct {
 }
 
 // InstLitRule represents a rule that sets fields on composite literals of a
-// given struct type, wherever those literals are written. It reaches values
-// that have no constructor to hook, which the func and call rules cannot.
+// given struct type, wherever those literals are written.
 //
 // The struct_literal field uses the qualified format "package/path.TypeName",
 // matching the convention of function_call. Unqualified literals of a type
@@ -56,22 +49,6 @@ type InstLitField struct {
 //
 // This transforms: &http.Transport{MaxIdleConns: 100}
 // Into: &http.Transport{Internal: true, MaxIdleConns: 100}
-//
-// A field may instead wrap the value the literal already assigns, which reaches
-// values the rule cannot name because they are computed at the call site:
-//
-//	instrument_clients:
-//		target: "example.com/app"
-//		struct_literal: "net/http.Client"
-//		field:
-//		  - name: Transport
-//		    wrap: "otelhttp.NewTransport({{ . }})"
-//		    value: "otelhttp.NewTransport(http.DefaultTransport)"
-//
-// This transforms: &http.Client{Transport: myTransport}
-// Into: &http.Client{Transport: otelhttp.NewTransport(myTransport)}
-// And:  &http.Client{}
-// Into: &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
 type InstLitRule struct {
 	InstBaseRule `yaml:",inline"`
 

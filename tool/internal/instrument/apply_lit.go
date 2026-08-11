@@ -14,8 +14,7 @@ import (
 )
 
 // applyLitRule sets fields on every composite literal of the rule's type found
-// in the target file. It reaches values built inline, which have no call site
-// or declaration for the other rule types to hook.
+// in the target file.
 func (ip *InstrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) error {
 	importAliases := collectImportAliases(root)
 
@@ -40,7 +39,6 @@ func (ip *InstrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	for _, lit := range matched {
 		// Go rejects a literal that mixes keyed and positional elements, so a
 		// positional literal cannot take the keyed elements this rule produces.
-		// Skipping keeps the build valid and surfaces the site to the user.
 		if hasPositionalElements(lit) {
 			ip.Warn("Skipping positional composite literal; set_fields requires keyed elements",
 				"rule", r.Name, "type", r.StructLiteral)
@@ -65,10 +63,9 @@ func (ip *InstrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	return nil
 }
 
-// litFieldSetter holds a field's parsed instructions. The value expression is
-// parsed and the wrap template compiled once per rule rather than once per
-// matched literal; wrap still has to be applied per literal because it
-// substitutes that literal's own expression.
+// litFieldSetter holds a field's parsed instructions, built once per rule.
+// Applying wrap still happens per literal, since it substitutes that literal's
+// own expression.
 type litFieldSetter struct {
 	name string
 	// value is the parsed expression for a literal that omits the field. It is
@@ -154,12 +151,8 @@ func (ip *InstrumentPhase) setLitFields(
 	changed := false
 	var prepend []dst.Expr
 	for _, setter := range setters {
-		// Validation guarantees at least one of value or wrap per field, so a
-		// nil wrap leaves value as the only way this setter can act.
 		util.Assert(setter.value != nil || setter.wrap != nil, "field setter has neither value nor wrap")
 
-		// The literal already assigns this field: wrap what is there if the rule
-		// says how, otherwise override it with value.
 		if existing := findKeyedElement(lit, setter.name); existing != nil {
 			if setter.wrap == nil {
 				existing.Value = util.AssertType[dst.Expr](dst.Clone(setter.value))
@@ -175,8 +168,7 @@ func (ip *InstrumentPhase) setLitFields(
 			continue
 		}
 
-		// The literal omits this field, so there is nothing for wrap to
-		// substitute. Only value can reach it.
+		// Nothing for wrap to substitute when the literal omits the field.
 		if setter.value == nil {
 			ip.Warn("Skipping field absent from composite literal; wrap has no value to substitute",
 				"rule", r.Name, "type", r.StructLiteral, "field", setter.name)

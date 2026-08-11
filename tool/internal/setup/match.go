@@ -387,10 +387,8 @@ func (sp *SetupPhase) matchOneRule(
 		set.AddCallRule(source, rt)
 		sp.Info("Match call rule", "rule", rt, "dep", dep)
 	case *rule.InstLitRule:
-		// Literal rules are added unconditionally for the same reason as call
-		// rules: resolving the literal's type to an import path needs the file's
-		// import aliases, which are only read during the instrument phase.
-		// Files without matching literals are a no-op in applyLitRule.
+		// Added unconditionally for the same reason as call rules above:
+		// resolving the literal's type needs the file's import aliases.
 		set.AddLitRule(source, rt)
 		sp.Info("Match literal rule", "rule", rt, "dep", dep)
 	case *rule.InstDirectiveRule:
