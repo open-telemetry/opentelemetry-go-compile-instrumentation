@@ -241,8 +241,8 @@ func TestDeclRuleWrapDoesNotClobberSiblingNames(t *testing.T) {
 }
 
 // A tuple-valued initializer gives two names one value, so no single
-// initializer belongs to the targeted name. Both advices refuse it rather than
-// rewrite the declaration into a different shape.
+// initializer belongs to the targeted name. Both replace and wrap refuse it
+// rather than rewrite the declaration into a different shape.
 const tupleValuedSource = "package main\n\nfunc pair() (int, int) { return 1, 2 }\n\nvar alpha, beta = pair()\n"
 
 func TestDeclRuleReplaceRejectsTupleValuedInitializer(t *testing.T) {
