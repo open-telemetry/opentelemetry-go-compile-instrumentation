@@ -46,8 +46,7 @@ func main() {
 
 	topic := "test-topic-http"
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/produce", func(w http.ResponseWriter, r *http.Request) {
+	produce := func(w http.ResponseWriter, r *http.Request) {
 		ensureTopic(r.Context(), topic)
 
 		writer := &kafka.Writer{
@@ -71,7 +70,13 @@ func main() {
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("frontend produced message to kafka"))
-	})
+	}
+
+	mux := http.NewServeMux()
+	// /produce is kept for the existing integration test; /hello lets the
+	// e2e test reuse test/apps/httpclient, which always requests /hello.
+	mux.HandleFunc("/produce", produce)
+	mux.HandleFunc("/hello", produce)
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *frontPort),

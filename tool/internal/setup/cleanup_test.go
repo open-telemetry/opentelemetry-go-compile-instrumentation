@@ -28,7 +28,7 @@ func TestCleanup(t *testing.T) {
 				// track otelc.runtime.go in the state manager so it is removed when Cleanup is called
 				stateManager := NewStateManager()
 				otelcRuntimeGoPath := filepath.Join(dir, OtelcRuntimeFile)
-				stateManager.Track(otelcRuntimeGoPath)
+				require.NoError(t, stateManager.Track(otelcRuntimeGoPath))
 				mustWriteFile(t, otelcRuntimeGoPath, "package main \n\n// dummy runtime file")
 				// The instrumentation package is extracted inside .otelc-build/pkg/,
 				// not at the project root. It is removed as part of .otelc-build/ cleanup.
@@ -55,7 +55,7 @@ func TestCleanup(t *testing.T) {
 				t.Helper()
 				stateManager := NewStateManager()
 				otelcRuntimeGoPath := filepath.Join(dir, OtelcRuntimeFile)
-				stateManager.Track(otelcRuntimeGoPath)
+				require.NoError(t, stateManager.Track(otelcRuntimeGoPath))
 				mustWriteFile(t, otelcRuntimeGoPath, "package main\n\n// dummy runtime file")
 				return ContextWithStateManager(t.Context(), stateManager)
 			},

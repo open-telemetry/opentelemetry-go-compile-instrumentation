@@ -85,6 +85,11 @@ func TestCollectArguments(t *testing.T) {
 			expected: []string{"_ignoredParam0"},
 		},
 		{
+			name:     "underscore receiver",
+			src:      "package main\ntype T struct{}\nfunc (_ T) F() {}",
+			expected: []string{"_ignoredParam0"},
+		},
+		{
 			name:     "named receiver with params",
 			src:      "package main\ntype T struct{}\nfunc (t T) F(a int, b string) {}",
 			expected: []string{"t", "a", "b"},
@@ -160,6 +165,10 @@ func TestCollectNamesNoCollision(t *testing.T) {
 		{
 			name: "unnamed receiver and blank named return",
 			src:  "package main\ntype T struct{}\nfunc (T) M() (_ error) { return nil }",
+		},
+		{
+			name: "blank receiver and blank named return",
+			src:  "package main\ntype T struct{}\nfunc (_ T) M() (_ error) { return nil }",
 		},
 		{
 			name: "unnamed param and unnamed return (control)",
