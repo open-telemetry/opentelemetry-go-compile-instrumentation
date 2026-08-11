@@ -170,6 +170,7 @@ func TestSyncDeps_NoMods(t *testing.T) {
 //nolint:revive // if we add named returns then nonamedreturns will complain
 func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, string, string) {
 	tempDir := t.TempDir()
+	repositoryDir := t.TempDir()
 
 	goModPath := filepath.Join(tempDir, "go.mod")
 	require.NoError(t, os.WriteFile(goModPath, []byte(goMod), 0o644))
@@ -177,11 +178,9 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 	t.Chdir(tempDir)
 	t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
-	buildTempDir := util.GetBuildTempDir()
-
-	pkgDir := filepath.Join(buildTempDir, unzippedPkgDir)
+	pkgDir := filepath.Join(repositoryDir, "pkg")
 	pkgRuntimeDir := filepath.Join(pkgDir, "runtime")
-	instDir := filepath.Join(buildTempDir, unzippedInstDir)
+	instDir := filepath.Join(repositoryDir, "instrumentation")
 
 	require.NoError(t, os.MkdirAll(pkgRuntimeDir, 0o755))
 	require.NoError(t, os.MkdirAll(instDir, 0o755))
@@ -212,7 +211,7 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 		))
 	}
 
-	return tempDir, buildTempDir, goModPath
+	return tempDir, repositoryDir, goModPath
 }
 
 func TestSyncDeps_WithMods(t *testing.T) {
@@ -220,25 +219,27 @@ func TestSyncDeps_WithMods(t *testing.T) {
 
 go 1.21
 `
-	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"/net/http/client"})
-	require.NoError(t, syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir))
+	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	require.NoError(t, syncDepsFromSource(
+		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
+	))
 
 	content, err := os.ReadFile(goModPath)
 	require.NoError(t, err)
 	got := string(content)
 
 	assert.Contains(t, got,
-		"replace "+util.OtelcPkgRoot+" => "+filepath.Join(buildTempDir, unzippedPkgDir))
+		"replace "+util.OtelcPkgRoot+" => "+filepath.Join(repositoryDir, "pkg"))
 	assert.Contains(t, got,
-		"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(buildTempDir, unzippedPkgDir, "runtime"))
+		"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(repositoryDir, "pkg", "runtime"))
 	assert.Contains(t, got,
-		"replace "+util.OtelcInstRoot+" => "+filepath.Join(buildTempDir, unzippedInstDir))
+		"replace "+util.OtelcInstRoot+" => "+filepath.Join(repositoryDir, "instrumentation"))
 	assert.Contains(
 		t,
 		got,
 		"replace "+util.OtelcInstRoot+"/net/http/client"+" => "+filepath.Join(
-			buildTempDir,
-			unzippedInstDir,
+			repositoryDir,
+			"instrumentation",
 			"net",
 			"http",
 			"client",
@@ -251,12 +252,12 @@ func TestSyncDeps_NestedModule(t *testing.T) {
 
 go 1.21
 `
-	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
 
 	// Add a nested module with no otelc.yaml of its own inside the matched
 	// instrumentation module's directory, mirroring a shared internal
 	// package used by several versioned copies of one instrumentation.
-	nestedDir := filepath.Join(buildTempDir, unzippedInstDir, "net", "http", "client", "internal", "shared")
+	nestedDir := filepath.Join(repositoryDir, "instrumentation", "net", "http", "client", "internal", "shared")
 	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
 	nestedModule := util.OtelcInstRoot + "/net/http/client/internal/shared"
 	require.NoError(t, os.WriteFile(
@@ -265,7 +266,9 @@ go 1.21
 		0o644,
 	))
 
-	require.NoError(t, syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir))
+	require.NoError(t, syncDepsFromSource(
+		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
+	))
 
 	content, err := os.ReadFile(goModPath)
 	require.NoError(t, err)
@@ -285,13 +288,13 @@ func TestSyncDeps_SiblingNestedModule(t *testing.T) {
 
 go 1.21
 `
-	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"github.com/openai/openai-go/v2"})
+	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"github.com/openai/openai-go/v2"})
 
 	// internal/streaming lives under the parent of the matched v2 directory
 	// (i.e. under github.com/openai/openai-go/), as a sibling of v2, not a
 	// descendant of it.
 	siblingDir := filepath.Join(
-		buildTempDir, unzippedInstDir, "github.com", "openai", "openai-go", "internal", "streaming",
+		repositoryDir, "instrumentation", "github.com", "openai", "openai-go", "internal", "streaming",
 	)
 	require.NoError(t, os.MkdirAll(siblingDir, 0o755))
 	siblingModule := util.OtelcInstRoot + "/github.com/openai/openai-go/internal/streaming"
@@ -301,10 +304,11 @@ go 1.21
 		0o644,
 	))
 
-	require.NoError(t, syncDeps(
+	require.NoError(t, syncDepsFromSource(
 		t.Context(),
 		map[string]bool{util.OtelcInstRoot + "/github.com/openai/openai-go/v2": true},
 		tempDir,
+		repositoryDir,
 	))
 
 	content, err := os.ReadFile(goModPath)
@@ -408,12 +412,12 @@ func TestSyncDeps_NestedModuleDiscoveryError(t *testing.T) {
 
 go 1.21
 `
-	tempDir, buildTempDir, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	tempDir, repositoryDir, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
 
 	// Malformed go.mod inside the matched instrumentation module's directory
 	// makes discoverNestedModuleReplaces fail, which syncDeps must surface
 	// rather than silently drop.
-	nestedDir := filepath.Join(buildTempDir, unzippedInstDir, "net", "http", "client", "internal", "shared")
+	nestedDir := filepath.Join(repositoryDir, "instrumentation", "net", "http", "client", "internal", "shared")
 	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(nestedDir, "go.mod"),
@@ -421,7 +425,9 @@ go 1.21
 		0o644,
 	))
 
-	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir)
+	err := syncDepsFromSource(
+		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discovering nested modules under")
 }
@@ -434,8 +440,10 @@ go 1.21
 replace %s => /already/there
 `, util.OtelcInstRoot+"/net/http/client")
 
-	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
-	require.NoError(t, syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir))
+	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	require.NoError(t, syncDepsFromSource(
+		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
+	))
 
 	content, err := os.ReadFile(goModPath)
 	require.NoError(t, err)
@@ -447,8 +455,8 @@ replace %s => /already/there
 		t,
 		got,
 		"replace "+util.OtelcInstRoot+"/net/http/client => "+filepath.Join(
-			buildTempDir,
-			unzippedInstDir,
+			repositoryDir,
+			"instrumentation",
 			"net",
 			"http",
 			"client",

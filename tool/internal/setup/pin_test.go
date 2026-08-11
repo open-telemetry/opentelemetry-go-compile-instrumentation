@@ -21,6 +21,7 @@ import (
 	"gotest.tools/v3/golden"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -448,7 +449,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
 		deps  []*Dependency
-		rules map[string][]yamlRule
+		rules manifest.Manifest
 		want  map[string]bool
 	}{
 		{
@@ -459,12 +460,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
-					VersionRange: "v1.2.3",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/foo",
+				VersionRange: "v1.2.3",
+			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
@@ -477,12 +477,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/bar": {{
-					Target:       "example.com/bar",
-					VersionRange: "v1.2.3",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/bar",
+				Target:       "example.com/bar",
+				VersionRange: "v1.2.3",
+			}},
 			want: map[string]bool{},
 		},
 		{
@@ -493,12 +492,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
-					VersionRange: "v1.2.4",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/foo",
+				VersionRange: "v1.2.4",
+			}},
 			want: map[string]bool{},
 		},
 		{
@@ -509,12 +507,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "", // replace/local path: findModVersion returns empty
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
-					VersionRange: "v1.0.0",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/foo",
+				VersionRange: "v1.0.0",
+			}},
 			want: map[string]bool{},
 		},
 		{
@@ -525,12 +522,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
-					VersionRange: "",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/foo",
+				VersionRange: "",
+			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
@@ -543,12 +539,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/*",
-					VersionRange: "v1.2.3",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/*",
+				VersionRange: "v1.2.3",
+			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
@@ -561,12 +556,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/*",
-					VersionRange: "v1.2.3",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/*",
+				VersionRange: "v1.2.3",
+			}},
 			want: map[string]bool{},
 		},
 		{
@@ -576,11 +570,10 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					ImportPath: "example.com/foo",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target: rule.TargetRoot,
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath: "example.com/instrumentation/foo",
+				Target:     rule.TargetRoot,
+			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
@@ -597,19 +590,35 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v2.0.0",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
+			rules: manifest.Manifest{
+				{
+					ModulePath:   "example.com/instrumentation/foo",
 					Target:       "example.com/foo",
 					VersionRange: "v1.0.0",
-				}},
-				"example.com/instrumentation/bar": {{
+				},
+				{
+					ModulePath:   "example.com/instrumentation/bar",
 					Target:       "example.com/bar",
 					VersionRange: "v2.0.0",
-				}},
+				},
 			},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 				"example.com/instrumentation/bar": true,
+			},
+		},
+		{
+			name: "duplicate entries produce one import",
+			deps: []*Dependency{{
+				ImportPath: "example.com/foo",
+				Version:    "v1.0.0",
+			}},
+			rules: manifest.Manifest{
+				{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo"},
+				{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo"},
+			},
+			want: map[string]bool{
+				"example.com/instrumentation/foo": true,
 			},
 		},
 	} {
@@ -626,12 +635,11 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 			ImportPath: "example.com/foo",
 			Version:    "",
 		}}
-		rules := map[string][]yamlRule{
-			"example.com/instrumentation/foo": {{
-				Target:       "example.com/foo",
-				VersionRange: "v1.0.0",
-			}},
-		}
+		rules := manifest.Manifest{{
+			ModulePath:   "example.com/instrumentation/foo",
+			Target:       "example.com/foo",
+			VersionRange: "v1.0.0",
+		}}
 
 		var warned bool
 		var warnedMsg string
@@ -654,11 +662,9 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 			{ImportPath: "example.com/foo/v1", Version: ""},
 			{ImportPath: "example.com/foo/v1/sub", Version: "v1.0.0"},
 		}
-		rules := map[string][]yamlRule{
-			"example.com/instrumentation/foo": {
-				{Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
-				{Target: "example.com/foo/v1/sub", VersionRange: ""},
-			},
+		rules := manifest.Manifest{
+			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
+			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo/v1/sub"},
 		}
 
 		var warned bool
@@ -677,11 +683,9 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 			ImportPath: "example.com/foo",
 			Version:    "",
 		}}
-		rules := map[string][]yamlRule{
-			"example.com/instrumentation/foo": {
-				{Target: "example.com/foo", VersionRange: "v1.0.0"},
-				{Target: "example.com/foo", VersionRange: "v2.0.0"},
-			},
+		rules := manifest.Manifest{
+			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo", VersionRange: "v1.0.0"},
+			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo", VersionRange: "v2.0.0"},
 		}
 
 		warnCount := 0
@@ -694,71 +698,6 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 		require.Empty(t, got)
 		require.Equal(t, 1, warnCount)
 	})
-}
-
-func TestLoadMinimalRules_HappyPath(t *testing.T) {
-	// root directory
-	dir := t.TempDir()
-
-	// Create sub1 submodule
-	sub1 := filepath.Join(dir, "sub1")
-	require.NoError(t, os.Mkdir(sub1, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
-
-	ruleContent := `
-rule1:
-  target: example.com/target
-  version: v1.0.0
-`
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte(ruleContent), 0o644))
-
-	// Create nested submodule within sub1, which should be iterated separately
-	nested := filepath.Join(sub1, "nested")
-	require.NoError(t, os.Mkdir(nested, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(nested, "go.mod"), []byte("module example.com/sub1/nested\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(nested, "otelc.yaml"), []byte(`
-ruleNested:
-  target: example.com/nested-target
-  version: v1.0.0
-`), 0o644))
-
-	rules, err := loadMinimalRules(dir)
-	require.NoError(t, err)
-
-	// make sure only 2 rules are loaded (sub1 and nested, sub1 doesn't load nested rules)
-	require.Len(t, rules, 2)
-	require.Contains(t, rules, "example.com/sub1")
-	require.Contains(t, rules, "example.com/sub1/nested")
-
-	require.Len(t, rules["example.com/sub1"], 1)
-	require.Equal(t, "example.com/target", rules["example.com/sub1"][0].Target)
-	require.Equal(t, "v1.0.0", rules["example.com/sub1"][0].VersionRange)
-
-	require.Len(t, rules["example.com/sub1/nested"], 1)
-	require.Equal(t, "example.com/nested-target", rules["example.com/sub1/nested"][0].Target)
-}
-
-func TestLoadMinimalRules_InvalidGoMod(t *testing.T) {
-	dir := t.TempDir()
-
-	sub1 := filepath.Join(dir, "sub1")
-	require.NoError(t, os.Mkdir(sub1, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("invalid"), 0o644))
-
-	_, err := loadMinimalRules(dir)
-	require.Error(t, err)
-}
-
-func TestLoadMinimalRules_InvalidRuleYAML(t *testing.T) {
-	dir := t.TempDir()
-
-	sub1 := filepath.Join(dir, "sub1")
-	require.NoError(t, os.Mkdir(sub1, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte("invalid: yaml: {"), 0o644))
-
-	_, err := loadMinimalRules(dir)
-	require.Error(t, err)
 }
 
 func TestUpdateToolFile(t *testing.T) {
