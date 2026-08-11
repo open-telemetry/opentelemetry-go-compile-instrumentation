@@ -62,4 +62,5 @@ func TestGRPCServerDBClient(t *testing.T) {
 	// Assert on propagation (parent-child relationships)
 	require.Equal(t, grpcServerSpan.TraceID(), sqlClientSpan.TraceID(), "trace ID mismatch")
 	require.Equal(t, grpcServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be gRPC server")
+	require.True(t, grpcServerSpan.ParentSpanID().IsEmpty(), "gRPC server span must be the trace root")
 }

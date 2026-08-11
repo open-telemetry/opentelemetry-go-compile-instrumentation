@@ -4,6 +4,7 @@
 package data
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,4 +24,17 @@ func TestGetBundleReader(t *testing.T) {
 	r2 := GetBundleReader()
 	require.NotNil(t, r2)
 	assert.Equal(t, r.Len(), r2.Len())
+}
+
+func TestGetManifestJSON(t *testing.T) {
+	original := GetManifestJSON()
+	require.NotEmpty(t, original)
+	assert.True(t, json.Valid(original))
+
+	mutable := GetManifestJSON()
+	require.Equal(t, original, mutable)
+	mutable[0] ^= 0xff
+
+	assert.NotEqual(t, original, mutable)
+	assert.Equal(t, original, GetManifestJSON())
 }
