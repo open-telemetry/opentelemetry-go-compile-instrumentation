@@ -568,7 +568,7 @@ test-integration: build build-demo
 	set -euo pipefail
 	# 40m: linodego public-method instrumentation rewrites ~450 *Client methods per
 	# instrumented build; under coverage (all tests, no shards) wall time exceeds 20m.
-	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
+	OTELC_SOURCE_ROOT=$(CURDIR) go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-latestlibbuild: build ## Run LatestLibBuild tests
@@ -610,7 +610,7 @@ test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
 	# See test-integration: linodego builds need >20m when the suite is unsharded.
-	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	OTELC_SOURCE_ROOT=$(CURDIR) go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests

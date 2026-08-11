@@ -244,6 +244,7 @@ func (b *preparedBuildCase) runAndRequireHTTPSpan() {
 func preparedBuildBaseEnvironment() []string {
 	env := os.Environ()
 	filtered := env[:0]
+	sourceRoot := os.Getenv("OTELC_SOURCE_ROOT")
 	for _, entry := range env {
 		name, _, _ := strings.Cut(entry, "=")
 		name = strings.ToLower(name)
@@ -253,7 +254,11 @@ func preparedBuildBaseEnvironment() []string {
 		}
 		filtered = append(filtered, entry)
 	}
-	return append(filtered, "GOENV=off")
+	filtered = append(filtered, "GOENV=off")
+	if sourceRoot != "" {
+		filtered = append(filtered, "OTELC_SOURCE_ROOT="+sourceRoot)
+	}
+	return filtered
 }
 
 func preparedPlainBuildEnvironment(baseEnv []string, goCache string) []string {

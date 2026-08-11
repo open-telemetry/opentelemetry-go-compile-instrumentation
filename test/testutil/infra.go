@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,19 @@ func newCmd(ctx context.Context, dir string, env []string, args ...string) *exec
 		cmd.Env = os.Environ()
 	} else {
 		cmd.Env = env
+	}
+	if root := os.Getenv("OTELC_SOURCE_ROOT"); root != "" {
+		const prefix = "OTELC_SOURCE_ROOT="
+		hasRoot := false
+		for _, value := range cmd.Env {
+			if strings.HasPrefix(value, prefix) {
+				hasRoot = true
+				break
+			}
+		}
+		if !hasRoot {
+			cmd.Env = append(cmd.Env, prefix+root)
+		}
 	}
 	return cmd
 }
