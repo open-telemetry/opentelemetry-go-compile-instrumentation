@@ -88,3 +88,50 @@ func TestApplyDirectiveRule_MatchingFunc(t *testing.T) {
 	require.True(t, ok, "expected *dst.FuncDecl, got %T", root.Decls[0])
 	assert.Len(t, funcDecl.Body.List, 2, "rendered statement should be prepended to the body")
 }
+
+// The template failures below are rejected by InstDirectiveRule.validate before
+// a rule reaches this point, so these cases build the rule struct directly.
+// They pin the behaviour of applyDirectiveRule itself: a template that cannot
+// be compiled, rendered, or parsed is reported, never silently skipped.
+func TestApplyDirectiveRule_TemplateErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+		wantErr  string
+	}{
+		{
+			name:     "unterminated tag",
+			template: `println("{{FuncName")`,
+			wantErr:  "end tag",
+		},
+		{
+			name:     "unknown tag",
+			template: `println("{{Bogus}}")`,
+			wantErr:  "unknown template tag",
+		},
+		{
+			name:     "renders to invalid Go",
+			template: "if {",
+			wantErr:  "parsing rendered template for func foo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, err := ast.NewAstParser().ParseSource(directiveOnFuncSource)
+			require.NoError(t, err)
+
+			r := &rule.InstDirectiveRule{
+				InstBaseRule: rule.InstBaseRule{Name: "span_directive"},
+				Directive:    "otelc:span",
+				Template:     tt.template,
+			}
+
+			modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.False(t, modified)
+		})
+	}
+}
