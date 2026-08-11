@@ -43,6 +43,5 @@ profiles
 schemas/otelc/.deps/
 
 # Test build cache and workspaces
-test/testutil/.gocache/
-test/testutil/.tmp/
+test/.otelc-gocache/
 test/.tmp_*/

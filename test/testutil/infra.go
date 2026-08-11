@@ -19,6 +19,9 @@ import (
 )
 
 var (
+	// buildMu serializes all go build operations across tests to act as a resource throttle,
+	// preventing CPU/memory exhaustion on CI runners (since individual go builds already
+	// parallelize package compilation internally).
 	buildMu   sync.Mutex
 	sandboxMu sync.Mutex
 	sandboxes = make(map[string]bool)
@@ -87,8 +90,7 @@ func sandboxPath(t *testing.T) (string, error) {
 	if idx := strings.Index(tName, "/"); idx != -1 {
 		tName = tName[:idx]
 	}
-	sanitized := strings.ReplaceAll(tName, "/", "_")
-	return filepath.Join(pwd, "..", ".tmp_"+sanitized), nil
+	return filepath.Join(pwd, "..", ".tmp_"+tName), nil
 }
 
 func initSandbox(t *testing.T, sandboxDir string) {
@@ -110,9 +112,9 @@ func initSandbox(t *testing.T, sandboxDir string) {
 
 // Build builds the application with the instrumentation tool. The built binary
 // is registered for cleanup via t.Cleanup. Standard test apps use
-// OTELC_TEST_GOCACHE/<app> as GOCACHE when OTELC_TEST_GOCACHE is set, and drop
-// -a so warm builds can reuse that per-app cache. Custom appsDir builds keep
-// the caller's arguments and environment unchanged.
+// OTELC_TEST_GOCACHE as a shared GOCACHE when OTELC_TEST_GOCACHE is set, and
+// drop -a so warm builds can reuse that shared cache. Custom appsDir builds
+// keep the caller's arguments and environment unchanged.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
 	buildMu.Lock()
@@ -131,8 +133,7 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 			require.NoError(t, os.MkdirAll(cacheRoot, 0o755))
 			env = setEnv(env, "GOCACHE", cacheRoot)
 
-			// Dropping -a lets warm builds reuse this app-local cache without sharing
-			// compiled objects across different instrumentation configs.
+			// Dropping -a lets warm builds reuse this shared build cache.
 			filteredArgs := make([]string, 0, len(args))
 			for _, arg := range args {
 				if arg != "-a" {
@@ -159,7 +160,9 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 		srcDir := filepath.Join(appsDir, app)
 		dstDir := filepath.Join(sandboxDir, app)
 
-		require.NoError(t, copyDir(srcDir, dstDir))
+		if _, err := os.Stat(dstDir); os.IsNotExist(err) {
+			require.NoError(t, copyDir(srcDir, dstDir))
+		}
 		appDir = dstDir
 	} else {
 		appDir = filepath.Join(appsDir, app)
@@ -190,6 +193,9 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 		sandboxDir, err := sandboxPath(t)
 		require.NoError(t, err)
 		appDir = filepath.Join(sandboxDir, app)
+		if _, err := os.Stat(appDir); os.IsNotExist(err) {
+			t.Fatalf("sandbox directory %s does not exist; Build must be called before Run", appDir)
+		}
 	} else {
 		appDir = filepath.Join(appsDir, app)
 	}
@@ -213,6 +219,9 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 		sandboxDir, err := sandboxPath(t)
 		require.NoError(t, err)
 		appDir = filepath.Join(sandboxDir, app)
+		if _, err := os.Stat(appDir); os.IsNotExist(err) {
+			t.Fatalf("sandbox directory %s does not exist; Build must be called before Start", appDir)
+		}
 	} else {
 		appDir = filepath.Join(appsDir, app)
 	}
