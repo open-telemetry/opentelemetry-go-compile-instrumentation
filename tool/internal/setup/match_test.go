@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -1540,4 +1541,53 @@ func TestMatchDeps_NoMatchesWarning(t *testing.T) {
 	matched, err := sp.matchDeps(t.Context(), deps, nil)
 	require.NoError(t, err)
 	assert.Empty(t, matched)
+}
+
+func TestRunMatch_WarnsOnUnresolvedVersion(t *testing.T) {
+	const importPath = "example.com/mypkg"
+
+	var buf bytes.Buffer
+	sp := &SetupPhase{
+		logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Version:    "",
+		Sources:    []string{},
+		CgoFiles:   make(map[string]string),
+	}
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {
+			&rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:    "versioned_hook",
+					Target:  importPath,
+					Version: "v1.0.0",
+				},
+				Func:   "Target",
+				Before: "BeforeTarget",
+			},
+			&rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:    "another_versioned_hook",
+					Target:  importPath,
+					Version: "v2.0.0",
+				},
+				Func:   "Other",
+				Before: "BeforeOther",
+			},
+		},
+	}
+
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+	assert.True(t, set.IsEmpty())
+
+	out := buf.String()
+	require.Contains(t, out, "unresolved")
+	require.Contains(t, out, "versioned_hook")
+	require.Contains(t, out, "another_versioned_hook")
+	require.Contains(t, out, importPath)
 }

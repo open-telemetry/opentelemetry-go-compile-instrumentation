@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	goversion "go/version"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +119,54 @@ func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) 
 	return nil
 }
 
+// discoverNestedModuleReplaces walks dir for go.mod files nested inside it
+// (excluding dir's own go.mod), returning a map of module path to directory.
+// This picks up local helper modules that live inside an instrumentation
+// module's tree but carry no otelc.yaml of their own — e.g. a package shared
+// between several versioned copies of one instrumentation — so they never
+// match as an instrumentation import on their own. Without a replace
+// directive for them here, a downstream consumer's "go mod tidy" tries to
+// fetch them from a real module proxy and fails.
+//
+// The walk can pick up modules the consumer never actually requires — e.g.
+// a matched v1 directory that nests v2/v3 copies inside it, or, with the
+// parent-directory walk in syncDeps, sibling instrumentations under a
+// shared parent. That's intentional and harmless: "go mod tidy" ignores a
+// replace directive for a module that isn't in the build list.
+func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
+	nested := make(map[string]string)
+	topGoMod := filepath.Join(dir, "go.mod")
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" || filepath.Clean(path) == filepath.Clean(topGoMod) {
+			return nil
+		}
+
+		modFile, parseErr := parseGoMod(path)
+		if parseErr != nil {
+			return ex.Wrapf(parseErr, "loading %s", path)
+		}
+
+		nested[modFile.Module.Mod.Path] = filepath.Dir(path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return nested, nil
+}
+
 func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
 	if len(modPaths) == 0 {
 		return nil
@@ -138,6 +188,32 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		if path, isEmbedded := strings.CutPrefix(m, util.OtelcInstRoot+"/"); isEmbedded {
 			replaces[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
 		}
+	}
+
+	// Some matched instrumentation modules have their own nested local
+	// modules (see discoverNestedModuleReplaces) — either inside the matched
+	// module's own directory, or as a sibling shared by several versioned
+	// copies of one instrumentation (e.g. openai-go's v1/v2/v3 all sharing
+	// openai-go/internal/streaming, which sits under v1's directory, a
+	// sibling of v2/ and v3/ rather than a descendant of either). Walking
+	// each matched directory's parent in addition to the directory itself
+	// catches both shapes. The parent walk can also re-discover sibling
+	// version directories or unrelated instrumentations under a shared
+	// parent; a replace directive for a module the consumer doesn't
+	// actually require is harmless, since "go mod tidy" ignores it.
+	// Capacity hint: each matched dir contributes itself plus its parent.
+	const dirsPerMatch = 2
+	walkDirs := make(map[string]bool, len(replaces)*dirsPerMatch)
+	for _, dir := range replaces {
+		walkDirs[dir] = true
+		walkDirs[filepath.Dir(dir)] = true
+	}
+	for dir := range walkDirs {
+		nested, nestedErr := discoverNestedModuleReplaces(dir)
+		if nestedErr != nil {
+			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
+		}
+		maps.Copy(replaces, nested)
 	}
 
 	// Add replace directive for special pkg module

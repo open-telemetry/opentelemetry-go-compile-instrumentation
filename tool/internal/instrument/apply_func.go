@@ -87,8 +87,17 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 	idx := 0
 	if ast.HasReceiver(funcDecl) {
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
-			// Named receiver, e.g. func (r R) F() {}
-			receiver := funcDecl.Recv.List[0].Names[0].Name
+			// Named receiver, e.g. func (r R) F() {} or func (_ R) F() {}
+			receiver := recv.Names[0].Name
+			if receiver == ast.IdentIgnore {
+				// Blank receiver: recv.Names holds "_" rather than being nil,
+				// so it falls into this branch, but "_" cannot have its
+				// address taken during trampoline generation the way a named
+				// receiver can. Assign it a generated name instead.
+				receiver = fmt.Sprintf("%s%d", ignoredParam, idx)
+				idx++
+				recv.Names[0].Name = receiver
+			}
 			args = append(args, receiver)
 		} else {
 			// Unnamed receiver, e.g. func (R) F() {}

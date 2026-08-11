@@ -1,22 +1,32 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package v2
+// Package streaming implements the OpenAI GenAI streaming response reader
+// shared by the v1, v2, and v3 openai-go instrumentation packages. It has no
+// dependency on the versioned openai-go SDK, so a single copy serves all
+// three; each version's own package only adapts its local operationType into
+// OperationType and delegates here.
+package streaming
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
-
-	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v2/semconv"
 )
 
-type streamingReader struct {
+// OperationType identifies which OpenAI API shape a stream's chunks follow.
+type OperationType int
+
+const (
+	OpChat OperationType = iota
+	OpCompletion
+)
+
+type StreamingReader struct {
 	reader        io.ReadCloser
 	teeReader     io.Reader
 	logBuffer     *bytes.Buffer
@@ -30,33 +40,25 @@ type streamingReader struct {
 	responseModel string
 	reasons       []string
 	span          trace.Span
-	model         string
-	opName        string
-	provider      string
-	op            operationType
+	op            OperationType
 	done          atomic.Bool
 }
 
-func newStreamingReader(
+func NewStreamingReader(
 	body io.ReadCloser,
 	span trace.Span,
 	start time.Time,
-	model, opName, provider string,
-	op operationType,
-	_ context.Context,
-) *streamingReader {
-	return &streamingReader{
-		reader:   body,
-		start:    start,
-		span:     span,
-		model:    model,
-		opName:   opName,
-		provider: provider,
-		op:       op,
+	op OperationType,
+) *StreamingReader {
+	return &StreamingReader{
+		reader: body,
+		start:  start,
+		span:   span,
+		op:     op,
 	}
 }
 
-func (r *streamingReader) Read(p []byte) (n int, err error) {
+func (r *StreamingReader) Read(p []byte) (n int, err error) {
 	if r.teeReader == nil {
 		r.logBuffer = &bytes.Buffer{}
 		r.lineBuffer = &bytes.Buffer{}
@@ -80,7 +82,7 @@ func (r *streamingReader) Read(p []byte) (n int, err error) {
 	return n, err
 }
 
-func (r *streamingReader) Close() error {
+func (r *StreamingReader) Close() error {
 	if r.done.CompareAndSwap(false, true) {
 		r.finalize(true)
 	}
@@ -90,26 +92,26 @@ func (r *streamingReader) Close() error {
 	return nil
 }
 
-func (r *streamingReader) finalize(flush bool) {
+func (r *StreamingReader) finalize(flush bool) {
 	if flush {
 		r.flushRemaining()
 	}
 
 	r.span.SetAttributes(
-		semconv.GenAIResponseFinishReasons(r.reasons),
-		semconv.GenAIUsageInputTokens(r.inputTokens),
-		semconv.GenAIUsageOutputTokens(r.outputTokens),
-		semconv.GenAIUsageTotalTokens(r.totalTokens),
+		genAIResponseFinishReasonsKey.StringSlice(r.reasons),
+		genAIUsageInputTokensKey.Int64(r.inputTokens),
+		genAIUsageOutputTokensKey.Int64(r.outputTokens),
+		genAIUsageTotalTokensKey.Int64(r.totalTokens),
 	)
 	if r.id != "" {
-		r.span.SetAttributes(semconv.GenAIResponseID(r.id))
+		r.span.SetAttributes(genAIResponseIDKey.String(r.id))
 	}
 	if r.responseModel != "" {
-		r.span.SetAttributes(semconv.GenAIResponseModel(r.responseModel))
+		r.span.SetAttributes(genAIResponseModelKey.String(r.responseModel))
 	}
 	if !r.first.IsZero() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
-		r.span.SetAttributes(semconv.GenAIResponseTimeToFirstToken(firstTokenUs))
+		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
 	}
 
 	r.span.End()
@@ -119,7 +121,7 @@ func (r *streamingReader) finalize(flush bool) {
 // underlying reader can report an error (typically io.EOF) right after the
 // last data line, with no trailing newline to trigger processSSELines, so
 // that last chunk would otherwise sit unparsed in lineBuffer forever.
-func (r *streamingReader) flushRemaining() {
+func (r *StreamingReader) flushRemaining() {
 	if r.lineBuffer == nil || r.lineBuffer.Len() == 0 {
 		return
 	}
@@ -137,7 +139,7 @@ func (r *streamingReader) flushRemaining() {
 	r.processChunk(payload)
 }
 
-func (r *streamingReader) processSSELines() {
+func (r *StreamingReader) processSSELines() {
 	if r.logBuffer == nil || r.logBuffer.Len() == 0 {
 		return
 	}
@@ -189,20 +191,20 @@ func parseSSELine(line []byte) ([]byte, bool) {
 	return payload, false
 }
 
-func (r *streamingReader) processChunk(payload []byte) {
+func (r *StreamingReader) processChunk(payload []byte) {
 	if r.first.IsZero() {
 		r.first = time.Now()
 	}
 
 	switch r.op {
-	case opChat:
+	case OpChat:
 		r.processChatChunk(payload)
-	case opCompletion:
+	case OpCompletion:
 		r.processCompletionChunk(payload)
 	}
 }
 
-func (r *streamingReader) processChatChunk(payload []byte) {
+func (r *StreamingReader) processChatChunk(payload []byte) {
 	var chunk struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
@@ -244,7 +246,7 @@ func (r *streamingReader) processChatChunk(payload []byte) {
 	}
 }
 
-func (r *streamingReader) processCompletionChunk(payload []byte) {
+func (r *StreamingReader) processCompletionChunk(payload []byte) {
 	var chunk struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
