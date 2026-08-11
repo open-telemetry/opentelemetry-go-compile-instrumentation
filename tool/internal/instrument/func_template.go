@@ -103,16 +103,14 @@ func (d *funcTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
 	args := d.arguments() // ensures synthetic names are assigned first
 	idx := 0
 	for _, field := range d.funcDecl.Type.Params.List {
-		for range field.Names {
-			matched, err := ast.MatchesTypeName(field.Type, typeStr, d.imports)
-			if err != nil {
-				return "", err
-			}
-			if matched {
-				return args[idx], nil
-			}
-			idx++
+		matched, err := ast.MatchesTypeName(field.Type, typeStr, d.imports)
+		if err != nil {
+			return "", err
 		}
+		if matched {
+			return args[idx], nil
+		}
+		idx += len(field.Names)
 	}
 	return "", nil
 }
@@ -127,16 +125,14 @@ func (d *funcTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	}
 	idx := 0
 	for _, field := range d.funcDecl.Type.Results.List {
-		for range field.Names {
-			matched, err := ast.MatchesTypeName(field.Type, typeStr, d.imports)
-			if err != nil {
-				return "", err
-			}
-			if matched {
-				return rets[idx], nil
-			}
-			idx++
+		matched, err := ast.MatchesTypeName(field.Type, typeStr, d.imports)
+		if err != nil {
+			return "", err
 		}
+		if matched {
+			return rets[idx], nil
+		}
+		idx += len(field.Names)
 	}
 	return "", nil
 }
