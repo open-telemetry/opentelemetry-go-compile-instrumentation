@@ -105,6 +105,26 @@ func TestInitProfiling(t *testing.T) {
 	})
 }
 
+func TestPathWithin(t *testing.T) {
+	parent := filepath.Join("root", ".otelc-build")
+	tests := map[string]struct {
+		path string
+		want bool
+	}{
+		"same directory": {path: parent, want: true},
+		"descendant":     {path: filepath.Join(parent, "profiles"), want: true},
+		"parent":         {path: filepath.Dir(parent), want: false},
+		"sibling":        {path: filepath.Join("root", "profiles"), want: false},
+		"prefix sibling": {path: parent + "-profiles", want: false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.want, pathWithin(parent, tt.path))
+		})
+	}
+}
+
 func TestStopProfiling(t *testing.T) {
 	t.Run("no active session is a no-op", func(t *testing.T) {
 		activeSession = nil
