@@ -35,6 +35,23 @@ Use this convention when a testcase exercises call rules that reference wrapper 
 2. Reference the full import path in `rules.yml` under `imports:`, the path is `<root-module>/tool/internal/instrument/testdata/golden/<testname>/helpers/<pkgname>`.
 3. Create a placeholder for the golden file and run `make test-unit/update-golden` to regenerate the `.golden` snapshot.
 
+### Fuzz targets
+
+Go fuzz targets (`func FuzzXxx(f *testing.F)`) live next to the code they exercise and count as unit tests. They suit components that parse untrusted or free-form input, where the surface is too large to enumerate by hand — DSN strings, header values, and similar.
+
+Prefer a fuzz target when there is an invariant worth stating mechanically rather than a specific input worth asserting on. Two kinds are useful here:
+
+- **It never panics.** A hook runs inside the instrumented application, so a panic takes the application down rather than merely losing a span.
+- **Values survive the seam between components.** For example `dsnparse.DSNInfo.Addr` composes an endpoint that the semconv helpers take apart again with `net.SplitHostPort`; the round trip must recover the same host and port.
+
+A fuzz target's seed corpus runs as an ordinary table test during `make test-unit`, so seeds guard their cases without anyone passing `-fuzz`. Add a seed for every bug a fuzzer finds. Run a target as a real fuzzer locally with:
+
+```bash
+go test ./instrumentation/database/sql/dsnparse/ -run=Fuzz -fuzz=FuzzParseDSN -fuzztime=60s
+```
+
+Keep the invariant honest: assert it only where it genuinely holds. Malformed input may legitimately produce a result the next component cannot use, as long as that component degrades gracefully.
+
 ## Integration Tests
 
 > [!IMPORTANT]

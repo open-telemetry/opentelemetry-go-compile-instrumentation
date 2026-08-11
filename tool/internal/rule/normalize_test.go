@@ -405,6 +405,36 @@ func TestNormalize_Errors(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "unsupported do modifier map form",
+			fields: map[string]any{
+				"target": "database/sql",
+				"where": map[string]any{
+					"func": "Open",
+				},
+				"do": map[string]any{
+					"inject_hook": map[string]any{
+						"before": "BeforeOpen",
+					},
+				},
+			},
+		},
+		{
+			name: "unsupported do modifier sequence form",
+			fields: map[string]any{
+				"target": "database/sql",
+				"where": map[string]any{
+					"func": "Open",
+				},
+				"do": []any{
+					map[string]any{
+						"raw_inject": map[string]any{
+							"raw": "_ = 1",
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

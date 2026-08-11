@@ -317,6 +317,10 @@ func TestServerStatsHandler_HandleRPC_WithError(t *testing.T) {
 	spans := exporter.GetSpans()
 	require.NotEmpty(t, spans, "expected span to be exported")
 	assert.Equal(t, otelcodes.Error, spans[0].Status.Code, "errored RPC should set span status to Error")
+
+	events := spans[0].Events
+	require.Len(t, events, 1, "expected one exception event for the recorded error")
+	assert.Equal(t, "exception", events[0].Name)
 }
 
 func TestServerStatsHandler_HandleRPC_NilContextIsNoop(t *testing.T) {

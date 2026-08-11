@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -78,7 +79,7 @@ func Logger() *slog.Logger {
 
 // logLevel returns the log level from environment variable
 func logLevel() slog.Level {
-	levelStr := os.Getenv("OTEL_LOG_LEVEL")
+	levelStr := strings.ToLower(strings.TrimSpace(os.Getenv("OTEL_LOG_LEVEL")))
 	switch levelStr {
 	case "debug":
 		return slog.LevelDebug

@@ -104,6 +104,24 @@ func TestVersionInRange(t *testing.T) {
 			versionRange:   "v1.2.4",
 			expectedResult: false,
 		},
+		{
+			name:           "empty version with range - not in range",
+			version:        "",
+			versionRange:   "v1.0.0",
+			expectedResult: false,
+		},
+		{
+			name:           "empty version with bounded range - not in range",
+			version:        "",
+			versionRange:   "v1.0.0,v2.0.0",
+			expectedResult: false,
+		},
+		{
+			name:           "empty version with empty range - always matches",
+			version:        "",
+			versionRange:   "",
+			expectedResult: true,
+		},
 	}
 
 	for _, tt := range tests {

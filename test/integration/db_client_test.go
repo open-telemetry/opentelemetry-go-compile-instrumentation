@@ -16,7 +16,7 @@ import (
 
 func TestDBClient(t *testing.T) {
 	t.Parallel()
-	testutil.Build(t, "", "dbclient", "go", "build", "-a")
+	testutil.Build(t, "", "dbclient", "go", "build", "-a", "-trimpath")
 
 	t.Run("Ping", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)

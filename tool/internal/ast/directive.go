@@ -135,9 +135,11 @@ func FileHasDirective(file *dst.File, directive string) bool {
 	return found
 }
 
-// FuncHasDirective reports whether the function declaration's leading
-// decorations contain the given directive.
-func FuncHasDirective(funcDecl *dst.FuncDecl, directive string) bool {
+// FuncLeadHasDirective reports whether the function declaration's leading
+// decorations contain the given directive. It inspects only the leading
+// decorations (the comments directly above the func), not the body or trailing
+// decorations, mirroring FileHasLeadingDirective for files.
+func FuncLeadHasDirective(funcDecl *dst.FuncDecl, directive string) bool {
 	for _, dec := range funcDecl.Decs.Start {
 		if MatchDirective(dec, directive) {
 			return true
@@ -146,10 +148,9 @@ func FuncHasDirective(funcDecl *dst.FuncDecl, directive string) bool {
 	return false
 }
 
-// FileLeadHasDirective reports whether the file's leading decorations (the
-// comments that appear before the package keyword) contain the given directive.
-// This is distinct from FileHasDirective, which searches all nodes in the file.
-func FileLeadHasDirective(file *dst.File, directive string) bool {
+// FileHasLeadingDirective returns true if the file contains a leading run of comments
+// before the package clause that matches the given directive.
+func FileHasLeadingDirective(file *dst.File, directive string) bool {
 	for _, dec := range file.Decs.Start {
 		if MatchDirective(dec, directive) {
 			return true
@@ -181,33 +182,23 @@ func FindFuncsByDirective(file *dst.File, directive string) []*dst.FuncDecl {
 func tokenize(input string) ([]string, error) {
 	var tokens []string
 	var current strings.Builder
-	var err error
 	inQuote := false
 	escaped := false
 
 	for _, ch := range input {
 		if escaped {
-			_, err = current.WriteRune(ch)
-			if err != nil {
-				return nil, ex.Wrapf(err, "failed to write rune")
-			}
+			current.WriteRune(ch)
 			escaped = false
 			continue
 		}
 		if ch == '\\' && inQuote {
-			_, err = current.WriteRune(ch)
-			if err != nil {
-				return nil, ex.Wrapf(err, "failed to write rune")
-			}
+			current.WriteRune(ch)
 			escaped = true
 			continue
 		}
 		if ch == '"' {
 			inQuote = !inQuote
-			_, err = current.WriteRune(ch)
-			if err != nil {
-				return nil, ex.Wrapf(err, "failed to write rune")
-			}
+			current.WriteRune(ch)
 			continue
 		}
 		if unicode.IsSpace(ch) && !inQuote {
@@ -217,10 +208,7 @@ func tokenize(input string) ([]string, error) {
 			}
 			continue
 		}
-		_, err = current.WriteRune(ch)
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to write rune")
-		}
+		current.WriteRune(ch)
 	}
 	if inQuote {
 		return nil, ex.New("unclosed double quote")

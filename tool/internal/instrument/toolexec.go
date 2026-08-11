@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -86,7 +87,8 @@ func (ip *InstrumentPhase) keepForDebug(name string) {
 func stripCompleteFlag(args []string) []string {
 	for i, arg := range args {
 		if arg == "-complete" {
-			return append(args[:i], args[i+1:]...)
+			res := slices.Clone(args)
+			return slices.Delete(res, i, i+1)
 		}
 	}
 	return args

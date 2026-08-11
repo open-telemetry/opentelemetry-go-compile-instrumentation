@@ -206,6 +206,18 @@ The max chain size is configurable:
 - env var: `OTEL_GLS_MAX_SPANS`
 - default: `1000`
 - invalid or non-positive values are ignored (default remains in effect)
+- once a goroutine's live (unended) span count reaches this limit, new spans are not tracked for
+  implicit propagation; `SpanFromContext(context.Background())` on that goroutine keeps returning
+  whatever was already on top of the stack. This is logged at debug level
+  (`OTEL_LOG_LEVEL=debug`) rather than failing silently.
+
+Span end-state is tracked in a map shared across all goroutines (so a span ended on one goroutine
+is recognized as ended by any other goroutine holding a GLS clone of it), bounded separately:
+
+- env var: `OTEL_GLS_MAX_SPAN_STATES`
+- default: `100000`
+- once full, the oldest tracked entry is evicted (also logged at debug level) to make room for
+  new spans; eviction always targets the oldest entry deterministically, never an arbitrary one.
 
 ##### 3) Hook integration points
 

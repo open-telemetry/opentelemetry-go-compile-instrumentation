@@ -22,9 +22,21 @@ const MaxRetries = 3
 
 type MyStruct struct{ x int }
 
+type GenSingle[T any] struct{ val T }
+
+type GenMulti[T, U any] struct{ t T; u U }
+
 func TopLevel(a, b int) int { return a + b }
 
 func (s *MyStruct) Method() error { return nil }
+
+func (g GenSingle[T]) SingleVal() T { return g.val }
+
+func (g *GenSingle[T]) SinglePtr() T { return g.val }
+
+func (g GenMulti[T, U]) MultiVal() (T, U) { return g.t, g.u }
+
+func (g *GenMulti[T, U]) MultiPtr() (T, U) { return g.t, g.u }
 `
 
 func parseSharedFixture(t *testing.T) *dst.File {
@@ -38,10 +50,17 @@ func parseSharedFixture(t *testing.T) *dst.File {
 func TestListFuncDecls(t *testing.T) {
 	file := parseSharedFixture(t)
 	decls := ListFuncDecls(file)
-	require.Len(t, decls, 2)
-	names := []string{decls[0].Name.Name, decls[1].Name.Name}
+	require.Len(t, decls, 6)
+	names := make([]string, 0, len(decls))
+	for _, decl := range decls {
+		names = append(names, decl.Name.Name)
+	}
 	assert.Contains(t, names, "TopLevel")
 	assert.Contains(t, names, "Method")
+	assert.Contains(t, names, "SingleVal")
+	assert.Contains(t, names, "SinglePtr")
+	assert.Contains(t, names, "MultiVal")
+	assert.Contains(t, names, "MultiPtr")
 }
 
 func TestFindFuncDeclWithoutRecv(t *testing.T) {
@@ -83,6 +102,78 @@ func TestFindFuncDeclForRule(t *testing.T) {
 		assert.Equal(t, "Method", fn.Name.Name)
 	})
 
+	t.Run("matches single param generic value receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "SingleVal",
+			Recv: "GenSingle",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "SingleVal", fn.Name.Name)
+	})
+
+	t.Run("matches single param generic pointer receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "SinglePtr",
+			Recv: "*GenSingle",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "SinglePtr", fn.Name.Name)
+	})
+
+	t.Run("matches multi param generic value receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "MultiVal",
+			Recv: "GenMulti",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "MultiVal", fn.Name.Name)
+	})
+
+	t.Run("matches multi param generic pointer receiver", func(t *testing.T) {
+		r := &rule.InstFuncRule{
+			Func: "MultiPtr",
+			Recv: "*GenMulti",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "MultiPtr", fn.Name.Name)
+	})
+
+	t.Run("matches InstRawRule", func(t *testing.T) {
+		r := &rule.InstRawRule{
+			Func: "Method",
+			Recv: "*MyStruct",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Method", fn.Name.Name)
+	})
+
+	t.Run("matches FilterDef", func(t *testing.T) {
+		r := &rule.FilterDef{
+			HasFunc: "Method",
+			HasRecv: "*MyStruct",
+		}
+		fn, ok, err := FindFuncDecl(file, r)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Method", fn.Name.Name)
+	})
+
 	t.Run("returns nil when signature filters do not match", func(t *testing.T) {
 		sig := rule.FuncSignature{Args: []string{"string"}}
 		r := &rule.InstFuncRule{
@@ -107,6 +198,37 @@ func TestFindFuncDeclForRule(t *testing.T) {
 		assert.False(t, ok)
 		assert.Nil(t, fn)
 	})
+}
+
+// TestFindFuncDeclForRule_QualifiedParamType is an end-to-end regression test
+// for the bug where a where.param/where.result filter naming a type from a
+// multi-segment import path (e.g. "*net/http.Request", as opposed to a
+// single-segment stdlib package like "io" or "context") never matched,
+// because the matcher compared the bare package identifier written at the
+// call site ("http") against the filter's full import path ("net/http")
+// instead of resolving it via the file's own imports. This silently broke any
+// rule targeting a handler-shaped function such as
+// func(w http.ResponseWriter, r *http.Request).
+func TestFindFuncDeclForRule_QualifiedParamType(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource(`package main
+
+import "net/http"
+
+func handleRoot(w http.ResponseWriter, r *http.Request) {}
+`)
+	require.NoError(t, err)
+
+	r := &rule.InstFuncRule{
+		Func:  "handleRoot",
+		Param: "*net/http.Request",
+	}
+
+	fn, ok, err := FindFuncDecl(file, r)
+	require.NoError(t, err)
+	require.True(t, ok, `where.param: "*net/http.Request" should match a *http.Request parameter`)
+	require.NotNil(t, fn)
+	assert.Equal(t, "handleRoot", fn.Name.Name)
 }
 
 func TestFindVarDecl(t *testing.T) {
@@ -230,5 +352,46 @@ func TestFindNamedDecl(t *testing.T) {
 		// GlobalVar is a var, not a const
 		node := FindNamedDecl(file, "GlobalVar", "const")
 		assert.Nil(t, node)
+	})
+}
+
+func TestFindStructType(t *testing.T) {
+	t.Run("finds a plain struct", func(t *testing.T) {
+		assert.NotNil(t, FindStructType(parseSharedFixture(t), "MyStruct"))
+	})
+
+	t.Run("nil for interface, alias, or missing type", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type Iface interface{ M() }
+type Alias = int
+type Plain struct{ x int }
+`)
+		require.NoError(t, err)
+		assert.Nil(t, FindStructType(src, "Iface"))
+		assert.Nil(t, FindStructType(src, "Alias"))
+		assert.Nil(t, FindStructType(src, "Nope"))
+		assert.NotNil(t, FindStructType(src, "Plain"))
+	})
+
+	t.Run("resolves the named struct in a grouped type block", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type (
+	First  = int
+	Second struct{ a int }
+)
+`)
+		require.NoError(t, err)
+		assert.Nil(t, FindStructType(src, "First"))
+		assert.NotNil(t, FindStructType(src, "Second"))
+	})
+
+	t.Run("resolves generic structs", func(t *testing.T) {
+		src, err := NewAstParser().ParseSource(`package main
+type Gen[T any] struct{ v T }
+type GenMulti[K comparable, V any] struct{ m map[K]V }
+`)
+		require.NoError(t, err)
+		assert.NotNil(t, FindStructType(src, "Gen"))
+		assert.NotNil(t, FindStructType(src, "GenMulti"))
 	})
 }
