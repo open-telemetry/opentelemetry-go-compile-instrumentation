@@ -81,7 +81,7 @@ func appsPath() (string, error) {
 	return filepath.Join(pwd, "..", "apps"), nil
 }
 
-func sandboxPath(t *testing.T) (string, error) {
+func SandboxPath(t *testing.T) (string, error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -125,8 +125,8 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 
 	standardAppsDir := appsDir == ""
 	env := os.Environ()
+	env = setEnv(env, "GOWORK", "off")
 	if standardAppsDir {
-		env = setEnv(env, "GOWORK", "off")
 
 		cacheRoot := os.Getenv("OTELC_TEST_GOCACHE")
 		if cacheRoot != "" {
@@ -150,7 +150,7 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 
 	var appDir string
 	if standardAppsDir {
-		sandboxDir, err := sandboxPath(t)
+		sandboxDir, err := SandboxPath(t)
 		require.NoError(t, err)
 		initSandbox(t, sandboxDir)
 
@@ -190,7 +190,7 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 	}
 	var appDir string
 	if appsDir == "" {
-		sandboxDir, err := sandboxPath(t)
+		sandboxDir, err := SandboxPath(t)
 		require.NoError(t, err)
 		appDir = filepath.Join(sandboxDir, app)
 		if _, err := os.Stat(appDir); os.IsNotExist(err) {
@@ -216,7 +216,7 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 	}
 	var appDir string
 	if appsDir == "" {
-		sandboxDir, err := sandboxPath(t)
+		sandboxDir, err := SandboxPath(t)
 		require.NoError(t, err)
 		appDir = filepath.Join(sandboxDir, app)
 		if _, err := os.Stat(appDir); os.IsNotExist(err) {
