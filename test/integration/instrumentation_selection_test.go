@@ -61,7 +61,7 @@ func TestExplicitInstrumentationSelection(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(1)
 
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(1)
