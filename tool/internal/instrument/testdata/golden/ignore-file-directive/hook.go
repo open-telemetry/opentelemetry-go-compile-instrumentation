@@ -6,8 +6,8 @@ package testdata
 import (
 	_ "unsafe"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/inst"
+	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
-func HBefore(ctx inst.HookContext, p1 string) {}
-func HAfter(ctx inst.HookContext)              {}
+func HBefore(ctx hook.HookContext, p1 string) {}
+func HAfter(ctx hook.HookContext)              {}

@@ -38,7 +38,7 @@ func Target(value string) error { return nil }
 		Signature:    &sig,
 	}
 
-	err = newTestPhase().applyFuncRule(context.Background(), funcRule, root)
+	_, err = newTestPhase().applyFuncRule(context.Background(), funcRule, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can not find function Target")
 }

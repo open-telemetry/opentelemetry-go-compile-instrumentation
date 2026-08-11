@@ -11,3 +11,20 @@ hook_forced:
   before: HBefore
   after: HAfter
   path: testdata/golden/ignore-file-directive
+
+hook_both:
+  target: main
+  func: BothFunc
+  before: HBefore
+  after: HAfter
+  path: testdata/golden/ignore-file-directive
+
+add_field_skipped:
+  target: main
+  where:
+    struct: T
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: NewField
+            type: string

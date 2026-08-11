@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -319,13 +320,33 @@ func Foo() {}
 			expected:  false,
 		},
 		{
-			name: "file level directive",
+			name: "file level directive, no blank line before package",
 			src: `//otelc:span
 package p
 func Foo() {}
 `,
 			directive: "otelc:span",
 			expected:  true,
+		},
+		{
+			name: "file level directive, blank line before package",
+			src: `//otelc:span
+
+package p
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  true,
+		},
+		{
+			name: "different file level directive",
+			src: `//otelc:ignore
+
+package p
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  false,
 		},
 	}
 
@@ -335,6 +356,106 @@ func Foo() {}
 			tree, err := ParseFileFast(path)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, FileHasLeadingDirective(tree, tt.directive))
+		})
+	}
+}
+
+// lastFuncDecl returns the last top-level function declaration in the file,
+// which is the target function in the single-function test sources below.
+func lastFuncDecl(t *testing.T, file *dst.File) *dst.FuncDecl {
+	t.Helper()
+	var fn *dst.FuncDecl
+	for _, d := range file.Decls {
+		if f, ok := d.(*dst.FuncDecl); ok {
+			fn = f
+		}
+	}
+	require.NotNil(t, fn, "test source must contain a function declaration")
+	return fn
+}
+
+func TestFuncLeadHasDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		directive string
+		expected  bool
+	}{
+		{
+			name: "directive on function",
+			src: `package p
+//otelc:ignore
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+		{
+			name: "no directive",
+			src: `package p
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			name: "different directive",
+			src: `package p
+//otelc:instrument
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			name: "directive on method with receiver",
+			src: `package p
+type T struct{}
+//otelc:ignore
+func (T) Bar() {}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+		{
+			name: "multiple leading comments, one matches",
+			src: `package p
+// a plain doc comment
+//otelc:ignore
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+		{
+			name: "space after slashes rejected",
+			src: `package p
+// otelc:ignore
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			// When both directives are present, each is independently detectable;
+			// the ignore-wins precedence is resolved by the instrument phase.
+			name: "both instrument and ignore present, ignore is found",
+			src: `package p
+//otelc:instrument
+//otelc:ignore
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, FuncLeadHasDirective(lastFuncDecl(t, tree), tt.directive))
 		})
 	}
 }

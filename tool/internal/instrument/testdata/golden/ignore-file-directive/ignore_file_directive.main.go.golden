@@ -19,6 +19,17 @@ func ForcedFunc(p1 string) {
 	//line main.go:11:28
 }
 
+// BothFunc carries both directives; //otelc:ignore must win over
+// //otelc:instrument, so it is not instrumented.
+//otelc:instrument
+//otelc:ignore
+func BothFunc(p1 string) {}
+
+// T is targeted by a non-func (struct) rule. File-level //otelc:ignore skips
+// non-func rules unconditionally (they are not overridable), so no field is
+// added.
+type T struct{}
+
 func main() {}
 
 //line <generated>:1
@@ -36,25 +47,27 @@ func (c *HookContextImpl191951179) IsSkipCall() bool         { return c.skipCall
 func (c *HookContextImpl191951179) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl191951179) GetData() interface{}     { return c.data }
 func (c *HookContextImpl191951179) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	return c.data.(map[string]interface{})[key]
+	return nil
 }
 
 func (c *HookContextImpl191951179) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
 
 func (c *HookContextImpl191951179) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	return false
 }
 
 func (c *HookContextImpl191951179) GetParam(idx int) interface{} {
@@ -66,13 +79,13 @@ func (c *HookContextImpl191951179) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl191951179) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.params[0].(*string)) = val.(string)
+		if val == nil {
+			*(c.params[0].(*string)) = *new(string)
+		} else {
+			*(c.params[0].(*string)) = val.(string)
+		}
 	}
 }
 
@@ -83,10 +96,6 @@ func (c *HookContextImpl191951179) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl191951179) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }
