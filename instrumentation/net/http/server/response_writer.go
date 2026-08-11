@@ -6,6 +6,7 @@ package server
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 )
@@ -17,6 +18,7 @@ var (
 	_ http.Hijacker       = (*writerWrapper)(nil)
 	_ http.Flusher        = (*writerWrapper)(nil)
 	_ http.Pusher         = (*writerWrapper)(nil)
+	_ io.ReaderFrom       = (*writerWrapper)(nil)
 )
 
 // writerWrapper wraps http.ResponseWriter to capture the status code
@@ -44,6 +46,34 @@ func (w *writerWrapper) Write(b []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+// writeOnly hides every method of the wrapped value except Write, so that
+// io.Copy cannot re-enter a ReadFrom fast path through it.
+type writeOnly struct {
+	io.Writer
+}
+
+// ReadFrom implements io.ReaderFrom so that io.Copy keeps reaching the
+// underlying ResponseWriter's own ReadFrom. net/http's *response implements
+// io.ReaderFrom and hands the body to the connection, which lets the kernel
+// serve it with sendfile(2). Without this method the wrapper hides that
+// capability from io.Copy, and http.ServeFile/http.ServeContent silently fall
+// back to a 32KiB user-space copy loop on every instrumented server.
+func (w *writerWrapper) ReadFrom(src io.Reader) (int64, error) {
+	// http.ResponseWriter.Write implies a 200 when no status was set; ReadFrom
+	// writes the body the same way, so record it before handing the body off.
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	if rf, ok := w.ResponseWriter.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+
+	// The underlying writer has no fast path, so fall back to a plain copy
+	// through Write. writeOnly keeps io.Copy from picking this method up again.
+	return io.Copy(writeOnly{w}, src)
 }
 
 // Hijack implements the http.Hijacker interface
