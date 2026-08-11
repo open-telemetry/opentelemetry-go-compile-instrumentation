@@ -177,7 +177,11 @@ func TestRepositorySourceRoot(t *testing.T) {
 	repositoryDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(repositoryDir, "go.mod"), []byte("module example.com/repo\n"), 0o644))
 	require.NoError(t, os.Mkdir(filepath.Join(repositoryDir, "pkg"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(repositoryDir, "pkg", "go.mod"), []byte("module example.com/repo/pkg\n"), 0o644))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(repositoryDir, "pkg", "go.mod"),
+		[]byte("module example.com/repo/pkg\n"),
+		0o644,
+	))
 	require.NoError(t, os.Mkdir(filepath.Join(repositoryDir, "instrumentation"), 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(repositoryDir, "instrumentation", "go.mod"),
