@@ -116,7 +116,7 @@ This command:
 Compare the current version against the latest to see available updates:
 
 ```bash
-make registry-diff
+make semantic-conventions/diff
 ```
 
 This command automatically:

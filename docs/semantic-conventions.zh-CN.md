@@ -44,7 +44,7 @@ make weaver-install
 验证项目的语义约定是否符合指定版本的注册表：
 
 ```bash
-make registry-check
+make lint-schema
 ```
 
 此命令会：
@@ -62,7 +62,7 @@ make registry-check
 将当前版本与最新版本进行比较，查看可用的更新：
 
 ```bash
-make registry-diff
+make semantic-conventions/diff
 ```
 
 此命令会自动：
