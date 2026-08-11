@@ -4,7 +4,7 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
-.PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package clean setup-git \
+.PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package manifest verify-manifest clean setup-git \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
@@ -192,6 +192,25 @@ package: ## Package the instrumentation code into binary
 	@$(MAKE) $(BUNDLE)
 	@$(BUNDLE) tool/data/$(INST_BUNDLE_ARCHIVE) $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@echo "Package created successfully at tool/data/$(INST_BUNDLE_ARCHIVE)"
+
+manifest: ## Generate the instrumentation manifest
+	@echo "Generating instrumentation manifest..."
+	@go run ./tool/cmd/gen-manifest
+
+.ONESHELL:
+verify-manifest: ## Verify the instrumentation manifest is up to date
+	@echo "Checking instrumentation manifest is up to date..."
+	@set -euo pipefail
+	@tmp=$$(mktemp); \
+	cp tool/data/instrumentation-manifest.json "$$tmp"; \
+	trap 'cp "$$tmp" tool/data/instrumentation-manifest.json; rm -f "$$tmp"' EXIT; \
+	$(MAKE) manifest; \
+	if ! cmp -s "$$tmp" tool/data/instrumentation-manifest.json; then \
+		echo "Error: instrumentation manifest is stale"; \
+		echo "Run 'make manifest' to regenerate it"; \
+		exit 1; \
+	fi; \
+	echo "Instrumentation manifest is up to date"
 
 build-demo: ## Build all demos
 build-demo: build-demo-grpc build-demo-http

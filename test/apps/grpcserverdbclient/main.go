@@ -47,9 +47,9 @@ func main() {
 	}
 	defer db.Close()
 
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *frontPort))
+	lis, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *frontPort))
 	if err != nil {
-		log.Fatalf("failed to listen on frontPort: %v", err)
+		log.Fatalf("failed to listen: %v", err)
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterGreeterServer(grpcServer, &server{db: db})

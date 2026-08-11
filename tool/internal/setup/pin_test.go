@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -302,7 +303,8 @@ func TestGenerateOtelInstrumentationGo(t *testing.T) {
 			actual, readErr := os.ReadFile(outPath)
 			require.NoError(t, readErr)
 
-			golden.Assert(t, string(actual), tt.goldenFile)
+			actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+			golden.Assert(t, actualNorm, tt.goldenFile)
 		})
 	}
 }
@@ -492,6 +494,40 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			want: map[string]bool{},
 		},
 		{
+			name: "empty dependency version skips version-gated rule",
+			deps: []*Dependency{
+				{
+					ImportPath: "example.com/foo",
+					Version:    "", // replace/local path: findModVersion returns empty
+				},
+			},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target:       "example.com/foo",
+					VersionRange: "v1.0.0",
+				}},
+			},
+			want: map[string]bool{},
+		},
+		{
+			name: "empty dependency version still matches when rule has no version range",
+			deps: []*Dependency{
+				{
+					ImportPath: "example.com/foo",
+					Version:    "",
+				},
+			},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target:       "example.com/foo",
+					VersionRange: "",
+				}},
+			},
+			want: map[string]bool{
+				"example.com/instrumentation/foo": true,
+			},
+		},
+		{
 			name: "glob target",
 			deps: []*Dependency{
 				{
@@ -508,6 +544,22 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
+		},
+		{
+			name: "glob target mismatch",
+			deps: []*Dependency{
+				{
+					ImportPath: "other.com/foo",
+					Version:    "v1.2.3",
+				},
+			},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target:       "example.com/*",
+					VersionRange: "v1.2.3",
+				}},
+			},
+			want: map[string]bool{},
 		},
 		{
 			name: "root target",
@@ -554,10 +606,86 @@ func TestMatchInstrumentationImports(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := matchInstrumentationImports(tt.deps, tt.rules)
+			got := matchInstrumentationImports(tt.deps, tt.rules, nil)
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
+	t.Run("warns when instrumentation is fully skipped", func(t *testing.T) {
+		deps := []*Dependency{{
+			ImportPath: "example.com/foo",
+			Version:    "",
+		}}
+		rules := map[string][]yamlRule{
+			"example.com/instrumentation/foo": {{
+				Target:       "example.com/foo",
+				VersionRange: "v1.0.0",
+			}},
+		}
+
+		var warned bool
+		var warnedMsg string
+		got := matchInstrumentationImports(deps, rules, func(msg string, args ...any) {
+			warned = true
+			warnedMsg = msg
+			_ = args
+		})
+
+		require.Empty(t, got)
+		require.True(t, warned)
+		require.Contains(t, warnedMsg, "unresolved")
+	})
+
+	t.Run("no warn when another rule still imports the module", func(t *testing.T) {
+		// One dep fails version gate (empty version); another dep under the
+		// same instrumentation module matches an unversioned rule. The module
+		// must be imported and must not emit a skip warning.
+		deps := []*Dependency{
+			{ImportPath: "example.com/foo/v1", Version: ""},
+			{ImportPath: "example.com/foo/v1/sub", Version: "v1.0.0"},
+		}
+		rules := map[string][]yamlRule{
+			"example.com/instrumentation/foo": {
+				{Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
+				{Target: "example.com/foo/v1/sub", VersionRange: ""},
+			},
+		}
+
+		var warned bool
+		got := matchInstrumentationImports(deps, rules, func(msg string, args ...any) {
+			warned = true
+			_ = msg
+			_ = args
+		})
+
+		require.Equal(t, map[string]bool{"example.com/instrumentation/foo": true}, got)
+		require.False(t, warned)
+	})
+
+	t.Run("warns once per instrumentation module", func(t *testing.T) {
+		deps := []*Dependency{{
+			ImportPath: "example.com/foo",
+			Version:    "",
+		}}
+		rules := map[string][]yamlRule{
+			"example.com/instrumentation/foo": {
+				{Target: "example.com/foo", VersionRange: "v1.0.0"},
+				{Target: "example.com/foo", VersionRange: "v2.0.0"},
+			},
+		}
+
+		warnCount := 0
+		got := matchInstrumentationImports(deps, rules, func(msg string, args ...any) {
+			warnCount++
+			_ = msg
+			_ = args
+		})
+
+		require.Empty(t, got)
+		require.Equal(t, 1, warnCount)
+	})
 }
 
 func TestLoadMinimalRules_HappyPath(t *testing.T) {
@@ -823,14 +951,32 @@ func TestUpdatePinnedProjects_InvalidRule(t *testing.T) {
 func TestGeneratePinnedProjects(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, dir)
-	os.MkdirAll(util.GetBuildTempDir(), 0o755) // ensure .otelc-build exists
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755)) // ensure .otelc-build exists
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "go.mod"),
 		[]byte(`module example.com/test
 
 go 1.25
+
+require github.com/anthropics/anthropic-sdk-go v0.0.0-00010101000000-000000000000
+replace github.com/anthropics/anthropic-sdk-go => ./anthropic
 `),
+		0o644,
+	))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "anthropic"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "anthropic", "go.mod"),
+		[]byte(`module github.com/anthropics/anthropic-sdk-go
+
+go 1.25
+`),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "anthropic", "main.go"),
+		[]byte(`package anthropic`),
 		0o644,
 	))
 

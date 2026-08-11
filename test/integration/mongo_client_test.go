@@ -17,7 +17,7 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
-func TestMongoClient(t *testing.T) {
+func TestMongoClientV1(t *testing.T) {
 	t.Parallel()
 	testutil.Build(t, "", "mongoclient", "go", "build", "-a")
 
@@ -34,7 +34,7 @@ func TestMongoClient(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 			addr := StartMockMongoServer(t)
 
-			output := f.Run("mongoclient", "-uri=mongodb://"+addr)
+			output := f.Run("mongoclient", "-uri=mongodb://"+addr, "-version=1")
 			require.Contains(t, output, "MongoDB operations completed successfully")
 
 			spans := testutil.AllSpans(f.Traces())
@@ -53,6 +53,46 @@ func TestMongoClient(t *testing.T) {
 			testutil.RequireAttribute(t, insertSpan, "db.mongodb.collection", "users")
 			testutil.RequireAttribute(t, insertSpan, "net.peer.name", "127.0.0.1")
 			testutil.RequireAttribute(t, insertSpan, "net.transport", "ip_tcp")
+		})
+	}
+}
+
+func TestMongoClientV2(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "mongoclient", "go", "build", "-a")
+
+	testCases := []struct {
+		name string
+	}{
+		{
+			name: "basic",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := testutil.NewTestFixture(t)
+			addr := StartMockMongoServer(t)
+
+			output := f.Run("mongoclient", "-uri=mongodb://"+addr, "-version=2")
+			require.Contains(t, output, "MongoDB operations completed successfully")
+
+			spans := testutil.AllSpans(f.Traces())
+			require.GreaterOrEqual(t, len(spans), 1, "expected at least 1 span (insert)")
+
+			// Verify insert span matching the actual attributes from otelmongo
+			insertSpan := testutil.RequireSpan(t, f.Traces(),
+				testutil.IsClient,
+				testutil.HasAttribute("db.operation.name", "insert"),
+			)
+
+			// Assert MongoDB specific semantic conventions attributes
+			testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
+			testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
+			testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
+			testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+			testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
+			testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
 		})
 	}
 }

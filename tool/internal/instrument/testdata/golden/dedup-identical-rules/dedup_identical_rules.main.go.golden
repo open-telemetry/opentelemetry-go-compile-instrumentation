@@ -31,25 +31,27 @@ func (c *HookContextImpl616481378) IsSkipCall() bool         { return c.skipCall
 func (c *HookContextImpl616481378) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl616481378) GetData() interface{}     { return c.data }
 func (c *HookContextImpl616481378) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	return c.data.(map[string]interface{})[key]
+	return nil
 }
 
 func (c *HookContextImpl616481378) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
 
 func (c *HookContextImpl616481378) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	return false
 }
 
 func (c *HookContextImpl616481378) GetParam(idx int) interface{} {
@@ -63,15 +65,19 @@ func (c *HookContextImpl616481378) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl616481378) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.params[0].(*string)) = val.(string)
+		if val == nil {
+			*(c.params[0].(*string)) = *new(string)
+		} else {
+			*(c.params[0].(*string)) = val.(string)
+		}
 	case 1:
-		*(c.params[1].(*int)) = val.(int)
+		if val == nil {
+			*(c.params[1].(*int)) = *new(int)
+		} else {
+			*(c.params[1].(*int)) = val.(int)
+		}
 	}
 }
 
@@ -86,15 +92,19 @@ func (c *HookContextImpl616481378) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl616481378) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.returnVals[0].(*float32)) = val.(float32)
+		if val == nil {
+			*(c.returnVals[0].(*float32)) = *new(float32)
+		} else {
+			*(c.returnVals[0].(*float32)) = val.(float32)
+		}
 	case 1:
-		*(c.returnVals[1].(*error)) = val.(error)
+		if val == nil {
+			*(c.returnVals[1].(*error)) = *new(error)
+		} else {
+			*(c.returnVals[1].(*error)) = val.(error)
+		}
 	}
 }
 func (c *HookContextImpl616481378) GetParamCount() int     { return len(c.params) }

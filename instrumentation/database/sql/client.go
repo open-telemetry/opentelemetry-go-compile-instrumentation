@@ -645,6 +645,7 @@ func instrumentEnd(ictx hook.HookContext, err error) {
 	}
 	defer span.End()
 	if err != nil {
+		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 	}
 }
