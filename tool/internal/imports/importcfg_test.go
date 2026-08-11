@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -91,6 +92,49 @@ func TestWriteFile(t *testing.T) {
 	assert.Equal(t, "packagefile fmt=/path/to/fmt.a\n", string(content))
 }
 
+func TestWriteFile_CreateError(t *testing.T) {
+	cfg := ImportConfig{}
+	err := cfg.WriteFile(filepath.Join(t.TempDir(), "nonexistent", "importcfg"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create file")
+}
+
+type mockWriteCloser struct {
+	writeErr error
+	closeErr error
+}
+
+func (m *mockWriteCloser) Write(p []byte) (int, error) {
+	if m.writeErr != nil {
+		return 0, m.writeErr
+	}
+	return len(p), nil
+}
+
+func (m *mockWriteCloser) Close() error {
+	return m.closeErr
+}
+
+func TestWriteFile_WriteError(t *testing.T) {
+	cfg := ImportConfig{
+		PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
+	}
+	mock := &mockWriteCloser{writeErr: errors.New("disk write failure")}
+	err := cfg.writeFile(mock, "importcfg")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write to file")
+}
+
+func TestWriteFile_CloseError(t *testing.T) {
+	cfg := ImportConfig{
+		PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
+	}
+	mock := &mockWriteCloser{closeErr: errors.New("flush close failure")}
+	err := cfg.writeFile(mock, "importcfg")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to close file")
+}
+
 func TestRoundTrip(t *testing.T) {
 	input := `# comment line
 packagefile fmt=/usr/local/go/pkg/linux_amd64/fmt.a
@@ -136,6 +180,19 @@ func (r *errorReader) Read(p []byte) (int, error) {
 		return n, r.err
 	}
 	return n, nil
+}
+
+func TestParse_LongLine(t *testing.T) {
+	// Lines in importcfg files can exceed bufio.MaxScanTokenSize (64 KiB) in
+	// large build configurations with long package import paths or complex
+	// import maps. parse must not fail with bufio.ErrTooLong in that case.
+	longPath := "example.com/" + strings.Repeat("a", 128*1024)
+	input := "packagefile " + longPath + "=/path/to/pkg.a\n"
+
+	cfg, err := parse(bytes.NewReader([]byte(input)))
+	require.NoError(t, err)
+
+	assert.Equal(t, "/path/to/pkg.a", cfg.PackageFile[longPath])
 }
 
 func TestParse_ScannerError(t *testing.T) {

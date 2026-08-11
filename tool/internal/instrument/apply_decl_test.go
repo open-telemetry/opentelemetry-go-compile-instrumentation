@@ -175,3 +175,26 @@ func TestApplyDeclRule_WrapExpression_NoInitializer(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "wrap requires an existing initializer")
 }
+
+func TestApplyDeclRule_EmptyKind_FunctionTarget(t *testing.T) {
+	file := &dst.File{
+		Name: &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{
+			&dst.FuncDecl{
+				Name: &dst.Ident{Name: "DefaultHandler"},
+				Type: &dst.FuncType{},
+			},
+		},
+	}
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_handler"},
+		Kind:         "",
+		Identifier:   "DefaultHandler",
+		Replace:      "CustomHandler",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not a var or const declaration")
+}

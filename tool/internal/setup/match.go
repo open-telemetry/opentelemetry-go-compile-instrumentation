@@ -190,6 +190,12 @@ func (sp *SetupPhase) runMatch(
 	filteredRules := make([]rule.InstRule, 0, len(relevantRules))
 	for _, r := range relevantRules {
 		if !matchVersion(dep, r) {
+			if unresolvedVersionSkip(dep.Version, r.GetVersion()) {
+				// Per-rule: setup drops individual rules, so each skip is actionable.
+				warnUnresolvedVersionSkip(sp.Warn, dep.ImportPath, r.GetVersion(),
+					"rule", r.GetName(),
+				)
+			}
 			continue
 		}
 		filteredRules = append(filteredRules, r)
@@ -356,8 +362,8 @@ func (sp *SetupPhase) matchOneRule(
 			sp.Info("Match func rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstStructRule:
-		structDecl := ast.FindStructDecl(tree, rt.Struct)
-		if structDecl != nil {
+		structType := ast.FindStructType(tree, rt.Struct)
+		if structType != nil {
 			set.AddStructRule(source, rt)
 			sp.Info("Match struct rule", "rule", rt, "dep", dep)
 		}

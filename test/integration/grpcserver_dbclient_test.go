@@ -43,7 +43,7 @@ func TestGRPCServerDBClient(t *testing.T) {
 	require.Equal(t, "frontend querying database", resp.GetMessage())
 
 	// Wait for the spans to be flushed
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(2)
 
 	// We expect exactly 1 trace with 2 spans:
 	// 1. gRPC server (Frontend)
@@ -62,4 +62,5 @@ func TestGRPCServerDBClient(t *testing.T) {
 	// Assert on propagation (parent-child relationships)
 	require.Equal(t, grpcServerSpan.TraceID(), sqlClientSpan.TraceID(), "trace ID mismatch")
 	require.Equal(t, grpcServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be gRPC server")
+	require.True(t, grpcServerSpan.ParentSpanID().IsEmpty(), "gRPC server span must be the trace root")
 }

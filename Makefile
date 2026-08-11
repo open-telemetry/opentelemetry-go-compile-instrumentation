@@ -4,13 +4,13 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
-.PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package clean setup-git \
+.PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package manifest verify-manifest clean setup-git \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
-        test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
+        check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
@@ -28,6 +28,8 @@ API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
 GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
+TOOL_COVERAGE_THRESHOLD ?= 68
+PKG_COVERAGE_THRESHOLD ?= 70
 
 # OTel Weaver execution for the local semantic-convention registry under
 # schemas/otelc/. Weaver runs from an OCI image (no host install required);
@@ -193,6 +195,25 @@ package: ## Package the instrumentation code into binary
 	@$(BUNDLE) tool/data/$(INST_BUNDLE_ARCHIVE) $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
 	@echo "Package created successfully at tool/data/$(INST_BUNDLE_ARCHIVE)"
 
+manifest: ## Generate the instrumentation manifest
+	@echo "Generating instrumentation manifest..."
+	@go run ./tool/cmd/gen-manifest
+
+.ONESHELL:
+verify-manifest: ## Verify the instrumentation manifest is up to date
+	@echo "Checking instrumentation manifest is up to date..."
+	@set -euo pipefail
+	@tmp=$$(mktemp); \
+	cp tool/data/instrumentation-manifest.json "$$tmp"; \
+	trap 'cp "$$tmp" tool/data/instrumentation-manifest.json; rm -f "$$tmp"' EXIT; \
+	$(MAKE) manifest; \
+	if ! cmp -s "$$tmp" tool/data/instrumentation-manifest.json; then \
+		echo "Error: instrumentation manifest is stale"; \
+		echo "Run 'make manifest' to regenerate it"; \
+		exit 1; \
+	fi; \
+	echo "Instrumentation manifest is up to date"
+
 build-demo: ## Build all demos
 build-demo: build-demo-grpc build-demo-http
 
@@ -212,10 +233,13 @@ format/go: $(GOLANGCI_LINT)
 	@echo "Formatting Go code..."
 	$(GOLANGCI_LINT) fmt --config .tools/golangci.yml
 
-format/yaml: ## Format YAML files only (excludes testdata)
+format/yaml: ## Format YAML files only (excludes testdata and schemas/otelc/.deps)
 format/yaml: $(YAMLFMT)
 	@echo "Formatting YAML files..."
-	$(YAMLFMT) -conf .tools/yamlfmt -dstar '**/*.yml' '**/*.yaml'
+	$(YAMLFMT) -conf .tools/yamlfmt -dstar \
+		-exclude '**/schemas/otelc/.deps/**' \
+		-exclude '**/testdata/**' \
+		'**/*.yml' '**/*.yaml'
 
 lint: ## Run all linters (Go, YAML, GitHub Actions, Makefile, Dockerfile, typos)
 lint: lint/go lint/yaml lint/action lint/makefile lint/license-header lint/dockerfile lint/typos
@@ -238,7 +262,10 @@ lint/go/fix: $(GOLANGCI_LINT)
 lint/yaml: ## Lint YAML formatting
 lint/yaml: $(YAMLFMT)
 	@echo "Linting YAML files..."
-	$(YAMLFMT) -conf .tools/yamlfmt -lint -dstar '**/*.yml' '**/*.yaml'
+	$(YAMLFMT) -conf .tools/yamlfmt -lint -dstar \
+		-exclude '**/schemas/otelc/.deps/**' \
+		-exclude '**/testdata/**' \
+		'**/*.yml' '**/*.yaml'
 
 lint/dockerfile: ## Lint Dockerfiles
 lint/dockerfile: hadolint
@@ -268,10 +295,13 @@ lint/typos: ## Check for typos using crate-ci/typos
 	@echo "Checking for typos..."
 	@if command -v typos >/dev/null 2>&1; then \
 		typos --config .tools/typos.toml; \
-	elif command -v docker >/dev/null 2>&1; then \
-		docker run --rm -v "$(CURDIR)":/src -w /src ghcr.io/crate-ci/typos:latest --config .tools/typos.toml; \
 	else \
-		echo "Error: install 'typos' (https://github.com/crate-ci/typos) or Docker to run this check."; \
+		echo "Error: 'typos' not found on PATH."; \
+		echo "Install with one of:"; \
+		echo "  brew install typos-cli"; \
+		echo "  cargo install typos-cli"; \
+		echo "  https://github.com/crate-ci/typos/releases"; \
+		echo "(The former ghcr.io/crate-ci/typos Docker image is no longer published.)"; \
 		exit 1; \
 	fi
 
@@ -557,11 +587,39 @@ test-unit/instrumentation/coverage: package ## Run unit tests with coverage for 
 	@find instrumentation -name "coverage.txt" -delete 2>/dev/null || true
 
 .ONESHELL:
+check-coverage: test-unit/tool/coverage test-unit/pkg/coverage ## Verify the unit test coverage floor for tool and pkg modules
+	@echo "Checking unit test coverage floors..."
+	set -euo pipefail
+	for coverage_file in coverage-tool.txt coverage-pkg.txt; do \
+		case "$$coverage_file" in \
+			coverage-tool.txt) threshold="$(TOOL_COVERAGE_THRESHOLD)" ;; \
+			coverage-pkg.txt) threshold="$(PKG_COVERAGE_THRESHOLD)" ;; \
+			*) echo "Unexpected coverage report: $$coverage_file"; exit 1 ;; \
+		esac; \
+		if [[ ! -f "$$coverage_file" ]]; then \
+			echo "Missing coverage report: $$coverage_file"; \
+			exit 1; \
+		fi; \
+		coverage_value=$$(awk '/^mode:/ { next } { total += $$2; if ($$3 > 0) covered += $$2 } END { if (total > 0) printf "%.1f", (covered / total) * 100; else print "0.0" }' "$$coverage_file"); \
+		if [[ -z "$$coverage_value" ]]; then \
+			echo "Unable to determine coverage for $$coverage_file"; \
+			exit 1; \
+		fi; \
+		awk -v coverage="$$coverage_value" -v threshold="$$threshold" 'BEGIN { exit (coverage + 0 >= threshold + 0) ? 0 : 1 }' || { \
+			echo "Coverage $$coverage_file is below $$threshold%: $$coverage_value%"; \
+			exit 1; \
+		}; \
+		echo "$$coverage_file: $$coverage_value% (threshold $$threshold%)"; \
+	done
+
+.ONESHELL:
 test-integration: go-protobuf-plugins ## Run integration tests
 test-integration: build build-demo
 	@echo "Running integration tests..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
+	# 40m: linodego public-method instrumentation rewrites ~450 *Client methods per
+	# instrumented build; under coverage (all tests, no shards) wall time exceeds 20m.
+	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration -run '$(value INTEGRATION_TEST_RUN)' ./integration/... 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-latestlibbuild: build ## Run LatestLibBuild tests
@@ -602,7 +660,8 @@ test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	go -C "test" test -json -v -shuffle=on -timeout=20m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	# See test-integration: linodego builds need >20m when the suite is unsharded.
+	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
