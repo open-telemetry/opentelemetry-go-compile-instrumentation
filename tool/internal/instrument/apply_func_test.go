@@ -104,7 +104,7 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "underscore receiver",
 			src:      "package main\ntype T struct{}\nfunc (_ T) F() {}",
-			expected: []string{"_ignoredParam0"},
+			expected: []string{syntheticParam(0)},
 		},
 		{
 			name:     "named receiver with params",
