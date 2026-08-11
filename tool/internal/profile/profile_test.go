@@ -233,6 +233,29 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+func TestMergeHandlesBracketedDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "profile-[test]")
+
+	s, err := Start(dir, []Type{Heap})
+	if err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	if stopErr := s.Stop(); stopErr != nil {
+		t.Fatalf("Stop() error: %v", stopErr)
+	}
+	pidFile := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
+	assertFileExists(t, pidFile)
+
+	if mergeErr := Merge(context.Background(), dir, []Type{Heap}); mergeErr != nil {
+		t.Fatalf("Merge() error: %v", mergeErr)
+	}
+
+	assertFileExists(t, filepath.Join(dir, "otelc-heap.pprof"))
+	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
+		t.Errorf("expected PID-stamped file %q to be removed after merge", pidFile)
+	}
+}
+
 func TestMergeTraceSkipped(t *testing.T) {
 	dir := t.TempDir()
 

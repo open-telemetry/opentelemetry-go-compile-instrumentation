@@ -194,8 +194,8 @@ func TestTrackAddedImports(t *testing.T) {
 		require.NoError(t, err)
 
 		// No file should be created
-		pattern := util.GetAddedImportsPattern()
-		files, _ := filepath.Glob(pattern)
+		files, err := getAddedImportTrackingFiles()
+		require.NoError(t, err)
 		assert.Empty(t, files)
 	})
 

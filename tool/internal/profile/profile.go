@@ -173,12 +173,38 @@ func Merge(ctx context.Context, dir string, types []Type) error {
 	return ex.Join(errs...)
 }
 
+// getProfileFiles scans the profile directory for PID-stamped files matching the given profile type.
+// It uses os.ReadDir instead of filepath.Glob to avoid path globbing errors when
+// profile directory paths contain special characters (e.g., brackets).
+func getProfileFiles(dir string, t Type) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, ex.Wrapf(err, "read %s profile directory", t)
+	}
+
+	prefix := fmt.Sprintf("otelc-%s-", t)
+	const suffix = ".pprof"
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
+			files = append(files, filepath.Join(dir, name))
+		}
+	}
+	return files, nil
+}
+
 // mergeType merges all PID-stamped files for a single profile type.
 func mergeType(ctx context.Context, dir string, t Type) error {
-	pattern := filepath.Join(dir, fmt.Sprintf("otelc-%s-*.pprof", t))
-	files, err := filepath.Glob(pattern)
+	files, err := getProfileFiles(dir, t)
 	if err != nil {
-		return ex.Wrapf(err, "glob %s profiles", t)
+		return err
 	}
 	if len(files) == 0 {
 		return nil

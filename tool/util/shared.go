@@ -48,12 +48,6 @@ func GetAddedImportsFileForProcess() string {
 	return GetBuildTemp(fmt.Sprintf("added_imports.%d.json", pid))
 }
 
-// GetAddedImportsPattern returns the glob pattern for all import tracking files.
-// Used by the link phase to discover and merge all per-process import files.
-func GetAddedImportsPattern() string {
-	return GetBuildTemp("added_imports.*.json")
-}
-
 // GetOtelcWorkDir returns the otelc working directory. It first checks the
 // OTELC_WORK_DIR environment variable; if unset, it falls back to the current
 // working directory. If the working directory cannot be determined, the process
