@@ -1,19 +1,17 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package consumer
+package propagation
 
 import (
 	"testing"
 
-	kafka "github.com/segmentio/kafka-go"
+	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
-
-var _ propagation.TextMapCarrier = headerCarrier{}
 
 func newSpanContext(t *testing.T, traceID, spanID string) trace.SpanContext {
 	t.Helper()
@@ -37,7 +35,7 @@ func TestHeaderCarrier_Get(t *testing.T) {
 		{Key: "traceparent", Value: []byte("second")},
 		{Key: "baggage", Value: []byte("bg")},
 	}
-	c := headerCarrier{headers: &headers}
+	c := NewHeaderCarrier(&headers)
 
 	// Kafka allows repeated keys; the first one wins.
 	assert.Equal(t, "first", c.Get("traceparent"))
@@ -50,7 +48,7 @@ func TestHeaderCarrier_Get(t *testing.T) {
 
 func TestHeaderCarrier_SetReplacesInPlace(t *testing.T) {
 	var headers []kafka.Header
-	c := headerCarrier{headers: &headers}
+	c := NewHeaderCarrier(&headers)
 
 	c.Set("traceparent", "tp-1")
 	c.Set("baggage", "bg-1")
@@ -66,6 +64,24 @@ func TestHeaderCarrier_SetReplacesInPlace(t *testing.T) {
 	assert.Equal(t, "bg-1", c.Get("baggage"))
 }
 
+func TestHeaderCarrier_SetGetKeys(t *testing.T) {
+	var headers []kafka.Header
+	hc := NewHeaderCarrier(&headers)
+
+	hc.Set("traceparent", "v1")
+	hc.Set("baggage", "v2")
+	assert.Equal(t, "v1", hc.Get("traceparent"))
+	assert.Equal(t, "v2", hc.Get("baggage"))
+	assert.Empty(t, hc.Get("absent"))
+
+	// Set on an existing key overwrites rather than appending a duplicate.
+	hc.Set("traceparent", "v3")
+	assert.Equal(t, "v3", hc.Get("traceparent"))
+	assert.Len(t, headers, 2)
+
+	assert.ElementsMatch(t, []string{"traceparent", "baggage"}, hc.Keys())
+}
+
 func TestHeaderCarrier_Keys(t *testing.T) {
 	headers := []kafka.Header{
 		{Key: "traceparent", Value: []byte("tp")},
@@ -76,7 +92,7 @@ func TestHeaderCarrier_Keys(t *testing.T) {
 	assert.Equal(
 		t,
 		[]string{"traceparent", "tracestate", "baggage"},
-		headerCarrier{headers: &headers}.Keys(),
+		NewHeaderCarrier(&headers).Keys(),
 	)
 }
 
@@ -90,7 +106,7 @@ func TestHeaderCarrier_KeysReportsDuplicates(t *testing.T) {
 		{Key: "baggage", Value: []byte("bg")},
 		{Key: "traceparent", Value: []byte("second")},
 	}
-	c := headerCarrier{headers: &headers}
+	c := NewHeaderCarrier(&headers)
 
 	assert.Equal(t, []string{"traceparent", "baggage", "traceparent"}, c.Keys())
 
@@ -105,7 +121,7 @@ func TestHeaderCarrier_KeysReportsDuplicates(t *testing.T) {
 
 func TestHeaderCarrier_MessageWithoutHeaders(t *testing.T) {
 	msg := kafka.Message{}
-	c := headerCarrier{headers: &msg.Headers}
+	c := NewHeaderCarrier(&msg.Headers)
 
 	require.Nil(t, msg.Headers)
 	assert.Empty(t, c.Keys())
@@ -123,13 +139,13 @@ func TestHeaderCarrier_PropagatorRoundTrip(t *testing.T) {
 	want := newSpanContext(t, "0102030405060708090a0b0c0d0e0f10", "0102030405060708")
 
 	var headers []kafka.Header
-	prop.Inject(trace.ContextWithSpanContext(t.Context(), want), headerCarrier{headers: &headers})
+	prop.Inject(trace.ContextWithSpanContext(t.Context(), want), NewHeaderCarrier(&headers))
 
 	require.Len(t, headers, 1)
 	assert.Equal(t, "traceparent", headers[0].Key)
 
 	msg := kafka.Message{Headers: headers}
-	got := trace.SpanContextFromContext(prop.Extract(t.Context(), headerCarrier{headers: &msg.Headers}))
+	got := trace.SpanContextFromContext(prop.Extract(t.Context(), NewHeaderCarrier(&msg.Headers)))
 
 	assert.Equal(t, want.TraceID(), got.TraceID())
 	assert.Equal(t, want.SpanID(), got.SpanID())
@@ -146,7 +162,7 @@ func TestHeaderCarrier_ReinjectReplacesTraceparent(t *testing.T) {
 	fresh := newSpanContext(t, "1112131415161718191a1b1c1d1e1f20", "1112131415161718")
 
 	var headers []kafka.Header
-	c := headerCarrier{headers: &headers}
+	c := NewHeaderCarrier(&headers)
 	prop.Inject(trace.ContextWithSpanContext(t.Context(), stale), c)
 	prop.Inject(trace.ContextWithSpanContext(t.Context(), fresh), c)
 

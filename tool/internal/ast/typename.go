@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"go/token"
 	"regexp"
 	"strconv"
 	"strings"
@@ -64,7 +65,7 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 		// tests with no backing *dst.File): compare against importPath's last
 		// segment. Note this cannot rescue a miskeyed map — a tail match here
 		// would imply ident.Name is a key, so the lookup above would have hit.
-		return importPathTail(t.importPath) == ident.Name && t.name == n.Sel.Name
+		return DefaultImportAlias(t.importPath) == ident.Name && t.name == n.Sel.Name
 
 	case *dst.StarExpr:
 		inner := parsedTypeName{importPath: t.importPath, name: t.name}
@@ -132,15 +133,32 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 // it: that resolves unaliased imports with pkgload.ResolvePackageName (a
 // go/packages load that ex.Fatalf's on failure), which is too costly and too fatal
 // for the setup/match path, where this runs for every compiled package in the build.
-// The cost is that the default name here is a syntactic guess; see importPathTail.
+// The cost is that the default name here is a syntactic guess; see DefaultImportAlias.
 //
 // Returns nil when file is nil.
 func ImportAliasMap(file *dst.File) map[string]string {
 	if file == nil {
 		return nil
 	}
-	aliases := make(map[string]string, len(file.Imports))
-	for _, imp := range file.Imports {
+	var specs []*dst.ImportSpec
+	if len(file.Imports) > 0 {
+		specs = file.Imports
+	} else {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*dst.GenDecl)
+			if !ok || genDecl.Tok != token.IMPORT {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				if importSpec, isImport := spec.(*dst.ImportSpec); isImport {
+					specs = append(specs, importSpec)
+				}
+			}
+		}
+	}
+
+	aliases := make(map[string]string, len(specs))
+	for _, imp := range specs {
 		if imp.Path == nil {
 			continue
 		}
@@ -148,13 +166,13 @@ func ImportAliasMap(file *dst.File) map[string]string {
 		if err != nil {
 			continue
 		}
-		alias := importPathTail(path)
+		alias := DefaultImportAlias(path)
 		if imp.Name != nil {
 			alias = imp.Name.Name
 		}
 		// Blank and dot imports don't introduce a qualified identifier that a
 		// type reference could use, so they can't participate in matching.
-		if alias == "_" || alias == "." {
+		if alias == "" || alias == "_" || alias == "." {
 			continue
 		}
 		aliases[alias] = path
@@ -162,15 +180,20 @@ func ImportAliasMap(file *dst.File) map[string]string {
 	return aliases
 }
 
-// importPathTail returns the local identifier conventionally used to reference
-// an import path: its last segment, ignoring a Go module major-version suffix
-// ("/v2".."/vN", or gopkg.in's ".vN"), which is part of the module path but not
-// of the package name, e.g. "net/http" -> "http", "github.com/x/jwt/v5" -> "jwt".
+// DefaultImportAlias (also aliased as ImportPathTail) returns the local identifier
+// conventionally used to reference an import path: its last segment, ignoring a
+// Go module major-version suffix ("/v2".."/vN", or gopkg.in's ".vN"), which is
+// part of the module path but not of the package name, e.g. "net/http" -> "http",
+// "github.com/x/jwt/v5" -> "jwt", "gopkg.in/yaml.v3" -> "yaml".
 //
 // This is a convention, not a guarantee: a package may declare a name unrelated
 // to its path (e.g. "github.com/redis/go-redis/v9" declares "redis"). Such
 // packages are matched only when the importing file aliases them explicitly.
-func importPathTail(path string) string {
+func DefaultImportAlias(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || path == "." || path == "/" {
+		return ""
+	}
 	if i := strings.LastIndexByte(path, '/'); i >= 0 && isMajorVersion(path[i+1:]) {
 		path = path[:i]
 	}
@@ -180,6 +203,9 @@ func importPathTail(path string) string {
 	// gopkg.in style: "yaml.v3" -> "yaml".
 	if i := strings.LastIndexByte(path, '.'); i >= 0 && isMajorVersion(path[i+1:]) {
 		path = path[:i]
+	}
+	if path == "." || path == "/" {
+		return ""
 	}
 	return path
 }

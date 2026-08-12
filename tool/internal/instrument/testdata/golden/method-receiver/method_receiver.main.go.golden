@@ -7,19 +7,19 @@ import _ "unsafe"
 
 type T struct{}
 
-func (t *T) Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+func (t *T) Func1(p1 string, p2 int) (_unnamedRetVal_3482884715_0 float32, _unnamedRetVal_3482884715_1 error) {
 	//line <generated>:1
 	if hookContext3482884715, _ := OtelBeforeTrampoline_Func13482884715(&t, &p1, &p2); false {
 	} else {
-		defer OtelAfterTrampoline_Func13482884715(hookContext3482884715, &_unnamedRetVal0, &_unnamedRetVal1)
+		defer OtelAfterTrampoline_Func13482884715(hookContext3482884715, &_unnamedRetVal_3482884715_0, &_unnamedRetVal_3482884715_1)
 	}
 	//line main.go:9:2
 	return 0.0, nil
 }
 
-func (_ignoredParam0 T) Func3() {
+func (_ignoredParam_1380706877_0 T) Func3() {
 	//line <generated>:1
-	if OtelBeforeTrampoline_Func31380706877(&_ignoredParam0); false {
+	if OtelBeforeTrampoline_Func31380706877(&_ignoredParam_1380706877_0); false {
 	} else {
 	}
 	//line main.go:12:18

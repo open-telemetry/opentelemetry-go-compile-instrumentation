@@ -28,6 +28,12 @@ const (
 	ignoredRetValName = "_ignoredRetVal"
 )
 
+// renameReturnValues assigns referenceable names to funcDecl's unnamed return
+// values. Raw and directive rules reference these by the resulting bare
+// "_unnamedRetValN" name in their injected code (e.g. the runtime
+// instrumentation's goroutine_propagate rule), so the naming here is a
+// stable, positional convention and intentionally not salted with a rule
+// hash the way collectReturnValues/collectArguments are for func rules.
 func renameReturnValues(funcDecl *dst.FuncDecl) {
 	if retList := funcDecl.Type.Results; retList != nil {
 		idx := 0

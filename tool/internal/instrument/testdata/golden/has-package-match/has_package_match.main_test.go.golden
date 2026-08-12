@@ -12,11 +12,11 @@ import _ "unsafe"
 // is required. The non-matching counterpart is has-package-no-match, where the
 // same import path is targeted with has_package: otherpkg and the rule is gated
 // out because the declared name does not match.
-func ProcessRequest(req string) (_unnamedRetVal0 error) {
+func ProcessRequest(req string) (_unnamedRetVal_3868073204_0 error) {
 	//line <generated>:1
 	if hookContext3868073204, _ := OtelBeforeTrampoline_ProcessRequest3868073204(&req); false {
 	} else {
-		defer OtelAfterTrampoline_ProcessRequest3868073204(hookContext3868073204, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_ProcessRequest3868073204(hookContext3868073204, &_unnamedRetVal_3868073204_0)
 	}
 	//line main_test.go:14:2
 	println("processing:", req)

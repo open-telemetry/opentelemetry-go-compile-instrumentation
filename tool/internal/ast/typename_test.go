@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"go/token"
 	"testing"
 
 	"github.com/dave/dst"
@@ -376,6 +377,89 @@ func f(c *vault.Client) {}
 		assert.Len(t, imports, 1)
 		assert.Equal(t, "net/http", imports["http"])
 	})
+
+	t.Run("resolves imports from Decls when Imports slice is empty", func(t *testing.T) {
+		file := &dst.File{
+			Decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.IMPORT,
+					Specs: []dst.Spec{
+						&dst.ImportSpec{
+							Path: &dst.BasicLit{Value: `"net/http"`},
+						},
+						&dst.ImportSpec{
+							Name: &dst.Ident{Name: "althttp"},
+							Path: &dst.BasicLit{Value: `"net/http"`},
+						},
+					},
+				},
+				&dst.GenDecl{
+					Tok: token.VAR,
+				},
+			},
+		}
+
+		imports := ImportAliasMap(file)
+		assert.Len(t, imports, 2)
+		assert.Equal(t, "net/http", imports["http"])
+		assert.Equal(t, "net/http", imports["althttp"])
+	})
+
+	t.Run("Imports takes precedence when both Imports and Decls contain specs", func(t *testing.T) {
+		file := &dst.File{
+			Imports: []*dst.ImportSpec{
+				{Path: &dst.BasicLit{Value: `"net/http"`}},
+			},
+			Decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.IMPORT,
+					Specs: []dst.Spec{
+						&dst.ImportSpec{
+							Name: &dst.Ident{Name: "ignored"},
+							Path: &dst.BasicLit{Value: `"other/pkg"`},
+						},
+					},
+				},
+			},
+		}
+
+		imports := ImportAliasMap(file)
+		assert.Len(t, imports, 1)
+		assert.Equal(t, "net/http", imports["http"])
+		assert.NotContains(t, imports, "ignored")
+	})
+}
+
+func TestDefaultImportAlias(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "net/http", want: "http"},
+		{input: "fmt", want: "fmt"},
+		{input: "github.com/golang-jwt/jwt/v5", want: "jwt"},
+		{input: "github.com/example/pkg/v2", want: "pkg"},
+		{input: "gopkg.in/yaml.v3", want: "yaml"},
+		{input: "gopkg.in/go-playground/validator.v9", want: "validator"},
+		{input: "github.com/hashicorp/vault", want: "vault"},
+		{input: "github.com/redis/go-redis/v9", want: "go-redis"},
+		{input: "example.com/foo/v10", want: "foo"},
+		{input: "yaml.v2", want: "yaml"},
+		{input: "v2", want: "v2"},
+		{input: "./v2", want: ""},
+		{input: "/v2", want: ""},
+		{input: "", want: ""},
+		{input: ".", want: ""},
+		{input: "/", want: ""},
+		{input: "   ", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := DefaultImportAlias(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func mustContains(t *testing.T, fields *dst.FieldList, typeStr string) bool {
