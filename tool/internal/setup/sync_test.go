@@ -167,6 +167,10 @@ func TestSyncDeps_NoMods(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestSyncDepsFromSource_NoMods(t *testing.T) {
+	require.NoError(t, syncDepsFromSource(t.Context(), nil, t.TempDir(), t.TempDir()))
+}
+
 func TestSyncDeps_NoModsOutsideRepository(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("OTELC_SOURCE_ROOT", "")
@@ -214,6 +218,41 @@ func TestRepositorySourceRoot(t *testing.T) {
 	})
 }
 
+func TestSyncDeps_UsesConfiguredSourceRoot(t *testing.T) {
+	goMod := `module example.com/app
+
+go 1.21
+
+require go.opentelemetry.io/otelc/instrumentation/example.com/lib v0.0.0
+`
+	moduleDir, repositoryDir, _ := setupSyncDepsTest(t, goMod, []string{"example.com/lib"})
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+
+	require.NoError(t, syncDeps(
+		t.Context(),
+		map[string]bool{util.OtelcInstRoot + "/example.com/lib": true},
+		moduleDir,
+	))
+
+	modFile, err := parseGoMod(filepath.Join(moduleDir, "go.mod"))
+	require.NoError(t, err)
+	require.Condition(t, func() bool {
+		for _, replace := range modFile.Replace {
+			if replace.Old.Path == util.OtelcInstRoot+"/example.com/lib" {
+				return replace.New.Path == filepath.Join(repositoryDir, "instrumentation", "example.com/lib")
+			}
+		}
+		return false
+	})
+}
+
+func TestSyncDeps_MissingSourceRoot(t *testing.T) {
+	t.Setenv("OTELC_SOURCE_ROOT", t.TempDir())
+
+	err := syncDeps(t.Context(), map[string]bool{"example.com/instrumentation": true}, t.TempDir())
+	require.ErrorContains(t, err, "otelc source checkout not found")
+}
+
 //nolint:revive // if we add named returns then nonamedreturns will complain
 func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, string, string) {
 	tempDir := t.TempDir()
@@ -231,6 +270,11 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 
 	require.NoError(t, os.MkdirAll(pkgRuntimeDir, 0o755))
 	require.NoError(t, os.MkdirAll(instDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(repositoryDir, "go.mod"),
+		[]byte("module "+util.OtelcRoot+"\ngo 1.21\n"),
+		0o644,
+	))
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(pkgDir, "go.mod"),
