@@ -8,9 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -97,8 +99,9 @@ func StateManagerFromContext(ctx context.Context) (*StateManager, bool) {
 func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, error) {
 	var files []string
 
+	dirs := slices.Sorted(maps.Keys(moduleDirs))
 	// Find all go.mod, go.sum, and tool files
-	for moduleDir := range moduleDirs {
+	for _, moduleDir := range dirs {
 		goModFile := filepath.Join(moduleDir, "go.mod")
 		goSumFile := filepath.Join(moduleDir, "go.sum")
 		toolFileCanonical := filepath.Join(moduleDir, ToolFileCanonical)
