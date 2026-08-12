@@ -10,12 +10,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
@@ -169,12 +171,25 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 		req = req.WithContext(ctx)
 
+		// Record the operation duration on every exit path below.
+		// errorAttrs carries error.type on error paths and is empty on success.
+		var errorAttrs []attribute.KeyValue
+		defer func() {
+			if operationDuration != nil {
+				attrs := slices.Concat(baseAttrs, errorAttrs)
+				operationDuration.Record(ctx, time.Since(start).Seconds(),
+					metric.WithAttributes(attrs...))
+			}
+		}()
+
 		resp, err := next(req)
 		if err != nil {
+			errorTypeAttr := otelsemconv.ErrorType(err)
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
-			span.SetAttributes(otelsemconv.ErrorType(err))
+			span.SetAttributes(errorTypeAttr)
 			span.End()
+			errorAttrs = []attribute.KeyValue{errorTypeAttr}
 			return resp, err
 		}
 
@@ -183,6 +198,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			span.SetStatus(codes.Error, resp.Status)
 			span.SetAttributes(otelsemconv.ErrorTypeKey.String(strconv.Itoa(resp.StatusCode)))
 			span.End()
+			errorAttrs = []attribute.KeyValue{otelsemconv.ErrorTypeKey.String(strconv.Itoa(resp.StatusCode))}
 			return resp, nil
 		}
 
