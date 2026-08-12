@@ -144,10 +144,37 @@ func TestScanArgs(t *testing.T) {
 			hasError: true,
 		},
 		{
-			name:  "empty value",
-			input: "key:",
+			name:     "empty value",
+			input:    "key:",
 			expected: []DirectiveArg{
 				{Key: "key", Value: ""},
+			},
+		},
+		{
+			name:     "empty key rejected",
+			input:    ":value",
+			hasError: true,
+		},
+		{
+			name:  "quoted value containing colon",
+			input: `url:"https://example.com/path"`,
+			expected: []DirectiveArg{
+				{Key: "url", Value: "https://example.com/path"},
+			},
+		},
+		{
+			name:  "bare value containing colon splits at first colon only",
+			input: "key:a:b:c",
+			expected: []DirectiveArg{
+				{Key: "key", Value: "a:b:c"},
+			},
+		},
+		{
+			name:  "multiple args one with quoted colon value",
+			input: `op:"http:post" tag:foo`,
+			expected: []DirectiveArg{
+				{Key: "op", Value: "http:post"},
+				{Key: "tag", Value: "foo"},
 			},
 		},
 	}

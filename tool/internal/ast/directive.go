@@ -90,6 +90,9 @@ func scanArgs(input string) ([]DirectiveArg, error) {
 		if !found {
 			return nil, ex.Newf("argument %q missing colon separator", tok)
 		}
+		if key == "" {
+			return nil, ex.Newf("argument %q has an empty key", tok)
+		}
 		if strings.HasPrefix(value, "'") {
 			return nil, ex.Newf("single-quoted values are not supported in argument %q", tok)
 		}
