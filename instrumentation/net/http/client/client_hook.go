@@ -4,6 +4,7 @@
 package client
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,10 +12,12 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
+	httpsemconv "go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
@@ -30,17 +33,26 @@ var (
 	logger     = runtime.Logger()
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator
+	meter      metric.Meter
+	httpClient httpsemconv.HTTPClient
 	initOnce   sync.Once
 )
 
 func initInstrumentation() {
 	initOnce.Do(func() {
+		version := runtime.ModuleVersion()
 		tracer = otel.GetTracerProvider().Tracer(
 			instrumentationName,
-			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
+			trace.WithInstrumentationVersion(version),
 		)
 		propagator = otel.GetTextMapPropagator()
-		logger.Info("HTTP client instrumentation initialized")
+		meter = otel.GetMeterProvider().Meter(
+			instrumentationName,
+			metric.WithInstrumentationVersion(version),
+			metric.WithSchemaURL(semconv.SchemaURL),
+		)
+		httpClient = httpsemconv.NewHTTPClient(meter)
+		logger.Info("HTTP client instrumentation initialized with metrics")
 	})
 }
 
@@ -81,7 +93,7 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 	ctx := req.Context()
 
 	// Get trace attributes from semconv
-	attrs := semconv.HTTPClientRequestTraceAttrs(req)
+	attrs := httpClient.RequestTraceAttrs(req)
 
 	// Start span
 	spanName := req.Method
@@ -99,11 +111,13 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 	ictx.SetParam(requestParamIndex, newReq)
 
 	// Store data for after hook
+	requestSize := req.ContentLength
 	ictx.SetData(map[string]interface{}{
-		"ctx":   ctx,
-		"span":  span,
-		"req":   req,
-		"start": time.Now(),
+		"ctx":          ctx,
+		"span":         span,
+		"req":          req,
+		"start":        time.Now(),
+		"request_size": requestSize,
 	})
 }
 
@@ -122,14 +136,25 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 
 	// Add response attributes
 	if res != nil {
+		ctx, _ := ictx.GetKeyData("ctx").(context.Context)
 		startTime, _ := ictx.GetKeyData("start").(time.Time)
-		attrs := semconv.HTTPClientResponseTraceAttrs(res)
+		requestSize, _ := ictx.GetKeyData("request_size").(int64)
+		req, _ := ictx.GetKeyData("req").(*http.Request)
+
+		attrs := httpClient.ResponseTraceAttrs(res)
 		span.SetAttributes(attrs...)
 
 		// Set span status based on status code
-		code, desc := semconv.HTTPClientStatus(res.StatusCode)
+		code, desc := httpClient.Status(res.StatusCode)
 		if code != codes.Unset {
 			span.SetStatus(code, desc)
+		}
+
+		// Record metrics
+		if ctx != nil && req != nil {
+			responseSize := res.ContentLength
+			elapsedTime := time.Since(startTime).Seconds()
+			httpClient.RecordMetrics(ctx, req, res.StatusCode, requestSize, responseSize, elapsedTime, nil)
 		}
 
 		logger.Debug("AfterRoundTrip called",
@@ -143,7 +168,7 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		span.SetAttributes(semconv.HTTPClientErrorType(err))
+		span.SetAttributes(httpClient.ErrorType(err))
 		logger.Debug("AfterRoundTrip called with error", "error", err)
 	}
 
