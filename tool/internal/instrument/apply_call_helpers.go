@@ -6,7 +6,6 @@ package instrument
 import (
 	"github.com/dave/dst"
 
-	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
