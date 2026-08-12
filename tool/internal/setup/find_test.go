@@ -543,3 +543,51 @@ echo nothing useful
 		})
 	}
 }
+
+func TestFindModVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "module cache path",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.3/pkg/foo.go",
+			want: "v1.2.3",
+		},
+		{
+			name: "module cache path with pre-release",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.3-rc.1/pkg/foo.go",
+			want: "v1.2.3-rc.1",
+		},
+		{
+			name: "windows-style module cache path",
+			// Use /-separated form so this exercises the same path shape
+			// filepath.ToSlash produces on Windows, without depending on GOOS
+			// (filepath.ToSlash is a no-op when the host separator is already /).
+			path: "C:/go/pkg/mod/github.com/foo/bar@v9.0.0/client.go",
+			want: "v9.0.0",
+		},
+		{
+			name: "local path has no version",
+			path: "/home/user/projects/bar/pkg/foo.go",
+			want: "",
+		},
+		{
+			name: "vendor path has no version",
+			path: "/tmp/myapp/vendor/github.com/foo/bar/pkg/foo.go",
+			want: "",
+		},
+		{
+			name: "empty path",
+			path: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, findModVersion(tt.path))
+		})
+	}
+}

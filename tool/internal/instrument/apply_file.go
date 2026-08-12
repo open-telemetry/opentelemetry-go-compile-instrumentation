@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -23,21 +22,10 @@ func stripBuildIgnoreTag(content string) string {
 
 // applyFileRule introduces the new file to the target package at compile time.
 func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
-	// List all files in the rule module path
-	files, err := util.ListFiles(rule.ResolvedPath)
-	if err != nil {
-		return ex.Wrapf(err, "listing files for rule %s in dir %s (import path %s)",
-			rule.Name, rule.ResolvedPath, rule.Path)
+	file := filepath.Join(rule.ResolvedPath, rule.File)
+	if !util.PathExists(file) {
+		return ex.Newf("file %s not found in %s", rule.File, rule.ResolvedPath)
 	}
-
-	// Find the new file we want to introduce
-	index := slices.IndexFunc(files, func(file string) bool {
-		return strings.HasSuffix(file, rule.File)
-	})
-	if index == -1 {
-		return ex.Newf("file %s not found", rule.File)
-	}
-	file := files[index]
 
 	// Parse the new file into AST nodes and modify it as needed.
 	// Keep processing in-memory to avoid mutating shared temp rule files.

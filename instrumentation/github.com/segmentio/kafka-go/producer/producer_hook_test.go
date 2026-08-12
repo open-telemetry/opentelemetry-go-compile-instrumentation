@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	kafkaprop "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/internal/propagation"
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
@@ -68,7 +69,7 @@ func TestBeforeWriteMessages_InjectsHeadersAndStartsSpans(t *testing.T) {
 
 	// Each message must carry the propagated trace context.
 	for i := range msgs {
-		hc := headerCarrier{headers: &msgs[i].Headers}
+		hc := kafkaprop.NewHeaderCarrier(&msgs[i].Headers)
 		assert.NotEmpty(t, hc.Get("traceparent"), "message %d missing traceparent", i)
 	}
 
@@ -142,24 +143,6 @@ func TestWriteMessages_Disabled(t *testing.T) {
 
 	assert.Empty(t, sr.Ended())
 	assert.Nil(t, ictx.GetData())
-}
-
-func TestHeaderCarrier_SetGetKeys(t *testing.T) {
-	var headers []kafka.Header
-	hc := headerCarrier{headers: &headers}
-
-	hc.Set("traceparent", "v1")
-	hc.Set("baggage", "v2")
-	assert.Equal(t, "v1", hc.Get("traceparent"))
-	assert.Equal(t, "v2", hc.Get("baggage"))
-	assert.Equal(t, "", hc.Get("absent"))
-
-	// Set on an existing key overwrites rather than appending a duplicate.
-	hc.Set("traceparent", "v3")
-	assert.Equal(t, "v3", hc.Get("traceparent"))
-	assert.Len(t, headers, 2)
-
-	assert.ElementsMatch(t, []string{"traceparent", "baggage"}, hc.Keys())
 }
 
 // TestAfterWriteMessages_PartialFailure verifies that when WriteMessages returns
