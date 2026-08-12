@@ -5,7 +5,9 @@ package instrument
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
+	"slices"
 
 	"github.com/dave/dst"
 
@@ -42,6 +44,14 @@ func addRulesToMap[T rule.InstRule](
 	}
 }
 
+// sortedFiles returns file2rules' keys in sorted order. instrument() must
+// process files in a deterministic order: it returns on the first error, so
+// unsorted map iteration would make which failure gets reported (and the
+// order of per-file log lines) vary between identical runs of the same input.
+func sortedFiles(file2rules map[string][]rule.InstRule) []string {
+	return slices.Sorted(maps.Keys(file2rules))
+}
+
 // applyOneRule applies a single rule to the target file and reports whether
 // the rule counts as a function rule (i.e. whether a globals file is needed).
 func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (bool, error) {
@@ -74,7 +84,9 @@ func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
 	}
-	for file, rules := range groupRules(ip.workDir, rset) {
+	file2rules := groupRules(ip.workDir, rset)
+	for _, file := range sortedFiles(file2rules) {
+		rules := file2rules[file]
 		// Group rules by file, then parse the target file once
 		root, err := ip.parseFile(file)
 		if err != nil {
