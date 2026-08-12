@@ -68,7 +68,7 @@ func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
-			name: "QUERY method",
+			name: "QUERY method not in defaults",
 			req: &http.Request{
 				Method: "QUERY",
 				URL: &url.URL{
@@ -79,8 +79,9 @@ func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 				Proto: "HTTP/1.1",
 			},
 			expected: map[string]interface{}{
-				"http.request.method": "QUERY",
-				"url.scheme":          "https",
+				"http.request.method":          "_OTHER",
+				"http.request.method_original": "QUERY",
+				"url.scheme":                   "https",
 			},
 		},
 		{

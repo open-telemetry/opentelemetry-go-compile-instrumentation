@@ -89,11 +89,11 @@ func TestStandardizeHTTPMethod(t *testing.T) {
 		{"GET", "GET"},
 		{"get", "GET"},
 		{"Post", "POST"},
-		{"QUERY", "QUERY"},
-		{"query", "QUERY"},
-		{"CUSTOM", "_OTHER"},
-		{"", "_OTHER"},
-		{"_OTHER", "_OTHER"},
+		{"QUERY", HTTPMethodOther},
+		{"query", HTTPMethodOther},
+		{"CUSTOM", HTTPMethodOther},
+		{"", HTTPMethodOther},
+		{HTTPMethodOther, HTTPMethodOther},
 	}
 
 	for _, tt := range tests {
@@ -116,6 +116,38 @@ func TestParseKnownMethods(t *testing.T) {
 	assert.Empty(t, empty)
 }
 
+func TestKnownMethods(t *testing.T) {
+	t.Cleanup(func() {
+		t.Setenv(HTTPKnownMethodsEnv, "")
+		resetKnownMethodsForTest()
+	})
+
+	t.Run("defaults", func(t *testing.T) {
+		t.Setenv(HTTPKnownMethodsEnv, "")
+		resetKnownMethodsForTest()
+
+		got := knownMethods()
+		assert.Equal(t, MethodLookup, got)
+		_, hasQuery := got["QUERY"]
+		assert.False(t, hasQuery, "QUERY is not a default known method")
+	})
+
+	t.Run("env override", func(t *testing.T) {
+		t.Setenv(HTTPKnownMethodsEnv, "GET,QUERY,PROPFIND")
+		resetKnownMethodsForTest()
+
+		got := knownMethods()
+		assert.Equal(t, "GET", got["GET"].Value.AsString())
+		assert.Equal(t, "QUERY", got["QUERY"].Value.AsString())
+		assert.Equal(t, "PROPFIND", got["PROPFIND"].Value.AsString())
+		_, hasPost := got["POST"]
+		assert.False(t, hasPost, "override must fully replace defaults")
+
+		assert.Equal(t, "QUERY", StandardizeHTTPMethod("QUERY"))
+		assert.Equal(t, "QUERY", SpanMethod("QUERY"))
+	})
+}
+
 func TestRequestMethodAttrs(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -126,9 +158,10 @@ func TestRequestMethodAttrs(t *testing.T) {
 	}{
 		{name: "known", method: "GET", wantMethod: "GET", wantNoOriginal: true},
 		{name: "case variant", method: "get", wantMethod: "GET", wantOriginal: "get"},
-		{name: "unknown", method: "CUSTOM", wantMethod: "_OTHER", wantOriginal: "CUSTOM"},
-		{name: "empty", method: "", wantMethod: "_OTHER", wantNoOriginal: true},
-		{name: "literal _OTHER", method: "_OTHER", wantMethod: "_OTHER", wantNoOriginal: true},
+		{name: "unknown", method: "CUSTOM", wantMethod: HTTPMethodOther, wantOriginal: "CUSTOM"},
+		{name: "QUERY not default", method: "QUERY", wantMethod: HTTPMethodOther, wantOriginal: "QUERY"},
+		{name: "empty", method: "", wantMethod: HTTPMethodOther, wantNoOriginal: true},
+		{name: "literal _OTHER", method: HTTPMethodOther, wantMethod: HTTPMethodOther, wantNoOriginal: true},
 	}
 
 	for _, tt := range tests {
@@ -153,7 +186,7 @@ func TestSpanMethod(t *testing.T) {
 	}{
 		{"GET", "GET"},
 		{"get", "GET"},
-		{"QUERY", "QUERY"},
+		{"QUERY", "HTTP"},
 		{"CUSTOM", "HTTP"},
 		{"", "HTTP"},
 	}
@@ -185,7 +218,7 @@ func TestMethodLookup(t *testing.T) {
 		{"OPTIONS", true},
 		{"CONNECT", true},
 		{"TRACE", true},
-		{"QUERY", true},
+		{"QUERY", false},
 		{"CUSTOM", false},
 	}
 

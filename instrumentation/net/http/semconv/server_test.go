@@ -110,7 +110,7 @@ func TestHTTPServerRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
-			name:   "QUERY method",
+			name:   "QUERY method not in defaults",
 			server: "",
 			req: &http.Request{
 				Method:     "QUERY",
@@ -122,7 +122,8 @@ func TestHTTPServerRequestTraceAttrs(t *testing.T) {
 				Proto: "HTTP/1.1",
 			},
 			expected: map[string]interface{}{
-				"http.request.method": "QUERY",
+				"http.request.method":          "_OTHER",
+				"http.request.method_original": "QUERY",
 			},
 		},
 		{
@@ -397,7 +398,7 @@ func TestHTTPServerSpanName(t *testing.T) {
 		{"CUSTOM", "/api", "HTTP /api"},
 		{"CUSTOM", "", "HTTP"},
 		{"get", "/api", "GET /api"},
-		{"QUERY", "/search", "QUERY /search"},
+		{"QUERY", "/search", "HTTP /search"},
 	}
 
 	for _, tt := range tests {
