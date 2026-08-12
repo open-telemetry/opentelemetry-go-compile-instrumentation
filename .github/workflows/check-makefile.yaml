@@ -7,11 +7,15 @@ on:
     paths:
       - "**/*Makefile*"
       - ".tools/checkmake"
+      - ".tools/go.mod"
+      - ".tools/go.sum"
       - ".github/workflows/check-makefile.yaml"
   pull_request:
     paths:
       - "**/*Makefile*"
       - ".tools/checkmake"
+      - ".tools/go.mod"
+      - ".tools/go.sum"
       - ".github/workflows/check-makefile.yaml"
 
 jobs:
