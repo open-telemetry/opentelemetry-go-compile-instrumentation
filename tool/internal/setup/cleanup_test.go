@@ -30,9 +30,7 @@ func TestCleanup(t *testing.T) {
 				otelcRuntimeGoPath := filepath.Join(dir, OtelcRuntimeFile)
 				require.NoError(t, stateManager.Track(otelcRuntimeGoPath))
 				mustWriteFile(t, otelcRuntimeGoPath, "package main \n\n// dummy runtime file")
-				// The instrumentation package is extracted inside .otelc-build/pkg/,
-				// not at the project root. It is removed as part of .otelc-build/ cleanup.
-				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, unzippedPkgDir, "a.go"), "dummy")
+				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, "build-artifact"), "dummy")
 				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, "matched.json"), "{}")
 				return ContextWithStateManager(t.Context(), stateManager)
 			},

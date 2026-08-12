@@ -167,9 +167,100 @@ func TestSyncDeps_NoMods(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestSyncDepsFromSource_NoMods(t *testing.T) {
+	require.NoError(t, syncDepsFromSource(t.Context(), nil, t.TempDir(), t.TempDir()))
+}
+
+func TestSyncDeps_NoModsOutsideRepository(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("OTELC_SOURCE_ROOT", "")
+	require.NoError(t, syncDeps(t.Context(), nil, t.TempDir()))
+}
+
+func TestRepositorySourceRoot(t *testing.T) {
+	repositoryDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(repositoryDir, "go.mod"), []byte("module example.com/repo\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(repositoryDir, "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(repositoryDir, "pkg", "go.mod"),
+		[]byte("module example.com/repo/pkg\n"),
+		0o644,
+	))
+	require.NoError(t, os.Mkdir(filepath.Join(repositoryDir, "instrumentation"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(repositoryDir, "instrumentation", "go.mod"),
+		[]byte("module example.com/repo/instrumentation\n"),
+		0o644,
+	))
+
+	t.Run("environment", func(t *testing.T) {
+		t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+		got, err := repositorySourceRoot()
+		require.NoError(t, err)
+		require.Equal(t, repositoryDir, got)
+	})
+
+	t.Run("parent", func(t *testing.T) {
+		t.Setenv("OTELC_SOURCE_ROOT", "")
+		nested := filepath.Join(repositoryDir, "test", "app")
+		require.NoError(t, os.MkdirAll(nested, 0o755))
+		t.Chdir(nested)
+
+		got, err := repositorySourceRoot()
+		require.NoError(t, err)
+		require.Equal(t, repositoryDir, got)
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		t.Setenv("OTELC_SOURCE_ROOT", t.TempDir())
+		_, err := repositorySourceRoot()
+		require.ErrorContains(t, err, "otelc source checkout not found")
+		require.ErrorContains(t, err, "OTELC_SOURCE_ROOT")
+		require.ErrorContains(t, err, "#983")
+	})
+}
+
+func TestSyncDeps_UsesConfiguredSourceRoot(t *testing.T) {
+	goMod := `module example.com/app
+
+go 1.21
+
+require go.opentelemetry.io/otelc/instrumentation/example.com/lib v0.0.0
+`
+	moduleDir, repositoryDir, _ := setupSyncDepsTest(t, goMod, []string{"example.com/lib"})
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+
+	require.NoError(t, syncDeps(
+		t.Context(),
+		map[string]bool{util.OtelcInstRoot + "/example.com/lib": true},
+		moduleDir,
+	))
+
+	modFile, err := parseGoMod(filepath.Join(moduleDir, "go.mod"))
+	require.NoError(t, err)
+	require.Condition(t, func() bool {
+		for _, replace := range modFile.Replace {
+			if replace.Old.Path == util.OtelcInstRoot+"/example.com/lib" {
+				return replace.New.Path == filepath.Join(repositoryDir, "instrumentation", "example.com/lib")
+			}
+		}
+		return false
+	})
+}
+
+func TestSyncDeps_MissingSourceRoot(t *testing.T) {
+	t.Setenv("OTELC_SOURCE_ROOT", t.TempDir())
+
+	err := syncDeps(t.Context(), map[string]bool{"example.com/instrumentation": true}, t.TempDir())
+	require.ErrorContains(t, err, "otelc source checkout not found")
+	require.ErrorContains(t, err, "OTELC_SOURCE_ROOT")
+	require.ErrorContains(t, err, "#983")
+}
+
 //nolint:revive // if we add named returns then nonamedreturns will complain
 func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, string, string) {
 	tempDir := t.TempDir()
+	repositoryDir := t.TempDir()
 
 	goModPath := filepath.Join(tempDir, "go.mod")
 	require.NoError(t, os.WriteFile(goModPath, []byte(goMod), 0o644))
@@ -177,14 +268,17 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 	t.Chdir(tempDir)
 	t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
-	buildTempDir := util.GetBuildTempDir()
-
-	pkgDir := filepath.Join(buildTempDir, unzippedPkgDir)
+	pkgDir := filepath.Join(repositoryDir, "pkg")
 	pkgRuntimeDir := filepath.Join(pkgDir, "runtime")
-	instDir := filepath.Join(buildTempDir, unzippedInstDir)
+	instDir := filepath.Join(repositoryDir, "instrumentation")
 
 	require.NoError(t, os.MkdirAll(pkgRuntimeDir, 0o755))
 	require.NoError(t, os.MkdirAll(instDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(repositoryDir, "go.mod"),
+		[]byte("module "+util.OtelcRoot+"\ngo 1.21\n"),
+		0o644,
+	))
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(pkgDir, "go.mod"),
@@ -212,7 +306,7 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 		))
 	}
 
-	return tempDir, buildTempDir, goModPath
+	return tempDir, repositoryDir, goModPath
 }
 
 func TestSyncDeps_WithMods(t *testing.T) {
@@ -220,25 +314,27 @@ func TestSyncDeps_WithMods(t *testing.T) {
 
 go 1.21
 `
-	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"/net/http/client"})
-	require.NoError(t, syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir))
+	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	require.NoError(t, syncDepsFromSource(
+		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
+	))
 
 	content, err := os.ReadFile(goModPath)
 	require.NoError(t, err)
 	got := string(content)
 
 	assert.Contains(t, got,
-		"replace "+util.OtelcPkgRoot+" => "+filepath.Join(buildTempDir, unzippedPkgDir))
+		"replace "+util.OtelcPkgRoot+" => "+filepath.Join(repositoryDir, "pkg"))
 	assert.Contains(t, got,
-		"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(buildTempDir, unzippedPkgDir, "runtime"))
+		"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(repositoryDir, "pkg", "runtime"))
 	assert.Contains(t, got,
-		"replace "+util.OtelcInstRoot+" => "+filepath.Join(buildTempDir, unzippedInstDir))
+		"replace "+util.OtelcInstRoot+" => "+filepath.Join(repositoryDir, "instrumentation"))
 	assert.Contains(
 		t,
 		got,
 		"replace "+util.OtelcInstRoot+"/net/http/client"+" => "+filepath.Join(
-			buildTempDir,
-			unzippedInstDir,
+			repositoryDir,
+			"instrumentation",
 			"net",
 			"http",
 			"client",
@@ -251,12 +347,12 @@ func TestSyncDeps_NestedModule(t *testing.T) {
 
 go 1.21
 `
-	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
 
 	// Add a nested module with no otelc.yaml of its own inside the matched
 	// instrumentation module's directory, mirroring a shared internal
 	// package used by several versioned copies of one instrumentation.
-	nestedDir := filepath.Join(buildTempDir, unzippedInstDir, "net", "http", "client", "internal", "shared")
+	nestedDir := filepath.Join(repositoryDir, "instrumentation", "net", "http", "client", "internal", "shared")
 	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
 	nestedModule := util.OtelcInstRoot + "/net/http/client/internal/shared"
 	require.NoError(t, os.WriteFile(
@@ -265,7 +361,9 @@ go 1.21
 		0o644,
 	))
 
-	require.NoError(t, syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir))
+	require.NoError(t, syncDepsFromSource(
+		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
+	))
 
 	content, err := os.ReadFile(goModPath)
 	require.NoError(t, err)
@@ -285,13 +383,13 @@ func TestSyncDeps_SiblingNestedModule(t *testing.T) {
 
 go 1.21
 `
-	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"github.com/openai/openai-go/v2"})
+	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"github.com/openai/openai-go/v2"})
 
 	// internal/streaming lives under the parent of the matched v2 directory
 	// (i.e. under github.com/openai/openai-go/), as a sibling of v2, not a
 	// descendant of it.
 	siblingDir := filepath.Join(
-		buildTempDir, unzippedInstDir, "github.com", "openai", "openai-go", "internal", "streaming",
+		repositoryDir, "instrumentation", "github.com", "openai", "openai-go", "internal", "streaming",
 	)
 	require.NoError(t, os.MkdirAll(siblingDir, 0o755))
 	siblingModule := util.OtelcInstRoot + "/github.com/openai/openai-go/internal/streaming"
@@ -301,10 +399,11 @@ go 1.21
 		0o644,
 	))
 
-	require.NoError(t, syncDeps(
+	require.NoError(t, syncDepsFromSource(
 		t.Context(),
 		map[string]bool{util.OtelcInstRoot + "/github.com/openai/openai-go/v2": true},
 		tempDir,
+		repositoryDir,
 	))
 
 	content, err := os.ReadFile(goModPath)
@@ -408,12 +507,12 @@ func TestSyncDeps_NestedModuleDiscoveryError(t *testing.T) {
 
 go 1.21
 `
-	tempDir, buildTempDir, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	tempDir, repositoryDir, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
 
 	// Malformed go.mod inside the matched instrumentation module's directory
 	// makes discoverNestedModuleReplaces fail, which syncDeps must surface
 	// rather than silently drop.
-	nestedDir := filepath.Join(buildTempDir, unzippedInstDir, "net", "http", "client", "internal", "shared")
+	nestedDir := filepath.Join(repositoryDir, "instrumentation", "net", "http", "client", "internal", "shared")
 	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(nestedDir, "go.mod"),
@@ -421,7 +520,9 @@ go 1.21
 		0o644,
 	))
 
-	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir)
+	err := syncDepsFromSource(
+		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discovering nested modules under")
 }
@@ -434,8 +535,10 @@ go 1.21
 replace %s => /already/there
 `, util.OtelcInstRoot+"/net/http/client")
 
-	tempDir, buildTempDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
-	require.NoError(t, syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir))
+	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	require.NoError(t, syncDepsFromSource(
+		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
+	))
 
 	content, err := os.ReadFile(goModPath)
 	require.NoError(t, err)
@@ -447,8 +550,8 @@ replace %s => /already/there
 		t,
 		got,
 		"replace "+util.OtelcInstRoot+"/net/http/client => "+filepath.Join(
-			buildTempDir,
-			unzippedInstDir,
+			repositoryDir,
+			"instrumentation",
 			"net",
 			"http",
 			"client",

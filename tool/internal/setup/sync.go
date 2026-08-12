@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -19,6 +20,39 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+func repositorySourceRoot() (string, error) {
+	root := os.Getenv("OTELC_SOURCE_ROOT")
+	if root == "" {
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			return "", ex.Wrapf(err, "getting otelc source checkout directory")
+		}
+	}
+
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", ex.Wrapf(err, "resolving otelc source checkout directory")
+	}
+	// Walk to the filesystem root: the root, pkg, and instrumentation go.mod
+	// files together are specific enough to identify this repository checkout.
+	for {
+		if util.PathExists(filepath.Join(root, "go.mod")) &&
+			util.PathExists(filepath.Join(root, "pkg", "go.mod")) &&
+			util.PathExists(filepath.Join(root, "instrumentation", "go.mod")) {
+			return root, nil
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			break
+		}
+		root = parent
+	}
+	return "", ex.New("otelc source checkout not found; set OTELC_SOURCE_ROOT " +
+		"or run from inside a full opentelemetry-go-compile-instrumentation " +
+		"checkout (temporary requirement, see #983)")
+}
 
 func parseGoMod(gomod string) (*modfile.File, error) {
 	data, err := os.ReadFile(gomod)
@@ -172,6 +206,18 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		return nil
 	}
 
+	sourceRoot, err := repositorySourceRoot()
+	if err != nil {
+		return err
+	}
+	return syncDepsFromSource(ctx, modPaths, moduleDir, sourceRoot)
+}
+
+func syncDepsFromSource(ctx context.Context, modPaths map[string]bool, moduleDir, sourceRoot string) error {
+	if len(modPaths) == 0 {
+		return nil
+	}
+
 	logger := util.LoggerFromContext(ctx)
 
 	goModFile := filepath.Join(moduleDir, "go.mod")
@@ -182,11 +228,16 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 
 	before := snapshotVersion(modfile)
 
+	// Temporary source-checkout bridge. Remove with #983 when instrumentation
+	// modules are versioned and replacements are no longer needed.
+	pkgDir := filepath.Join(sourceRoot, "pkg")
+	instDir := filepath.Join(sourceRoot, "instrumentation")
+
 	// Add replace directives for modules imported to otel.instrumentation.go
 	replaces := make(map[string]string, len(modPaths))
 	for m := range modPaths {
 		if path, isEmbedded := strings.CutPrefix(m, util.OtelcInstRoot+"/"); isEmbedded {
-			replaces[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
+			replaces[m] = filepath.Join(instDir, path)
 		}
 	}
 
@@ -208,7 +259,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		walkDirs[dir] = true
 		walkDirs[filepath.Dir(dir)] = true
 	}
-	for dir := range walkDirs {
+	for _, dir := range slices.Collect(maps.Keys(walkDirs)) {
 		nested, nestedErr := discoverNestedModuleReplaces(dir)
 		if nestedErr != nil {
 			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
@@ -220,16 +271,16 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	// TODO: Since we haven't published the instrumentation packages yet,
 	// we need to add the replace directive to the local path.
 	// Once the instrumentation packages are published, we can remove this.
-	replaces[util.OtelcPkgRoot] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir)
+	replaces[util.OtelcPkgRoot] = pkgDir
 
 	// Add replace directive for special runtime module
 	// runtime module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
-	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
+	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(pkgDir, "runtime")
 
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
-	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
+	replaces[util.OtelcInstRoot] = instDir
 
 	// Okay, now add all the replace directives to go.mod
 	changed := false

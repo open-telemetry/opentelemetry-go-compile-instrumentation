@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -22,10 +21,10 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -167,77 +166,6 @@ func generateOtelInstrumentationGo(imports map[string]bool, opts PinOptions) *ds
 	}
 }
 
-type yamlRule struct {
-	Target       string `yaml:"target"`
-	VersionRange string `yaml:"version"`
-}
-
-func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) error {
-	return filepath.WalkDir(moduleDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if d.IsDir() {
-			// Skip any submodules
-			if path != moduleDir && util.PathExists(filepath.Join(path, "go.mod")) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if !isRuleFile(d.Name()) {
-			return nil
-		}
-
-		data, readErr := os.ReadFile(path) //nolint:gosec // walking embedded rules from extractOtelcBundle
-		if readErr != nil {
-			return ex.Wrapf(readErr, "reading rule file %s", path)
-		}
-
-		var rules map[string]yamlRule
-		if unmarshalErr := yaml.Unmarshal(data, &rules); unmarshalErr != nil {
-			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
-		}
-
-		for _, r := range rules {
-			if r.Target != "" {
-				loaded[module] = append(loaded[module], r)
-			}
-		}
-
-		return nil
-	})
-}
-
-func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
-	loaded := make(map[string][]yamlRule)
-
-	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		// rulesRoot is instrumentation/
-		// We want to load rules for submodules within instrumentation/
-		// Look for go.mod nested within instrumentation/
-		if d.IsDir() || d.Name() != "go.mod" || filepath.Dir(path) == rulesRoot {
-			return nil
-		}
-
-		modFile, err := parseGoMod(path)
-		if err != nil {
-			return ex.Wrapf(err, "loading %s", path)
-		}
-
-		return loadModuleRules(filepath.Dir(path), modFile.Module.Mod.Path, loaded)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return loaded, nil
-}
-
 func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 	if !semver.IsValid(version) || version == "v0.0.0" || module.IsPseudoVersion(version) {
 		return false, nil
@@ -309,7 +237,7 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 
 func matchInstrumentationImports(
 	deps []*Dependency,
-	ruleset map[string][]yamlRule,
+	ruleset manifest.Manifest,
 	warn func(msg string, args ...any),
 ) map[string]bool {
 	imports := make(map[string]bool)
@@ -321,25 +249,23 @@ func matchInstrumentationImports(
 
 	// Match only on target + version.
 	for _, dep := range deps {
-		for modPath, rules := range ruleset {
-			for _, r := range rules {
-				tm := instrumentationRuleMatchesDep(dep, r)
-				if tm.isRoot {
-					// always add root targets; they are further matched in setup
-					imports[modPath] = true
-					continue
-				}
-				if !tm.matched {
-					continue
-				}
-
-				if !util.VersionInRange(dep.Version, r.VersionRange) {
-					recordUnresolvedSkip(skipped, modPath, dep, r.VersionRange)
-					continue
-				}
-
-				imports[modPath] = true
+		for _, entry := range ruleset {
+			tm := instrumentationRuleMatchesDep(dep, entry)
+			if tm.isRoot {
+				// always add root targets; they are further matched in setup
+				imports[entry.ModulePath] = true
+				continue
 			}
+			if !tm.matched {
+				continue
+			}
+
+			if !util.VersionInRange(dep.Version, entry.VersionRange) {
+				recordUnresolvedSkip(skipped, entry.ModulePath, dep, entry.VersionRange)
+				continue
+			}
+
+			imports[entry.ModulePath] = true
 		}
 	}
 
@@ -359,14 +285,14 @@ type instrumentationTargetMatch struct {
 
 // instrumentationRuleMatchesDep reports whether r's target matches dep.
 // Root targets always pin the instrumentation module.
-func instrumentationRuleMatchesDep(dep *Dependency, r yamlRule) instrumentationTargetMatch {
+func instrumentationRuleMatchesDep(dep *Dependency, entry manifest.Entry) instrumentationTargetMatch {
 	switch {
-	case rule.IsRootTarget(r.Target):
+	case rule.IsRootTarget(entry.Target):
 		return instrumentationTargetMatch{matched: true, isRoot: true}
-	case rule.IsGlobTarget(r.Target):
-		return instrumentationTargetMatch{matched: rule.MatchGlobTarget(r.Target, dep.ImportPath)}
+	case rule.IsGlobTarget(entry.Target):
+		return instrumentationTargetMatch{matched: rule.MatchGlobTarget(entry.Target, dep.ImportPath)}
 	default:
-		return instrumentationTargetMatch{matched: r.Target == dep.ImportPath}
+		return instrumentationTargetMatch{matched: entry.Target == dep.ImportPath}
 	}
 }
 
@@ -525,14 +451,9 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 		return nil, ex.Wrapf(findDepsErr, "finding dependencies")
 	}
 
-	extractErr := extractOtelcBundle()
-	if extractErr != nil {
-		return nil, ex.Wrapf(extractErr, "extracting otelc package")
-	}
-
-	ruleset, err := loadMinimalRules(filepath.Join(util.GetBuildTempDir(), unzippedInstDir))
+	ruleset, err := manifest.Load()
 	if err != nil {
-		return nil, ex.Wrapf(err, "loading instrumentation rules")
+		return nil, ex.Wrapf(err, "loading instrumentation manifest")
 	}
 
 	// We expect every built-in instrumentation module to be importable

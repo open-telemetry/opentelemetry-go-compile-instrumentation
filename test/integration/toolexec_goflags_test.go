@@ -244,6 +244,7 @@ func (b *preparedBuildCase) runAndRequireHTTPSpan() {
 func preparedBuildBaseEnvironment() []string {
 	env := os.Environ()
 	filtered := env[:0]
+	sourceRoot := os.Getenv("OTELC_SOURCE_ROOT")
 	for _, entry := range env {
 		name, _, _ := strings.Cut(entry, "=")
 		name = strings.ToLower(name)
@@ -253,7 +254,34 @@ func preparedBuildBaseEnvironment() []string {
 		}
 		filtered = append(filtered, entry)
 	}
-	return append(filtered, "GOENV=off")
+	filtered = append(filtered, "GOENV=off")
+	if sourceRoot != "" {
+		filtered = append(filtered, "OTELC_SOURCE_ROOT="+sourceRoot)
+	}
+	return filtered
+}
+
+func TestPreparedBuildBaseEnvironmentPreservesSourceRoot(t *testing.T) {
+	t.Setenv("GOENV", "custom")
+	t.Setenv("GOFLAGS", "-x")
+	t.Setenv("GOCACHE", t.TempDir())
+	t.Setenv("GOWORK", "off")
+	t.Setenv("OTELC_WORK_DIR", t.TempDir())
+	t.Setenv("OTELC_SOURCE_ROOT", "/repo")
+
+	env := preparedBuildBaseEnvironment()
+	values := make(map[string]string, len(env))
+	for _, entry := range env {
+		name, value, _ := strings.Cut(entry, "=")
+		values[strings.ToLower(name)] = value
+	}
+
+	require.Equal(t, "off", values["goenv"])
+	require.Equal(t, "/repo", values["otelc_source_root"])
+	require.NotContains(t, values, "goflags")
+	require.NotContains(t, values, "gocache")
+	require.NotContains(t, values, "gowork")
+	require.NotContains(t, values, "otelc_work_dir")
 }
 
 func preparedPlainBuildEnvironment(baseEnv []string, goCache string) []string {
