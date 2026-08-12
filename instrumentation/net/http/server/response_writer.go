@@ -5,7 +5,7 @@ package server
 
 import (
 	"bufio"
-	"fmt"
+	"io"
 	"net"
 	"net/http"
 )
@@ -14,12 +14,29 @@ import (
 // an http.ResponseWriter may implement.
 var (
 	_ http.ResponseWriter = (*writerWrapper)(nil)
-	_ http.Hijacker       = (*writerWrapper)(nil)
 	_ http.Flusher        = (*writerWrapper)(nil)
+	_ http.Hijacker       = (*writerWrapper)(nil)
 	_ http.Pusher         = (*writerWrapper)(nil)
+	_ io.ReaderFrom       = (*writerWrapper)(nil)
+	// Required by http.ResponseController to reach the real writer for
+	// SetReadDeadline, SetWriteDeadline and EnableFullDuplex.
+	_ interface{ Unwrap() http.ResponseWriter } = (*writerWrapper)(nil)
 )
 
-// writerWrapper wraps http.ResponseWriter to capture the status code
+// writerWrapper wraps http.ResponseWriter to capture the status code.
+//
+// This wrapper is substituted for the application's real http.ResponseWriter
+// before its handler runs, so it must stay as transparent as possible: any
+// capability of the underlying writer that the wrapper fails to forward
+// silently disappears from the instrumented application.
+//
+// Note that the wrapper unconditionally implements Flusher, Hijacker, Pusher
+// and ReaderFrom, so a handler that probes with a type assertion always sees
+// them present. Each method degrades to http.ErrNotSupported (or a no-op for
+// Flush) when the underlying writer lacks the capability, which matches the
+// contract those interfaces document for unsupported transports. Handlers that
+// need an accurate answer should use http.ResponseController, which follows
+// Unwrap down to the real writer.
 type writerWrapper struct {
 	http.ResponseWriter
 	statusCode  int
@@ -46,19 +63,51 @@ func (w *writerWrapper) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (w *writerWrapper) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// ReadFrom implements io.ReaderFrom so that io.Copy and http.ServeFile keep the
+// underlying writer's sendfile fast path instead of falling back to a buffered
+// copy through Write.
+func (w *writerWrapper) ReadFrom(src io.Reader) (int64, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if rf, ok := w.ResponseWriter.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	// Copy into the underlying writer rather than w, so io.Copy does not probe
+	// this method again and recurse.
+	return io.Copy(w.ResponseWriter, src)
+}
+
 // Hijack implements the http.Hijacker interface
 func (w *writerWrapper) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
 		return h.Hijack()
 	}
-	return nil, nil, fmt.Errorf("responseWriter does not implement http.Hijacker")
+	return nil, nil, http.ErrNotSupported
+}
+
+// FlushError implements the interface http.ResponseController prefers over
+// http.Flusher, so a failed flush is reported to the handler instead of being
+// silently swallowed.
+func (w *writerWrapper) FlushError() error {
+	if fe, ok := w.ResponseWriter.(interface{ FlushError() error }); ok {
+		return fe.FlushError()
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+		return nil
+	}
+	return http.ErrNotSupported
 }
 
 // Flush implements the http.Flusher interface
 func (w *writerWrapper) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	_ = w.FlushError()
 }
 
 // Push implements the http.Pusher interface, forwarding to the underlying
@@ -71,7 +120,3 @@ func (w *writerWrapper) Push(target string, opts *http.PushOptions) error {
 	return http.ErrNotSupported
 }
 
-// Unwrap exposes the underlying writer to http.ResponseController.
-func (w *writerWrapper) Unwrap() http.ResponseWriter {
-	return w.ResponseWriter
-}

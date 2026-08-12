@@ -5,9 +5,11 @@ package server
 
 import (
 	"bufio"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,10 +116,9 @@ func TestWriterWrapper_Hijack_NotSupported(t *testing.T) {
 	}
 
 	conn, rw, err := wrapper.Hijack()
-	require.Error(t, err)
+	assert.ErrorIs(t, err, http.ErrNotSupported)
 	assert.Nil(t, conn)
 	assert.Nil(t, rw)
-	assert.Contains(t, err.Error(), "does not implement http.Hijacker")
 }
 
 // mockFlusher is a mock ResponseWriter that implements the Flusher interface
@@ -239,3 +240,69 @@ func TestWriterWrapper_MultipleStatusCodes(t *testing.T) {
 		})
 	}
 }
+
+// readerFromRecorder records whether the sendfile fast path was taken.
+type readerFromRecorder struct {
+	http.ResponseWriter
+	readFromCalled bool
+}
+
+func (r *readerFromRecorder) ReadFrom(src io.Reader) (int64, error) {
+	r.readFromCalled = true
+	return io.Copy(r.ResponseWriter, src)
+}
+
+func TestWriterWrapper_ReadFrom_PreservesFastPath(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &readerFromRecorder{ResponseWriter: recorder}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	// Wrap in a bare io.Reader: strings.Reader implements io.WriterTo, which
+	// io.Copy prefers, and that would bypass ReadFrom entirely. Real bodies
+	// (e.g. the *os.File behind http.ServeFile) take the ReadFrom path.
+	src := struct{ io.Reader }{strings.NewReader("payload")}
+	n, err := io.Copy(wrapper, src)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(len("payload")), n)
+	assert.True(t, mock.readFromCalled, "io.Copy must reach the underlying io.ReaderFrom")
+	assert.Equal(t, "payload", recorder.Body.String())
+	// The implicit 200 must still be captured on the ReadFrom path.
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+}
+
+func TestWriterWrapper_ReadFrom_Fallback(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	wrapper := &writerWrapper{
+		ResponseWriter: recorder,
+		statusCode:     http.StatusOK,
+	}
+
+	n, err := wrapper.ReadFrom(strings.NewReader("payload"))
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(len("payload")), n)
+	assert.Equal(t, "payload", recorder.Body.String())
+}
+
+func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
+	wrapper := &writerWrapper{
+		// A bare ResponseWriter with no Flush support.
+		ResponseWriter: nonFlusher{httptest.NewRecorder()},
+		statusCode:     http.StatusOK,
+	}
+
+	assert.ErrorIs(t, wrapper.FlushError(), http.ErrNotSupported)
+}
+
+// nonFlusher hides the recorder's Flush method.
+type nonFlusher struct{ rec *httptest.ResponseRecorder }
+
+func (n nonFlusher) Header() http.Header         { return n.rec.Header() }
+func (n nonFlusher) Write(b []byte) (int, error) { return n.rec.Write(b) }
+func (n nonFlusher) WriteHeader(code int)        { n.rec.WriteHeader(code) }
+
