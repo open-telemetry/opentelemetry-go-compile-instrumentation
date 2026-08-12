@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"go/token"
 	"testing"
 
 	"github.com/dave/dst"
@@ -376,6 +377,33 @@ func f(c *vault.Client) {}
 		assert.Len(t, imports, 1)
 		assert.Equal(t, "net/http", imports["http"])
 	})
+
+	t.Run("resolves imports from Decls when Imports slice is empty", func(t *testing.T) {
+		file := &dst.File{
+			Decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.IMPORT,
+					Specs: []dst.Spec{
+						&dst.ImportSpec{
+							Path: &dst.BasicLit{Value: `"net/http"`},
+						},
+						&dst.ImportSpec{
+							Name: &dst.Ident{Name: "althttp"},
+							Path: &dst.BasicLit{Value: `"net/http"`},
+						},
+					},
+				},
+				&dst.GenDecl{
+					Tok: token.VAR,
+				},
+			},
+		}
+
+		imports := ImportAliasMap(file)
+		assert.Len(t, imports, 2)
+		assert.Equal(t, "net/http", imports["http"])
+		assert.Equal(t, "net/http", imports["althttp"])
+	})
 }
 
 func TestDefaultImportAlias(t *testing.T) {
@@ -394,6 +422,8 @@ func TestDefaultImportAlias(t *testing.T) {
 		{input: "example.com/foo/v10", want: "foo"},
 		{input: "yaml.v2", want: "yaml"},
 		{input: "v2", want: "v2"},
+		{input: "./v2", want: ""},
+		{input: "/v2", want: ""},
 		{input: "", want: ""},
 		{input: ".", want: ""},
 		{input: "/", want: ""},
