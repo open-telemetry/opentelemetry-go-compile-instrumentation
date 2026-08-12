@@ -144,8 +144,8 @@ func TestScanArgs(t *testing.T) {
 			hasError: true,
 		},
 		{
-			name:     "empty value",
-			input:    "key:",
+			name:  "empty value",
+			input: "key:",
 			expected: []DirectiveArg{
 				{Key: "key", Value: ""},
 			},
