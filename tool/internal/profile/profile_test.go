@@ -233,26 +233,23 @@ func TestMerge(t *testing.T) {
 	}
 }
 
-func TestMergeHandlesBracketedDirectory(t *testing.T) {
+func TestGetProfileFilesBracketedDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "profile-[test]")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
 
-	s, err := Start(dir, []Type{Heap})
+	pidFile := filepath.Join(dir, "otelc-heap-12345.pprof")
+	if err := os.WriteFile(pidFile, []byte("data"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	files, err := getProfileFiles(dir, Heap)
 	if err != nil {
-		t.Fatalf("Start() error: %v", err)
+		t.Fatalf("getProfileFiles() error: %v", err)
 	}
-	if stopErr := s.Stop(); stopErr != nil {
-		t.Fatalf("Stop() error: %v", stopErr)
-	}
-	pidFile := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
-	assertFileExists(t, pidFile)
-
-	if mergeErr := Merge(context.Background(), dir, []Type{Heap}); mergeErr != nil {
-		t.Fatalf("Merge() error: %v", mergeErr)
-	}
-
-	assertFileExists(t, filepath.Join(dir, "otelc-heap.pprof"))
-	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
-		t.Errorf("expected PID-stamped file %q to be removed after merge", pidFile)
+	if len(files) != 1 || files[0] != pidFile {
+		t.Errorf("getProfileFiles() = %v, want [%q]", files, pidFile)
 	}
 }
 

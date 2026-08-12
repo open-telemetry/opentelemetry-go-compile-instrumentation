@@ -219,6 +219,7 @@ func mergeType(ctx context.Context, dir string, t Type) error {
 	// "go tool pprof -proto" writes a binary proto-encoded pprof profile to stdout.
 	args := append([]string{"tool", "pprof", "-proto"}, files...)
 	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Stdin = bytes.NewReader(nil)
 	cmd.Stdout = out
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
