@@ -247,6 +247,56 @@ func Foo() {}
 	assert.Empty(t, matches)
 }
 
+func TestFindFuncsByDirective_SkipsNonFuncDecls(t *testing.T) {
+	src := `package p
+//otelc:span
+type T struct{}
+
+//otelc:span
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "Foo", matches[0].Func.Name.Name)
+}
+
+func TestFindFuncsByDirective_ParseArgsError(t *testing.T) {
+	src := `package p
+//otelc:span nocolon
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Foo")
+	assert.Nil(t, matches)
+}
+
+func TestFindFuncsByDirective_FirstMatchingDecorationWins(t *testing.T) {
+	src := `package p
+// a regular doc comment
+//otelc:span tag:first
+//otelc:span tag:second
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "first"}}, matches[0].Args)
+}
+
 func writeGoTempFile(t *testing.T, src string) string {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "*.go")

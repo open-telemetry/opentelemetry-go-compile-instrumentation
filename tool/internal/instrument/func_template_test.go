@@ -168,6 +168,23 @@ func TestFuncTemplateData_FuncReturnOfType(t *testing.T) {
 	assert.Empty(t, v)
 }
 
+func TestFuncTemplateData_FuncReturnOfTypeNoResults(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	v, err := data.FuncReturnOfType("error")
+	require.NoError(t, err)
+	assert.Empty(t, v)
+}
+
+func TestFuncTemplateData_FuncReturnOfTypeInvalidType(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\nfunc Foo() (int, error) { return 0, nil }")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	_, err := data.FuncReturnOfType("[]invalid")
+	require.Error(t, err)
+}
+
 func TestFuncTemplateData_DirectiveArgs(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 	args := []ast.DirectiveArg{{Key: "span.name", Value: "my-op"}, {Key: "tag", Value: "v1"}}

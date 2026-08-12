@@ -6,18 +6,22 @@ package instrument
 import (
 	"testing"
 
+	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestRenderDirective(t *testing.T) {
 	tests := []struct {
-		name     string
-		src      string
-		template string
-		expected string
+		name          string
+		src           string
+		template      string
+		directiveArgs []ast.DirectiveArg
+		withImports   bool
+		expected      string
 	}{
 		{
 			name:     "FuncName no spaces",
@@ -61,15 +65,72 @@ func TestRenderDirective(t *testing.T) {
 			template: "call({{- .FuncName -}})",
 			expected: "call(Foo)",
 		},
+		{
+			name:        "FuncArgumentOfType matched",
+			src:         "package main\nimport \"context\"\nfunc Foo(ctx context.Context, name string) {}",
+			template:    "use({{ .FuncArgumentOfType \"context.Context\" }})",
+			withImports: true,
+			expected:    "use(ctx)",
+		},
+		{
+			name:        "FuncArgumentOfType no match",
+			src:         "package main\nfunc Foo(name string) {}",
+			template:    "use({{ .FuncArgumentOfType \"io.Reader\" }})",
+			withImports: true,
+			expected:    "use()",
+		},
+		{
+			name:        "FuncReturnOfType matched",
+			src:         "package main\nfunc Foo() (int, error) { return 0, nil }",
+			template:    "check({{ .FuncReturnOfType \"error\" }})",
+			withImports: true,
+			expected:    "check(_unnamedRetVal_h1_1)",
+		},
+		{
+			name:        "FuncReturnOfType no match",
+			src:         "package main\nfunc Foo() (int, error) { return 0, nil }",
+			template:    "check({{ .FuncReturnOfType \"string\" }})",
+			withImports: true,
+			expected:    "check()",
+		},
+		{
+			name:          "DirectiveArgs ranges over key:value pairs",
+			src:           "package main\nfunc Foo() {}",
+			template:      "{{ range .DirectiveArgs }}{{.Key}}={{.Value}} {{ end }}",
+			directiveArgs: []ast.DirectiveArg{{Key: "span.name", Value: "my-op"}, {Key: "tag", Value: "v1"}},
+			expected:      "span.name=my-op tag=v1 ",
+		},
+		{
+			name:          "DirectiveArg looks up a single key",
+			src:           "package main\nfunc Foo() {}",
+			template:      "name={{ .DirectiveArg \"span.name\" }}",
+			directiveArgs: []ast.DirectiveArg{{Key: "span.name", Value: "my-op"}},
+			expected:      "name=my-op",
+		},
+		{
+			name:          "DirectiveArg missing key returns empty",
+			src:           "package main\nfunc Foo() {}",
+			template:      "name={{ .DirectiveArg \"missing\" }}",
+			directiveArgs: []ast.DirectiveArg{{Key: "span.name", Value: "my-op"}},
+			expected:      "name=",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			funcDecl := parseFunc(t, tt.src)
+			var (
+				funcDecl *dst.FuncDecl
+				imports  map[string]string
+			)
+			if tt.withImports {
+				funcDecl, imports = parseFuncWithImports(t, tt.src)
+			} else {
+				funcDecl = parseFunc(t, tt.src)
+			}
 			tmpl, err := rule.ParseDirectiveTemplate(tt.template)
 			require.NoError(t, err)
 
-			result, err := renderDirective(tmpl, newFuncTemplateData(funcDecl, nil, nil, "h1"))
+			result, err := renderDirective(tmpl, newFuncTemplateData(funcDecl, tt.directiveArgs, imports, "h1"))
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
