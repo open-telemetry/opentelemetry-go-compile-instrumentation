@@ -35,7 +35,7 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
 		)
-		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, match.Args, imports))
+		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, match.Args, imports, r.Identity()))
 		if err != nil {
 			return ex.Wrapf(err, "rendering template for func %s", funcDecl.Name.Name)
 		}

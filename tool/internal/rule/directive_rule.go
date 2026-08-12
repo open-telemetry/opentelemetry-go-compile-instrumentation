@@ -4,9 +4,11 @@
 package rule
 
 import (
+	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -52,4 +54,16 @@ func (r *InstDirectiveRule) validate() error {
 		return ex.Wrapf(err, "invalid template syntax")
 	}
 	return nil
+}
+
+// Identity returns a content-derived key used to salt the synthetic argument
+// and return-value names FuncArgument/FuncReturn assign (see
+// collectArguments/collectReturnValues), the same way InstFuncRule.Identity
+// salts func-rule trampoline names (issue #560, PR #1035). It is a function
+// purely of what the rule does — its target, version, directive, and
+// template — never of the rule's name.
+func (r *InstDirectiveRule) Identity() string {
+	enc := func(s string) string { return strconv.Itoa(len(s)) + ":" + s }
+	parts := []string{enc(r.Target), enc(r.Version), enc(r.Directive), enc(r.Template)}
+	return util.CRC32(strings.Join(parts, ""))
 }

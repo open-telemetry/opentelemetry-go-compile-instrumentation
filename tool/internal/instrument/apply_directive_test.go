@@ -41,7 +41,7 @@ func TestRenderDirective(t *testing.T) {
 			name:     "FuncReturn",
 			src:      "package main\nfunc Foo() (int, error) { return 0, nil }",
 			template: "check({{ .FuncReturn 0 }}, {{ .FuncReturn 1 }})",
-			expected: "check(_unnamedRetVal0, _unnamedRetVal1)",
+			expected: "check(_unnamedRetVal_h1_0, _unnamedRetVal_h1_1)",
 		},
 		{
 			name:     "counts",
@@ -69,7 +69,7 @@ func TestRenderDirective(t *testing.T) {
 			tmpl, err := rule.ParseDirectiveTemplate(tt.template)
 			require.NoError(t, err)
 
-			result, err := renderDirective(tmpl, newFuncTemplateData(funcDecl, nil, nil))
+			result, err := renderDirective(tmpl, newFuncTemplateData(funcDecl, nil, nil, "h1"))
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
@@ -100,7 +100,7 @@ func TestRenderDirective_OutOfRangeArgument(t *testing.T) {
 	tmpl, err := rule.ParseDirectiveTemplate("{{.FuncArgument 0}}")
 	require.NoError(t, err)
 
-	_, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, nil, nil))
+	_, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, nil, nil, "h1"))
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")

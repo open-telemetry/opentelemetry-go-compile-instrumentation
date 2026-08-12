@@ -17,6 +17,7 @@ type funcTemplateData struct {
 	funcDecl      *dst.FuncDecl
 	directiveArgs []ast.DirectiveArg
 	imports       map[string]string
+	hash          string
 
 	argsCollected bool
 	args          []string
@@ -31,10 +32,13 @@ type funcTemplateData struct {
 // imports resolves the local identifiers used in funcDecl's enclosing file to
 // their real import paths (see ast.ImportAliasMap); if nil, FuncArgumentOfType
 // and FuncReturnOfType fall back to matching against a type name's package tail.
+// hash salts synthetic argument/return names the same way InstFuncRule.Identity
+// salts func-rule trampoline names (see collectArguments/collectReturnValues),
+// so multiple rules touching the same function never generate colliding names.
 func newFuncTemplateData(
-	funcDecl *dst.FuncDecl, directiveArgs []ast.DirectiveArg, imports map[string]string,
+	funcDecl *dst.FuncDecl, directiveArgs []ast.DirectiveArg, imports map[string]string, hash string,
 ) *funcTemplateData {
-	return &funcTemplateData{funcDecl: funcDecl, directiveArgs: directiveArgs, imports: imports}
+	return &funcTemplateData{funcDecl: funcDecl, directiveArgs: directiveArgs, imports: imports, hash: hash}
 }
 
 // FuncName returns the matched function's name. Template usage: {{.FuncName}}
@@ -46,7 +50,7 @@ func (d *funcTemplateData) FuncName() string {
 // the receiver.
 func (d *funcTemplateData) arguments() []string {
 	if !d.argsCollected {
-		args := collectArguments(d.funcDecl)
+		args := collectArguments(d.funcDecl, d.hash)
 		if ast.HasReceiver(d.funcDecl) {
 			args = args[1:]
 		}
@@ -58,7 +62,7 @@ func (d *funcTemplateData) arguments() []string {
 
 func (d *funcTemplateData) returns() []string {
 	if !d.retsCollected {
-		d.rets = collectReturnValues(d.funcDecl)
+		d.rets = collectReturnValues(d.funcDecl, d.hash)
 		d.retsCollected = true
 	}
 	return d.rets

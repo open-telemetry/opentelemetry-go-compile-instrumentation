@@ -6,10 +6,10 @@ package main
 import "context"
 
 //otelc:span span.name:"custom-op"
-func divide(ctx context.Context, a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
+func divide(ctx context.Context, a int, b int) (_unnamedRetVal_2257724966_0 int, _unnamedRetVal_2257724966_1 error) {
 	println("span name:", "custom-op")
 	println("ctx arg:", ctx != nil)
-	println("err ret:", _unnamedRetVal1 == nil)
+	println("err ret:", _unnamedRetVal_2257724966_1 == nil)
 	return a / b, nil
 }
 

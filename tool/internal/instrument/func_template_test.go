@@ -14,14 +14,14 @@ import (
 
 func TestFuncTemplateData_FuncName(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	assert.Equal(t, "Foo", data.FuncName())
 }
 
 func TestFuncTemplateData_FuncArgument(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(ctx int, name string) {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	v, err := data.FuncArgument(0)
 	require.NoError(t, err)
@@ -34,7 +34,7 @@ func TestFuncTemplateData_FuncArgument(t *testing.T) {
 
 func TestFuncTemplateData_FuncArgumentExcludesReceiver(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Foo(x int) {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	v, err := data.FuncArgument(0)
 	require.NoError(t, err)
@@ -43,7 +43,7 @@ func TestFuncTemplateData_FuncArgumentExcludesReceiver(t *testing.T) {
 
 func TestFuncTemplateData_VariadicArgument(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a string, b ...int) {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	v, err := data.FuncArgument(0)
 	require.NoError(t, err)
@@ -58,20 +58,20 @@ func TestFuncTemplateData_VariadicArgument(t *testing.T) {
 
 func TestFuncTemplateData_FuncReturn(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() (int, error) { return 0, nil }")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	v, err := data.FuncReturn(0)
 	require.NoError(t, err)
-	assert.Equal(t, "_unnamedRetVal0", v)
+	assert.Equal(t, "_unnamedRetVal_h1_0", v)
 
 	v, err = data.FuncReturn(1)
 	require.NoError(t, err)
-	assert.Equal(t, "_unnamedRetVal1", v)
+	assert.Equal(t, "_unnamedRetVal_h1_1", v)
 }
 
 func TestFuncTemplateData_Counts(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a, b int) (int, error) { return 0, nil }")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	assert.Equal(t, 2, data.FuncArgumentCount())
 	assert.Equal(t, 2, data.FuncReturnCount())
@@ -79,7 +79,7 @@ func TestFuncTemplateData_Counts(t *testing.T) {
 
 func TestFuncTemplateData_FuncArgumentOutOfRange(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	_, err := data.FuncArgument(1)
 	require.Error(t, err)
@@ -88,7 +88,7 @@ func TestFuncTemplateData_FuncArgumentOutOfRange(t *testing.T) {
 
 func TestFuncTemplateData_FuncReturnOutOfRange(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	_, err := data.FuncReturn(0)
 	require.Error(t, err)
@@ -97,7 +97,7 @@ func TestFuncTemplateData_FuncReturnOutOfRange(t *testing.T) {
 
 func TestFuncTemplateData_FuncArgumentOfType(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nimport \"context\"\nfunc Foo(ctx context.Context, name string) {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	v, err := data.FuncArgumentOfType("context.Context")
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestFuncTemplateData_FuncArgumentOfType(t *testing.T) {
 func TestFuncTemplateData_FuncArgumentOfTypeResolvesAliasedImport(t *testing.T) {
 	source := "package main\nimport althttp \"net/http\"\nfunc Foo(r *althttp.Request) {}"
 	funcDecl, imports := parseFuncWithImports(t, source)
-	data := newFuncTemplateData(funcDecl, nil, imports)
+	data := newFuncTemplateData(funcDecl, nil, imports, "h1")
 
 	v, err := data.FuncArgumentOfType("*net/http.Request")
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestFuncTemplateData_FuncArgumentOfTypeResolvesAliasedImport(t *testing.T) 
 func TestFuncTemplateData_FuncArgumentOfTypeDisambiguatesSharedTail(t *testing.T) {
 	source := "package main\nimport \"text/template\"\nfunc Foo(t *template.Template) {}"
 	funcDecl, imports := parseFuncWithImports(t, source)
-	data := newFuncTemplateData(funcDecl, nil, imports)
+	data := newFuncTemplateData(funcDecl, nil, imports, "h1")
 
 	v, err := data.FuncArgumentOfType("*html/template.Template")
 	require.NoError(t, err)
@@ -136,7 +136,7 @@ func TestFuncTemplateData_FuncArgumentOfTypeDisambiguatesSharedTail(t *testing.T
 
 func TestFuncTemplateData_FuncArgumentOfTypeExcludesReceiver(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Foo(x int) {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	v, err := data.FuncArgumentOfType("T")
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestFuncTemplateData_FuncArgumentOfTypeExcludesReceiver(t *testing.T) {
 
 func TestFuncTemplateData_FuncArgumentOfTypeInvalidType(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	_, err := data.FuncArgumentOfType("[]invalid")
 	require.Error(t, err)
@@ -157,11 +157,11 @@ func TestFuncTemplateData_FuncArgumentOfTypeInvalidType(t *testing.T) {
 
 func TestFuncTemplateData_FuncReturnOfType(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() (int, error) { return 0, nil }")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	v, err := data.FuncReturnOfType("error")
 	require.NoError(t, err)
-	assert.Equal(t, "_unnamedRetVal1", v)
+	assert.Equal(t, "_unnamedRetVal_h1_1", v)
 
 	v, err = data.FuncReturnOfType("string")
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestFuncTemplateData_FuncReturnOfType(t *testing.T) {
 func TestFuncTemplateData_DirectiveArgs(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 	args := []ast.DirectiveArg{{Key: "span.name", Value: "my-op"}, {Key: "tag", Value: "v1"}}
-	data := newFuncTemplateData(funcDecl, args, nil)
+	data := newFuncTemplateData(funcDecl, args, nil, "h1")
 
 	assert.Equal(t, args, data.DirectiveArgs())
 	assert.Equal(t, "my-op", data.DirectiveArg("span.name"))
@@ -181,7 +181,7 @@ func TestFuncTemplateData_DirectiveArgs(t *testing.T) {
 
 func TestFuncTemplateData_DirectiveArgsEmpty(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
-	data := newFuncTemplateData(funcDecl, nil, nil)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
 	assert.Empty(t, data.DirectiveArgs())
 	assert.Empty(t, data.DirectiveArg("span.name"))
