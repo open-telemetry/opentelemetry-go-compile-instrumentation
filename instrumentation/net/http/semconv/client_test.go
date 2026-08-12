@@ -100,6 +100,22 @@ func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
+			name: "literal _OTHER method",
+			req: &http.Request{
+				Method: "_OTHER",
+				URL: &url.URL{
+					Scheme: "https",
+					Host:   "example.com",
+					Path:   "/api",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"http.request.method": "_OTHER",
+			},
+			unexpected: []string{"http.request.method_original"},
+		},
+		{
 			name: "empty method",
 			req: &http.Request{
 				Method: "",

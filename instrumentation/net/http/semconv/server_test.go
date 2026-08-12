@@ -143,6 +143,23 @@ func TestHTTPServerRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
+			name:   "literal _OTHER method",
+			server: "",
+			req: &http.Request{
+				Method:     "_OTHER",
+				Host:       "example.com",
+				RemoteAddr: "192.168.1.1:12345",
+				URL: &url.URL{
+					Path: "/api",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"http.request.method": "_OTHER",
+			},
+			unexpected: []string{"http.request.method_original"},
+		},
+		{
 			name:   "empty method",
 			server: "",
 			req: &http.Request{
