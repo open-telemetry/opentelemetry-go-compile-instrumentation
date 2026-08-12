@@ -166,8 +166,6 @@ func generateOtelInstrumentationGo(imports map[string]bool, opts PinOptions) *ds
 	}
 }
 
-
-
 func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 	if !semver.IsValid(version) || version == "v0.0.0" || module.IsPseudoVersion(version) {
 		return false, nil
