@@ -698,11 +698,29 @@ func TestGroupRules(t *testing.T) {
 			},
 			expectedFiles: []string{"file1.go"},
 		},
+		{
+			// Insertion order (both in the map literal below and, more
+			// importantly, in Go's own randomized map iteration at runtime)
+			// deliberately does not match sorted order, so this only passes
+			// if groupRules actually sorts rather than happening to agree.
+			name: "returned files are sorted, not insertion order",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				DeclRules: map[string][]*rule.InstDeclRule{
+					"zzz.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_zzz"}, Identifier: "X"}},
+					"aaa.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_aaa"}, Identifier: "X"}},
+					"mmm.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_mmm"}, Identifier: "X"}},
+				},
+			},
+			expectedFiles: []string{"aaa.go", "mmm.go", "zzz.go"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			grouped := groupRules("", tt.ruleSet)
+			grouped, files := groupRules("", tt.ruleSet)
 
 			// Check expected files are present
 			for _, file := range tt.expectedFiles {
@@ -712,6 +730,17 @@ func TestGroupRules(t *testing.T) {
 
 			// Check no unexpected files
 			assert.Len(t, grouped, len(tt.expectedFiles))
+
+			// The second return value must be expectedFiles in sorted order.
+			// expectedFiles is written in sorted order in every case above,
+			// but sort a clone rather than relying on that by convention.
+			wantFiles := slices.Clone(tt.expectedFiles)
+			slices.Sort(wantFiles)
+			if len(wantFiles) == 0 {
+				assert.Empty(t, files)
+			} else {
+				assert.Equal(t, wantFiles, files)
+			}
 
 			if tt.validate != nil {
 				tt.validate(t, grouped)
