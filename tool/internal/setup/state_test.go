@@ -169,6 +169,23 @@ func TestGetBackupFiles(t *testing.T) {
 			},
 		},
 		{
+			name: "GOWORK=off disabled workspace",
+			setup: func(t *testing.T, tmp string) string {
+				t.Setenv("GOWORK", "off")
+				moduleDir := filepath.Join(tmp, "mod")
+				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
+				mustWriteFile(t, filepath.Join(tmp, "go.work.sum"), "worksum")
+				return moduleDir
+			},
+			wantFiles: func(_, moduleDir string) []string {
+				return []string{
+					filepath.Join(moduleDir, "go.mod"),
+					filepath.Join(moduleDir, "go.sum"),
+					filepath.Join(moduleDir, ToolFileCanonical),
+				}
+			},
+		},
+		{
 			name: "missing go.mod",
 			setup: func(t *testing.T, tmp string) string {
 				return filepath.Join(tmp, "mod")
