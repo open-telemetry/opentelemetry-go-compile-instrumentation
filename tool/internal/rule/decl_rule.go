@@ -4,8 +4,10 @@
 package rule
 
 import (
+	"go/parser"
 	"strings"
 
+	"github.com/valyala/fasttemplate"
 	"go.opentelemetry.io/otelc/tool/ex"
 	"gopkg.in/yaml.v3"
 )
@@ -106,11 +108,24 @@ func (r *InstDeclRule) validate() error {
 		return ex.Newf("replace and wrap are mutually exclusive")
 	}
 
+	if hasReplace {
+		if _, err := parser.ParseExpr(r.Replace); err != nil {
+			return ex.Wrapf(err, "invalid replace expression syntax: %q", r.Replace)
+		}
+	}
+
 	if hasWrap {
 		if !replacePlaceholderPattern.MatchString(r.Wrap) {
 			return ex.Newf(
 				"wrap template must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)",
 			)
+		}
+		if _, err := fasttemplate.NewTemplate(r.Wrap, "{{", "}}"); err != nil {
+			return ex.Wrapf(err, "invalid wrap template syntax: %q", r.Wrap)
+		}
+		dummyExpr := replacePlaceholderPattern.ReplaceAllString(r.Wrap, "__otelc_orig__")
+		if _, err := parser.ParseExpr(dummyExpr); err != nil {
+			return ex.Wrapf(err, "invalid wrap expression syntax: %q", r.Wrap)
 		}
 	}
 
