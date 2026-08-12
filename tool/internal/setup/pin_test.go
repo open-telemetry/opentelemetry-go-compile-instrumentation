@@ -1056,6 +1056,9 @@ func TestPinLocked_DiscoversModuleDirs(t *testing.T) {
 	// packages in the working directory. With no existing tool file, it falls
 	// through to generating one from the dependency graph.
 	dir := t.TempDir()
+	repositoryDir, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755)) // ensure .otelc-build exists
 	t.Chdir(dir)
@@ -1071,7 +1074,7 @@ func TestPinLocked_DiscoversModuleDirs(t *testing.T) {
 		0o644,
 	))
 
-	_, err := pinLocked(t.Context(), PinOptions{})
+	_, err = pinLocked(t.Context(), PinOptions{})
 	require.NoError(t, err)
 
 	// A tool file is generated for the discovered module.
