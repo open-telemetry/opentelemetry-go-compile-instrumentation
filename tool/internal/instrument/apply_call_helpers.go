@@ -54,7 +54,3 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 	resolvedPath, ok := importAliases[ident.Name]
 	return ok && resolvedPath == importPath
 }
-
-func collectImportAliases(file *dst.File) map[string]string {
-	return ast.ImportAliasMap(file)
-}
