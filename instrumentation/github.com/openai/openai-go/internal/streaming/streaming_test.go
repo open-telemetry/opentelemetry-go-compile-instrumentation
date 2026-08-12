@@ -391,14 +391,14 @@ func TestStreamingReader_ContentCapture(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-content")
+	_, span := tr.Start(t.Context(), "test-content")
 
 	streamData := "data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"hello \"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"world\"},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
 
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, true, 1024)
 	_, _ = io.ReadAll(reader)
 	reader.Close()
 
