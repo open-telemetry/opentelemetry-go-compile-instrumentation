@@ -35,6 +35,8 @@ func repositorySourceRoot() (string, error) {
 	if err != nil {
 		return "", ex.Wrapf(err, "resolving otelc source checkout directory")
 	}
+	// Walk to the filesystem root: the root, pkg, and instrumentation go.mod
+	// files together are specific enough to identify this repository checkout.
 	for {
 		if util.PathExists(filepath.Join(root, "go.mod")) &&
 			util.PathExists(filepath.Join(root, "pkg", "go.mod")) &&
@@ -47,7 +49,9 @@ func repositorySourceRoot() (string, error) {
 		}
 		root = parent
 	}
-	return "", ex.New("otelc source checkout not found")
+	return "", ex.New("otelc source checkout not found; set OTELC_SOURCE_ROOT " +
+		"or run from inside a full opentelemetry-go-compile-instrumentation " +
+		"checkout (temporary requirement, see #983)")
 }
 
 func parseGoMod(gomod string) (*modfile.File, error) {

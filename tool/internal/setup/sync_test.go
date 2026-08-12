@@ -215,6 +215,8 @@ func TestRepositorySourceRoot(t *testing.T) {
 		t.Setenv("OTELC_SOURCE_ROOT", t.TempDir())
 		_, err := repositorySourceRoot()
 		require.ErrorContains(t, err, "otelc source checkout not found")
+		require.ErrorContains(t, err, "OTELC_SOURCE_ROOT")
+		require.ErrorContains(t, err, "#983")
 	})
 }
 
@@ -251,6 +253,8 @@ func TestSyncDeps_MissingSourceRoot(t *testing.T) {
 
 	err := syncDeps(t.Context(), map[string]bool{"example.com/instrumentation": true}, t.TempDir())
 	require.ErrorContains(t, err, "otelc source checkout not found")
+	require.ErrorContains(t, err, "OTELC_SOURCE_ROOT")
+	require.ErrorContains(t, err, "#983")
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
