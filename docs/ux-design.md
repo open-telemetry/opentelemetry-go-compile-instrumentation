@@ -113,7 +113,7 @@ $ go run go.opentelemetry.io/otelc/tool/cmd/otelc@latest setup
 ℹ️ Using go tool dependencies or a `otel.instrumentation.go` file to configure
    integrations is recommended as it ensures the instrumentation packages are
    represented in your `go.mod` file, making builds reproducible.
-   Using a `.otel.yml` file is useful when instrumenting applications without
+   Using an `otel.instrumentation.yml` file is useful when instrumenting applications without
    modifying their codebase at all; which may be preferable when building
    third-party applications or integrating in the CI/CD pipeline. The
    reproductibility of builds is no longer guaranteed by the go toolchain, and
@@ -122,7 +122,7 @@ $ go run go.opentelemetry.io/otelc/tool/cmd/otelc@latest setup
 🤖 How do you want to configure instrumentation for this project?
    (*) Using go tool dependencies (Recommended)
    ( ) Using the `otel.instrumentation.go` file
-   ( ) Using a `.otel.yml` file
+   ( ) Using an `otel.instrumentation.yml` file
 🆗 I will use go tool dependencies to enable integration packages.
 
 🤖 We're all set! Based on your answers, I will execute the following commands:
@@ -169,7 +169,7 @@ ways:
    alias `otelc.tool.go`) allows instrumentation packages to be declared
    explicitly in source control and managed as normal Go module dependencies.
 
-2. The `.otel.yml` file allows injecting configuration directly within the
+2. The `otel.instrumentation.yml` file allows injecting configuration directly within the
    CI/CD pipeline without persisting any change to the project's source code
    &ndash; but has the disadvantage of making hermetic or reproducible builds
    more difficult (the `go.mod` and `go.sum` files ought to be considered as
@@ -264,7 +264,7 @@ configuration:
 
 - `otel.instrumentation.go` (or the compatibility alias `otelc.tool.go`),
   which declares instrumentation packages through Go imports;
-- `.otel.yml`, which provides module-local instrumentation configuration;
+- `otel.instrumentation.yml`, which provides module-local instrumentation configuration;
 - `--rules`, which allows an explicit rule set to be supplied at build time.
 
 All rule files use the same schema described in the

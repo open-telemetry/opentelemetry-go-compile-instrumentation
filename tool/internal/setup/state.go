@@ -111,14 +111,7 @@ func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, 
 			files = append(files, goModFile)
 			files = append(files, goSumFile)
 
-			// If otelc.tool.go exists, use it (it may get modified)
-			// Otherwise, use the canonical path (it may get generated or modified)
-			toolFile := toolFileCanonical
-			if !util.PathExists(toolFileCanonical) && util.PathExists(toolFileAlias) {
-				toolFile = toolFileAlias
-			}
-
-			files = append(files, toolFile)
+			files = append(files, toolFileCanonical, toolFileAlias)
 		}
 	}
 

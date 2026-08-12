@@ -86,6 +86,76 @@ func TestFindToolFile(t *testing.T) {
 	}
 }
 
+func TestFindInstrumentationYAMLFile(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		setup   func(string)
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "none",
+			setup: func(string) {},
+		},
+		{
+			name: "canonical",
+			setup: func(dir string) {
+				require.NoError(t, os.WriteFile(
+					filepath.Join(dir, InstrumentationYAMLCanonical),
+					nil,
+					0o644,
+				))
+			},
+			want: InstrumentationYAMLCanonical,
+		},
+		{
+			name: "alias",
+			setup: func(dir string) {
+				require.NoError(t, os.WriteFile(
+					filepath.Join(dir, InstrumentationYAMLAlias),
+					nil,
+					0o644,
+				))
+			},
+			want: InstrumentationYAMLAlias,
+		},
+		{
+			name: "both",
+			setup: func(dir string) {
+				require.NoError(t, os.WriteFile(
+					filepath.Join(dir, InstrumentationYAMLCanonical),
+					nil,
+					0o644,
+				))
+				require.NoError(t, os.WriteFile(
+					filepath.Join(dir, InstrumentationYAMLAlias),
+					nil,
+					0o644,
+				))
+			},
+			wantErr: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(dir)
+
+			got, err := findInstrumentationYAMLFile(dir)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			if tt.want != "" {
+				require.Equal(t, filepath.Join(dir, tt.want), got)
+			} else {
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
 func TestResolveInstrumentationConfig(t *testing.T) {
 	type wantConfig struct {
 		tool  string
@@ -427,6 +497,18 @@ func writeToolFile(t *testing.T, path string, imports ...string) {
 		fmt.Fprintf(&b, "\t_ %q\n", imp)
 	}
 	b.WriteString(")\n")
+
+	require.NoError(t, os.WriteFile(path, []byte(b.String()), 0o644))
+}
+
+func writeOtelYAMLFile(t *testing.T, path string, imports ...string) {
+	t.Helper()
+
+	var b strings.Builder
+	b.WriteString("instrumentations:\n")
+	for _, imp := range imports {
+		fmt.Fprintf(&b, "  - %s\n", imp)
+	}
 
 	require.NoError(t, os.WriteFile(path, []byte(b.String()), 0o644))
 }

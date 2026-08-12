@@ -396,7 +396,8 @@ When multiple rule sources are present, `otelc` resolves them using the followin
 
 1. `OTELC_RULES` environment variable
 2. `--rules` flag
-3. `otel.instrumentation.go` / `otelc.tool.go`
+3. Module-local `otel.instrumentation.go` / `otelc.tool.go` and
+   `otel.instrumentation.yml` / `otel.instrumentation.yaml`
 4. Default embedded rules.
 
 Only the highest-precedence source that is present is used.
@@ -405,8 +406,9 @@ For example:
 
 - If `OTELC_RULES` is set, all other rule sources are ignored.
 - If `--rules` is provided, discovery through tool files is skipped.
-- If an `otel.instrumentation.go` (or `otelc.tool.go`) file exists, embedded
-  rules are not used.
+- If any participating module provides a tool file or instrumentation YAML,
+  embedded rules are not used. Tool and YAML selections in the same module are
+  merged for rule selection while each file retains ownership of its entries.
 - Default embedded rules are only used when no higher-precedence rule source is
   available.
 
