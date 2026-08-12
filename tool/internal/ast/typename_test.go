@@ -404,6 +404,30 @@ func f(c *vault.Client) {}
 		assert.Equal(t, "net/http", imports["http"])
 		assert.Equal(t, "net/http", imports["althttp"])
 	})
+
+	t.Run("Imports takes precedence when both Imports and Decls contain specs", func(t *testing.T) {
+		file := &dst.File{
+			Imports: []*dst.ImportSpec{
+				{Path: &dst.BasicLit{Value: `"net/http"`}},
+			},
+			Decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.IMPORT,
+					Specs: []dst.Spec{
+						&dst.ImportSpec{
+							Name: &dst.Ident{Name: "ignored"},
+							Path: &dst.BasicLit{Value: `"other/pkg"`},
+						},
+					},
+				},
+			},
+		}
+
+		imports := ImportAliasMap(file)
+		assert.Len(t, imports, 1)
+		assert.Equal(t, "net/http", imports["http"])
+		assert.NotContains(t, imports, "ignored")
+	})
 }
 
 func TestDefaultImportAlias(t *testing.T) {
@@ -434,7 +458,6 @@ func TestDefaultImportAlias(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			got := DefaultImportAlias(tt.input)
 			assert.Equal(t, tt.want, got)
-			assert.Equal(t, tt.want, ImportPathTail(tt.input))
 		})
 	}
 }

@@ -197,12 +197,6 @@ func DefaultImportAlias(path string) string {
 	return path
 }
 
-// ImportPathTail returns the local identifier conventionally used to reference an import path.
-// It is an alias for DefaultImportAlias.
-func ImportPathTail(path string) string {
-	return DefaultImportAlias(path)
-}
-
 // isMajorVersion reports whether s is a module major-version element ("v2", "v11").
 func isMajorVersion(s string) bool {
 	if len(s) < 2 || s[0] != 'v' {
