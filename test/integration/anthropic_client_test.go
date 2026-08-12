@@ -79,6 +79,27 @@ func TestAnthropicClient(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("count_tokens", func(t *testing.T) {
+		model := "claude-sonnet-4-5"
+		f := testutil.NewTestFixture(t)
+		server := startMockAnthropicServer(t, 0, 0)
+
+		f.Run("anthropicclient",
+			fmt.Sprintf("-addr=%s", server.URL),
+			"-api-key=test-key",
+			fmt.Sprintf("-model=%s", model),
+			"-count-tokens",
+		)
+
+		// count_tokens has no response id, model, or output/cache usage, so it
+		// can't reuse RequireGenAIClientSemconv above.
+		span := f.RequireSingleSpan()
+		testutil.RequireAttribute(t, span, "gen_ai.system", "anthropic")
+		testutil.RequireAttribute(t, span, "gen_ai.operation.name", "count_tokens")
+		testutil.RequireAttribute(t, span, "gen_ai.request.model", model)
+		testutil.RequireAttribute(t, span, "gen_ai.usage.input_tokens", int64(42))
+	})
 }
 
 // startMockAnthropicServer creates a mock Anthropic API server for testing.
@@ -88,6 +109,12 @@ func startMockAnthropicServer(t *testing.T, cacheRead, cacheCreation int64) *htt
 	t.Helper()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/messages/count_tokens", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"input_tokens": 42}); err != nil {
+			t.Errorf("failed to encode response: %v", err)
+		}
+	})
 	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		// Parse model from request body
 		var reqBody struct {

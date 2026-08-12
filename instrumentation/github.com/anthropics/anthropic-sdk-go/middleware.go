@@ -48,22 +48,37 @@ type operationType int
 
 const (
 	opMessages operationType = iota
+	opCountTokens
 	opUnknown
 )
 
-// classifyOperation maps a request path to an operation. Only the Messages API
-// (POST /v1/messages) is instrumented; the suffix match excludes
-// /v1/messages/count_tokens and /v1/messages/batches.
+// classifyOperation maps a request path to an operation. The Messages API
+// (POST /v1/messages) and count_tokens (POST /v1/messages/count_tokens) are
+// instrumented; the count_tokens suffix is checked first so it isn't
+// shadowed by the /messages suffix match below. Message batches are not
+// instrumented.
 func classifyOperation(path string) operationType {
+	if strings.HasSuffix(path, "/messages/count_tokens") {
+		return opCountTokens
+	}
 	if strings.HasSuffix(path, "/messages") {
 		return opMessages
 	}
 	return opUnknown
 }
 
+// operationName maps an operation to its gen_ai.operation.name value. The
+// GenAI semantic conventions have no standard operation name for token
+// counting; "count_tokens" is used as a placeholder pending upstream
+// guidance.
 func operationName(op operationType) string {
-	if op == opMessages {
+	switch op {
+	case opMessages:
 		return "chat"
+	case opCountTokens:
+		return "count_tokens"
+	case opUnknown:
+		return ""
 	}
 	return ""
 }
@@ -164,13 +179,13 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			return resp, nil
 		}
 
-		handleNonStreamingResponse(resp, span)
+		handleNonStreamingResponse(resp, span, op)
 
 		return resp, nil
 	}
 }
 
-func handleNonStreamingResponse(resp *http.Response, span trace.Span) {
+func handleNonStreamingResponse(resp *http.Response, span trace.Span, op operationType) {
 	defer span.End()
 
 	if resp.Body == nil {
@@ -190,7 +205,14 @@ func handleNonStreamingResponse(resp *http.Response, span trace.Span) {
 		return
 	}
 
-	parseMessagesResponse(bodyBytes, span)
+	switch op {
+	case opMessages:
+		parseMessagesResponse(bodyBytes, span)
+	case opCountTokens:
+		parseCountTokensResponse(bodyBytes, span)
+	case opUnknown:
+		// Unreachable: OtelMiddleware returns before instrumenting opUnknown requests.
+	}
 }
 
 func parseMessagesRequest(body []byte) (string, bool, []attribute.KeyValue) {
@@ -271,4 +293,18 @@ func parseMessagesResponse(body []byte, span trace.Span) {
 	if resp.Usage.CacheCreationInputTokens > 0 {
 		span.SetAttributes(semconv.GenAIUsageCacheCreationInputTokens(resp.Usage.CacheCreationInputTokens))
 	}
+}
+
+// parseCountTokensResponse sets span attributes from a count_tokens response
+// body. Unlike the Messages API, count_tokens returns only
+// {"input_tokens": N}: no id, model, stop_reason, or output/cache usage.
+func parseCountTokensResponse(body []byte, span trace.Span) {
+	var resp struct {
+		InputTokens int64 `json:"input_tokens"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return
+	}
+
+	span.SetAttributes(semconv.GenAIUsageInputTokens(resp.InputTokens))
 }

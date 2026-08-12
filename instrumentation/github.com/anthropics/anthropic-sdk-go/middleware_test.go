@@ -32,7 +32,8 @@ func TestClassifyOperation(t *testing.T) {
 	}{
 		{"/v1/messages", opMessages},
 		{"/anthropic/v1/messages", opMessages},
-		{"/v1/messages/count_tokens", opUnknown},
+		{"/v1/messages/count_tokens", opCountTokens},
+		{"/anthropic/v1/messages/count_tokens", opCountTokens},
 		{"/v1/messages/batches", opUnknown},
 		{"/v1/models", opUnknown},
 	}
@@ -64,6 +65,7 @@ func TestGetProviderName(t *testing.T) {
 
 func TestOperationName(t *testing.T) {
 	assert.Equal(t, "chat", operationName(opMessages))
+	assert.Equal(t, "count_tokens", operationName(opCountTokens))
 	assert.Equal(t, "", operationName(opUnknown))
 }
 
@@ -89,6 +91,29 @@ func TestParseMessagesRequest_Invalid(t *testing.T) {
 	assert.Equal(t, "", model)
 	assert.False(t, isStream)
 	assert.Nil(t, attrs)
+}
+
+func TestParseCountTokensResponse(t *testing.T) {
+	sr := setupTestTracer(t)
+	_, span := tracer.Start(context.Background(), "test")
+	parseCountTokensResponse([]byte(`{"input_tokens":42}`), span)
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assertInt64Attribute(t, spans[0].Attributes(), "gen_ai.usage.input_tokens", 42)
+}
+
+func TestParseCountTokensResponse_Invalid(t *testing.T) {
+	sr := setupTestTracer(t)
+	_, span := tracer.Start(context.Background(), "test")
+	parseCountTokensResponse([]byte(`not json`), span)
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	_, found := findAttribute(spans[0].Attributes(), "gen_ai.usage.input_tokens")
+	assert.False(t, found, "malformed JSON should not set any attribute")
 }
 
 func setupTestTracer(t *testing.T) *tracetest.SpanRecorder {
@@ -160,7 +185,8 @@ func TestOtelMiddleware_RecordsDuration(t *testing.T) {
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
 			Body: io.NopCloser(strings.NewReader(
-				`{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`)),
+				`{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`,
+			)),
 		}, nil
 	}
 
@@ -288,29 +314,46 @@ func TestOtelMiddleware_Messages_NoCacheUsage(t *testing.T) {
 	assert.False(t, found, "cache_creation attribute should be omitted when zero")
 }
 
-func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
+// TestOtelMiddleware_CountTokens defines the expected span shape for the
+// count_tokens endpoint (POST /v1/messages/count_tokens), whose response
+// shape ({"input_tokens": N}) differs from the Messages API and carries no
+// id, stop_reason, or output/cache usage.
+func TestOtelMiddleware_CountTokens(t *testing.T) {
 	sr := setupTestTracer(t)
 
 	middleware := OtelMiddleware()
 
+	reqBody := `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"Hello"}]}`
 	req, _ := http.NewRequest(
 		"POST",
 		"http://api.anthropic.com/v1/messages/count_tokens",
-		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5"}`))),
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
 	)
 
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(bytes.NewReader([]byte(`{"input_tokens":5}`))),
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"input_tokens":42}`))),
 		}, nil
 	}
 
 	resp, err := middleware(req, next)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Empty(t, sr.Ended())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	assert.Equal(t, "count_tokens claude-sonnet-4-5", span.Name())
+
+	attrs := span.Attributes()
+	assertAttribute(t, attrs, "gen_ai.system", "anthropic")
+	assertAttribute(t, attrs, "gen_ai.operation.name", "count_tokens")
+	assertAttribute(t, attrs, "gen_ai.request.model", "claude-sonnet-4-5")
+	assertAttribute(t, attrs, "gen_ai.provider.name", "anthropic")
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 42)
 }
 
 // TestOtelMiddleware_StreamingRequestPassThrough verifies that streaming

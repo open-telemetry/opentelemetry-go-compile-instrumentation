@@ -20,11 +20,12 @@ import (
 )
 
 var (
-	addr     = flag.String("addr", "", "The Anthropic API base URL (leave empty for default)")
-	apiKey   = flag.String("api-key", "", "The API key (defaults to ANTHROPIC_API_KEY env)")
-	model    = flag.String("model", "claude-sonnet-4-5", "The model to use")
-	prompt   = flag.String("prompt", "Say hello in one word", "The prompt to send")
-	logLevel = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	addr        = flag.String("addr", "", "The Anthropic API base URL (leave empty for default)")
+	apiKey      = flag.String("api-key", "", "The API key (defaults to ANTHROPIC_API_KEY env)")
+	model       = flag.String("model", "claude-sonnet-4-5", "The model to use")
+	prompt      = flag.String("prompt", "Say hello in one word", "The prompt to send")
+	logLevel    = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	countTokens = flag.Bool("count-tokens", false, "Call CountTokens instead of Messages.New")
 )
 
 func main() {
@@ -67,6 +68,36 @@ func main() {
 
 	client := anthropic.NewClient(opts...)
 
+	if *countTokens {
+		sendCountTokens(client, logger)
+		return
+	}
+	sendMessage(client, logger)
+}
+
+func sendCountTokens(client anthropic.Client, logger *slog.Logger) {
+	logger.Info("sending count_tokens request",
+		"model", *model,
+		"prompt", *prompt)
+
+	count, err := client.Messages.CountTokens(context.Background(), anthropic.MessageCountTokensParams{
+		Model: anthropic.Model(*model),
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock(*prompt)),
+		},
+	})
+	if err != nil {
+		logger.Error("count_tokens request failed", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("count_tokens request succeeded",
+		"model", *model,
+		"input_tokens", count.InputTokens)
+	fmt.Println(count.InputTokens)
+}
+
+func sendMessage(client anthropic.Client, logger *slog.Logger) {
 	logger.Info("sending message request",
 		"model", *model,
 		"prompt", *prompt)

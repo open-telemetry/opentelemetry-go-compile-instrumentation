@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	addr   = flag.String("addr", "http://localhost:8080", "The Anthropic API base URL")
-	apiKey = flag.String("api-key", "test-key", "The API key")
-	model  = flag.String("model", "claude-sonnet-4-5", "The model to use")
+	addr        = flag.String("addr", "http://localhost:8080", "The Anthropic API base URL")
+	apiKey      = flag.String("api-key", "test-key", "The API key")
+	model       = flag.String("model", "claude-sonnet-4-5", "The model to use")
+	countTokens = flag.Bool("count-tokens", false, "Call CountTokens instead of Messages.New")
 )
 
 func main() {
@@ -29,6 +30,14 @@ func main() {
 		option.WithAPIKey(*apiKey),
 	)
 
+	if *countTokens {
+		doCountTokens(client)
+	} else {
+		doMessages(client)
+	}
+}
+
+func doMessages(client anthropic.Client) {
 	message, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
 		Model:     anthropic.Model(*model),
 		MaxTokens: 1024,
@@ -45,4 +54,18 @@ func main() {
 			slog.Info("response", "content", text.Text)
 		}
 	}
+}
+
+func doCountTokens(client anthropic.Client) {
+	count, err := client.Messages.CountTokens(context.Background(), anthropic.MessageCountTokensParams{
+		Model: anthropic.Model(*model),
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("Say hello in one word")),
+		},
+	})
+	if err != nil {
+		log.Fatalf("failed to count tokens: %v", err)
+	}
+
+	slog.Info("token count", "input_tokens", count.InputTokens)
 }
