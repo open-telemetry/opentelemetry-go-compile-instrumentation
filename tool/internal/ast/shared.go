@@ -346,13 +346,13 @@ func AddStructField(st *dst.StructType, name, t string) {
 // full interface-satisfaction checking.
 //
 // Qualified type names are resolved against imports, which maps the local
-// identifier used at a use site to its real import path (see importAliasMap).
+// identifier used at a use site to its real import path (see ImportAliasMap).
 // Matching is therefore relative to the enclosing file's import declarations.
 func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, root *dst.File) (bool, error) {
 	if r.Signature == nil && r.SignatureContains == nil && r.Result == "" && r.LastResult == "" && r.Param == "" {
 		return true, nil
 	}
-	imports := importAliasMap(root)
+	imports := ImportAliasMap(root)
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
