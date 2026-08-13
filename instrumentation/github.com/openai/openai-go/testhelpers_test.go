@@ -34,6 +34,18 @@ func boolString(b bool) string {
 	return "false"
 }
 
+// assertNoAttribute fails if key is present, which is how conditional
+// attributes prove they are omitted rather than recorded as zero.
+func assertNoAttribute(t *testing.T, attrs []attribute.KeyValue, key string) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			t.Errorf("attribute %q should not be recorded, got %v", key, attr.Value.String())
+			return
+		}
+	}
+}
+
 func assertInt64Attribute(t *testing.T, attrs []attribute.KeyValue, key string, expected int64) {
 	t.Helper()
 	for _, attr := range attrs {

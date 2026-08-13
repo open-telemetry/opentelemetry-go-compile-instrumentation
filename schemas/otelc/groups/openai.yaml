@@ -12,18 +12,30 @@ groups:
   # The openai-go instrumentation is trace-only: it wraps the SDK HTTP transport
   # and creates one client span per chat / completion / embedding call, with
   # GenAI attributes. It records no metrics. Most attributes are standard
-  # upstream OpenTelemetry GenAI attributes (referenced with `ref:`). Three
+  # upstream OpenTelemetry GenAI attributes (referenced with `ref:`). Four
   # attributes are not defined upstream and are declared locally with `id:`
-  # below: `gen_ai.usage.total_tokens`, `gen_ai.request.is_stream`, and
-  # `gen_ai.response.time_to_first_token`.
+  # below: `gen_ai.usage.total_tokens`, `gen_ai.request.is_stream`,
+  # `gen_ai.response.time_to_first_token`, and
+  # `gen_ai.usage.cache_read.input_tokens`.
+  #
+  # `registry.otelc.gen_ai` holds the otelc-invented GenAI attributes that are
+  # shared across provider instrumentations; provider-specific ones are declared
+  # in that provider's own group (see `registry.otelc.gen_ai.anthropic`).
+  #
+  # Note on `gen_ai.usage.cache_read.input_tokens`: OpenAI reports cached prompt
+  # tokens under `usage.prompt_tokens_details.cached_tokens` and already counts
+  # them inside `prompt_tokens`, so the attribute is a breakdown of
+  # `gen_ai.usage.input_tokens` and is not added to it. Anthropic reports cache
+  # reads outside its `input_tokens`, so that instrumentation folds them in
+  # instead. Recorded only when the request actually hit the cache.
   # ---------------------------------------------------------------------------
 
   - id: registry.otelc.gen_ai
     type: attribute_group
     display_name: otelc GenAI attributes
     brief: >
-      GenAI attributes emitted by the openai-go instrumentation that are not covered by the upstream OpenTelemetry GenAI semantic
-      conventions.
+      GenAI attributes shared across the otelc provider instrumentations that are not covered by the upstream OpenTelemetry
+      GenAI semantic conventions.
     attributes:
       - id: gen_ai.usage.total_tokens
         type: int
@@ -40,6 +52,11 @@ groups:
         brief: >
           Time from sending the request to receiving the first token of a streaming response, in microseconds.
         examples: [1200]
+      - id: gen_ai.usage.cache_read.input_tokens
+        type: int
+        stability: development
+        brief: The number of prompt tokens that were read from the provider's prompt cache.
+        examples: [1024]
 
   - id: span.otelc.gen_ai.client
     type: span
@@ -62,6 +79,7 @@ groups:
       - ref: gen_ai.usage.input_tokens
       - ref: gen_ai.usage.output_tokens
       - ref: gen_ai.usage.total_tokens
+      - ref: gen_ai.usage.cache_read.input_tokens
       - ref: gen_ai.request.is_stream
       - ref: gen_ai.response.time_to_first_token
       - ref: error.type
