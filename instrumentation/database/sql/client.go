@@ -6,7 +6,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"sync"
 	"time"
 
@@ -603,7 +602,7 @@ func instrumentStart(
 	}
 	initInstrumentation()
 	req := semconv.DatabaseSqlRequest{
-		OpType:     calOp(query),
+		OpType:     semconv.OperationName(query),
 		Sql:        query,
 		Endpoint:   endpoint,
 		DriverName: driverName,
@@ -648,18 +647,6 @@ func instrumentEnd(ictx hook.HookContext, err error) {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 	}
-}
-
-func calOp(sql string) string {
-	trimmed := strings.TrimSpace(sql)
-	if trimmed == "" {
-		return ""
-	}
-	fields := strings.Fields(trimmed)
-	if len(fields) == 0 {
-		return ""
-	}
-	return strings.ToUpper(fields[0])
 }
 
 func initInstrumentation() {
