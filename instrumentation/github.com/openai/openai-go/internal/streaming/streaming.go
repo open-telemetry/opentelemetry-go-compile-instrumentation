@@ -43,6 +43,8 @@ type StreamingReader struct {
 	reasons       []string
 	span          trace.Span
 	op             OperationType
+	captureContent bool
+	maxBodySize    int
 	done           atomic.Bool
 	capturedStream strings.Builder
 }
@@ -52,12 +54,16 @@ func NewStreamingReader(
 	span trace.Span,
 	start time.Time,
 	op OperationType,
+	captureContent bool,
+	maxBodySize int,
 ) *StreamingReader {
 	return &StreamingReader{
-		reader: body,
-		start:  start,
-		span:   span,
-		op:     op,
+		reader:         body,
+		start:          start,
+		span:           span,
+		op:             op,
+		captureContent: captureContent,
+		maxBodySize:    maxBodySize,
 	}
 }
 
@@ -117,7 +123,7 @@ func (r *StreamingReader) finalize(flush bool) {
 		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
 	}
 
-	if captureContentEnabled() && r.capturedStream.Len() > 0 {
+	if r.captureContent && r.capturedStream.Len() > 0 {
 		r.span.AddEvent("gen_ai.content.completion", trace.WithAttributes(
 			attribute.String("gen_ai.completion", r.capturedStream.String()),
 		))
@@ -252,8 +258,8 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 		if c.FinishReason != "" {
 			r.reasons = append(r.reasons, c.FinishReason)
 		}
-		if captureContentEnabled() && c.Delta.Content != "" {
-			rem := maxResponseBodySize - r.capturedStream.Len()
+		if r.captureContent && c.Delta.Content != "" {
+			rem := r.maxBodySize - r.capturedStream.Len()
 			if rem > 0 {
 				if len(c.Delta.Content) <= rem {
 					r.capturedStream.WriteString(c.Delta.Content)

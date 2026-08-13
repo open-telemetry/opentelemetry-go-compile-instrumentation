@@ -64,7 +64,7 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 
 	resp := &http.Response{
 		StatusCode: 200, Header: make(http.Header),
-		Body:       io.NopCloser(bytes.NewBufferString(`{}`)),
+		Body: io.NopCloser(bytes.NewBufferString(`{}`)),
 	}
 
 	next := func(req *http.Request) (*http.Response, error) {
@@ -92,4 +92,36 @@ func TestOtelMiddleware_ErrorResponse(t *testing.T) {
 
 	middleware := OtelMiddleware()
 	_, _ = middleware(req, next)
+}
+
+func TestParseChatResponse_ContentExtraction(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "test-json-extract")
+
+	body := []byte(`{
+        "id": "chatcmpl-123",
+        "model": "gpt-4",
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {
+                "content": "This is extracted content",
+                "role": "assistant"
+            }
+        }]
+    }`)
+	parseChatResponse(body, span)
+
+	spans := sr.Ended()
+	if len(spans) > 0 {
+		for _, event := range spans[0].Events() {
+			if event.Name == "gen_ai.content.completion" {
+				for _, attr := range event.Attributes {
+					if attr.Key == "gen_ai.completion" {
+						assert.Equal(t, "This is extracted content", attr.Value.AsString())
+					}
+				}
+			}
+		}
+	}
 }

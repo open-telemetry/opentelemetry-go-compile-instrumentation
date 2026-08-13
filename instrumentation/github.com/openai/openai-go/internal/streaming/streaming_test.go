@@ -25,7 +25,7 @@ func TestStreamingReader_ChatChunks(t *testing.T) {
 	streamData := "data: {\"id\":\"chatcmpl-abc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl-abc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\" there\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3,\"total_tokens\":11}}\n\ndata: [DONE]\n\n"
 
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 0)
 
 	data, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -55,7 +55,7 @@ func TestStreamingReader_CompletionChunks(t *testing.T) {
 	streamData := "data: {\"id\":\"cmpl-xyz\",\"model\":\"gpt-3.5-turbo-instruct\",\"choices\":[{\"text\":\"Hello\",\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":10,\"total_tokens\":14}}\n\ndata: [DONE]\n\n"
 
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := NewStreamingReader(body, span, time.Now(), OpCompletion)
+	reader := NewStreamingReader(body, span, time.Now(), OpCompletion, false, 0)
 
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestStreamingReader_EmptyStream(t *testing.T) {
 	_, span := tr.Start(t.Context(), "test-empty-stream")
 
 	body := io.NopCloser(bytes.NewReader([]byte("")))
-	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 0)
 
 	data, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestStreamingReader_CloseBeforeRead(t *testing.T) {
 
 	streamData := "data: {\"id\":\"early\",\"model\":\"gpt-4\",\"choices\":[]}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 0)
 
 	err := reader.Close()
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestStreamingReader_MultipleCloseIdempotent(t *testing.T) {
 	_, span := tr.Start(t.Context(), "test-multi-close")
 
 	body := io.NopCloser(bytes.NewReader([]byte("data: [DONE]\n\n")))
-	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 0)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -132,7 +132,7 @@ func TestStreamingReader_FinishReasons(t *testing.T) {
 
 	streamData := "data: {\"id\":\"r1\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"a\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 0)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -151,7 +151,7 @@ func TestStreamingReader_FirstTokenLatency(t *testing.T) {
 	start := time.Now().Add(-100 * time.Millisecond) // simulate 100ms delay
 	streamData := "data: {\"id\":\"lat\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := NewStreamingReader(body, span, start, OpChat)
+	reader := NewStreamingReader(body, span, start, OpChat, false, 0)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -201,7 +201,7 @@ func TestStreamingReader_FinalChunkWithoutTrailingNewline(t *testing.T) {
 	streamData := "data: {\"id\":\"final\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}"
 
 	body := &eofWithFinalChunkReader{data: []byte(streamData)}
-	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 0)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -225,7 +225,7 @@ func TestStreamingReader_FinalChunkWithoutTrailingNewline_Completion(t *testing.
 	streamData := "data: {\"id\":\"cmpl-final\",\"model\":\"gpt-3.5-turbo-instruct\",\"choices\":[{\"text\":\"Hi\",\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":4,\"total_tokens\":13}}"
 
 	body := &eofWithFinalChunkReader{data: []byte(streamData)}
-	reader := NewStreamingReader(body, span, time.Now(), OpCompletion)
+	reader := NewStreamingReader(body, span, time.Now(), OpCompletion, false, 0)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -274,7 +274,7 @@ func TestStreamingReader_CloseWithoutDrainingFlushesFinalChunk(t *testing.T) {
 	streamData := "data: {\"id\":\"closed-early\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2,\"total_tokens\":9}}"
 
 	body := &dataThenEOFReader{data: []byte(streamData)}
-	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 0)
 
 	buf := make([]byte, len(streamData))
 	n, err := reader.Read(buf)
@@ -327,7 +327,7 @@ func TestStreamingReader_IncrementalRead(t *testing.T) {
 
 	streamData := "data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"a\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"b\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 0)
 
 	// Read in small chunks to test incremental processing
 	buf := make([]byte, 10)
@@ -383,10 +383,7 @@ func assertSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, 
 }
 
 func TestStreamingReader_ContentCapture(t *testing.T) {
-	// Temporarily override captureContentEnabled
-	orig := captureContentEnabled
-	captureContentEnabled = func() bool { return true }
-	defer func() { captureContentEnabled = orig }()
+
 
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
@@ -410,6 +407,53 @@ func TestStreamingReader_ContentCapture(t *testing.T) {
 		if event.Name == "gen_ai.content.completion" {
 			hasCompletion = true
 			assertAttribute(t, event.Attributes, "gen_ai.completion", "hello world")
+		}
+	}
+	assert.True(t, hasCompletion, "missing completion event")
+}
+
+func TestStreamingReader_ContentCaptureDisabled(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-content-disabled")
+
+	streamData := "data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"hello \"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
+	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, false, 1024)
+	_, _ = io.ReadAll(reader)
+	reader.Close()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			t.Fatalf("Content capture event emitted when disabled")
+		}
+	}
+}
+
+func TestStreamingReader_MemoryBoundsRespected(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-bounds")
+
+	streamData := "data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"1234567890\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
+	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, true, 5)
+	_, _ = io.ReadAll(reader)
+	reader.Close()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	hasCompletion := false
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			hasCompletion = true
+			assertAttribute(t, event.Attributes, "gen_ai.completion", "12345")
 		}
 	}
 	assert.True(t, hasCompletion, "missing completion event")
