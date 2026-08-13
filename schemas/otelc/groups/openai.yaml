@@ -4,10 +4,13 @@ groups:
   #
   # Source of truth for this file:
   #   instrumentation/github.com/openai/openai-go/v3/middleware.go  (span + attrs)
-  #   instrumentation/github.com/openai/openai-go/v3/streaming.go   (streaming attrs)
+  #   instrumentation/github.com/openai/openai-go/internal/streaming/streaming.go (streaming attrs)
+  #   instrumentation/github.com/openai/openai-go/internal/streaming/attrs.go     (streaming attribute keys)
   #   instrumentation/github.com/openai/openai-go/v3/semconv/genai.go (attribute keys)
   #
-  # (v1, v2, and v3 are identical apart from the import path.)
+  # (v1, v2, and v3 middleware are identical apart from the import path. Since
+  # #990 the streaming reader is a single shared module under internal/streaming
+  # that all three delegate to via a per-version streaming_bridge.go.)
   #
   # The openai-go instrumentation is trace-only: it wraps the SDK HTTP transport
   # and creates one client span per chat / completion / embedding call, with

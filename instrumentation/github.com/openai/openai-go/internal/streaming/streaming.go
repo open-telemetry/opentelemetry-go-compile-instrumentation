@@ -27,21 +27,24 @@ const (
 )
 
 type StreamingReader struct {
-	reader        io.ReadCloser
-	teeReader     io.Reader
-	logBuffer     *bytes.Buffer
-	lineBuffer    *bytes.Buffer
-	start         time.Time
-	first         time.Time
-	inputTokens   int64
-	outputTokens  int64
-	totalTokens   int64
-	id            string
-	responseModel string
-	reasons       []string
-	span          trace.Span
-	op            OperationType
-	done          atomic.Bool
+	reader       io.ReadCloser
+	teeReader    io.Reader
+	logBuffer    *bytes.Buffer
+	lineBuffer   *bytes.Buffer
+	start        time.Time
+	first        time.Time
+	inputTokens  int64
+	outputTokens int64
+	totalTokens  int64
+	// cacheReadTokens is part of inputTokens, not additional to it: OpenAI
+	// already counts cached prompt tokens inside prompt_tokens.
+	cacheReadTokens int64
+	id              string
+	responseModel   string
+	reasons         []string
+	span            trace.Span
+	op              OperationType
+	done            atomic.Bool
 }
 
 func NewStreamingReader(
@@ -112,6 +115,11 @@ func (r *StreamingReader) finalize(flush bool) {
 	if !r.first.IsZero() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
 		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
+	}
+	// Recorded only when the request actually hit the cache, matching the
+	// non-streaming path and the anthropic-sdk-go instrumentation.
+	if r.cacheReadTokens > 0 {
+		r.span.SetAttributes(genAIUsageCacheReadInputTokensKey.Int64(r.cacheReadTokens))
 	}
 
 	r.span.End()
@@ -215,9 +223,12 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 			} `json:"delta"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
+			PromptTokens        int64 `json:"prompt_tokens"`
+			CompletionTokens    int64 `json:"completion_tokens"`
+			TotalTokens         int64 `json:"total_tokens"`
+			PromptTokensDetails struct {
+				CachedTokens int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(payload, &chunk); err != nil {
@@ -238,6 +249,9 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 	}
 	if chunk.Usage.TotalTokens > 0 {
 		r.totalTokens = chunk.Usage.TotalTokens
+	}
+	if chunk.Usage.PromptTokensDetails.CachedTokens > 0 {
+		r.cacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 	}
 	for _, c := range chunk.Choices {
 		if c.FinishReason != "" {
@@ -254,9 +268,12 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
+			PromptTokens        int64 `json:"prompt_tokens"`
+			CompletionTokens    int64 `json:"completion_tokens"`
+			TotalTokens         int64 `json:"total_tokens"`
+			PromptTokensDetails struct {
+				CachedTokens int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(payload, &chunk); err != nil {
@@ -277,6 +294,9 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 	}
 	if chunk.Usage.TotalTokens > 0 {
 		r.totalTokens = chunk.Usage.TotalTokens
+	}
+	if chunk.Usage.PromptTokensDetails.CachedTokens > 0 {
+		r.cacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 	}
 	for _, c := range chunk.Choices {
 		if c.FinishReason != "" {
