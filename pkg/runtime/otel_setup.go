@@ -128,7 +128,7 @@ func buildConfigCache(sdkDisabled, enabledList, disabledList string) *configCach
 		sdkDisabled:   sdkDisabled,
 		enabledRaw:    enabledList,
 		disabledRaw:   disabledList,
-		isSdkDisabled: strings.EqualFold(strings.TrimSpace(sdkDisabled), "true"),
+		isSdkDisabled: strings.EqualFold(sdkDisabled, "true"),
 	}
 
 	if enabledList != "" {
