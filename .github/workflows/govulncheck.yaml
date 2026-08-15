@@ -17,13 +17,16 @@ on:
 permissions: read-all
 
 jobs:
-  # Core modules (root, pkg). Non-blocking: a newly-disclosed stdlib/dep CVE with
-  # no fix released yet shouldn't red unrelated PRs on tooling code. Still visible
-  # as a failed check. Instrumentation (higher impact) stays hard-blocking below.
+  # Core modules (root, pkg). Soft on pull requests: a newly-disclosed stdlib/dep
+  # CVE with no fix released yet shouldn't red unrelated PRs on tooling code.
+  # Hard on the weekly schedule and manual runs, which exist to catch exactly
+  # those; a soft failure there concludes the whole run as success, leaving a red
+  # job buried in a green run that nobody is prompted to look at.
+  # Instrumentation (higher impact) stays hard-blocking on every trigger.
   govulncheck:
     name: govulncheck (core)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
