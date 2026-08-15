@@ -42,6 +42,33 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("frontend querying database"))
 	})
+	mux.HandleFunc("/tx", func(w http.ResponseWriter, r *http.Request) {
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		query := "INSERT INTO orders (user_id, amount) VALUES (?, ?)"
+		if r.URL.Query().Get("rollback") == "true" {
+			query = "FAIL_INSERT INTO orders (user_id, amount) VALUES (?, ?)"
+		}
+		if _, err := tx.ExecContext(
+			r.Context(),
+			query,
+			1,
+			99.99,
+		); err != nil {
+			_ = tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("frontend committed transaction"))
+	})
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *frontPort),

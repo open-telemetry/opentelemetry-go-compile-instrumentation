@@ -30,6 +30,8 @@ add_new_field_stmt:
 
 add_new_field_tx:
   target: database/sql
+  imports:
+    context: context
   where:
     struct: Tx
   do:
@@ -43,6 +45,8 @@ add_new_field_tx:
             type: string
           - name: DSN
             type: string
+          - name: Ctx
+            type: context.Context
 
 add_new_field_conn:
   target: database/sql

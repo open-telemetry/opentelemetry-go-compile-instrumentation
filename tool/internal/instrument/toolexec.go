@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -474,7 +475,7 @@ func EnableNestedToolexec() error {
 	if err != nil {
 		return ex.Wrapf(err, "resolving otelc executable path")
 	}
-	toolexecFlag, err := util.QuoteGoflagsToken(fmt.Sprintf("-toolexec=%s toolexec", execPath))
+	toolexecFlag, err := util.QuoteGoflagsToken(fmt.Sprintf("-toolexec=%s toolexec", strconv.Quote(execPath)))
 	if err != nil {
 		return ex.Wrapf(err, "quoting nested toolexec GOFLAGS entry")
 	}

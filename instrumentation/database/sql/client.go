@@ -206,6 +206,13 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	if !ok {
 		return
 	}
+	if callerCtx, ok := callData["callerCtx"].(context.Context); ok {
+		if span := trace.SpanFromContext(callerCtx); span.SpanContext().IsValid() {
+			tx.Ctx = trace.ContextWithSpan(context.Background(), span)
+		} else {
+			tx.Ctx = callerCtx
+		}
+	}
 	dbRequest, ok := callData["req"].(semconv.DatabaseSqlRequest)
 	if !ok {
 		return
@@ -373,7 +380,29 @@ func afterConnTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	if !clientEnabler.Enable() {
 		return
 	}
-	instrumentEnd(ictx, err)
+	defer instrumentEnd(ictx, err)
+	if tx == nil || ictx.GetData() == nil {
+		return
+	}
+	callData, ok := ictx.GetData().(map[string]interface{})
+	if !ok {
+		return
+	}
+	if callerCtx, ok := callData["callerCtx"].(context.Context); ok {
+		if span := trace.SpanFromContext(callerCtx); span.SpanContext().IsValid() {
+			tx.Ctx = trace.ContextWithSpan(context.Background(), span)
+		} else {
+			tx.Ctx = callerCtx
+		}
+	}
+	dbRequest, ok := callData["req"].(semconv.DatabaseSqlRequest)
+	if !ok {
+		return
+	}
+	tx.Endpoint = dbRequest.Endpoint
+	tx.DriverName = dbRequest.DriverName
+	tx.DSN = dbRequest.Dsn
+	tx.DbName = dbRequest.DbName
 }
 
 func beforeTxPrepareContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ctx context.Context, query string) {
@@ -511,7 +540,12 @@ func beforeTxCommitInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	ctx := tx.Ctx
+	tx.Ctx = nil
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instrumentStart(ictx, ctx, "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 func afterTxCommitInstrumentation(ictx hook.HookContext, err error) {
@@ -528,7 +562,12 @@ func beforeTxRollbackInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	ctx := tx.Ctx
+	tx.Ctx = nil
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instrumentStart(ictx, ctx, "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 func afterTxRollbackInstrumentation(ictx hook.HookContext, err error) {
@@ -610,6 +649,7 @@ func instrumentStart(
 		Params:     args,
 		DbName:     dbName,
 	}
+	callerCtx := ctx
 	// Get trace attributes from semconv
 	attrs := semconv.DbClientRequestTraceAttrs(req)
 
@@ -622,10 +662,11 @@ func instrumentStart(
 
 	// Store data for after hook
 	ictx.SetData(map[string]interface{}{
-		"ctx":   ctx,
-		"span":  span,
-		"req":   req,
-		"start": time.Now(),
+		"ctx":       ctx,
+		"callerCtx": callerCtx,
+		"span":      span,
+		"req":       req,
+		"start":     time.Now(),
 	})
 }
 

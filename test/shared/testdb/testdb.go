@@ -11,6 +11,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"strings"
 )
 
 func init() {
@@ -85,6 +86,9 @@ func (c *testConn) QueryContext(ctx context.Context, query string, args []driver
 
 // Implement driver.ExecerContext for direct exec support
 func (c *testConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if strings.HasPrefix(query, "FAIL") {
+		return nil, fmt.Errorf("simulated exec error")
+	}
 	return &testResult{lastInsertID: 1, rowsAffected: 1}, nil
 }
 
