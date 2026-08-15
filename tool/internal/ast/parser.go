@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -91,17 +92,28 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	return ap.fset.Position(astNode.Pos())
 }
 
+type writeCloser interface {
+	io.Writer
+	io.Closer
+}
+
 // WriteFile writes the AST to a file.
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
 	if err != nil {
 		return ex.Wrapf(err, "failed to create file %s", filePath)
 	}
-	defer file.Close()
+	return writeFile(file, filePath, root)
+}
+
+func writeFile(w writeCloser, filePath string, root *dst.File) error {
 	r := decorator.NewRestorer()
-	err = r.Fprint(file, root)
-	if err != nil {
+	if err := r.Fprint(w, root); err != nil {
+		_ = w.Close()
 		return ex.Wrapf(err, "failed to write to file %s", filePath)
+	}
+	if err := w.Close(); err != nil {
+		return ex.Wrapf(err, "failed to close file %s", filePath)
 	}
 	return nil
 }

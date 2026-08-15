@@ -6,7 +6,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"sync"
 	"time"
 
@@ -199,6 +198,7 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	if !clientEnabler.Enable() {
 		return
 	}
+	defer instrumentEnd(ictx, err)
 	if tx == nil || ictx.GetData() == nil {
 		return
 	}
@@ -214,7 +214,6 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	tx.DriverName = dbRequest.DriverName
 	tx.DSN = dbRequest.Dsn
 	tx.DbName = dbRequest.DbName
-	instrumentEnd(ictx, err)
 }
 
 func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Context) {
@@ -603,7 +602,7 @@ func instrumentStart(
 	}
 	initInstrumentation()
 	req := semconv.DatabaseSqlRequest{
-		OpType:     calOp(query),
+		OpType:     semconv.OperationName(query),
 		Sql:        query,
 		Endpoint:   endpoint,
 		DriverName: driverName,
@@ -645,20 +644,9 @@ func instrumentEnd(ictx hook.HookContext, err error) {
 	}
 	defer span.End()
 	if err != nil {
+		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 	}
-}
-
-func calOp(sql string) string {
-	trimmed := strings.TrimSpace(sql)
-	if trimmed == "" {
-		return ""
-	}
-	fields := strings.Fields(trimmed)
-	if len(fields) == 0 {
-		return ""
-	}
-	return strings.ToUpper(fields[0])
 }
 
 func initInstrumentation() {

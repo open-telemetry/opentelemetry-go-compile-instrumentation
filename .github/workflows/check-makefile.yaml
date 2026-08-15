@@ -7,12 +7,12 @@ on:
     paths:
       - "**/*Makefile*"
       - ".tools/checkmake"
-      - ".github/workflows/checkmake.yaml"
+      - ".github/workflows/check-makefile.yaml"
   pull_request:
     paths:
       - "**/*Makefile*"
       - ".tools/checkmake"
-      - ".github/workflows/checkmake.yaml"
+      - ".github/workflows/check-makefile.yaml"
 
 jobs:
   checkmake:

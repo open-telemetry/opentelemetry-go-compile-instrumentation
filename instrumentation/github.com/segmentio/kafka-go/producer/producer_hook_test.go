@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	kafkaprop "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/internal/propagation"
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
@@ -68,7 +69,7 @@ func TestBeforeWriteMessages_InjectsHeadersAndStartsSpans(t *testing.T) {
 
 	// Each message must carry the propagated trace context.
 	for i := range msgs {
-		hc := headerCarrier{headers: &msgs[i].Headers}
+		hc := kafkaprop.NewHeaderCarrier(&msgs[i].Headers)
 		assert.NotEmpty(t, hc.Get("traceparent"), "message %d missing traceparent", i)
 	}
 
@@ -94,6 +95,23 @@ func TestBeforeWriteMessages_InjectsHeadersAndStartsSpans(t *testing.T) {
 	assert.Equal(t, "localhost", m["server.address"])
 	assert.Equal(t, int64(9092), m["server.port"])
 	assert.Equal(t, "k1", m["messaging.kafka.message.key"])
+}
+
+func TestBeforeWriteMessages_InvalidUTF8MessageKey(t *testing.T) {
+	sr := setupTest(t)
+
+	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders"}
+	msgs := []kafka.Message{{Key: []byte{'o', 0xff, 'k'}, Value: []byte("hello")}}
+
+	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
+	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	AfterWriteMessages(ictx, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	m := spanAttrs(spans[0])
+	assert.Equal(t, "o\uFFFDk", m["messaging.kafka.message.key"])
 }
 
 func TestAfterWriteMessages_RecordsError(t *testing.T) {
@@ -125,24 +143,6 @@ func TestWriteMessages_Disabled(t *testing.T) {
 
 	assert.Empty(t, sr.Ended())
 	assert.Nil(t, ictx.GetData())
-}
-
-func TestHeaderCarrier_SetGetKeys(t *testing.T) {
-	var headers []kafka.Header
-	hc := headerCarrier{headers: &headers}
-
-	hc.Set("traceparent", "v1")
-	hc.Set("baggage", "v2")
-	assert.Equal(t, "v1", hc.Get("traceparent"))
-	assert.Equal(t, "v2", hc.Get("baggage"))
-	assert.Equal(t, "", hc.Get("absent"))
-
-	// Set on an existing key overwrites rather than appending a duplicate.
-	hc.Set("traceparent", "v3")
-	assert.Equal(t, "v3", hc.Get("traceparent"))
-	assert.Len(t, headers, 2)
-
-	assert.ElementsMatch(t, []string{"traceparent", "baggage"}, hc.Keys())
 }
 
 // TestAfterWriteMessages_PartialFailure verifies that when WriteMessages returns

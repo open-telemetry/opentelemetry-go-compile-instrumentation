@@ -22,6 +22,16 @@ This project uses several tools for development. Most tools will be automaticall
 
 ### Getting Started
 
+> **Windows/WSL contributors:** make sure `core.autocrlf` is `false` before
+> cloning (`git config --global core.autocrlf false`). CI runs on Windows as
+> well as Linux and macOS, and a clone with `core.autocrlf` enabled checks out
+> source files with CRLF line endings. That changes how blank lines are
+> preserved when the AST-based code generator writes output, which then fails
+> to match the (LF) golden files under `testdata/golden`, even though the
+> generated code is correct. If you already cloned with `autocrlf` on, re-clone
+> after changing the setting rather than trying to fix the line endings of an
+> existing checkout.
+
 1. Clone the repository:
 
    ```sh
@@ -235,7 +245,7 @@ format:
 ╰─┬──╯╰───┬───╯│  ╰─────┬─────╯
   │       │    │        ╰─ Short description of the change (see below)
   │       │    ╰─ If, and only if the PR contains breaking changes
-  │       ╰─ Optional: change scope (e.g, 'cmd/gotel', `pkg/weaver`, ...)
+  │       ╰─ Optional: change scope (e.g, 'cmd/otelc', `pkg/weaver`, ...)
   ╰─ Required: commit type (see below for accepted values)
 ```
 
@@ -270,7 +280,7 @@ Here are some examples for the various supported commit types:
 - `feat`:
   - :information_source:  What feature is being introduced specifically? A user might decide if this
     is useful to them or not based on this.
-  - :white_check_mark: `feat(cmd/gotel): -log-level flag to configure log verbosity`
+  - :white_check_mark: `feat(cmd/otelc): -log-level flag to configure log verbosity`
   - :x: `feat: logging`
 - `fix`:
   - :information_source: What bug is being fixed? Refer to the symptoms of the fixed issue, not to
