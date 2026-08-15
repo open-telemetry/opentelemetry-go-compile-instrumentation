@@ -1210,7 +1210,12 @@ func Target(value string) error { return nil }
 
 	assert.Equal(t, "v1.4.2", set.Version)
 	require.NotNil(t, set.Candidates)
-	require.Len(t, set.Candidates.FuncRules, 2, "candidates keep target+version matches, including rules the AST later rejects")
+	require.Len(
+		t,
+		set.Candidates.FuncRules,
+		2,
+		"candidates keep target+version matches, including rules the AST later rejects",
+	)
 	names := []string{set.Candidates.FuncRules[0].Name, set.Candidates.FuncRules[1].Name}
 	assert.ElementsMatch(t, []string{"matching", "non-matching"}, names)
 

@@ -101,7 +101,7 @@ func applyPrecise(ctx context.Context, in Input, rules []rule.InstRule) error {
 			if rf.where != nil && !rf.where.Match(&mctx) {
 				continue
 			}
-			if err = matchOneRule(tree, source, rf.rule, in.Set, in.Log, in.Dep); err != nil {
+			if err = matchOneRule(tree, source, rf.rule, in); err != nil {
 				return err
 			}
 		}
@@ -140,14 +140,7 @@ func IsTestBuild(sources []string) bool {
 	return false
 }
 
-func matchOneRule(
-	tree *dst.File,
-	source string,
-	r rule.InstRule,
-	set *rule.InstRuleSet,
-	log Logger,
-	dep any,
-) error {
+func matchOneRule(tree *dst.File, source string, r rule.InstRule, in Input) error {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		_, ok, err := ast.FindFuncDecl(tree, rt)
@@ -155,14 +148,14 @@ func matchOneRule(
 			return err
 		}
 		if ok {
-			set.AddFuncRule(source, rt)
-			logInfo(log, "Match func rule", "rule", rt, "dep", dep)
+			in.Set.AddFuncRule(source, rt)
+			logInfo(in.Log, "Match func rule", "rule", rt, "dep", in.Dep)
 		}
 	case *rule.InstStructRule:
 		structType := ast.FindStructType(tree, rt.Struct)
 		if structType != nil {
-			set.AddStructRule(source, rt)
-			logInfo(log, "Match struct rule", "rule", rt, "dep", dep)
+			in.Set.AddStructRule(source, rt)
+			logInfo(in.Log, "Match struct rule", "rule", rt, "dep", in.Dep)
 		}
 	case *rule.InstRawRule:
 		_, ok, err := ast.FindFuncDecl(tree, rt)
@@ -170,8 +163,8 @@ func matchOneRule(
 			return err
 		}
 		if ok {
-			set.AddRawRule(source, rt)
-			logInfo(log, "Match raw rule", "rule", rt, "dep", dep)
+			in.Set.AddRawRule(source, rt)
+			logInfo(in.Log, "Match raw rule", "rule", rt, "dep", in.Dep)
 		}
 	case *rule.InstCallRule:
 		// Call rules are added unconditionally to all source files in the
@@ -179,17 +172,17 @@ func matchOneRule(
 		// AST predicate to pre-filter files (the matching requires import
 		// alias resolution which happens during the instrument phase).
 		// Files without matching calls are a no-op in applyCallRule.
-		set.AddCallRule(source, rt)
-		logInfo(log, "Match call rule", "rule", rt, "dep", dep)
+		in.Set.AddCallRule(source, rt)
+		logInfo(in.Log, "Match call rule", "rule", rt, "dep", in.Dep)
 	case *rule.InstDirectiveRule:
 		if ast.FileHasDirective(tree, rt.Directive) {
-			set.AddDirectiveRule(source, rt)
-			logInfo(log, "Match directive rule", "rule", rt, "dep", dep)
+			in.Set.AddDirectiveRule(source, rt)
+			logInfo(in.Log, "Match directive rule", "rule", rt, "dep", in.Dep)
 		}
 	case *rule.InstDeclRule:
 		if ast.FindNamedDecl(tree, rt.Identifier, rt.Kind) != nil {
-			set.AddDeclRule(source, rt)
-			logInfo(log, "Match decl rule", "rule", rt, "dep", dep)
+			in.Set.AddDeclRule(source, rt)
+			logInfo(in.Log, "Match decl rule", "rule", rt, "dep", in.Dep)
 		}
 	case *rule.InstFileRule:
 		// Skip as it's already processed
