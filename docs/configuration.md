@@ -46,21 +46,6 @@ OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
 > compiled in, use `otel.instrumentation.go` (see
 > [External Configuration Sources](external-configuration.md)).
 
-### HTTP known methods
-
-By default, `net/http` instrumentation treats the [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#name-methods)
-methods plus `PATCH` as known. Any other method (including `QUERY`) is recorded as
-`http.request.method=_OTHER`.
-
-To fully override that list (for example to restore `QUERY`), set:
-
-```bash
-OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS=CONNECT,DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT,TRACE,QUERY
-```
-
-The value is a comma-separated, case-sensitive list and **replaces** the defaults
-entirely (it is not additive).
-
 ## Rule Sources and Precedence
 
 `otelc` resolves rules from the following sources, in priority order (highest first):

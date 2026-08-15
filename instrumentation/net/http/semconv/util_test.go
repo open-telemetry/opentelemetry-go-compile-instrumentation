@@ -4,6 +4,7 @@
 package semconv
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -116,15 +117,21 @@ func TestParseKnownMethods(t *testing.T) {
 	assert.Empty(t, empty)
 }
 
+func resetKnownMethodsForTest(t *testing.T) {
+	t.Helper()
+	knownMethodsOnce = sync.Once{}
+	knownMethodsMap = nil
+}
+
 func TestKnownMethods(t *testing.T) {
 	t.Cleanup(func() {
 		t.Setenv(HTTPKnownMethodsEnv, "")
-		resetKnownMethodsForTest()
+		resetKnownMethodsForTest(t)
 	})
 
 	t.Run("defaults", func(t *testing.T) {
 		t.Setenv(HTTPKnownMethodsEnv, "")
-		resetKnownMethodsForTest()
+		resetKnownMethodsForTest(t)
 
 		got := knownMethods()
 		assert.Equal(t, MethodLookup, got)
@@ -134,7 +141,7 @@ func TestKnownMethods(t *testing.T) {
 
 	t.Run("env override", func(t *testing.T) {
 		t.Setenv(HTTPKnownMethodsEnv, "GET,QUERY,PROPFIND")
-		resetKnownMethodsForTest()
+		resetKnownMethodsForTest(t)
 
 		got := knownMethods()
 		assert.Equal(t, "GET", got["GET"].Value.AsString())

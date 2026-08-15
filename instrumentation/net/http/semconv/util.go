@@ -144,13 +144,6 @@ func knownMethods() map[string]attribute.KeyValue {
 	return knownMethodsMap
 }
 
-// resetKnownMethodsForTest clears the cached known-methods set so tests can
-// exercise different OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS values.
-func resetKnownMethodsForTest() {
-	knownMethodsOnce = sync.Once{}
-	knownMethodsMap = nil
-}
-
 // parseKnownMethods parses a comma-separated, case-sensitive override list.
 // Whitespace around each method is trimmed; empty entries are skipped.
 func parseKnownMethods(env string) map[string]attribute.KeyValue {
