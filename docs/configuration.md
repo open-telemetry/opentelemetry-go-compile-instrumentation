@@ -165,12 +165,20 @@ Run-time behavior can also be controlled using the two `otelc`-specific environm
 
 ## Verifying Your Configuration
 
-After a build, the file `.otelc-build/matched.json` lists every rule that matched a dependency
-and the locations it was applied. Inspect it to confirm that the instrumentations you expect
-are active:
+After a build, the file `.otelc-build/matched.json` lists every package that matched a
+dependency. Each entry includes:
+
+- `module_path` — the import path that was instrumented
+- `version` — the resolved dependency version (for example `v1.4.2`)
+- file-keyed maps (`func_rules`, `file_rules`, …) — setup-time matches keyed by
+  absolute source path; toolexec still applies these today
+- `candidates` — the same package's rules after `target` and `version` filtering,
+  not keyed by source path (package-level schema for later toolexec file matching)
+
+Inspect it to confirm that the instrumentations you expect are active:
 
 ```bash
-cat .otelc-build/matched.json | jq '.[].Name'
+cat .otelc-build/matched.json | jq '.[].module_path'
 ```
 
 If instrumentation is not applied, `otelc` prints a warning to stderr:

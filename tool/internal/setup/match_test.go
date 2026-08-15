@@ -1168,6 +1168,57 @@ func Target(value string) error { return nil }
 	assert.Equal(t, "matching", matchedFuncRules[0].Name)
 }
 
+func TestRunMatch_RecordsVersionAndCandidates(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "mypkg.go")
+	err := os.WriteFile(srcFile, []byte(`package mypkg
+
+func Target(value string) error { return nil }
+`), 0o644)
+	require.NoError(t, err)
+
+	const importPath = "example.com/mypkg"
+	matchingSig := rule.FuncSignature{Args: []string{"string"}, Returns: []string{"error"}}
+	nonMatchingSig := rule.FuncSignature{Args: []string{"int"}, Returns: []string{"error"}}
+	matchingRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "matching", Target: importPath},
+		Func:         "Target",
+		Before:       "BeforeTarget",
+		Signature:    &matchingSig,
+	}
+	nonMatchingRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "non-matching", Target: importPath},
+		Func:         "Target",
+		Before:       "BeforeTarget",
+		Signature:    &nonMatchingSig,
+	}
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Version:    "v1.4.2",
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {matchingRule, nonMatchingRule},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+
+	assert.Equal(t, "v1.4.2", set.Version)
+	require.NotNil(t, set.Candidates)
+	require.Len(t, set.Candidates.FuncRules, 2, "candidates keep target+version matches, including rules the AST later rejects")
+	names := []string{set.Candidates.FuncRules[0].Name, set.Candidates.FuncRules[1].Name}
+	assert.ElementsMatch(t, []string{"matching", "non-matching"}, names)
+
+	matchedFuncRules := set.AllFuncRules()
+	require.Len(t, matchedFuncRules, 1)
+	assert.Equal(t, "matching", matchedFuncRules[0].Name)
+}
+
 func TestRunMatch_EmptyRules(t *testing.T) {
 	dep := &Dependency{
 		ImportPath: "example.com/noop",

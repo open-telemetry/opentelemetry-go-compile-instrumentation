@@ -164,6 +164,7 @@ func (sp *SetupPhase) runMatch(
 	globRules []targetRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
+	set.Version = dep.Version
 
 	if len(dep.CgoFiles) > 0 {
 		set.SetCgoFileMap(dep.CgoFiles)
@@ -200,6 +201,9 @@ func (sp *SetupPhase) runMatch(
 		}
 		filteredRules = append(filteredRules, r)
 	}
+	// Package-level candidates: target+version only. File-keyed maps below
+	// remain the setup-time AST match that toolexec consumes today.
+	set.SetCandidates(filteredRules)
 
 	// Separate file rules from rules that need precise matching
 	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
