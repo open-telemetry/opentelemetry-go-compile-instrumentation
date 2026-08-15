@@ -4,14 +4,14 @@
 package setup
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/match"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -27,16 +27,9 @@ func Traced() {}
 func Plain() {}
 `
 
-func parseMatchSource(t *testing.T) *dst.File {
-	t.Helper()
-	tree, err := ast.NewAstParser().ParseSource(matchOneRuleSource)
-	require.NoError(t, err)
-	return tree
-}
-
 func TestMatchOneRule(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "sample.go")
-	dep := &Dependency{ImportPath: "example.com/sample"}
+	require.NoError(t, os.WriteFile(source, []byte(matchOneRuleSource), 0o644))
 
 	tests := []struct {
 		name   string
@@ -120,23 +113,26 @@ func TestMatchOneRule(t *testing.T) {
 			},
 		},
 		{
-			name: "file rule is skipped",
+			name: "file rule is recorded on the set",
 			rule: &rule.InstFileRule{
 				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				File:         "extra.go",
+				Path:         "example.com/hooks",
 			},
 			verify: func(t *testing.T, set *rule.InstRuleSet) {
-				assert.Empty(t, set.FileRules)
+				assert.Len(t, set.FileRules, 1)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sp := newTestSetupPhase()
 			set := rule.NewInstRuleSet("example.com/sample")
-			tree := parseMatchSource(t)
-
-			require.NoError(t, sp.matchOneRule(tree, source, tt.rule, set, dep))
+			require.NoError(t, match.Apply(t.Context(), match.Input{
+				Set:     set,
+				Sources: []string{source},
+				Rules:   []rule.InstRule{tt.rule},
+			}))
 			tt.verify(t, set)
 		})
 	}
