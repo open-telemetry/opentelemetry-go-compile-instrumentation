@@ -37,6 +37,10 @@ PKG_COVERAGE_THRESHOLD ?= 70
 # Instrumentation is scanned separately via instrumented integration-test binaries
 # (see govulncheck/instrumentation): source scans skip //go:build ignore files and
 # cannot typecheck modules that need compile-time field injection (e.g. database/sql).
+# Known gap: that makes instrumentation coverage only as good as the test apps.
+# An instrumentation module that no app under test/apps builds against is scanned
+# by neither job, so adding a module without an app leaves it uncovered (currently
+# instrumentation/github.com/openai/openai-go/v3).
 # Demos are intentionally excluded (pinned example deps).
 GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
 # Top-level integration apps only (skip nested modules such as
