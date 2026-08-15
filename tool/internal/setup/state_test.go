@@ -193,6 +193,22 @@ func TestGetBackupFiles(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "GOWORK=off does not track go.work.sum",
+			setup: func(t *testing.T, tmp string) string {
+				t.Setenv("GOWORK", "off")
+				moduleDir := filepath.Join(tmp, "mod")
+				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
+				return moduleDir
+			},
+			wantFiles: func(_, moduleDir string) []string {
+				return []string{
+					filepath.Join(moduleDir, "go.mod"),
+					filepath.Join(moduleDir, "go.sum"),
+					filepath.Join(moduleDir, ToolFileCanonical),
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
