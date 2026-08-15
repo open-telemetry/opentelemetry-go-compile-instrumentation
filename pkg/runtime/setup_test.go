@@ -28,6 +28,60 @@ func TestShutdownSignals(t *testing.T) {
 	assert.Contains(t, signals, syscall.SIGTERM)
 }
 
+// errShutdownProcessor is a span processor whose Shutdown always fails, used to
+// exercise the handler's error-logging branch.
+type errShutdownProcessor struct{}
+
+func (errShutdownProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (errShutdownProcessor) OnEnd(sdktrace.ReadOnlySpan)                     {}
+func (errShutdownProcessor) ForceFlush(context.Context) error                { return nil }
+func (errShutdownProcessor) Shutdown(context.Context) error                  { return errors.New("shutdown failed") }
+
+// recordingProcessor records whether Shutdown was called.
+type recordingProcessor struct{ shutdownCalled bool }
+
+func (*recordingProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (*recordingProcessor) OnEnd(sdktrace.ReadOnlySpan)                     {}
+func (*recordingProcessor) ForceFlush(context.Context) error                { return nil }
+func (p *recordingProcessor) Shutdown(context.Context) error                { p.shutdownCalled = true; return nil }
+
+// runShutdownHandler drives handleShutdownSignal inline with a SIGTERM already
+// queued, exercising the flush path without delivering a real signal to the test
+// process. Reaching the return proves the handler neither exits nor re-raises.
+func runShutdownHandler(t *testing.T) {
+	t.Helper()
+	sigCh := make(chan os.Signal, 1)
+	sigCh <- syscall.SIGTERM
+	handleShutdownSignal(sigCh)
+}
+
+func TestHandleShutdownSignalFlushesProviders(t *testing.T) {
+	restoreProviders(t)
+	rp := &recordingProcessor{}
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rp))
+	meterProvider, loggerProvider = nil, nil
+
+	runShutdownHandler(t)
+
+	assert.True(t, rp.shutdownCalled, "handler should flush the tracer provider on shutdown")
+}
+
+func TestHandleShutdownSignalLogsFlushError(t *testing.T) {
+	restoreProviders(t)
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(errShutdownProcessor{}))
+	meterProvider, loggerProvider = nil, nil
+
+	var buf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	runShutdownHandler(t)
+
+	assert.Contains(t, buf.String(), "shutdown failed",
+		"flush errors should be logged during shutdown")
+}
+
 func TestLogLevel(t *testing.T) {
 	tests := []struct {
 		envValue string

@@ -490,7 +490,9 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	done
 
 # Notes on test-unit/instrumentation implementation:
-# - Excludes "runtime" and "database/sql" modules (have build errors because of compile-time field injection).
+# - Excludes "runtime" entirely (compile-time field injection; no testable subpackages).
+# - "database/sql" root package also needs field injection, so ./... cannot type-check
+#   client.go. Safe subpackages (dsnparse, semconv) are tested explicitly afterwards.
 # - Skips modules without test files to avoid empty test output.
 # - Uses go test -C to run tests without changing directories (cleaner, more reliable).
 # - Does NOT use gotestfmt because v2.5.0 has a bug that causes panics when go test
@@ -511,6 +513,11 @@ test-unit/instrumentation: package ## Run unit tests for instrumentation modules
 		(cd "$$moddir" && go mod tidy); \
 		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
+	# database/sql: root package references otelc-injected fields on database/sql
+	# types and cannot be built uninstrumented. dsnparse/semconv do not.
+	echo "Testing instrumentation/database/sql (dsnparse, semconv)..."
+	(cd instrumentation/database/sql && go mod tidy)
+	go test -C instrumentation/database/sql -v -shuffle=on -timeout=5m -count=1 ./dsnparse/... ./semconv/... 2>&1 | tee -a ./gotest-unit-instrumentation.log
 
 .ONESHELL:
 test-unit/helper: ## Run unit tests for test helper packages
@@ -581,6 +588,10 @@ test-unit/instrumentation/coverage: package ## Run unit tests with coverage for 
 		(cd "$$moddir" && go mod tidy); \
 		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
+	# See test-unit/instrumentation: only packages that type-check without field injection.
+	echo "Testing instrumentation/database/sql (dsnparse, semconv) with coverage..."
+	(cd instrumentation/database/sql && go mod tidy)
+	go test -C instrumentation/database/sql -v -shuffle=on -timeout=5m -count=1 ./dsnparse/... ./semconv/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ./gotest-unit-instrumentation.log
 	@echo "Merging coverage files into coverage-instrumentation.txt..."
 	@echo "mode: atomic" > coverage-instrumentation.txt
 	@find instrumentation -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-instrumentation.txt 2>/dev/null || true

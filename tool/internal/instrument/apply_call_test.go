@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -221,7 +222,7 @@ func TestMatchesCallRule_ImportAliasFromVersionSuffix(t *testing.T) {
 		},
 	}
 
-	importAliases := collectImportAliases(file)
+	importAliases := ast.ImportAliasMap(file)
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
@@ -440,7 +441,7 @@ func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 		},
 	}
 
-	importAliases := collectImportAliases(file)
+	importAliases := ast.ImportAliasMap(file)
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
@@ -488,7 +489,7 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 	}
 
 	ip := newTestPhase()
-	importAliases := collectImportAliases(file)
+	importAliases := ast.ImportAliasMap(file)
 	result := ip.applyCallAppendArgs(r, file, importAliases)
 
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")

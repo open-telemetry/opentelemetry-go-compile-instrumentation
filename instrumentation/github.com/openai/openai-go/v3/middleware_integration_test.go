@@ -302,6 +302,8 @@ func TestOtelMiddleware_NextError(t *testing.T) {
 	events := span.Events()
 	require.Len(t, events, 1, "expected exception event for transport error")
 	assert.Equal(t, "exception", events[0].Name)
+
+	assertAttribute(t, span.Attributes(), "error.type", "*errors.errorString")
 }
 
 func TestOtelMiddleware_HTTPErrorStatus(t *testing.T) {

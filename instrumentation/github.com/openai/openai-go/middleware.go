@@ -173,6 +173,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
+			span.SetAttributes(otelsemconv.ErrorType(err))
 			span.End()
 			return resp, err
 		}
