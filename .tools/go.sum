@@ -589,6 +589,7 @@ github.com/sergi/go-diff v1.2.0 h1:XU+rvMAioB0UC3q1MFrIQy4Vo5/4VsRDQQXHsEya6xQ=
 github.com/sergi/go-diff v1.2.0/go.mod h1:STckp+ISIX8hZLjrqAeVduY0gWCT9IjLuqbuNXdaHfM=
 github.com/sethvargo/ratchet v0.11.4 h1:Q6bEm6SexLS3G+PKOTY+ArkL9KM5anX+cZqOmLrtFhE=
 github.com/sethvargo/ratchet v0.11.4/go.mod h1:YVTmBPenzqMADQAycbYC9mhEdRm+nZ4KRIjNPsmE9sA=
+github.com/sethvargo/ratchet v0.12.0/go.mod h1:Unu+6zOcsnJj5x/hKgiaRKbGKPZkysoYkgDFkhRUio0=
 github.com/sirupsen/logrus v1.2.0/go.mod h1:LxeOpSwHxABJmUn/MG1IvRgCAasNZTLOkJPxbbu5VWo=
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=
 github.com/sirupsen/logrus v1.6.0/go.mod h1:7uNnSEd1DgxDLC74fIahvMZmmYsHGZGEOFrfsX/uA88=

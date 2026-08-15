@@ -3,7 +3,7 @@
 
 module go.opentelemetry.io/otelc/tools
 
-go 1.25.0
+go 1.25.12
 
 require (
 	github.com/campoy/embedmd/v2 v2.0.0
@@ -12,7 +12,7 @@ require (
 	github.com/google/yamlfmt v0.21.0
 	github.com/gotesttools/gotestfmt/v2 v2.5.0
 	github.com/rhysd/actionlint v1.7.12
-	github.com/sethvargo/ratchet v0.11.4
+	github.com/sethvargo/ratchet v0.12.0
 	go.opentelemetry.io/build-tools/crosslink v0.30.0
 )
 
