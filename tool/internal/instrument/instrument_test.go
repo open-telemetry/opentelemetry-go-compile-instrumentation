@@ -87,7 +87,7 @@ func runTest(t *testing.T, testName string) {
 	// source_test.go (a test build — a file the Go toolchain only compiles
 	// under `go test`). The chosen name is preserved into the temp dir so the
 	// compiled unit is genuinely a _test.go file, which is what is_test gates
-	// on. This mirrors setup.isTestBuild: test-ness is a source-set property,
+	// on. This mirrors match.IsTestBuild: test-ness is a source-set property,
 	// not an import-path suffix.
 	srcName, compiledName := sourceFileName, mainGoFileName
 	if testSrc := filepath.Join(testdataDir, goldenDir, testName, sourceTestFileName); util.PathExists(testSrc) {
@@ -247,7 +247,7 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 // instrumentation. The caller parses the tree once and shares it across rules.
 //
 // isTest reports whether the fixture is a test build (its source is a
-// source_test.go file), mirroring setup.isTestBuild; the is_test predicate is
+// source_test.go file), mirroring match.IsTestBuild; the is_test predicate is
 // evaluated against it.
 func whereFileMatches(t *testing.T, ruleData []byte, isTest bool, tree *dst.File) bool {
 	t.Helper()
