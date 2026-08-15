@@ -169,33 +169,23 @@ func FindFuncsByDirective(file *dst.File, directive string) []*dst.FuncDecl {
 func tokenize(input string) ([]string, error) {
 	var tokens []string
 	var current strings.Builder
-	var err error
 	inQuote := false
 	escaped := false
 
 	for _, ch := range input {
 		if escaped {
-			_, err = current.WriteRune(ch)
-			if err != nil {
-				return nil, ex.Wrapf(err, "failed to write rune")
-			}
+			current.WriteRune(ch)
 			escaped = false
 			continue
 		}
 		if ch == '\\' && inQuote {
-			_, err = current.WriteRune(ch)
-			if err != nil {
-				return nil, ex.Wrapf(err, "failed to write rune")
-			}
+			current.WriteRune(ch)
 			escaped = true
 			continue
 		}
 		if ch == '"' {
 			inQuote = !inQuote
-			_, err = current.WriteRune(ch)
-			if err != nil {
-				return nil, ex.Wrapf(err, "failed to write rune")
-			}
+			current.WriteRune(ch)
 			continue
 		}
 		if unicode.IsSpace(ch) && !inQuote {
@@ -205,10 +195,7 @@ func tokenize(input string) ([]string, error) {
 			}
 			continue
 		}
-		_, err = current.WriteRune(ch)
-		if err != nil {
-			return nil, ex.Wrapf(err, "failed to write rune")
-		}
+		current.WriteRune(ch)
 	}
 	if inQuote {
 		return nil, ex.New("unclosed double quote")

@@ -129,6 +129,9 @@ The following libraries are automatically instrumented:
 | `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
 | `github.com/anthropics/anthropic-sdk-go` | GenAI spans |
 | `github.com/segmentio/kafka-go` | Kafka messaging spans |
+| `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
+| `github.com/linode/linodego/v2` | HTTP client spans and metrics |
+| `log`, `log/slog`, `github.com/sirupsen/logrus` | Trace/span ID log correlation |
 
 ## Learn More
 

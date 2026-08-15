@@ -104,7 +104,7 @@ To send multiple requests:
 
 #### Telemetry Export Note
 
-The instrumentation layer automatically handles graceful shutdown of the OpenTelemetry SDK. When the application receives SIGINT or SIGTERM, a signal handler ensures all pending telemetry is flushed before the process exits. No explicit sleep or shutdown code is needed in the application - the instrumentation handles this transparently.
+The instrumentation layer flushes the OpenTelemetry SDK when the application receives SIGINT or SIGTERM, so telemetry buffered by the batch processors is exported during shutdown. It does not stop the process or change its exit code — the application stays in control of its own shutdown and exit path.
 
 ## Regenerating Protocol Buffer Code
 

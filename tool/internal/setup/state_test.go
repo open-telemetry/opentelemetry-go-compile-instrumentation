@@ -441,3 +441,36 @@ func TestStateManagerCommitIsAtomicAndSorted(t *testing.T) {
 	assert.Equal(t, string(first), string(second), "manifest serialization must be deterministic")
 	assert.False(t, util.PathExists(util.GetBuildTemp(stateFileName)+".tmp"), "no temp file left behind")
 }
+
+func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
+	tmp := t.TempDir()
+	modA := filepath.Join(tmp, "dirA")
+	modB := filepath.Join(tmp, "dirB")
+	modC := filepath.Join(tmp, "dirC")
+
+	require.NoError(t, os.MkdirAll(modA, 0o755))
+	require.NoError(t, os.MkdirAll(modB, 0o755))
+	require.NoError(t, os.MkdirAll(modC, 0o755))
+
+	mustWriteFile(t, filepath.Join(modA, "go.mod"), "module dirA")
+	mustWriteFile(t, filepath.Join(modB, "go.mod"), "module dirB")
+	mustWriteFile(t, filepath.Join(modC, "go.mod"), "module dirC")
+
+	moduleDirs := map[string]bool{
+		modC: true,
+		modA: true,
+		modB: true,
+	}
+
+	var firstResult []string
+	for range 20 {
+		files, err := getBackupFiles(t.Context(), moduleDirs)
+		require.NoError(t, err)
+
+		if firstResult == nil {
+			firstResult = files
+		} else {
+			assert.Equal(t, firstResult, files, "getBackupFiles output must be deterministic across multiple calls")
+		}
+	}
+}
