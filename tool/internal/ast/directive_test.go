@@ -156,6 +156,21 @@ func TestScanArgs(t *testing.T) {
 			hasError: true,
 		},
 		{
+			name:     "colon inside a fully quoted token is not a separator",
+			input:    `"key:value"`,
+			hasError: true,
+		},
+		{
+			name:     "quoted key rejected",
+			input:    `"k":v`,
+			hasError: true,
+		},
+		{
+			name:     "escaped quote inside quoted key does not end the quote early",
+			input:    `"a\"b":value`,
+			hasError: true,
+		},
+		{
 			name:  "quoted value containing colon",
 			input: `url:"https://example.com/path"`,
 			expected: []DirectiveArg{
