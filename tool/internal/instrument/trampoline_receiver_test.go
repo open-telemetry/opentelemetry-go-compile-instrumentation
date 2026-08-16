@@ -235,6 +235,44 @@ func TestExtractReceiverTypeParamsConstraint_MultipleParams(t *testing.T) {
 	}
 }
 
+// TestReceiverBaseTypeName_NonIdent covers the defensive fallback directly: a
+// non-identifier base expression, which no valid Go receiver form actually
+// produces, returns "" rather than panicking.
+func TestReceiverBaseTypeName_NonIdent(t *testing.T) {
+	nonIdent := &dst.SelectorExpr{X: ast.Ident("pkg"), Sel: ast.Ident("GenStruct")}
+
+	assert.Empty(t, receiverBaseTypeName(nonIdent))
+}
+
+// TestFindGenericTypeDecl_NilFileOrEmptyName covers both guard conditions in
+// findGenericTypeDecl directly: a nil file and an empty type name should each
+// short-circuit to nil without walking file.Decls.
+func TestFindGenericTypeDecl_NilFileOrEmptyName(t *testing.T) {
+	file, _ := parseReceiverTypeWithDecl(t, "", "type GenStruct[T comparable] struct{}", "GenStruct[T]")
+
+	assert.Nil(t, findGenericTypeDecl(nil, "GenStruct"))
+	assert.Nil(t, findGenericTypeDecl(file, ""))
+}
+
+// TestReceiverConstraintAt_EmptyNamesField covers the defensive n=1 fallback
+// in the position-walking loop. A type parameter field with no names doesn't
+// occur in valid Go, but the loop should still advance past it by one
+// position instead of looping forever or reading out of range.
+func TestReceiverConstraintAt_EmptyNamesField(t *testing.T) {
+	original := &dst.FieldList{
+		List: []*dst.Field{
+			{Names: nil, Type: ast.Ident("comparable")},
+			{Names: []*dst.Ident{ast.Ident("T")}, Type: ast.Ident("any")},
+		},
+	}
+
+	constraint := receiverConstraintAt(original, 1)
+
+	ident, ok := constraint.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "any", ident.Name)
+}
+
 // TestExtractReceiverTypeParamsNestedPointer covers the recursive path. A
 // doubly-indirected receiver is not valid Go, but the function recurses
 // through StarExpr without limit and callers reach it from expressions that
