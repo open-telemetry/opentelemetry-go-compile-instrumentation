@@ -231,6 +231,29 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {}
 	assert.Equal(t, "handleRoot", fn.Name.Name)
 }
 
+func TestFindFuncDeclQualifiedPointerReceiver(t *testing.T) {
+	// *pkg.Type used to fatal in stripGenericTypes ("unexpected receiver type:
+	// *dst.StarExpr") instead of matching recv: "*Writer".
+	p := NewAstParser()
+	file, err := p.ParseSource(`package main
+
+import "bufio"
+
+func (*bufio.Writer) Write(p []byte) (n int, err error) { return 0, nil }
+`)
+	require.NoError(t, err)
+
+	r := &rule.InstFuncRule{
+		Func: "Write",
+		Recv: "*Writer",
+	}
+	fn, ok, err := FindFuncDecl(file, r)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, fn)
+	assert.Equal(t, "Write", fn.Name.Name)
+}
+
 func TestFindVarDecl(t *testing.T) {
 	file := parseSharedFixture(t)
 

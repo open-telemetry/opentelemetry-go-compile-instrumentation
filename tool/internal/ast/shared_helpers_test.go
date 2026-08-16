@@ -109,8 +109,18 @@ func TestStripGenericTypes(t *testing.T) {
 			want: "*GenStruct",
 		},
 		{
-			name: "unrecognized expression yields empty",
+			name: "qualified value receiver",
 			expr: &dst.SelectorExpr{X: Ident("pkg"), Sel: Ident("Type")},
+			want: "Type",
+		},
+		{
+			name: "qualified pointer receiver",
+			expr: &dst.StarExpr{X: &dst.SelectorExpr{X: Ident("bufio"), Sel: Ident("Writer")}},
+			want: "*Writer",
+		},
+		{
+			name: "unrecognized expression yields empty",
+			expr: &dst.BasicLit{Value: "1"},
 			want: "",
 		},
 	}

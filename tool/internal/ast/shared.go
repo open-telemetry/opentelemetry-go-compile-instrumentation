@@ -55,19 +55,32 @@ func stripGenericTypes(recvTypeExpr dst.Expr) string {
 		case *dst.Ident:
 			// Non-generic pointer receiver: *MyStruct
 			return "*" + x.Name
+		case *dst.SelectorExpr:
+			// Qualified pointer receiver: *bufio.Writer
+			return "*" + x.Sel.Name
 		case *dst.IndexExpr:
 			// Generic pointer receiver with single type param: *GenStruct[T]
+			// or *pkg.GenStruct[T]
 			if baseIdent, ok := x.X.(*dst.Ident); ok {
 				return "*" + baseIdent.Name
+			}
+			if sel, ok := x.X.(*dst.SelectorExpr); ok {
+				return "*" + sel.Sel.Name
 			}
 		case *dst.IndexListExpr:
 			// Generic pointer receiver with multiple type params: *GenStruct[T, U]
 			if baseIdent, ok := x.X.(*dst.Ident); ok {
 				return "*" + baseIdent.Name
 			}
+			if sel, ok := x.X.(*dst.SelectorExpr); ok {
+				return "*" + sel.Sel.Name
+			}
 		}
 	case *dst.Ident: // func (Recv)T
 		return expr.Name
+	case *dst.SelectorExpr:
+		// Qualified value receiver: bufio.Writer
+		return expr.Sel.Name
 	case *dst.IndexExpr:
 		// Generic value receiver with single type param: GenStruct[T]
 		if baseIdent, ok := expr.X.(*dst.Ident); ok {
