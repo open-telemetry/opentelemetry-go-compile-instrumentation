@@ -477,10 +477,10 @@ func findTargetResultType(targetFunc *dst.FuncDecl) *dst.FieldList {
 // func (c *Type1[K]) Target[V any]() V
 // ->
 // [K, V]
-func findTargetGenericType(targetFunc *dst.FuncDecl) *dst.FieldList {
+func findTargetGenericType(file *dst.File, targetFunc *dst.FuncDecl) *dst.FieldList {
 	var trampolineTypeParams *dst.FieldList
 	if ast.HasReceiver(targetFunc) {
-		receiverTypeParams := extractReceiverTypeParams(targetFunc.Recv.List[0].Type)
+		receiverTypeParams := extractReceiverTypeParams(file, targetFunc.Recv.List[0].Type)
 		if receiverTypeParams != nil {
 			trampolineTypeParams = receiverTypeParams
 		}
@@ -508,12 +508,12 @@ func (ip *InstrumentPhase) buildTrampSignature(before bool) {
 	if before {
 		beforeTramp := ip.beforeTrampFunc
 		beforeTramp.Type.Params = findTargetParamType(ip.targetFunc)
-		beforeTramp.Type.TypeParams = findTargetGenericType(ip.targetFunc)
+		beforeTramp.Type.TypeParams = findTargetGenericType(ip.target, ip.targetFunc)
 		fields = beforeTramp.Type.Params
 	} else {
 		afterTramp := ip.afterTrampFunc
 		afterTramp.Type.Params = findTargetResultType(ip.targetFunc)
-		afterTramp.Type.TypeParams = findTargetGenericType(ip.targetFunc)
+		afterTramp.Type.TypeParams = findTargetGenericType(ip.target, ip.targetFunc)
 		fields = afterTramp.Type.Params
 	}
 	// All types should be replaced with dereferenced types, so that the trampoline
@@ -543,7 +543,7 @@ func (ip *InstrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool)
 	addHookContext(paramTypes)
 
 	// Replace type parameters with interface{}
-	genericTypes = findTargetGenericType(ip.targetFunc)
+	genericTypes = findTargetGenericType(ip.target, ip.targetFunc)
 	for _, field := range paramTypes.List {
 		field.Type = replaceTypeParamsWithAny(field.Type, genericTypes)
 	}
@@ -746,29 +746,40 @@ func setReturnValClause(idx int, t dst.Expr) *dst.CaseClause {
 
 // extractReceiverTypeParams extracts type parameters from a receiver type expression
 // For example: *GenStruct[T] or GenStruct[T, U] -> FieldList with T and U as type parameters
-func extractReceiverTypeParams(recvType dst.Expr) *dst.FieldList {
+//
+// file is the source file the receiver was declared in. When it contains the
+// matching generic type declaration (e.g. type GenStruct[T comparable] struct{...}),
+// each parameter's real constraint is recovered from it instead of being widened to
+// any. Constraints are matched positionally against that declaration's own type
+// parameters, since a method receiver is free to use different names for them
+// (type GenStruct[T comparable] struct{} but func (s GenStruct[U]) M(v U) is valid
+// Go; U is still constrained by comparable). If no matching declaration is found in
+// file, the constraint falls back to any, as before.
+func extractReceiverTypeParams(file *dst.File, recvType dst.Expr) *dst.FieldList {
 	switch t := recvType.(type) {
 	case *dst.StarExpr:
 		// *GenStruct[T] - recurse into X
-		return extractReceiverTypeParams(t.X)
+		return extractReceiverTypeParams(file, t.X)
 	case *dst.IndexExpr:
 		// GenStruct[T] - single type parameter
 		if ident, ok := t.Index.(*dst.Ident); ok {
+			original := findGenericTypeDecl(file, receiverBaseTypeName(t.X))
 			return &dst.FieldList{
 				List: []*dst.Field{{
 					Names: []*dst.Ident{ident},
-					Type:  ast.Ident("any"), // Type constraint for the parameter
+					Type:  receiverConstraintAt(original, 0),
 				}},
 			}
 		}
 	case *dst.IndexListExpr:
 		// GenStruct[T, U, ...] - multiple type parameters
+		original := findGenericTypeDecl(file, receiverBaseTypeName(t.X))
 		fields := make([]*dst.Field, 0, len(t.Indices))
-		for _, idx := range t.Indices {
+		for i, idx := range t.Indices {
 			if ident, ok := idx.(*dst.Ident); ok {
 				fields = append(fields, &dst.Field{
 					Names: []*dst.Ident{ident},
-					Type:  ast.Ident("any"), // Type constraint for the parameter
+					Type:  receiverConstraintAt(original, i),
 				})
 			}
 		}
@@ -777,6 +788,63 @@ func extractReceiverTypeParams(recvType dst.Expr) *dst.FieldList {
 		}
 	}
 	return nil
+}
+
+// receiverBaseTypeName returns the local identifier naming a receiver's generic
+// type, e.g. "GenStruct" for the X in GenStruct[T]. Only a plain identifier can be
+// looked up in file's own declarations, so anything else (there is currently no
+// valid Go receiver form that produces anything else) returns "".
+func receiverBaseTypeName(x dst.Expr) string {
+	if ident, ok := x.(*dst.Ident); ok {
+		return ident.Name
+	}
+	return ""
+}
+
+// findGenericTypeDecl searches file's top-level declarations for a generic type
+// declaration named typeName and returns its type parameter list (with each
+// parameter's real constraint, not any), or nil if no such declaration is found in
+// file. The declaration may live in a different file of the same package; that case
+// is not resolved today, so it falls through to the caller's any fallback.
+func findGenericTypeDecl(file *dst.File, typeName string) *dst.FieldList {
+	if file == nil || typeName == "" {
+		return nil
+	}
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			typeSpec, isTypeSpec := spec.(*dst.TypeSpec)
+			if isTypeSpec && typeSpec.Name.Name == typeName {
+				return typeSpec.TypeParams
+			}
+		}
+	}
+	return nil
+}
+
+// receiverConstraintAt returns a clone of the constraint type at position idx in
+// original's type parameter list, or the any identifier if original is nil or has
+// no parameter at that position. original's fields are walked positionally, rather
+// than indexed directly, because a single field can carry multiple names sharing one
+// constraint (e.g. [T, U comparable]).
+func receiverConstraintAt(original *dst.FieldList, idx int) dst.Expr {
+	if original != nil {
+		pos := 0
+		for _, field := range original.List {
+			n := len(field.Names)
+			if n == 0 {
+				n = 1
+			}
+			if idx < pos+n {
+				return util.AssertType[dst.Expr](dst.Clone(field.Type))
+			}
+			pos += n
+		}
+	}
+	return ast.Ident("any") // Type constraint for the parameter
 }
 
 // desugarType desugars parameter type to its original type, if parameter
@@ -841,7 +909,7 @@ func (ip *InstrumentPhase) rewriteHookContextMethods() {
 	}
 
 	// For generic functions, we need to panic the methods that are not supported
-	if findTargetGenericType(ip.targetFunc) != nil {
+	if findTargetGenericType(ip.target, ip.targetFunc) != nil {
 		makeMethodPanic(methodGetParam, "GetParam is unsupported for generic functions")
 		makeMethodPanic(methodGetRetVal, "GetReturnVal is unsupported for generic functions")
 		makeMethodPanic(methodSetParam, "SetParam is unsupported for generic functions")
