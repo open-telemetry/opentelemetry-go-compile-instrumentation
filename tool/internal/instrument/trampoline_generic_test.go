@@ -8,7 +8,6 @@ import (
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // typeParamsT builds a type-parameter list with a single parameter named "T".
@@ -27,6 +26,51 @@ func TestIsTypeParameter(t *testing.T) {
 	assert.False(t, isTypeParameter(&dst.StarExpr{X: dst.NewIdent("T")}, tp))
 }
 
+func TestContainsTypeParameter(t *testing.T) {
+	tp := typeParamsT()
+
+	// Real nested cases must work
+	assert.True(t, containsTypeParameter(dst.NewIdent("T"), tp))
+	assert.True(t, containsTypeParameter(&dst.StarExpr{X: dst.NewIdent("T")}, tp))
+	assert.True(t, containsTypeParameter(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp))
+	assert.True(t, containsTypeParameter(&dst.MapType{Key: dst.NewIdent("string"), Value: dst.NewIdent("T")}, tp))
+
+	// Non-matching identifiers
+	assert.False(t, containsTypeParameter(dst.NewIdent("string"), tp))
+	assert.False(t, containsTypeParameter(dst.NewIdent("T"), nil))
+
+	// False-positive risks must return false
+	assert.False(t, containsTypeParameter(&dst.SelectorExpr{X: dst.NewIdent("pkg"), Sel: dst.NewIdent("T")}, tp), "selector name pkg.T should not match")
+
+	funcType := &dst.FuncType{
+		Params: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("T")}, Type: dst.NewIdent("int")},
+		}},
+	}
+	assert.False(t, containsTypeParameter(funcType, tp), "parameter named T should not match")
+
+	// Anonymous composite types containing type parameters
+	assert.True(t, containsTypeParameter(&dst.ParenExpr{X: dst.NewIdent("T")}, tp), "parenthesized type (T) should match")
+
+	structType := &dst.StructType{
+		Fields: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("X")}, Type: dst.NewIdent("T")},
+		}},
+	}
+	assert.True(t, containsTypeParameter(structType, tp), "struct{ X T } should match")
+
+	interfaceType := &dst.InterfaceType{
+		Methods: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("M")}, Type: &dst.FuncType{
+				Params: &dst.FieldList{List: []*dst.Field{
+					{Type: dst.NewIdent("T")},
+				}},
+			}},
+		}},
+	}
+	assert.True(t, containsTypeParameter(interfaceType, tp), "interface{ M(T) } should match")
+}
+
 func TestReplaceTypeParamsWithAny(t *testing.T) {
 	tp := typeParamsT()
 
@@ -35,34 +79,24 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("pointer to type parameter", func(t *testing.T) {
+	t.Run("pointer to type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.StarExpr{X: dst.NewIdent("T")}, tp)
-		star, ok := got.(*dst.StarExpr)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, star.X)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("slice of type parameter", func(t *testing.T) {
+	t.Run("slice of type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp)
-		arr, ok := got.(*dst.ArrayType)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, arr.Elt)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("map with type parameter key and value", func(t *testing.T) {
+	t.Run("map with type parameter key and value becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.MapType{Key: dst.NewIdent("T"), Value: dst.NewIdent("T")}, tp)
-		m, ok := got.(*dst.MapType)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, m.Key)
-		assert.IsType(t, &dst.InterfaceType{}, m.Value)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("channel of type parameter", func(t *testing.T) {
+	t.Run("channel of type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.ChanType{Dir: dst.SEND, Value: dst.NewIdent("T")}, tp)
-		ch, ok := got.(*dst.ChanType)
-		require.True(t, ok)
-		assert.Equal(t, dst.SEND, ch.Dir)
-		assert.IsType(t, &dst.InterfaceType{}, ch.Value)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
 	t.Run("generic index expression becomes interface{}", func(t *testing.T) {
@@ -78,14 +112,12 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("variadic type parameter preserves ellipsis", func(t *testing.T) {
+	t.Run("variadic type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.Ellipsis{Elt: dst.NewIdent("T")}, tp)
-		ell, ok := got.(*dst.Ellipsis)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, ell.Elt)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("func type processes params and results", func(t *testing.T) {
+	t.Run("func type with type parameter becomes interface{}", func(t *testing.T) {
 		fn := &dst.FuncType{
 			Params: &dst.FieldList{List: []*dst.Field{
 				{Names: []*dst.Ident{dst.NewIdent("x")}, Type: dst.NewIdent("T")},
@@ -95,15 +127,7 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 			}},
 		}
 		got := replaceTypeParamsWithAny(fn, tp)
-		newFn, ok := got.(*dst.FuncType)
-		require.True(t, ok)
-		require.Len(t, newFn.Params.List, 1)
-		require.Len(t, newFn.Results.List, 1)
-		// The named parameter keeps its name but its type becomes interface{}.
-		require.Len(t, newFn.Params.List[0].Names, 1)
-		assert.Equal(t, "x", newFn.Params.List[0].Names[0].Name)
-		assert.IsType(t, &dst.InterfaceType{}, newFn.Params.List[0].Type)
-		assert.IsType(t, &dst.InterfaceType{}, newFn.Results.List[0].Type)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
 	t.Run("non-type-param identifier is returned unchanged", func(t *testing.T) {
