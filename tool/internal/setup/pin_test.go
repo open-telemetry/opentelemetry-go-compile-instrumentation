@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/token"
@@ -812,6 +813,90 @@ go 1.25
 
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/tool/cmd/otelc")
+}
+
+func TestUpdateToolFile_SteadyStateSkipsModTidy(t *testing.T) {
+	trueValue := true
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte(`module example.com/test
+
+go 1.25
+`),
+		0o644,
+	))
+
+	toolFile := filepath.Join(dir, ToolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	// First run canonicalizes the tool file and adds the otelc require.
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+
+	toolFileAfterFirst, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	goModAfterFirst, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	require.NoError(t, err)
+
+	// Second run changes nothing, so go mod tidy must be skipped.
+	var logs bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), debugLogger)
+
+	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
+	require.Contains(t, logs.String(), "skipping go mod tidy")
+
+	toolFileAfterSecond, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Equal(t, string(toolFileAfterFirst), string(toolFileAfterSecond))
+
+	goModAfterSecond, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	require.NoError(t, err)
+	require.Equal(t, string(goModAfterFirst), string(goModAfterSecond))
+}
+
+func TestUpdateToolFile_MissingGoSumRunsTidy(t *testing.T) {
+	trueValue := true
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte(`module example.com/test
+
+go 1.25
+`),
+		0o644,
+	))
+
+	toolFile := filepath.Join(dir, ToolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+
+	// A hand-deleted go.sum must force a tidy even when nothing else changed.
+	goSumPath := filepath.Join(dir, "go.sum")
+	require.NoError(t, os.Remove(goSumPath))
+
+	var logs bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), debugLogger)
+
+	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
+	require.NotContains(t, logs.String(), "skipping go mod tidy")
+	require.FileExists(t, goSumPath, "go mod tidy should have restored go.sum")
 }
 
 func TestUpdateToolFile_ParseError(t *testing.T) {
