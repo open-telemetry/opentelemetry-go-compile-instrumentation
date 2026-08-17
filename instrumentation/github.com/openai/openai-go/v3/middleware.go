@@ -234,19 +234,24 @@ func handleNonStreamingResponse(
 
 func parseChatRequest(body []byte) (string, []attribute.KeyValue) {
 	var req struct {
-		Model            string   `json:"model"`
-		MaxTokens        *int64   `json:"max_tokens,omitempty"`
-		Temperature      *float64 `json:"temperature,omitempty"`
-		TopP             *float64 `json:"top_p,omitempty"`
-		FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
-		PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
+		Model               string   `json:"model"`
+		MaxTokens           *int64   `json:"max_tokens,omitempty"`
+		MaxCompletionTokens *int64   `json:"max_completion_tokens,omitempty"`
+		Temperature         *float64 `json:"temperature,omitempty"`
+		TopP                *float64 `json:"top_p,omitempty"`
+		FrequencyPenalty    *float64 `json:"frequency_penalty,omitempty"`
+		PresencePenalty     *float64 `json:"presence_penalty,omitempty"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		return "", nil
 	}
 
 	var attrs []attribute.KeyValue
-	if req.MaxTokens != nil {
+	// Prefer max_completion_tokens over deprecated max_tokens.
+	switch {
+	case req.MaxCompletionTokens != nil:
+		attrs = append(attrs, semconv.GenAIRequestMaxTokens(*req.MaxCompletionTokens))
+	case req.MaxTokens != nil:
 		attrs = append(attrs, semconv.GenAIRequestMaxTokens(*req.MaxTokens))
 	}
 	if req.Temperature != nil {
