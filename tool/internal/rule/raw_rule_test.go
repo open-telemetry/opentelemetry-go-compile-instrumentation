@@ -106,6 +106,24 @@ placement: after
 			yaml:    "target: main\n  bad: [unterminated",
 			wantErr: true,
 		},
+		{
+			name:   "valid raw with template tag",
+			ruleID: "templated-raw",
+			yaml: `
+target: main
+func: Bar
+raw: "println({{ .FuncArgument 0 }})"
+`,
+			check: func(t *testing.T, r *InstRawRule) {
+				assert.Equal(t, `println({{ .FuncArgument 0 }})`, r.Raw)
+			},
+		},
+		{
+			name:    "invalid template syntax in raw is rejected",
+			ruleID:  "bad-template-raw",
+			yaml:    "target: main\nfunc: Bar\nraw: \"println({{ FuncArgument 0 )\"",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
