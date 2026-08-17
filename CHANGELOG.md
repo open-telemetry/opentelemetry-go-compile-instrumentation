@@ -13,6 +13,7 @@ The full list of changes can be found in the compare view for the respective rel
 ### Changed
 
 - ⚠️ **Breaking Change:** Template variable `{{ FuncName }}` should now be accessed with `{{ .FuncName }}`. ([#729](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/729))
+- Reduce per-request allocations in the `net/http` client and server hooks: hook state is passed via a typed struct instead of a `map[string]interface{}`, and debug log arguments are no longer built when debug logging is off. ([#TBD](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/TBD))
 
 ### Deprecated
 
