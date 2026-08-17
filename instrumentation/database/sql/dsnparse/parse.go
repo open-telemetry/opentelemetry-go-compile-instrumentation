@@ -310,7 +310,11 @@ func parseMySQLDSN(dsn string) DSNInfo {
 	} else {
 		// Non-standard: no parentheses around the address.
 		// Locate the '/' that separates the address from the database name.
-		if sl := strings.IndexByte(rest, '/'); sl >= 0 {
+		sl := strings.IndexByte(rest, '/')
+		if strings.HasPrefix(rest, "unix:/") {
+			sl = strings.LastIndexByte(rest, '/')
+		}
+		if sl >= 0 {
 			addrStr = rest[:sl]
 			dbPart = rest[sl:]
 		} else {

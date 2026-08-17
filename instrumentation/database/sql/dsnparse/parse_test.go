@@ -255,6 +255,27 @@ func TestParseDSN_MySQL(t *testing.T) {
 			wantDB:   "proddb",
 		},
 		{
+			name:     "unix socket",
+			dsn:      "unix:/tmp/mysql.sock/db",
+			wantHost: "/tmp/mysql.sock",
+			wantPort: "",
+			wantDB:   "db",
+		},
+		{
+			name:     "unix socket with credentials",
+			dsn:      "user:pass@unix:/tmp/mysql.sock/mydb",
+			wantHost: "/tmp/mysql.sock",
+			wantPort: "",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "unix socket with empty db",
+			dsn:      "unix:/tmp/mysql.sock/",
+			wantHost: "/tmp/mysql.sock",
+			wantPort: "",
+			wantDB:   "",
+		},
+		{
 			name:     "empty db after slash",
 			dsn:      "user:pass@tcp(host:3306)/",
 			wantHost: "host",

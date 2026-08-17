@@ -221,6 +221,14 @@ func TestDBClient(t *testing.T) {
 				wantDb:     "inventory",
 			},
 			{
+				name:       "MySQL non-parenthesized unix socket",
+				driverName: "mysql",
+				dsn:        "user:pass@unix:/tmp/mysql.sock/inventory",
+				wantAddr:   "/tmp/mysql.sock",
+				wantPort:   0,
+				wantDb:     "inventory",
+			},
+			{
 				name:       "Postgres URL format with port",
 				driverName: "postgres",
 				dsn:        "postgres://user:pass@localhost:5432/reporting?sslmode=disable",
