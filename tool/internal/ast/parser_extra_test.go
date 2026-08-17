@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"go/token"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,8 +48,8 @@ func TestFindPosition(t *testing.T) {
 	t.Run("unknown node returns invalid position", func(t *testing.T) {
 		// A node the decorator never saw maps to no AST node.
 		pos := p.FindPosition(Ident("orphan"))
-		assert.Equal(t, -1, pos.Line)
-		assert.Equal(t, -1, pos.Column)
+		assert.Equal(t, token.Position{}, pos)
+		assert.False(t, pos.IsValid())
 	})
 }
 

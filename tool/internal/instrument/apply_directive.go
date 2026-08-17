@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // applyDirectiveRule finds all functions annotated with the directive, renders
@@ -31,6 +32,7 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 	imports := ast.ImportAliasMap(root)
 	for _, match := range matches {
 		funcDecl := match.Func
+		util.Assert(funcDecl.Body != nil, "function must have a body")
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`

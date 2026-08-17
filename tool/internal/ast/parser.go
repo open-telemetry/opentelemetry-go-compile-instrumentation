@@ -84,10 +84,11 @@ func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
 }
 
 // FindPosition finds the source position of a node in the AST.
+// It returns a zero-value token.Position{} when the node is unmapped.
 func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	astNode := ap.dec.Ast.Nodes[node]
 	if astNode == nil {
-		return token.Position{Filename: "", Line: -1, Column: -1} // Invalid
+		return token.Position{}
 	}
 	return ap.fset.Position(astNode.Pos())
 }
