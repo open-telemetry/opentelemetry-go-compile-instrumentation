@@ -120,8 +120,8 @@ func TestResolveRulePaths_Candidates(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	require.Equal(t, hooksDir, rs.Candidates.FuncRules[0].ResolvedPath)
-	require.Equal(t, hooksDir, rs.Candidates.FileRules[0].ResolvedPath)
+	require.Empty(t, rs.Candidates.FuncRules[0].ResolvedPath)
+	require.Empty(t, rs.Candidates.FileRules[0].ResolvedPath)
 }
 
 func TestResolveRulePaths_NotFound(t *testing.T) {

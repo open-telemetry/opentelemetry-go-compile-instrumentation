@@ -165,15 +165,29 @@ func (irs *InstRuleSet) String() string {
 	return fmt.Sprintf("{%s: %s}", irs.ModulePath, strings.Join(parts, ", "))
 }
 
+// HasAppliedRules reports whether setup-time AST/file matching attached any
+// rules to this set. Toolexec uses this, not IsEmpty, so a Candidates-only
+// entry can be stored for later file matching without triggering injection.
+func (irs *InstRuleSet) HasAppliedRules() bool {
+	return irs != nil && !irs.appliedRulesEmpty()
+}
+
 func (irs *InstRuleSet) IsEmpty() bool {
-	return irs == nil ||
-		(len(irs.FuncRules) == 0 &&
-			len(irs.StructRules) == 0 &&
-			len(irs.RawRules) == 0 &&
-			len(irs.CallRules) == 0 &&
-			len(irs.DirectiveRules) == 0 &&
-			len(irs.DeclRules) == 0 &&
-			len(irs.FileRules) == 0)
+	return irs == nil || (irs.appliedRulesEmpty() && irs.Candidates.isEmpty())
+}
+
+// appliedRulesEmpty inspects the setup-time file-keyed maps and FileRules
+// slice. Keep in sync with candidatesFromRules and matchOneRule when adding
+// a new InstRule type; a missed case here would silently omit that type from
+// emptiness (no panic).
+func (irs *InstRuleSet) appliedRulesEmpty() bool {
+	return len(irs.FuncRules) == 0 &&
+		len(irs.StructRules) == 0 &&
+		len(irs.RawRules) == 0 &&
+		len(irs.CallRules) == 0 &&
+		len(irs.DirectiveRules) == 0 &&
+		len(irs.DeclRules) == 0 &&
+		len(irs.FileRules) == 0
 }
 
 // AddRule is a generic method that adds any type of rule to the appropriate map.

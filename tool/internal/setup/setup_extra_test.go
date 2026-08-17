@@ -96,9 +96,8 @@ func TestPreciseMatching_NoSources(t *testing.T) {
 		Func:         "Foo",
 	}
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
-	res, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{funcRule}, set)
+	res, err := applyFileMatch(context.Background(), dep, []rule.InstRule{funcRule}, set)
 	require.NoError(t, err)
 	require.True(t, res.IsEmpty())
 }
@@ -119,9 +118,8 @@ func TestPreciseMatching_CtxCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
-	_, err := sp.preciseMatching(ctx, dep, []rule.InstRule{funcRule}, set)
+	_, err := applyFileMatch(ctx, dep, []rule.InstRule{funcRule}, set)
 	require.ErrorIs(t, err, context.Canceled)
 }
 
@@ -137,9 +135,8 @@ func TestPreciseMatching_MatchOneRuleError(t *testing.T) {
 		Signature:    &rule.FuncSignature{Args: []string{"[]invalid"}},
 	}
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
-	_, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{badRule}, set)
+	_, err := applyFileMatch(context.Background(), dep, []rule.InstRule{badRule}, set)
 	require.Error(t, err)
 }
 

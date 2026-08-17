@@ -5,6 +5,7 @@ package match
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -30,7 +31,8 @@ type Input struct {
 	Rules   []rule.InstRule
 	Log     Logger
 	// Dep is included in match log lines for compatibility with setup-time logs.
-	Dep any
+	// fmt.Stringer (not *setup.Dependency) avoids an import cycle with setup.
+	Dep fmt.Stringer
 }
 
 // Apply attaches file-level matches to in.Set. File rules are recorded
@@ -40,6 +42,11 @@ func Apply(ctx context.Context, in Input) error {
 	preciseRules := make([]rule.InstRule, 0, len(in.Rules))
 	for _, r := range in.Rules {
 		if fr, ok := r.(*rule.InstFileRule); ok {
+			// File rules that passed target+version filtering are recorded in
+			// both Set.FileRules (consumed by toolexec today) and
+			// Candidates.FileRules (same pointers, identical JSON). That
+			// duplication is the migration target: toolexec can later read
+			// Candidates.FileRules without a schema change.
 			in.Set.AddFileRule(fr)
 			logInfo(in.Log, "Match file rule", "rule", fr, "dep", in.Dep)
 			continue
@@ -48,7 +55,7 @@ func Apply(ctx context.Context, in Input) error {
 	}
 
 	if len(preciseRules) == 0 {
-		if !in.Set.IsEmpty() && len(in.Sources) > 0 {
+		if in.Set.HasAppliedRules() && len(in.Sources) > 0 {
 			name, err := ast.ParsePackageName(in.Sources[0])
 			if err != nil {
 				return err
@@ -79,7 +86,7 @@ func applyPrecise(ctx context.Context, in Input, rules []rule.InstRule) error {
 		ruleFilters = append(ruleFilters, ruleFilter{rule: r, where: f})
 	}
 
-	isTest := IsTestBuild(in.Sources)
+	isTest := isTestBuild(in.Sources)
 
 	for _, source := range in.Sources {
 		if err := ctx.Err(); err != nil {
@@ -115,7 +122,7 @@ type ruleFilter struct {
 	where Filter // nil means no where clause — apply unconditionally
 }
 
-// IsTestBuild reports whether a compile invocation is part of a `go test` run.
+// isTestBuild reports whether a compile invocation is part of a `go test` run.
 // The Go toolchain only ever feeds these inputs to the compiler while building
 // a test binary: a package augmented with its in-package _test.go files, the
 // external xxx_test package (whose sources are also _test.go files), and the
@@ -130,7 +137,7 @@ type ruleFilter struct {
 // no test-only variant of it — so is_test cannot gate that package's production
 // code. The external xxx_test package and any in-package _test.go files are
 // still detected.
-func IsTestBuild(sources []string) bool {
+func isTestBuild(sources []string) bool {
 	for _, src := range sources {
 		base := filepath.Base(src)
 		if base == "_testmain.go" || strings.HasSuffix(base, "_test.go") {
@@ -141,6 +148,8 @@ func IsTestBuild(sources []string) bool {
 }
 
 func matchOneRule(tree *dst.File, source string, r rule.InstRule, in Input) error {
+	// Keep in sync with candidatesFromRules and InstRuleSet.IsEmpty /
+	// InstRuleCandidates.isEmpty when adding a new InstRule type.
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		_, ok, err := ast.FindFuncDecl(tree, rt)

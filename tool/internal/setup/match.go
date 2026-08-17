@@ -217,27 +217,6 @@ func (sp *SetupPhase) runMatch(
 	return set, nil
 }
 
-// preciseMatching is a test helper that runs file/AST matching without the
-// target+version filter. Production matching goes through runMatch.
-func (sp *SetupPhase) preciseMatching(
-	ctx context.Context,
-	dep *Dependency,
-	rules []rule.InstRule,
-	set *rule.InstRuleSet,
-) (*rule.InstRuleSet, error) {
-	err := match.Apply(ctx, match.Input{
-		Set:     set,
-		Sources: dep.Sources,
-		Rules:   rules,
-		Log:     sp,
-		Dep:     dep,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return set, nil
-}
-
 func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 	var filesToProcess []string
 

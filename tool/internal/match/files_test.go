@@ -22,27 +22,6 @@ func writeMatchSource(t *testing.T, name, src string) string {
 	return path
 }
 
-func TestIsTestBuild(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		sources []string
-		want    bool
-	}{
-		{name: "production sources", sources: []string{"handler.go"}, want: false},
-		{name: "in-package test file", sources: []string{"handler.go", "handler_test.go"}, want: true},
-		{name: "generated testmain", sources: []string{"_testmain.go"}, want: true},
-		{name: "empty", sources: nil, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, match.IsTestBuild(tt.sources))
-		})
-	}
-}
-
 func TestApply_FileRuleSetsPackageName(t *testing.T) {
 	src := writeMatchSource(t, "mypkg.go", "package mypkg\n")
 	fileRule := &rule.InstFileRule{

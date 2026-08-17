@@ -60,16 +60,33 @@ func TestInstRuleSetIsEmpty(t *testing.T) {
 		irs := NewInstRuleSet("m")
 		irs.AddFuncRule(file, &InstFuncRule{})
 		assert.False(t, irs.IsEmpty())
+		assert.True(t, irs.HasAppliedRules())
 	})
 	t.Run("file rule makes it non-empty", func(t *testing.T) {
 		irs := NewInstRuleSet("m")
 		irs.AddFileRule(&InstFileRule{})
 		assert.False(t, irs.IsEmpty())
+		assert.True(t, irs.HasAppliedRules())
 	})
 	t.Run("struct rule makes it non-empty", func(t *testing.T) {
 		irs := NewInstRuleSet("m")
 		irs.AddStructRule(file, &InstStructRule{})
 		assert.False(t, irs.IsEmpty())
+		assert.True(t, irs.HasAppliedRules())
+	})
+	t.Run("candidates-only set is not empty", func(t *testing.T) {
+		irs := NewInstRuleSet("m")
+		irs.SetCandidates([]InstRule{
+			&InstFuncRule{InstBaseRule: InstBaseRule{Name: "later"}},
+		})
+		assert.False(t, irs.IsEmpty())
+		assert.False(t, irs.HasAppliedRules())
+	})
+	t.Run("empty candidates struct is empty", func(t *testing.T) {
+		irs := NewInstRuleSet("m")
+		irs.Candidates = &InstRuleCandidates{}
+		assert.True(t, irs.IsEmpty())
+		assert.False(t, irs.HasAppliedRules())
 	})
 }
 

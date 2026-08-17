@@ -87,7 +87,7 @@ func runTest(t *testing.T, testName string) {
 	// source_test.go (a test build — a file the Go toolchain only compiles
 	// under `go test`). The chosen name is preserved into the temp dir so the
 	// compiled unit is genuinely a _test.go file, which is what is_test gates
-	// on. This mirrors match.IsTestBuild: test-ness is a source-set property,
+	// on. This mirrors match.isTestBuild: test-ness is a source-set property,
 	// not an import-path suffix.
 	srcName, compiledName := sourceFileName, mainGoFileName
 	if testSrc := filepath.Join(testdataDir, goldenDir, testName, sourceTestFileName); util.PathExists(testSrc) {
@@ -193,7 +193,7 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 			ruleData, _ := yaml.Marshal(props)
 
 			// The golden harness has no setup phase, so the where.file filter
-			// that setup.preciseMatching would evaluate is applied inline here.
+			// that match.Apply would evaluate is applied inline here.
 			// A rule whose file predicate does not match the source is skipped,
 			// exactly as it would be gated out during matching.
 			if !whereFileMatches(t, ruleData, p.isTest, sourceTree) {
@@ -240,14 +240,14 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 }
 
 // whereFileMatches evaluates the rule's where.file predicate against the
-// already-parsed source tree, mirroring the gating that setup.preciseMatching
+// already-parsed source tree, mirroring the gating that match.Apply
 // performs. It returns true when there is no file predicate. The golden harness
 // builds the matched rule set by hand (no setup phase), so this keeps fixtures
 // honest: a rule whose file filter does not match is gated out and produces no
 // instrumentation. The caller parses the tree once and shares it across rules.
 //
 // isTest reports whether the fixture is a test build (its source is a
-// source_test.go file), mirroring match.IsTestBuild; the is_test predicate is
+// source_test.go file), mirroring match.isTestBuild; the is_test predicate is
 // evaluated against it.
 func whereFileMatches(t *testing.T, ruleData []byte, isTest bool, tree *dst.File) bool {
 	t.Helper()

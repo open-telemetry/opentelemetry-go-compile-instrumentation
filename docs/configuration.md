@@ -170,10 +170,12 @@ dependency. Each entry includes:
 
 - `module_path` — the import path that was instrumented
 - `version` — the resolved dependency version (for example `v1.4.2`)
-- file-keyed maps (`func_rules`, `file_rules`, …) — setup-time matches keyed by
-  absolute source path; toolexec still applies these today
+- setup-time matches: `func_rules` (keyed by absolute source path) and
+  `file_rules` (a flat array — applies unconditionally) among others; toolexec
+  still applies these today
 - `candidates` — the same package's rules after `target` and `version` filtering,
-  not keyed by source path (package-level schema for later toolexec file matching)
+  grouped by rule type (`func_rules`, `file_rules`, …) but not keyed by source path
+  (package-level schema for later toolexec file matching)
 
 Inspect it to confirm that the instrumentations you expect are active:
 

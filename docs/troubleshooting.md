@@ -31,8 +31,9 @@ and the build continues without injecting any hooks. This is not a build error.
 
 The file `.otelc-build/matched.json` is written after every build and lists every package that
 matched a dependency. An empty array (`[]`) confirms that no rules matched. Each object has
-`module_path`, a resolved `version`, file-keyed rule maps, and a `candidates` list of
-target+version filtered rules (not keyed by source path):
+`module_path`, a resolved `version`, setup-time matches (`func_rules` keyed by source path,
+`file_rules` as a flat array, among others), and `candidates` grouped by rule type
+(`func_rules`, `file_rules`, …) after `target` and `version` filtering:
 
 ```bash
 cat .otelc-build/matched.json | jq '.[].module_path'
@@ -121,7 +122,7 @@ Run `otelc cleanup` to remove them.
 | File | Contents |
 | --- | --- |
 | `debug.log` | Full build log, appended each run (not truncated). |
-| `matched.json` | Packages that matched; each entry has `module_path`, resolved `version`, file-keyed rules, and `candidates`. Empty array when nothing matched. |
+| `matched.json` | Packages that matched; each entry has `module_path`, resolved `version`, setup-time matches (`func_rules` keyed by path, `file_rules` as a flat array, among others), and `candidates` grouped by rule type. Empty array when nothing matched. |
 | `debug/main/otelc.runtime.go` | Generated helper file for runtime hooks and file injections. |
 | `debug/main/go.mod` | Copy of `go.mod` after `otelc` adds its `replace` directives. |
 | `gocache/` | Persistent Go build cache used across `otelc` builds. |

@@ -24,8 +24,26 @@ type InstRuleCandidates struct {
 
 // SetCandidates records the target+version filtered rules for this package.
 // Passing an empty slice clears Candidates so legacy matched.json stays compact.
+//
+// File rules also land in InstRuleSet.FileRules (same pointers). That copy is
+// intentional until toolexec switches from FileRules to Candidates.FileRules.
 func (irs *InstRuleSet) SetCandidates(rules []InstRule) {
 	irs.Candidates = candidatesFromRules(rules)
+}
+
+func (c *InstRuleCandidates) isEmpty() bool {
+	if c == nil {
+		return true
+	}
+	// Keep in sync with candidatesFromRules, matchOneRule, and
+	// InstRuleSet.appliedRulesEmpty when adding a new InstRule type.
+	return len(c.RawRules) == 0 &&
+		len(c.FuncRules) == 0 &&
+		len(c.StructRules) == 0 &&
+		len(c.CallRules) == 0 &&
+		len(c.DirectiveRules) == 0 &&
+		len(c.DeclRules) == 0 &&
+		len(c.FileRules) == 0
 }
 
 func candidatesFromRules(rules []InstRule) *InstRuleCandidates {
@@ -34,6 +52,8 @@ func candidatesFromRules(rules []InstRule) *InstRuleCandidates {
 	}
 	c := &InstRuleCandidates{}
 	for _, r := range rules {
+		// Keep in sync with matchOneRule and InstRuleSet.IsEmpty /
+		// InstRuleCandidates.isEmpty when adding a new InstRule type.
 		switch rt := r.(type) {
 		case *InstRawRule:
 			c.RawRules = append(c.RawRules, rt)
