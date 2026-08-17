@@ -51,37 +51,62 @@ func TestBaseTypeName(t *testing.T) {
 		{
 			name:     "array type",
 			typeSrc:  "[]int",
-			expected: "int",
+			expected: "[]int",
 		},
 		{
 			name:     "nested array type",
 			typeSrc:  "[][]string",
-			expected: "string",
+			expected: "[][]string",
 		},
 		{
 			name:     "array of pointer type",
 			typeSrc:  "[]*int",
-			expected: "int",
+			expected: "[]int",
 		},
 		{
 			name:     "array of package qualified type",
 			typeSrc:  "[]pkg.Type",
-			expected: "Type",
+			expected: "[]Type",
 		},
 		{
 			name:     "ellipsis type",
 			typeSrc:  "...int",
-			expected: "int",
+			expected: "...int",
 		},
 		{
 			name:     "ellipsis of pointer type",
 			typeSrc:  "...*string",
-			expected: "string",
+			expected: "...string",
 		},
 		{
 			name:     "ellipsis of package qualified type",
 			typeSrc:  "...pkg.Type",
-			expected: "Type",
+			expected: "...Type",
+		},
+		{
+			name:     "map type",
+			typeSrc:  "map[string]int",
+			expected: "map[string]int",
+		},
+		{
+			name:     "map of package qualified types",
+			typeSrc:  "map[pkg.Key]*pkg.Val",
+			expected: "map[Key]Val",
+		},
+		{
+			name:     "channel type",
+			typeSrc:  "chan bool",
+			expected: "chan bool",
+		},
+		{
+			name:     "receive channel type",
+			typeSrc:  "<-chan int",
+			expected: "<-chan int",
+		},
+		{
+			name:     "send channel type",
+			typeSrc:  "chan<- string",
+			expected: "chan<- string",
 		},
 	}
 
@@ -126,6 +151,61 @@ func H1Before(ctx hook.HookContext, p1 string, p2 int) {}`,
 			before: true,
 		},
 		{
+			name: "valid before hook - slice and variadic compatibility",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *[]string, param1 *[]int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 []string, p2 ...int) {}`,
+			before: true,
+		},
+		{
+			name: "valid before hook - map and chan types",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *map[string]int, param1 *chan bool) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 map[string]int, p2 chan bool) {}`,
+			before: true,
+		},
+		{
+			name: "valid before hook - any/interface{} wildcard",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *string) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 any) {}`,
+			before: true,
+		},
+		{
+			name: "valid before hook - slice of any matching variadic interface{}",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *[]any) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 ...interface{}) {}`,
+			before: true,
+		},
+		{
+			name: "valid before hook - slice of concrete type matching variadic interface{}",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *[]SpanEndOption) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 ...interface{}) {}`,
+			before: true,
+		},
+		{
 			name: "valid after hook - pointer types match value types",
 			trampSrc: `
 package main
@@ -149,7 +229,7 @@ func H1Before(p1 string) {}`,
 			errorMsg:    "expected 2 params, got 1",
 		},
 		{
-			name: "invalid - type mismatch",
+			name: "invalid - type mismatch basic",
 			trampSrc: `
 package main
 func OtelBeforeTrampoline(param0 *string, param1 *int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
@@ -159,7 +239,46 @@ import "go.opentelemetry.io/otelc/pkg/hook"
 func H1Before(ctx hook.HookContext, p1 string, p2 string) {}`,
 			before:      true,
 			expectError: true,
-			errorMsg:    "type mismatch",
+			errorMsg:    "type mismatch, expected int, got string",
+		},
+		{
+			name: "invalid - scalar vs slice mismatch",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *string) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 []string) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch, expected string, got []string",
+		},
+		{
+			name: "invalid - map vs chan mismatch",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *map[string]int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 chan bool) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch, expected map[string]int, got chan bool",
+		},
+		{
+			name: "invalid - slice element type mismatch",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *[]string) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 []int) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch, expected []string, got []int",
 		},
 	}
 

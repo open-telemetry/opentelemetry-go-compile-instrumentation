@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/token"
 	"strconv"
+	"strings"
 
 	"github.com/dave/dst"
 
@@ -222,27 +223,142 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 	return target, nil
 }
 
-// baseTypeName returns the unqualified type name, stripping pointers and package prefixes.
-// This is needed because trampolines use pointer types (*string) while hooks use value types (string),
+func arrayTypeName(t *dst.ArrayType) string {
+	lenStr := ""
+	if t.Len != nil {
+		switch l := t.Len.(type) {
+		case *dst.BasicLit:
+			lenStr = l.Value
+		case *dst.Ident:
+			lenStr = l.Name
+		}
+	}
+	return "[" + lenStr + "]" + baseTypeName(t.Elt)
+}
+
+func chanTypeName(t *dst.ChanType) string {
+	switch t.Dir {
+	case dst.SEND:
+		return "chan<- " + baseTypeName(t.Value)
+	case dst.RECV:
+		return "<-chan " + baseTypeName(t.Value)
+	default:
+		return "chan " + baseTypeName(t.Value)
+	}
+}
+
+func fieldListTypes(fl *dst.FieldList) []string {
+	if fl == nil {
+		return nil
+	}
+	var res []string
+	for _, f := range fl.List {
+		fType := baseTypeName(f.Type)
+		if len(f.Names) > 0 {
+			for range f.Names {
+				res = append(res, fType)
+			}
+		} else {
+			res = append(res, fType)
+		}
+	}
+	return res
+}
+
+func funcTypeName(t *dst.FuncType) string {
+	params := fieldListTypes(t.Params)
+	results := fieldListTypes(t.Results)
+	resStr := ""
+	if len(results) == 1 {
+		resStr = " " + results[0]
+	} else if len(results) > 1 {
+		resStr = " (" + strings.Join(results, ", ") + ")"
+	}
+	return "func(" + strings.Join(params, ", ") + ")" + resStr
+}
+
+// baseTypeName extracts the normalized type name for signature matching, stripping package prefixes
+// and outermost pointer indirection so that target types and hook types can be compared directly.
+// This is necessary because trampolines take pointers (*T) to allow mutating/capturing arguments and return values,
 // and hooks may use package-qualified types (hook.HookContext) while trampolines use local types (HookContext).
-// Examples: *int → int, pkg.Type → Type, *pkg.Type → Type, interface{} → interface{}, []int → int, ...string → string
+// Examples: *int → int, pkg.Type → Type, *pkg.Type → Type, interface{} → interface{}, []int → []int, ...string → ...string
 func baseTypeName(expr dst.Expr) string {
+	if expr == nil {
+		return ""
+	}
 	switch t := expr.(type) {
 	case *dst.Ident:
+		if t.Name == "any" {
+			return trampolineInterfaceType
+		}
 		return t.Name
 	case *dst.StarExpr:
 		return baseTypeName(t.X)
 	case *dst.SelectorExpr:
 		return t.Sel.Name
 	case *dst.ArrayType:
-		return baseTypeName(t.Elt)
+		return arrayTypeName(t)
 	case *dst.Ellipsis:
-		return baseTypeName(t.Elt)
+		return "..." + baseTypeName(t.Elt)
+	case *dst.MapType:
+		return "map[" + baseTypeName(t.Key) + "]" + baseTypeName(t.Value)
+	case *dst.ChanType:
+		return chanTypeName(t)
 	case *dst.InterfaceType:
-		return trampolineInterfaceType
+		if t.Methods == nil || len(t.Methods.List) == 0 {
+			return trampolineInterfaceType
+		}
+		return "interface{...}"
+	case *dst.StructType:
+		if t.Fields == nil || len(t.Fields.List) == 0 {
+			return "struct{}"
+		}
+		return "struct{...}"
+	case *dst.FuncType:
+		return funcTypeName(t)
+	case *dst.IndexExpr:
+		return baseTypeName(t.X) + "[" + baseTypeName(t.Index) + "]"
+	case *dst.IndexListExpr:
+		indices := make([]string, 0, len(t.Indices))
+		for _, idx := range t.Indices {
+			indices = append(indices, baseTypeName(idx))
+		}
+		return baseTypeName(t.X) + "[" + strings.Join(indices, ", ") + "]"
 	default:
 		return ""
 	}
+}
+
+// isAnyOrInterface reports whether the type string represents an empty interface (any / interface{}).
+func isAnyOrInterface(s string) bool {
+	return s == "any" || s == trampolineInterfaceType
+}
+
+// sliceOrEllipsisElt returns the element type and true if s is a slice or ellipsis type.
+func sliceOrEllipsisElt(s string) (string, bool) {
+	if strings.HasPrefix(s, "[]") {
+		return s[2:], true
+	}
+	if strings.HasPrefix(s, "...") {
+		return s[3:], true
+	}
+	return "", false
+}
+
+// hookTypeMatches reports whether hookBase matches the expected trampBase type.
+func hookTypeMatches(trampBase, hookBase string) bool {
+	if isAnyOrInterface(hookBase) {
+		return true
+	}
+	if trampBase != "" && (trampBase == hookBase || (isAnyOrInterface(trampBase) && isAnyOrInterface(hookBase))) {
+		return true
+	}
+	if tElt, tOk := sliceOrEllipsisElt(trampBase); tOk {
+		if hElt, hOk := sliceOrEllipsisElt(hookBase); hOk {
+			return tElt == hElt || isAnyOrInterface(hElt) || (isAnyOrInterface(tElt) && isAnyOrInterface(hElt))
+		}
+	}
+	return false
 }
 
 // checkHookDecl checks if the hook function declaration is correct, i.e. if they
@@ -271,7 +387,7 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 		for i, trampField := range beforeTrampParams.List {
 			trampBase := baseTypeName(trampField.Type)
 			hookBase := baseTypeName(beforeHookParams.List[i+1].Type)
-			if hookBase != trampolineInterfaceType && hookBase != "any" && trampBase != hookBase {
+			if !hookTypeMatches(trampBase, hookBase) {
 				return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 					i+1, trampBase, hookBase)
 			}
@@ -295,7 +411,7 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	for i, trampField := range afterTrampParams.List {
 		trampBase := baseTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
-		if hookBase != trampolineInterfaceType && hookBase != "any" && trampBase != hookBase {
+		if !hookTypeMatches(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 				i, trampBase, hookBase)
 		}
