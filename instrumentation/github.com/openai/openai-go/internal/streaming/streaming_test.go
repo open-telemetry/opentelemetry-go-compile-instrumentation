@@ -381,3 +381,62 @@ func assertSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, 
 	}
 	t.Errorf("attribute %q not found", key)
 }
+
+// TestStreamingReader_CacheReadTokens verifies that cached prompt tokens
+// reported in the final usage chunk (stream_options: {"include_usage": true})
+// are recorded, and that they are not added to gen_ai.usage.input_tokens:
+// OpenAI already counts them inside prompt_tokens.
+func TestStreamingReader_CacheReadTokens(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-stream")
+
+	streamData := "data: {\"id\":\"chatcmpl-cache\",\"model\":\"gpt-4o-mini\",\"choices\":" +
+		"[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]," +
+		"\"usage\":{\"prompt_tokens\":2048,\"completion_tokens\":64,\"total_tokens\":2112," +
+		"\"prompt_tokens_details\":{\"cached_tokens\":1024}}}\n\ndata: [DONE]\n\n"
+
+	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	attrs := spans[0].Attributes()
+	assertInt64Attribute(t, attrs, "gen_ai.usage.cache_read.input_tokens", 1024)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 2048)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 2112)
+}
+
+// TestStreamingReader_OmitsCacheReadTokensWhenUnused verifies the attribute is
+// absent rather than recorded as zero when the stream reported no cache hit.
+func TestStreamingReader_OmitsCacheReadTokensWhenUnused(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-stream")
+
+	streamData := "data: {\"id\":\"chatcmpl-nocache\",\"model\":\"gpt-4o-mini\",\"choices\":" +
+		"[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]," +
+		"\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\ndata: [DONE]\n\n"
+
+	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
+
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	for _, attr := range spans[0].Attributes() {
+		assert.NotEqual(t, "gen_ai.usage.cache_read.input_tokens", string(attr.Key),
+			"attribute must be omitted when the request did not hit the cache")
+	}
+}

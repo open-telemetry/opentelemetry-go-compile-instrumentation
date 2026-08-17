@@ -306,9 +306,12 @@ func parseChatResponse(body []byte, span trace.Span) {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
+			PromptTokens        int64 `json:"prompt_tokens"`
+			CompletionTokens    int64 `json:"completion_tokens"`
+			TotalTokens         int64 `json:"total_tokens"`
+			PromptTokensDetails struct {
+				CachedTokens int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -330,6 +333,19 @@ func parseChatResponse(body []byte, span trace.Span) {
 		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
 		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
 	)
+
+	// OpenAI serves part of the prompt from an automatic cache and reports the
+	// count under prompt_tokens_details. It is already included in
+	// prompt_tokens, so this is a breakdown of the input count and is never
+	// added to gen_ai.usage.input_tokens - unlike Anthropic, whose input_tokens
+	// excludes cache reads and therefore has to fold them back in. Recorded only
+	// when the request actually hit the cache, matching the Anthropic
+	// instrumentation.
+	if resp.Usage.PromptTokensDetails.CachedTokens > 0 {
+		span.SetAttributes(
+			semconv.GenAIUsageCacheReadInputTokens(resp.Usage.PromptTokensDetails.CachedTokens),
+		)
+	}
 }
 
 func parseCompletionResponse(body []byte, span trace.Span) {
@@ -340,9 +356,12 @@ func parseCompletionResponse(body []byte, span trace.Span) {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
+			PromptTokens        int64 `json:"prompt_tokens"`
+			CompletionTokens    int64 `json:"completion_tokens"`
+			TotalTokens         int64 `json:"total_tokens"`
+			PromptTokensDetails struct {
+				CachedTokens int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -364,6 +383,19 @@ func parseCompletionResponse(body []byte, span trace.Span) {
 		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
 		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
 	)
+
+	// OpenAI serves part of the prompt from an automatic cache and reports the
+	// count under prompt_tokens_details. It is already included in
+	// prompt_tokens, so this is a breakdown of the input count and is never
+	// added to gen_ai.usage.input_tokens - unlike Anthropic, whose input_tokens
+	// excludes cache reads and therefore has to fold them back in. Recorded only
+	// when the request actually hit the cache, matching the Anthropic
+	// instrumentation.
+	if resp.Usage.PromptTokensDetails.CachedTokens > 0 {
+		span.SetAttributes(
+			semconv.GenAIUsageCacheReadInputTokens(resp.Usage.PromptTokensDetails.CachedTokens),
+		)
+	}
 }
 
 func parseEmbeddingResponse(body []byte, span trace.Span) {

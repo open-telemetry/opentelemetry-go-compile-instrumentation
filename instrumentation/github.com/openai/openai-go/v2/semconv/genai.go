@@ -25,6 +25,12 @@ const (
 	GenAIRequestPresencePenaltyKey   = attribute.Key("gen_ai.request.presence_penalty")
 	GenAIRequestIsStreamKey          = attribute.Key("gen_ai.request.is_stream")
 	GenAIResponseTimeToFirstTokenKey = attribute.Key("gen_ai.response.time_to_first_token")
+
+	// GenAIUsageCacheReadInputTokensKey reports prompt tokens served from
+	// OpenAI's automatic prompt cache. Unlike Anthropic, OpenAI already counts
+	// these inside prompt_tokens, so this is a breakdown of the input count and
+	// must not be added to it.
+	GenAIUsageCacheReadInputTokensKey = attribute.Key("gen_ai.usage.cache_read.input_tokens")
 )
 
 func GenAISystem(val string) attribute.KeyValue {
@@ -61,6 +67,10 @@ func GenAIUsageOutputTokens(val int64) attribute.KeyValue {
 
 func GenAIUsageTotalTokens(val int64) attribute.KeyValue {
 	return GenAIUsageTotalTokensKey.Int64(val)
+}
+
+func GenAIUsageCacheReadInputTokens(val int64) attribute.KeyValue {
+	return GenAIUsageCacheReadInputTokensKey.Int64(val)
 }
 
 func GenAIProviderName(val string) attribute.KeyValue {

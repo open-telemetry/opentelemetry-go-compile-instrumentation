@@ -13,18 +13,22 @@ groups:
   # instrumented.
   #
   # Most attributes are standard upstream OpenTelemetry GenAI attributes
-  # (referenced with `ref:`). `gen_ai.usage.total_tokens` and
-  # `gen_ai.request.is_stream` are shared with the openai-go instrumentation and
-  # are declared in `groups/openai.yaml` (`registry.otelc.gen_ai`). The two
-  # prompt-cache attributes are Anthropic-specific and are declared locally with
-  # `id:` in the attribute group below.
+  # (referenced with `ref:`). `gen_ai.usage.total_tokens`,
+  # `gen_ai.request.is_stream` and `gen_ai.usage.cache_read.input_tokens` are
+  # shared with the openai-go instrumentation and are declared in
+  # `groups/openai.yaml` (`registry.otelc.gen_ai`). Only
+  # `gen_ai.usage.cache_creation.input_tokens` is Anthropic-specific and is
+  # declared locally with `id:` in the attribute group below: OpenAI's prompt
+  # cache is automatic and has no separate cache-write step to report.
   #
   # Notes on conditional attributes:
   #   - `gen_ai.usage.cache_read.input_tokens` and
   #     `gen_ai.usage.cache_creation.input_tokens` are recorded only when the
   #     request actually read from / wrote to the prompt cache. Both are also
   #     folded into `gen_ai.usage.input_tokens`, which per semconv reports the
-  #     full prompt, unlike Anthropic's raw `input_tokens` field.
+  #     full prompt, unlike Anthropic's raw `input_tokens` field. (The openai-go
+  #     instrumentation does not fold: OpenAI already counts cached tokens
+  #     inside `prompt_tokens`.)
   #   - `gen_ai.usage.total_tokens` is derived (input + output); the Messages
   #     API reports no total.
   #   - `gen_ai.response.*` attributes are absent on error responses and on
@@ -37,14 +41,9 @@ groups:
     type: attribute_group
     display_name: otelc Anthropic GenAI attributes
     brief: >
-      Prompt-cache attributes emitted by the anthropic-sdk-go instrumentation that are not covered by the upstream OpenTelemetry
-      GenAI semantic conventions.
+      Prompt-cache attributes specific to the anthropic-sdk-go instrumentation that are not covered by the upstream OpenTelemetry
+      GenAI semantic conventions. Cache reads are shared with other providers and are declared in `registry.otelc.gen_ai`.
     attributes:
-      - id: gen_ai.usage.cache_read.input_tokens
-        type: int
-        stability: development
-        brief: The number of prompt tokens that were read from the provider's prompt cache.
-        examples: [1024]
       - id: gen_ai.usage.cache_creation.input_tokens
         type: int
         stability: development
