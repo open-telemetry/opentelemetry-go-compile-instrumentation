@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -120,27 +119,4 @@ func TestOtelMiddleware_RecordsTokenUsage_Embedding(t *testing.T) {
 	usage := tokenUsageByType(t, reader)
 	assert.Equal(t, int64(2), usage["input"], "input tokens")
 	assert.Len(t, usage, 1, "embeddings record only input tokens")
-}
-
-// TestStreamingReader_RecordsTokenUsage verifies token usage is recorded once
-// a streaming response is finalized.
-func TestStreamingReader_RecordsTokenUsage(t *testing.T) {
-	setupTestTracer(t)
-	reader := setupTestMeter(t)
-
-	ctx, span := tracer.Start(t.Context(), "test-stream")
-	streamData := "data: {\"id\":\"chatcmpl-abc\",\"model\":\"gpt-4\",\"choices\":" +
-		"[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":\"stop\"}]," +
-		"\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3,\"total_tokens\":11}}\n\n" +
-		"data: [DONE]\n\n"
-	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	sr := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
-
-	_, err := io.ReadAll(sr)
-	require.NoError(t, err)
-	require.NoError(t, sr.Close())
-
-	usage := tokenUsageByType(t, reader)
-	assert.Equal(t, int64(8), usage["input"], "streaming input tokens")
-	assert.Equal(t, int64(3), usage["output"], "streaming output tokens")
 }

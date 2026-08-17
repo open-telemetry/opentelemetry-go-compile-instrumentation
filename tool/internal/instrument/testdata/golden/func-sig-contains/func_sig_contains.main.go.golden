@@ -5,11 +5,11 @@ package main
 
 import _ "unsafe"
 
-func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+func Func1(p1 string, p2 int) (_unnamedRetVal_2691098054_0 float32, _unnamedRetVal_2691098054_1 error) {
 	//line <generated>:1
 	if hookContext2691098054, _ := OtelBeforeTrampoline_Func12691098054(&p1, &p2); false {
 	} else {
-		defer OtelAfterTrampoline_Func12691098054(hookContext2691098054, &_unnamedRetVal0, &_unnamedRetVal1)
+		defer OtelAfterTrampoline_Func12691098054(hookContext2691098054, &_unnamedRetVal_2691098054_0, &_unnamedRetVal_2691098054_1)
 	}
 	//line main.go:7:2
 	println("Hello, World!")

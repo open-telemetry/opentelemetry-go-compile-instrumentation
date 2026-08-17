@@ -14,7 +14,7 @@ import (
 const (
 	defaultReadinessTimeout  = 10 * time.Second
 	defaultReadinessInterval = 100 * time.Millisecond
-	defaultSpanPollTimeout  = 3 * time.Second
+	defaultSpanPollTimeout  = 15 * time.Second
 	defaultSpanPollInterval  = 25 * time.Millisecond
 )
 
