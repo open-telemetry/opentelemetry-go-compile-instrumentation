@@ -108,3 +108,48 @@ target: main
 		})
 	}
 }
+
+func directiveIdentity(t *testing.T, name string, flat map[string]any) string {
+	t.Helper()
+	data, err := yaml.Marshal(flat)
+	require.NoError(t, err)
+	r, err := NewInstDirectiveRule(data, name)
+	require.NoError(t, err)
+	return r.Identity()
+}
+
+func TestInstDirectiveRule_Identity(t *testing.T) {
+	base := func() map[string]any {
+		return map[string]any{"target": "main", "directive": "otelc:span", "template": "_ = 0"}
+	}
+
+	// De-duplication: identical content under different names is one identity.
+	dupA := base()
+	dupB := base()
+	assert.Equal(t, directiveIdentity(t, "alpha", dupA), directiveIdentity(t, "beta", dupB),
+		"identical rule content must share an identity regardless of name")
+
+	// Differing target yields a distinct identity.
+	diffTarget := base()
+	diffTarget["target"] = "github.com/example/lib"
+	assert.NotEqual(t, directiveIdentity(t, "r", base()), directiveIdentity(t, "r", diffTarget),
+		"rules differing only in target must have distinct identities")
+
+	// Differing version yields a distinct identity.
+	diffVersion := base()
+	diffVersion["version"] = "v1.0.0,v2.0.0"
+	assert.NotEqual(t, directiveIdentity(t, "r", base()), directiveIdentity(t, "r", diffVersion),
+		"rules differing only in version must have distinct identities")
+
+	// Differing directive yields a distinct identity.
+	diffDirective := base()
+	diffDirective["directive"] = "otelc:trace"
+	assert.NotEqual(t, directiveIdentity(t, "r", base()), directiveIdentity(t, "r", diffDirective),
+		"rules differing only in directive must have distinct identities")
+
+	// Differing template yields a distinct identity.
+	diffTemplate := base()
+	diffTemplate["template"] = "_ = 1"
+	assert.NotEqual(t, directiveIdentity(t, "r", base()), directiveIdentity(t, "r", diffTemplate),
+		"rules differing only in template must have distinct identities")
+}
