@@ -329,8 +329,8 @@ func TestAfterRoundTrip(t *testing.T) {
 			},
 			err: nil,
 			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
-				// Span should not be ended because instrumentation is disabled
-				assert.Equal(t, 0, len(spans))
+				// Span should be ended even if instrumentation is disabled because it was found in context
+				assert.Equal(t, 1, len(spans))
 			},
 		},
 	}
@@ -400,4 +400,38 @@ func TestClientEnabler(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestAfterRoundTrip_DisabledAfterStart_Regression(t *testing.T) {
+	// 1. Enable nethttp instrumentation.
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+
+	initOnce = *new(sync.Once)
+	sr, _ := setupTestTracer(t)
+
+	// 2. BeforeRoundTrip creates and stores a span.
+	req, _ := http.NewRequest("GET", "http://example.com/path", nil)
+	mockCtx := hooktest.NewMockHookContext()
+	transport := &http.Transport{}
+
+	BeforeRoundTrip(mockCtx, transport, req)
+
+	// 3 & 4. Verify the span exists but has not been ended yet.
+	ended := sr.Ended()
+	assert.Empty(t, ended, "span should not be ended before AfterRoundTrip")
+
+	// 5. Disable nethttp instrumentation while the request is in flight.
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
+
+	// 6. Call AfterRoundTrip with a successful response.
+	res := &http.Response{
+		StatusCode: 200,
+		Request:    req,
+	}
+	AfterRoundTrip(mockCtx, res, nil)
+
+	// 7. Assert the span was ended despite instrumentation being disabled at after-hook time.
+	ended = sr.Ended()
+	require.Len(t, ended, 1, "span created by BeforeRoundTrip must be ended by AfterRoundTrip")
+	assert.Equal(t, "GET", ended[0].Name())
 }
