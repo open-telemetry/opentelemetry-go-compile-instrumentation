@@ -139,13 +139,31 @@ func AfterReadMessage(ictx hook.HookContext, msg kafka.Message, err error) {
 	span.End()
 }
 
+// BeforeFetchMessage captures the reader configuration and the call start time
+// so AfterFetchMessage can build an accurate consumer span once the message
+// arrives. FetchMessage does not auto-commit the offset; the caller must
+// explicitly call CommitMessages after processing.
+func BeforeFetchMessage(ictx hook.HookContext, r *kafka.Reader, ctx context.Context) {
+	BeforeReadMessage(ictx, r, ctx)
+}
+
+// AfterFetchMessage creates a consumer span for a message received via
+// FetchMessage. It delegates to AfterReadMessage because the two methods share
+// the same parameter layout and span semantics.
+//
+// The Enable() check is intentionally omitted — see AfterReadMessage.
+func AfterFetchMessage(ictx hook.HookContext, msg kafka.Message, err error) {
+	AfterReadMessage(ictx, msg, err)
+}
+
 // ExtractContext extracts the trace context from a Kafka message's headers
 // and returns a context.Context that carries the propagated span context.
 //
-// Use this with the message returned by (*kafka.Reader).ReadMessage to
-// continue the trace in downstream message-processing code:
+// Use this with the message returned by (*kafka.Reader).ReadMessage or
+// (*kafka.Reader).FetchMessage to continue the trace in downstream
+// message-processing code:
 //
-//	msg, err := r.ReadMessage(ctx)
+//	msg, err := r.FetchMessage(ctx)
 //	ctx = consumer.ExtractContext(msg)
 //	// spans created with ctx will be children of the producer span.
 func ExtractContext(msg kafka.Message) context.Context {

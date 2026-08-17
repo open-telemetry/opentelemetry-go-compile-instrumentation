@@ -225,3 +225,105 @@ func TestExtractContext(t *testing.T) {
 	assert.True(t, extractedSc.IsSampled())
 	assert.True(t, extractedSc.IsRemote())
 }
+
+// -----------------------------------------------------------------------------
+// FetchMessage tests
+// -----------------------------------------------------------------------------
+
+func TestFetchMessage_LinksToProducerAndSetsAttrs(t *testing.T) {
+	sr := setupTest(t)
+
+	tid, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	require.NoError(t, err)
+	sid, err := trace.SpanIDFromHex("0102030405060708")
+	require.NoError(t, err)
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    tid,
+		SpanID:     sid,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	producerCtx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	var headers []kafka.Header
+	propagator.Inject(producerCtx, kafkaprop.NewHeaderCarrier(&headers))
+
+	msg := kafka.Message{
+		Topic:     "orders",
+		Partition: 3,
+		Offset:    42,
+		Key:       []byte("k1"),
+		Value:     []byte("hello"),
+		Headers:   headers,
+	}
+
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "orders",
+	})
+	t.Cleanup(func() { _ = r.Close() })
+
+	ictx := hooktest.NewMockHookContext(r, context.Background())
+	BeforeFetchMessage(ictx, r, context.Background())
+	AfterFetchMessage(ictx, msg, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	assert.Equal(t, "orders receive", span.Name())
+	assert.Equal(t, trace.SpanKindConsumer, span.SpanKind())
+	assert.Equal(t, tid, span.SpanContext().TraceID())
+	assert.Equal(t, tid, span.Parent().TraceID())
+	assert.Equal(t, sid, span.Parent().SpanID())
+
+	m := spanAttrs(span)
+	assert.Equal(t, "kafka", m["messaging.system"])
+	assert.Equal(t, "receive", m["messaging.operation.name"])
+	assert.Equal(t, "orders", m["messaging.destination.name"])
+	assert.Equal(t, "localhost", m["server.address"])
+	assert.Equal(t, "3", m["messaging.destination.partition.id"])
+	assert.Equal(t, int64(42), m["messaging.kafka.offset"])
+}
+
+func TestFetchMessage_RecordsError(t *testing.T) {
+	sr := setupTest(t)
+
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "orders",
+	})
+	t.Cleanup(func() { _ = r.Close() })
+
+	ictx := hooktest.NewMockHookContext(r, context.Background())
+	BeforeFetchMessage(ictx, r, context.Background())
+	AfterFetchMessage(ictx, kafka.Message{}, errors.New("fetch timeout"))
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+	assert.Contains(t, spans[0].Status().Description, "fetch timeout")
+
+	m := spanAttrs(spans[0])
+	_, hasPartition := m["messaging.destination.partition.id"]
+	assert.False(t, hasPartition)
+	_, hasOffset := m["messaging.kafka.offset"]
+	assert.False(t, hasOffset)
+}
+
+func TestFetchMessage_Disabled(t *testing.T) {
+	sr := setupTest(t)
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "kafka")
+
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "orders",
+	})
+	t.Cleanup(func() { _ = r.Close() })
+
+	ictx := hooktest.NewMockHookContext(r, context.Background())
+	BeforeFetchMessage(ictx, r, context.Background())
+	AfterFetchMessage(ictx, kafka.Message{Topic: "orders"}, nil)
+
+	assert.Empty(t, sr.Ended())
+}
