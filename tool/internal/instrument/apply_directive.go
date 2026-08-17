@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 type directiveTemplateData struct {
@@ -31,6 +32,7 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 	}
 	funcs := ast.FindFuncsByDirective(root, r.Directive)
 	for _, funcDecl := range funcs {
+		util.Assert(funcDecl.Body != nil, "function must have a body")
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
