@@ -116,7 +116,7 @@ func TestWriterWrapper_Hijack_NotSupported(t *testing.T) {
 	}
 
 	conn, rw, err := wrapper.Hijack()
-	assert.ErrorIs(t, err, http.ErrNotSupported)
+	require.ErrorIs(t, err, http.ErrNotSupported)
 	assert.Nil(t, conn)
 	assert.Nil(t, rw)
 }
@@ -287,6 +287,82 @@ func TestWriterWrapper_ReadFrom_Fallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(len("payload")), n)
 	assert.Equal(t, "payload", recorder.Body.String())
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+}
+
+type errorReader struct {
+	err error
+}
+
+func (e *errorReader) Read([]byte) (int, error) {
+	return 0, e.err
+}
+
+func TestWriterWrapper_ReadFrom_Error_DefersHeader(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &readerFromRecorder{ResponseWriter: recorder}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	testErr := io.ErrUnexpectedEOF
+	src := struct{ io.Reader }{&errorReader{err: testErr}}
+	n, err := io.Copy(wrapper, src)
+
+	require.ErrorIs(t, err, testErr)
+	assert.Equal(t, int64(0), n)
+	assert.True(t, mock.readFromCalled)
+	// Header must NOT be committed yet when no bytes were written.
+	assert.False(t, wrapper.wroteHeader)
+
+	// Handler should be able to report an error status.
+	http.Error(wrapper, "error occurred", http.StatusInternalServerError)
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusInternalServerError, wrapper.statusCode)
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+}
+
+func TestWriterWrapper_ReadFrom_Fallback_Error_DefersHeader(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	wrapper := &writerWrapper{
+		ResponseWriter: recorder,
+		statusCode:     http.StatusOK,
+	}
+
+	testErr := io.ErrUnexpectedEOF
+	n, err := wrapper.ReadFrom(&errorReader{err: testErr})
+
+	require.ErrorIs(t, err, testErr)
+	assert.Equal(t, int64(0), n)
+	assert.False(t, wrapper.wroteHeader)
+
+	http.Error(wrapper, "error occurred", http.StatusInternalServerError)
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusInternalServerError, wrapper.statusCode)
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+}
+
+func TestWriterWrapper_ReadFrom_PreWrittenHeader(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &readerFromRecorder{ResponseWriter: recorder}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	wrapper.WriteHeader(http.StatusAccepted)
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusAccepted, wrapper.statusCode)
+
+	src := struct{ io.Reader }{strings.NewReader("data")}
+	n, err := io.Copy(wrapper, src)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), n)
+	assert.Equal(t, http.StatusAccepted, wrapper.statusCode)
+	assert.Equal(t, http.StatusAccepted, recorder.Code)
 }
 
 func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
@@ -296,7 +372,7 @@ func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
 		statusCode:     http.StatusOK,
 	}
 
-	assert.ErrorIs(t, wrapper.FlushError(), http.ErrNotSupported)
+	require.ErrorIs(t, wrapper.FlushError(), http.ErrNotSupported)
 }
 
 // nonFlusher hides the recorder's Flush method.
@@ -305,4 +381,3 @@ type nonFlusher struct{ rec *httptest.ResponseRecorder }
 func (n nonFlusher) Header() http.Header         { return n.rec.Header() }
 func (n nonFlusher) Write(b []byte) (int, error) { return n.rec.Write(b) }
 func (n nonFlusher) WriteHeader(code int)        { n.rec.WriteHeader(code) }
-

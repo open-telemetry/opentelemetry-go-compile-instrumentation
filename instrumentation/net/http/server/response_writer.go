@@ -71,16 +71,24 @@ func (w *writerWrapper) Unwrap() http.ResponseWriter {
 // ReadFrom implements io.ReaderFrom so that io.Copy and http.ServeFile keep the
 // underlying writer's sendfile fast path instead of falling back to a buffered
 // copy through Write.
+//
+// Headers are not committed eagerly: if src fails before producing any bytes,
+// wroteHeader remains false so the caller can still send an error status code.
 func (w *writerWrapper) ReadFrom(src io.Reader) (int64, error) {
-	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
-	}
 	if rf, ok := w.ResponseWriter.(io.ReaderFrom); ok {
-		return rf.ReadFrom(src)
+		n, err := rf.ReadFrom(src)
+		if n > 0 && !w.wroteHeader {
+			w.wroteHeader = true
+			if w.statusCode == 0 {
+				w.statusCode = http.StatusOK
+			}
+		}
+		return n, err
 	}
-	// Copy into the underlying writer rather than w, so io.Copy does not probe
-	// this method again and recurse.
-	return io.Copy(w.ResponseWriter, src)
+	// Wrap w in a struct exposing only io.Writer to prevent io.Copy from calling
+	// w.ReadFrom recursively, while routing through w.Write which sets
+	// wroteHeader and statusCode only after the first successful chunk read.
+	return io.Copy(struct{ io.Writer }{w}, src)
 }
 
 // Hijack implements the http.Hijacker interface
@@ -119,4 +127,3 @@ func (w *writerWrapper) Push(target string, opts *http.PushOptions) error {
 	}
 	return http.ErrNotSupported
 }
-
