@@ -21,7 +21,7 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
 		return err
 	}
-	tmpl, err := rule.ParseDirectiveTemplate(r.Template)
+	tmpl, err := rule.ParseFuncTemplate(r.Template)
 	if err != nil {
 		return ex.Wrap(err)
 	}
@@ -54,6 +54,6 @@ func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstD
 
 // renderDirective executes the template with the given data and returns the
 // resulting Go source snippet.
-func renderDirective(tmpl *rule.DirectiveTemplate, data *funcTemplateData) (string, error) {
+func renderDirective(tmpl *rule.FuncTemplate, data *funcTemplateData) (string, error) {
 	return tmpl.Execute(data)
 }
