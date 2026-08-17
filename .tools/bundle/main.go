@@ -137,6 +137,11 @@ func addDir(tw *tar.Writer, dirPath, nameInArchive string) error {
 
 // shouldExclude reports whether an archive entry should be omitted.
 func shouldExclude(name string) bool {
+	base := filepath.Base(name)
+	// Exclude macOS metadata files so bundles are identical on all platforms.
+	if base == ".DS_Store" {
+		return true
+	}
 	return strings.HasSuffix(name, ".log")
 }
 
