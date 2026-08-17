@@ -315,7 +315,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			statusCode: 200,
 			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
-				// Span should be ended even if instrumentation is disabled because it was found in context
+				// The span should still be ended when instrumentation is disabled.
 				assert.Equal(t, 1, len(spans))
 			},
 		},
@@ -531,30 +531,25 @@ func TestWriterWrapper_IntegrationWithHandler(t *testing.T) {
 }
 
 func TestAfterServeHTTP_DisabledAfterStart_Regression(t *testing.T) {
-	// 1. Enable nethttp instrumentation.
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 
 	initOnce = *new(sync.Once)
 	sr, _ := setupTestTracer(t)
 
-	// 2. Create the span.
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 	mockCtx := hooktest.NewMockHookContext()
 
 	BeforeServeHTTP(mockCtx, nil, w, req)
 
-	// 3 & 4. Verify it has not ended yet.
 	ended := sr.Ended()
 	assert.Empty(t, ended, "span should not be ended before AfterServeHTTP")
 
-	// 5. Disable nethttp instrumentation.
+	// Disable instrumentation while the request is in flight.
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 
-	// 6. Call AfterServeHTTP.
 	AfterServeHTTP(mockCtx)
 
-	// 7. Assert the span has ended.
 	ended = sr.Ended()
 	require.Len(t, ended, 1, "[] should have 1 item(s), but has 0")
 	assert.Equal(t, "GET", ended[0].Name())
