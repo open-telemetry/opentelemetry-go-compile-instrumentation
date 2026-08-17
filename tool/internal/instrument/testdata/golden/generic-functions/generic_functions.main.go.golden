@@ -5,11 +5,11 @@ package main
 
 import _ "unsafe"
 
-func GenericFunc[T any](p1 T, p2 int) (_unnamedRetVal0 T, _unnamedRetVal1 error) {
+func GenericFunc[T any](p1 T, p2 int) (_unnamedRetVal_1523734358_0 T, _unnamedRetVal_1523734358_1 error) {
 	//line <generated>:1
 	if hookContext1523734358, _ := OtelBeforeTrampoline_GenericFunc1523734358[T](&p1, &p2); false {
 	} else {
-		defer OtelAfterTrampoline_GenericFunc1523734358[T](hookContext1523734358, &_unnamedRetVal0, &_unnamedRetVal1)
+		defer OtelAfterTrampoline_GenericFunc1523734358[T](hookContext1523734358, &_unnamedRetVal_1523734358_0, &_unnamedRetVal_1523734358_1)
 	}
 	//line main.go:7:2
 	return p1, nil
@@ -19,11 +19,11 @@ type GenStruct[T any] struct {
 	value T
 }
 
-func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal0 T, _unnamedRetVal1 error) {
+func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal_1139503255_0 T, _unnamedRetVal_1139503255_1 error) {
 	//line <generated>:1
 	if hookContext1139503255, _ := OtelBeforeTrampoline_GenericMethod1139503255(&g, &p1, &p2); false {
 	} else {
-		defer OtelAfterTrampoline_GenericMethod1139503255(hookContext1139503255, &_unnamedRetVal0, &_unnamedRetVal1)
+		defer OtelAfterTrampoline_GenericMethod1139503255(hookContext1139503255, &_unnamedRetVal_1139503255_0, &_unnamedRetVal_1139503255_1)
 	}
 	//line main.go:15:2
 	return p1, nil

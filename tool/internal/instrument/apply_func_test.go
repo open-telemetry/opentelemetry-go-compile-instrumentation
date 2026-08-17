@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"fmt"
 	goast "go/ast"
 	"go/importer"
 	"go/parser"
@@ -43,6 +44,22 @@ func Target(value string) error { return nil }
 	assert.Contains(t, err.Error(), "can not find function Target")
 }
 
+// testHash stands in for InstFuncRule.Identity() in these unit tests, since
+// they exercise collectArguments/collectReturnValues without a real rule.
+const testHash = "42"
+
+func syntheticParam(idx int) string {
+	return fmt.Sprintf("%s_%s_%d", ignoredParam, testHash, idx)
+}
+
+func syntheticUnnamedRetVal(idx int) string {
+	return fmt.Sprintf("%s_%s_%d", unnamedRetValName, testHash, idx)
+}
+
+func syntheticIgnoredRetVal(idx int) string {
+	return fmt.Sprintf("%s_%s_%d", ignoredRetValName, testHash, idx)
+}
+
 func TestCollectArguments(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -62,7 +79,7 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed params (len(Names) == 0)",
 			src:      "package main\nfunc F(int, string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1"},
+			expected: []string{syntheticParam(0), syntheticParam(1)},
 		},
 		{
 			name:     "mixed named and unnamed params via group",
@@ -72,7 +89,7 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "underscore params",
 			src:      "package main\nfunc F(_ int, _ string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1"},
+			expected: []string{syntheticParam(0), syntheticParam(1)},
 		},
 		{
 			name:     "named receiver",
@@ -82,7 +99,12 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed receiver",
 			src:      "package main\ntype T struct{}\nfunc (T) F() {}",
-			expected: []string{"_ignoredParam0"},
+			expected: []string{syntheticParam(0)},
+		},
+		{
+			name:     "underscore receiver",
+			src:      "package main\ntype T struct{}\nfunc (_ T) F() {}",
+			expected: []string{syntheticParam(0)},
 		},
 		{
 			name:     "named receiver with params",
@@ -92,14 +114,19 @@ func TestCollectArguments(t *testing.T) {
 		{
 			name:     "unnamed receiver with unnamed params",
 			src:      "package main\ntype T struct{}\nfunc (T) F(int, string) {}",
-			expected: []string{"_ignoredParam0", "_ignoredParam1", "_ignoredParam2"},
+			expected: []string{syntheticParam(0), syntheticParam(1), syntheticParam(2)},
+		},
+		{
+			name:     "underscore param collides with existing synthetic-looking param name",
+			src:      fmt.Sprintf("package main\nfunc F(%s int, _ string) {}", syntheticParam(0)),
+			expected: []string{syntheticParam(0), syntheticParam(1)},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			funcDecl := parseFunc(t, tt.src)
-			args := collectArguments(funcDecl)
+			args := collectArguments(funcDecl, testHash)
 			assert.Equal(t, tt.expected, args)
 		})
 	}
@@ -124,19 +151,27 @@ func TestCollectReturnValues(t *testing.T) {
 		{
 			name:     "unnamed return values",
 			src:      "package main\nfunc F() (int, string) { return 0, \"\" }",
-			expected: []string{"_unnamedRetVal0", "_unnamedRetVal1"},
+			expected: []string{syntheticUnnamedRetVal(0), syntheticUnnamedRetVal(1)},
 		},
 		{
 			name:     "underscore return values",
 			src:      "package main\nfunc F() (_ int, _ string) { return }",
-			expected: []string{"_ignoredRetVal0", "_ignoredRetVal1"},
+			expected: []string{syntheticIgnoredRetVal(0), syntheticIgnoredRetVal(1)},
+		},
+		{
+			name: "underscore return collides with existing synthetic-looking return name",
+			src: fmt.Sprintf(
+				"package main\nfunc F() (%s error, _ bool) { return nil, false }",
+				syntheticIgnoredRetVal(0),
+			),
+			expected: []string{syntheticIgnoredRetVal(0), syntheticIgnoredRetVal(1)},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			funcDecl := parseFunc(t, tt.src)
-			retVals := collectReturnValues(funcDecl)
+			retVals := collectReturnValues(funcDecl, testHash)
 			assert.Equal(t, tt.expected, retVals)
 		})
 	}
@@ -162,12 +197,27 @@ func TestCollectNamesNoCollision(t *testing.T) {
 			src:  "package main\ntype T struct{}\nfunc (T) M() (_ error) { return nil }",
 		},
 		{
+			name: "blank receiver and blank named return",
+			src:  "package main\ntype T struct{}\nfunc (_ T) M() (_ error) { return nil }",
+		},
+		{
 			name: "unnamed param and unnamed return (control)",
 			src:  "package main\nfunc F(int) (int) { return 0 }",
 		},
 		{
 			name: "multiple blanks on both sides",
 			src:  "package main\nfunc F(_ int, _ string) (_ error, _ bool) { return nil, false }",
+		},
+		{
+			name: "blank param collides with existing synthetic-looking param name",
+			src:  fmt.Sprintf("package main\nfunc F(%s int, _ string) {}", syntheticParam(0)),
+		},
+		{
+			name: "blank return collides with existing synthetic-looking return name",
+			src: fmt.Sprintf(
+				"package main\nfunc F() (%s error, _ bool) { return nil, false }",
+				syntheticIgnoredRetVal(0),
+			),
 		},
 	}
 
@@ -176,8 +226,8 @@ func TestCollectNamesNoCollision(t *testing.T) {
 			file, funcDecl := parseFileFunc(t, tt.src)
 
 			// Mirror insertTJump: returns are collected first, then arguments.
-			retVals := collectReturnValues(funcDecl)
-			args := collectArguments(funcDecl)
+			retVals := collectReturnValues(funcDecl, testHash)
+			args := collectArguments(funcDecl, testHash)
 
 			seen := make(map[string]struct{})
 			for _, name := range append(append([]string{}, retVals...), args...) {
@@ -190,6 +240,31 @@ func TestCollectNamesNoCollision(t *testing.T) {
 			requireTypeChecks(t, renderFile(t, file))
 		})
 	}
+}
+
+// Regression for #1014: syntheticNamer previously only checked names against
+// the function's own signature, so a blank param/return could still be
+// renamed to something that shadows a package-level identifier written in
+// the bare "prefixN" style the old scheme produced. Salting every generated
+// name with the rule's identity hash means it can never collide with that
+// bare form, so the global is never shadowed - without having to resolve
+// every identifier visible in the function's scope.
+func TestSyntheticNamesDoNotShadowBareStyleGlobal(t *testing.T) {
+	src := "package main\n" +
+		"var _ignoredParam0 = \"important\"\n" +
+		"func foo(_ int, _ignoredParam1 string) string { return _ignoredParam0 }"
+	funcDecl := parseFunc(t, src)
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "foo-rule"},
+		Func:         "foo",
+		Before:       "BeforeFoo",
+		Path:         "example.com/hook",
+	}
+
+	args := collectArguments(funcDecl, funcRule.Identity())
+	assert.NotContains(t, args, "_ignoredParam0", "synthetic name must not shadow the package-level global")
+	assert.Equal(t, "_ignoredParam1", args[1], "named param must be left untouched")
 }
 
 // parseFileFunc parses source into a file and returns it alongside the first
@@ -225,4 +300,95 @@ func requireTypeChecks(t *testing.T, src string) {
 	conf := types.Config{Importer: importer.Default()}
 	_, err = conf.Check("main", fset, []*goast.File{parsed}, nil)
 	require.NoErrorf(t, err, "generated code does not type-check:\n%s", src)
+}
+
+// newTrampolineJump builds an if statement shaped like the one buildTJump
+// produces: a labelled if whose else block holds the deferred after-call. The
+// label is what findJumpPoint keys on, so a jump without it is just an
+// ordinary if as far as this function is concerned.
+func newTrampolineJump(labelled bool) *dst.IfStmt {
+	// Mirrors buildTJump: the init defines the hook context and skip flag from
+	// the before-call, and the else block defers the after-call.
+	init := ast.DefineStmts(
+		ast.Exprs(ast.Ident("hookCtx"), ast.Ident("skip")),
+		ast.Exprs(ast.CallTo("beforeCall", nil, nil)),
+	)
+	elseBlock := ast.Block(ast.DeferStmt(ast.CallTo("afterCall", nil, nil)))
+
+	jump := ast.IfStmt(init, ast.Ident("skip"), ast.Block(ast.EmptyStmt()), elseBlock)
+	if labelled {
+		jump.Decs.If.Append(tJumpLabel)
+	}
+	return jump
+}
+
+// chainJump nests inner inside outer's else block the way insertToFunc does,
+// separating the existing statement from the new jump with an empty statement.
+// That leaves the else block with more than one statement, which is the
+// condition findJumpPoint recurses on.
+func chainJump(t *testing.T, outer, inner *dst.IfStmt) {
+	t.Helper()
+
+	elseBlock, ok := outer.Else.(*dst.BlockStmt)
+	require.True(t, ok, "a trampoline jump should always carry a block else")
+	elseBlock.List = append(elseBlock.List, ast.EmptyStmt(), inner)
+}
+
+func TestFindJumpPointIgnoresUnlabelledIf(t *testing.T) {
+	// Without the trampoline label this is an ordinary if statement that
+	// happened to be first in the function body. Returning a block here would
+	// splice a trampoline into unrelated user code.
+	jump := newTrampolineJump(false)
+
+	assert.Nil(t, findJumpPoint(jump))
+}
+
+func TestFindJumpPointReturnsElseBlockOfLoneJump(t *testing.T) {
+	jump := newTrampolineJump(true)
+
+	point := findJumpPoint(jump)
+
+	require.NotNil(t, point)
+	assert.Equal(t, jump.Else, point, "the only jump present is the insertion point")
+}
+
+func TestFindJumpPointDescendsToLastJumpInChain(t *testing.T) {
+	// Two rules already applied to the same function, so the second jump lives
+	// inside the first one's else block. A third has to land inside the second,
+	// not the first, or the rules stop nesting in the order they were applied.
+	first := newTrampolineJump(true)
+	second := newTrampolineJump(true)
+	chainJump(t, first, second)
+
+	point := findJumpPoint(first)
+
+	require.NotNil(t, point)
+	assert.Equal(t, second.Else, point, "insertion belongs in the innermost jump")
+	assert.NotEqual(t, first.Else, point)
+}
+
+func TestFindJumpPointDescendsThroughSeveralJumps(t *testing.T) {
+	// The descent is recursive, so a longer chain must still reach the end
+	// rather than stopping one level in.
+	first := newTrampolineJump(true)
+	second := newTrampolineJump(true)
+	third := newTrampolineJump(true)
+	chainJump(t, first, second)
+	chainJump(t, second, third)
+
+	point := findJumpPoint(first)
+
+	require.NotNil(t, point)
+	assert.Equal(t, third.Else, point, "insertion belongs at the end of the chain")
+}
+
+func TestFindJumpPointStopsAtUnlabelledTail(t *testing.T) {
+	// A chain whose last statement is not a labelled jump has no further
+	// insertion point beneath it, so the descent reports nothing rather than
+	// guessing at a block.
+	first := newTrampolineJump(true)
+	tail := newTrampolineJump(false)
+	chainJump(t, first, tail)
+
+	assert.Nil(t, findJumpPoint(first))
 }

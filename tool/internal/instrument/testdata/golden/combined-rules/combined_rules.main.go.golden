@@ -7,12 +7,12 @@ import _ "unsafe"
 
 type T struct{ NewField string }
 
-func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+func Func1(p1 string, p2 int) (_unnamedRetVal_2706976935_0 float32, _unnamedRetVal_2706976935_1 error) {
 	_ = 789
 	//line <generated>:1
 	if hookContext2706976935, _ := OtelBeforeTrampoline_Func12706976935(&p1, &p2); false {
 	} else {
-		defer OtelAfterTrampoline_Func12706976935(hookContext2706976935, &_unnamedRetVal0, &_unnamedRetVal1)
+		defer OtelAfterTrampoline_Func12706976935(hookContext2706976935, &_unnamedRetVal_2706976935_0, &_unnamedRetVal_2706976935_1)
 	}
 	//line main.go:9:2
 	println("Hello, World!")

@@ -9,11 +9,11 @@ import _ "unsafe"
 // predicate matches this normal build (source.go, no _test.go file); the same
 // rule is gated out of a test build. See is-test-filter-true-match for the
 // is_test: true counterpart.
-func ProcessRequest(req string) (_unnamedRetVal0 error) {
+func ProcessRequest(req string) (_unnamedRetVal_2401870380_0 error) {
 	//line <generated>:1
 	if hookContext2401870380, _ := OtelBeforeTrampoline_ProcessRequest2401870380(&req); false {
 	} else {
-		defer OtelAfterTrampoline_ProcessRequest2401870380(hookContext2401870380, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_ProcessRequest2401870380(hookContext2401870380, &_unnamedRetVal_2401870380_0)
 	}
 	//line main.go:11:2
 	println("processing:", req)

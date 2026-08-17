@@ -173,6 +173,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
+			span.SetAttributes(otelsemconv.ErrorType(err))
 			span.End()
 			return resp, err
 		}
@@ -190,7 +191,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		if isStreaming {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
-			resp.Body = newStreamingReader(resp.Body, span, start, model, opName, provider, op, ctx)
+			resp.Body = newStreamingReader(resp.Body, span, start, op)
 		} else {
 			handleNonStreamingResponse(ctx, resp, span, start, op)
 		}
