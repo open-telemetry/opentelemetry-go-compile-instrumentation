@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hook state is passed between the before and after hooks via a typed struct
   instead of a `map[string]interface{}`, and debug log arguments are no longer
   built when debug logging is off.
-  ([#TBD](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/TBD))
+  ([#1137](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1137))
 
 ### Deprecated
 
