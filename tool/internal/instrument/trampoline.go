@@ -885,6 +885,27 @@ func makeMethodPanic(method *dst.FuncDecl, message string) {
 	method.Body.List = []dst.Stmt{panicStmt}
 }
 
+func containsTypeParameterInExprs(exprs []dst.Expr, typeParams *dst.FieldList) bool {
+	for _, expr := range exprs {
+		if containsTypeParameter(expr, typeParams) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsTypeParameterInFields(fields *dst.FieldList, typeParams *dst.FieldList) bool {
+	if fields == nil {
+		return false
+	}
+	for _, field := range fields.List {
+		if containsTypeParameter(field.Type, typeParams) {
+			return true
+		}
+	}
+	return false
+}
+
 // containsTypeParameter checks if a type expression contains any type parameters
 func containsTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	if typeParams == nil {
@@ -908,53 +929,16 @@ func containsTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	case *dst.IndexExpr:
 		return containsTypeParameter(tType.X, typeParams) || containsTypeParameter(tType.Index, typeParams)
 	case *dst.IndexListExpr:
-		if containsTypeParameter(tType.X, typeParams) {
-			return true
-		}
-		for _, idx := range tType.Indices {
-			if containsTypeParameter(idx, typeParams) {
-				return true
-			}
-		}
-		return false
+		return containsTypeParameter(tType.X, typeParams) || containsTypeParameterInExprs(tType.Indices, typeParams)
 	case *dst.ParenExpr:
 		return containsTypeParameter(tType.X, typeParams)
 	case *dst.StructType:
-		if tType.Fields != nil {
-			for _, field := range tType.Fields.List {
-				if containsTypeParameter(field.Type, typeParams) {
-					return true
-				}
-			}
-		}
-		return false
+		return containsTypeParameterInFields(tType.Fields, typeParams)
 	case *dst.InterfaceType:
-		if tType.Methods != nil {
-			for _, field := range tType.Methods.List {
-				if containsTypeParameter(field.Type, typeParams) {
-					return true
-				}
-			}
-		}
-		return false
+		return containsTypeParameterInFields(tType.Methods, typeParams)
 	case *dst.FuncType:
-		if tType.Params != nil {
-			for _, field := range tType.Params.List {
-				if containsTypeParameter(field.Type, typeParams) {
-					return true
-				}
-			}
-		}
-		if tType.Results != nil {
-			for _, field := range tType.Results.List {
-				if containsTypeParameter(field.Type, typeParams) {
-					return true
-				}
-			}
-		}
-		return false
+		return containsTypeParameterInFields(tType.Params, typeParams) || containsTypeParameterInFields(tType.Results, typeParams)
 	case *dst.Ident, *dst.SelectorExpr:
-		// Base types without type parameters
 		return false
 	default:
 		return false
