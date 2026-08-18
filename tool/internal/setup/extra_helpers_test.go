@@ -20,7 +20,7 @@ func TestStateManagerDiscard(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
-	s := NewStateManager()
+	s := newStateManager()
 
 	// Track a non-existent path so Commit writes a manifest, then Discard must
 	// remove the manifest and the snapshot directory.
@@ -35,7 +35,7 @@ func TestStateManagerDiscard(t *testing.T) {
 
 func TestStateManagerDiscardEmpty(t *testing.T) {
 	// Discarding an empty state manager is a no-op.
-	require.NoError(t, NewStateManager().Discard())
+	require.NoError(t, newStateManager().Discard())
 }
 
 func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {

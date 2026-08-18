@@ -447,7 +447,7 @@ func updatePinnedProjects(
 	prunedImports := make(map[string]map[string]bool, len(toolFiles))
 
 	walkErr := walkInstrumentation(ctx, toolFiles,
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			pruneImport := func(reason error) {
 				logger.WarnContext(ctx, "invalid instrumentation import",
 					"importPath", v.Config.ImportPath,
@@ -471,7 +471,7 @@ func updatePinnedProjects(
 			}
 
 			if v.Config.Error != nil {
-				if errors.Is(v.Config.Error, ErrNotInstrumentation) {
+				if errors.Is(v.Config.Error, errNotInstrumentation) {
 					pruneImport(v.Config.Error)
 					return false, nil
 				}
@@ -546,7 +546,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 			os.Stderr,
 			"Warning: no instrumentations matched, checked %d dependencies. Skipping generating %s file.\n",
 			len(deps),
-			ToolFileCanonical,
+			toolFileCanonical,
 		)
 		logger.WarnContext(ctx, "no instrumentations matched, skipping generating tool file")
 
@@ -558,7 +558,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	f := generateOtelInstrumentationGo(imports, opts)
 	dirs := slices.Sorted(maps.Keys(moduleDirs))
 	for _, moduleDir := range dirs {
-		path := filepath.Join(moduleDir, ToolFileCanonical)
+		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
 		}
@@ -672,10 +672,10 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	return generatePinnedProjects(ctx, moduleDirs, opts)
 }
 
-// AutoPin is a convenience function that automatically tracks generated/modified files before calling Pin
+// autoPin is a convenience function that automatically tracks generated/modified files before calling Pin
 // in order to restore them after the build completes.
-func AutoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
-	stateManager, found := StateManagerFromContext(ctx)
+func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
+	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		return nil, ex.New("state manager not found in context")
 	}

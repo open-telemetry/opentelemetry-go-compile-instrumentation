@@ -117,7 +117,7 @@ type targetRule struct {
 	rule   rule.InstRule
 }
 
-func (sp *SetupPhase) matchGlobRules(
+func (sp *setupPhase) matchGlobRules(
 	dep *Dependency,
 	relevantRules []rule.InstRule,
 	globRules []targetRule,
@@ -157,7 +157,7 @@ func (sp *SetupPhase) matchGlobRules(
 //     path is a single map lookup on dep.ImportPath.
 //   - globRules are rules whose target uses glob syntax; each one's pattern is
 //     evaluated against dep.ImportPath because they cannot be pre-indexed by key.
-func (sp *SetupPhase) runMatch(
+func (sp *setupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
 	exactRules map[string][]rule.InstRule,
@@ -186,7 +186,7 @@ func (sp *SetupPhase) runMatch(
 		return set, nil
 	}
 
-	// Filter rules by version
+	// filter rules by version
 	filteredRules := make([]rule.InstRule, 0, len(relevantRules))
 	for _, r := range relevantRules {
 		if !matchVersion(dep, r) {
@@ -235,16 +235,16 @@ func (sp *SetupPhase) runMatch(
 // the rules slice is ever sorted or deduplicated before this point.
 type ruleFilter struct {
 	rule  rule.InstRule
-	where Filter // nil means no where clause — apply unconditionally
+	where filter // nil means no where clause — apply unconditionally
 }
 
 // preciseMatching performs AST-based matching of instrumentation rules against
 // the dependency's source files. It returns the rule set with the matched rules.
 //
-// If a rule carries a where clause, the compiled Filter is evaluated against
+// If a rule carries a where clause, the compiled filter is evaluated against
 // each source file before the standard AST match. Only files for which the
 // filter passes proceed to the type-specific matching step.
-func (sp *SetupPhase) preciseMatching(
+func (sp *setupPhase) preciseMatching(
 	ctx context.Context,
 	dep *Dependency,
 	rules []rule.InstRule,
@@ -260,10 +260,10 @@ func (sp *SetupPhase) preciseMatching(
 	// path, so each filter is built once across the entire matchDeps run.
 	ruleFilters := make([]ruleFilter, 0, len(rules))
 	for _, r := range rules {
-		var f Filter
+		var f filter
 		if where := r.GetWhere(); where != nil {
 			var err error
-			f, err = Build(where)
+			f, err = build(where)
 			if err != nil {
 				return nil, ex.Wrapf(err, "build where filter for rule %q", r.GetName())
 			}
@@ -297,7 +297,7 @@ func (sp *SetupPhase) preciseMatching(
 		// mctx is allocated once per source file and reused across all rules
 		// evaluated against that file. All fields are constant for a given
 		// source file, so no updates are needed inside the inner loop.
-		mctx := MatchContext{
+		mctx := matchContext{
 			IsTest:     isTest,
 			SourceFile: source,
 			AST:        tree,
@@ -344,7 +344,7 @@ func isTestBuild(sources []string) bool {
 
 // matchOneRule performs precise AST matching for a single rule against a parsed
 // source file, adding the rule to the set if it matches.
-func (sp *SetupPhase) matchOneRule(
+func (sp *setupPhase) matchOneRule(
 	tree *dst.File,
 	source string,
 	r rule.InstRule,
@@ -482,7 +482,7 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 
 func loadRulesFromToolFiles(ctx context.Context, toolFiles []string) ([]rule.InstRule, error) {
 	ruleSet := make([]rule.InstRule, 0)
-	walkErr := walkInstrumentation(ctx, toolFiles, func(v *InstrumentationVisit) (bool, error) {
+	walkErr := walkInstrumentation(ctx, toolFiles, func(v *instrumentationVisit) (bool, error) {
 		if v.Config.Error != nil {
 			return false, v.Config.Error
 		}
@@ -509,7 +509,7 @@ func loadRulesFromToolFiles(ctx context.Context, toolFiles []string) ([]rule.Ins
 	return ruleSet, nil
 }
 
-func (sp *SetupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool) ([]rule.InstRule, error) {
+func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool) ([]rule.InstRule, error) {
 	// Load rules from environment variable OTELC_RULES if specified. It has the
 	// highest priority.
 	rulePath := os.Getenv(util.EnvOtelcRules)
@@ -539,7 +539,7 @@ func (sp *SetupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool)
 	return nil, nil
 }
 
-func (sp *SetupPhase) matchDeps(
+func (sp *setupPhase) matchDeps(
 	ctx context.Context,
 	deps []*Dependency,
 	moduleDirs map[string]bool,

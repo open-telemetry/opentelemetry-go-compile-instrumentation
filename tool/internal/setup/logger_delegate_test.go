@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestSetupPhaseLogDelegators exercises the thin slog delegators on SetupPhase.
+// TestSetupPhaseLogDelegators exercises the thin slog delegators on setupPhase.
 // They must forward to the underlying logger without panicking.
 func TestSetupPhaseLogDelegators(t *testing.T) {
 	sp := newTestSetupPhase()

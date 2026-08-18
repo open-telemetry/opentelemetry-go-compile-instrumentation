@@ -185,9 +185,9 @@ func TestMatchDeps_RunMatchError(t *testing.T) {
 
 func TestFindToolFilesBothExist(t *testing.T) {
 	dir := t.TempDir()
-	err := os.WriteFile(filepath.Join(dir, ToolFileCanonical), []byte("package main"), 0o644)
+	err := os.WriteFile(filepath.Join(dir, toolFileCanonical), []byte("package main"), 0o644)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(dir, ToolFileAlias), []byte("package main"), 0o644)
+	err = os.WriteFile(filepath.Join(dir, toolFileAlias), []byte("package main"), 0o644)
 	require.NoError(t, err)
 
 	_, err = findToolFiles(map[string]bool{dir: true})
@@ -198,9 +198,9 @@ func TestFindToolFilesBothExist(t *testing.T) {
 func TestLoadRules_FindToolFilesError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 	dir := t.TempDir()
-	err := os.WriteFile(filepath.Join(dir, ToolFileCanonical), []byte("package main"), 0o644)
+	err := os.WriteFile(filepath.Join(dir, toolFileCanonical), []byte("package main"), 0o644)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(dir, ToolFileAlias), []byte("package main"), 0o644)
+	err = os.WriteFile(filepath.Join(dir, toolFileAlias), []byte("package main"), 0o644)
 	require.NoError(t, err)
 
 	sp := newTestSetupPhase()
@@ -221,7 +221,7 @@ func TestWalkInstrumentationParseError(t *testing.T) {
 	err := walkInstrumentation(
 		context.Background(),
 		[]string{filepath.Join(t.TempDir(), "nope.go")},
-		func(v *InstrumentationVisit) (bool, error) { return false, nil },
+		func(v *instrumentationVisit) (bool, error) { return false, nil },
 	)
 	require.Error(t, err)
 }

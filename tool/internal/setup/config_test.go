@@ -31,34 +31,34 @@ func TestFindToolFile(t *testing.T) {
 			name: "canonical",
 			setup: func(dir string) {
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, ToolFileCanonical),
+					filepath.Join(dir, toolFileCanonical),
 					nil,
 					0o644,
 				))
 			},
-			want: ToolFileCanonical,
+			want: toolFileCanonical,
 		},
 		{
 			name: "alias",
 			setup: func(dir string) {
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, ToolFileAlias),
+					filepath.Join(dir, toolFileAlias),
 					nil,
 					0o644,
 				))
 			},
-			want: ToolFileAlias,
+			want: toolFileAlias,
 		},
 		{
 			name: "both",
 			setup: func(dir string) {
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, ToolFileCanonical),
+					filepath.Join(dir, toolFileCanonical),
 					nil,
 					0o644,
 				))
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, ToolFileAlias),
+					filepath.Join(dir, toolFileAlias),
 					nil,
 					0o644,
 				))
@@ -110,14 +110,14 @@ func TestResolveInstrumentationConfig(t *testing.T) {
 				))
 
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, ToolFileCanonical),
+					filepath.Join(dir, toolFileCanonical),
 					[]byte("//go:build tools\n\npackage tools\n"),
 					0o644,
 				))
 			},
 			want: map[string]wantConfig{
 				"example.com/test": {
-					tool: ToolFileCanonical,
+					tool: toolFileCanonical,
 				},
 			},
 		},
@@ -160,7 +160,7 @@ func TestResolveInstrumentationConfig(t *testing.T) {
 				))
 
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, ToolFileCanonical),
+					filepath.Join(dir, toolFileCanonical),
 					[]byte("//go:build tools\n\npackage tools\n"),
 					0o644,
 				))
@@ -179,7 +179,7 @@ func TestResolveInstrumentationConfig(t *testing.T) {
 			},
 			want: map[string]wantConfig{
 				"example.com/test": {
-					tool:  ToolFileCanonical,
+					tool:  toolFileCanonical,
 					rules: []string{"foo.otelc.yml", "bar.otelc.yml"},
 				},
 			},
@@ -195,13 +195,13 @@ func TestResolveInstrumentationConfig(t *testing.T) {
 				))
 
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, ToolFileCanonical),
+					filepath.Join(dir, toolFileCanonical),
 					[]byte("//go:build tools\n\npackage tools\n"),
 					0o644,
 				))
 
 				require.NoError(t, os.WriteFile(
-					filepath.Join(dir, ToolFileAlias),
+					filepath.Join(dir, toolFileAlias),
 					[]byte("//go:build tools\n\npackage tools\n"),
 					0o644,
 				))
@@ -476,10 +476,10 @@ func writeInstrumentationModule(
 	}
 
 	if len(imports) > 0 {
-		writeToolFile(t, filepath.Join(root, ToolFileCanonical), slices.Collect(maps.Keys(imports))...)
+		writeToolFile(t, filepath.Join(root, toolFileCanonical), slices.Collect(maps.Keys(imports))...)
 	}
 
-	return filepath.Join(root, ToolFileCanonical)
+	return filepath.Join(root, toolFileCanonical)
 }
 
 func TestWalkInstrumentation_VisitsImports(t *testing.T) {
@@ -494,7 +494,7 @@ func TestWalkInstrumentation_VisitsImports(t *testing.T) {
 
 	var visits []string
 	err := walkInstrumentation(t.Context(), []string{toolFile},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			require.NoError(t, v.Config.Error)
 
 			visits = append(visits, v.Config.ImportPath)
@@ -552,7 +552,7 @@ replace example.com/foo => %s
 			))
 
 			require.NoError(t, os.WriteFile(
-				filepath.Join(tmp, ToolFileCanonical),
+				filepath.Join(tmp, toolFileCanonical),
 				[]byte(`//go:build tools
 
 package tools
@@ -567,8 +567,8 @@ import (`+tt.imports+`
 
 			err := walkInstrumentation(
 				t.Context(),
-				[]string{filepath.Join(tmp, ToolFileCanonical)},
-				func(v *InstrumentationVisit) (bool, error) {
+				[]string{filepath.Join(tmp, toolFileCanonical)},
+				func(v *instrumentationVisit) (bool, error) {
 					t.Fatal("visitor should not be called")
 					return false, nil
 				},
@@ -592,7 +592,7 @@ func TestWalkInstrumentation_Recurses(t *testing.T) {
 
 	var visits []string
 	err := walkInstrumentation(t.Context(), []string{toolFile},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			require.NoError(t, v.Config.Error)
 
 			visits = append(visits, v.Config.ImportPath)
@@ -623,7 +623,7 @@ func TestWalkInstrumentation_NoRecurse(t *testing.T) {
 
 	var visits []string
 	err := walkInstrumentation(t.Context(), []string{toolFile},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			require.NoError(t, v.Config.Error)
 
 			visits = append(visits, v.Config.ImportPath)
@@ -654,7 +654,7 @@ func TestWalkInstrumentation_DeduplicatesImports(t *testing.T) {
 
 	counts := make(map[string]int)
 	err := walkInstrumentation(t.Context(), []string{toolFile},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			require.NoError(t, v.Config.Error)
 
 			counts[v.Config.ImportPath]++
@@ -683,7 +683,7 @@ func TestWalkInstrumentation_AvoidsCycles(t *testing.T) {
 
 	var visits []string
 	err := walkInstrumentation(t.Context(), []string{toolFile},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			require.NoError(t, v.Config.Error)
 
 			visits = append(visits, v.Config.ImportPath)
@@ -710,7 +710,7 @@ func TestWalkInstrumentation_DoesNotRevisitRootToolFile(t *testing.T) {
 
 	var visits []string
 	err := walkInstrumentation(t.Context(), []string{rootTool},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			require.NoError(t, v.Config.Error)
 
 			visits = append(visits, v.Config.ImportPath)
@@ -733,7 +733,7 @@ func TestWalkInstrumentation_VisitError(t *testing.T) {
 	wantErr := errors.New("visit error")
 
 	err := walkInstrumentation(t.Context(), []string{toolFile},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			require.NoError(t, v.Config.Error)
 
 			return false, wantErr
@@ -749,7 +749,7 @@ func TestWalkInstrumentation_ResolveError(t *testing.T) {
 	toolFile := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
 		"example.com/notinstrumentation": filepath.Join(tmp, "notinstrumentation"),
 	})
-	// This module does not have a tool file or rule files, so it should return ErrNotInstrumentation.
+	// This module does not have a tool file or rule files, so it should return errNotInstrumentation.
 	writeInstrumentationModule(
 		t,
 		filepath.Join(tmp, "notinstrumentation"),
@@ -758,9 +758,9 @@ func TestWalkInstrumentation_ResolveError(t *testing.T) {
 		nil,
 	)
 
-	var got *InstrumentationVisit
+	var got *instrumentationVisit
 	err := walkInstrumentation(t.Context(), []string{toolFile},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			got = v
 			return false, nil
 		},
@@ -769,7 +769,7 @@ func TestWalkInstrumentation_ResolveError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.NotNil(t, got.Config)
-	require.ErrorIs(t, got.Config.Error, ErrNotInstrumentation)
+	require.ErrorIs(t, got.Config.Error, errNotInstrumentation)
 }
 
 func TestWalkInstrumentation_LoadsModulesWithoutBuildableFiles(t *testing.T) {
@@ -789,7 +789,7 @@ func TestWalkInstrumentation_LoadsModulesWithoutBuildableFiles(t *testing.T) {
 
 	var visits []string
 	err := walkInstrumentation(t.Context(), []string{toolFile},
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			require.NoError(t, v.Config.Error)
 
 			visits = append(visits, v.Config.ImportPath)
