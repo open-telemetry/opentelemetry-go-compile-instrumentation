@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"slices"
 
 	"github.com/dave/dst"
 
@@ -36,7 +37,10 @@ func (ip *InstrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	})
 
 	modified := false
-	for _, lit := range matched {
+	// Walk matched in reverse. dst.Inspect visits a literal before the literals
+	// nested inside it, so the reverse order edits the innermost literal first
+	// and an enclosing literal always wraps a finished subtree.
+	for _, lit := range slices.Backward(matched) {
 		// Go rejects a literal that mixes keyed and positional elements, so a
 		// positional literal cannot take the keyed elements this rule produces.
 		if hasPositionalElements(lit) {
@@ -163,7 +167,11 @@ func (ip *InstrumentPhase) setLitFields(
 			if err != nil {
 				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}
-			existing.Value = util.AssertType[dst.Expr](dst.Clone(wrapped))
+			// wrapped holds the literal's own expression, so cloning it would
+			// detach any literal nested in that expression from the tree.
+			// compileExpression already returns a fresh tree, and the old value
+			// leaves the tree in the same assignment, so no node is reused.
+			existing.Value = wrapped
 			changed = true
 			continue
 		}

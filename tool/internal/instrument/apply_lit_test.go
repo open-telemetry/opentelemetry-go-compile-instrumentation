@@ -328,6 +328,65 @@ func TestApplyLitRule_WrapTakesPrecedenceOverValueWhenPresent(t *testing.T) {
 	assert.Equal(t, "wrapProxy(myProxy)", wrapExprString(t, kv.Value))
 }
 
+// A literal of the rule's own type can sit inside the value another matched
+// literal wraps. Both must come out instrumented, and the nested one must stay
+// attached to the file rather than being replaced by an untouched copy.
+func TestApplyLitRule_WrapInstrumentsNestedMatchedLiteral(t *testing.T) {
+	inner := transportLit(keyed("MaxIdleConns", "100"))
+	outer := transportLit(&dst.KeyValueExpr{
+		Key:   &dst.Ident{Name: "Proxy"},
+		Value: &dst.CallExpr{Fun: &dst.Ident{Name: "identity"}, Args: []dst.Expr{inner}},
+	})
+	file := makeLitFile(outer)
+	r := transportRule(
+		&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }})"},
+		&rule.InstLitField{Name: "Internal", Value: "true"},
+	)
+
+	ip := newTestPhase()
+	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+
+	// Read the literals back out of the file, not through the nodes handed in,
+	// so a nested literal detached from the tree cannot pass this test.
+	var inTree []*dst.CompositeLit
+	dst.Inspect(file, func(node dst.Node) bool {
+		if lit, ok := node.(*dst.CompositeLit); ok {
+			inTree = append(inTree, lit)
+		}
+		return true
+	})
+	require.Len(t, inTree, 2)
+
+	assert.Equal(t, []string{"Internal", "Proxy"}, keyNames(t, inTree[0]))
+	assert.Equal(t, [][2]string{{"Internal", "true"}, {"MaxIdleConns", "100"}}, litKeys(t, inTree[1]))
+
+	// The nested literal reached through the wrapped value is the same node, so
+	// wrapping did not leave a stale copy behind.
+	outerProxy := findKeyedElement(inTree[0], "Proxy")
+	require.NotNil(t, outerProxy)
+	wrapCall, ok := outerProxy.Value.(*dst.CallExpr)
+	require.True(t, ok, "expected Proxy to be wrapped, got %T", outerProxy.Value)
+	assert.Equal(t, "wrapProxy", wrapCall.Fun.(*dst.Ident).Name)
+	identityCall, ok := wrapCall.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected the original identity call inside the wrap, got %T", wrapCall.Args[0])
+	assert.Same(t, inTree[1], identityCall.Args[0])
+}
+
+// keyNames returns the names of the literal's keyed elements, ignoring values.
+// Unlike litKeys it tolerates values that are not plain identifiers.
+func keyNames(t *testing.T, lit *dst.CompositeLit) []string {
+	t.Helper()
+	names := make([]string, 0, len(lit.Elts))
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*dst.KeyValueExpr)
+		require.True(t, ok, "element is not keyed")
+		key, ok := kv.Key.(*dst.Ident)
+		require.True(t, ok, "key is not an identifier")
+		names = append(names, key.Name)
+	}
+	return names
+}
+
 func TestApplyLitRule_InvalidWrapTemplate(t *testing.T) {
 	file := makeLitFile(transportLit(keyed("Proxy", "myProxy")))
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }}"})

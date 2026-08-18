@@ -17,7 +17,13 @@ func Absent() *io.LimitedReader {
 	return &io.LimitedReader{R: counting(nil)}
 }
 
+// A literal of the same type inside the wrapped field is instrumented too.
+func Nested(r io.Reader) *io.LimitedReader {
+	return &io.LimitedReader{R: counting(&io.LimitedReader{R: counting(r), N: (5) * 2}), N: (10) * 2}
+}
+
 func main() {
 	_ = Wrapped(nil)
 	_ = Absent()
+	_ = Nested(nil)
 }
