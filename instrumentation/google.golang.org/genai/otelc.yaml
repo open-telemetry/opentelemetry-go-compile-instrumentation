@@ -1,0 +1,9 @@
+genai_v1_new_client:
+  target: google.golang.org/genai
+  version: v1.0.0
+  where:
+    func: NewClient
+  do:
+    - inject_hooks:
+        after: AfterNewClient
+        path: "go.opentelemetry.io/otelc/instrumentation/google.golang.org/genai"
