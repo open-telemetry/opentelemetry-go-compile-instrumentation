@@ -85,6 +85,58 @@ func TestGetRedisV9Statement(t *testing.T) {
 	}
 }
 
+func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      redis.Cmder
+		expected string
+	}{
+		{
+			name:     "AUTH with password only",
+			cmd:      redis.NewCmd(context.Background(), "auth", "s3cret"),
+			expected: "auth ?",
+		},
+		{
+			name:     "AUTH with username and password",
+			cmd:      redis.NewCmd(context.Background(), "auth", "default", "s3cret"),
+			expected: "auth ? ?",
+		},
+		{
+			name:     "AUTH uppercase",
+			cmd:      redis.NewCmd(context.Background(), "AUTH", "s3cret"),
+			expected: "AUTH ?",
+		},
+		{
+			name:     "HELLO handshake with AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			expected: "hello 3 auth ? ?",
+		},
+		{
+			name:     "HELLO keeps SETNAME visible",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret", "setname", "myapp"),
+			expected: "hello 3 auth ? ? setname myapp",
+		},
+		{
+			name:     "HELLO without AUTH is untouched",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3),
+			expected: "hello 3",
+		},
+		{
+			name:     "key literally named auth is not a credential",
+			cmd:      redis.NewCmd(context.Background(), "get", "auth", "token"),
+			expected: "get auth token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getRedisV9Statement(tt.cmd)
+			assert.Equal(t, tt.expected, result)
+			assert.NotContains(t, result, "s3cret", "the password must never reach db.query.text")
+		})
+	}
+}
+
 func TestRedisV9AppendArg(t *testing.T) {
 	tests := []struct {
 		name     string

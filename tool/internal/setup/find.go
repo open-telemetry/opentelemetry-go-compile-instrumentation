@@ -150,7 +150,7 @@ func resolveCgoFile(cgoFile, sourceDir string) (string, error) {
 	return abs, nil
 }
 
-var versionRegexp = regexp.MustCompile(`@v\d+\.\d+\.\d+(-.*?)?/`)
+var versionRegexp = regexp.MustCompile(`@v\d+\.\d+\.\d+([-+][^/]*)?/`)
 
 func findModVersion(path string) string {
 	version := versionRegexp.FindString(filepath.ToSlash(path))

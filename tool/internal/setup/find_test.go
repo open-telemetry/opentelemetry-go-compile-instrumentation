@@ -561,6 +561,16 @@ func TestFindModVersion(t *testing.T) {
 			want: "v1.2.3-rc.1",
 		},
 		{
+			name: "module cache path with incompatible suffix",
+			path: "/go/pkg/mod/github.com/evanphx/json-patch@v5.9.11+incompatible/pkg/foo.go",
+			want: "v5.9.11+incompatible",
+		},
+		{
+			name: "module cache path with incompatible suffix and custom host",
+			path: "/go/pkg/mod/gotest.tools@v2.2.0+incompatible/pkg/foo.go",
+			want: "v2.2.0+incompatible",
+		},
+		{
 			name: "windows-style module cache path",
 			// Use /-separated form so this exercises the same path shape
 			// filepath.ToSlash produces on Windows, without depending on GOOS
