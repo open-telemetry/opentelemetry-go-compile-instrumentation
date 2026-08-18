@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic-sdk-go/semconv"
@@ -140,6 +141,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
+			span.SetAttributes(otelsemconv.ErrorType(err))
 			span.End()
 			return resp, err
 		}

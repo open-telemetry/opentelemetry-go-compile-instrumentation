@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -139,12 +140,72 @@ func (o *otelRedisHook) DialHook(next redis.DialHook) redis.DialHook {
 	}
 }
 
+// redactedArg is what replaces a credential in db.query.text.
+const redactedArg = "?"
+
+// credentialArgs reports which argument positions carry credentials and must
+// not reach db.query.text.
+//
+// A client configured with a password sends them on the connection handshake,
+// before any user command runs, so this is not limited to applications that
+// call AUTH themselves:
+//
+//	AUTH password                              (legacy)
+//	AUTH username password                     (ACL, Redis 6+)
+//	HELLO 3 AUTH username password [SETNAME c] (RESP3 handshake)
+func credentialArgs(args []interface{}) map[int]bool {
+	if len(args) == 0 {
+		return nil
+	}
+	name, ok := args[0].(string)
+	if !ok {
+		return nil
+	}
+
+	switch strings.ToLower(name) {
+	case "auth":
+		// Everything after the command name is a credential, whether the
+		// legacy one-argument form or the ACL username/password form.
+		redacted := make(map[int]bool, len(args)-1)
+		for i := 1; i < len(args); i++ {
+			redacted[i] = true
+		}
+		return redacted
+
+	case "hello":
+		// The AUTH section is optional and follows the protocol version, so
+		// find it rather than assuming a position.
+		for i := 1; i < len(args); i++ {
+			s, ok := args[i].(string)
+			if !ok || !strings.EqualFold(s, "auth") {
+				continue
+			}
+			// Exactly the username and password that follow, so a trailing
+			// SETNAME clientname is still visible.
+			redacted := make(map[int]bool, 2)
+			for j := i + 1; j < len(args) && j <= i+2; j++ {
+				redacted[j] = true
+			}
+			return redacted
+		}
+	}
+
+	return nil
+}
+
 func getRedisV9Statement(cmd redis.Cmder) string {
 	b := make([]byte, 0, 64)
 
-	for i, arg := range cmd.Args() {
+	args := cmd.Args()
+	redacted := credentialArgs(args)
+
+	for i, arg := range args {
 		if i > 0 {
 			b = append(b, ' ')
+		}
+		if redacted[i] {
+			b = append(b, redactedArg...)
+			continue
 		}
 		b = redisV9AppendArg(b, arg)
 	}

@@ -6,6 +6,7 @@ package semconv
 import (
 	"net"
 	"strconv"
+	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -19,6 +20,17 @@ type DatabaseSqlRequest struct {
 	Dsn        string
 	Params     []any
 	DbName     string
+}
+
+// OperationName returns the uppercased first token of a SQL statement for use
+// as db.operation.name. Empty or whitespace-only input returns "".
+func OperationName(query string) string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return ""
+	}
+	fields := strings.Fields(trimmed)
+	return strings.ToUpper(fields[0])
 }
 
 func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {

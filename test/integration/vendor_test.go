@@ -32,6 +32,7 @@ const vendoredAppMain = `package main
 import (
 	"flag"
 	"fmt"
+	"log"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,7 +47,7 @@ func main() {
 	})
 
 	if err := r.Run(fmt.Sprintf(":%d", *port)); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 `
