@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -633,4 +634,41 @@ go 1.25.0
 	require.NoError(t, warnVersion(ctx, gomodPath, before))
 
 	assert.Empty(t, buf.String())
+}
+
+func TestSyncDeps_DeterministicReplaceOrder(t *testing.T) {
+	goMod := `module example.com/test
+
+go 1.21
+`
+	instPaths := []string{
+		"google.golang.org/grpc",
+		"github.com/segmentio/kafka-go",
+		"github.com/gin-gonic/gin",
+		"net/http/client",
+	}
+
+	tempDir, _, goModPath := setupSyncDepsTest(t, goMod, instPaths)
+	modPaths := make(map[string]bool, len(instPaths))
+	for _, p := range instPaths {
+		modPaths[util.OtelcInstRoot+"/"+p] = true
+	}
+
+	require.NoError(t, syncDeps(t.Context(), modPaths, tempDir))
+
+	mf, err := parseGoMod(goModPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, mf.Replace)
+
+	replacedPaths := make([]string, 0, len(mf.Replace))
+	for _, r := range mf.Replace {
+		replacedPaths = append(replacedPaths, r.Old.Path)
+	}
+
+	assert.True(
+		t,
+		slices.IsSorted(replacedPaths),
+		"expected replace directives to be sorted alphabetically, got: %v",
+		replacedPaths,
+	)
 }

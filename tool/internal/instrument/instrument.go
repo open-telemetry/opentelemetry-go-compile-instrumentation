@@ -5,7 +5,9 @@ package instrument
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
+	"slices"
 
 	"github.com/dave/dst"
 
@@ -14,7 +16,12 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRule {
+// groupRules groups rset's rules by absolute file path, and also returns
+// those paths in sorted order. instrument() returns on the first error it
+// hits while walking the files it's given, so an unsorted order would make
+// which failure gets reported (and the order of per-file log lines) vary
+// between identical runs of the same input.
+func groupRules(workDir string, rset *rule.InstRuleSet) (map[string][]rule.InstRule, []string) {
 	file2rules := make(map[string][]rule.InstRule)
 	addRulesToMap(rset.FuncRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, workDir)
@@ -22,7 +29,7 @@ func groupRules(workDir string, rset *rule.InstRuleSet) map[string][]rule.InstRu
 	addRulesToMap(rset.CallRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DirectiveRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DeclRules, file2rules, rset.CgoFileMap, workDir)
-	return file2rules
+	return file2rules, slices.Sorted(maps.Keys(file2rules))
 }
 
 func addRulesToMap[T rule.InstRule](
@@ -74,7 +81,9 @@ func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
 	}
-	for file, rules := range groupRules(ip.workDir, rset) {
+	file2rules, files := groupRules(ip.workDir, rset)
+	for _, file := range files {
+		rules := file2rules[file]
 		// Group rules by file, then parse the target file once
 		root, err := ip.parseFile(file)
 		if err != nil {

@@ -301,3 +301,94 @@ func requireTypeChecks(t *testing.T, src string) {
 	_, err = conf.Check("main", fset, []*goast.File{parsed}, nil)
 	require.NoErrorf(t, err, "generated code does not type-check:\n%s", src)
 }
+
+// newTrampolineJump builds an if statement shaped like the one buildTJump
+// produces: a labelled if whose else block holds the deferred after-call. The
+// label is what findJumpPoint keys on, so a jump without it is just an
+// ordinary if as far as this function is concerned.
+func newTrampolineJump(labelled bool) *dst.IfStmt {
+	// Mirrors buildTJump: the init defines the hook context and skip flag from
+	// the before-call, and the else block defers the after-call.
+	init := ast.DefineStmts(
+		ast.Exprs(ast.Ident("hookCtx"), ast.Ident("skip")),
+		ast.Exprs(ast.CallTo("beforeCall", nil, nil)),
+	)
+	elseBlock := ast.Block(ast.DeferStmt(ast.CallTo("afterCall", nil, nil)))
+
+	jump := ast.IfStmt(init, ast.Ident("skip"), ast.Block(ast.EmptyStmt()), elseBlock)
+	if labelled {
+		jump.Decs.If.Append(tJumpLabel)
+	}
+	return jump
+}
+
+// chainJump nests inner inside outer's else block the way insertToFunc does,
+// separating the existing statement from the new jump with an empty statement.
+// That leaves the else block with more than one statement, which is the
+// condition findJumpPoint recurses on.
+func chainJump(t *testing.T, outer, inner *dst.IfStmt) {
+	t.Helper()
+
+	elseBlock, ok := outer.Else.(*dst.BlockStmt)
+	require.True(t, ok, "a trampoline jump should always carry a block else")
+	elseBlock.List = append(elseBlock.List, ast.EmptyStmt(), inner)
+}
+
+func TestFindJumpPointIgnoresUnlabelledIf(t *testing.T) {
+	// Without the trampoline label this is an ordinary if statement that
+	// happened to be first in the function body. Returning a block here would
+	// splice a trampoline into unrelated user code.
+	jump := newTrampolineJump(false)
+
+	assert.Nil(t, findJumpPoint(jump))
+}
+
+func TestFindJumpPointReturnsElseBlockOfLoneJump(t *testing.T) {
+	jump := newTrampolineJump(true)
+
+	point := findJumpPoint(jump)
+
+	require.NotNil(t, point)
+	assert.Equal(t, jump.Else, point, "the only jump present is the insertion point")
+}
+
+func TestFindJumpPointDescendsToLastJumpInChain(t *testing.T) {
+	// Two rules already applied to the same function, so the second jump lives
+	// inside the first one's else block. A third has to land inside the second,
+	// not the first, or the rules stop nesting in the order they were applied.
+	first := newTrampolineJump(true)
+	second := newTrampolineJump(true)
+	chainJump(t, first, second)
+
+	point := findJumpPoint(first)
+
+	require.NotNil(t, point)
+	assert.Equal(t, second.Else, point, "insertion belongs in the innermost jump")
+	assert.NotEqual(t, first.Else, point)
+}
+
+func TestFindJumpPointDescendsThroughSeveralJumps(t *testing.T) {
+	// The descent is recursive, so a longer chain must still reach the end
+	// rather than stopping one level in.
+	first := newTrampolineJump(true)
+	second := newTrampolineJump(true)
+	third := newTrampolineJump(true)
+	chainJump(t, first, second)
+	chainJump(t, second, third)
+
+	point := findJumpPoint(first)
+
+	require.NotNil(t, point)
+	assert.Equal(t, third.Else, point, "insertion belongs at the end of the chain")
+}
+
+func TestFindJumpPointStopsAtUnlabelledTail(t *testing.T) {
+	// A chain whose last statement is not a labelled jump has no further
+	// insertion point beneath it, so the descent reports nothing rather than
+	// guessing at a block.
+	first := newTrampolineJump(true)
+	tail := newTrampolineJump(false)
+	chainJump(t, first, tail)
+
+	assert.Nil(t, findJumpPoint(first))
+}
