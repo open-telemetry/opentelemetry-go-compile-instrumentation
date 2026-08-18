@@ -552,6 +552,10 @@ func TestClientStatsHandler_OTELExporterFiltering(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
+			var callerSpan trace.Span
+			if !tt.shouldInstrument {
+				ctx, callerSpan = tp.Tracer("test").Start(ctx, "caller")
+			}
 			info := &stats.RPCTagInfo{
 				FullMethodName: tt.fullMethodName,
 			}
@@ -579,9 +583,16 @@ func TestClientStatsHandler_OTELExporterFiltering(t *testing.T) {
 				gctx := newCtx.Value(gRPCContextKey{})
 				assert.Nil(t, gctx, "Expected no gRPC context for OTLP exporter calls")
 
-				// Verify no span was created
+				handler.HandleRPC(newCtx, &stats.End{
+					BeginTime: time.Now().Add(-100 * time.Millisecond),
+					EndTime:   time.Now(),
+				})
+				assert.True(t, callerSpan.IsRecording(), "Expected caller span to remain active")
+
+				// Verify no span was created or ended
 				spans := exporter.GetSpans()
 				assert.Empty(t, spans, "Expected no span for OTLP exporter calls")
+				callerSpan.End()
 			}
 
 			exporter.Reset()

@@ -176,8 +176,11 @@ func (h *serverStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo)
 
 // HandleRPC processes RPC stats events
 func (h *serverStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
-	span := trace.SpanFromContext(ctx)
 	gctx, _ := ctx.Value(gRPCContextKey{}).(*gRPCContext)
+	if gctx == nil {
+		return
+	}
+	span := trace.SpanFromContext(ctx)
 
 	switch rs := rs.(type) {
 	case *stats.Begin:
