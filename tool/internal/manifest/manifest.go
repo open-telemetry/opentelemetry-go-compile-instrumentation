@@ -73,7 +73,7 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 	return manifest, nil
 }
 
-func Load() (Manifest, error) {
+func load() (Manifest, error) {
 	var manifest Manifest
 	if err := json.Unmarshal(data.GetManifestJSON(), &manifest); err != nil {
 		return nil, ex.Wrapf(err, "loading embedded instrumentation manifest")
