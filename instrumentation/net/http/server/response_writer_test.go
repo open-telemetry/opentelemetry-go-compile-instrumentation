@@ -271,6 +271,106 @@ func TestWriterWrapper_ReadFrom_KeepsExplicitStatus(t *testing.T) {
 	assert.Equal(t, http.StatusPartialContent, recorder.Code)
 }
 
+// mockStringWriter is a mock ResponseWriter that implements io.StringWriter,
+// the interface net/http's own *response uses to write a string without an
+// extra []byte conversion.
+type mockStringWriter struct {
+	http.ResponseWriter
+	writeStringCalled bool
+}
+
+func (m *mockStringWriter) WriteString(s string) (int, error) {
+	m.writeStringCalled = true
+	return io.WriteString(m.ResponseWriter, s)
+}
+
+func TestWriterWrapper_WriteStringUsesUnderlyingFastPath(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &mockStringWriter{ResponseWriter: recorder}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	// io.WriteString is what fmt.Fprint and friends use; it must reach the
+	// underlying WriteString rather than falling back to a []byte conversion.
+	n, err := io.WriteString(wrapper, "payload")
+
+	require.NoError(t, err)
+	assert.Equal(t, len("payload"), n)
+	assert.True(t, mock.writeStringCalled, "io.WriteString must reach the underlying io.StringWriter")
+	assert.Equal(t, "payload", recorder.Body.String())
+}
+
+// plainResponseWriter implements exactly http.ResponseWriter and nothing more.
+// httptest.ResponseRecorder cannot stand in for a writer that lacks a string
+// fast path, because it does implement io.StringWriter, so a test built on the
+// recorder would take WriteString's fast path and never reach the fallback.
+type plainResponseWriter struct {
+	rec         *httptest.ResponseRecorder
+	writeCalled bool
+}
+
+func (p *plainResponseWriter) Header() http.Header { return p.rec.Header() }
+
+func (p *plainResponseWriter) Write(b []byte) (int, error) {
+	p.writeCalled = true
+	return p.rec.Write(b)
+}
+
+func (p *plainResponseWriter) WriteHeader(statusCode int) { p.rec.WriteHeader(statusCode) }
+
+func TestWriterWrapper_WriteString_NotSupported(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	plain := &plainResponseWriter{rec: recorder}
+
+	// Guard the premise of this test: if plainResponseWriter ever grows a
+	// WriteString method, the wrapper would take the fast path and the
+	// fallback below would silently stop being covered.
+	var rw http.ResponseWriter = plain
+	_, hasStringWriter := rw.(io.StringWriter)
+	require.False(t, hasStringWriter, "plainResponseWriter must not implement io.StringWriter")
+
+	wrapper := &writerWrapper{
+		ResponseWriter: plain,
+		statusCode:     http.StatusOK,
+	}
+
+	// plain has no WriteString, so the wrapper falls back to Write.
+	n, err := io.WriteString(wrapper, "payload")
+
+	require.NoError(t, err)
+	assert.Equal(t, len("payload"), n)
+	assert.True(t, plain.writeCalled, "the fallback must go through Write")
+	assert.Equal(t, "payload", recorder.Body.String())
+}
+
+func TestWriterWrapper_WriteString_ImplicitStatusOK(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &mockStringWriter{ResponseWriter: recorder}
+	wrapper := &writerWrapper{ResponseWriter: mock}
+
+	_, err := wrapper.WriteString("payload")
+
+	require.NoError(t, err)
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestWriterWrapper_WriteString_KeepsExplicitStatus(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &mockStringWriter{ResponseWriter: recorder}
+	wrapper := &writerWrapper{ResponseWriter: mock}
+
+	wrapper.WriteHeader(http.StatusPartialContent)
+	_, err := wrapper.WriteString("payload")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusPartialContent, wrapper.statusCode)
+	assert.Equal(t, http.StatusPartialContent, recorder.Code)
+}
+
 func TestWriterWrapper_ServeFileOverRealServer(t *testing.T) {
 	content := strings.Repeat("otelc", 100_000) // well past io.Copy's 32KiB buffer
 	path := filepath.Join(t.TempDir(), "payload.txt")
