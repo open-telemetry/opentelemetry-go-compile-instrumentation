@@ -65,6 +65,13 @@ type consumerData struct {
 	start    time.Time
 }
 
+// fetchMessageCallKey marks a context as coming from (*kafka.Reader).ReadMessage's
+// own call into r.FetchMessage(ctx) (see kafka-go's reader.go), so
+// BeforeFetchMessage can recognize and skip that nested call: ReadMessage is
+// already instrumented, and without this the same message would get a second,
+// duplicate consumer span from the inner FetchMessage call.
+type fetchMessageCallKey struct{}
+
 // BeforeReadMessage captures the reader configuration and the call start time so
 // AfterReadMessage can build an accurate consumer span once the message arrives.
 func BeforeReadMessage(ictx hook.HookContext, r *kafka.Reader, ctx context.Context) {
@@ -76,6 +83,16 @@ func BeforeReadMessage(ictx hook.HookContext, r *kafka.Reader, ctx context.Conte
 		return
 	}
 	initInstrumentation()
+
+	// ReadMessage's own body calls r.FetchMessage(ctx) with this same ctx value,
+	// so marking it here and writing it back via SetParam lets BeforeFetchMessage
+	// recognize that nested call and skip creating a duplicate span for it.
+	// context.WithValue panics on a nil parent, so normalize first.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = context.WithValue(ctx, fetchMessageCallKey{}, struct{}{})
+	ictx.SetParam(1, ctx)
 
 	cfg := r.Config()
 	endpoint := ""
@@ -143,7 +160,18 @@ func AfterReadMessage(ictx hook.HookContext, msg kafka.Message, err error) {
 // so AfterFetchMessage can build an accurate consumer span once the message
 // arrives. FetchMessage does not auto-commit the offset; the caller must
 // explicitly call CommitMessages after processing.
+//
+// (*kafka.Reader).ReadMessage's own implementation calls r.FetchMessage(ctx)
+// internally, and both methods are instrumented (see otelc.yaml), so a call to
+// ReadMessage would otherwise also trigger this hook for its nested FetchMessage
+// call, producing two consumer spans for one message. When ctx carries the
+// marker BeforeReadMessage set, this is that nested call, so it's skipped here:
+// no data is stored, and AfterFetchMessage's delegation to AfterReadMessage
+// already no-ops on missing data (see its comment).
 func BeforeFetchMessage(ictx hook.HookContext, r *kafka.Reader, ctx context.Context) {
+	if ctx != nil && ctx.Value(fetchMessageCallKey{}) != nil {
+		return
+	}
 	BeforeReadMessage(ictx, r, ctx)
 }
 

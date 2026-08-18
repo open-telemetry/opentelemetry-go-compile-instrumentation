@@ -327,3 +327,68 @@ func TestFetchMessage_Disabled(t *testing.T) {
 
 	assert.Empty(t, sr.Ended())
 }
+
+// TestReadMessage_NestedFetchMessageDoesNotDuplicateSpan is a regression test
+// for https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1076:
+// (*kafka.Reader).ReadMessage's own implementation calls r.FetchMessage(ctx)
+// internally, and since both methods are instrumented, that nested call used to
+// trigger BeforeFetchMessage/AfterFetchMessage as well, producing two consumer
+// spans for what is, from the caller's point of view, a single ReadMessage call.
+//
+// This drives the hooks the way otelc's generated trampolines actually would:
+// BeforeReadMessage's marked ctx (read back via GetParam, mirroring how the real
+// ReadMessage body picks up the mutated parameter) is what the nested
+// FetchMessage call — with its own, separate HookContext — receives.
+func TestReadMessage_NestedFetchMessageDoesNotDuplicateSpan(t *testing.T) {
+	sr := setupTest(t)
+
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "orders",
+	})
+	t.Cleanup(func() { _ = r.Close() })
+
+	msg := kafka.Message{Topic: "orders", Partition: 1, Offset: 7}
+
+	readCtx := hooktest.NewMockHookContext(r, context.Background())
+	BeforeReadMessage(readCtx, r, context.Background())
+
+	// ReadMessage's own body would now call r.FetchMessage using the ctx
+	// BeforeReadMessage wrote back via SetParam(1, ...).
+	nestedCtx, ok := readCtx.GetParam(1).(context.Context)
+	require.True(t, ok, "BeforeReadMessage should write the marked ctx back via SetParam")
+
+	fetchIctx := hooktest.NewMockHookContext(r, nestedCtx)
+	BeforeFetchMessage(fetchIctx, r, nestedCtx)
+	AfterFetchMessage(fetchIctx, msg, nil)
+
+	// The nested FetchMessage call must not have created a span of its own.
+	assert.Empty(t, sr.Ended(), "nested FetchMessage call should not create a duplicate span")
+
+	AfterReadMessage(readCtx, msg, nil)
+
+	// Only the outer ReadMessage call produces a span.
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, "orders receive", spans[0].Name())
+}
+
+// TestFetchMessage_DirectCallIsUnaffectedByNestedCallDetection ensures a
+// top-level FetchMessage call (not nested inside ReadMessage) still gets its
+// own span: the nested-call marker is only present on a ctx that
+// BeforeReadMessage produced.
+func TestFetchMessage_DirectCallIsUnaffectedByNestedCallDetection(t *testing.T) {
+	sr := setupTest(t)
+
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "orders",
+	})
+	t.Cleanup(func() { _ = r.Close() })
+
+	ictx := hooktest.NewMockHookContext(r, context.Background())
+	BeforeFetchMessage(ictx, r, context.Background())
+	AfterFetchMessage(ictx, kafka.Message{Topic: "orders"}, nil)
+
+	require.Len(t, sr.Ended(), 1)
+}
