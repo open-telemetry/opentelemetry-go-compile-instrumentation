@@ -13,7 +13,9 @@ are instrumented automatically.
 
 For projects that need tighter control — because they use a narrow set of libraries, because
 they ship a library themselves, or because they need reproducible, auditable builds — you can
-declare exactly which instrumentations to enable. See [External Configuration Sources](external-configuration.md)
+declare exactly which instrumentations to enable either at **build-time** or at **run-time**.
+
+- **Build-Time Selection**: See [External Configuration Sources](external-configuration.md)
 for the `otel.instrumentation.go` mechanism that makes this explicit and source-controlled.
 
 ### Runtime selection without rebuilding
@@ -155,6 +157,11 @@ enabled.
 
 See [GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for the
 operational constraints.
+
+Run-time behavior can also be controlled using the two `otelc`-specific environment variables:
+
+- `OTEL_GO_ENABLED_INSTRUMENTATIONS`: Use this to specify which instrumentations should be enabled at run-time itself.
+- `OTEL_GO_DISABLED_INSTRUMENTATIONS`: Use this to specify which instrumentations to disable at run-time.
 
 ## Verifying Your Configuration
 

@@ -10,6 +10,7 @@ import (
 	"github.com/dave/dst/dstutil"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -17,7 +18,7 @@ import (
 // applyCallRule transforms function calls at call sites by wrapping them with
 // instrumentation code according to the provided replacement template.
 func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
-	importAliases := collectImportAliases(root)
+	importAliases := ast.ImportAliasMap(root)
 
 	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
 
