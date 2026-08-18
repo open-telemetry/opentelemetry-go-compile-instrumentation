@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package v1
+package streaming
 
 import (
 	"bytes"
@@ -20,12 +20,12 @@ func TestStreamingReader_ChatChunks(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-stream")
+	_, span := tr.Start(t.Context(), "test-stream")
 
 	streamData := "data: {\"id\":\"chatcmpl-abc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl-abc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\" there\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3,\"total_tokens\":11}}\n\ndata: [DONE]\n\n"
 
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
 
 	data, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -50,21 +50,12 @@ func TestStreamingReader_CompletionChunks(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-completion-stream")
+	_, span := tr.Start(t.Context(), "test-completion-stream")
 
 	streamData := "data: {\"id\":\"cmpl-xyz\",\"model\":\"gpt-3.5-turbo-instruct\",\"choices\":[{\"text\":\"Hello\",\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":10,\"total_tokens\":14}}\n\ndata: [DONE]\n\n"
 
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := newStreamingReader(
-		body,
-		span,
-		time.Now(),
-		"gpt-3.5-turbo-instruct",
-		"text_completion",
-		"openai",
-		opCompletion,
-		ctx,
-	)
+	reader := NewStreamingReader(body, span, time.Now(), OpCompletion)
 
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -85,10 +76,10 @@ func TestStreamingReader_EmptyStream(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-empty-stream")
+	_, span := tr.Start(t.Context(), "test-empty-stream")
 
 	body := io.NopCloser(bytes.NewReader([]byte("")))
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
 
 	data, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -103,11 +94,11 @@ func TestStreamingReader_CloseBeforeRead(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-close-early")
+	_, span := tr.Start(t.Context(), "test-close-early")
 
 	streamData := "data: {\"id\":\"early\",\"model\":\"gpt-4\",\"choices\":[]}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
 
 	err := reader.Close()
 	require.NoError(t, err)
@@ -120,10 +111,10 @@ func TestStreamingReader_MultipleCloseIdempotent(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-multi-close")
+	_, span := tr.Start(t.Context(), "test-multi-close")
 
 	body := io.NopCloser(bytes.NewReader([]byte("data: [DONE]\n\n")))
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -137,11 +128,11 @@ func TestStreamingReader_FinishReasons(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-reasons")
+	_, span := tr.Start(t.Context(), "test-reasons")
 
 	streamData := "data: {\"id\":\"r1\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"a\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -155,12 +146,12 @@ func TestStreamingReader_FirstTokenLatency(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-latency")
+	_, span := tr.Start(t.Context(), "test-latency")
 
 	start := time.Now().Add(-100 * time.Millisecond) // simulate 100ms delay
 	streamData := "data: {\"id\":\"lat\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := newStreamingReader(body, span, start, "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, start, OpChat)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -204,13 +195,13 @@ func TestStreamingReader_FinalChunkWithoutTrailingNewline(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-no-trailing-newline")
+	_, span := tr.Start(t.Context(), "test-no-trailing-newline")
 
 	// No trailing "\n" after this chunk, and no separate "[DONE]" line.
 	streamData := "data: {\"id\":\"final\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}"
 
 	body := &eofWithFinalChunkReader{data: []byte(streamData)}
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -228,22 +219,13 @@ func TestStreamingReader_FinalChunkWithoutTrailingNewline_Completion(t *testing.
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-no-trailing-newline-completion")
+	_, span := tr.Start(t.Context(), "test-no-trailing-newline-completion")
 
 	// No trailing "\n" after this chunk, and no separate "[DONE]" line.
 	streamData := "data: {\"id\":\"cmpl-final\",\"model\":\"gpt-3.5-turbo-instruct\",\"choices\":[{\"text\":\"Hi\",\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":4,\"total_tokens\":13}}"
 
 	body := &eofWithFinalChunkReader{data: []byte(streamData)}
-	reader := newStreamingReader(
-		body,
-		span,
-		time.Now(),
-		"gpt-3.5-turbo-instruct",
-		"text_completion",
-		"openai",
-		opCompletion,
-		ctx,
-	)
+	reader := NewStreamingReader(body, span, time.Now(), OpCompletion)
 
 	_, _ = io.ReadAll(reader)
 	reader.Close()
@@ -285,14 +267,14 @@ func TestStreamingReader_CloseWithoutDrainingFlushesFinalChunk(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-close-without-draining")
+	_, span := tr.Start(t.Context(), "test-close-without-draining")
 
 	// No trailing "\n" and no "[DONE]" line, so this chunk only leaves the
 	// line buffer if something flushes it explicitly.
 	streamData := "data: {\"id\":\"closed-early\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2,\"total_tokens\":9}}"
 
 	body := &dataThenEOFReader{data: []byte(streamData)}
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
 
 	buf := make([]byte, len(streamData))
 	n, err := reader.Read(buf)
@@ -341,11 +323,11 @@ func TestStreamingReader_IncrementalRead(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
-	ctx, span := tr.Start(t.Context(), "test-incremental")
+	_, span := tr.Start(t.Context(), "test-incremental")
 
 	streamData := "data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"a\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"b\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := newStreamingReader(body, span, time.Now(), "gpt-4", "chat", "openai", opChat, ctx)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat)
 
 	// Read in small chunks to test incremental processing
 	buf := make([]byte, 10)
@@ -371,10 +353,6 @@ func assertAttribute(t *testing.T, attrs []attribute.KeyValue, key, expected str
 	t.Helper()
 	for _, attr := range attrs {
 		if string(attr.Key) == key {
-			if attr.Value.Type() == attribute.BOOL {
-				assert.Equal(t, expected, boolString(attr.Value.AsBool()))
-				return
-			}
 			assert.Equal(t, expected, attr.Value.AsString())
 			return
 		}
@@ -382,29 +360,11 @@ func assertAttribute(t *testing.T, attrs []attribute.KeyValue, key, expected str
 	t.Errorf("attribute %q not found", key)
 }
 
-func boolString(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}
-
 func assertInt64Attribute(t *testing.T, attrs []attribute.KeyValue, key string, expected int64) {
 	t.Helper()
 	for _, attr := range attrs {
 		if string(attr.Key) == key {
 			assert.Equal(t, expected, attr.Value.AsInt64())
-			return
-		}
-	}
-	t.Errorf("attribute %q not found", key)
-}
-
-func assertFloat64Attribute(t *testing.T, attrs []attribute.KeyValue, key string, expected float64) {
-	t.Helper()
-	for _, attr := range attrs {
-		if string(attr.Key) == key {
-			assert.InDelta(t, expected, attr.Value.AsFloat64(), 0.001)
 			return
 		}
 	}

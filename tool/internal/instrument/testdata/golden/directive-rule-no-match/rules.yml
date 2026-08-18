@@ -5,6 +5,6 @@ span_directive_no_match:
   do:
     - expand_directive:
         template: |-
-          fmt.Println("span start: {{FuncName}}")
+          fmt.Println("span start: {{.FuncName}}")
   imports:
     fmt: "fmt"

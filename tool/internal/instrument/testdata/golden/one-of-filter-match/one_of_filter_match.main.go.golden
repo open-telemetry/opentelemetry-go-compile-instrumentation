@@ -11,11 +11,11 @@ import _ "unsafe"
 
 type PostgresDriver struct{}
 
-func Open(dsn string) (_unnamedRetVal0 error) {
+func Open(dsn string) (_unnamedRetVal_2733714658_0 error) {
 	//line <generated>:1
 	if hookContext2733714658, _ := OtelBeforeTrampoline_Open2733714658(&dsn); false {
 	} else {
-		defer OtelAfterTrampoline_Open2733714658(hookContext2733714658, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_Open2733714658(hookContext2733714658, &_unnamedRetVal_2733714658_0)
 	}
 	//line main.go:13:2
 	println("opening " + dsn)

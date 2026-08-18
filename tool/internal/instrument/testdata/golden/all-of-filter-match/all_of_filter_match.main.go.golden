@@ -14,11 +14,11 @@ func init() {
 	_ = Driver{}
 }
 
-func Connect(dsn string) (_unnamedRetVal0 error) {
+func Connect(dsn string) (_unnamedRetVal_671999535_0 error) {
 	//line <generated>:1
 	if hookContext671999535, _ := OtelBeforeTrampoline_Connect671999535(&dsn); false {
 	} else {
-		defer OtelAfterTrampoline_Connect671999535(hookContext671999535, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_Connect671999535(hookContext671999535, &_unnamedRetVal_671999535_0)
 	}
 	//line main.go:16:2
 	println("connecting to " + dsn)

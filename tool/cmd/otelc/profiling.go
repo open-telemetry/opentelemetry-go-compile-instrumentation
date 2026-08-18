@@ -46,7 +46,7 @@ func initProfiling(ctx context.Context, cmd *cli.Command) (context.Context, erro
 
 	// Guard against placing profiles inside .otelc-build/ which Cleanup removes.
 	buildTemp := util.GetBuildTempDir()
-	if strings.HasPrefix(profilePath, buildTemp) {
+	if isSubPath(profilePath, buildTemp) {
 		return ctx, ex.Newf(
 			"profile-path %q must not be inside the build temp directory %q",
 			profilePath, buildTemp,
@@ -116,4 +116,13 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 	logger.InfoContext(ctx, "merging profile files", "dir", profileDir)
 	mergeErr := profile.Merge(ctx, profileDir, types)
 	return ex.Join(stopErr, mergeErr)
+}
+
+// isSubPath reports whether target is equal to base or located inside base.
+func isSubPath(target, base string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || !strings.HasPrefix(rel, "..")
 }
