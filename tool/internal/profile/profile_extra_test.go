@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,11 +20,12 @@ import (
 )
 
 func init() {
-	if os.Getenv("TEST_MOCK_GO_TOOL") == "stderr" {
-		_, _ = fmt.Fprintln(os.Stderr, "merge failed")
-		os.Exit(1)
-	}
-	if os.Getenv("TEST_MOCK_GO_TOOL") == "silent" {
+	mode := os.Getenv("TEST_MOCK_GO_TOOL")
+	base := strings.ToLower(filepath.Base(os.Args[0]))
+	if mode != "" || base == "go" || base == "go.exe" {
+		if mode == "stderr" {
+			_, _ = fmt.Fprintln(os.Stderr, "merge failed")
+		}
 		os.Exit(1)
 	}
 }
