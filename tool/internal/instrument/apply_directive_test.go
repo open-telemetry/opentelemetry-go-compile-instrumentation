@@ -204,7 +204,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 			Decls: []dst.Decl{funcDecl},
 		}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.NoError(t, err)
 		assert.Len(t, funcDecl.Body.List, 2)
@@ -218,7 +218,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 		root := &dst.File{}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 	})
@@ -241,7 +241,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "can't evaluate field UnknownTag")
@@ -265,7 +265,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "parsing rendered template")

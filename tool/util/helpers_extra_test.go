@@ -89,7 +89,7 @@ func TestContextLogger(t *testing.T) {
 func TestIsUnixAndIsWindows(t *testing.T) {
 	// Exactly the current platform family must report true; the two are
 	// mutually exclusive on every supported OS.
-	assert.NotEqual(t, IsUnix(), IsWindows())
+	assert.NotEqual(t, isUnix(), IsWindows())
 }
 
 func TestNormalizePath(t *testing.T) {

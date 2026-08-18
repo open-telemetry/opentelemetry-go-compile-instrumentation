@@ -17,7 +17,7 @@ import (
 // applyDirectiveRule finds all functions annotated with the directive, renders
 // the template for each, and prepends the resulting Go statements into the
 // function body.
-func (ip *InstrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstDirectiveRule, root *dst.File) error {
+func (ip *instrumentPhase) applyDirectiveRule(ctx context.Context, r *rule.InstDirectiveRule, root *dst.File) error {
 	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
 		return err
 	}

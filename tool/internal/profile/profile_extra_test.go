@@ -18,11 +18,11 @@ import (
 
 func TestStartCPUCreateFileError(t *testing.T) {
 	dir := t.TempDir()
-	// A directory occupying the CPU profile path makes os.Create fail.
+	// A directory occupying the typeCPU profile path makes os.Create fail.
 	path := filepath.Join(dir, fmt.Sprintf("otelc-cpu-%d.pprof", os.Getpid()))
 	require.NoError(t, os.Mkdir(path, 0o755))
 
-	_, err := Start(dir, []Type{CPU})
+	_, err := Start(dir, []Type{typeCPU})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create CPU profile")
 }
@@ -35,7 +35,7 @@ func TestStartCPUProfileAlreadyRunning(t *testing.T) {
 	require.NoError(t, pprof.StartCPUProfile(f))
 	defer pprof.StopCPUProfile()
 
-	_, err = Start(dir, []Type{CPU})
+	_, err = Start(dir, []Type{typeCPU})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "start CPU profile")
 }
@@ -45,7 +45,7 @@ func TestStartTraceCreateFileError(t *testing.T) {
 	path := filepath.Join(dir, fmt.Sprintf("otelc-%d.trace", os.Getpid()))
 	require.NoError(t, os.Mkdir(path, 0o755))
 
-	_, err := Start(dir, []Type{Trace})
+	_, err := Start(dir, []Type{typeTrace})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create trace file")
 }
@@ -58,14 +58,14 @@ func TestStartTraceAlreadyRunning(t *testing.T) {
 	require.NoError(t, trace.Start(f))
 	defer trace.Stop()
 
-	_, err = Start(dir, []Type{Trace})
+	_, err = Start(dir, []Type{typeTrace})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "start execution trace")
 }
 
 func TestStopCPUCloseError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{CPU})
+	s, err := Start(dir, []Type{typeCPU})
 	require.NoError(t, err)
 	require.NotNil(t, s.cpuFile)
 	require.NoError(t, s.cpuFile.Close())
@@ -77,7 +77,7 @@ func TestStopCPUCloseError(t *testing.T) {
 
 func TestStopTraceCloseError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{Trace})
+	s, err := Start(dir, []Type{typeTrace})
 	require.NoError(t, err)
 	require.NotNil(t, s.traceFile)
 	require.NoError(t, s.traceFile.Close())
@@ -100,13 +100,13 @@ func TestWriteHeapProfileCreateError(t *testing.T) {
 func TestMergeTypeGlobError(t *testing.T) {
 	// An unclosed bracket in the directory name makes filepath.Glob fail.
 	dir := filepath.Join(t.TempDir(), "a[")
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 }
 
 func TestMergeReturnsMergeError(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "a[")
-	err := Merge(context.Background(), dir, []Type{CPU})
+	err := Merge(context.Background(), dir, []Type{typeCPU})
 	require.Error(t, err)
 }
 
@@ -116,7 +116,7 @@ func TestMergeTypeCreateOutputError(t *testing.T) {
 	// The merged output path is blocked by a directory.
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "otelc-cpu.pprof"), 0o755))
 
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create merged")
 }
@@ -135,7 +135,7 @@ func TestMergeTypeGoToolFailsWithStderr(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge failed")
 }
@@ -154,13 +154,13 @@ func TestMergeTypeGoToolFailsWithoutStderr(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 }
 
 func TestStopHeapWriteError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{Heap})
+	s, err := Start(dir, []Type{typeHeap})
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -177,7 +177,7 @@ func TestMergeTypeGoToolNotFound(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "otelc-cpu-1.pprof"), []byte("data"), 0o644))
 	t.Setenv("PATH", "")
 
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge cpu profiles")
 }

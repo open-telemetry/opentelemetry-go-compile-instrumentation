@@ -51,7 +51,7 @@ func addRulesToMap[T rule.InstRule](
 
 // applyOneRule applies a single rule to the target file and reports whether
 // the rule counts as a function rule (i.e. whether a globals file is needed).
-func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (bool, error) {
+func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (bool, error) {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		return true, ip.applyFuncRule(ctx, rt, root)
@@ -71,7 +71,7 @@ func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 	}
 }
 
-func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
+func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
 	// by other rules such as raw rules

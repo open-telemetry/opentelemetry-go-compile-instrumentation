@@ -89,7 +89,7 @@ func Helper() string {
 `
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workDir: workDir,
 	}
@@ -128,7 +128,7 @@ func OrigHelper() {}
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "custom_helper.go"), []byte(customContent), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(origContent), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workDir: workDir,
 	}
@@ -156,7 +156,7 @@ func TestApplyFileRule_FileNotFound(t *testing.T) {
 	srcDir := t.TempDir()
 	workDir := t.TempDir()
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workDir: workDir,
 	}
@@ -185,7 +185,7 @@ func SubHelper() {}
 `
 	require.NoError(t, os.WriteFile(filepath.Join(subDir, "helper.go"), []byte(content), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workDir: workDir,
 	}

@@ -74,7 +74,7 @@ func TestStripCompleteFlag(t *testing.T) {
 
 func TestUpdateImportConfig(t *testing.T) {
 	t.Run("no importcfg path", func(t *testing.T) {
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: "",
 		}
 		err := ip.updateImportConfig(t.Context(), map[string]string{"fmt": "fmt"})
@@ -87,7 +87,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -108,7 +108,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -129,7 +129,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -150,7 +150,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -171,7 +171,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte(""), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			logger:           slog.Default(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{

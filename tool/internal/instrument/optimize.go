@@ -77,8 +77,8 @@ import (
 // the structure of trampoline-jump-if and trampoline functions. Any change in
 // tjump should be carefully examined.
 
-// TJump describes a trampoline-jump-if optimization candidate
-type TJump struct {
+// tJump describes a trampoline-jump-if optimization candidate
+type tJump struct {
 	target *dst.FuncDecl      // Target function we are hooking on
 	ifStmt *dst.IfStmt        // Trampoline-jump-if statement
 	rule   *rule.InstFuncRule // Rule associated with the trampoline-jump-if
@@ -90,7 +90,7 @@ func mustTJump(ifStmt *dst.IfStmt) {
 	util.Assert(desc == tJumpLabel, "must be a trampoline-jump-if")
 }
 
-func removeAfterTrampolineCall(tjump *TJump) error {
+func removeAfterTrampolineCall(tjump *tJump) error {
 	ifStmt := tjump.ifStmt
 	util.Assert(len(ifStmt.Body.List) > 0, "must have then block statements")
 	util.AssertType[*dst.ExprStmt](ifStmt.Body.List[0])
@@ -119,7 +119,7 @@ func removeAfterTrampolineCall(tjump *TJump) error {
 // newHookContextImpl constructs a new HookContextImpl structure literal and
 // populates its Params && ReturnValues field with addresses of all arguments.
 // The HookContextImpl structure is used to pass arguments to the exit trampoline
-func newHookContextImpl(tjump *TJump) dst.Expr {
+func newHookContextImpl(tjump *tJump) dst.Expr {
 	targetFunc := tjump.target
 	structName := trampolineHookContextImplType + tjump.rule.Identity()
 
@@ -151,7 +151,7 @@ func newHookContextImpl(tjump *TJump) dst.Expr {
 	)
 }
 
-func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
+func removeBeforeTrampolineCall(targetFile *dst.File, tjump *tJump) error {
 	// Construct HookContext on the fly and pass to After trampoline defer call
 	hookContextExpr := newHookContextImpl(tjump)
 	// Find defer call to After and replace its call context with new one
@@ -185,7 +185,7 @@ func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
 	return ex.Newf("can not remove Before trampoline function")
 }
 
-func removeAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
+func removeAfterTrampolineDecl(targetFile *dst.File, tjump *tJump) error {
 	afterTrampolineName := makeName(tjump.rule, tjump.target, false)
 	for i, decl := range targetFile.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
@@ -277,7 +277,7 @@ func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
 // flattenTJump transforms the trampoline-jump-if AST to a flattened form.
 // It sets the condition to false and empties the then block, effectively
 // converting the branching pattern to sequential execution.
-func flattenTJump(tjump *TJump, removedOnExit bool) error {
+func flattenTJump(tjump *tJump, removedOnExit bool) error {
 	// The current standard tjump pattern is as follows:
 	//
 	// 	if ctx, skip := otel_trampoline_before(&arg); skip {
@@ -348,12 +348,12 @@ func flattenTJump(tjump *TJump, removedOnExit bool) error {
 	return nil
 }
 
-func stripTJumpLabel(tjump *TJump) {
+func stripTJumpLabel(tjump *tJump) {
 	ifStmt := tjump.ifStmt
 	ifStmt.Decs.If = nil
 }
 
-func (ip *InstrumentPhase) optimizeTJumps() error {
+func (ip *instrumentPhase) optimizeTJumps() error {
 	for _, tjump := range ip.tjumps {
 		mustTJump(tjump.ifStmt)
 		// Strip the trampoline-jump-if anchor label as no longer needed
