@@ -40,7 +40,13 @@ func TestContainsTypeParameter(t *testing.T) {
 	assert.False(t, containsTypeParameter(dst.NewIdent("T"), nil))
 
 	// False-positive risks must return false
-	assert.False(t, containsTypeParameter(&dst.SelectorExpr{X: dst.NewIdent("pkg"), Sel: dst.NewIdent("T")}, tp), "selector name pkg.T should not match")
+	assert.False(t,
+		containsTypeParameter(
+			&dst.SelectorExpr{
+				X:   dst.NewIdent("pkg"),
+				Sel: dst.NewIdent("T"),
+			}, tp),
+		"selector name pkg.T should not match")
 
 	funcType := &dst.FuncType{
 		Params: &dst.FieldList{List: []*dst.Field{

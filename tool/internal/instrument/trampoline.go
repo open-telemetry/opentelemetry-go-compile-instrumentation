@@ -308,7 +308,8 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	targetParams := findTargetParamType(ip.targetFunc)
 	genericTypes := findTargetGenericType(ip.targetFunc)
 	isEllipsis := func(i int) bool {
-		return ast.IsEllipsis(targetParams.List[i].Type) && !containsTypeParameter(targetParams.List[i].Type, genericTypes)
+		return ast.IsEllipsis(targetParams.List[i].Type) &&
+	!containsTypeParameter(targetParams.List[i].Type, genericTypes)
 	}
 
 	args := []dst.Expr{ast.Ident(trampolineHookContextName)}
@@ -877,7 +878,7 @@ func makeMethodPanic(method *dst.FuncDecl, message string) {
 	panicStmt := ast.ExprStmt(
 		ast.CallTo("panic", nil, []dst.Expr{
 			&dst.BasicLit{
-				Kind:  token.STRING,
+				Kind: token.STRING,
 				Value: strconv.Quote(message),
 			},
 		}),
