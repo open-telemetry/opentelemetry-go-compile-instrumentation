@@ -87,7 +87,7 @@ func TestBeforeConnect(t *testing.T) {
 		assert.NotNil(t, newOpts[0].Monitor, "monitor should be injected")
 	})
 
-	t.Run("injects monitor into all provided options", func(t *testing.T) {
+	t.Run("injects a single trailing monitor when none of the provided options has one", func(t *testing.T) {
 		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
 
 		optA := options.Client()
@@ -98,9 +98,10 @@ func TestBeforeConnect(t *testing.T) {
 
 		newOpts, ok := mockCtx.GetParam(1).([]*options.ClientOptions)
 		require.True(t, ok, "param 1 should be updated with a []*options.ClientOptions")
-		require.Len(t, newOpts, 2)
-		assert.NotNil(t, newOpts[0].Monitor, "monitor should be injected into first option")
-		assert.NotNil(t, newOpts[1].Monitor, "monitor should be injected into second option")
+		require.Len(t, newOpts, 3, "a trailing options struct carrying the monitor should have been appended")
+		assert.Nil(t, newOpts[0].Monitor, "original first option should be left untouched")
+		assert.Nil(t, newOpts[1].Monitor, "original second option should be left untouched")
+		assert.NotNil(t, newOpts[2].Monitor, "monitor should be injected into the appended trailing option")
 	})
 
 	t.Run("does not overwrite an existing monitor", func(t *testing.T) {
@@ -116,6 +117,27 @@ func TestBeforeConnect(t *testing.T) {
 		require.True(t, ok)
 		require.Len(t, newOpts, 1)
 		assert.Same(t, existing, newOpts[0].Monitor, "existing monitor should be left untouched")
+	})
+
+	t.Run("does not let an injected monitor override a user monitor set on an earlier option", func(t *testing.T) {
+		// Regression test for https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1148:
+		// mongo.NewClient resolves opts via options.MergeClientOptions, which keeps
+		// the last non-nil value of each field across the slice. Injecting into a
+		// later, still-nil struct used to let the OTel monitor win the merge over a
+		// user's own CommandMonitor set on an earlier struct.
+		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
+
+		existing := &event.CommandMonitor{}
+		base := options.Client().SetMonitor(existing)
+		uriOpts := options.Client().ApplyURI("mongodb://localhost:27017")
+		mockCtx := hooktest.NewMockHookContext(t.Context())
+
+		BeforeConnect(mockCtx, t.Context(), base, uriOpts)
+
+		newOpts, ok := mockCtx.GetParam(1).([]*options.ClientOptions)
+		require.True(t, ok)
+		merged := options.MergeClientOptions(newOpts...)
+		assert.Same(t, existing, merged.Monitor, "user's monitor set on an earlier option must win the merge")
 	})
 
 	t.Run("does nothing when instrumentation is disabled", func(t *testing.T) {
@@ -137,8 +159,9 @@ func TestBeforeConnect(t *testing.T) {
 
 		newOpts, ok := mockCtx.GetParam(1).([]*options.ClientOptions)
 		require.True(t, ok, "param 1 should be updated with a []*options.ClientOptions")
-		require.Len(t, newOpts, 1)
+		require.Len(t, newOpts, 2, "a trailing options struct carrying the monitor should have been appended")
 		assert.Nil(t, newOpts[0], "first option should still be nil")
+		assert.NotNil(t, newOpts[1].Monitor, "monitor should be injected into the appended trailing option")
 	})
 }
 
@@ -156,7 +179,7 @@ func TestBeforeNewClient(t *testing.T) {
 		assert.NotNil(t, newOpts[0].Monitor, "monitor should be injected")
 	})
 
-	t.Run("injects monitor into all provided options", func(t *testing.T) {
+	t.Run("injects a single trailing monitor when none of the provided options has one", func(t *testing.T) {
 		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
 
 		optA := options.Client()
@@ -167,9 +190,10 @@ func TestBeforeNewClient(t *testing.T) {
 
 		newOpts, ok := mockCtx.GetParam(0).([]*options.ClientOptions)
 		require.True(t, ok, "param 0 should be updated with a []*options.ClientOptions")
-		require.Len(t, newOpts, 2)
-		assert.NotNil(t, newOpts[0].Monitor, "monitor should be injected into first option")
-		assert.NotNil(t, newOpts[1].Monitor, "monitor should be injected into second option")
+		require.Len(t, newOpts, 3, "a trailing options struct carrying the monitor should have been appended")
+		assert.Nil(t, newOpts[0].Monitor, "original first option should be left untouched")
+		assert.Nil(t, newOpts[1].Monitor, "original second option should be left untouched")
+		assert.NotNil(t, newOpts[2].Monitor, "monitor should be injected into the appended trailing option")
 	})
 
 	t.Run("does not overwrite an existing monitor", func(t *testing.T) {
@@ -185,6 +209,27 @@ func TestBeforeNewClient(t *testing.T) {
 		require.True(t, ok)
 		require.Len(t, newOpts, 1)
 		assert.Same(t, existing, newOpts[0].Monitor, "existing monitor should be left untouched")
+	})
+
+	t.Run("does not let an injected monitor override a user monitor set on an earlier option", func(t *testing.T) {
+		// Regression test for https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1148:
+		// mongo.NewClient resolves opts via options.MergeClientOptions, which keeps
+		// the last non-nil value of each field across the slice. Injecting into a
+		// later, still-nil struct used to let the OTel monitor win the merge over a
+		// user's own CommandMonitor set on an earlier struct.
+		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB")
+
+		existing := &event.CommandMonitor{}
+		base := options.Client().SetMonitor(existing)
+		uriOpts := options.Client().ApplyURI("mongodb://localhost:27017")
+		mockCtx := hooktest.NewMockHookContext()
+
+		BeforeNewClient(mockCtx, base, uriOpts)
+
+		newOpts, ok := mockCtx.GetParam(0).([]*options.ClientOptions)
+		require.True(t, ok)
+		merged := options.MergeClientOptions(newOpts...)
+		assert.Same(t, existing, merged.Monitor, "user's monitor set on an earlier option must win the merge")
 	})
 
 	t.Run("does nothing when instrumentation is disabled", func(t *testing.T) {
@@ -206,7 +251,8 @@ func TestBeforeNewClient(t *testing.T) {
 
 		newOpts, ok := mockCtx.GetParam(0).([]*options.ClientOptions)
 		require.True(t, ok, "param 0 should be updated with a []*options.ClientOptions")
-		require.Len(t, newOpts, 1)
+		require.Len(t, newOpts, 2, "a trailing options struct carrying the monitor should have been appended")
 		assert.Nil(t, newOpts[0], "first option should still be nil")
+		assert.NotNil(t, newOpts[1].Monitor, "monitor should be injected into the appended trailing option")
 	})
 }

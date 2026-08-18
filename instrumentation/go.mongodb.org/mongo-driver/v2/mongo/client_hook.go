@@ -22,31 +22,32 @@ func (g mongoEnabler) Enable() bool {
 
 var enabler = mongoEnabler{}
 
+// injectMonitor appends the OTel CommandMonitor as a trailing ClientOptions
+// element when no monitor is already present anywhere in opts.
+//
+// mongo.NewClient resolves opts via options.MergeClientOptions, which folds the
+// slice into one struct by taking the last non-nil value of each field, in slice
+// order. Injecting by mutating an existing element based on its own (per-struct)
+// Monitor field can land the OTel monitor on a struct that isn't last, letting it
+// win the merge over a user's CommandMonitor set on an earlier struct. Appending a
+// new trailing element instead only ever adds a monitor when the merged, effective
+// Monitor is nil, and — being last — can never be overridden by, or override,
+// anything the caller already passed in.
+func injectMonitor(opts []*options.ClientOptions) []*options.ClientOptions {
+	if options.MergeClientOptions(opts...).Monitor != nil {
+		return opts
+	}
+	// Full slice expression forces a new backing array so this never mutates a
+	// caller-owned slice passed in via `opts...`.
+	return append(opts[:len(opts):len(opts)], options.Client().SetMonitor(otelmongo.NewMonitor()))
+}
+
 // BeforeConnect intercepts mongo.Connect and injects the OTel command monitor
 func BeforeConnect(ictx hook.HookContext, opts ...*options.ClientOptions) {
 	if !enabler.Enable() {
 		return
 	}
 
-	monitor := otelmongo.NewMonitor()
-
-	// If no options were provided, create a default options struct
-	if len(opts) == 0 {
-		opts = []*options.ClientOptions{
-			options.Client(),
-		}
-	}
-
-	// Inject monitor to all existing options
-	for _, opt := range opts {
-		if opt == nil {
-			continue
-		}
-		if opt.Monitor == nil {
-			opt.SetMonitor(monitor)
-		}
-	}
-
 	// Explicitly set parameter to ensure otelc compiles and applies it
-	ictx.SetParam(0, opts)
+	ictx.SetParam(0, injectMonitor(opts))
 }
