@@ -271,6 +271,78 @@ func TestWriterWrapper_ReadFrom_KeepsExplicitStatus(t *testing.T) {
 	assert.Equal(t, http.StatusPartialContent, recorder.Code)
 }
 
+// mockStringWriter is a mock ResponseWriter that implements io.StringWriter,
+// the interface net/http's own *response uses to write a string without an
+// extra []byte conversion.
+type mockStringWriter struct {
+	http.ResponseWriter
+	writeStringCalled bool
+}
+
+func (m *mockStringWriter) WriteString(s string) (int, error) {
+	m.writeStringCalled = true
+	return io.WriteString(m.ResponseWriter, s)
+}
+
+func TestWriterWrapper_WriteStringUsesUnderlyingFastPath(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &mockStringWriter{ResponseWriter: recorder}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	// io.WriteString is what fmt.Fprint and friends use; it must reach the
+	// underlying WriteString rather than falling back to a []byte conversion.
+	n, err := io.WriteString(wrapper, "payload")
+
+	require.NoError(t, err)
+	assert.Equal(t, len("payload"), n)
+	assert.True(t, mock.writeStringCalled, "io.WriteString must reach the underlying io.StringWriter")
+	assert.Equal(t, "payload", recorder.Body.String())
+}
+
+func TestWriterWrapper_WriteString_NotSupported(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	wrapper := &writerWrapper{
+		ResponseWriter: recorder,
+		statusCode:     http.StatusOK,
+	}
+
+	// The recorder has no WriteString, so the wrapper falls back to Write.
+	n, err := io.WriteString(wrapper, "payload")
+
+	require.NoError(t, err)
+	assert.Equal(t, len("payload"), n)
+	assert.Equal(t, "payload", recorder.Body.String())
+}
+
+func TestWriterWrapper_WriteString_ImplicitStatusOK(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &mockStringWriter{ResponseWriter: recorder}
+	wrapper := &writerWrapper{ResponseWriter: mock}
+
+	_, err := wrapper.WriteString("payload")
+
+	require.NoError(t, err)
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestWriterWrapper_WriteString_KeepsExplicitStatus(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	mock := &mockStringWriter{ResponseWriter: recorder}
+	wrapper := &writerWrapper{ResponseWriter: mock}
+
+	wrapper.WriteHeader(http.StatusPartialContent)
+	_, err := wrapper.WriteString("payload")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusPartialContent, wrapper.statusCode)
+	assert.Equal(t, http.StatusPartialContent, recorder.Code)
+}
+
 func TestWriterWrapper_ServeFileOverRealServer(t *testing.T) {
 	content := strings.Repeat("otelc", 100_000) // well past io.Copy's 32KiB buffer
 	path := filepath.Join(t.TempDir(), "payload.txt")
