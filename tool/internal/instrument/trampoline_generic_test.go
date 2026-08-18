@@ -56,7 +56,11 @@ func TestContainsTypeParameter(t *testing.T) {
 	assert.False(t, containsTypeParameter(funcType, tp), "parameter named T should not match")
 
 	// Anonymous composite types containing type parameters
-	assert.True(t, containsTypeParameter(&dst.ParenExpr{X: dst.NewIdent("T")}, tp), "parenthesized type (T) should match")
+	assert.True(
+		t,
+		containsTypeParameter(&dst.ParenExpr{X: dst.NewIdent("T")}, tp),
+		"parenthesized type (T) should match",
+	)
 
 	structType := &dst.StructType{
 		Fields: &dst.FieldList{List: []*dst.Field{

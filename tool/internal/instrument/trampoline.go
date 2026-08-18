@@ -309,7 +309,7 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	genericTypes := findTargetGenericType(ip.targetFunc)
 	isEllipsis := func(i int) bool {
 		return ast.IsEllipsis(targetParams.List[i].Type) &&
-	!containsTypeParameter(targetParams.List[i].Type, genericTypes)
+			!containsTypeParameter(targetParams.List[i].Type, genericTypes)
 	}
 
 	args := []dst.Expr{ast.Ident(trampolineHookContextName)}
@@ -938,7 +938,8 @@ func containsTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	case *dst.InterfaceType:
 		return containsTypeParameterInFields(tType.Methods, typeParams)
 	case *dst.FuncType:
-		return containsTypeParameterInFields(tType.Params, typeParams) || containsTypeParameterInFields(tType.Results, typeParams)
+		return containsTypeParameterInFields(tType.Params, typeParams) ||
+			containsTypeParameterInFields(tType.Results, typeParams)
 	case *dst.Ident, *dst.SelectorExpr:
 		return false
 	default:
