@@ -19,6 +19,7 @@ var (
 	_ http.Flusher        = (*writerWrapper)(nil)
 	_ http.Pusher         = (*writerWrapper)(nil)
 	_ io.ReaderFrom       = (*writerWrapper)(nil)
+	_ io.StringWriter     = (*writerWrapper)(nil)
 )
 
 // writerWrapper wraps http.ResponseWriter to capture the status code
@@ -74,6 +75,27 @@ func (w *writerWrapper) ReadFrom(src io.Reader) (int64, error) {
 	// The underlying writer has no fast path, so fall back to a plain copy
 	// through Write. writeOnly keeps io.Copy from picking this method up again.
 	return io.Copy(writeOnly{w}, src)
+}
+
+// WriteString implements io.StringWriter so that io.WriteString keeps
+// reaching the underlying ResponseWriter's own WriteString. net/http's
+// *response implements io.StringWriter to write the string without an extra
+// []byte conversion. Without this method io.WriteString falls back to
+// converting to []byte and calling Write, which is the same fast-path loss
+// ReadFrom fixes above, just for string writes instead of io.Copy.
+func (w *writerWrapper) WriteString(s string) (int, error) {
+	// http.ResponseWriter.Write implies a 200 when no status was set;
+	// WriteString writes the body the same way, so record it first.
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	if sw, ok := w.ResponseWriter.(io.StringWriter); ok {
+		return sw.WriteString(s)
+	}
+
+	// The underlying writer has no fast path, so fall back to a plain Write.
+	return w.ResponseWriter.Write([]byte(s))
 }
 
 // Hijack implements the http.Hijacker interface
