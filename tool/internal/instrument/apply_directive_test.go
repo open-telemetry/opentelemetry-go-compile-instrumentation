@@ -361,4 +361,72 @@ func TestApplyDirectiveRule(t *testing.T) {
 		assert.False(t, modified)
 		assert.Contains(t, err.Error(), "parsing rendered template")
 	})
+
+	t.Run("returns error when directive args fail to parse", func(t *testing.T) {
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{Name: "test_directive"},
+			Directive:    "otelc:test",
+			Template:     "println(\"{{.FuncName}}\")",
+		}
+		funcDecl := &dst.FuncDecl{
+			Name: dst.NewIdent("myFunc"),
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: &dst.BlockStmt{List: []dst.Stmt{}},
+			Decs: dst.FuncDeclDecorations{
+				NodeDecs: dst.NodeDecs{
+					// Unclosed quote makes tokenize (via FindFuncsByDirective) fail
+					// before any imports or template work happens.
+					Start: dst.Decorations{"//otelc:test key:\"unterminated\n"},
+				},
+			},
+		}
+		root := &dst.File{Decls: []dst.Decl{funcDecl}}
+
+		ip := &InstrumentPhase{logger: slog.Default()}
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		require.Error(t, err)
+		assert.False(t, modified)
+		assert.Contains(t, err.Error(), "parsing directive args")
+	})
+
+	t.Run("returns error when rule imports conflict with an existing alias", func(t *testing.T) {
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    "test_directive",
+				Imports: map[string]string{"context": "context"},
+			},
+			Directive: "otelc:test",
+			Template:  "println(\"{{.FuncName}}\")",
+		}
+		funcDecl := &dst.FuncDecl{
+			Name: dst.NewIdent("myFunc"),
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: &dst.BlockStmt{List: []dst.Stmt{}},
+			Decs: dst.FuncDeclDecorations{
+				NodeDecs: dst.NodeDecs{
+					Start: dst.Decorations{"//otelc:test\n"},
+				},
+			},
+		}
+		root := &dst.File{
+			Decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.IMPORT,
+					Specs: []dst.Spec{
+						&dst.ImportSpec{
+							Name: dst.NewIdent("ctx"),
+							Path: &dst.BasicLit{Value: `"context"`},
+						},
+					},
+				},
+				funcDecl,
+			},
+		}
+
+		ip := &InstrumentPhase{logger: slog.Default()}
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		require.Error(t, err)
+		assert.False(t, modified)
+		assert.Contains(t, err.Error(), "import alias mismatch")
+	})
 }
