@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/dave/dst/decorator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -33,6 +35,55 @@ func TestRenameReturnValuesUsesStableBareNames(t *testing.T) {
 
 	names := []string{funcDecl.Type.Results.List[0].Names[0].Name, funcDecl.Type.Results.List[1].Names[0].Name}
 	assert.Equal(t, []string{unnamedRetValName + "0", unnamedRetValName + "1"}, names)
+}
+
+func TestInsertRaw_SharedSyntheticName(t *testing.T) {
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	ruleA, err := rule.NewInstRawRule([]byte(`
+target: main
+func: Foo
+raw: "use({{ .FuncArgument 0 }})"
+`), "ruleA")
+	require.NoError(t, err)
+	ruleB, err := rule.NewInstRawRule([]byte(`
+target: main
+func: Foo
+raw: "log({{ .FuncArgument 0 }})"
+`), "ruleB")
+	require.NoError(t, err)
+	require.NotEqual(t, ruleA.Identity(), ruleB.Identity(),
+		"test setup: the two rules must actually differ for this check to mean anything")
+
+	// Mirrors InstrumentPhase.instrument: multiple rules for one file are
+	// applied to the same parsed root/decl in sequence, not to independent
+	// copies (see groupRules/instrument in instrument.go).
+	funcDecl := parseFunc(t, "package main\nfunc Foo(int) {}")
+	require.NoError(t, insertRaw(ctx, ruleA, funcDecl, nil))
+	require.NoError(t, insertRaw(ctx, ruleB, funcDecl, nil))
+
+	require.Len(t, funcDecl.Body.List, 2)
+	argOf := func(stmt dst.Stmt) (string, string) {
+		call := stmt.(*dst.ExprStmt).X.(*dst.CallExpr)
+		return call.Fun.(*dst.Ident).Name, call.Args[0].(*dst.Ident).Name
+	}
+	var argForUse, argForLog string
+	for _, stmt := range funcDecl.Body.List {
+		fn, arg := argOf(stmt)
+		switch fn {
+		case "use":
+			argForUse = arg
+		case "log":
+			argForLog = arg
+		default:
+			t.Fatalf("unexpected call %q in generated body", fn)
+		}
+	}
+
+	assert.Equal(t, argForUse, argForLog,
+		"both rules must resolve the unnamed parameter to the same identifier")
+	assert.Equal(t, fmt.Sprintf("_ignoredParam_%s_0", ruleA.Identity()), argForUse,
+		"the parameter must be salted with the first rule's Identity, since ruleA runs first")
 }
 
 func TestInsertRawAtPattern(t *testing.T) {
