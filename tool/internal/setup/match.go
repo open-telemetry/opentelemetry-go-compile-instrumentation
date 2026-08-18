@@ -62,7 +62,8 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 		return nil, ex.Wrap(err)
 	}
 	rules := make([]rule.InstRule, 0)
-	for name, fields := range h {
+	for _, name := range slices.Sorted(maps.Keys(h)) {
+		fields := h[name]
 		flatRules, normErr := rule.Normalize(fields)
 		if normErr != nil {
 			return nil, normErr
@@ -477,7 +478,15 @@ func loadCustomRules(ruleConfig string) ([]rule.InstRule, error) {
 		}
 	}
 
-	return slices.Concat(slices.Collect(maps.Values(ruleSet))...), nil
+	total := 0
+	for _, rules := range ruleSet {
+		total += len(rules)
+	}
+	result := make([]rule.InstRule, 0, total)
+	for _, name := range slices.Sorted(maps.Keys(ruleSet)) {
+		result = append(result, ruleSet[name]...)
+	}
+	return result, nil
 }
 
 func loadRulesFromToolFiles(ctx context.Context, toolFiles []string) ([]rule.InstRule, error) {
