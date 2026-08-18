@@ -22,15 +22,15 @@ func TestMakeAndIsUnusedIdent(t *testing.T) {
 }
 
 func TestIsStringLit(t *testing.T) {
-	lit := StringLit("hello")
-	assert.True(t, IsStringLit(lit, "hello"))
-	assert.False(t, IsStringLit(lit, "world"))
+	lit := stringLit("hello")
+	assert.True(t, isStringLit(lit, "hello"))
+	assert.False(t, isStringLit(lit, "world"))
 
 	// A non-string-literal expression is never a string literal.
-	assert.False(t, IsStringLit(Ident("hello"), "hello"))
+	assert.False(t, isStringLit(Ident("hello"), "hello"))
 
 	// An integer literal has the wrong Kind.
-	assert.False(t, IsStringLit(IntLit(3), "3"))
+	assert.False(t, isStringLit(IntLit(3), "3"))
 }
 
 func TestIsInterfaceType(t *testing.T) {

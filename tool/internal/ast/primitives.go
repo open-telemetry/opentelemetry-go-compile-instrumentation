@@ -23,9 +23,9 @@ import (
 // handling of common AST patterns and reducing code duplication.
 
 const (
-	IdentNil    = "nil"
-	IdentTrue   = "true"
-	IdentFalse  = "false"
+	identNil    = "nil"
+	identTrue   = "true"
+	identFalse  = "false"
 	IdentIgnore = "_"
 )
 
@@ -36,7 +36,7 @@ func Ident(name string) *dst.Ident {
 }
 
 func Nil() *dst.Ident {
-	return &dst.Ident{Name: IdentNil}
+	return &dst.Ident{Name: identNil}
 }
 
 func AddressOf(name string) *dst.UnaryExpr {
@@ -64,7 +64,7 @@ func CallTo(name string, typeArgs *dst.FieldList, args []dst.Expr) *dst.CallExpr
 	if len(indices) == 1 {
 		fun = IndexExpr(Ident(name), indices[0])
 	} else {
-		fun = IndexListExpr(Ident(name), indices)
+		fun = indexListExpr(Ident(name), indices)
 	}
 	return &dst.CallExpr{
 		Fun:  fun,
@@ -72,7 +72,7 @@ func CallTo(name string, typeArgs *dst.FieldList, args []dst.Expr) *dst.CallExpr
 	}
 }
 
-func StringLit(value string) *dst.BasicLit {
+func stringLit(value string) *dst.BasicLit {
 	return &dst.BasicLit{
 		Kind:  token.STRING,
 		Value: strconv.Quote(value),
@@ -125,7 +125,7 @@ func IndexExpr(x, index dst.Expr) *dst.IndexExpr {
 	}
 }
 
-func IndexListExpr(x dst.Expr, indices []dst.Expr) *dst.IndexListExpr {
+func indexListExpr(x dst.Expr, indices []dst.Expr) *dst.IndexListExpr {
 	e := util.AssertType[dst.Expr](dst.Clone(x))
 	return &dst.IndexListExpr{
 		X:       e,
@@ -148,12 +148,12 @@ func ParenExpr(x dst.Expr) *dst.ParenExpr {
 	}
 }
 
-func BoolTrue() *dst.BasicLit {
-	return &dst.BasicLit{Value: IdentTrue}
+func boolTrue() *dst.BasicLit {
+	return &dst.BasicLit{Value: identTrue}
 }
 
 func BoolFalse() *dst.BasicLit {
-	return &dst.BasicLit{Value: IdentFalse}
+	return &dst.BasicLit{Value: identFalse}
 }
 
 func InterfaceType() *dst.InterfaceType {
@@ -192,7 +192,7 @@ func IfNotNilStmt(cond dst.Expr, body, elseBody *dst.BlockStmt) *dst.IfStmt {
 		Cond: &dst.BinaryExpr{
 			X:  e,
 			Op: token.NEQ,
-			Y:  &dst.Ident{Name: IdentNil},
+			Y:  &dst.Ident{Name: identNil},
 		},
 		Body: b,
 		Else: elseB,
