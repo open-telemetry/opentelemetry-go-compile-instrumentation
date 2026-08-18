@@ -85,7 +85,7 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 
 	default:
 		// Unsupported AST node types (chan, func, map, slice, array, interface
-		// literals) cannot be matched by type-name filters.
+		// literals) can never satisfy a plain type-name filter.
 		return false
 	}
 }
@@ -109,7 +109,20 @@ func fieldListContainsType(fields *dst.FieldList, typeStr string, imports map[st
 	return false, nil
 }
 
-// ImportAliasMap builds a map from the local identifier used to reference an
+// MatchesTypeName reports whether node's type matches the type-name string
+// typeStr. imports resolves the local identifier used at node's use site to
+// its real import path; see ImportAliasMap. Pass nil when no import context
+// is available
+// Returns an error when typeStr cannot be parsed.
+func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (bool, error) {
+	tn, err := parseTypeName(typeStr)
+	if err != nil {
+		return false, err
+	}
+	return tn.matches(node, imports), nil
+}
+
+// importAliasMap builds a map from the local identifier used to reference an
 // imported package within file (its explicit alias, or its default package
 // name when unaliased) to that package's real import path. It correctly disambiguates:
 //   - aliased imports (e.g. `import althttp "net/http"`)
