@@ -112,6 +112,7 @@ func insertRawAtPattern(
 
 func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, root *dst.File) error {
 	util.Assert(decl.Name.Name == r.Func, "sanity check")
+	util.Assert(decl.Body != nil, "function must have a body")
 
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
