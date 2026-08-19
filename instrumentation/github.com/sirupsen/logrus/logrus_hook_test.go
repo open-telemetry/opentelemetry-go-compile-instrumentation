@@ -126,6 +126,63 @@ func TestTraceHook_Fire_NoTraceContext(t *testing.T) {
 	assert.Empty(t, entry.Data)
 }
 
+// TestAfterLogrusNew_NilMapAtCallTime covers the AfterLogrusNew init-order
+// panic (see #1028): the hook is wired via //go:linkname, so it can fire
+// before this package's own var initializers have run, meaning
+// hookInitMap can still be nil the moment the hook is invoked. It must
+// lazily initialize the map rather than panic on a nil-map write.
+func TestAfterLogrusNew_NilMapAtCallTime(t *testing.T) {
+	hookInitMu.Lock()
+	hookInitMap = nil
+	fieldInitMap = nil
+	formatterInit = false
+	hookInitMu.Unlock()
+
+	ictx := hooktest.NewMockHookContext()
+	logger := logrus.New()
+	assert.NotPanics(t, func() {
+		AfterLogrusNew(ictx, logger)
+	})
+
+	hasHook := false
+	for _, hooks := range logger.Hooks {
+		for _, h := range hooks {
+			if _, ok := h.(*traceHook); ok {
+				hasHook = true
+			}
+		}
+	}
+	assert.True(t, hasHook)
+}
+
+// TestAfterLogrusWithField_NilMapAtCallTime is the AfterLogrusWithField
+// counterpart of TestAfterLogrusNew_NilMapAtCallTime: fieldInitMap can also
+// still be nil when the hook fires.
+func TestAfterLogrusWithField_NilMapAtCallTime(t *testing.T) {
+	hookInitMu.Lock()
+	hookInitMap = nil
+	fieldInitMap = nil
+	formatterInit = false
+	hookInitMu.Unlock()
+
+	ictx := hooktest.NewMockHookContext()
+	logger := logrus.New()
+	entry := &logrus.Entry{Logger: logger, Data: logrus.Fields{}}
+	assert.NotPanics(t, func() {
+		AfterLogrusWithField(ictx, entry)
+	})
+
+	hasHook := false
+	for _, hooks := range logger.Hooks {
+		for _, h := range hooks {
+			if _, ok := h.(*traceHook); ok {
+				hasHook = true
+			}
+		}
+	}
+	assert.True(t, hasHook)
+}
+
 func TestAfterLogrusNew_Disabled(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "logs/logrus")
 	resetHookState()
