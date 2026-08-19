@@ -82,6 +82,19 @@
       ],
       enabled: false,
     },
+    {
+      // ratchet v0.12.0 raises .tools/go.mod's go directive to 1.25.12,
+      // which our CI toolchain (installed from the root go.mod's go 1.25.0)
+      // can't build with GOTOOLCHAIN=local. Ignore updates until the
+      // toolchain moves to 1.25.12+.
+      matchManagers: [
+        'gomod',
+      ],
+      matchPackageNames: [
+        'github.com/sethvargo/ratchet',
+      ],
+      enabled: false,
+    },
   ],
   labels: [
     'dependencies',
