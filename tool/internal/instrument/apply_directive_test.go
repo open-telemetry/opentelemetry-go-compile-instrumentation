@@ -130,7 +130,7 @@ func TestRenderDirective(t *testing.T) {
 			} else {
 				funcDecl = parseFunc(t, tt.src)
 			}
-			tmpl, err := rule.ParseDirectiveTemplate(tt.template)
+			tmpl, err := rule.ParseFuncTemplate(tt.template)
 			require.NoError(t, err)
 
 			result, err := renderDirective(tmpl, newFuncTemplateData(funcDecl, tt.directiveArgs, imports, "h1"))
@@ -141,27 +141,27 @@ func TestRenderDirective(t *testing.T) {
 	}
 }
 
-func TestParseDirectiveTemplate_UnknownTagFails(t *testing.T) {
-	_, err := rule.ParseDirectiveTemplate("{{Bogus}}")
+func TestParseFuncTemplate_UnknownTagFails(t *testing.T) {
+	_, err := rule.ParseFuncTemplate("{{Bogus}}")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not defined")
 }
 
-func TestParseDirectiveTemplate_CompositeLiteralFails(t *testing.T) {
+func TestParseFuncTemplate_CompositeLiteralFails(t *testing.T) {
 	// text/template treats every "{{ ... }}" as an action, so incidental
 	// adjacent Go braces (e.g. a composite literal like []Point{{X: 1, Y: 2}})
 	// fail to parse. Datadog/orchestrion's code.Template has the same
 	// limitation for the same reason (plain text/template.Parse with no
 	// escaping).
-	_, err := rule.ParseDirectiveTemplate(`attrs := []Point{{X: 1, Y: 2}}; call({{.FuncName}})`)
+	_, err := rule.ParseFuncTemplate(`attrs := []Point{{X: 1, Y: 2}}; call({{.FuncName}})`)
 
 	require.Error(t, err)
 }
 
 func TestRenderDirective_OutOfRangeArgument(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
-	tmpl, err := rule.ParseDirectiveTemplate("{{.FuncArgument 0}}")
+	tmpl, err := rule.ParseFuncTemplate("{{.FuncArgument 0}}")
 	require.NoError(t, err)
 
 	_, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, nil, nil, "h1"))

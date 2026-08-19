@@ -613,9 +613,36 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 **Modifier (`do: - inject_code:`):**
 
-- `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function.
+- `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function. If the string contains `{{`, it is additionally rendered as a Go standard [text/template](https://pkg.go.dev/text/template) template using the shared function template variables below before being parsed; code with no `{{` is injected verbatim, unaffected by this rendering step.
 
 Top-level `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Top-level fields](#top-level-fields).
+
+**Template Placeholders:**
+
+| Placeholder              | Replaced with                                                            |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `{{.FuncName}}`          | The name of the target function                                          |
+| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver |
+| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                      |
+| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                         |
+| `{{.FuncReturnCount}}`   | The number of return values                                              |
+
+Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values, and blank (`_`) names, are assigned a synthetic name the first time a template references them. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with a descriptive error. Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are also available.
+
+**Example with function template variables:**
+
+```yaml
+raw_args:
+  target: main
+  where:
+    func: divide
+  do:
+    - inject_code:
+        raw: |-
+          println("enter {{ .FuncName }}, arg0={{ .FuncArgument 0 }}")
+```
+
+Given `func divide(a int, b int) (int, error) { ... }`, the injected code becomes `println("enter divide, arg0=a")`.
 
 **Example:**
 
