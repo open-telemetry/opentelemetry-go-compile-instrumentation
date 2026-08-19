@@ -6,6 +6,7 @@ package instrument
 import (
 	"context"
 	"fmt"
+	"go/build/constraint"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +17,19 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
+// stripBuildIgnoreTag removes genuine "//go:build ignore" constraint lines
+// from content, line by line. It leaves every other occurrence of that text —
+// inside a string literal, inside comment prose, anywhere that isn't itself a
+// build-constraint line — untouched. See #1069: a whole-file substring
+// replace corrupted both of those.
 func stripBuildIgnoreTag(content string) string {
-	return strings.ReplaceAll(content, "//go:build ignore", "")
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if constraint.IsGoBuild(line) {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // applyFileRule introduces the new file to the target package at compile time.
