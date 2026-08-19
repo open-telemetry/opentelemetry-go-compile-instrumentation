@@ -65,7 +65,14 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 	}
 
 	for _, ruleset := range matched {
-		for _, fileRule := range ruleset.FileRules {
+		fileRules := ruleset.FileRules
+		funcRules := ruleset.AllFuncRules()
+		if c := ruleset.Candidates; c != nil {
+			fileRules = append(fileRules, c.FileRules...)
+			funcRules = append(funcRules, c.FuncRules...)
+		}
+
+		for _, fileRule := range fileRules {
 			dir, err := resolve(fileRule.Path)
 			if err != nil {
 				return err
@@ -73,7 +80,7 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 			fileRule.ResolvedPath = dir
 		}
 
-		for _, funcRule := range ruleset.AllFuncRules() {
+		for _, funcRule := range funcRules {
 			dir, err := resolve(funcRule.Path)
 			if err != nil {
 				return err
