@@ -130,7 +130,10 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 			return ex.Wrapf(restoreErr, "failed to restore the AST")
 		}
 
-		pattern := regexp.MustCompile(r.Pattern)
+		pattern, err := regexp.Compile(r.Pattern)
+		if err != nil {
+			return ex.Wrapf(err, "invalid raw rule pattern %q", r.Pattern)
+		}
 		pos := insertPos{
 			pattern:   pattern,
 			placement: r.Placement,
