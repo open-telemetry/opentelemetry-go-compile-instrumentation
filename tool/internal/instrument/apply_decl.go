@@ -54,7 +54,7 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	util.Assert(nameIdx >= 0, "matched spec must declare the targeted identifier")
 
 	// Validate and apply the rewrite before touching imports: a rule that
-	// fails here (unparseable wrap/replace expression, tuple-valued
+	// fails here (unparsable wrap/replace expression, tuple-valued
 	// initializer) must not leave an import spec in root.Decls behind it.
 	if r.Wrap != "" {
 		if err := wrapDeclValue(spec, r.Wrap, nameIdx); err != nil {
