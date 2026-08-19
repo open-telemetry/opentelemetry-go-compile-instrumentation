@@ -696,3 +696,22 @@ func TestExtractReceiverTypeParamsConstraint_RenamedInterParam(t *testing.T) {
 	assert.Equal(t, "A", elem.Name,
 		"inter-parameter constraint must use the receiver name A, not the declaration name K")
 }
+
+// TestTypeParamDeclNames covers the positional flattening directly: a nil list
+// yields no names, a grouped field (type M[K, V any] declares K then V under
+// one field) contributes each name in order, and a field with no names, which
+// valid Go does not produce, still advances by one empty slot rather than being
+// dropped.
+func TestTypeParamDeclNames(t *testing.T) {
+	assert.Nil(t, typeParamDeclNames(nil))
+
+	params := &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{ast.Ident("K"), ast.Ident("V")}, Type: ast.Ident("any")},
+			{Names: nil, Type: ast.Ident("comparable")},
+			{Names: []*dst.Ident{ast.Ident("T")}, Type: ast.Ident("any")},
+		},
+	}
+
+	assert.Equal(t, []string{"K", "V", "", "T"}, typeParamDeclNames(params))
+}
