@@ -91,7 +91,8 @@ func wrapDeclValues(spec *dst.ValueSpec, templateStr string) error {
 
 	var wrapped dst.Expr
 	for i, val := range spec.Values {
-		wrapped, err = tmpl.compileExpression(val)
+		// Package-level var/const initializers have no enclosing function.
+		wrapped, err = tmpl.compileExpression(val, nil)
 		if err != nil {
 			return ex.Wrapf(err, "failed to wrap expression at index %d", i)
 		}

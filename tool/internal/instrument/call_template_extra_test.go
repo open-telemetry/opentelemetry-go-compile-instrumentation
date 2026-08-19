@@ -6,22 +6,16 @@ package instrument
 import (
 	"testing"
 
-	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCompileExpression_UnknownTemplateTag(t *testing.T) {
-	tmpl, err := newCallTemplate("wrapper({{ something }})")
-	require.NoError(t, err)
-
-	originalCall := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "funcCall"},
-	}
-
-	result, err := tmpl.compileExpression(originalCall)
+	// text/template rejects an unrecognized bare identifier like "something"
+	// at parse time (as an undefined function call), so newCallTemplate is
+	// where the error now surfaces rather than compileExpression.
+	_, err := newCallTemplate("wrapper({{ something }})")
 	require.Error(t, err)
-	assert.Nil(t, result)
 }
 
 func TestParseGoExpression_NonExpressionStatement(t *testing.T) {
