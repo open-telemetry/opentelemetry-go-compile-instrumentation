@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // bundle creates a reproducible .tar.gz archive from the given directories,
-// excluding *.log files. It replaces platform-dependent tar invocations to
-// produce consistent archives across platforms.
+// excluding *.log files and OS-generated junk files such as .DS_Store. It
+// replaces platform-dependent tar invocations to produce consistent archives
+// across platforms.
 // More information: https://reproducible-builds.org/docs/archives/
 package main
 
@@ -135,9 +136,25 @@ func addDir(tw *tar.Writer, dirPath, nameInArchive string) error {
 	})
 }
 
+// junkFileNames are exact filenames that OSes and local tooling create
+// incidentally (e.g. macOS Finder writes .DS_Store as soon as a directory is
+// browsed). They carry no source content, are already listed in .gitignore
+// so they never show up in git status or diffs, but the walk in addDir reads
+// the filesystem directly and would otherwise archive them if they happen to
+// be present on disk, making the archive depend on what the machine that ran
+// "make package" had lying around rather than on tracked source.
+var junkFileNames = map[string]bool{
+	".DS_Store":   true,
+	"Thumbs.db":   true,
+	"desktop.ini": true,
+}
+
 // shouldExclude reports whether an archive entry should be omitted.
 func shouldExclude(name string) bool {
-	return strings.HasSuffix(name, ".log")
+	if strings.HasSuffix(name, ".log") {
+		return true
+	}
+	return junkFileNames[filepath.Base(name)]
 }
 
 // isEffectivelyEmpty reports whether a directory is effectively empty,

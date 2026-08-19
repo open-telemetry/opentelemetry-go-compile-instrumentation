@@ -33,7 +33,7 @@ func (ip *InstrumentPhase) applyDirectiveRule(
 	if len(matches) == 0 {
 		return false, nil
 	}
-	tmpl, err := rule.ParseDirectiveTemplate(r.Template)
+	tmpl, err := rule.ParseFuncTemplate(r.Template)
 	if err != nil {
 		return false, ex.Wrap(err)
 	}
@@ -65,6 +65,6 @@ func (ip *InstrumentPhase) applyDirectiveRule(
 
 // renderDirective executes the template with the given data and returns the
 // resulting Go source snippet.
-func renderDirective(tmpl *rule.DirectiveTemplate, data *funcTemplateData) (string, error) {
+func renderDirective(tmpl *rule.FuncTemplate, data *funcTemplateData) (string, error) {
 	return tmpl.Execute(data)
 }
