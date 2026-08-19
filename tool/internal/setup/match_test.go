@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
@@ -1590,4 +1592,311 @@ func TestRunMatch_WarnsOnUnresolvedVersion(t *testing.T) {
 	require.Contains(t, out, "versioned_hook")
 	require.Contains(t, out, "another_versioned_hook")
 	require.Contains(t, out, importPath)
+}
+
+const matchOneRuleSource = `package sample
+
+const MaxRetries = 3
+
+type Widget struct{ x int }
+
+//sample:trace
+func Traced() {}
+
+func Plain() {}
+`
+
+func parseMatchSource(t *testing.T) *dst.File {
+	t.Helper()
+	tree, err := ast.NewAstParser().ParseSource(matchOneRuleSource)
+	require.NoError(t, err)
+	return tree
+}
+
+func TestMatchOneRule(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "sample.go")
+	dep := &Dependency{ImportPath: "example.com/sample"}
+
+	tests := []struct {
+		name   string
+		rule   rule.InstRule
+		verify func(*testing.T, *rule.InstRuleSet)
+	}{
+		{
+			name: "func rule matches declared function",
+			rule: &rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				Func:         "Plain",
+				Before:       "H",
+				Path:         "example.com/hooks",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Len(t, set.FuncRules[source], 1)
+			},
+		},
+		{
+			name: "func rule does not match missing function",
+			rule: &rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				Func:         "DoesNotExist",
+				Before:       "H",
+				Path:         "example.com/hooks",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Empty(t, set.FuncRules[source])
+			},
+		},
+		{
+			name: "struct rule matches declared struct",
+			rule: &rule.InstStructRule{
+				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				Struct:       "Widget",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Len(t, set.StructRules[source], 1)
+			},
+		},
+		{
+			name: "raw rule matches declared function",
+			rule: &rule.InstRawRule{
+				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				Func:         "Plain",
+				Raw:          "println()",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Len(t, set.RawRules[source], 1)
+			},
+		},
+		{
+			name: "call rule is added unconditionally",
+			rule: &rule.InstCallRule{
+				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				FunctionCall: "net/http.Get",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Len(t, set.CallRules[source], 1)
+			},
+		},
+		{
+			name: "directive rule matches annotated function",
+			rule: &rule.InstDirectiveRule{
+				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				Directive:    "sample:trace",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Len(t, set.DirectiveRules[source], 1)
+			},
+		},
+		{
+			name: "decl rule matches named const",
+			rule: &rule.InstDeclRule{
+				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				Identifier:   "MaxRetries",
+				Kind:         "const",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Len(t, set.DeclRules[source], 1)
+			},
+		},
+		{
+			name: "file rule is skipped",
+			rule: &rule.InstFileRule{
+				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Empty(t, set.FileRules)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sp := newTestSetupPhase()
+			set := rule.NewInstRuleSet("example.com/sample")
+			tree := parseMatchSource(t)
+
+			require.NoError(t, sp.matchOneRule(tree, source, tt.rule, set, dep))
+			tt.verify(t, set)
+		})
+	}
+}
+
+func TestCreateRuleFromFields_CallRule(t *testing.T) {
+	raw := []byte("target: example.com/x\nfunction_call: net/http.Get\nreplace: tracedGet({{ . }})\n")
+	fields := map[string]any{
+		"target":             "example.com/x",
+		rule.SelFunctionCall: "net/http.Get",
+		"replace":            "tracedGet({{ . }})",
+	}
+
+	r, err := createRuleFromFields(raw, "call-rule", fields)
+	require.NoError(t, err)
+	require.IsType(t, &rule.InstCallRule{}, r)
+}
+
+func TestCreateRuleFromFields_UnrecognizedSelector(t *testing.T) {
+	fields := map[string]any{"target": "example.com/x"}
+	_, err := createRuleFromFields(nil, "bad-rule", fields)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "no recognised selector")
+}
+
+func TestParseRuleFromYaml_NormalizeError(t *testing.T) {
+	content := []byte(`bad:
+  target: main
+  where:
+    target: net/http
+    func: Open
+  do:
+    - inject_hooks:
+        before: BeforeOpen
+        path: example.com/hooks
+`)
+	_, err := parseRuleFromYaml(content)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "target must be top-level")
+}
+
+func TestRunMatch_CgoFiles(t *testing.T) {
+	dep := &Dependency{
+		ImportPath: "example.com/cgo",
+		CgoFiles:   map[string]string{"a.go": "header"},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, nil, nil)
+	require.NoError(t, err)
+	require.True(t, set.IsEmpty())
+}
+
+func TestRunMatch_VersionFilteredOut(t *testing.T) {
+	srcFile := writeGoSource(t, "v.go", "package v\n\nfunc Handler() {}\n")
+	dep := &Dependency{
+		ImportPath: "example.com/v",
+		Version:    "v1.0.0",
+		Sources:    []string{srcFile},
+		CgoFiles:   map[string]string{},
+	}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "vrule",
+			Target:  "example.com/v",
+			Version: "v2.0.0",
+		},
+		Func:   "Handler",
+		Before: "BeforeHandler",
+		Path:   "example.com/hooks",
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{"example.com/v": {funcRule}}, nil)
+	require.NoError(t, err)
+	require.True(t, set.IsEmpty())
+}
+
+func TestPreciseMatching_NoSources(t *testing.T) {
+	dep := &Dependency{ImportPath: "example.com/empty"}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: "example.com/empty"},
+		Func:         "Foo",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	res, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+	require.True(t, res.IsEmpty())
+}
+
+func TestPreciseMatching_CtxCancelled(t *testing.T) {
+	srcFile := writeGoSource(t, "c.go", "package c\n\nfunc Foo() {}\n")
+	dep := &Dependency{
+		ImportPath: "example.com/c",
+		Sources:    []string{srcFile},
+	}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: "example.com/c"},
+		Func:         "Foo",
+		Before:       "BeforeFoo",
+		Path:         "example.com/hooks",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	_, err := sp.preciseMatching(ctx, dep, []rule.InstRule{funcRule}, set)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestPreciseMatching_MatchOneRuleError(t *testing.T) {
+	srcFile := writeGoSource(t, "s.go", "package s\n\nfunc Foo(a string) error { return nil }\n")
+	dep := &Dependency{
+		ImportPath: "example.com/s",
+		Sources:    []string{srcFile},
+	}
+	badRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad", Target: "example.com/s"},
+		Func:         "Foo",
+		Signature:    &rule.FuncSignature{Args: []string{"[]invalid"}},
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	_, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{badRule}, set)
+	require.Error(t, err)
+}
+
+func TestRulesFromDirWalkError(t *testing.T) {
+	_, err := rulesFromDir(filepath.Join(t.TempDir(), "missing"), false)
+	require.Error(t, err)
+}
+
+func TestLoadCustomRulesStatError(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	_, err := loadCustomRules(filepath.Join(t.TempDir(), "nope.yaml"))
+	require.Error(t, err)
+}
+
+func TestMatchDeps_NoRules(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+
+	sp := newTestSetupPhase()
+	matched, err := sp.matchDeps(context.Background(), []*Dependency{{ImportPath: "example.com/x"}}, nil)
+	require.NoError(t, err)
+	require.Nil(t, matched)
+}
+
+func TestMatchDeps_RunMatchError(t *testing.T) {
+	ruleFile := filepath.Join(t.TempDir(), "r.yaml")
+	err := os.WriteFile(ruleFile, []byte(`h:
+  target: example.com/bad
+  func: Handler
+  before: BeforeHandler
+  path: "example.com/hooks"
+`), 0o644)
+	require.NoError(t, err)
+
+	badSrc := writeGoSource(t, "bad.go", "not valid go {{{")
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	_, err = sp.matchDeps(context.Background(), []*Dependency{
+		{ImportPath: "example.com/bad", Sources: []string{badSrc}, CgoFiles: map[string]string{}},
+	}, nil)
+	require.Error(t, err)
+}
+
+func TestLoadRules_FindToolFilesError(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, ToolFileCanonical), []byte("package main"), 0o644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(dir, ToolFileAlias), []byte("package main"), 0o644)
+	require.NoError(t, err)
+
+	sp := newTestSetupPhase()
+	_, err = sp.loadRules(context.Background(), map[string]bool{dir: true})
+	require.Error(t, err)
 }
