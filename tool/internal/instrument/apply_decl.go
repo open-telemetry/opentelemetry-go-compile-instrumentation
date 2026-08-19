@@ -43,11 +43,6 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 		return ex.Newf("can not find declaration %q (kind: %q)", r.Identifier, r.Kind)
 	}
 
-	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
-		return err
-	}
-
 	spec, ok := node.(*dst.ValueSpec)
 	if !ok {
 		return ex.Newf("declaration %q (kind: %q) is not a var or const declaration", r.Identifier, r.Kind)
@@ -58,15 +53,20 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	nameIdx := slices.IndexFunc(spec.Names, func(name *dst.Ident) bool { return name.Name == r.Identifier })
 	util.Assert(nameIdx >= 0, "matched spec must declare the targeted identifier")
 
+	// Validate and apply the rewrite before touching imports: a rule that
+	// fails here (unparseable wrap/replace expression, tuple-valued
+	// initializer) must not leave an import spec in root.Decls behind it.
 	if r.Wrap != "" {
 		if err := wrapDeclValue(spec, r.Wrap, nameIdx); err != nil {
 			return err
 		}
-		ip.Info("Apply decl rule", "rule", r)
-		return nil
+	} else {
+		if err := replaceDeclValue(spec, r.Replace, nameIdx); err != nil {
+			return err
+		}
 	}
 
-	if err := replaceDeclValue(spec, r.Replace, nameIdx); err != nil {
+	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
 		return err
 	}
 

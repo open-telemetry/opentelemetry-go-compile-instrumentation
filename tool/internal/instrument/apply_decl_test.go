@@ -26,6 +26,21 @@ func newTestPhase() *InstrumentPhase {
 	}
 }
 
+// countImportSpecs counts the import specs declared in the file. Import
+// injection appends to root.Decls rather than root.Imports, so the decls are
+// what a file written back out actually reflects.
+func countImportSpecs(root *dst.File) int {
+	count := 0
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		count += len(genDecl.Specs)
+	}
+	return count
+}
+
 // --- wrapDeclValue helper tests ---
 
 func TestWrapDeclValue_Success(t *testing.T) {
@@ -178,6 +193,26 @@ func TestApplyDeclRule_WrapExpression_NoInitializer(t *testing.T) {
 	assert.Contains(t, err.Error(), "wrap requires an existing initializer")
 }
 
+func TestApplyDeclRule_WrapExpression_InvalidTemplateSkipsImports(t *testing.T) {
+	// Imports is set, but the wrap template fails to compile. The rule must
+	// fail before addRuleImports ever runs, so no import spec is added.
+	file := makeVarFile("X", &dst.BasicLit{Kind: token.INT, Value: "1"})
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "wrap_x",
+			Imports: map[string]string{"fmt": "fmt"},
+		},
+		Kind:       "var",
+		Identifier: "X",
+		Wrap:       "func {{ . }}",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Zero(t, countImportSpecs(file))
+}
+
 func TestApplyDeclRule_EmptyKind_FunctionTarget(t *testing.T) {
 	file := &dst.File{
 		Name: &dst.Ident{Name: "main"},
@@ -275,6 +310,26 @@ func TestDeclRuleWrapRejectsTupleValuedInitializer(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declares 2 names but has 1 initializers")
 	assert.Contains(t, renderFile(t, file), "var alpha, beta = pair()", "declaration must be left untouched")
+}
+
+func TestDeclRuleReplaceRejectsTupleValuedInitializer_SkipsImports(t *testing.T) {
+	// Imports is set, but the tuple-valued initializer makes replace fail its
+	// arity check. The rule must fail before addRuleImports ever runs.
+	file := parseTestFile(t, tupleValuedSource)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "replace_alpha",
+			Imports: map[string]string{"fmt": "fmt"},
+		},
+		Kind:       "var",
+		Identifier: "alpha",
+		Replace:    "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Zero(t, countImportSpecs(file))
 }
 
 func TestParseValueExpr(t *testing.T) {
