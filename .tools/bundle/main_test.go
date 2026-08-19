@@ -8,6 +8,7 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +60,35 @@ func TestArchive_ExcludesOSJunk(t *testing.T) {
 	}
 	if !containsSuffix(names, "client.go") {
 		t.Errorf("archive is missing expected source file, got entries: %v", names)
+	}
+}
+
+// TestArchive_PrunesJunkOnlyDir verifies a directory containing only OS junk
+// is treated as effectively empty and omitted from the archive, matching
+// git's behavior for directories with no tracked content.
+func TestArchive_PrunesJunkOnlyDir(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "client.go"), []byte("package redis\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	junkOnlyDir := filepath.Join(srcDir, "empty")
+	if err := os.Mkdir(junkOnlyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(junkOnlyDir, ".DS_Store"), []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outPath := filepath.Join(t.TempDir(), "out.tgz")
+	if err := archive(outPath, []string{srcDir}); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	names := readTarNames(t, outPath)
+	for _, name := range names {
+		if strings.Contains(name, "empty") {
+			t.Errorf("archive contains junk-only directory %q, want it pruned", name)
+		}
 	}
 }
 
