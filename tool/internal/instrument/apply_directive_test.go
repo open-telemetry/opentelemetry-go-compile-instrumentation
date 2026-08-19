@@ -17,6 +17,79 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
+// countImportSpecs counts the import specs declared in the file. Import
+// injection appends to root.Decls rather than root.Imports, so the decls are
+// what a file written back out actually reflects.
+func countImportSpecs(root *dst.File) int {
+	count := 0
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		count += len(genDecl.Specs)
+	}
+	return count
+}
+
+// The directive sits on a statement inside a function body, so it annotates no
+// top-level func and the rule matches nothing.
+const directiveInsideBodySource = `package main
+
+func main() {
+	//otelc:span
+	value := 1
+	println(value)
+}
+`
+
+const directiveOnFuncSource = `package main
+
+//otelc:span
+func foo() {
+	println("hello")
+}
+`
+
+func TestApplyDirectiveRule_NoMatchingFuncs(t *testing.T) {
+	root, err := ast.NewAstParser().ParseSource(directiveInsideBodySource)
+	require.NoError(t, err)
+
+	r := &rule.InstDirectiveRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "span_directive",
+			Imports: map[string]string{"fmt": "fmt"},
+		},
+		Directive: "otelc:span",
+		Template:  `fmt.Println("span start: {{.FuncName}}")`,
+	}
+
+	modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	assert.False(t, modified, "a rule that instruments nothing must not request the globals file")
+	assert.Zero(t, countImportSpecs(root), "imports must not be injected when no func is instrumented")
+}
+
+func TestApplyDirectiveRule_MatchingFunc(t *testing.T) {
+	root, err := ast.NewAstParser().ParseSource(directiveOnFuncSource)
+	require.NoError(t, err)
+
+	r := &rule.InstDirectiveRule{
+		InstBaseRule: rule.InstBaseRule{Name: "span_directive"},
+		Directive:    "otelc:span",
+		Template:     `println("span start: {{.FuncName}}")`,
+	}
+
+	modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	funcDecl, ok := root.Decls[0].(*dst.FuncDecl)
+	require.True(t, ok, "expected *dst.FuncDecl, got %T", root.Decls[0])
+	assert.Len(t, funcDecl.Body.List, 2, "rendered statement should be prepended to the body")
+}
+
 func TestRenderDirective(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -205,8 +278,9 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 
 		ip := &InstrumentPhase{logger: slog.Default()}
-		err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.NoError(t, err)
+		assert.True(t, modified)
 		assert.Len(t, funcDecl.Body.List, 2)
 	})
 
@@ -216,11 +290,26 @@ func TestApplyDirectiveRule(t *testing.T) {
 			Directive:    "otelc:test",
 			Template:     "println(\"{{FuncName\")",
 		}
-		root := &dst.File{}
+		// A matching func must be present: applyDirectiveRule now checks for
+		// matches before validating the template (see #1045), so an empty file
+		// would short-circuit to (false, nil) before ever reaching the invalid
+		// template and this test would no longer exercise the path it's testing.
+		funcDecl := &dst.FuncDecl{
+			Name: dst.NewIdent("myFunc"),
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: &dst.BlockStmt{List: []dst.Stmt{}},
+			Decs: dst.FuncDeclDecorations{
+				NodeDecs: dst.NodeDecs{
+					Start: dst.Decorations{"//otelc:test\n"},
+				},
+			},
+		}
+		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
 		ip := &InstrumentPhase{logger: slog.Default()}
-		err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
+		assert.False(t, modified)
 	})
 
 	t.Run("returns error on unknown template tag", func(t *testing.T) {
@@ -242,8 +331,9 @@ func TestApplyDirectiveRule(t *testing.T) {
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
 		ip := &InstrumentPhase{logger: slog.Default()}
-		err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
+		assert.False(t, modified)
 		assert.Contains(t, err.Error(), "can't evaluate field UnknownTag")
 	})
 
@@ -266,8 +356,107 @@ func TestApplyDirectiveRule(t *testing.T) {
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
 		ip := &InstrumentPhase{logger: slog.Default()}
-		err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
+		assert.False(t, modified)
 		assert.Contains(t, err.Error(), "parsing rendered template")
+	})
+
+	t.Run("returns error when directive args fail to parse", func(t *testing.T) {
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{Name: "test_directive"},
+			Directive:    "otelc:test",
+			Template:     "println(\"{{.FuncName}}\")",
+		}
+		funcDecl := &dst.FuncDecl{
+			Name: dst.NewIdent("myFunc"),
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: &dst.BlockStmt{List: []dst.Stmt{}},
+			Decs: dst.FuncDeclDecorations{
+				NodeDecs: dst.NodeDecs{
+					// Unclosed quote makes tokenize (via FindFuncsByDirective) fail
+					// before any imports or template work happens.
+					Start: dst.Decorations{"//otelc:test key:\"unterminated\n"},
+				},
+			},
+		}
+		root := &dst.File{Decls: []dst.Decl{funcDecl}}
+
+		ip := &InstrumentPhase{logger: slog.Default()}
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		require.Error(t, err)
+		assert.False(t, modified)
+		assert.Contains(t, err.Error(), "parsing directive args")
+	})
+
+	t.Run("returns error when rule imports conflict with an existing alias", func(t *testing.T) {
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    "test_directive",
+				Imports: map[string]string{"context": "context"},
+			},
+			Directive: "otelc:test",
+			Template:  "println(\"{{.FuncName}}\")",
+		}
+		funcDecl := &dst.FuncDecl{
+			Name: dst.NewIdent("myFunc"),
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: &dst.BlockStmt{List: []dst.Stmt{}},
+			Decs: dst.FuncDeclDecorations{
+				NodeDecs: dst.NodeDecs{
+					Start: dst.Decorations{"//otelc:test\n"},
+				},
+			},
+		}
+		root := &dst.File{
+			Decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.IMPORT,
+					Specs: []dst.Spec{
+						&dst.ImportSpec{
+							Name: dst.NewIdent("ctx"),
+							Path: &dst.BasicLit{Value: `"context"`},
+						},
+					},
+				},
+				funcDecl,
+			},
+		}
+
+		ip := &InstrumentPhase{logger: slog.Default()}
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		require.Error(t, err)
+		assert.False(t, modified)
+		assert.Contains(t, err.Error(), "import alias mismatch")
+	})
+
+	t.Run("template parse failure short-circuits before imports are added", func(t *testing.T) {
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    "test_directive",
+				Imports: map[string]string{"context": "context"},
+			},
+			Directive: "otelc:test",
+			Template:  "println(\"{{FuncName\")",
+		}
+		funcDecl := &dst.FuncDecl{
+			Name: dst.NewIdent("myFunc"),
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: &dst.BlockStmt{List: []dst.Stmt{}},
+			Decs: dst.FuncDeclDecorations{
+				NodeDecs: dst.NodeDecs{
+					Start: dst.Decorations{"//otelc:test\n"},
+				},
+			},
+		}
+		root := &dst.File{Decls: []dst.Decl{funcDecl}}
+
+		ip := &InstrumentPhase{logger: slog.Default()}
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		require.Error(t, err)
+		assert.False(t, modified)
+		// The template is parsed before imports are added, so a rule with a
+		// broken template must fail without ever touching the file's imports.
+		assert.Zero(t, countImportSpecs(root))
 	})
 }
