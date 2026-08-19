@@ -6,13 +6,6 @@ replace go.opentelemetry.io/otelc/pkg => ../../../pkg
 
 replace go.opentelemetry.io/otelc/pkg/runtime => ../../../pkg/runtime
 
-// Pinned below Go 1.26 requirement; see https://github.com/kubernetes/client-go
-replace (
-	k8s.io/api => k8s.io/api v0.34.0
-	k8s.io/apimachinery => k8s.io/apimachinery v0.34.0
-	k8s.io/client-go => k8s.io/client-go v0.34.0
-)
-
 require (
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.45.0
