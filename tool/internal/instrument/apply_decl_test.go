@@ -213,6 +213,24 @@ func TestApplyDeclRule_WrapExpression_InvalidTemplateSkipsImports(t *testing.T) 
 	assert.Zero(t, countImportSpecs(file))
 }
 
+func TestApplyDeclRule_ReplaceSuccess_AddsImports(t *testing.T) {
+	file := makeVarFile("X", &dst.BasicLit{Kind: token.INT, Value: "1"})
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "replace_x",
+			Imports: map[string]string{"fmt": "fmt"},
+		},
+		Kind:       "var",
+		Identifier: "X",
+		Replace:    "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countImportSpecs(file), "a successful rewrite must still add the rule's imports")
+}
+
 func TestApplyDeclRule_EmptyKind_FunctionTarget(t *testing.T) {
 	file := &dst.File{
 		Name: &dst.Ident{Name: "main"},
@@ -224,16 +242,20 @@ func TestApplyDeclRule_EmptyKind_FunctionTarget(t *testing.T) {
 		},
 	}
 	r := &rule.InstDeclRule{
-		InstBaseRule: rule.InstBaseRule{Name: "replace_handler"},
-		Kind:         "",
-		Identifier:   "DefaultHandler",
-		Replace:      "CustomHandler",
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "replace_handler",
+			Imports: map[string]string{"fmt": "fmt"},
+		},
+		Kind:       "",
+		Identifier: "DefaultHandler",
+		Replace:    "CustomHandler",
 	}
 
 	err := newTestPhase().applyDeclRule(context.Background(), r, file)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is not a var or const declaration")
+	assert.Zero(t, countImportSpecs(file), "imports must not be injected when the target isn't a var/const declaration")
 }
 
 // --- multi-name ValueSpec tests ---
@@ -292,8 +314,24 @@ func TestDeclRuleReplaceRejectsTupleValuedInitializer(t *testing.T) {
 	err := newTestPhase().applyDeclRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "declares 2 names but has 1 initializers")
+	assert.Contains(t, err.Error(), "declares 2 names but has 1 initializer(s)")
 	assert.Contains(t, renderFile(t, file), "var alpha, beta = pair()", "declaration must be left untouched")
+}
+
+func TestDeclRuleReplaceRejectsMultiNameNoInitializer(t *testing.T) {
+	file := parseTestFile(t, "package main\n\nvar alpha, beta int\n")
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_alpha"},
+		Kind:         "var",
+		Identifier:   "alpha",
+		Replace:      "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "declares 2 names but has 0 initializer(s)")
+	assert.Contains(t, renderFile(t, file), "var alpha, beta int", "declaration must be left untouched")
 }
 
 func TestDeclRuleWrapRejectsTupleValuedInitializer(t *testing.T) {
@@ -308,7 +346,7 @@ func TestDeclRuleWrapRejectsTupleValuedInitializer(t *testing.T) {
 	err := newTestPhase().applyDeclRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "declares 2 names but has 1 initializers")
+	assert.Contains(t, err.Error(), "declares 2 names but has 1 initializer(s)")
 	assert.Contains(t, renderFile(t, file), "var alpha, beta = pair()", "declaration must be left untouched")
 }
 
@@ -330,6 +368,21 @@ func TestDeclRuleReplaceRejectsTupleValuedInitializer_SkipsImports(t *testing.T)
 
 	require.Error(t, err)
 	assert.Zero(t, countImportSpecs(file))
+}
+
+func TestDeclRuleReplaceHandlesConstIotaImplicitRepeat(t *testing.T) {
+	file := parseTestFile(t, "package main\n\nconst (\n\tA = iota\n\tB\n)\n")
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_b"},
+		Kind:         "const",
+		Identifier:   "B",
+		Replace:      "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.Contains(t, renderFile(t, file), "B = 99")
 }
 
 func TestParseValueExpr(t *testing.T) {

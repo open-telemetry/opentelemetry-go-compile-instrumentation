@@ -50,6 +50,10 @@ func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 
 	// One ValueSpec can declare several names (var a, b = 1, 2), and only the
 	// name the rule targets may be rewritten.
+	//
+	// nameIdx is guaranteed non-negative: FindNamedDecl already selected this
+	// spec via the identical name.Name == r.Identifier comparison, so the
+	// targeted identifier is present in spec.Names by construction.
 	nameIdx := slices.IndexFunc(spec.Names, func(name *dst.Ident) bool { return name.Name == r.Identifier })
 	util.Assert(nameIdx >= 0, "matched spec must declare the targeted identifier")
 
@@ -129,7 +133,7 @@ func wrapDeclValue(spec *dst.ValueSpec, templateStr string, nameIdx int) error {
 // instead of guessed at.
 func declArityError(spec *dst.ValueSpec, nameIdx int) error {
 	return ex.Newf(
-		"declaration %q declares %d names but has %d initializers; "+
+		"declaration %q declares %d names but has %d initializer(s); "+
 			"rewriting a single name requires one initializer per name "+
 			"(tuple-valued declarations such as `var a, b = f()` are not supported)",
 		spec.Names[nameIdx].Name, len(spec.Names), len(spec.Values),
