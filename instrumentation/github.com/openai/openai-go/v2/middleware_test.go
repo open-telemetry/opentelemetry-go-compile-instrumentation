@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestClassifyOperation(t *testing.T) {
@@ -74,20 +77,33 @@ func TestOperationName(t *testing.T) {
 
 func TestParseChatRequest(t *testing.T) {
 	body := []byte(`{"model":"gpt-4","max_tokens":100,"temperature":0.7}`)
-	model, attrs := parseChatRequest(body)
+	model, attrs, _ := parseChatRequest(body)
 	assert.Equal(t, "gpt-4", model)
 	assert.NotEmpty(t, attrs)
 }
 
+func TestParseChatRequest_ContentCapture(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
+	_, _, msgs := parseChatRequest(body)
+	assert.Len(t, msgs, 1)
+
+	var m struct {
+		Content string `json:"content"`
+	}
+	err := json.Unmarshal(msgs[0], &m)
+	assert.NoError(t, err)
+	assert.Equal(t, "hello", m.Content)
+}
+
 func TestParseChatRequest_Invalid(t *testing.T) {
 	body := []byte(`invalid json`)
-	model, attrs := parseChatRequest(body)
+	model, attrs, _ := parseChatRequest(body)
 	assert.Equal(t, "", model)
 	assert.Nil(t, attrs)
 }
 
 func TestParseCompletionRequest(t *testing.T) {
-	body := []byte(`{"model":"gpt-3.5-turbo-instruct","max_tokens":50}`)
+	body := []byte(`{"model":"gpt-3.5-turbo-instruct","max_tokens":50,"top_p":0.9}`)
 	model, attrs := parseCompletionRequest(body)
 	assert.Equal(t, "gpt-3.5-turbo-instruct", model)
 	assert.NotEmpty(t, attrs)
@@ -127,4 +143,66 @@ func TestParseChatResponse_Valid(t *testing.T) {
 	assert.Equal(t, int64(10), resp.Usage.PromptTokens)
 	assert.Equal(t, int64(20), resp.Usage.CompletionTokens)
 	assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+}
+
+func TestParseChatResponse_ContentCapture(t *testing.T) {
+	orig := captureContentEnabled
+	captureContentEnabled = func() bool { return true }
+	defer func() { captureContentEnabled = orig }()
+
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-content")
+
+	body := []byte(`{
+		"id":"chatcmpl-123",
+		"model":"gpt-4",
+		"choices":[{"message":{"content":"hello world"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}
+	}`)
+	parseChatResponse(body, span)
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	hasCompletion := false
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			hasCompletion = true
+			require.Len(t, event.Attributes, 1)
+			assert.Equal(t, "gen_ai.completion", string(event.Attributes[0].Key))
+			assert.Equal(t, "hello world", event.Attributes[0].Value.AsString())
+		}
+	}
+	assert.True(t, hasCompletion, "missing completion event")
+}
+
+func TestParseChatResponse_ContentCapture_Disabled(t *testing.T) {
+	orig := captureContentEnabled
+	captureContentEnabled = func() bool { return false }
+	defer func() { captureContentEnabled = orig }()
+
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-content")
+
+	body := []byte(`{
+		"id":"chatcmpl-123",
+		"model":"gpt-4",
+		"choices":[{"message":{"content":"hello world"},"finish_reason":"stop"}]
+	}`)
+	parseChatResponse(body, span)
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			t.Errorf("expected no completion event, but got one")
+		}
+	}
 }
