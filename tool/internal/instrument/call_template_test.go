@@ -41,6 +41,111 @@ func TestNewCallTemplate_EmptyTemplate(t *testing.T) {
 	assert.Equal(t, text, tmpl.String())
 }
 
+func TestCallTemplateData_FuncName(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncName()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler() {}")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		name, err := d.FuncName()
+
+		require.NoError(t, err)
+		assert.Equal(t, "Handler", name)
+	})
+}
+
+func TestCallTemplateData_FuncArgument(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncArgument(0)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler(name string) {}")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		arg, err := d.FuncArgument(0)
+
+		require.NoError(t, err)
+		assert.Equal(t, "name", arg)
+	})
+}
+
+func TestCallTemplateData_FuncReturn(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncReturn(0)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler() (err error) { return nil }")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		ret, err := d.FuncReturn(0)
+
+		require.NoError(t, err)
+		assert.Equal(t, "err", ret)
+	})
+}
+
+func TestCallTemplateData_FuncArgumentCount(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncArgumentCount()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler(a, b string) {}")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		count, err := d.FuncArgumentCount()
+
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+	})
+}
+
+func TestCallTemplateData_FuncReturnCount(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncReturnCount()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler() (int, error) { return 0, nil }")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		count, err := d.FuncReturnCount()
+
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+	})
+}
+
 func TestCompileExpression_FuncArgumentWithEnclosingFunc(t *testing.T) {
 	tmpl, err := newCallTemplate("traced({{ .FuncArgument 0 }}, {{ . }})")
 	require.NoError(t, err)

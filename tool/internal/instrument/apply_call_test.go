@@ -55,6 +55,79 @@ func httpGetRule(replace string) *rule.InstCallRule {
 	}
 }
 
+func TestWalkCallsWithEnclosingFunc_VisitsAllCallsWithEnclosingFunc(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "fmt"
+
+var result = fmt.Sprintf("x")
+
+func A() {
+	fmt.Println("a")
+}
+
+func B() {
+	fmt.Println("b1")
+	fmt.Println("b2")
+}
+`)
+
+	var enclosingNames []string
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing *dst.FuncDecl) bool {
+		name := "<none>"
+		if enclosing != nil {
+			name = enclosing.Name.Name
+		}
+		enclosingNames = append(enclosingNames, name)
+		return true
+	})
+
+	assert.Equal(t, []string{"<none>", "A", "B", "B"}, enclosingNames)
+}
+
+func TestWalkCallsWithEnclosingFunc_StopsWithinDecl(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "fmt"
+
+func A() {
+	fmt.Println("first")
+	fmt.Println("second")
+}
+`)
+
+	visited := 0
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, _ *dst.FuncDecl) bool {
+		visited++
+		return false
+	})
+
+	assert.Equal(t, 1, visited, "must stop inspecting further calls within the same decl once fn returns false")
+}
+
+func TestWalkCallsWithEnclosingFunc_StopsAcrossDecls(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "fmt"
+
+func A() {
+	fmt.Println("a")
+}
+
+func B() {
+	fmt.Println("b")
+}
+`)
+
+	var visited []string
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing *dst.FuncDecl) bool {
+		visited = append(visited, enclosing.Name.Name)
+		return false
+	})
+
+	assert.Equal(t, []string{"A"}, visited)
+}
+
 // --- applyCallRule tests ---
 
 func TestApplyCallRule_Success(t *testing.T) {
