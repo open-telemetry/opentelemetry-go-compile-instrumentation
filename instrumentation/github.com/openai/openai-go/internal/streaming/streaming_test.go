@@ -6,12 +6,15 @@ package streaming
 import (
 	"bytes"
 	"io"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -384,7 +387,6 @@ func assertSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, 
 
 func TestStreamingReader_ContentCapture(t *testing.T) {
 
-
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
@@ -440,9 +442,9 @@ func TestStreamingReader_MemoryBoundsRespected(t *testing.T) {
 	tr := tp.Tracer("test")
 	_, span := tr.Start(t.Context(), "test-bounds")
 
-	streamData := "data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"1234567890\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
+	streamData := "data: {\"id\":\"inc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"1234567890123456789012345678901234567890\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
 	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
-	reader := NewStreamingReader(body, span, time.Now(), OpChat, true, 5)
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, true, 32)
 	_, _ = io.ReadAll(reader)
 	reader.Close()
 
@@ -453,8 +455,79 @@ func TestStreamingReader_MemoryBoundsRespected(t *testing.T) {
 	for _, event := range spans[0].Events() {
 		if event.Name == "gen_ai.content.completion" {
 			hasCompletion = true
-			assertAttribute(t, event.Attributes, "gen_ai.completion", "12345")
+			assertAttribute(t, event.Attributes, "gen_ai.completion", "12345678901234567... [truncated]")
 		}
 	}
 	assert.True(t, hasCompletion, "missing completion event")
+}
+
+func TestTruncateContent(t *testing.T) {
+	content := strings.Repeat("a", ContentCaptureLimit+1)
+	truncated := TruncateContent(content)
+
+	assert.Len(t, truncated, ContentCaptureLimit)
+	assert.True(t, strings.HasSuffix(truncated, truncatedContentSuffix))
+}
+
+func TestTruncateContentPreservesUTF8(t *testing.T) {
+	content := strings.Repeat("é", ContentCaptureLimit)
+	truncated := TruncateContent(content)
+
+	assert.LessOrEqual(t, len(truncated), ContentCaptureLimit)
+	assert.True(t, strings.HasSuffix(truncated, truncatedContentSuffix))
+	assert.True(t, utf8.ValidString(truncated))
+}
+
+func TestStreamingReader_CompletionContentCapture(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "completion-content")
+
+	streamData := "data: {\"choices\":[{\"index\":0,\"text\":\"hello \"}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"text\":\"world\",\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpCompletion, true, ContentCaptureLimit)
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Len(t, spans[0].Events(), 1)
+	assertAttribute(t, spans[0].Events()[0].Attributes, "gen_ai.completion", "hello world")
+}
+
+func TestStreamingReader_SeparatesChoiceContent(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "multiple-choices")
+
+	streamData := "data: {\"choices\":[{\"index\":1,\"delta\":{\"content\":\"beta\"}},{\"index\":0,\"delta\":{\"content\":\"alpha\"}}]}\n\ndata: [DONE]\n\n"
+	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, true, ContentCaptureLimit)
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Len(t, spans[0].Events(), 2)
+	assertAttribute(t, spans[0].Events()[0].Attributes, "gen_ai.completion", "alpha")
+	assertAttribute(t, spans[0].Events()[1].Attributes, "gen_ai.completion", "beta")
+}
+
+func TestStreamingReader_AbortedStreamRecordsError(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "aborted-stream")
+
+	streamData := "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, false, ContentCaptureLimit)
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+	assertSliceAttribute(t, spans[0].Attributes(), "gen_ai.response.finish_reasons", []string{"error"})
 }

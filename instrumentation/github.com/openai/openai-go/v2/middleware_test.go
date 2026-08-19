@@ -5,6 +5,7 @@ package v2
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,36 +78,55 @@ func TestOperationName(t *testing.T) {
 
 func TestParseChatRequest(t *testing.T) {
 	body := []byte(`{"model":"gpt-4","max_tokens":100,"temperature":0.7}`)
-	model, attrs, _ := parseChatRequest(body)
+	model, attrs, _ := parseChatRequest(body, false)
 	assert.Equal(t, "gpt-4", model)
 	assert.NotEmpty(t, attrs)
 }
 
 func TestParseChatRequest_ContentCapture(t *testing.T) {
 	body := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
-	_, _, msgs := parseChatRequest(body)
-	assert.Len(t, msgs, 1)
+	_, _, prompts := parseChatRequest(body, true)
+	assert.Equal(t, []string{"hello"}, prompts)
+}
 
-	var m struct {
-		Content string `json:"content"`
-	}
-	err := json.Unmarshal(msgs[0], &m)
-	assert.NoError(t, err)
-	assert.Equal(t, "hello", m.Content)
+func TestParseChatRequest_MultimodalContentCapture(t *testing.T) {
+	body := []byte(`{"model":"gpt-4-vision-preview","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`)
+	model, _, prompts := parseChatRequest(body, true)
+
+	assert.Equal(t, "gpt-4-vision-preview", model)
+	assert.Equal(t, []string{`[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]`}, prompts)
 }
 
 func TestParseChatRequest_Invalid(t *testing.T) {
 	body := []byte(`invalid json`)
-	model, attrs, _ := parseChatRequest(body)
+	model, attrs, _ := parseChatRequest(body, false)
 	assert.Equal(t, "", model)
 	assert.Nil(t, attrs)
 }
 
 func TestParseCompletionRequest(t *testing.T) {
 	body := []byte(`{"model":"gpt-3.5-turbo-instruct","max_tokens":50,"top_p":0.9}`)
-	model, attrs := parseCompletionRequest(body)
+	model, attrs, _ := parseCompletionRequest(body, false)
 	assert.Equal(t, "gpt-3.5-turbo-instruct", model)
 	assert.NotEmpty(t, attrs)
+}
+
+func TestParseCompletionRequest_ContentCapture(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     []byte
+		expected []string
+	}{
+		{"string", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":"hello"}`), []string{"hello"}},
+		{"array", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":["first","second"]}`), []string{"first", "second"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model, _, prompts := parseCompletionRequest(tt.body, true)
+			assert.Equal(t, "gpt-3.5-turbo-instruct", model)
+			assert.Equal(t, tt.expected, prompts)
+		})
+	}
 }
 
 func TestParseEmbeddingRequest(t *testing.T) {
@@ -146,10 +166,6 @@ func TestParseChatResponse_Valid(t *testing.T) {
 }
 
 func TestParseChatResponse_ContentCapture(t *testing.T) {
-	orig := captureContentEnabled
-	captureContentEnabled = func() bool { return true }
-	defer func() { captureContentEnabled = orig }()
-
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
@@ -161,7 +177,7 @@ func TestParseChatResponse_ContentCapture(t *testing.T) {
 		"choices":[{"message":{"content":"hello world"},"finish_reason":"stop"}],
 		"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}
 	}`)
-	parseChatResponse(body, span)
+	parseChatResponse(body, span, true)
 	span.End()
 
 	spans := sr.Ended()
@@ -180,10 +196,6 @@ func TestParseChatResponse_ContentCapture(t *testing.T) {
 }
 
 func TestParseChatResponse_ContentCapture_Disabled(t *testing.T) {
-	orig := captureContentEnabled
-	captureContentEnabled = func() bool { return false }
-	defer func() { captureContentEnabled = orig }()
-
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
@@ -194,7 +206,7 @@ func TestParseChatResponse_ContentCapture_Disabled(t *testing.T) {
 		"model":"gpt-4",
 		"choices":[{"message":{"content":"hello world"},"finish_reason":"stop"}]
 	}`)
-	parseChatResponse(body, span)
+	parseChatResponse(body, span, false)
 	span.End()
 
 	spans := sr.Ended()
@@ -205,4 +217,35 @@ func TestParseChatResponse_ContentCapture_Disabled(t *testing.T) {
 			t.Errorf("expected no completion event, but got one")
 		}
 	}
+}
+
+func TestParseCompletionResponse_ContentCapture(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "completion-content")
+
+	parseCompletionResponse([]byte(`{"choices":[{"text":"first","finish_reason":"stop"},{"text":"second","finish_reason":"stop"}]}`), span, true)
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Len(t, spans[0].Events(), 2)
+	assert.Equal(t, "first", spans[0].Events()[0].Attributes[0].Value.AsString())
+	assert.Equal(t, "second", spans[0].Events()[1].Attributes[0].Value.AsString())
+}
+
+func TestContentEventsTruncateValues(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "truncated-content")
+
+	recordContentEvents(span, "gen_ai.content.prompt", "gen_ai.prompt", []string{strings.Repeat("x", 16*1024+1)})
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Len(t, spans[0].Events(), 1)
+	captured := spans[0].Events()[0].Attributes[0].Value.AsString()
+	assert.Len(t, captured, 16*1024)
+	assert.True(t, strings.HasSuffix(captured, "... [truncated]"))
 }

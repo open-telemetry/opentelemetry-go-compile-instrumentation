@@ -18,7 +18,7 @@ import (
 
 func TestParseCompletionRequest_Invalid(t *testing.T) {
 	body := []byte(`invalid json`)
-	model, attrs := parseCompletionRequest(body)
+	model, attrs, _ := parseCompletionRequest(body, false)
 	assert.Equal(t, "", model)
 	assert.Nil(t, attrs)
 }
@@ -34,7 +34,7 @@ func TestParseChatResponse_Invalid(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	_, span := tp.Tracer("test").Start(t.Context(), "test")
 	body := []byte(`invalid json`)
-	parseChatResponse(body, span)
+	parseChatResponse(body, span, false)
 }
 
 func TestParseCompletionResponse_Invalid(t *testing.T) {
@@ -42,7 +42,7 @@ func TestParseCompletionResponse_Invalid(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	_, span := tp.Tracer("test").Start(t.Context(), "test")
 	body := []byte(`invalid json`)
-	parseCompletionResponse(body, span)
+	parseCompletionResponse(body, span, false)
 }
 
 func TestParseEmbeddingResponse_Invalid(t *testing.T) {
@@ -54,10 +54,6 @@ func TestParseEmbeddingResponse_Invalid(t *testing.T) {
 }
 
 func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
-	orig := captureContentEnabled
-	captureContentEnabled = func() bool { return true }
-	defer func() { captureContentEnabled = orig }()
-
 	reqBody := `{"messages":[{"role":"user","content":"hello"}]}`
 	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(reqBody))
 	require.NoError(t, err)
@@ -71,7 +67,7 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 		return resp, nil
 	}
 
-	middleware := OtelMiddleware()
+	middleware := otelMiddleware(func() bool { return true })
 	_, _ = middleware(req, next)
 }
 
@@ -110,7 +106,7 @@ func TestParseChatResponse_ContentExtraction(t *testing.T) {
             }
         }]
     }`)
-	parseChatResponse(body, span)
+	parseChatResponse(body, span, true)
 
 	spans := sr.Ended()
 	if len(spans) > 0 {
