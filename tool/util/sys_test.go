@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -503,4 +504,27 @@ func TestWriteFileAtomic(t *testing.T) {
 			require.Empty(t, matches)
 		})
 	}
+}
+
+func TestCRC32(t *testing.T) {
+	// CRC32 is deterministic and returns a decimal string.
+	got := CRC32("hello")
+	assert.Equal(t, CRC32("hello"), got, "must be deterministic")
+	assert.NotEqual(t, CRC32("hello"), CRC32("world"), "distinct inputs differ")
+
+	// The empty string hashes to 0.
+	assert.Equal(t, "0", CRC32(""))
+}
+
+func TestIsUnixAndIsWindows(t *testing.T) {
+	// Exactly the current platform family must report true; the two are
+	// mutually exclusive on every supported OS.
+	assert.NotEqual(t, IsUnix(), IsWindows())
+}
+
+func TestNormalizePath(t *testing.T) {
+	// NormalizePath cleans and converts separators to forward slashes.
+	assert.Equal(t, "a/b/c", NormalizePath("a/b/./c"))
+	assert.Equal(t, "a/c", NormalizePath("a/b/../c"))
+	assert.Equal(t, ".", NormalizePath(""))
 }
