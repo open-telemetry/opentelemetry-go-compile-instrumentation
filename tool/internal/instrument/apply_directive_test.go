@@ -429,4 +429,34 @@ func TestApplyDirectiveRule(t *testing.T) {
 		assert.False(t, modified)
 		assert.Contains(t, err.Error(), "import alias mismatch")
 	})
+
+	t.Run("template parse failure short-circuits before imports are added", func(t *testing.T) {
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    "test_directive",
+				Imports: map[string]string{"context": "context"},
+			},
+			Directive: "otelc:test",
+			Template:  "println(\"{{FuncName\")",
+		}
+		funcDecl := &dst.FuncDecl{
+			Name: dst.NewIdent("myFunc"),
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: &dst.BlockStmt{List: []dst.Stmt{}},
+			Decs: dst.FuncDeclDecorations{
+				NodeDecs: dst.NodeDecs{
+					Start: dst.Decorations{"//otelc:test\n"},
+				},
+			},
+		}
+		root := &dst.File{Decls: []dst.Decl{funcDecl}}
+
+		ip := &InstrumentPhase{logger: slog.Default()}
+		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		require.Error(t, err)
+		assert.False(t, modified)
+		// The template is parsed before imports are added, so a rule with a
+		// broken template must fail without ever touching the file's imports.
+		assert.Zero(t, countImportSpecs(root))
+	})
 }

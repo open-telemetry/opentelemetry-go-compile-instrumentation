@@ -33,12 +33,12 @@ func (ip *InstrumentPhase) applyDirectiveRule(
 	if len(matches) == 0 {
 		return false, nil
 	}
-	if importErr := ip.addRuleImports(ctx, root, r.Imports, r.Name); importErr != nil {
-		return false, importErr
-	}
 	tmpl, err := rule.ParseDirectiveTemplate(r.Template)
 	if err != nil {
 		return false, ex.Wrap(err)
+	}
+	if importErr := ip.addRuleImports(ctx, root, r.Imports, r.Name); importErr != nil {
+		return false, importErr
 	}
 	imports := ast.ImportAliasMap(root)
 	for _, match := range matches {
