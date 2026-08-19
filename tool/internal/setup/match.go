@@ -15,12 +15,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dave/dst"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/match"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -164,6 +163,7 @@ func (sp *SetupPhase) runMatch(
 	globRules []targetRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
+	set.Version = dep.Version
 
 	if len(dep.CgoFiles) > 0 {
 		set.SetCgoFileMap(dep.CgoFiles)
@@ -200,206 +200,21 @@ func (sp *SetupPhase) runMatch(
 		}
 		filteredRules = append(filteredRules, r)
 	}
+	// Package-level candidates: target+version only. File-keyed maps below
+	// remain the setup-time AST match that toolexec consumes today.
+	set.SetCandidates(filteredRules)
 
-	// Separate file rules from rules that need precise matching
-	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
-	for _, r := range filteredRules {
-		// If the rule is a file rule, it is always applicable
-		if fr, ok := r.(*rule.InstFileRule); ok {
-			set.AddFileRule(fr)
-			sp.Info("Match file rule", "rule", fr, "dep", dep)
-			continue
-		}
-		// We can't decide whether the rule is applicable yet, add it to the
-		// precise rules list to be processed later.
-		preciseRules = append(preciseRules, r)
-	}
-
-	if len(preciseRules) == 0 {
-		if !set.IsEmpty() && len(dep.Sources) > 0 {
-			name, err := ast.ParsePackageName(dep.Sources[0])
-			if err != nil {
-				return nil, err
-			}
-			set.SetPackageName(name)
-		}
-
-		return set, nil
-	}
-
-	return sp.preciseMatching(ctx, dep, preciseRules, set)
-}
-
-// ruleFilter pairs a rule with its pre-compiled where filter (if any).
-// Using a struct instead of parallel slices prevents index-desync bugs if
-// the rules slice is ever sorted or deduplicated before this point.
-type ruleFilter struct {
-	rule  rule.InstRule
-	where Filter // nil means no where clause — apply unconditionally
-}
-
-// preciseMatching performs AST-based matching of instrumentation rules against
-// the dependency's source files. It returns the rule set with the matched rules.
-//
-// If a rule carries a where clause, the compiled Filter is evaluated against
-// each source file before the standard AST match. Only files for which the
-// filter passes proceed to the type-specific matching step.
-func (sp *SetupPhase) preciseMatching(
-	ctx context.Context,
-	dep *Dependency,
-	rules []rule.InstRule,
-	set *rule.InstRuleSet,
-) (*rule.InstRuleSet, error) {
-	if len(dep.Sources) == 0 {
-		return set, nil
-	}
-
-	// Pre-build filter trees for rules that carry a where clause.
-	// Filters are compiled once per rule before source-file iteration, not
-	// once per source file. In practice each rule targets exactly one import
-	// path, so each filter is built once across the entire matchDeps run.
-	ruleFilters := make([]ruleFilter, 0, len(rules))
-	for _, r := range rules {
-		var f Filter
-		if where := r.GetWhere(); where != nil {
-			var err error
-			f, err = Build(where)
-			if err != nil {
-				return nil, ex.Wrapf(err, "build where filter for rule %q", r.GetName())
-			}
-		}
-		ruleFilters = append(ruleFilters, ruleFilter{rule: r, where: f})
-	}
-
-	// IsTest is a property of the whole compile (every file in a test build
-	// shares it), so compute it once and reuse it across each file's context.
-	isTest := isTestBuild(dep.Sources)
-
-	for _, source := range dep.Sources {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		// Parse the source code. Since the only purpose here is to match,
-		// no node updates, we can use the fast variant.
-		//
-		// Contract: ParseFileFast returns (non-nil, nil) on success and
-		// (nil, non-nil error) on failure. A (nil, nil) return is not
-		// possible per the Go stdlib parser.ParseFile and dave/dst
-		// DecorateFile contracts that ParseFileFast composes.
-		tree, err := ast.ParseFileFast(source)
-		if err != nil {
-			return nil, err
-		}
-		// All files in a Go package share the same declared package name, so
-		// this is idempotent across iterations; SetPackageName asserts non-empty.
-		set.SetPackageName(tree.Name.Name)
-
-		// mctx is allocated once per source file and reused across all rules
-		// evaluated against that file. All fields are constant for a given
-		// source file, so no updates are needed inside the inner loop.
-		mctx := MatchContext{
-			IsTest:     isTest,
-			SourceFile: source,
-			AST:        tree,
-		}
-
-		for _, rf := range ruleFilters {
-			// Evaluate the where filter if one is defined for this rule.
-			// A nil filter means the rule applies to all files unconditionally.
-			if rf.where != nil && !rf.where.Match(&mctx) {
-				continue
-			}
-			if err = sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
-				return nil, err
-			}
-		}
+	err := match.Apply(ctx, match.Input{
+		Set:     set,
+		Sources: dep.Sources,
+		Rules:   filteredRules,
+		Log:     sp,
+		Dep:     dep,
+	})
+	if err != nil {
+		return nil, err
 	}
 	return set, nil
-}
-
-// isTestBuild reports whether a compile invocation is part of a `go test` run.
-// The Go toolchain only ever feeds these inputs to the compiler while building
-// a test binary: a package augmented with its in-package _test.go files, the
-// external xxx_test package (whose sources are also _test.go files), and the
-// generated _testmain.go runner. None of them appear in a normal `go build`,
-// so their presence in the source set is the signal. There is no dedicated
-// "is test" compiler flag — verified against the toolchain — so the source set
-// is the only thing to key on.
-//
-// ponytail: known gap, no fix possible at compile granularity. A package whose
-// tests live only in an external xxx_test package (no in-package _test.go) is
-// compiled once and shared between normal and test builds — the toolchain emits
-// no test-only variant of it — so is_test cannot gate that package's production
-// code. The external xxx_test package and any in-package _test.go files are
-// still detected.
-func isTestBuild(sources []string) bool {
-	for _, src := range sources {
-		base := filepath.Base(src)
-		if base == "_testmain.go" || strings.HasSuffix(base, "_test.go") {
-			return true
-		}
-	}
-	return false
-}
-
-// matchOneRule performs precise AST matching for a single rule against a parsed
-// source file, adding the rule to the set if it matches.
-func (sp *SetupPhase) matchOneRule(
-	tree *dst.File,
-	source string,
-	r rule.InstRule,
-	set *rule.InstRuleSet,
-	dep *Dependency,
-) error {
-	switch rt := r.(type) {
-	case *rule.InstFuncRule:
-		_, ok, err := ast.FindFuncDecl(tree, rt)
-		if err != nil {
-			return err
-		}
-		if ok {
-			set.AddFuncRule(source, rt)
-			sp.Info("Match func rule", "rule", rt, "dep", dep)
-		}
-	case *rule.InstStructRule:
-		structType := ast.FindStructType(tree, rt.Struct)
-		if structType != nil {
-			set.AddStructRule(source, rt)
-			sp.Info("Match struct rule", "rule", rt, "dep", dep)
-		}
-	case *rule.InstRawRule:
-		_, ok, err := ast.FindFuncDecl(tree, rt)
-		if err != nil {
-			return err
-		}
-		if ok {
-			set.AddRawRule(source, rt)
-			sp.Info("Match raw rule", "rule", rt, "dep", dep)
-		}
-	case *rule.InstCallRule:
-		// Call rules are added unconditionally to all source files in the
-		// target package. Unlike func/struct/raw rules, there is no cheap
-		// AST predicate to pre-filter files (the matching requires import
-		// alias resolution which happens during the instrument phase).
-		// Files without matching calls are a no-op in applyCallRule.
-		set.AddCallRule(source, rt)
-		sp.Info("Match call rule", "rule", rt, "dep", dep)
-	case *rule.InstDirectiveRule:
-		if ast.FileHasDirective(tree, rt.Directive) {
-			set.AddDirectiveRule(source, rt)
-			sp.Info("Match directive rule", "rule", rt, "dep", dep)
-		}
-	case *rule.InstDeclRule:
-		if ast.FindNamedDecl(tree, rt.Identifier, rt.Kind) != nil {
-			set.AddDeclRule(source, rt)
-			sp.Info("Match decl rule", "rule", rt, "dep", dep)
-		}
-	case *rule.InstFileRule:
-		// Skip as it's already processed
-	default:
-		util.ShouldNotReachHere()
-	}
-	return nil
 }
 
 func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {

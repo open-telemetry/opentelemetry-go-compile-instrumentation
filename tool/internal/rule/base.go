@@ -112,10 +112,22 @@ func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
 // organizing them by file and by the specific functions or structs they target.
 // This structure is essential for the instrumentation process, as it allows the
 // tool to efficiently locate and apply the correct rules to the source code.
+//
+// matched.json currently stores both views of a match:
+//   - File-keyed maps (FuncRules, …) are the setup-time AST match consumed by
+//     toolexec today. Keys are absolute user-source paths.
+//   - Version and Candidates are the package-level schema (#1086 / #552): the
+//     resolved dependency version and the rules that passed target+version
+//     filtering, not keyed by source path. Toolexec ignores Candidates until a
+//     later step moves file matching into the compile phase.
 type InstRuleSet struct {
-	PackageName    string                          `json:"package_name"`
-	ModulePath     string                          `json:"module_path"`
+	PackageName string `json:"package_name"`
+	ModulePath  string `json:"module_path"`
+	// Version is the resolved module version of this dependency (for example
+	// "v1.2.3"), not a rule version range.
+	Version        string                          `json:"version,omitempty"`
 	CgoFileMap     map[string]string               `json:"cgo_file_map,omitempty"` // go -> cgo
+	Candidates     *InstRuleCandidates             `json:"candidates,omitempty"`
 	RawRules       map[string][]*InstRawRule       `json:"raw_rules"`
 	FuncRules      map[string][]*InstFuncRule      `json:"func_rules"`
 	StructRules    map[string][]*InstStructRule    `json:"struct_rules"`
@@ -153,15 +165,29 @@ func (irs *InstRuleSet) String() string {
 	return fmt.Sprintf("{%s: %s}", irs.ModulePath, strings.Join(parts, ", "))
 }
 
+// HasAppliedRules reports whether setup-time AST/file matching attached any
+// rules to this set. Toolexec uses this, not IsEmpty, so a Candidates-only
+// entry can be stored for later file matching without triggering injection.
+func (irs *InstRuleSet) HasAppliedRules() bool {
+	return irs != nil && !irs.appliedRulesEmpty()
+}
+
 func (irs *InstRuleSet) IsEmpty() bool {
-	return irs == nil ||
-		(len(irs.FuncRules) == 0 &&
-			len(irs.StructRules) == 0 &&
-			len(irs.RawRules) == 0 &&
-			len(irs.CallRules) == 0 &&
-			len(irs.DirectiveRules) == 0 &&
-			len(irs.DeclRules) == 0 &&
-			len(irs.FileRules) == 0)
+	return irs == nil || (irs.appliedRulesEmpty() && irs.Candidates.isEmpty())
+}
+
+// appliedRulesEmpty inspects the setup-time file-keyed maps and FileRules
+// slice. Keep in sync with candidatesFromRules and matchOneRule when adding
+// a new InstRule type; a missed case here would silently omit that type from
+// emptiness (no panic).
+func (irs *InstRuleSet) appliedRulesEmpty() bool {
+	return len(irs.FuncRules) == 0 &&
+		len(irs.StructRules) == 0 &&
+		len(irs.RawRules) == 0 &&
+		len(irs.CallRules) == 0 &&
+		len(irs.DirectiveRules) == 0 &&
+		len(irs.DeclRules) == 0 &&
+		len(irs.FileRules) == 0
 }
 
 // AddRule is a generic method that adds any type of rule to the appropriate map.

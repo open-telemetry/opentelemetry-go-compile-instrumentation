@@ -126,7 +126,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 
 	// Check if the current compile command matches the rules.
 	matched := ip.match(allSet, args)
-	if !matched.IsEmpty() {
+	if matched.HasAppliedRules() {
 		ip.Info("Instrument package", "rules", matched, "args", args)
 		// Okay, this package should be instrumented.
 		err = ip.instrument(ctx, matched)

@@ -86,6 +86,44 @@ func TestResolveRulePaths(t *testing.T) {
 	require.Equal(t, hooksDir, rs.FileRules[0].ResolvedPath)
 }
 
+func TestResolveRulePaths_Candidates(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte("module example.com/test\n\ngo 1.25\n"),
+		0o644,
+	))
+
+	hooksDir := filepath.Join(dir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(hooksDir, "hook.go"),
+		[]byte("package hooks\n"),
+		0o644,
+	))
+
+	funcRule := &rule.InstFuncRule{Path: "example.com/test/hooks"}
+	fileRule := &rule.InstFileRule{Path: "example.com/test/hooks"}
+	rs := &rule.InstRuleSet{
+		Version: "v0.1.0",
+		Candidates: &rule.InstRuleCandidates{
+			FuncRules: []*rule.InstFuncRule{funcRule},
+			FileRules: []*rule.InstFileRule{fileRule},
+		},
+	}
+
+	err := resolveRulePaths(
+		t.Context(),
+		[]*rule.InstRuleSet{rs},
+		map[string]bool{dir: true},
+	)
+	require.NoError(t, err)
+
+	require.Empty(t, rs.Candidates.FuncRules[0].ResolvedPath)
+	require.Empty(t, rs.Candidates.FileRules[0].ResolvedPath)
+}
+
 func TestResolveRulePaths_NotFound(t *testing.T) {
 	dir := t.TempDir()
 

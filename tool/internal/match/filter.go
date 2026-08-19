@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package setup
+package match
 
 import (
 	"strings"
@@ -17,7 +17,7 @@ import (
 // File-level predicate evaluation for the structured where.file clause defined
 // in ADR-0003. Filters are constructed once per rule from a [FilterDef] (the
 // YAML representation) via [Build], then evaluated once per source file during
-// the setup phase. A nil Filter value is valid and means "no filtering" — the
+// file matching. A nil Filter value is valid and means "no filtering" — the
 // rule applies unconditionally to any matching source file.
 //
 // The runtime filter tree maps directly onto the YAML where.file shape:
@@ -36,13 +36,13 @@ import (
 //
 // Implementations must be safe for concurrent use: a single Filter instance
 // is evaluated across multiple source files, potentially from parallel
-// goroutines spawned by matchDeps.
+// goroutines.
 type Filter interface {
 	Match(ctx *MatchContext) bool
 }
 
 // MatchContext carries the per-file information available to where.file
-// predicates. It is constructed once per source file in the setup phase and
+// predicates. It is constructed once per source file during file matching and
 // passed to all filters associated with the rules being evaluated for that
 // file.
 type MatchContext struct {
@@ -78,8 +78,8 @@ type FuncFilter struct {
 }
 
 func (f *FuncFilter) Match(ctx *MatchContext) bool {
-	// We create an `InstFuncRule`` because including `setup.FuncFilter` to
-	// `ast.FindFuncDecl` causes an import loop.
+	// We create an InstFuncRule because including FuncFilter in
+	// ast.FindFuncDecl would couple ast to this package.
 	fr := &rule.InstFuncRule{
 		Func: f.Func,
 		Recv: f.Recv,

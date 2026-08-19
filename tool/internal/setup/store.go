@@ -65,6 +65,10 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 	}
 
 	for _, ruleset := range matched {
+		// Resolve Path only for rules that setup already AST/file-matched.
+		// Candidates are unused until a later toolexec step; resolving them
+		// here would fail the build for a rule whose hook path is valid but
+		// whose target function is absent in this dependency version.
 		for _, fileRule := range ruleset.FileRules {
 			dir, err := resolve(fileRule.Path)
 			if err != nil {

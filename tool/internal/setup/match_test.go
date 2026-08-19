@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/match"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
@@ -772,10 +773,9 @@ func TestPreciseMatching_WhereFileFilter(t *testing.T) {
 		Path:   "example.com/hooks",
 	}
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
-	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	result, err := applyFileMatch(t.Context(), dep, []rule.InstRule{funcRule}, set)
 	require.NoError(t, err)
 	require.Len(t, result.FuncRules, 1)
 	require.Contains(t, result.FuncRules, matchFile)
@@ -810,10 +810,9 @@ func TestPreciseMatching_WhereFileAllOf(t *testing.T) {
 		Path:   "example.com/hooks",
 	}
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
-	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	result, err := applyFileMatch(t.Context(), dep, []rule.InstRule{funcRule}, set)
 	require.NoError(t, err)
 	require.Len(t, result.FuncRules, 1)
 	require.Contains(t, result.FuncRules, matchFile)
@@ -844,10 +843,9 @@ func TestPreciseMatching_CallRuleAddedToAllFiles(t *testing.T) {
 		Replace:      "Wrapper({{ . }})",
 	}
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
-	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule}, set)
+	result, err := applyFileMatch(t.Context(), dep, []rule.InstRule{callRule}, set)
 	require.NoError(t, err)
 	require.Len(t, result.CallRules, 2)
 	require.Contains(t, result.CallRules, matchFile)
@@ -884,10 +882,9 @@ func TestPreciseMatching_WhereFileOneOf(t *testing.T) {
 		Path:   "example.com/hooks",
 	}
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
-	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	result, err := applyFileMatch(t.Context(), dep, []rule.InstRule{funcRule}, set)
 	require.NoError(t, err)
 	require.Len(t, result.FuncRules, 1)
 	require.Contains(t, result.FuncRules, matchFile)
@@ -922,10 +919,9 @@ func TestPreciseMatching_WhereFileNot(t *testing.T) {
 		Path:   "example.com/hooks",
 	}
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
-	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+	result, err := applyFileMatch(t.Context(), dep, []rule.InstRule{funcRule}, set)
 	require.NoError(t, err)
 	require.Len(t, result.FuncRules, 1)
 	require.Contains(t, result.FuncRules, matchFile)
@@ -996,10 +992,9 @@ func TestPreciseMatching_IsTestFilter(t *testing.T) {
 				Sources:    tt.sources,
 			}
 
-			sp := newTestSetupPhase()
 			set := rule.NewInstRuleSet(dep.ImportPath)
 
-			result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
+			result, err := applyFileMatch(t.Context(), dep, []rule.InstRule{funcRule}, set)
 			require.NoError(t, err)
 
 			if tt.wantMatched {
@@ -1032,10 +1027,9 @@ func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 		Func: "Foo",
 	}
 
-	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
-	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
+	_, err := applyFileMatch(t.Context(), dep, []rule.InstRule{badRule}, set)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "where.file has multiple active predicates")
 }
@@ -1080,6 +1074,24 @@ func newTestRuleSet(
 		rs.AddFileRule(fr)
 	}
 	return rs
+}
+
+func applyFileMatch(
+	ctx context.Context,
+	dep *Dependency,
+	rules []rule.InstRule,
+	set *rule.InstRuleSet,
+) (*rule.InstRuleSet, error) {
+	err := match.Apply(ctx, match.Input{
+		Set:     set,
+		Sources: dep.Sources,
+		Rules:   rules,
+		Dep:     dep,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return set, nil
 }
 
 func writeGoSource(t *testing.T, name, content string) string {
@@ -1166,6 +1178,92 @@ func Target(value string) error { return nil }
 	matchedFuncRules := set.AllFuncRules()
 	require.Len(t, matchedFuncRules, 1)
 	assert.Equal(t, "matching", matchedFuncRules[0].Name)
+}
+
+func TestRunMatch_RecordsVersionAndCandidates(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "mypkg.go")
+	err := os.WriteFile(srcFile, []byte(`package mypkg
+
+func Target(value string) error { return nil }
+`), 0o644)
+	require.NoError(t, err)
+
+	const importPath = "example.com/mypkg"
+	matchingSig := rule.FuncSignature{Args: []string{"string"}, Returns: []string{"error"}}
+	nonMatchingSig := rule.FuncSignature{Args: []string{"int"}, Returns: []string{"error"}}
+	matchingRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "matching", Target: importPath},
+		Func:         "Target",
+		Before:       "BeforeTarget",
+		Signature:    &matchingSig,
+	}
+	nonMatchingRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "non-matching", Target: importPath},
+		Func:         "Target",
+		Before:       "BeforeTarget",
+		Signature:    &nonMatchingSig,
+	}
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Version:    "v1.4.2",
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+	rulesByTarget := map[string][]rule.InstRule{
+		importPath: {matchingRule, nonMatchingRule},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+
+	assert.Equal(t, "v1.4.2", set.Version)
+	require.NotNil(t, set.Candidates)
+	require.Len(
+		t,
+		set.Candidates.FuncRules,
+		2,
+		"candidates keep target+version matches, including rules the AST later rejects",
+	)
+	names := []string{set.Candidates.FuncRules[0].Name, set.Candidates.FuncRules[1].Name}
+	assert.ElementsMatch(t, []string{"matching", "non-matching"}, names)
+
+	matchedFuncRules := set.AllFuncRules()
+	require.Len(t, matchedFuncRules, 1)
+	assert.Equal(t, "matching", matchedFuncRules[0].Name)
+}
+
+func TestRunMatch_CandidatesOnlyNotDropped(t *testing.T) {
+	srcFile := writeGoSource(t, "mypkg.go", "package mypkg\n\nfunc Other() {}\n")
+	const importPath = "example.com/mypkg"
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "missing-target", Target: importPath},
+		Func:         "Target",
+		Before:       "BeforeTarget",
+		Path:         "example.com/hooks",
+	}
+
+	dep := &Dependency{
+		ImportPath: importPath,
+		Version:    "v1.4.2",
+		Sources:    []string{srcFile},
+		CgoFiles:   make(map[string]string),
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{importPath: {funcRule}}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+
+	assert.Empty(t, set.AllFuncRules())
+	assert.False(t, set.HasAppliedRules())
+	assert.False(t, set.IsEmpty(), "target+version candidates must keep the set for later toolexec matching")
+	require.NotNil(t, set.Candidates)
+	require.Len(t, set.Candidates.FuncRules, 1)
+	assert.Equal(t, "missing-target", set.Candidates.FuncRules[0].Name)
 }
 
 func TestRunMatch_EmptyRules(t *testing.T) {
