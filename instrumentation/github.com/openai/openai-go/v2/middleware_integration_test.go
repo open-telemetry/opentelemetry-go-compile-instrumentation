@@ -80,6 +80,7 @@ func TestOtelMiddleware_ChatCompletion(t *testing.T) {
 	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
 	assertAttribute(t, attrs, "gen_ai.request.model", "gpt-4")
 	assertAttribute(t, attrs, "gen_ai.provider.name", "openai")
+	assertAttribute(t, attrs, "server.address", "api.openai.com")
 	assertAttribute(t, attrs, "gen_ai.response.id", "chatcmpl-123")
 	assertAttribute(t, attrs, "gen_ai.response.model", "gpt-4")
 	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 10)
@@ -543,4 +544,41 @@ func TestOtelMiddleware_AzurePath(t *testing.T) {
 	attrs := spans[0].Attributes()
 	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
 	assertAttribute(t, attrs, "gen_ai.provider.name", "azure")
+	assertAttribute(t, attrs, "server.address", "myendpoint.azure.com")
+}
+
+func TestOtelMiddleware_CustomEndpointWithPort(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	reqBody := `{"model":"llama3","max_tokens":100}`
+	req, _ := http.NewRequest(
+		"POST",
+		"http://localhost:11434/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
+
+	respBody := `{"id":"chatcmpl-custom","model":"llama3","choices":[{"finish_reason":"stop"}]}`
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	attrs := span.Attributes()
+	assertAttribute(t, attrs, "gen_ai.system", "openai")
+	assertAttribute(t, attrs, "gen_ai.provider.name", "local")
+	assertAttribute(t, attrs, "server.address", "localhost")
+	assertInt64Attribute(t, attrs, "server.port", 11434)
 }

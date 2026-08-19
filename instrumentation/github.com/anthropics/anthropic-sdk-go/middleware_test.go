@@ -236,6 +236,7 @@ func TestOtelMiddleware_Messages(t *testing.T) {
 	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
 	assertAttribute(t, attrs, "gen_ai.request.model", "claude-sonnet-4-5")
 	assertAttribute(t, attrs, "gen_ai.provider.name", "anthropic")
+	assertAttribute(t, attrs, "server.address", "api.anthropic.com")
 	assertInt64Attribute(t, attrs, "gen_ai.request.max_tokens", 1024)
 	assertFloat64Attribute(t, attrs, "gen_ai.request.temperature", 0.7)
 	assertFloat64Attribute(t, attrs, "gen_ai.request.top_p", 0.9)
@@ -652,4 +653,124 @@ func assertBoolAttribute(t *testing.T, attrs []attribute.KeyValue, key string, e
 	val, ok := findAttribute(attrs, key)
 	require.True(t, ok, "attribute %s not found", key)
 	assert.Equal(t, expected, val.AsBool(), "attribute %s", key)
+}
+
+func TestEndpointAttributes(t *testing.T) {
+	tests := []struct {
+		name          string
+		reqURL        string
+		reqHost       string
+		expectedAttrs []attribute.KeyValue
+	}{
+		{
+			name:   "standard default https port is omitted",
+			reqURL: "https://api.anthropic.com/v1/messages",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "api.anthropic.com"),
+			},
+		},
+		{
+			name:   "explicit standard https port 443 is omitted",
+			reqURL: "https://api.anthropic.com:443/v1/messages",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "api.anthropic.com"),
+			},
+		},
+		{
+			name:   "standard default http port 80 is omitted",
+			reqURL: "http://localhost/v1/messages",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "localhost"),
+			},
+		},
+		{
+			name:   "custom non-default port on localhost",
+			reqURL: "http://localhost:8080/v1/messages",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "localhost"),
+				attribute.Int("server.port", 8080),
+			},
+		},
+		{
+			name:   "custom non-default port on https",
+			reqURL: "https://custom-proxy.example.com:8443/v1/messages",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "custom-proxy.example.com"),
+				attribute.Int("server.port", 8443),
+			},
+		},
+		{
+			name:   "ipv6 address with custom port",
+			reqURL: "http://[::1]:8080/v1/messages",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "::1"),
+				attribute.Int("server.port", 8080),
+			},
+		},
+		{
+			name:    "fallback to req.Host with port when URL host is empty",
+			reqURL:  "/v1/messages",
+			reqHost: "localhost:8080",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "localhost"),
+				attribute.Int("server.port", 8080),
+			},
+		},
+		{
+			name:    "fallback to req.Host without port when URL host is empty",
+			reqURL:  "/v1/messages",
+			reqHost: "api.anthropic.com",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "api.anthropic.com"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("POST", tt.reqURL, nil)
+			assert.NoError(t, err)
+			if tt.reqHost != "" {
+				req.Host = tt.reqHost
+			}
+			attrs := endpointAttributes(req)
+			assert.Equal(t, tt.expectedAttrs, attrs)
+		})
+	}
+}
+
+func TestOtelMiddleware_CustomEndpointWithPort(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	reqBody := `{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}`
+	req, _ := http.NewRequest(
+		"POST",
+		"http://localhost:8080/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
+
+	respBody := `{"id":"msg_test_custom","type":"message","role":"assistant","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":20}}`
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	attrs := span.Attributes()
+	assertAttribute(t, attrs, "gen_ai.system", "anthropic")
+	assertAttribute(t, attrs, "gen_ai.provider.name", "local")
+	assertAttribute(t, attrs, "server.address", "localhost")
+	assertInt64Attribute(t, attrs, "server.port", 8080)
 }

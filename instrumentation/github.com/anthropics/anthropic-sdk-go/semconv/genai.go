@@ -26,6 +26,8 @@ const (
 	GenAIRequestTopKKey                   = attribute.Key("gen_ai.request.top_k")
 	GenAIRequestIsStreamKey               = attribute.Key("gen_ai.request.is_stream")
 	GenAIResponseTimeToFirstTokenKey      = attribute.Key("gen_ai.response.time_to_first_token")
+	ServerAddressKey                      = attribute.Key("server.address")
+	ServerPortKey                         = attribute.Key("server.port")
 )
 
 func GenAISystem(val string) attribute.KeyValue {
@@ -98,4 +100,12 @@ func GenAIRequestIsStream(val bool) attribute.KeyValue {
 
 func GenAIResponseTimeToFirstToken(microseconds int64) attribute.KeyValue {
 	return GenAIResponseTimeToFirstTokenKey.Int64(microseconds)
+}
+
+func ServerAddress(val string) attribute.KeyValue {
+	return ServerAddressKey.String(val)
+}
+
+func ServerPort(val int) attribute.KeyValue {
+	return ServerPortKey.Int(val)
 }
