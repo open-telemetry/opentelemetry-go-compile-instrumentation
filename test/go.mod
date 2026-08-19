@@ -21,7 +21,7 @@ require (
 	go.opentelemetry.io/otel v1.41.0
 	go.opentelemetry.io/otelc v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otelc/test/shared/grpcpb v0.0.0-00010101000000-000000000000
-	golang.org/x/mod v0.38.0
+	golang.org/x/mod v0.40.0
 	google.golang.org/grpc v1.80.0
 	gopkg.in/yaml.v3 v3.0.1
 )
