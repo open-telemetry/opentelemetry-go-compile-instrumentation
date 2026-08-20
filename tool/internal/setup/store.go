@@ -87,7 +87,7 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 
 // store stores the matched rules to the file
 // It's the pair of the InstrumentPhase.load
-func (sp *SetupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
+func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
 	if err := resolveRulePaths(ctx, matched, moduleDirs); err != nil {
 		return ex.Wrapf(err, "resolving rule paths")
 	}

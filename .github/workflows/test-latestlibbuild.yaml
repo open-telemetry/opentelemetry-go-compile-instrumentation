@@ -30,6 +30,8 @@ jobs:
               - 'Makefile'
               - 'tool/**'
               - 'pkg/**'
+              - 'instrumentation/**/*.yaml'
+              - 'instrumentation/**/*.yml'
               - 'test/**'
               - '.github/workflows/test-latestlibbuild.yaml'
 

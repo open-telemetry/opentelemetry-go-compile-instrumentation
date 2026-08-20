@@ -36,7 +36,7 @@ type yamlRule struct {
 	Version string `yaml:"version"`
 }
 
-// InstrumentedTargets walks rulesRoot, parses every *.yaml file as an
+// InstrumentedTargets walks rulesRoot, parses every otelc rule file as an
 // instrumentation rule set, and returns instrumented targets mapped
 // to their supported version ranges.
 func InstrumentedTargets(t *testing.T, rulesRoot string) map[string][]string {
@@ -45,7 +45,7 @@ func InstrumentedTargets(t *testing.T, rulesRoot string) map[string][]string {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+		if d.IsDir() || !util.IsRuleFile(d.Name()) {
 			return nil
 		}
 		data, readErr := os.ReadFile(path) //nolint:gosec

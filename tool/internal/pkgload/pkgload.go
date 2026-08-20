@@ -207,8 +207,8 @@ func ResolveModule(ctx context.Context, pkgDir string) (*packages.Module, error)
 	return pkg.Module, nil
 }
 
-// ResolveModuleDir returns the module directory for a given package directory.
-func ResolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
+// resolveModuleDir returns the module directory for a given package directory.
+func resolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
 	mod, err := ResolveModule(ctx, pkgDir)
 	if err != nil {
 		return "", err
@@ -237,7 +237,7 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) (map[string]b
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
-			modDir, err := ResolveModuleDir(ctx, pkgDir)
+			modDir, err := resolveModuleDir(ctx, pkgDir)
 			if err != nil {
 				return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
 			}

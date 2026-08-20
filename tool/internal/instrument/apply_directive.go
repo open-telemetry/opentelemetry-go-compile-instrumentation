@@ -17,7 +17,7 @@ import (
 // applyDirectiveRule finds all functions annotated with the directive, renders
 // the template for each, and prepends the resulting Go statements into the
 // function body. It reports whether any function was instrumented.
-func (ip *InstrumentPhase) applyDirectiveRule(
+func (ip *instrumentPhase) applyDirectiveRule(
 	ctx context.Context,
 	r *rule.InstDirectiveRule,
 	root *dst.File,
