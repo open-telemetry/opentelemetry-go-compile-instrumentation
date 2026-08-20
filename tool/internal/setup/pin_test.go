@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"fmt"
 	"go/token"
 	"io"
@@ -1212,4 +1213,29 @@ func TestAutoPin_TracksAndPins(t *testing.T) {
 	data, err := os.ReadFile(toolFile)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "example.com/notinstrumentation")
+}
+
+// newModuleDir creates a minimal Go module in a fresh temp directory and
+// returns its path.
+func newModuleDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte("module example.com/vend\n\ngo 1.25\n"),
+		0o644,
+	))
+	return dir
+}
+
+func TestPrepareVendoredBuild(t *testing.T) {
+	// With no vendored module active, prepareVendoredBuild returns the args
+	// unchanged and does not force module mode.
+	dir := newModuleDir(t)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+
+	args := []string{"build", "./..."}
+	got, err := prepareVendoredBuild(context.Background(), util.LoggerFromContext(context.Background()), args)
+	require.NoError(t, err)
+	assert.Equal(t, args, got)
 }

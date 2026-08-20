@@ -75,3 +75,16 @@ func TestAssertType_InvalidType(t *testing.T) {
 		stderr.String(),
 		"Type assertion failed: got int, expected string")
 }
+
+func TestAssertPasses(t *testing.T) {
+	// A satisfied assertion must not exit the process.
+	assert.NotPanics(t, func() {
+		Assert(true, "should not fail")
+	})
+}
+
+func TestAssertType(t *testing.T) {
+	// A matching type assertion returns the typed value.
+	var v any = "hello"
+	assert.Equal(t, "hello", AssertType[string](v))
+}

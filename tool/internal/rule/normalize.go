@@ -50,8 +50,8 @@ import (
 //	imports:
 //	  fmt: fmt
 func Normalize(fields map[string]any) ([]map[string]any, error) {
-	_, hasWhere := fields[KeyWhere]
-	_, hasDo := fields[KeyDo]
+	_, hasWhere := fields[keyWhere]
+	_, hasDo := fields[keyDo]
 	if !hasWhere && !hasDo {
 		return []map[string]any{fields}, nil
 	}
@@ -63,12 +63,12 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 
 	// Copy top-level fields (e.g. imports, name) that sit outside where/do.
 	for k, v := range fields {
-		if k != KeyWhere && k != KeyDo {
+		if k != keyWhere && k != keyDo {
 			common[k] = v
 		}
 	}
 
-	if whereRaw, ok := fields[KeyWhere]; ok {
+	if whereRaw, ok := fields[keyWhere]; ok {
 		whereMap, isMap := whereRaw.(map[string]any)
 		if !isMap {
 			return nil, ex.Newf("where must be a map")
@@ -78,11 +78,11 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 			return nil, err
 		}
 		if len(normalizedWhere) > 0 {
-			common[KeyWhere] = normalizedWhere
+			common[keyWhere] = normalizedWhere
 		}
 	}
 
-	doItems, err := normalizeDo(fields[KeyDo])
+	doItems, err := normalizeDo(fields[keyDo])
 	if err != nil {
 		return nil, err
 	}
@@ -108,32 +108,32 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 // target/version are explicitly rejected here because they belong to the
 // top-level package selector slot per ADR-0003.
 func normalizeWhere(common, where map[string]any) (map[string]any, error) {
-	if _, exists := where[SelTarget]; exists {
+	if _, exists := where[selTarget]; exists {
 		return nil, ex.Newf("target must be top-level, not inside where")
 	}
-	if _, exists := where[SelVersion]; exists {
+	if _, exists := where[selVersion]; exists {
 		return nil, ex.Newf("version must be top-level, not inside where")
 	}
 
 	normalized := make(map[string]any)
 	for key, value := range where {
-		if !IsValidSelector(key) {
+		if !isValidSelector(key) {
 			return nil, ex.Newf("unsupported where key %q", key)
 		}
 		switch key {
-		case SelFunc, SelRecv, SelStruct, SelFunctionCall, SelDirective, SelKind, SelIdentifier,
-			SelSignature, SelSignatureContains, SelResult, SelLastResult, SelParam,
-			SelPattern, SelPlacement:
+		case SelFunc, selRecv, SelStruct, SelFunctionCall, SelDirective, selKind, SelIdentifier,
+			selSignature, selSignatureContains, selResult, selLastResult, selParam,
+			selPattern, selPlacement:
 			common[key] = value
 		case WhereFile:
 			if _, ok := value.(map[string]any); !ok {
 				return nil, ex.Newf("where.file must be a map")
 			}
 			normalized[key] = value
-		case CombAllOf, CombOneOf, CombNot:
+		case combAllOf, combOneOf, combNot:
 			normalized[key] = value
 		default:
-			// IsValidSelector includes target/version, which are rejected above,
+			// isValidSelector includes target/version, which are rejected above,
 			// and any future registry entry must be handled explicitly here.
 			return nil, ex.Newf("unsupported where key %q", key)
 		}
@@ -175,7 +175,7 @@ func normalizeDoSequence(items []any) ([]map[string]any, error) {
 			return nil, ex.Newf("do[%d] must contain exactly one modifier key", idx)
 		}
 		for modifierName, modifierRaw := range modifierMap {
-			if !IsValidModifier(modifierName) {
+			if !isValidModifier(modifierName) {
 				return nil, ex.Newf("do[%d]: unsupported modifier %q", idx, modifierName)
 			}
 			modifierFields, hasModifierFields := modifierRaw.(map[string]any)
@@ -200,7 +200,7 @@ func normalizeDoMap(modifier map[string]any) ([]map[string]any, error) {
 		)
 	}
 	for modifierName, modifierRaw := range modifier {
-		if !IsValidModifier(modifierName) {
+		if !isValidModifier(modifierName) {
 			return nil, ex.Newf("unsupported modifier %q", modifierName)
 		}
 		modifierFields, ok := modifierRaw.(map[string]any)
