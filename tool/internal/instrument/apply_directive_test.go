@@ -277,7 +277,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 			Decls: []dst.Decl{funcDecl},
 		}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.NoError(t, err)
 		assert.True(t, modified)
@@ -306,7 +306,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
@@ -330,7 +330,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
@@ -355,7 +355,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
@@ -382,7 +382,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
@@ -423,7 +423,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 			},
 		}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
@@ -451,7 +451,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
-		ip := &InstrumentPhase{logger: slog.Default()}
+		ip := &instrumentPhase{logger: slog.Default()}
 		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)

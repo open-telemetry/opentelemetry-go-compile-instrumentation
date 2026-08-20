@@ -17,10 +17,10 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
-// newTestPhase returns a minimal InstrumentPhase suitable for unit tests that
+// newTestPhase returns a minimal instrumentPhase suitable for unit tests that
 // do not exercise import injection or compilation (logger discards all output).
-func newTestPhase() *InstrumentPhase {
-	return &InstrumentPhase{
+func newTestPhase() *instrumentPhase {
+	return &instrumentPhase{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }

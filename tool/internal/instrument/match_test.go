@@ -18,7 +18,7 @@ func TestLoadMissingMatchedRules(t *testing.T) {
 	// which is what a bare -toolexec build sees when setup never ran.
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 
-	ip := &InstrumentPhase{logger: slog.Default()}
+	ip := &instrumentPhase{logger: slog.Default()}
 	_, err := ip.load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "otelc setup")

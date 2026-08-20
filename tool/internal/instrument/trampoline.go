@@ -68,14 +68,14 @@ const (
 //go:embed impl.tmpl
 var templateImpl string
 
-func (ip *InstrumentPhase) addDecl(decl dst.Decl) {
+func (ip *instrumentPhase) addDecl(decl dst.Decl) {
 	util.Assert(ip.target != nil, "sanity check")
 	ip.target.Decls = append(ip.target.Decls, decl)
 }
 
 // ensureUnsafeImport ensures that the unsafe package is imported in the target file.
 // This is required when using //go:linkname directives.
-func (ip *InstrumentPhase) ensureUnsafeImport() {
+func (ip *instrumentPhase) ensureUnsafeImport() {
 	for _, decl := range ip.target.Decls {
 		genDecl, ok := decl.(*dst.GenDecl)
 		if !ok || genDecl.Tok != token.IMPORT {
@@ -92,7 +92,7 @@ func (ip *InstrumentPhase) ensureUnsafeImport() {
 	ip.target.Decls = append([]dst.Decl{unsafeImport}, ip.target.Decls...)
 }
 
-func (ip *InstrumentPhase) materializeTemplate() error {
+func (ip *instrumentPhase) materializeTemplate() error {
 	// Read trampoline template and materialize before and after function
 	// declarations based on that
 	p := ast.NewAstParser()
@@ -247,7 +247,7 @@ func baseTypeName(expr dst.Expr) string {
 
 // checkHookDecl checks if the hook function declaration is correct, i.e. if they
 // have correct signature (parameter count and types)
-func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) error {
+func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) error {
 	// TargetFunc:  func A(a int, b string) (ret string)
 	// BeforeTramp: func B(a *int, b *string) (ctx *HookContext, skip bool)
 	// BeforeHook:  func C(ctx *HookContext, a int, b string)
@@ -303,7 +303,7 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	return nil
 }
 
-func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
+func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	// Query whether the parameter is a variadic parameter in the target function
 	targetParams := findTargetParamType(ip.targetFunc)
 	isEllipsis := func(i int) bool { return ast.IsEllipsis(targetParams.List[i].Type) }
@@ -330,7 +330,7 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
 }
 
-func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule) {
+func (ip *instrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 	var args []dst.Expr
 	for i, field := range ip.afterTrampFunc.Type.Params.List {
 		// If it's the first HookContext parameter, pass it directly
@@ -355,7 +355,7 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 	insertAtEnd(ip.afterTrampFunc, iff)
 }
 
-func (ip *InstrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {
+func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {
 	fnName := getHookFuncName(t, before)
 	funcDecl := &dst.FuncDecl{
 		Name: ast.Ident(fnName),
@@ -389,7 +389,7 @@ func insertAtEnd(funcDecl *dst.FuncDecl, stmt dst.Stmt) {
 	insertAt(funcDecl, stmt, len(funcDecl.Body.List))
 }
 
-func (ip *InstrumentPhase) renameTrampFunc(t *rule.InstFuncRule) {
+func (ip *instrumentPhase) renameTrampFunc(t *rule.InstFuncRule) {
 	// Randomize trampoline function names
 	ip.beforeTrampFunc.Name.Name = makeName(t, ip.targetFunc, trampolineBefore)
 	dst.Inspect(ip.beforeTrampFunc, func(node dst.Node) bool {
@@ -503,7 +503,7 @@ func findTargetGenericType(file *dst.File, targetFunc *dst.FuncDecl) *dst.FieldL
 	return trampolineTypeParams
 }
 
-func (ip *InstrumentPhase) buildTrampSignature(before bool) {
+func (ip *instrumentPhase) buildTrampSignature(before bool) {
 	var fields *dst.FieldList
 	if before {
 		beforeTramp := ip.beforeTrampFunc
@@ -530,7 +530,7 @@ func (ip *InstrumentPhase) buildTrampSignature(before bool) {
 	}
 }
 
-func (ip *InstrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool) (*dst.FieldList, error) {
+func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool) (*dst.FieldList, error) {
 	// TargetFunc: func A(a int, b string) (ret string)
 	// BeforeHook: func B(ctx *HookContext, a int, b string)
 	// AfterHook:  func C(ctx *HookContext, ret string)
@@ -602,7 +602,7 @@ func assignSliceLiteral(assignStmt *dst.AssignStmt, vals []dst.Expr) bool {
 }
 
 // populateHookContext populates the hook context before hook invocation
-func (ip *InstrumentPhase) populateHookContext(before bool) bool {
+func (ip *instrumentPhase) populateHookContext(before bool) bool {
 	funcDecl := ip.beforeTrampFunc
 	if !before {
 		funcDecl = ip.afterTrampFunc
@@ -657,7 +657,7 @@ func (ip *InstrumentPhase) populateHookContext(before bool) bool {
 // implementHookContext effectively "implements" the HookContext interface by
 // renaming occurrences of HookContextImpl to HookContextImpl{suffix} in the
 // trampoline template
-func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
+func (ip *instrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 	suffix := t.Identity()
 	structType := util.AssertType[*dst.TypeSpec](ip.hookCtxDecl.Specs[0])
 	util.Assert(structType.Name.Name == trampolineHookContextImplType,
@@ -892,7 +892,7 @@ func rewriteReturnValMethods(targetFunc *dst.FuncDecl, methodSetRetVal, methodGe
 	}
 }
 
-func (ip *InstrumentPhase) rewriteHookContextMethods() {
+func (ip *instrumentPhase) rewriteHookContextMethods() {
 	util.Assert(len(ip.hookCtxMethods) > 4, "sanity check")
 	var methodSetParam, methodGetParam, methodGetRetVal, methodSetRetVal *dst.FuncDecl
 	for _, decl := range ip.hookCtxMethods {
@@ -1049,7 +1049,7 @@ func processFieldList(fields []*dst.Field, typeParams *dst.FieldList) []*dst.Fie
 	return result
 }
 
-func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
+func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
 	// Build hook function signature and check if it is correct
 	paramTypes, err := ip.buildHookSignature(t, before)
 	if err != nil {
@@ -1074,7 +1074,7 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	return nil
 }
 
-func (ip *InstrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
+func (ip *instrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
 	// Ensure unsafe package is imported since we use //go:linkname directives
 	ip.ensureUnsafeImport()
 	// Materialize various declarations from template file, no one wants to see

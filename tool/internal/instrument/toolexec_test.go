@@ -78,7 +78,7 @@ func TestStripCompleteFlag(t *testing.T) {
 
 func TestUpdateImportConfig(t *testing.T) {
 	t.Run("no importcfg path", func(t *testing.T) {
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: "",
 		}
 		err := ip.updateImportConfig(t.Context(), map[string]string{"fmt": "fmt"})
@@ -91,7 +91,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -112,7 +112,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -133,7 +133,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -154,7 +154,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
 				PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
@@ -175,7 +175,7 @@ func TestUpdateImportConfig(t *testing.T) {
 		err := os.WriteFile(cfgPath, []byte(""), 0o644)
 		require.NoError(t, err)
 
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			logger:           slog.Default(),
 			importConfigPath: cfgPath,
 			importConfig: imports.ImportConfig{
@@ -400,7 +400,7 @@ func TestKeepForDebugCopyError(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:      slog.Default(),
 		compileArgs: []string{"-p", "example.com/mod/pkg"},
 	}
@@ -432,7 +432,7 @@ func TestUpdateImportConfigAddsResolvedImport(t *testing.T) {
 	cfgPath := filepath.Join(workDir, "importcfg")
 	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:           slog.Default(),
 		importConfigPath: cfgPath,
 		importConfig: imports.ImportConfig{
@@ -453,7 +453,7 @@ func TestUpdateImportConfigResolveError(t *testing.T) {
 	cfgPath := filepath.Join(workDir, "importcfg")
 	require.NoError(t, os.WriteFile(cfgPath, []byte(""), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:           slog.Default(),
 		importConfigPath: cfgPath,
 		importConfig: imports.ImportConfig{
@@ -472,7 +472,7 @@ func TestUpdateImportConfigWriteError(t *testing.T) {
 
 	// The parent directory does not exist, so the importcfg rewrite fails.
 	cfgPath := filepath.Join(workDir, "missing", "importcfg")
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:           slog.Default(),
 		importConfigPath: cfgPath,
 		importConfig: imports.ImportConfig{
@@ -492,7 +492,7 @@ func TestUpdateImportConfigTrackError(t *testing.T) {
 	cfgPath := filepath.Join(workDir, "importcfg")
 	require.NoError(t, os.WriteFile(cfgPath, []byte(""), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:           slog.Default(),
 		importConfigPath: cfgPath,
 		importConfig: imports.ImportConfig{

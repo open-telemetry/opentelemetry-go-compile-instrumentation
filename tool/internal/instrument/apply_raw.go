@@ -176,7 +176,7 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 
 // applyRawRule injects the raw code into the target function at the beginning
 // of the function.
-func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
+func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
 	// Find the target function to be instrumented
 	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {

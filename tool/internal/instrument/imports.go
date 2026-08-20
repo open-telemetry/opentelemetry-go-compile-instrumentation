@@ -15,7 +15,7 @@ import (
 // updateImportConfigForFile ensures all imports in the given file's AST are present in the importcfg.
 // This is used when adding a new file (e.g., via file rules) that has its own imports which may
 // not be in the target package's importcfg.
-func (ip *InstrumentPhase) updateImportConfigForFile(ctx context.Context, root *dst.File, ruleName string) error {
+func (ip *instrumentPhase) updateImportConfigForFile(ctx context.Context, root *dst.File, ruleName string) error {
 	paths := imports.CollectPaths(ctx, root)
 
 	if len(paths) == 0 {
@@ -35,7 +35,7 @@ func (ip *InstrumentPhase) updateImportConfigForFile(ctx context.Context, root *
 // and the file already imports the same package with a different alias (whether explicit or
 // implicit), an error is returned. This prevents silent failures where injected code uses
 // an alias that doesn't exist in the file.
-func (ip *InstrumentPhase) addRuleImports(
+func (ip *instrumentPhase) addRuleImports(
 	ctx context.Context,
 	root *dst.File,
 	ruleImports map[string]string,
