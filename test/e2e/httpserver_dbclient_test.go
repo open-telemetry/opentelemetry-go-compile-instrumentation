@@ -7,6 +7,7 @@ package test
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,4 +60,53 @@ func TestHTTPServerDBClient(t *testing.T) {
 	require.Equal(t, httpClientSpan.SpanID(), httpServerSpan.ParentSpanID(), "HTTP server parent must be HTTP client")
 	require.Equal(t, httpServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be HTTP server")
 	require.True(t, httpClientSpan.ParentSpanID().IsEmpty(), "HTTP client span must be the trace root")
+}
+
+func TestHTTPServerDBClient_Transaction(t *testing.T) {
+	f := testutil.NewTestFixture(t)
+
+	frontPort := testutil.FreePort(t)
+
+	f.BuildAndStart("httpserverdbclient", fmt.Sprintf("-front-port=%d", frontPort))
+	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
+
+	// We use the regular instrumented httpclient but we modify the addr to include the path if we couldn't,
+	// wait, httpclient hardcodes /hello. Let's just use standard Go http client. It won't generate a client span,
+	// but the server span will become the root span.
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/tx", frontPort))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	// Wait for the server span to be exported.
+	f.WaitForSpans(4) // HTTP server -> START -> INSERT -> COMMIT
+
+	f.RequireTraceCount(1)
+	f.RequireSpansPerTrace(4)
+
+	httpServerSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsServer,
+		testutil.HasAttribute(string(semconv.URLPathKey), "/tx"),
+		testutil.HasAttribute(string(semconv.HTTPResponseStatusCodeKey), int64(200)),
+	)
+	beginSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsClient,
+		testutil.HasAttribute(string(semconv.DBOperationNameKey), "START"),
+	)
+	execSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsClient,
+		testutil.HasAttribute(string(semconv.DBOperationNameKey), "INSERT"),
+	)
+	commitSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsClient,
+		testutil.HasAttribute(string(semconv.DBOperationNameKey), "COMMIT"),
+	)
+
+	require.Equal(t, httpServerSpan.TraceID(), beginSpan.TraceID(), "HTTP server and START must share a trace ID")
+	require.Equal(t, httpServerSpan.TraceID(), execSpan.TraceID(), "HTTP server and INSERT must share a trace ID")
+	require.Equal(t, httpServerSpan.TraceID(), commitSpan.TraceID(), "HTTP server and COMMIT must share a trace ID")
+	
+	require.Equal(t, httpServerSpan.SpanID(), beginSpan.ParentSpanID(), "START parent must be HTTP server")
+	require.Equal(t, httpServerSpan.SpanID(), execSpan.ParentSpanID(), "INSERT parent must be HTTP server")
+	require.Equal(t, httpServerSpan.SpanID(), commitSpan.ParentSpanID(), "COMMIT parent must be HTTP server")
+	require.True(t, httpServerSpan.ParentSpanID().IsEmpty(), "HTTP server span must be the trace root")
 }

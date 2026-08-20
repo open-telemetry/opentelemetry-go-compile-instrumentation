@@ -43,6 +43,29 @@ func main() {
 		_, _ = w.Write([]byte("frontend querying database"))
 	})
 
+	mux.HandleFunc("/tx", func(w http.ResponseWriter, r *http.Request) {
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, err = tx.ExecContext(r.Context(), "INSERT INTO users (name) VALUES (?)", "bob")
+		if err != nil {
+			_ = tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("transaction committed"))
+	})
+
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *frontPort),
 		Handler: mux,

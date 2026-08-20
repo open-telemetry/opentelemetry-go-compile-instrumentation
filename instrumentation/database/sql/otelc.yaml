@@ -43,6 +43,8 @@ add_new_field_tx:
             type: string
           - name: DSN
             type: string
+          - name: OtelCtx
+            type: context.Context
 
 add_new_field_conn:
   target: database/sql
