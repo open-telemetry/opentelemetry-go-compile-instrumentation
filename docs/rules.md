@@ -1201,8 +1201,8 @@ This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTra
 - `replace` must be a valid Go expression (not a statement).
 - `wrap` must contain `{{ . }}` as a placeholder for the original expression. The template must produce exactly one expression.
 - `wrap` returns an error at instrumentation time if the matched declaration has no initializer (e.g., `var X T` without `= ...`).
-- If `replace` matches multiple names in a single declaration (e.g., `var a, b = ...`), the replacement expression is cloned and assigned to each name.
-- If `wrap` matches multiple initialized values in a single declaration, each initializer is wrapped independently.
+- If `replace` targets one name in a multi-name declaration (e.g., `var a, b = ...`), only that name's initializer is replaced; sibling names are left untouched. If the declaration's names and initializers don't correspond one-to-one (e.g., a tuple-valued `var a, b = f()`), the rule reports an error instead of guessing.
+- If `wrap` targets one name in a multi-name declaration, only that name's initializer is wrapped; sibling names are left untouched. The same one-to-one requirement applies as for `replace`.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.
 
 ### 8. Composite Literal Rule
