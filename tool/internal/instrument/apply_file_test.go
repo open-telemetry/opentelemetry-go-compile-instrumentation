@@ -254,10 +254,10 @@ func Helper() { fmt.Println("hi") }
 	}
 
 	fileRule := &rule.InstFileRule{
-		InstBaseRule: rule.InstBaseRule{Name: "test_cached_source_imports"},
-		File:         "helper.go",
-		Path:         "example.com/mypkg",
-		ResolvedPath: srcDir,
+		InstBaseRule:  rule.InstBaseRule{Name: "test_cached_source_imports"},
+		File:          "helper.go",
+		Path:          "example.com/mypkg",
+		ResolvedPath:  srcDir,
 		SourceImports: []string{"fmt", "log"},
 	}
 
