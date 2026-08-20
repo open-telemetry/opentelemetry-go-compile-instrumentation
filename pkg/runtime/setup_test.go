@@ -122,7 +122,7 @@ func TestShutdownNilProviders(t *testing.T) {
 	tracerProvider = nil
 	meterProvider = nil
 	loggerProvider = nil
-	require.NoError(t, Shutdown(t.Context()))
+	require.NoError(t, Shutdown(context.Background()))
 }
 
 func TestShutdownProviders(t *testing.T) {
@@ -134,7 +134,7 @@ func TestShutdownProviders(t *testing.T) {
 	tracerProvider = sdktrace.NewTracerProvider()
 	meterProvider = sdkmetric.NewMeterProvider()
 	loggerProvider = sdklog.NewLoggerProvider()
-	require.NoError(t, Shutdown(t.Context()))
+	require.NoError(t, Shutdown(context.Background()))
 }
 
 // restoreProviders resets the global providers after a test that configures them.

@@ -5,7 +5,6 @@ package setup
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"log/slog"
 	"os"
