@@ -46,7 +46,16 @@ func registerRuleImports(dst, ruleImports map[string]string) {
 	}
 }
 
+// collectRuleSetBaseImports blank-registers imports that must enter the build
+// graph from matched rules: hook/file package paths, and explicit imports:
+// maps from snippet-injecting rules (raw/struct/call/directive/decl).
 func collectRuleSetBaseImports(dst map[string]string, m *rule.InstRuleSet) {
+	for _, r := range m.AllFuncRules() {
+		registerBlankImport(dst, r.Path)
+	}
+	for _, r := range m.FileRules {
+		registerBlankImport(dst, r.Path)
+	}
 	for _, rs := range m.RawRules {
 		for _, r := range rs {
 			registerRuleImports(dst, r.Imports)
@@ -82,14 +91,8 @@ func collectRuntimeImports(matched []*rule.InstRuleSet) (map[string]string, []*r
 	funcRules := make([]*rule.InstFuncRule, 0)
 
 	for _, m := range matched {
-		for _, r := range m.AllFuncRules() {
-			funcRules = append(funcRules, r)
-			registerBlankImport(importsMap, r.Path)
-			registerRuleImports(importsMap, r.Imports)
-		}
+		funcRules = append(funcRules, m.AllFuncRules()...)
 		for _, r := range m.FileRules {
-			registerBlankImport(importsMap, r.Path)
-			registerRuleImports(importsMap, r.Imports)
 			if err := collectFileRuleSourceImports(importsMap, r); err != nil {
 				return nil, nil, err
 			}
@@ -104,9 +107,10 @@ func collectRuntimeImports(matched []*rule.InstRuleSet) (map[string]string, []*r
 	return importsMap, funcRules, nil
 }
 
-// collectFileRuleSourceImports parses the add_file source (often //go:build ignore)
-// and blank-registers its imports. Blank-importing rule.Path alone only pulls the
-// stub package into the build graph, not dependencies of the ignored implementation.
+// collectFileRuleSourceImports parses the add_file source and blank-registers
+// its imports. Blank-importing rule.Path alone only pulls the stub package into
+// the build graph, not dependencies of a //go:build ignore implementation file.
+// Discovered paths are cached on the rule for apply_file.
 func collectFileRuleSourceImports(dst map[string]string, r *rule.InstFileRule) error {
 	if r.ResolvedPath == "" || r.File == "" {
 		return nil
@@ -122,12 +126,16 @@ func collectFileRuleSourceImports(dst map[string]string, r *rule.InstFileRule) e
 		return ex.Wrapf(err, "reading rule source file %s", file)
 	}
 
-	root, err := ast.NewAstParser().ParseSource(ast.StripBuildIgnore(string(data)))
+	// Parsing does not require stripping //go:build ignore; go/parser accepts
+	// the file either way. apply_file still strips before injecting the source.
+	root, err := ast.NewAstParser().ParseSource(string(data))
 	if err != nil {
 		return ex.Wrapf(err, "parsing rule source file %s", file)
 	}
 
-	for _, path := range imports.Paths(root) {
+	paths := imports.Paths(root)
+	r.SourceImports = paths
+	for _, path := range paths {
 		registerBlankImport(dst, path)
 	}
 	return nil

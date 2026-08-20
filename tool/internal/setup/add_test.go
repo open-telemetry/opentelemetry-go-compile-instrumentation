@@ -160,8 +160,17 @@ func Extend() string { return uuid.NewString() }
 			stateManager := NewStateManager()
 			ctx := ContextWithStateManager(t.Context(), stateManager)
 
-			importsMap, funcRules, err := collectRuntimeImports(tt.matched(t))
+			matched := tt.matched(t)
+			importsMap, funcRules, err := collectRuntimeImports(matched)
 			require.NoError(t, err)
+
+			if tt.name == "file_rule_with_source_imports" {
+				require.Len(t, matched[0].FileRules, 1)
+				assert.ElementsMatch(t, []string{
+					"github.com/google/uuid",
+					"golang.org/x/sync/errgroup",
+				}, matched[0].FileRules[0].SourceImports)
+			}
 
 			err = sp.addDeps(ctx, importsMap, funcRules, tmpDir, tt.packageName)
 			require.NoError(t, err)

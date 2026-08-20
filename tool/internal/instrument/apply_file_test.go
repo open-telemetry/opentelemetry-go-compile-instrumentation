@@ -231,7 +231,7 @@ func SubHelper() {}
 	assert.Contains(t, string(outData), "func SubHelper()")
 }
 
-func TestApplyFileRule_MergesTopLevelImports(t *testing.T) {
+func TestApplyFileRule_UsesCachedSourceImports(t *testing.T) {
 	srcDir := t.TempDir()
 	workDir := t.TempDir()
 
@@ -248,16 +248,17 @@ func Helper() { fmt.Println("hi") }
 	ip := &InstrumentPhase{
 		logger:  slog.New(slog.DiscardHandler),
 		workDir: workDir,
+		// No importcfg path: updateImportConfig returns early, but SourceImports
+		// must still be preferred over re-collecting from the AST.
+		importConfigPath: "",
 	}
 
 	fileRule := &rule.InstFileRule{
-		InstBaseRule: rule.InstBaseRule{
-			Name:    "test_file_rule_imports",
-			Imports: map[string]string{"log": "log"},
-		},
+		InstBaseRule: rule.InstBaseRule{Name: "test_cached_source_imports"},
 		File:         "helper.go",
 		Path:         "example.com/mypkg",
 		ResolvedPath: srcDir,
+		SourceImports: []string{"fmt", "log"},
 	}
 
 	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
@@ -266,5 +267,6 @@ func Helper() { fmt.Println("hi") }
 	outData, err := os.ReadFile(filepath.Join(workDir, "otelc.helper.go"))
 	require.NoError(t, err)
 	assert.Contains(t, string(outData), `"fmt"`)
-	assert.Contains(t, string(outData), `"log"`)
+	// Cached SourceImports are only used for importcfg, not injected into the AST.
+	assert.NotContains(t, string(outData), `"log"`)
 }

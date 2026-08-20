@@ -10,8 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dave/dst"
+
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -36,14 +39,10 @@ func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 	// Always rename the package name to the target package name
 	root.Name.Name = pkgName
 
-	// Merge optional top-level imports: into the added file (see docs/rules.md).
-	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
-		return err
-	}
-
-	// The file being added has its own imports that need to be in importcfg.
-	// Without this, the compiler will fail with "could not import X" errors.
-	if err = ip.updateImportConfigForFile(ctx, root, rule.Name); err != nil {
+	// Prefer imports discovered during setup so we do not re-parse the source
+	// just for importcfg. Fall back to AST collection when SourceImports is empty
+	// (e.g. unit tests that call applyFileRule directly).
+	if err = ip.updateImportConfigForFileRule(ctx, root, rule); err != nil {
 		return err
 	}
 
@@ -61,5 +60,29 @@ func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 	// Add the new file as part of the source files to be compiled
 	ip.addCompileArg(newFile)
 	ip.keepForDebug(newFile)
+	return nil
+}
+
+func (ip *InstrumentPhase) updateImportConfigForFileRule(
+	ctx context.Context,
+	root *dst.File,
+	rule *rule.InstFileRule,
+) error {
+	var pathMap map[string]string
+	if len(rule.SourceImports) > 0 {
+		pathMap = make(map[string]string, len(rule.SourceImports))
+		for _, p := range rule.SourceImports {
+			pathMap[p] = p
+		}
+	} else {
+		// Fallback when SourceImports was not populated (e.g. direct unit tests).
+		pathMap = imports.CollectPaths(ctx, root)
+	}
+	if len(pathMap) == 0 {
+		return nil
+	}
+	if err := ip.updateImportConfig(ctx, pathMap); err != nil {
+		return ex.Wrapf(err, "updating import config for file imports in %s", rule.Name)
+	}
 	return nil
 }
