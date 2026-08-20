@@ -74,6 +74,41 @@ func TestBaseTypeName(t *testing.T) {
 			expected: "struct{Base}",
 		},
 		{
+			name:     "fixed-size array type with literal length",
+			typeSrc:  "[5]int",
+			expected: "[5]int",
+		},
+		{
+			name:     "fixed-size array type with named length",
+			typeSrc:  "[N]int",
+			expected: "[N]int",
+		},
+		{
+			name:     "func type with no params or results",
+			typeSrc:  "func()",
+			expected: "func()",
+		},
+		{
+			name:     "func type with unnamed params and multiple results",
+			typeSrc:  "func(int, string) (bool, error)",
+			expected: "func(int, string) (bool, error)",
+		},
+		{
+			name:     "func type with a single result",
+			typeSrc:  "func(int) string",
+			expected: "func(int) string",
+		},
+		{
+			name:     "generic type with one type argument",
+			typeSrc:  "Foo[int]",
+			expected: "Foo[int]",
+		},
+		{
+			name:     "generic type with multiple type arguments",
+			typeSrc:  "Foo[int, string]",
+			expected: "Foo[int, string]",
+		},
+		{
 			name:     "array type",
 			typeSrc:  "[]int",
 			expected: "[]int",
@@ -153,6 +188,10 @@ func TestBaseTypeName(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestBaseTypeName_NilExpr(t *testing.T) {
+	assert.Equal(t, "", baseTypeName(nil))
 }
 
 func TestCheckHookDecl(t *testing.T) {
@@ -240,6 +279,44 @@ package testdata
 import "go.opentelemetry.io/otelc/pkg/hook"
 func H1After(ctx hook.HookContext, r1 float32, r2 error) {}`,
 			before: false,
+		},
+		{
+			name: "invalid - before hook first param is not HookContext",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *string) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+func H1Before(notCtx int, p1 string) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "hook func first param must be HookContext, got int",
+		},
+		{
+			name: "invalid - after hook param count mismatch",
+			trampSrc: `
+package main
+func OtelAfterTrampoline(hookContext *HookContext, ret0 *string) {}`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1After(ctx hook.HookContext) {}`,
+			before:      false,
+			expectError: true,
+			errorMsg:    "expected 2 params, got 1",
+		},
+		{
+			name: "invalid - after hook type mismatch",
+			trampSrc: `
+package main
+func OtelAfterTrampoline(hookContext *HookContext, ret0 *string) {}`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1After(ctx hook.HookContext, r1 int) {}`,
+			before:      false,
+			expectError: true,
+			errorMsg:    "type mismatch, expected string, got int",
 		},
 		{
 			name: "invalid - missing HookContext in hook",
