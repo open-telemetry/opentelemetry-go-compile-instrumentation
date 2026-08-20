@@ -954,6 +954,7 @@ func makeMethodPanic(method *dst.FuncDecl, message string) {
 	method.Body.List = []dst.Stmt{panicStmt}
 }
 
+// containsTypeParameterInExprs checks if any expression in exprs contains a type parameter
 func containsTypeParameterInExprs(exprs []dst.Expr, typeParams *dst.FieldList) bool {
 	for _, expr := range exprs {
 		if containsTypeParameter(expr, typeParams) {
@@ -963,6 +964,7 @@ func containsTypeParameterInExprs(exprs []dst.Expr, typeParams *dst.FieldList) b
 	return false
 }
 
+// containsTypeParameterInFields checks if any field in fields contains a type parameter
 func containsTypeParameterInFields(fields *dst.FieldList, typeParams *dst.FieldList) bool {
 	if fields == nil {
 		return false
