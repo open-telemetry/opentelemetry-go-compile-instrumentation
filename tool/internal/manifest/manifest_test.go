@@ -34,6 +34,11 @@ empty:
 client:
   target: example.com/client
 `)
+	writeRuleFile(t, root, "parent/ranged.otelc.yaml", `
+ranged:
+  target: example.com/ranged
+  version: v1.0.0,v2.0.0
+`)
 	writeRuleFile(t, root, "parent/ignored.yaml", `
 ignored:
   target: example.com/ignored
@@ -51,9 +56,26 @@ server:
 	require.Equal(t, Manifest{
 		{ModulePath: "example.com/nested", Target: "example.com/server", VersionRange: "v1.5.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/client"},
+		{ModulePath: "example.com/parent", Target: "example.com/ranged", VersionRange: "v1.0.0,v2.0.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v1.0.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v2.0.0"},
 	}, got)
+}
+
+func TestGenerateRejectsInvalidVersionRange(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "module", "example.com/test")
+	writeRuleFile(t, root, "module/otelc.yaml", `
+invalid:
+  target: example.com/target
+  version: v1.0.0,
+`)
+
+	_, err := Generate(root)
+	require.ErrorContains(t, err, `version "v1.0.0," must use non-empty start and end bounds`)
+	require.ErrorContains(t, err, "validating version in rule file otelc.yaml")
+	require.ErrorContains(t, err, "loading rules for module example.com/test")
+	require.ErrorContains(t, err, "generating manifest from")
 }
 
 func TestGenerateErrors(t *testing.T) {

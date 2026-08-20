@@ -136,6 +136,9 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			if rule.Target == "" {
 				continue
 			}
+			if validateErr := util.ValidateVersionRange(rule.VersionRange); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating version in rule file %s", path)
+			}
 			entries = append(entries, Entry{
 				ModulePath:   modulePath,
 				Target:       rule.Target,
