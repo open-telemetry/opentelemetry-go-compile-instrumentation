@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -38,7 +37,7 @@ func TestRenameReturnValuesUsesStableBareNames(t *testing.T) {
 }
 
 func TestInsertRaw_SharedSyntheticName(t *testing.T) {
-	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	ruleA, err := rule.NewInstRawRule([]byte(`
 target: main
@@ -87,7 +86,7 @@ raw: "log({{ .FuncArgument 0 }})"
 }
 
 func TestInsertRawAtPattern(t *testing.T) {
-	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	tests := []struct {
 		name           string
@@ -336,7 +335,7 @@ func a() {
 }
 
 func TestInsertRawInvalidRegexPattern(t *testing.T) {
-	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
 
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", "package main\nfunc main() {}", parser.ParseComments)

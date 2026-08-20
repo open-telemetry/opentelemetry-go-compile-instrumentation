@@ -5,7 +5,6 @@ package setup
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -1095,7 +1094,7 @@ path: example.com/mypkg
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	set, err := sp.runMatch(t.Context(), dep, rulesByTarget, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
@@ -1138,7 +1137,7 @@ func Target(value string) error { return nil }
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	set, err := sp.runMatch(t.Context(), dep, rulesByTarget, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
@@ -1209,7 +1208,7 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+	set, err := sp.runMatch(t.Context(), dep, map[string][]rule.InstRule{}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
@@ -1242,7 +1241,7 @@ path: example.com/mypkg
 	}
 
 	sp := newTestSetupPhase()
-	_, err = sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	_, err = sp.runMatch(t.Context(), dep, rulesByTarget, nil)
 	assert.Error(t, err, "should fail when source file cannot be parsed")
 }
 
@@ -1268,7 +1267,7 @@ path: example.com/mypkg
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	set, err := sp.runMatch(t.Context(), dep, rulesByTarget, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
@@ -1303,7 +1302,7 @@ func TestRunMatch_GlobTargetMatches(t *testing.T) {
 
 	sp := newTestSetupPhase()
 	set, err := sp.runMatch(
-		context.Background(),
+		t.Context(),
 		dep,
 		map[string][]rule.InstRule{},
 		[]targetRule{{target: globRule.Target, rule: globRule}},
@@ -1326,7 +1325,7 @@ func TestRunMatch_GlobTargetNoMatch(t *testing.T) {
 
 	sp := newTestSetupPhase()
 	set, err := sp.runMatch(
-		context.Background(),
+		t.Context(),
 		dep,
 		map[string][]rule.InstRule{},
 		[]targetRule{{target: globRule.Target, rule: globRule}},
@@ -1348,7 +1347,7 @@ func TestRunMatch_SingleSegmentGlobDoesNotCrossBoundary(t *testing.T) {
 
 	sp := newTestSetupPhase()
 	set, err := sp.runMatch(
-		context.Background(),
+		t.Context(),
 		dep,
 		map[string][]rule.InstRule{},
 		[]targetRule{{target: globRule.Target, rule: globRule}},
@@ -1375,7 +1374,7 @@ func TestRunMatch_ExactAndGlobCoexist(t *testing.T) {
 		"example.com/svc/users": {exactRule},
 	}
 	set, err := sp.runMatch(
-		context.Background(),
+		t.Context(),
 		dep,
 		exactRules,
 		[]targetRule{{target: globRule.Target, rule: globRule}},
@@ -1411,7 +1410,7 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 		{ImportPath: "example.com/other", Sources: []string{unrelatedSrc}, CgoFiles: map[string]string{}},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps, nil)
+	matched, err := sp.matchDeps(t.Context(), deps, nil)
 	require.NoError(t, err)
 
 	matchedPaths := make(map[string]bool)
@@ -1455,7 +1454,7 @@ func TestMatchDeps_RootTargetExpandsToRootModuleGlob(t *testing.T) {
 		{ImportPath: "example.com/appliance", Sources: []string{prefixSrc}, CgoFiles: map[string]string{}},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps, nil)
+	matched, err := sp.matchDeps(t.Context(), deps, nil)
 	require.NoError(t, err)
 
 	matchedPaths := make(map[string]bool)
@@ -1488,7 +1487,7 @@ func TestMatchDeps_RootTargetRequiresRootModule(t *testing.T) {
 	sp := newTestSetupPhase()
 	sp.ruleConfig = ruleFile
 
-	_, err = sp.matchDeps(context.Background(), []*Dependency{
+	_, err = sp.matchDeps(t.Context(), []*Dependency{
 		{ImportPath: "example.com/app", Sources: []string{}, CgoFiles: map[string]string{}},
 	}, nil)
 	require.Error(t, err)
@@ -1515,7 +1514,7 @@ func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
 		{ImportPath: "example.com/svc/users", Sources: []string{}, CgoFiles: map[string]string{}},
 	}
 
-	_, err = sp.matchDeps(context.Background(), deps, nil)
+	_, err = sp.matchDeps(t.Context(), deps, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "not a valid glob pattern")
 }
@@ -1541,7 +1540,7 @@ func TestMatchDeps_EmptyTargetRejected(t *testing.T) {
 		{ImportPath: "example.com/svc/users", Sources: []string{}, CgoFiles: map[string]string{}},
 	}
 
-	_, err = sp.matchDeps(context.Background(), deps, nil)
+	_, err = sp.matchDeps(t.Context(), deps, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "empty target")
 }
@@ -1613,7 +1612,7 @@ func TestRunMatch_WarnsOnUnresolvedVersion(t *testing.T) {
 		},
 	}
 
-	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	set, err := sp.runMatch(t.Context(), dep, rulesByTarget, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
@@ -1795,7 +1794,7 @@ func TestRunMatch_CgoFiles(t *testing.T) {
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, nil, nil)
+	set, err := sp.runMatch(t.Context(), dep, nil, nil)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty())
 }
@@ -1820,7 +1819,7 @@ func TestRunMatch_VersionFilteredOut(t *testing.T) {
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{"example.com/v": {funcRule}}, nil)
+	set, err := sp.runMatch(t.Context(), dep, map[string][]rule.InstRule{"example.com/v": {funcRule}}, nil)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty())
 }
@@ -1834,7 +1833,7 @@ func TestPreciseMatching_NoSources(t *testing.T) {
 
 	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
-	res, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{funcRule}, set)
+	res, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcRule}, set)
 	require.NoError(t, err)
 	require.True(t, res.IsEmpty())
 }
@@ -1875,7 +1874,7 @@ func TestPreciseMatching_MatchOneRuleError(t *testing.T) {
 
 	sp := newTestSetupPhase()
 	set := rule.NewInstRuleSet(dep.ImportPath)
-	_, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{badRule}, set)
+	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
 	require.Error(t, err)
 }
 
@@ -1894,7 +1893,7 @@ func TestMatchDeps_NoRules(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 
 	sp := newTestSetupPhase()
-	matched, err := sp.matchDeps(context.Background(), []*Dependency{{ImportPath: "example.com/x"}}, nil)
+	matched, err := sp.matchDeps(t.Context(), []*Dependency{{ImportPath: "example.com/x"}}, nil)
 	require.NoError(t, err)
 	require.Nil(t, matched)
 }
@@ -1913,7 +1912,7 @@ func TestMatchDeps_RunMatchError(t *testing.T) {
 	sp := newTestSetupPhase()
 	sp.ruleConfig = ruleFile
 
-	_, err = sp.matchDeps(context.Background(), []*Dependency{
+	_, err = sp.matchDeps(t.Context(), []*Dependency{
 		{ImportPath: "example.com/bad", Sources: []string{badSrc}, CgoFiles: map[string]string{}},
 	}, nil)
 	require.Error(t, err)
@@ -1928,6 +1927,6 @@ func TestLoadRules_FindToolFilesError(t *testing.T) {
 	require.NoError(t, err)
 
 	sp := newTestSetupPhase()
-	_, err = sp.loadRules(context.Background(), map[string]bool{dir: true})
+	_, err = sp.loadRules(t.Context(), map[string]bool{dir: true})
 	require.Error(t, err)
 }

@@ -4,7 +4,6 @@
 package semconv
 
 import (
-	"context"
 	"crypto/tls"
 	"net/http"
 	"net/url"
@@ -186,7 +185,7 @@ func TestHTTPClientRecordMetrics(t *testing.T) {
 
 	// Should not panic
 	client.RecordMetrics(
-		context.Background(),
+		t.Context(),
 		req,
 		200,   // statusCode
 		1024,  // requestSize

@@ -5,7 +5,6 @@ package setup
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"log/slog"
 	"os"

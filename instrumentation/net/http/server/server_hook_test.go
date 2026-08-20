@@ -173,7 +173,7 @@ func TestAfterServeHTTP(t *testing.T) {
 	tests := []struct {
 		name         string
 		setupEnv     func(t *testing.T)
-		setupContext func(*sdktrace.TracerProvider) hook.HookContext
+		setupContext func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext
 		statusCode   int
 		validateSpan func(*testing.T, []sdktrace.ReadOnlySpan)
 	}{
@@ -182,10 +182,10 @@ func TestAfterServeHTTP(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				ctx, span := testTracer.Start(
-					context.Background(),
+					t.Context(),
 					"GET /path",
 					trace.WithSpanKind(trace.SpanKindServer),
 				)
@@ -214,10 +214,10 @@ func TestAfterServeHTTP(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				ctx, span := testTracer.Start(
-					context.Background(),
+					t.Context(),
 					"GET /notfound",
 					trace.WithSpanKind(trace.SpanKindServer),
 				)
@@ -247,10 +247,10 @@ func TestAfterServeHTTP(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				ctx, span := testTracer.Start(
-					context.Background(),
+					t.Context(),
 					"GET /error",
 					trace.WithSpanKind(trace.SpanKindServer),
 				)
@@ -279,7 +279,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				return hooktest.NewMockHookContext()
 			},
 			statusCode: 200,
@@ -293,10 +293,10 @@ func TestAfterServeHTTP(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				ctx, span := testTracer.Start(
-					context.Background(),
+					t.Context(),
 					"GET /path",
 					trace.WithSpanKind(trace.SpanKindServer),
 				)
@@ -324,10 +324,10 @@ func TestAfterServeHTTP(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				ctx, span := testTracer.Start(
-					context.Background(),
+					t.Context(),
 					"GET /path",
 					trace.WithSpanKind(trace.SpanKindServer),
 				)
@@ -353,10 +353,10 @@ func TestAfterServeHTTP(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				ctx, span := testTracer.Start(
-					context.Background(),
+					t.Context(),
 					"GET",
 					trace.WithSpanKind(trace.SpanKindServer),
 				)
@@ -384,10 +384,10 @@ func TestAfterServeHTTP(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				ctx, span := testTracer.Start(
-					context.Background(),
+					t.Context(),
 					"GET /set/by/gin",
 					trace.WithSpanKind(trace.SpanKindServer),
 				)
@@ -420,7 +420,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			tt.setupEnv(t)
 			sr, tp := setupTestTracer(t)
 
-			mockCtx := tt.setupContext(tp)
+			mockCtx := tt.setupContext(t, tp)
 
 			AfterServeHTTP(mockCtx)
 

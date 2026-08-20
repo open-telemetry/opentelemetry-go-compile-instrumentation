@@ -41,7 +41,7 @@ func TestInitLogger(t *testing.T) {
 		if debug {
 			args = append(args, "--debug")
 		}
-		if err := app.Run(context.Background(), args); err != nil {
+		if err := app.Run(t.Context(), args); err != nil {
 			t.Fatal(err)
 		}
 
@@ -66,7 +66,7 @@ func TestInitLogger(t *testing.T) {
 		}
 
 		logger := util.LoggerFromContext(ctx)
-		if logger.Enabled(context.Background(), slog.LevelDebug) {
+		if logger.Enabled(t.Context(), slog.LevelDebug) {
 			t.Error("expected debug logging to be disabled")
 		}
 	})
@@ -82,7 +82,7 @@ func TestInitLogger(t *testing.T) {
 		}
 
 		logger := util.LoggerFromContext(ctx)
-		if !logger.Enabled(context.Background(), slog.LevelDebug) {
+		if !logger.Enabled(t.Context(), slog.LevelDebug) {
 			t.Error("expected debug logging to be enabled")
 		}
 	})
@@ -112,7 +112,7 @@ func TestInitLogger(t *testing.T) {
 		}
 
 		logger := util.LoggerFromContext(ctx)
-		if !logger.Enabled(context.Background(), slog.LevelDebug) {
+		if !logger.Enabled(t.Context(), slog.LevelDebug) {
 			t.Error("expected debug logging to be enabled via env var")
 		}
 	})
@@ -133,7 +133,7 @@ func TestInitLogger(t *testing.T) {
 func TestCloseLoggerNoWriter(t *testing.T) {
 	// When initLogger never ran (e.g. it failed early), the context holds no log
 	// writer and closeLogger must be a no-op rather than panic.
-	if err := closeLogger(context.Background()); err != nil {
+	if err := closeLogger(t.Context()); err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 }
@@ -159,7 +159,7 @@ func TestCleanupSubcommand(t *testing.T) {
 		},
 	}
 	args := []string{"otelc", "--work-dir", workDir, "cleanup"}
-	if err := app.Run(context.Background(), args); err != nil {
+	if err := app.Run(t.Context(), args); err != nil {
 		t.Fatal(err)
 	}
 

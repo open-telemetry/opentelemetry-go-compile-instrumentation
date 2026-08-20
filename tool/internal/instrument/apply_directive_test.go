@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"go/token"
 	"log/slog"
 	"testing"
@@ -49,7 +48,7 @@ func TestApplyDirectiveRule_NoMatchingFuncs(t *testing.T) {
 		Template:  `fmt.Println("span start: {{.FuncName}}")`,
 	}
 
-	modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+	modified, err := newTestPhase().applyDirectiveRule(t.Context(), r, root)
 
 	require.NoError(t, err)
 	assert.False(t, modified, "a rule that instruments nothing must not request the globals file")
@@ -66,7 +65,7 @@ func TestApplyDirectiveRule_MatchingFunc(t *testing.T) {
 		Template:     `println("span start: {{.FuncName}}")`,
 	}
 
-	modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+	modified, err := newTestPhase().applyDirectiveRule(t.Context(), r, root)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -263,7 +262,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 
 		ip := &instrumentPhase{logger: slog.Default()}
-		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(t.Context(), r, root)
 		require.NoError(t, err)
 		assert.True(t, modified)
 		assert.Len(t, funcDecl.Body.List, 2)
@@ -292,7 +291,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
 		ip := &instrumentPhase{logger: slog.Default()}
-		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(t.Context(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
 	})
@@ -316,7 +315,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
 		ip := &instrumentPhase{logger: slog.Default()}
-		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(t.Context(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
 		assert.Contains(t, err.Error(), "can't evaluate field UnknownTag")
@@ -341,7 +340,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
 		ip := &instrumentPhase{logger: slog.Default()}
-		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(t.Context(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
 		assert.Contains(t, err.Error(), "parsing rendered template")
@@ -368,7 +367,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
 		ip := &instrumentPhase{logger: slog.Default()}
-		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(t.Context(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
 		assert.Contains(t, err.Error(), "parsing directive args")
@@ -409,7 +408,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		}
 
 		ip := &instrumentPhase{logger: slog.Default()}
-		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(t.Context(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
 		assert.Contains(t, err.Error(), "import alias mismatch")
@@ -437,7 +436,7 @@ func TestApplyDirectiveRule(t *testing.T) {
 		root := &dst.File{Decls: []dst.Decl{funcDecl}}
 
 		ip := &instrumentPhase{logger: slog.Default()}
-		modified, err := ip.applyDirectiveRule(context.Background(), r, root)
+		modified, err := ip.applyDirectiveRule(t.Context(), r, root)
 		require.Error(t, err)
 		assert.False(t, modified)
 		// The template is parsed before imports are added, so a rule with a

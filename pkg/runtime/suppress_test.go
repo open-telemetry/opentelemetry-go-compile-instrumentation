@@ -4,14 +4,13 @@
 package runtime
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHTTPClientInstrumentationSuppression(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// A plain context carries no suppression flag.
 	assert.False(t, IsHTTPClientInstrumentationSuppressed(ctx))

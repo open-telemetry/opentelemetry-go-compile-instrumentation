@@ -74,7 +74,7 @@ func TestAcquireBuildLockCancellable(t *testing.T) {
 
 	// A waiting acquisition must give up when its context is canceled —
 	// this is what Ctrl-C during the wait resolves to.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*buildLockRetryInterval)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*buildLockRetryInterval)
 	defer cancel()
 	_, err = acquireBuildLock(ctx)
 	require.Error(t, err)

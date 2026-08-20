@@ -309,7 +309,7 @@ func TestSetupTraceProviderConsoleExporterNoEndpoint(t *testing.T) {
 	restoreProviders(t)
 	tracerProvider = nil
 
-	err := setupTraceProvider(context.Background(), resource.Default())
+	err := setupTraceProvider(t.Context(), resource.Default())
 
 	require.NoError(t, err)
 	assert.NotNil(t, tracerProvider,
@@ -321,7 +321,7 @@ func TestSetupTraceProviderNoneExporter(t *testing.T) {
 	restoreProviders(t)
 	tracerProvider = nil
 
-	err := setupTraceProvider(context.Background(), resource.Default())
+	err := setupTraceProvider(t.Context(), resource.Default())
 
 	require.NoError(t, err)
 	assert.Nil(t, tracerProvider, "no trace provider should be installed for OTEL_TRACES_EXPORTER=none")
@@ -333,7 +333,7 @@ func TestSetupMeterProviderNoneExporter(t *testing.T) {
 	restoreProviders(t)
 	meterProvider = nil
 
-	err := setupMeterProvider(context.Background(), resource.Default())
+	err := setupMeterProvider(t.Context(), resource.Default())
 
 	require.NoError(t, err)
 	assert.Nil(t, meterProvider, "no meter provider should be installed for OTEL_METRICS_EXPORTER=none")
@@ -344,7 +344,7 @@ func TestSetupLoggerProviderConsoleExporter(t *testing.T) {
 	restoreProviders(t)
 	loggerProvider = nil
 
-	err := setupLoggerProvider(context.Background(), resource.Default())
+	err := setupLoggerProvider(t.Context(), resource.Default())
 
 	require.NoError(t, err)
 	assert.NotNil(t, loggerProvider,
@@ -356,7 +356,7 @@ func TestSetupLoggerProviderNoneExporter(t *testing.T) {
 	restoreProviders(t)
 	loggerProvider = nil
 
-	err := setupLoggerProvider(context.Background(), resource.Default())
+	err := setupLoggerProvider(t.Context(), resource.Default())
 
 	require.NoError(t, err)
 	assert.Nil(t, loggerProvider, "no logger provider should be installed for OTEL_LOGS_EXPORTER=none")

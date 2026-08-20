@@ -75,7 +75,7 @@ func TestClientContextPropagation(t *testing.T) {
 		SpanID:     expectedSpanID,
 		TraceFlags: trace.FlagsSampled,
 	})
-	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+	ctx := trace.ContextWithSpanContext(t.Context(), sc)
 
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
@@ -130,7 +130,7 @@ func TestClientContextPropagationWithBaggage(t *testing.T) {
 		SpanID:     spanID,
 		TraceFlags: trace.FlagsSampled,
 	})
-	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+	ctx := trace.ContextWithSpanContext(t.Context(), sc)
 
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
@@ -171,7 +171,7 @@ func TestSpanParentChildRelationship(t *testing.T) {
 	defer ts.Close()
 
 	// Create parent span
-	ctx, parentSpan := tracer.Start(context.Background(), testParentSpanName)
+	ctx, parentSpan := tracer.Start(t.Context(), testParentSpanName)
 
 	// Create child span (simulating what instrumentation does)
 	ctx, childSpan := tracer.Start(ctx, testChildSpanName)

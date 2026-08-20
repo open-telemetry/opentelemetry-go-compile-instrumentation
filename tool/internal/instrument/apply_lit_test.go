@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"go/token"
 	"testing"
 
@@ -181,7 +180,7 @@ func TestApplyLitRule_SetsFieldOnEmptyLiteral(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	assert.Equal(t, [][2]string{{"Internal", "true"}}, litKeys(t, lit))
 }
@@ -192,7 +191,7 @@ func TestApplyLitRule_PreservesExistingElements(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	// The new field is prepended; the literal's own element is untouched.
 	assert.Equal(t, [][2]string{{"Internal", "true"}, {"MaxIdleConns", "100"}}, litKeys(t, lit))
@@ -204,7 +203,7 @@ func TestApplyLitRule_OverridesExistingFieldInPlace(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	// Overriding keeps the field where it was rather than moving it to the front.
 	assert.Equal(t, [][2]string{{"MaxIdleConns", "100"}, {"Internal", "true"}}, litKeys(t, lit))
@@ -219,7 +218,7 @@ func TestApplyLitRule_SetsMultipleFields(t *testing.T) {
 	)
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	assert.Equal(t, [][2]string{{"Internal", "true"}, {"MaxIdleConns", "50"}}, litKeys(t, lit))
 }
@@ -232,7 +231,7 @@ func TestApplyLitRule_SkipsPositionalLiteral(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	require.Len(t, lit.Elts, 1)
 	assert.IsType(t, &dst.BasicLit{}, lit.Elts[0])
@@ -249,7 +248,7 @@ func TestApplyLitRule_NoMatchIsNoOp(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	assert.Empty(t, lit.Elts)
 }
@@ -274,7 +273,7 @@ func TestApplyLitRule_WrapsExistingFieldValue(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }})"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	require.Len(t, lit.Elts, 1)
 	kv, ok := lit.Elts[0].(*dst.KeyValueExpr)
@@ -290,7 +289,7 @@ func TestApplyLitRule_WrapOnlySkipsAbsentField(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }})"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	assert.Empty(t, lit.Elts)
 }
@@ -305,7 +304,7 @@ func TestApplyLitRule_ValueFillsAbsentFieldAlongsideWrap(t *testing.T) {
 	})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	assert.Equal(t, [][2]string{{"Proxy", "defaultProxy"}}, litKeys(t, lit))
 }
@@ -320,7 +319,7 @@ func TestApplyLitRule_WrapTakesPrecedenceOverValueWhenPresent(t *testing.T) {
 	})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	require.Len(t, lit.Elts, 1)
 	kv, ok := lit.Elts[0].(*dst.KeyValueExpr)
@@ -344,7 +343,7 @@ func TestApplyLitRule_WrapInstrumentsNestedMatchedLiteral(t *testing.T) {
 	)
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	require.NoError(t, ip.applyLitRule(t.Context(), r, file))
 
 	// Read the literals back out of the file, not through the nodes handed in,
 	// so a nested literal detached from the tree cannot pass this test.
@@ -392,7 +391,7 @@ func TestApplyLitRule_InvalidWrapTemplate(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }}"})
 
 	ip := newTestPhase()
-	err := ip.applyLitRule(context.Background(), r, file)
+	err := ip.applyLitRule(t.Context(), r, file)
 	require.Error(t, err)
 }
 
@@ -401,7 +400,7 @@ func TestApplyLitRule_InvalidValueExpression(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "func("})
 
 	ip := newTestPhase()
-	err := ip.applyLitRule(context.Background(), r, file)
+	err := ip.applyLitRule(t.Context(), r, file)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse value")
 }

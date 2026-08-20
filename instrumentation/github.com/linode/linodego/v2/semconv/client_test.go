@@ -132,7 +132,7 @@ func TestMetricsRecord(t *testing.T) {
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
 
 	m := NewMetrics(mp.Meter("test"))
-	ctx := context.Background()
+	ctx := t.Context()
 	m.RecordOperationDuration(ctx, 0.12, "GetInstance", 200)
 
 	var rm metricdata.ResourceMetrics
@@ -171,7 +171,7 @@ func TestMetricAttributes_ModerateCardinality(t *testing.T) {
 func TestNewMetricsNilMeter(t *testing.T) {
 	m := NewMetrics(nil)
 	// Should not panic.
-	m.RecordOperationDuration(context.Background(), 1, "GetInstance", 0)
+	m.RecordOperationDuration(t.Context(), 1, "GetInstance", 0)
 }
 
 func attrsToMap(attrs []attribute.KeyValue) map[string]interface{} {

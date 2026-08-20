@@ -4,7 +4,6 @@
 package profile
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -226,7 +225,7 @@ func TestMerge(t *testing.T) {
 	pidFile := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
 	assertFileExists(t, pidFile)
 
-	if mergeErr := Merge(context.Background(), dir, []Type{typeHeap}); mergeErr != nil {
+	if mergeErr := Merge(t.Context(), dir, []Type{typeHeap}); mergeErr != nil {
 		t.Fatalf("Merge() error: %v", mergeErr)
 	}
 
@@ -242,7 +241,7 @@ func TestMergeTraceSkipped(t *testing.T) {
 
 	// typeTrace profiles cannot be merged, so Merge is a no-op for them and must not
 	// create a merged trace file.
-	if err := Merge(context.Background(), dir, []Type{typeTrace}); err != nil {
+	if err := Merge(t.Context(), dir, []Type{typeTrace}); err != nil {
 		t.Fatalf("Merge() error: %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "otelc-trace.pprof")); !os.IsNotExist(statErr) {
@@ -252,7 +251,7 @@ func TestMergeTraceSkipped(t *testing.T) {
 
 func TestMergeNoFiles(t *testing.T) {
 	// With no matching profile files present, Merge succeeds without writing anything.
-	if err := Merge(context.Background(), t.TempDir(), []Type{typeHeap, typeCPU}); err != nil {
+	if err := Merge(t.Context(), t.TempDir(), []Type{typeHeap, typeCPU}); err != nil {
 		t.Fatalf("Merge() error: %v", err)
 	}
 }
@@ -358,13 +357,13 @@ func TestWriteHeapProfileCreateError(t *testing.T) {
 func TestMergeTypeGlobError(t *testing.T) {
 	// An unclosed bracket in the directory name makes filepath.Glob fail.
 	dir := filepath.Join(t.TempDir(), "a[")
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeType(t.Context(), dir, typeCPU)
 	require.Error(t, err)
 }
 
 func TestMergeReturnsMergeError(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "a[")
-	err := Merge(context.Background(), dir, []Type{typeCPU})
+	err := Merge(t.Context(), dir, []Type{typeCPU})
 	require.Error(t, err)
 }
 
@@ -374,7 +373,7 @@ func TestMergeTypeCreateOutputError(t *testing.T) {
 	// The merged output path is blocked by a directory.
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "otelc-cpu.pprof"), 0o755))
 
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeType(t.Context(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create merged")
 }
@@ -393,7 +392,7 @@ func TestMergeTypeGoToolFailsWithStderr(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeType(t.Context(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge failed")
 }
@@ -412,7 +411,7 @@ func TestMergeTypeGoToolFailsWithoutStderr(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeType(t.Context(), dir, typeCPU)
 	require.Error(t, err)
 }
 
@@ -435,7 +434,7 @@ func TestMergeTypeGoToolNotFound(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "otelc-cpu-1.pprof"), []byte("data"), 0o644))
 	t.Setenv("PATH", "")
 
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeType(t.Context(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge cpu profiles")
 }

@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -583,6 +582,6 @@ func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 	// A package with no Go files has an empty package directory and must be
 	// skipped without error.
 	pkgs := []*packages.Package{{PkgPath: "example.com/empty"}}
-	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{})
+	err := sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{})
 	require.NoError(t, err)
 }
