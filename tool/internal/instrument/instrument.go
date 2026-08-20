@@ -49,8 +49,9 @@ func addRulesToMap[T rule.InstRule](
 	}
 }
 
-// applyOneRule applies a single rule to the target file and reports whether
-// the rule counts as a function rule (i.e. whether a globals file is needed).
+// applyOneRule applies a single rule to the target file and reports whether the
+// rule injected code that depends on the globals file (i.e. whether a globals
+// file is needed).
 func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (bool, error) {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
@@ -64,7 +65,7 @@ func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 	case *rule.InstCallRule:
 		return false, ip.applyCallRule(ctx, rt, root)
 	case *rule.InstDirectiveRule:
-		return true, ip.applyDirectiveRule(ctx, rt, root)
+		return ip.applyDirectiveRule(ctx, rt, root)
 	default:
 		util.ShouldNotReachHere()
 		return false, nil
