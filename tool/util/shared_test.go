@@ -4,7 +4,14 @@
 package util
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestVersionInRange(t *testing.T) {
@@ -164,4 +171,96 @@ func TestValidateVersionRange(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetOtelcWorkDir(t *testing.T) {
+	t.Run("uses OTELC_WORK_DIR when set", func(t *testing.T) {
+		t.Setenv(EnvOtelcWorkDir, "/tmp/otelc-work")
+		assert.Equal(t, "/tmp/otelc-work", GetOtelcWorkDir())
+	})
+	t.Run("falls back to cwd when unset", func(t *testing.T) {
+		t.Setenv(EnvOtelcWorkDir, "")
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		assert.Equal(t, cwd, GetOtelcWorkDir())
+	})
+}
+
+func TestGetBuildTempPaths(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(EnvOtelcWorkDir, workDir)
+
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir), GetBuildTempDir())
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "foo.txt"), GetBuildTemp("foo.txt"))
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "matched.json"), GetMatchedRuleFile())
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "added_imports.*.json"), GetAddedImportsPattern())
+
+	// The per-process import file embeds the current PID.
+	want := filepath.Join(workDir, BuildTempDir, fmt.Sprintf("added_imports.%d.json", os.Getpid()))
+	assert.Equal(t, want, GetAddedImportsFileForProcess())
+}
+
+func TestEncodeBuildFlagsEmpty(t *testing.T) {
+	assert.Empty(t, EncodeBuildFlags(nil))
+	assert.Empty(t, EncodeBuildFlags([]string{}))
+}
+
+func TestEncodeBuildFlagsRoundTrip(t *testing.T) {
+	flags := []string{"-tags", "foo bar", "-race"}
+	encoded := EncodeBuildFlags(flags)
+	assert.NotEmpty(t, encoded)
+	// The encoding must be valid JSON that preserves spaces in tokens.
+	assert.True(t, strings.HasPrefix(encoded, "["))
+	assert.Contains(t, encoded, "foo bar")
+}
+
+func TestDiscoverWorkDir(t *testing.T) {
+	newDir := func(t *testing.T, parts ...string) string {
+		t.Helper()
+		dir := filepath.Join(parts...)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	touch := func(t *testing.T, path string) {
+		t.Helper()
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("found in current directory", func(t *testing.T) {
+		module := newDir(t, t.TempDir(), "module")
+		newDir(t, module, BuildTempDir)
+		touch(t, filepath.Join(module, "go.mod"))
+
+		if got := DiscoverWorkDir(module); got != module {
+			t.Errorf("DiscoverWorkDir() = %q, want %q", got, module)
+		}
+	})
+
+	t.Run("found walking up from a subdirectory", func(t *testing.T) {
+		module := newDir(t, t.TempDir(), "module")
+		newDir(t, module, BuildTempDir)
+		touch(t, filepath.Join(module, "go.mod"))
+		sub := newDir(t, module, "internal", "app")
+
+		if got := DiscoverWorkDir(sub); got != module {
+			t.Errorf("DiscoverWorkDir() = %q, want %q", got, module)
+		}
+	})
+
+	t.Run("stops at go.mod when no work dir exists", func(t *testing.T) {
+		// .otelc-build exists above the module boundary and must not be found.
+		root := t.TempDir()
+		newDir(t, root, BuildTempDir)
+		module := newDir(t, root, "module")
+		touch(t, filepath.Join(module, "go.mod"))
+		sub := newDir(t, module, "internal")
+
+		if got := DiscoverWorkDir(sub); got != "" {
+			t.Errorf("DiscoverWorkDir() = %q, want empty", got)
+		}
+	})
 }
