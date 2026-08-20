@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package v1
+package v2
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
+	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v2/semconv"
 )
 
 // setupTestMeter wires the package-level tokenUsage histogram to a manual

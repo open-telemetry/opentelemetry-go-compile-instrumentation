@@ -223,7 +223,7 @@ func handleNonStreamingResponse(
 		return
 	}
 
-	var inputTokens, outputTokens int64
+	var inputTokens, outputTokens *int64
 	switch op {
 	case opChat:
 		inputTokens, outputTokens = parseChatResponse(bodyBytes, span)
@@ -236,9 +236,17 @@ func handleNonStreamingResponse(
 }
 
 // recordTokenUsage emits the gen_ai.client.token.usage histogram, once per
-// token type that has a non-zero count. The base attributes are copied so the
-// gen_ai.token.type tag never mutates the caller's slice.
-func recordTokenUsage(ctx context.Context, baseAttrs []attribute.KeyValue, inputTokens, outputTokens int64) {
+// token type the response actually reported.
+//
+// A nil count means the provider reported nothing for that token type: either
+// the response carried no usage object, or the field does not exist for the
+// operation (embeddings have no completion_tokens). A reported zero is recorded
+// as a zero, so the data point count stays usable as "how many operations
+// reported usage" rather than collapsing absent and zero into the same result.
+//
+// The base attributes are copied so the gen_ai.token.type tag never mutates the
+// caller's slice.
+func recordTokenUsage(ctx context.Context, baseAttrs []attribute.KeyValue, inputTokens, outputTokens *int64) {
 	if tokenUsage == nil {
 		return
 	}
@@ -248,11 +256,11 @@ func recordTokenUsage(ctx context.Context, baseAttrs []attribute.KeyValue, input
 		attrs = append(attrs, semconv.GenAITokenType(tokenType))
 		tokenUsage.Record(ctx, tokens, metric.WithAttributes(attrs...))
 	}
-	if inputTokens > 0 {
-		record(inputTokens, "input")
+	if inputTokens != nil {
+		record(*inputTokens, "input")
 	}
-	if outputTokens > 0 {
-		record(outputTokens, "output")
+	if outputTokens != nil {
+		record(*outputTokens, "output")
 	}
 }
 
@@ -324,21 +332,24 @@ func parseEmbeddingRequest(body []byte) (string, []attribute.KeyValue) {
 
 // parseChatResponse sets response attributes on the span and returns the
 // input and output token counts for metric recording.
-func parseChatResponse(body []byte, span trace.Span) (int64, int64) {
+func parseChatResponse(body []byte, span trace.Span) (*int64, *int64) {
 	var resp struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
-		Usage struct {
+		// Pointer so an absent usage object is distinguishable from one
+		// reporting genuine zeros; the metric records the latter but not the
+		// former.
+		Usage *struct {
 			PromptTokens     int64 `json:"prompt_tokens"`
 			CompletionTokens int64 `json:"completion_tokens"`
 			TotalTokens      int64 `json:"total_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return 0, 0
+		return nil, nil
 	}
 
 	var reasons []string
@@ -348,34 +359,44 @@ func parseChatResponse(body []byte, span trace.Span) (int64, int64) {
 		}
 	}
 
+	var input, output, total int64
+	if resp.Usage != nil {
+		input, output, total = resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens
+	}
 	span.SetAttributes(
 		semconv.GenAIResponseID(resp.ID),
 		semconv.GenAIResponseModel(resp.Model),
 		semconv.GenAIResponseFinishReasons(reasons),
-		semconv.GenAIUsageInputTokens(resp.Usage.PromptTokens),
-		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		semconv.GenAIUsageInputTokens(input),
+		semconv.GenAIUsageOutputTokens(output),
+		semconv.GenAIUsageTotalTokens(total),
 	)
-	return resp.Usage.PromptTokens, resp.Usage.CompletionTokens
+	if resp.Usage == nil {
+		return nil, nil
+	}
+	return &input, &output
 }
 
 // parseCompletionResponse sets response attributes on the span and returns the
 // input and output token counts for metric recording.
-func parseCompletionResponse(body []byte, span trace.Span) (int64, int64) {
+func parseCompletionResponse(body []byte, span trace.Span) (*int64, *int64) {
 	var resp struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
-		Usage struct {
+		// Pointer so an absent usage object is distinguishable from one
+		// reporting genuine zeros; the metric records the latter but not the
+		// former.
+		Usage *struct {
 			PromptTokens     int64 `json:"prompt_tokens"`
 			CompletionTokens int64 `json:"completion_tokens"`
 			TotalTokens      int64 `json:"total_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return 0, 0
+		return nil, nil
 	}
 
 	var reasons []string
@@ -385,35 +406,51 @@ func parseCompletionResponse(body []byte, span trace.Span) (int64, int64) {
 		}
 	}
 
+	var input, output, total int64
+	if resp.Usage != nil {
+		input, output, total = resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens
+	}
 	span.SetAttributes(
 		semconv.GenAIResponseID(resp.ID),
 		semconv.GenAIResponseModel(resp.Model),
 		semconv.GenAIResponseFinishReasons(reasons),
-		semconv.GenAIUsageInputTokens(resp.Usage.PromptTokens),
-		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		semconv.GenAIUsageInputTokens(input),
+		semconv.GenAIUsageOutputTokens(output),
+		semconv.GenAIUsageTotalTokens(total),
 	)
-	return resp.Usage.PromptTokens, resp.Usage.CompletionTokens
+	if resp.Usage == nil {
+		return nil, nil
+	}
+	return &input, &output
 }
 
 // parseEmbeddingResponse sets response attributes on the span and returns the
 // input token count; embeddings have no output tokens.
-func parseEmbeddingResponse(body []byte, span trace.Span) (int64, int64) {
+func parseEmbeddingResponse(body []byte, span trace.Span) (*int64, *int64) {
 	var resp struct {
 		Model string `json:"model"`
-		Usage struct {
+		Usage *struct {
 			PromptTokens int64 `json:"prompt_tokens"`
 			TotalTokens  int64 `json:"total_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return 0, 0
+		return nil, nil
 	}
 
+	var input, total int64
+	if resp.Usage != nil {
+		input, total = resp.Usage.PromptTokens, resp.Usage.TotalTokens
+	}
 	span.SetAttributes(
 		semconv.GenAIResponseModel(resp.Model),
-		semconv.GenAIUsageInputTokens(resp.Usage.PromptTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		semconv.GenAIUsageInputTokens(input),
+		semconv.GenAIUsageTotalTokens(total),
 	)
-	return resp.Usage.PromptTokens, 0
+	if resp.Usage == nil {
+		return nil, nil
+	}
+	// The embeddings response has no completion_tokens field at all, so the
+	// output side is reported as absent rather than as a zero.
+	return &input, nil
 }
