@@ -40,6 +40,15 @@ var (
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator
 	initOnce   sync.Once
+
+	// asyncCompletionWrapped tracks which *kafka.Writer instances already have
+	// a logging wrapper installed on Completion (see ensureAsyncFailureLogging),
+	// so a writer reused across many WriteMessages calls is only wrapped once.
+	// Entries are keyed by the writer's own pointer and are never removed, but
+	// kafka.Writer values are conventionally constructed once per process and
+	// reused for its lifetime, not created per call, so this stays bounded by
+	// the number of distinct writers an application creates, not by traffic.
+	asyncCompletionWrapped sync.Map //nolint:gochecknoglobals // per-writer wrap tracking, see comment above
 )
 
 func initInstrumentation() {
@@ -75,6 +84,16 @@ func BeforeWriteMessages(
 	}
 	initInstrumentation()
 
+	if w.Async {
+		// WriteMessages returns as soon as messages are enqueued, before the
+		// broker write happens, so any failure only ever reaches the caller
+		// through Completion — long after the spans below have already been
+		// ended by AfterWriteMessages. Without this, such failures are
+		// completely invisible: not on the span, not anywhere. Wrapping
+		// Completion at least surfaces them in the logs.
+		ensureAsyncFailureLogging(w)
+	}
+
 	endpoint := ""
 	if w.Addr != nil {
 		endpoint = w.Addr.String()
@@ -92,6 +111,7 @@ func BeforeWriteMessages(
 			Operation:       semconv.KafkaOperationSend,
 			MessageKey:      semconv.KafkaMessageKey(msgs[i].Key),
 			MessageBodySize: len(msgs[i].Value),
+			Async:           w.Async,
 		}
 		msgCtx, span := tracer.Start(ctx, topic+" send",
 			trace.WithSpanKind(trace.SpanKindProducer),
@@ -106,12 +126,51 @@ func BeforeWriteMessages(
 	ictx.SetData(spans)
 }
 
+// ensureAsyncFailureLogging installs a wrapper around w.Completion, preserving
+// any callback the caller already configured, so that write failures reported
+// asynchronously for an Async writer are at least logged. It runs at most once
+// per *kafka.Writer (see asyncCompletionWrapped).
+//
+// This does not attempt to correlate a failure back to the specific span(s)
+// for the affected message(s): by the time Completion fires, those spans have
+// already been ended by AfterWriteMessages (WriteMessages returns before the
+// broker write happens for an Async writer, so there is no later hook to defer
+// span-ending to). Reliable correlation would require either depending on a
+// configured propagator (silently finding nothing when one isn't set, which is
+// the OTel default) or attaching a tracking header to every outgoing message
+// that would then be visible to real Kafka consumers — both worse than not
+// correlating. Logging the failure is the honest, dependency-free improvement
+// over the previous behavior, where such failures were entirely invisible.
+func ensureAsyncFailureLogging(w *kafka.Writer) {
+	if _, alreadyWrapped := asyncCompletionWrapped.LoadOrStore(w, struct{}{}); alreadyWrapped {
+		return
+	}
+	original := w.Completion
+	w.Completion = func(msgs []kafka.Message, err error) {
+		if err != nil {
+			//nolint:sloglint // matches the existing package-level logger usage in this file
+			logger.Error("kafka async write failed after WriteMessages returned; "+
+				"the producer span(s) for the affected message(s) were already ended without this outcome",
+				"error", err, "messageCount", len(msgs))
+		}
+		if original != nil {
+			original(msgs, err)
+		}
+	}
+}
+
 // AfterWriteMessages finalizes the producer spans created by BeforeWriteMessages.
 //
 // kafka.WriteMessages may return kafka.WriteErrors — a []error aligned with
 // the message slice — to indicate partial success. When that happens, only the
 // spans for messages whose entry is non-nil are marked as Error; the rest stay
 // Ok. For any other error type, the error is applied to every span.
+//
+// For an Async writer, a nil err here only means the messages were handed off
+// to the client library, not that the broker write succeeded: WriteMessages
+// returns before that happens. These spans are marked via the
+// messaging.kafka.async attribute (set in BeforeWriteMessages) so their
+// duration and Unset/Ok status aren't misread as confirmed delivery.
 func AfterWriteMessages(ictx hook.HookContext, err error) {
 	spans, ok := ictx.GetData().([]trace.Span)
 	if !ok {
