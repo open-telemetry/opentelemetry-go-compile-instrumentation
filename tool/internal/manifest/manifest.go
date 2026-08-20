@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/data"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // Entry describes a distinct instrumentation module, target package, and
@@ -119,7 +120,7 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			}
 			return nil
 		}
-		if !isRuleFile(d.Name()) {
+		if !util.IsRuleFileName(d.Name()) {
 			return nil
 		}
 
@@ -147,11 +148,4 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		return nil, ex.Wrapf(err, "loading rules for module %s", modulePath)
 	}
 	return entries, nil
-}
-
-func isRuleFile(name string) bool {
-	return name == "otelc.yml" ||
-		name == "otelc.yaml" ||
-		strings.HasSuffix(name, ".otelc.yml") ||
-		strings.HasSuffix(name, ".otelc.yaml")
 }

@@ -99,15 +99,6 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 	return rules, nil
 }
 
-// isRuleFile checks if the given file name matches the following patterns:
-// otelc.yml, otelc.yaml, *.otelc.yml, *.otelc.yaml
-func isRuleFile(name string) bool {
-	return (name == "otelc.yml" ||
-		name == "otelc.yaml" ||
-		strings.HasSuffix(name, ".otelc.yml") ||
-		strings.HasSuffix(name, ".otelc.yaml"))
-}
-
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
@@ -415,7 +406,7 @@ func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 			return filepath.SkipDir
 		}
 
-		if !d.IsDir() && isRuleFile(d.Name()) {
+		if !d.IsDir() && util.IsRuleFileName(d.Name()) {
 			filesToProcess = append(filesToProcess, p)
 		}
 

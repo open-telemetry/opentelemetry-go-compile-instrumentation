@@ -126,26 +126,6 @@ func TestLoadModuleEntriesRejectsEscapingRuleSymlink(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestIsRuleFile(t *testing.T) {
-	tests := map[string]bool{
-		"otelc.yaml":        true,
-		"otelc.yml":         true,
-		"client.otelc.yaml": true,
-		"server.otelc.yml":  true,
-		"rules.yaml":        false,
-		"otelc.client.yaml": false,
-		"otelc":             false,
-		"otelc.txt":         false,
-		"otelc.yaml.bak":    false,
-	}
-
-	for filename, expected := range tests {
-		t.Run(filename, func(t *testing.T) {
-			assert.Equal(t, expected, isRuleFile(filename))
-		})
-	}
-}
-
 func TestLoad(t *testing.T) {
 	got, err := Load()
 	require.NoError(t, err)
