@@ -20,41 +20,135 @@ func TestHTTPServerDBClient(t *testing.T) {
 	t.Parallel()
 	testutil.Build(t, "", "httpserverdbclient", "go", "build", "-a")
 
-	f := testutil.NewTestFixture(t)
-	frontPort := testutil.FreePort(t)
+	t.Run("QueryContext", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		frontPort := testutil.FreePort(t)
 
-	f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", frontPort))
-	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
+		f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", frontPort))
+		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
 
-	// Send request to frontend
-	url := fmt.Sprintf("http://127.0.0.1:%d/hello", frontPort)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
-	require.NoError(t, err)
+		// Send request to frontend
+		url := fmt.Sprintf("http://127.0.0.1:%d/hello", frontPort)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		require.NoError(t, err)
 
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	// Wait for the spans to be flushed
-	f.WaitForSpans(2)
+		// Wait for the spans to be flushed
+		f.WaitForSpans(2)
 
-	// We expect exactly 1 trace with 2 spans:
-	// 1. HTTP server (Frontend)
-	// 2. SQL client (Frontend -> Database)
-	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(2)
+		// We expect exactly 1 trace with 2 spans:
+		// 1. HTTP server (Frontend)
+		// 2. SQL client (Frontend -> Database)
+		f.RequireTraceCount(1)
+		f.RequireSpansPerTrace(2)
 
-	httpServerSpan := testutil.RequireSpan(
-		t,
-		f.Traces(),
-		testutil.IsServer,
-		func(s ptrace.Span) bool { return s.Name() == "GET /hello" },
-	)
-	sqlClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
+		httpServerSpan := testutil.RequireSpan(
+			t,
+			f.Traces(),
+			testutil.IsServer,
+			func(s ptrace.Span) bool { return s.Name() == "GET /hello" },
+		)
+		sqlClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
 
-	// Assert on propagation (parent-child relationships)
-	require.Equal(t, httpServerSpan.TraceID(), sqlClientSpan.TraceID(), "trace ID mismatch")
-	require.Equal(t, httpServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be HTTP server")
-	require.True(t, httpServerSpan.ParentSpanID().IsEmpty(), "HTTP server span must be the trace root")
+		// Assert on propagation (parent-child relationships)
+		require.Equal(t, httpServerSpan.TraceID(), sqlClientSpan.TraceID(), "trace ID mismatch")
+		require.Equal(t, httpServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be HTTP server")
+		require.True(t, httpServerSpan.ParentSpanID().IsEmpty(), "HTTP server span must be the trace root")
+	})
+
+	t.Run("TransactionCommit", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		frontPort := testutil.FreePort(t)
+
+		f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", frontPort))
+		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
+
+		url := fmt.Sprintf("http://127.0.0.1:%d/tx", frontPort)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		require.NoError(t, err)
+
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// 4 spans: GET /tx, START TRANSACTION, INSERT, COMMIT
+		f.WaitForSpans(4)
+		f.RequireTraceCount(1)
+		f.RequireSpansPerTrace(4)
+
+		httpServerSpan := testutil.RequireSpan(
+			t,
+			f.Traces(),
+			testutil.IsServer,
+			func(s ptrace.Span) bool { return s.Name() == "GET /tx" },
+		)
+
+		for _, op := range []string{"START", "INSERT", "COMMIT"} {
+			span := testutil.RequireSpan(
+				t,
+				f.Traces(),
+				testutil.IsClient,
+				testutil.HasAttribute("db.operation.name", op),
+			)
+			require.Equal(t, httpServerSpan.TraceID(), span.TraceID(), "%s span must share the HTTP server's trace", op)
+			require.Equal(
+				t,
+				httpServerSpan.SpanID(),
+				span.ParentSpanID(),
+				"%s span parent must be the HTTP server span",
+				op,
+			)
+		}
+	})
+
+	t.Run("TransactionRollback", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		frontPort := testutil.FreePort(t)
+
+		f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", frontPort))
+		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
+
+		url := fmt.Sprintf("http://127.0.0.1:%d/tx?rollback=true", frontPort)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		require.NoError(t, err)
+
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+		// 4 spans: GET /tx, START TRANSACTION, FAIL_INSERT, ROLLBACK
+		f.WaitForSpans(4)
+		f.RequireTraceCount(1)
+		f.RequireSpansPerTrace(4)
+
+		httpServerSpan := testutil.RequireSpan(
+			t,
+			f.Traces(),
+			testutil.IsServer,
+			func(s ptrace.Span) bool { return s.Name() == "GET /tx" },
+		)
+
+		for _, op := range []string{"START", "FAIL_INSERT", "ROLLBACK"} {
+			span := testutil.RequireSpan(
+				t,
+				f.Traces(),
+				testutil.IsClient,
+				testutil.HasAttribute("db.operation.name", op),
+			)
+			require.Equal(t, httpServerSpan.TraceID(), span.TraceID(), "%s span must share the HTTP server's trace", op)
+			require.Equal(
+				t,
+				httpServerSpan.SpanID(),
+				span.ParentSpanID(),
+				"%s span parent must be the HTTP server span",
+				op,
+			)
+		}
+	})
 }

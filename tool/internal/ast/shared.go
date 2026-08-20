@@ -331,7 +331,33 @@ func FindStructType(root *dst.File, name string) *dst.StructType {
 
 // AddStructField appends a field named name of type t to the given struct.
 func AddStructField(st *dst.StructType, name, t string) {
+	if expr := parseTypeExpr(t); expr != nil {
+		st.Fields.List = append(st.Fields.List, Field(name, expr))
+		return
+	}
 	st.Fields.List = append(st.Fields.List, Field(name, Ident(t)))
+}
+
+func parseTypeExpr(t string) dst.Expr {
+	snippet := "package main\ntype _ struct { X " + t + " }\n"
+	p := NewAstParser()
+	file, err := p.ParseSource(snippet)
+	if err != nil || len(file.Decls) == 0 {
+		return nil
+	}
+	gen, ok1 := file.Decls[0].(*dst.GenDecl)
+	if !ok1 || len(gen.Specs) == 0 {
+		return nil
+	}
+	ts, ok2 := gen.Specs[0].(*dst.TypeSpec)
+	if !ok2 {
+		return nil
+	}
+	s, ok3 := ts.Type.(*dst.StructType)
+	if !ok3 || len(s.Fields.List) == 0 {
+		return nil
+	}
+	return s.Fields.List[0].Type
 }
 
 // funcDeclMatchesFilters reports whether funcDecl satisfies all signature

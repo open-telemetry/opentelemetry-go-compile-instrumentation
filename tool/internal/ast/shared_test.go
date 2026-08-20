@@ -742,13 +742,22 @@ type S struct {
 	require.NotNil(t, st)
 
 	AddStructField(st, "B", "string")
+	AddStructField(st, "Ctx", "context.Context")
 
-	// The struct now has two fields, the new one named B of type string.
-	require.Len(t, st.Fields.List, 2)
+	// The struct now has three fields.
+	require.Len(t, st.Fields.List, 3)
 	newField := st.Fields.List[1]
 	require.Len(t, newField.Names, 1)
 	assert.Equal(t, "B", newField.Names[0].Name)
 	assert.Equal(t, "string", newField.Type.(*dst.Ident).Name)
+
+	ctxField := st.Fields.List[2]
+	require.Len(t, ctxField.Names, 1)
+	assert.Equal(t, "Ctx", ctxField.Names[0].Name)
+	selExpr, ok := ctxField.Type.(*dst.SelectorExpr)
+	require.True(t, ok)
+	assert.Equal(t, "context", selExpr.X.(*dst.Ident).Name)
+	assert.Equal(t, "Context", selExpr.Sel.Name)
 }
 
 func TestStripGenericTypes(t *testing.T) {

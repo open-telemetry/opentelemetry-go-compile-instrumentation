@@ -56,7 +56,7 @@ OTELC_REGISTRY_DIR = $(CURDIR)/schemas/otelc
 
 ##@ Tooling
 
-TOOLS := $(CURDIR)/.bin
+TOOLS := .bin
 
 # Tools built from .tools module
 $(TOOLS):
@@ -64,7 +64,7 @@ $(TOOLS):
 
 $(TOOLS)/%: $(TOOLS_DIR)/go.mod | $(TOOLS)
 	cd $(TOOLS_DIR) && \
-	GOWORK=off go build -o $@ $(PACKAGE)
+	GOWORK=off go build -o "$@" $(PACKAGE)
 
 CROSSLINK = $(TOOLS)/crosslink
 $(CROSSLINK): PACKAGE=go.opentelemetry.io/build-tools/crosslink
@@ -87,7 +87,7 @@ $(RATCHET): PACKAGE=github.com/sethvargo/ratchet
 
 BUNDLE = $(TOOLS)/bundle
 $(BUNDLE): | $(TOOLS)
-	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
+	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o "$@"
 
 EMBEDMD = $(TOOLS)/embedmd
 $(EMBEDMD): PACKAGE=github.com/campoy/embedmd
