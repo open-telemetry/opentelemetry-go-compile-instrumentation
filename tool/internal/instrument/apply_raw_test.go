@@ -286,7 +286,7 @@ func a() {
 }
 
 func TestInsertRawInvalidRegexPattern(t *testing.T) {
-	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
 
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", "package main\nfunc main() {}", parser.ParseComments)
@@ -309,4 +309,3 @@ func TestInsertRawInvalidRegexPattern(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid raw rule pattern")
 }
-
