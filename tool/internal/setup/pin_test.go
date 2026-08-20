@@ -829,7 +829,7 @@ go 1.25
 		0o644,
 	))
 
-	toolFile := filepath.Join(dir, ToolFileCanonical)
+	toolFile := filepath.Join(dir, toolFileCanonical)
 	writeToolFile(t, toolFile, "fmt")
 
 	opts := PinOptions{
@@ -876,7 +876,7 @@ go 1.25
 		0o644,
 	))
 
-	toolFile := filepath.Join(dir, ToolFileCanonical)
+	toolFile := filepath.Join(dir, toolFileCanonical)
 	writeToolFile(t, toolFile, "fmt")
 
 	opts := PinOptions{
