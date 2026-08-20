@@ -375,16 +375,18 @@ func TestWriteHeapProfileCreateError(t *testing.T) {
 	require.ErrorContains(t, err, "create heap profile")
 }
 
-func TestMergeTypeGlobError(t *testing.T) {
-	// An unclosed bracket in the directory name makes filepath.Glob fail.
-	dir := filepath.Join(t.TempDir(), "a[")
-	err := mergeType(context.Background(), dir, CPU)
+func TestMergeTypeReadDirError(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "not-a-dir")
+	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0o644))
+	err := mergeType(context.Background(), filePath, CPU)
 	require.Error(t, err)
+	require.ErrorContains(t, err, "read cpu profile directory")
 }
 
 func TestMergeReturnsMergeError(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "a[")
-	err := Merge(context.Background(), dir, []Type{CPU})
+	filePath := filepath.Join(t.TempDir(), "not-a-dir")
+	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0o644))
+	err := Merge(context.Background(), filePath, []Type{CPU})
 	require.Error(t, err)
 }
 

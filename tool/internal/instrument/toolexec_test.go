@@ -545,8 +545,9 @@ func TestCleanupImportTrackingFilesGlobError(t *testing.T) {
 func TestLoadAddedImportsGlobError(t *testing.T) {
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	t.Setenv(util.EnvOtelcWorkDir, filepath.Join(t.TempDir(), "bad[glob"))
-	_, err := loadAddedImports(ctx)
-	require.Error(t, err)
+	result, err := loadAddedImports(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, result)
 }
 
 func TestLoadAddedImportsReadError(t *testing.T) {
