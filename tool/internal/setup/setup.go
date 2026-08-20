@@ -286,6 +286,11 @@ func (sp *SetupPhase) generateRuntimePerPackage(
 	pkgs []*packages.Package,
 	matched []*rule.InstRuleSet,
 ) error {
+	importsMap, funcRules, err := collectRuntimeImports(matched)
+	if err != nil {
+		return err
+	}
+
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
@@ -294,7 +299,7 @@ func (sp *SetupPhase) generateRuntimePerPackage(
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, pkgDir, pkg.Name); err != nil {
+		if err = sp.addDeps(ctx, importsMap, funcRules, pkgDir, pkg.Name); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
@@ -404,13 +409,19 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
+	// Resolve rule import paths before generating otelc.runtime.go so add_file
+	// sources can be parsed for dependencies that must enter the build graph.
+	if err = resolveRulePaths(ctx, matched, moduleDirs); err != nil {
+		return ex.Wrapf(err, "resolving rule paths")
+	}
+
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, pkgs, matched); err != nil {
 		return err
 	}
 
 	// Write the matched ruleset to matched.json for further instrument phase
-	return sp.store(ctx, matched, moduleDirs)
+	return sp.store(ctx, matched)
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
