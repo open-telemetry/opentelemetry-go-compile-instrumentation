@@ -21,7 +21,7 @@ func TestIdent(t *testing.T) {
 func TestNil(t *testing.T) {
 	id := Nil()
 	require.NotNil(t, id)
-	assert.Equal(t, identNil, id.Name)
+	assert.Equal(t, IdentNil, id.Name)
 }
 
 func TestAddressOf(t *testing.T) {
@@ -34,7 +34,7 @@ func TestAddressOf(t *testing.T) {
 }
 
 func TestStringLit(t *testing.T) {
-	lit := stringLit("hello")
+	lit := StringLit("hello")
 	require.NotNil(t, lit)
 	assert.Equal(t, token.STRING, lit.Kind)
 	// Value must be a quoted Go string literal.
@@ -107,7 +107,7 @@ func TestIndexExpr(t *testing.T) {
 
 func TestIndexListExpr(t *testing.T) {
 	indices := []dst.Expr{Ident("T"), Ident("U")}
-	idx := indexListExpr(Ident("Generic"), indices)
+	idx := IndexListExpr(Ident("Generic"), indices)
 	require.NotNil(t, idx)
 	base, ok := idx.X.(*dst.Ident)
 	require.True(t, ok)
@@ -135,8 +135,8 @@ func TestParenExpr(t *testing.T) {
 }
 
 func TestBoolLiterals(t *testing.T) {
-	assert.Equal(t, identTrue, boolTrue().Value)
-	assert.Equal(t, identFalse, BoolFalse().Value)
+	assert.Equal(t, IdentTrue, BoolTrue().Value)
+	assert.Equal(t, IdentFalse, BoolFalse().Value)
 }
 
 func TestInterfaceType(t *testing.T) {
@@ -166,7 +166,7 @@ func TestEllipsis(t *testing.T) {
 func TestIfStmt(t *testing.T) {
 	body := Block(EmptyStmt())
 	elseBody := Block(EmptyStmt())
-	stmt := IfStmt(AssignStmt(Ident("a"), Ident("b")), boolTrue(), body, elseBody)
+	stmt := IfStmt(AssignStmt(Ident("a"), Ident("b")), BoolTrue(), body, elseBody)
 	require.NotNil(t, stmt)
 	assert.NotNil(t, stmt.Init)
 	assert.NotNil(t, stmt.Cond)
@@ -190,7 +190,7 @@ func TestIfNotNilStmt(t *testing.T) {
 		assert.Equal(t, "err", x.Name)
 		y, ok := cond.Y.(*dst.Ident)
 		require.True(t, ok)
-		assert.Equal(t, identNil, y.Name)
+		assert.Equal(t, IdentNil, y.Name)
 	})
 
 	t.Run("with else", func(t *testing.T) {

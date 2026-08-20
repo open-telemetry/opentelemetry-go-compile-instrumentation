@@ -703,7 +703,7 @@ func TestMakeAndIsUnusedIdent(t *testing.T) {
 }
 
 func TestIsStringLit(t *testing.T) {
-	lit := stringLit("hello")
+	lit := StringLit("hello")
 	assert.True(t, isStringLit(lit, "hello"))
 	assert.False(t, isStringLit(lit, "world"))
 
