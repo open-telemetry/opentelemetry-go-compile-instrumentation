@@ -112,7 +112,7 @@ func TestExtract_ClosesFileOnCopyError(t *testing.T) {
 
 	targetPath := filepath.Join(tmpDir, "rules.yaml")
 
-	// Build a tar header that promises more bytes than the tar stream
+	// build a tar header that promises more bytes than the tar stream
 	// actually contains, so io.CopyN fails partway through the copy.
 	var tarBuf bytes.Buffer
 	tw := tar.NewWriter(&tarBuf)

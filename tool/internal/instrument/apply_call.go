@@ -17,7 +17,7 @@ import (
 
 // applyCallRule transforms function calls at call sites by wrapping them with
 // instrumentation code according to the provided replacement template.
-func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
+func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
 	importAliases := ast.ImportAliasMap(root)
 
 	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
@@ -46,7 +46,7 @@ func (ip *InstrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
-func (*InstrumentPhase) applyCallReplace(
+func (*instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -105,7 +105,7 @@ func (*InstrumentPhase) applyCallReplace(
 	return true, nil
 }
 
-func (ip *InstrumentPhase) applyCallAppendArgs(
+func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,

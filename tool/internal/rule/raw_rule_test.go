@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestNewInstRawRule(t *testing.T) {
@@ -106,6 +107,24 @@ placement: after
 			yaml:    "target: main\n  bad: [unterminated",
 			wantErr: true,
 		},
+		{
+			name:   "valid raw with template tag",
+			ruleID: "templated-raw",
+			yaml: `
+target: main
+func: Bar
+raw: "println({{ .FuncArgument 0 }})"
+`,
+			check: func(t *testing.T, r *InstRawRule) {
+				assert.Equal(t, `println({{ .FuncArgument 0 }})`, r.Raw)
+			},
+		},
+		{
+			name:    "invalid template syntax in raw is rejected",
+			ruleID:  "bad-template-raw",
+			yaml:    "target: main\nfunc: Bar\nraw: \"println({{ FuncArgument 0 )\"",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -122,4 +141,72 @@ placement: after
 			}
 		})
 	}
+}
+
+func rawIdentity(t *testing.T, name string, flat map[string]any) string {
+	t.Helper()
+	data, err := yaml.Marshal(flat)
+	require.NoError(t, err)
+	r, err := NewInstRawRule(data, name)
+	require.NoError(t, err)
+	return r.Identity()
+}
+
+func TestInstRawRule_Identity(t *testing.T) {
+	base := func() map[string]any {
+		return map[string]any{"target": "main", "func": "Bar", "raw": `println("hi")`}
+	}
+
+	// De-duplication: identical content under different names is one identity.
+	dupA := base()
+	dupB := base()
+	assert.Equal(t, rawIdentity(t, "alpha", dupA), rawIdentity(t, "beta", dupB),
+		"identical rule content must share an identity regardless of name")
+
+	// Differing target yields a distinct identity.
+	diffTarget := base()
+	diffTarget["target"] = "github.com/example/lib"
+	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffTarget),
+		"rules differing only in target must have distinct identities")
+
+	// Differing version yields a distinct identity.
+	diffVersion := base()
+	diffVersion["version"] = "v1.0.0,v2.0.0"
+	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffVersion),
+		"rules differing only in version must have distinct identities")
+
+	// Differing func yields a distinct identity.
+	diffFunc := base()
+	diffFunc["func"] = "Baz"
+	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffFunc),
+		"rules differing only in func must have distinct identities")
+
+	// Differing recv yields a distinct identity.
+	diffRecv := base()
+	diffRecv["recv"] = "*Recv"
+	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffRecv),
+		"rules differing only in recv must have distinct identities")
+
+	// Differing raw yields a distinct identity.
+	diffRaw := base()
+	diffRaw["raw"] = `println("bye")`
+	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffRaw),
+		"rules differing only in raw must have distinct identities")
+
+	// The length-prefixed encoding must not let field boundaries shift: moving
+	// characters from func into recv (same concatenation, different split)
+	// must not collide.
+	shiftedA := map[string]any{"target": "main", "func": "Foo", "recv": "Bar", "raw": `println("hi")`}
+	shiftedB := map[string]any{"target": "main", "func": "FooB", "recv": "ar", "raw": `println("hi")`}
+	assert.NotEqual(t, rawIdentity(t, "r", shiftedA), rawIdentity(t, "r", shiftedB),
+		"field encoding must be unambiguous across a func/recv boundary shift")
+
+	// Pattern and placement do not affect identity: they govern where the
+	// same rendered code is inserted, not what the rule does or what names it
+	// generates.
+	diffPositional := base()
+	diffPositional["pattern"] = "^x := 1$"
+	diffPositional["placement"] = "after"
+	assert.Equal(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffPositional),
+		"rules differing only in pattern/placement must share an identity")
 }

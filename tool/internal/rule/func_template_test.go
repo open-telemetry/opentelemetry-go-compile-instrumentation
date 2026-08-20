@@ -12,7 +12,7 @@ import (
 )
 
 // executeTestData is a minimal template data value used to exercise
-// DirectiveTemplate.Execute directly, without depending on the instrument
+// FuncTemplate.Execute directly, without depending on the instrument
 // package's funcTemplateData.
 type executeTestData struct {
 	Name string
@@ -22,8 +22,8 @@ func (d executeTestData) Fail() (string, error) {
 	return "", errors.New("boom")
 }
 
-func TestDirectiveTemplate_Execute(t *testing.T) {
-	tmpl, err := ParseDirectiveTemplate("hello {{.Name}}")
+func TestFuncTemplate_Execute(t *testing.T) {
+	tmpl, err := ParseFuncTemplate("hello {{.Name}}")
 	require.NoError(t, err)
 
 	result, err := tmpl.Execute(executeTestData{Name: "world"})
@@ -32,11 +32,11 @@ func TestDirectiveTemplate_Execute(t *testing.T) {
 	assert.Equal(t, "hello world", result)
 }
 
-// TestDirectiveTemplate_ExecuteError exercises the branch where the
+// TestFuncTemplate_ExecuteError exercises the branch where the
 // underlying text/template execution fails (here, a data method returning a
 // non-nil error), verifying Execute wraps and surfaces that error.
-func TestDirectiveTemplate_ExecuteError(t *testing.T) {
-	tmpl, err := ParseDirectiveTemplate("{{.Fail}}")
+func TestFuncTemplate_ExecuteError(t *testing.T) {
+	tmpl, err := ParseFuncTemplate("{{.Fail}}")
 	require.NoError(t, err)
 
 	_, err = tmpl.Execute(executeTestData{})
