@@ -203,16 +203,16 @@ type genHookContext struct {
 func (c *genHookContext) SetParam(idx int, val any) {
 	if idx == 0 {
 		if val == nil {
-			*(c.params[0].(*int)) = 0
+			*c.params[0].(*int) = 0
 		} else {
-			*(c.params[0].(*int)) = val.(int)
+			*c.params[0].(*int) = val.(int)
 		}
 	}
 }
 
 func (c *genHookContext) GetParam(idx int) any {
 	if idx == 0 {
-		return *(c.params[0].(*int))
+		return *c.params[0].(*int)
 	}
 	return nil
 }
@@ -220,16 +220,16 @@ func (c *genHookContext) GetParam(idx int) any {
 func (c *genHookContext) SetReturnVal(idx int, val any) {
 	if idx == 0 {
 		if val == nil {
-			*(c.returnVals[0].(*error)) = nil
+			*c.returnVals[0].(*error) = nil
 		} else {
-			*(c.returnVals[0].(*error)) = val.(error)
+			*c.returnVals[0].(*error) = val.(error)
 		}
 	}
 }
 
 func (c *genHookContext) GetReturnVal(idx int) any {
 	if idx == 0 {
-		return *(c.returnVals[0].(*error))
+		return *c.returnVals[0].(*error)
 	}
 	return nil
 }
