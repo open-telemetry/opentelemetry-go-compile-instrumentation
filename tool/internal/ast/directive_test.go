@@ -150,6 +150,48 @@ func TestScanArgs(t *testing.T) {
 				{Key: "key", Value: ""},
 			},
 		},
+		{
+			name:     "empty key rejected",
+			input:    ":value",
+			hasError: true,
+		},
+		{
+			name:     "colon inside a fully quoted token is not a separator",
+			input:    `"key:value"`,
+			hasError: true,
+		},
+		{
+			name:     "quoted key rejected",
+			input:    `"k":v`,
+			hasError: true,
+		},
+		{
+			name:     "escaped quote inside quoted key does not end the quote early",
+			input:    `"a\"b":value`,
+			hasError: true,
+		},
+		{
+			name:  "quoted value containing colon",
+			input: `url:"https://example.com/path"`,
+			expected: []DirectiveArg{
+				{Key: "url", Value: "https://example.com/path"},
+			},
+		},
+		{
+			name:  "bare value containing colon splits at first colon only",
+			input: "key:a:b:c",
+			expected: []DirectiveArg{
+				{Key: "key", Value: "a:b:c"},
+			},
+		},
+		{
+			name:  "multiple args one with quoted colon value",
+			input: `op:"http:post" tag:foo`,
+			expected: []DirectiveArg{
+				{Key: "op", Value: "http:post"},
+				{Key: "tag", Value: "foo"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
