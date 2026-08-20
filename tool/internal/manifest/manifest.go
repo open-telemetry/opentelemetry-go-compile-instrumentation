@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -132,12 +133,13 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		if unmarshalErr := yaml.Unmarshal(content, &rules); unmarshalErr != nil {
 			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
 		}
-		for _, rule := range rules {
+		for _, name := range slices.Sorted(maps.Keys(rules)) {
+			rule := rules[name]
+			if validateErr := util.ValidateVersionRange(rule.VersionRange); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
+			}
 			if rule.Target == "" {
 				continue
-			}
-			if validateErr := util.ValidateVersionRange(rule.VersionRange); validateErr != nil {
-				return ex.Wrapf(validateErr, "validating version in rule file %s", path)
 			}
 			entries = append(entries, Entry{
 				ModulePath:   modulePath,
