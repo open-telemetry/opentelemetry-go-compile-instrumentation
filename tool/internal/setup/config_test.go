@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dave/dst"
 	"github.com/stretchr/testify/require"
 )
 
@@ -805,4 +807,34 @@ func TestWalkInstrumentation_LoadsModulesWithoutBuildableFiles(t *testing.T) {
 		},
 		visits,
 	)
+}
+
+func TestFindToolFilesBothExist(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, ToolFileCanonical), []byte("package main"), 0o644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(dir, ToolFileAlias), []byte("package main"), 0o644)
+	require.NoError(t, err)
+
+	_, err = findToolFiles(map[string]bool{dir: true})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "only one instrumentation config file")
+}
+
+func TestCollectImports_UnquoteError(t *testing.T) {
+	f := &dst.File{Imports: []*dst.ImportSpec{
+		{Name: &dst.Ident{Name: "_"}, Path: &dst.BasicLit{Value: `"badpath`}},
+	}}
+
+	_, err := collectImports("tool.go", f, map[string]bool{})
+	require.Error(t, err)
+}
+
+func TestWalkInstrumentationParseError(t *testing.T) {
+	err := walkInstrumentation(
+		context.Background(),
+		[]string{filepath.Join(t.TempDir(), "nope.go")},
+		func(v *InstrumentationVisit) (bool, error) { return false, nil },
+	)
+	require.Error(t, err)
 }

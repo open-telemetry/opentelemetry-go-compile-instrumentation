@@ -490,3 +490,25 @@ func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestStateManagerDiscard(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	s := NewStateManager()
+
+	// Track a non-existent path so Commit writes a manifest, then Discard must
+	// remove the manifest and the snapshot directory.
+	require.NoError(t, s.Track(util.GetBuildTemp("ghost.txt")))
+	require.FileExists(t, util.GetBuildTemp(stateFileName))
+
+	require.NoError(t, s.Discard())
+
+	_, err := os.Stat(util.GetBuildTemp(stateFileName))
+	assert.True(t, os.IsNotExist(err), "manifest must be removed")
+}
+
+func TestStateManagerDiscardEmpty(t *testing.T) {
+	// Discarding an empty state manager is a no-op.
+	require.NoError(t, NewStateManager().Discard())
+}

@@ -334,3 +334,28 @@ func a() {
 		})
 	}
 }
+
+func TestInsertRawInvalidRegexPattern(t *testing.T) {
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", "package main\nfunc main() {}", parser.ParseComments)
+	require.NoError(t, err)
+
+	dec := decorator.NewDecorator(fset)
+	dstFile, err := dec.DecorateFile(f)
+	require.NoError(t, err)
+
+	fn := dstFile.Decls[0].(*dst.FuncDecl)
+
+	rawRule := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "invalid-regex"},
+		Func:         "main",
+		Raw:          `println("test")`,
+		Pattern:      `[unclosed-bracket`,
+	}
+
+	err = insertRaw(ctx, rawRule, fn, dstFile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid raw rule pattern")
+}

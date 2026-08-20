@@ -6,6 +6,7 @@ package ast
 import (
 	"errors"
 	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,13 +15,90 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestParseSnippet(t *testing.T) {
+	p := NewAstParser()
+
+	t.Run("parses statements", func(t *testing.T) {
+		stmts, err := p.ParseSnippet("x := 1; y := x + 2")
+		require.NoError(t, err)
+		assert.Len(t, stmts, 2)
+	})
+
+	t.Run("rejects empty source", func(t *testing.T) {
+		_, err := p.ParseSnippet("")
+		require.Error(t, err)
+	})
+
+	t.Run("rejects invalid source", func(t *testing.T) {
+		_, err := p.ParseSnippet("this is not go")
+		require.Error(t, err)
+	})
+}
+
+func TestFindPosition(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Foo() {}\n")
+	require.NoError(t, err)
+
+	t.Run("known node has a valid position", func(t *testing.T) {
+		fn := FindFuncDeclWithoutRecv(file, "Foo")
+		require.NotNil(t, fn)
+		pos := p.FindPosition(fn)
+		assert.Positive(t, pos.Line)
+	})
+
+	t.Run("unknown node returns invalid position", func(t *testing.T) {
+		// A node the decorator never saw maps to no AST node.
+		pos := p.FindPosition(Ident("orphan"))
+		assert.Equal(t, token.Position{}, pos)
+		assert.False(t, pos.IsValid())
+	})
+}
+
+func TestWriteFile(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Foo() {}\n")
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "out.go")
+	require.NoError(t, WriteFile(out, file))
+
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "package main")
+	assert.Contains(t, string(data), "func Foo()")
+}
+
+func TestWriteFileReturnsErrorForBadPath(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n")
+	require.NoError(t, err)
+
+	// A path inside a nonexistent directory cannot be created.
+	bad := filepath.Join(t.TempDir(), "missing-dir", "out.go")
+	require.Error(t, WriteFile(bad, file))
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Bar() {}\n")
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "atomic.go")
+	require.NoError(t, WriteFileAtomic(out, file))
+
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "func Bar()")
+}
+
 func TestParseAst(t *testing.T) {
-	_, err := ParseFile("ast_test.go")
+	_, err := ParseFile("parser_test.go")
 	require.NoError(t, err)
 }
 
 func TestParsePackageName(t *testing.T) {
-	name, err := ParsePackageName("ast_test.go")
+	name, err := ParsePackageName("parser_test.go")
 	require.NoError(t, err)
 	assert.Equal(t, "ast", name)
 }
@@ -62,7 +140,7 @@ func BenchmarkParsePackageName(b *testing.B) {
 }
 
 func TestWriteFile_Basic(t *testing.T) {
-	f, err := ParseFile("ast_test.go")
+	f, err := ParseFile("parser_test.go")
 	require.NoError(t, err)
 
 	tmpDir := t.TempDir()
@@ -76,7 +154,7 @@ func TestWriteFile_Basic(t *testing.T) {
 }
 
 func TestWriteFile_CreateError(t *testing.T) {
-	f, err := ParseFile("ast_test.go")
+	f, err := ParseFile("parser_test.go")
 	require.NoError(t, err)
 
 	err = WriteFile(filepath.Join(t.TempDir(), "nonexistent", "out.go"), f)
@@ -101,7 +179,7 @@ func (m *mockWriteCloser) Close() error {
 }
 
 func TestWriteFile_WriteError(t *testing.T) {
-	f, err := ParseFile("ast_test.go")
+	f, err := ParseFile("parser_test.go")
 	require.NoError(t, err)
 
 	mock := &mockWriteCloser{writeErr: errors.New("disk write error")}
@@ -111,7 +189,7 @@ func TestWriteFile_WriteError(t *testing.T) {
 }
 
 func TestWriteFile_CloseError(t *testing.T) {
-	f, err := ParseFile("ast_test.go")
+	f, err := ParseFile("parser_test.go")
 	require.NoError(t, err)
 
 	mock := &mockWriteCloser{closeErr: errors.New("flush close error")}
