@@ -4,9 +4,12 @@
 package instrument
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"go/token"
+	"maps"
+	"slices"
 	"strconv"
 
 	"github.com/dave/dst"
@@ -477,10 +480,16 @@ func findTargetResultType(targetFunc *dst.FuncDecl) *dst.FieldList {
 // func (c *Type1[K]) Target[V any]() V
 // ->
 // [K, V]
-func findTargetGenericType(file *dst.File, targetFunc *dst.FuncDecl) *dst.FieldList {
+func (ip *instrumentPhase) findTargetGenericType(
+	ctx context.Context,
+	targetFunc *dst.FuncDecl,
+) (*dst.FieldList, error) {
 	var trampolineTypeParams *dst.FieldList
 	if ast.HasReceiver(targetFunc) {
-		receiverTypeParams := extractReceiverTypeParams(file, targetFunc.Recv.List[0].Type)
+		receiverTypeParams, err := ip.extractReceiverTypeParams(ctx, targetFunc.Recv.List[0].Type)
+		if err != nil {
+			return nil, err
+		}
 		if receiverTypeParams != nil {
 			trampolineTypeParams = receiverTypeParams
 		}
@@ -500,20 +509,33 @@ func findTargetGenericType(file *dst.File, targetFunc *dst.FuncDecl) *dst.FieldL
 		clone := dst.Clone(trampolineTypeParams)
 		trampolineTypeParams = util.AssertType[*dst.FieldList](clone)
 	}
-	return trampolineTypeParams
+	return trampolineTypeParams, nil
 }
 
-func (ip *instrumentPhase) buildTrampSignature(before bool) {
+// buildTrampSignature assigns the trampoline function's parameter and type-
+// parameter lists. genericTypes is findTargetGenericType's result, resolved
+// once by the caller (createTrampoline) and passed in here rather than
+// re-resolved per call: recovering a cross-file constraint involves a
+// package search and import resolution, and createTrampoline calls this
+// twice (once for Before, once for After) -- re-deriving genericTypes each
+// time would repeat that work for a value that cannot have changed. It is
+// cloned before assignment since each trampoline FuncDecl needs to own an
+// independent copy of the type-parameter AST subtree.
+func (ip *instrumentPhase) buildTrampSignature(genericTypes *dst.FieldList, before bool) {
 	var fields *dst.FieldList
+	var typeParams *dst.FieldList
+	if genericTypes != nil {
+		typeParams = util.AssertType[*dst.FieldList](dst.Clone(genericTypes))
+	}
 	if before {
 		beforeTramp := ip.beforeTrampFunc
 		beforeTramp.Type.Params = findTargetParamType(ip.targetFunc)
-		beforeTramp.Type.TypeParams = findTargetGenericType(ip.target, ip.targetFunc)
+		beforeTramp.Type.TypeParams = typeParams
 		fields = beforeTramp.Type.Params
 	} else {
 		afterTramp := ip.afterTrampFunc
 		afterTramp.Type.Params = findTargetResultType(ip.targetFunc)
-		afterTramp.Type.TypeParams = findTargetGenericType(ip.target, ip.targetFunc)
+		afterTramp.Type.TypeParams = typeParams
 		fields = afterTramp.Type.Params
 	}
 	// All types should be replaced with dereferenced types, so that the trampoline
@@ -530,11 +552,21 @@ func (ip *instrumentPhase) buildTrampSignature(before bool) {
 	}
 }
 
-func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool) (*dst.FieldList, error) {
+// buildHookSignature builds the linked hook function's expected signature.
+// genericTypes is findTargetGenericType's result, resolved once by the
+// caller and passed in -- see buildTrampSignature's doc comment for why. It
+// is only read here (matched against field names via replaceTypeParamsWithAny)
+// and never assigned into paramTypes, so unlike buildTrampSignature it needs
+// no clone of its own.
+func (ip *instrumentPhase) buildHookSignature(
+	t *rule.InstFuncRule,
+	before bool,
+	genericTypes *dst.FieldList,
+) (*dst.FieldList, error) {
 	// TargetFunc: func A(a int, b string) (ret string)
 	// BeforeHook: func B(ctx *HookContext, a int, b string)
 	// AfterHook:  func C(ctx *HookContext, ret string)
-	var paramTypes, genericTypes *dst.FieldList
+	var paramTypes *dst.FieldList
 	if before {
 		paramTypes = findTargetParamType(ip.targetFunc)
 	} else {
@@ -543,7 +575,6 @@ func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool)
 	addHookContext(paramTypes)
 
 	// Replace type parameters with interface{}
-	genericTypes = findTargetGenericType(ip.target, ip.targetFunc)
 	for _, field := range paramTypes.List {
 		field.Type = replaceTypeParamsWithAny(field.Type, genericTypes)
 	}
@@ -747,47 +778,90 @@ func setReturnValClause(idx int, t dst.Expr) *dst.CaseClause {
 // extractReceiverTypeParams extracts type parameters from a receiver type expression
 // For example: *GenStruct[T] or GenStruct[T, U] -> FieldList with T and U as type parameters
 //
-// file is the source file the receiver was declared in. When it contains the
-// matching generic type declaration (e.g. type GenStruct[T comparable] struct{...}),
-// each parameter's real constraint is recovered from it instead of being widened to
-// any. Constraints are matched positionally against that declaration's own type
-// parameters, since a method receiver is free to use different names for them
-// (type GenStruct[T comparable] struct{} but func (s GenStruct[U]) M(v U) is valid
-// Go; U is still constrained by comparable). If no matching declaration is found in
-// file, the constraint falls back to any, as before.
-func extractReceiverTypeParams(file *dst.File, recvType dst.Expr) *dst.FieldList {
+// When the receiver's matching generic type declaration (e.g. type
+// GenStruct[T comparable] struct{...}) can be found -- in ip.target or, failing
+// that, anywhere else in the current package, see resolveGenericTypeDecl --
+// each parameter's real constraint is recovered from it instead of being
+// widened to any. Constraints are matched positionally against that
+// declaration's own type parameters, since a method receiver is free to use
+// different names for them (type GenStruct[T comparable] struct{} but func (s
+// GenStruct[U]) M(v U) is valid Go; U is still constrained by comparable). If
+// no matching declaration is found anywhere in the package, the constraint
+// falls back to any, as before.
+func (ip *instrumentPhase) extractReceiverTypeParams(ctx context.Context, recvType dst.Expr) (*dst.FieldList, error) {
 	switch t := recvType.(type) {
 	case *dst.StarExpr:
 		// *GenStruct[T] - recurse into X
-		return extractReceiverTypeParams(file, t.X)
+		return ip.extractReceiverTypeParams(ctx, t.X)
 	case *dst.IndexExpr:
 		// GenStruct[T] - single type parameter
 		if ident, ok := t.Index.(*dst.Ident); ok {
-			original := findGenericTypeDecl(file, receiverBaseTypeName(t.X))
-			return &dst.FieldList{
+			original, declFile := ip.resolveGenericTypeDecl(receiverBaseTypeName(t.X))
+			fields := &dst.FieldList{
 				List: []*dst.Field{{
 					Names: []*dst.Ident{ident},
 					Type:  receiverConstraintAt(original, 0),
 				}},
 			}
+			if err := ip.injectConstraintImports(ctx, declFile, fields); err != nil {
+				return nil, err
+			}
+			return fields, nil
 		}
 	case *dst.IndexListExpr:
 		// GenStruct[T, U, ...] - multiple type parameters
-		original := findGenericTypeDecl(file, receiverBaseTypeName(t.X))
-		fields := make([]*dst.Field, 0, len(t.Indices))
+		original, declFile := ip.resolveGenericTypeDecl(receiverBaseTypeName(t.X))
+		fieldList := make([]*dst.Field, 0, len(t.Indices))
 		for i, idx := range t.Indices {
 			if ident, ok := idx.(*dst.Ident); ok {
-				fields = append(fields, &dst.Field{
+				fieldList = append(fieldList, &dst.Field{
 					Names: []*dst.Ident{ident},
 					Type:  receiverConstraintAt(original, i),
 				})
 			}
 		}
-		if len(fields) > 0 {
-			return &dst.FieldList{List: fields}
+		if len(fieldList) > 0 {
+			fields := &dst.FieldList{List: fieldList}
+			if err := ip.injectConstraintImports(ctx, declFile, fields); err != nil {
+				return nil, err
+			}
+			return fields, nil
 		}
 	}
-	return nil
+	//nolint:nilnil // nil is returned when the receiver is not generic
+	return nil, nil
+}
+
+// resolveGenericTypeDecl looks up typeName's generic type declaration, first in
+// ip.target (the common case, and the fast path), then -- on a miss -- across
+// every other .go file of the current package, lazily parsed and cached on
+// ip.siblingASTs for the rest of this package's instrumentation. Returns the
+// recovered type-parameter list and the *dst.File it was found in (needed by
+// the caller to resolve any imports its constraints reference), or (nil, nil)
+// if typeName isn't declared anywhere in the package.
+func (ip *instrumentPhase) resolveGenericTypeDecl(typeName string) (*dst.FieldList, *dst.File) {
+	if original := findGenericTypeDecl(ip.target, typeName); original != nil {
+		return original, ip.target
+	}
+	if ip.siblingASTs == nil {
+		ip.siblingASTs = ip.loadSiblingASTs()
+	}
+	// Iterate in a deterministic order: only one file can validly declare a
+	// given type name (Go rejects redeclaration), so this can't change which
+	// declaration is found, but it keeps behavior reproducible across runs.
+	for _, path := range slices.Sorted(maps.Keys(ip.siblingASTs)) {
+		if path == ip.targetPath {
+			// Already checked above via ip.target itself -- its entry in the
+			// cache (if present) may even be a stale re-parse of the file as
+			// it looked before in-progress edits to ip.target, so it must be
+			// skipped here rather than consulted.
+			continue
+		}
+		if original := findGenericTypeDecl(ip.siblingASTs[path], typeName); original != nil {
+			return original, ip.siblingASTs[path]
+		}
+	}
+	return nil, nil
 }
 
 // receiverBaseTypeName returns the local identifier naming a receiver's generic
@@ -804,8 +878,8 @@ func receiverBaseTypeName(x dst.Expr) string {
 // findGenericTypeDecl searches file's top-level declarations for a generic type
 // declaration named typeName and returns its type parameter list (with each
 // parameter's real constraint, not any), or nil if no such declaration is found in
-// file. The declaration may live in a different file of the same package; that case
-// is not resolved today, so it falls through to the caller's any fallback.
+// file. This is the single-file search primitive; see resolveGenericTypeDecl for
+// the whole-package search that also checks other files of the same package.
 func findGenericTypeDecl(file *dst.File, typeName string) *dst.FieldList {
 	if file == nil || typeName == "" {
 		return nil
@@ -892,7 +966,12 @@ func rewriteReturnValMethods(targetFunc *dst.FuncDecl, methodSetRetVal, methodGe
 	}
 }
 
-func (ip *instrumentPhase) rewriteHookContextMethods() {
+// rewriteHookContextMethods rewrites the specialized HookContextImpl's
+// GetParam/SetParam/GetReturnVal/SetReturnVal methods. genericTypes is
+// findTargetGenericType's result, resolved once by the caller (see
+// buildTrampSignature's doc comment for why) -- this function only checks it
+// for nil, so it needs no clone of its own.
+func (ip *instrumentPhase) rewriteHookContextMethods(genericTypes *dst.FieldList) {
 	util.Assert(len(ip.hookCtxMethods) > 4, "sanity check")
 	var methodSetParam, methodGetParam, methodGetRetVal, methodSetRetVal *dst.FuncDecl
 	for _, decl := range ip.hookCtxMethods {
@@ -909,7 +988,7 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 	}
 
 	// For generic functions, we need to panic the methods that are not supported
-	if findTargetGenericType(ip.target, ip.targetFunc) != nil {
+	if genericTypes != nil {
 		makeMethodPanic(methodGetParam, "GetParam is unsupported for generic functions")
 		makeMethodPanic(methodGetRetVal, "GetReturnVal is unsupported for generic functions")
 		makeMethodPanic(methodSetParam, "SetParam is unsupported for generic functions")
@@ -1049,9 +1128,9 @@ func processFieldList(fields []*dst.Field, typeParams *dst.FieldList) []*dst.Fie
 	return result
 }
 
-func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
+func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool, genericTypes *dst.FieldList) error {
 	// Build hook function signature and check if it is correct
-	paramTypes, err := ip.buildHookSignature(t, before)
+	paramTypes, err := ip.buildHookSignature(t, before, genericTypes)
 	if err != nil {
 		return err
 	}
@@ -1074,7 +1153,7 @@ func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	return nil
 }
 
-func (ip *instrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
+func (ip *instrumentPhase) createTrampoline(ctx context.Context, t *rule.InstFuncRule) error {
 	// Ensure unsafe package is imported since we use //go:linkname directives
 	ip.ensureUnsafeImport()
 	// Materialize various declarations from template file, no one wants to see
@@ -1085,9 +1164,21 @@ func (ip *instrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
 	}
 	// Implement HookContext interface methods dynamically
 	ip.implementHookContext(t)
+
+	// Resolve the target's generic type parameters once, up front. This is
+	// the one place in this function that can trigger a cross-file search and
+	// import resolution (see findTargetGenericType -> extractReceiverTypeParams
+	// -> resolveGenericTypeDecl / injectConstraintImports); every consumer
+	// below is given the resolved value instead of re-deriving it, so that
+	// work happens once per rule rather than once per consumer.
+	genericTypes, err := ip.findTargetGenericType(ctx, ip.targetFunc)
+	if err != nil {
+		return err
+	}
+
 	// Make all HookContext methods type-aware according to the target function
 	// signature.
-	ip.rewriteHookContextMethods()
+	ip.rewriteHookContextMethods(genericTypes)
 	// Rename template function to trampoline function
 	ip.renameTrampFunc(t)
 	// Build types of trampoline functions. The parameters of the Before trampoline
@@ -1095,15 +1186,15 @@ func (ip *instrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
 	// trampoline function are the same as the target function.
 	// Generate calls to real hook functions
 	if t.Before != "" {
-		ip.buildTrampSignature(trampolineBefore)
-		err = ip.callHookFunc(t, trampolineBefore)
+		ip.buildTrampSignature(genericTypes, trampolineBefore)
+		err = ip.callHookFunc(t, trampolineBefore, genericTypes)
 		if err != nil {
 			return err
 		}
 	}
 	if t.After != "" {
-		ip.buildTrampSignature(trampolineAfter)
-		err = ip.callHookFunc(t, trampolineAfter)
+		ip.buildTrampSignature(genericTypes, trampolineAfter)
+		err = ip.callHookFunc(t, trampolineAfter, genericTypes)
 		if err != nil {
 			return err
 		}

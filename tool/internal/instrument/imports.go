@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // updateImportConfigForFile ensures all imports in the given file's AST are present in the importcfg.
@@ -27,6 +28,52 @@ func (ip *instrumentPhase) updateImportConfigForFile(ctx context.Context, root *
 	}
 
 	return nil
+}
+
+// injectConstraintImports ensures ip.target has whatever imports fields'
+// constraint expressions reference, when those constraints were recovered from
+// a different file (declFile) than the one they're being written into.
+//
+// The same-file constraint recovery this builds on (see extractReceiverTypeParams)
+// could originally assume any import a constraint needed was already present in
+// the receiver's own file, since that file wouldn't otherwise compile. That
+// assumption breaks once a constraint is recovered from a sibling file: the
+// package qualifier it uses (e.g. "constraints" in constraints.Ordered) may not
+// be imported, or may be imported under a different alias, in ip.target. This
+// resolves each qualifier against declFile and adds whatever's missing to
+// ip.target via the existing addRuleImports machinery, which already handles
+// alias-conflict detection and the importcfg update.
+func (ip *instrumentPhase) injectConstraintImports(
+	ctx context.Context,
+	declFile *dst.File,
+	fields *dst.FieldList,
+) error {
+	if declFile == nil || declFile == ip.target || fields == nil {
+		return nil
+	}
+
+	buildFlags := util.GetBuildFlags()
+	needed := make(map[string]string)
+	for _, field := range fields.List {
+		dst.Inspect(field.Type, func(n dst.Node) bool {
+			sel, ok := n.(*dst.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := sel.X.(*dst.Ident)
+			if !ok {
+				return true
+			}
+			if path, found := imports.ResolveAlias(ctx, declFile, ident.Name, buildFlags...); found {
+				needed[ident.Name] = path
+			}
+			return true
+		})
+	}
+	if len(needed) == 0 {
+		return nil
+	}
+	return ip.addRuleImports(ctx, ip.target, needed, "generic-receiver-constraint")
 }
 
 // addRuleImports processes imports for a rule and updates the import config.

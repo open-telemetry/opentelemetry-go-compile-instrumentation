@@ -37,6 +37,14 @@ type instrumentPhase struct {
 	importConfigPath string
 	// The target file to be instrumented
 	target *dst.File
+	// The absolute path of the file currently held in target. Used to exclude
+	// the target's own file from sibling-file discovery.
+	targetPath string
+	// Lazily populated cache of every other .go file in the current package,
+	// parsed on first cross-file generic type lookup and reused for the rest
+	// of this package's instrumentation. Keyed by absolute path. Nil until
+	// first populated by loadSiblingASTs.
+	siblingASTs map[string]*dst.File
 	// The parser for the target file
 	parser *ast.AstParser
 	// The compiling arguments for the target file
