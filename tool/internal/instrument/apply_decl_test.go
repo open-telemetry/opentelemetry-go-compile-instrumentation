@@ -17,10 +17,10 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
-// newTestPhase returns a minimal InstrumentPhase suitable for unit tests that
+// newTestPhase returns a minimal instrumentPhase suitable for unit tests that
 // do not exercise import injection or compilation (logger discards all output).
-func newTestPhase() *InstrumentPhase {
-	return &InstrumentPhase{
+func newTestPhase() *instrumentPhase {
+	return &instrumentPhase{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
@@ -197,4 +197,23 @@ func TestApplyDeclRule_EmptyKind_FunctionTarget(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is not a var or const declaration")
+}
+
+func TestParseValueExpr(t *testing.T) {
+	t.Run("valid expression", func(t *testing.T) {
+		expr, err := parseValueExpr("123")
+		require.NoError(t, err)
+		require.NotNil(t, expr)
+	})
+
+	t.Run("syntax error in expression", func(t *testing.T) {
+		_, err := parseValueExpr("1 +")
+		require.Error(t, err)
+	})
+
+	t.Run("multiple values expression produces error instead of taking first value", func(t *testing.T) {
+		_, err := parseValueExpr("1, 2")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected 1 value, got 2")
+	})
 }

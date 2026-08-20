@@ -24,17 +24,17 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-type SetupPhase struct {
+type setupPhase struct {
 	logger          *slog.Logger
 	ruleConfig      string
 	buildPackages   []*packages.Package
 	rootModulePaths []string
 }
 
-func (sp *SetupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
-func (sp *SetupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
-func (sp *SetupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
-func (sp *SetupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
+func (sp *setupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
+func (sp *setupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
+func (sp *setupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
+func (sp *setupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
 // keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
@@ -281,7 +281,7 @@ func rootModulePaths(ctx context.Context, pkgs []*packages.Package) ([]string, e
 
 // generateRuntimePerPackage generates the injected hook code (otelc.runtime.go)
 // for every buildable package.
-func (sp *SetupPhase) generateRuntimePerPackage(
+func (sp *setupPhase) generateRuntimePerPackage(
 	ctx context.Context,
 	pkgs []*packages.Package,
 	matched []*rule.InstRuleSet,
@@ -329,7 +329,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// (matching versions and paths) instead of vendor/, leaving the user's
 	// vendor directory untouched. This must run before isSetup() and
 	// getBuildPackages() below so a cached-setup `otelc go build` still sets
-	// GOFLAGS for the later BuildWithToolexec, and before the findDeps dry run
+	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
 	// further down. Computed here rather than threaded in because Setup is also
 	// a standalone command action (otelc setup).
 	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
@@ -354,7 +354,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	sp := &SetupPhase{
+	sp := &setupPhase{
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 	}
@@ -374,16 +374,16 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Ensure a state manager is available in the context
-	stateManager, found := StateManagerFromContext(ctx)
+	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		// save this state manager in the context
-		ctx = ContextWithStateManager(ctx, stateManager)
+		ctx = contextWithStateManager(ctx, stateManager)
 	}
 
 	// Auto-pin generates/updates otel.instrumentation.go file
 	var deps []*Dependency
 	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
-		pinResult, pinErr := AutoPin(ctx, moduleDirs, subcommand, args)
+		pinResult, pinErr := autoPin(ctx, moduleDirs, subcommand, args)
 		if pinErr != nil {
 			return ex.Wrapf(pinErr, "auto-pinning dependencies")
 		}
@@ -439,7 +439,7 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 var buildContextFlagsWithValue = map[string]bool{
 	"-C":       true, // Change directory before running the command
 	"-overlay": true, // JSON overlay file used by go list/build
-	"-tags":    true, // Build tags
+	"-tags":    true, // build tags
 	"-mod":     true, // Module mode (vendor, mod, readonly)
 	"-modfile": true, // Custom go.mod file
 }
@@ -529,11 +529,11 @@ func extractBuildFlags(args []string) []string {
 	return append(valueFlags, enabledBoolFlags...)
 }
 
-// BuildWithToolexec builds the project with the toolexec mode. vendored is
+// buildWithToolexec builds the project with the toolexec mode. vendored is
 // passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
 // -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
 // args and forwarded flags below.
-func BuildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
+func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
 	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
@@ -560,7 +560,7 @@ func BuildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if _, fileTargets, err2 := splitBuildTargets(restArgs); err2 == nil && len(fileTargets) > 0 {
 		// add otelc.runtime.go manually to command line for file targets
 		dir := filepath.Dir(fileTargets[0])
-		otelcRuntimePath := filepath.Join(dir, OtelcRuntimeFile)
+		otelcRuntimePath := filepath.Join(dir, otelcRuntimeFile)
 		if util.PathExists(otelcRuntimePath) {
 			restArgs = append(restArgs, otelcRuntimePath)
 		}
@@ -618,7 +618,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 }
 
 func runGoBuild(ctx context.Context, cmd *cli.Command) error {
-	ctx = ContextWithStateManager(ctx, NewStateManager())
+	ctx = contextWithStateManager(ctx, newStateManager())
 	logger := util.LoggerFromContext(ctx)
 
 	// Clean up import tracking files from previous builds at the start
@@ -638,7 +638,7 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 
 	// Setup forces GOFLAGS=-mod=mod for a vendored project (needed for both
 	// entry points, otelc setup and otelc go build). vendored is still computed
-	// here too so BuildWithToolexec can rewrite an explicit CLI -mod=vendor,
+	// here too so buildWithToolexec can rewrite an explicit CLI -mod=vendor,
 	// which beats GOFLAGS.
 	pwd := util.GetOtelcWorkDir()
 	vendored := vendoringActive(ctx, pwd)
@@ -654,7 +654,7 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	logger.InfoContext(ctx, "Setup completed successfully")
 
 	buildStart := time.Now()
-	err = BuildWithToolexec(ctx, cmd, vendored)
+	err = buildWithToolexec(ctx, cmd, vendored)
 	if err != nil {
 		return err
 	}

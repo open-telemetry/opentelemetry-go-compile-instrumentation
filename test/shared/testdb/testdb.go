@@ -21,12 +21,38 @@ func init() {
 	sql.Register("sqlserver", &testDriver{})
 	sql.Register("mssql", &testDriver{})
 	sql.Register("sqlite3", &testDriver{})
+	sql.Register("testdb-fail", &failTxDriver{})
 }
 
 type testDriver struct{}
 
 func (d *testDriver) Open(name string) (driver.Conn, error) {
 	return &testConn{}, nil
+}
+
+// failTxDriver is a driver whose connections always fail Begin().
+type failTxDriver struct{}
+
+func (d *failTxDriver) Open(name string) (driver.Conn, error) {
+	return &failTxConn{}, nil
+}
+
+type failTxConn struct{}
+
+func (c *failTxConn) Prepare(query string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("failTxConn does not support Prepare")
+}
+
+func (c *failTxConn) Close() error {
+	return nil
+}
+
+func (c *failTxConn) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("simulated transaction start failure")
+}
+
+func (c *failTxConn) Ping(ctx context.Context) error {
+	return nil
 }
 
 type testConn struct{}

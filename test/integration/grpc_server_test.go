@@ -9,10 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
@@ -91,12 +89,13 @@ func TestGRPCServer(t *testing.T) {
 			client := NewGRPCClient(t, addr)
 			client.SayHello(t, "ShutdownTest")
 
+			// Instrumentation flushes buffered telemetry on the signal but must not
+			// terminate the process — the app owns its exit. Wait for the flushed
+			// span, then confirm the process is still alive (fixture kills it later).
 			require.NoError(t, srv.Cmd.Process.Signal(tc.sig))
-			waitForProcessExit(t, srv.Cmd, 10*time.Second)
 			f.WaitForSpans(1)
-
-			spans := testutil.AllSpans(f.Traces())
-			require.NotEmpty(t, spans, "expected spans to be flushed on %s shutdown", tc.name)
+			require.NoError(t, srv.Cmd.Process.Signal(syscall.Signal(0)),
+				"instrumentation must not terminate the process on %s", tc.name)
 
 			serverSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsServer,
@@ -155,20 +154,4 @@ func (c *GRPCClient) SayHelloStream(t *testing.T, name string, count int) {
 		responseCount++
 	}
 	require.Equal(t, count, responseCount, "Should receive %d responses", count)
-}
-
-// waitForProcessExit waits for a process to exit within the given timeout.
-func waitForProcessExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
-	t.Helper()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Fatal("process did not exit within timeout")
-	}
 }

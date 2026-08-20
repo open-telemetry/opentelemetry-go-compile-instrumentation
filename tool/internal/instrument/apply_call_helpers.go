@@ -4,10 +4,6 @@
 package instrument
 
 import (
-	"go/token"
-	"path"
-	"strings"
-
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -56,83 +52,4 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 
 	resolvedPath, ok := importAliases[ident.Name]
 	return ok && resolvedPath == importPath
-}
-
-func collectImportAliases(file *dst.File) map[string]string {
-	aliases := make(map[string]string)
-	for _, decl := range file.Decls {
-		genDecl, ok := decl.(*dst.GenDecl)
-		if !ok || genDecl.Tok != token.IMPORT {
-			continue
-		}
-		for _, spec := range genDecl.Specs {
-			importSpec, isImport := spec.(*dst.ImportSpec)
-			if !isImport || importSpec.Path == nil {
-				continue
-			}
-			importPath := strings.Trim(importSpec.Path.Value, `"`)
-			var alias string
-			if importSpec.Name != nil {
-				alias = importSpec.Name.Name
-			} else {
-				alias = defaultImportAlias(importPath)
-			}
-			if alias == "" || alias == "_" || alias == "." {
-				continue
-			}
-			aliases[alias] = importPath
-		}
-	}
-	return aliases
-}
-
-// defaultImportAlias infers the package alias from an import path, replicating
-// Go's default alias rules (last path element, versioned-path stripping, gopkg.in
-// conventions). This is a best-effort reimplementation — edge cases like package
-// names containing hyphens, _test packages, or build-tag-conditional imports may
-// behave differently from the Go compiler's own resolution.
-func defaultImportAlias(importPath string) string {
-	base := path.Base(importPath)
-	if base == "." || base == "/" {
-		return ""
-	}
-	if strings.HasPrefix(importPath, "gopkg.in/") {
-		if trimmed := trimGopkgInVersion(base); trimmed != "" {
-			return trimmed
-		}
-	}
-	if isVersionSuffix(base) {
-		parent := path.Base(path.Dir(importPath))
-		if parent != "." && parent != "/" {
-			return parent
-		}
-	}
-	return base
-}
-
-func trimGopkgInVersion(base string) string {
-	idx := strings.LastIndex(base, ".v")
-	if idx <= 0 {
-		return ""
-	}
-	if !isDigits(base[idx+2:]) {
-		return ""
-	}
-	return base[:idx]
-}
-
-func isVersionSuffix(base string) bool {
-	if len(base) < 2 || base[0] != 'v' {
-		return false
-	}
-	return isDigits(base[1:])
-}
-
-func isDigits(s string) bool {
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return s != ""
 }

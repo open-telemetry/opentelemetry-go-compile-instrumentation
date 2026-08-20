@@ -10,14 +10,15 @@ import (
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // applyLitRule sets fields on every composite literal of the rule's type found
 // in the target file.
-func (ip *InstrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) error {
-	importAliases := collectImportAliases(root)
+func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) error {
+	importAliases := ast.ImportAliasMap(root)
 
 	setters, err := newLitFieldSetters(r)
 	if err != nil {
@@ -147,7 +148,7 @@ func hasPositionalElements(lit *dst.CompositeLit) bool {
 // setLitFields applies each setter to the literal, overriding fields already
 // present in place and prepending the rest. The literal's own elements are
 // otherwise left untouched. It reports whether the literal changed.
-func (ip *InstrumentPhase) setLitFields(
+func (ip *instrumentPhase) setLitFields(
 	lit *dst.CompositeLit,
 	setters []*litFieldSetter,
 	r *rule.InstLitRule,

@@ -26,13 +26,15 @@ func parseValueExpr(exprSource string) (dst.Expr, error) {
 	}
 	genDecl := util.AssertType[*dst.GenDecl](file.Decls[0])
 	valueSpec := util.AssertType[*dst.ValueSpec](genDecl.Specs[0])
-	util.Assert(len(valueSpec.Values) == 1, "expected exactly one value in parsed expression")
+	if len(valueSpec.Values) != 1 {
+		return nil, ex.Newf("invalid value expression %q: expected 1 value, got %d", exprSource, len(valueSpec.Values))
+	}
 	return valueSpec.Values[0], nil
 }
 
 // applyDeclRule applies a declaration rule to the target file, modifying the
 // matched named declaration (e.g., assigning a new value to a var or const).
-func (ip *InstrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRule, root *dst.File) error {
+func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRule, root *dst.File) error {
 	util.Assert(r.Replace != "" || r.Wrap != "", "decl rule must set replace or wrap")
 
 	node := ast.FindNamedDecl(root, r.Identifier, r.Kind)

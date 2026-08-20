@@ -1,0 +1,12 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+func divide(a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
+	println("enter divide args=2 arg0=a arg1=b")
+	defer println("exit divide rets=2 ret0=_unnamedRetVal0 ret1=_unnamedRetVal1")
+	return a / b, nil
+}
+
+func main() { divide(4, 2) }

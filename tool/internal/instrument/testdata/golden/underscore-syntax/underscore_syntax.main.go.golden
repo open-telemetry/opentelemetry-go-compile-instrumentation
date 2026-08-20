@@ -5,9 +5,9 @@ package main
 
 import _ "unsafe"
 
-func UnderscoreFunc(_ignoredParam0 int, _ignoredParam1 float32) {
+func UnderscoreFunc(_ignoredParam_418572368_0 int, _ignoredParam_418572368_1 float32) {
 	//line <generated>:1
-	if OtelBeforeTrampoline_UnderscoreFunc418572368(&_ignoredParam0, &_ignoredParam1); false {
+	if OtelBeforeTrampoline_UnderscoreFunc418572368(&_ignoredParam_418572368_0, &_ignoredParam_418572368_1); false {
 	} else {
 	}
 	//line main.go:6:39
