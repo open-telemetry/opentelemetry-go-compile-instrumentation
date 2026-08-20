@@ -114,21 +114,36 @@ jobs:
     steps:
       - name: Check result
         run: |
+          changes_result="${{ needs.changes.result }}"
+          code_changed="${{ needs.changes.outputs.code }}"
           api_result="${{ needs.check-api-sync.result }}"
           golden_result="${{ needs.check-golden-files.result }}"
           mod_tidy_result="${{ needs.check-mod-tidy.result }}"
           manifest_result="${{ needs.verify-manifest.result }}"
+          echo "Changes result: $changes_result"
+          echo "Code changed: $code_changed"
           echo "api-sync result: $api_result"
           echo "golden-files result: $golden_result"
           echo "mod-tidy result: $mod_tidy_result"
           echo "manifest result: $manifest_result"
-          if [[ ("$api_result" == "success" || "$api_result" == "skipped") && \
-                ("$golden_result" == "success" || "$golden_result" == "skipped") && \
-                ("$mod_tidy_result" == "success" || "$mod_tidy_result" == "skipped") && \
-                ("$manifest_result" == "success" || "$manifest_result" == "skipped") ]]; then
-            echo "✅ Consistency checks passed or were skipped"
-            exit 0
-          else
-            echo "❌ Consistency checks failed"
+          if [[ "$changes_result" != "success" ]]; then
+            echo "❌ Change detection failed"
             exit 1
           fi
+          if [[ "$code_changed" == "false" ]]; then
+            echo "✅ No relevant code changes; consistency checks skipped"
+            exit 0
+          fi
+          if [[ "$code_changed" != "true" ]]; then
+            echo "❌ Unexpected change detection output: $code_changed"
+            exit 1
+          fi
+          if [[ "$api_result" == "success" && \
+                "$golden_result" == "success" && \
+                "$mod_tidy_result" == "success" && \
+                "$manifest_result" == "success" ]]; then
+            echo "✅ Consistency checks passed"
+            exit 0
+          fi
+          echo "❌ Consistency checks failed"
+          exit 1
