@@ -109,7 +109,12 @@ func TestGenerateRejectsInvalidVersionRanges(t *testing.T) {
 			if test.target != "" {
 				target = "  target: " + test.target + "\n"
 			}
-			writeRuleFile(t, root, "module/otelc.yaml", fmt.Sprintf("invalid:\n%s  version: %s\n", target, test.version))
+			writeRuleFile(
+				t,
+				root,
+				"module/otelc.yaml",
+				fmt.Sprintf("invalid:\n%s  version: %s\n", target, test.version),
+			)
 
 			_, err := Generate(root)
 			require.ErrorContains(t, err, test.wantErr)
