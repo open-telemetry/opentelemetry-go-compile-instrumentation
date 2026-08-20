@@ -14,7 +14,7 @@ SHELL := /bin/bash
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
-        benchmark/codspeed benchmark/threshold
+        benchmark/codspeed benchmark/threshold govulncheck govulncheck/instrumentation
 
 # Constant variables
 BINARY_NAME := otelc
@@ -30,6 +30,22 @@ GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
 TOOL_COVERAGE_THRESHOLD ?= 68
 PKG_COVERAGE_THRESHOLD ?= 70
+
+# Modules/apps scanned by govulncheck for known Go CVEs (tool version pinned in
+# .tools/go.mod, Renovate-managed like every other .tools binary).
+# Core modules: root module (covers tool/) plus every pkg/ module.
+# Instrumentation is scanned separately via instrumented integration-test binaries
+# (see govulncheck/instrumentation): source scans skip //go:build ignore files and
+# cannot typecheck modules that need compile-time field injection (e.g. database/sql).
+# Known gap: that makes instrumentation coverage only as good as the test apps.
+# An instrumentation module that no app under test/apps builds against is scanned
+# by neither job, so adding a module without an app leaves it uncovered (currently
+# instrumentation/github.com/openai/openai-go/v3).
+# Demos are intentionally excluded (pinned example deps).
+GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
+# Top-level integration apps only (skip nested modules such as
+# test/apps/gincustom/instrumentation).
+GOVULNCHECK_TEST_APPS := $(shell find test/apps -mindepth 1 -maxdepth 1 -type d | sort)
 
 # OTel Weaver execution for the local semantic-convention registry under
 # schemas/otelc/. Weaver runs from an OCI image (no host install required);
@@ -78,6 +94,9 @@ $(EMBEDMD): PACKAGE=github.com/campoy/embedmd
 
 CHECKMAKE = $(TOOLS)/checkmake
 $(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
+
+GOVULNCHECK = $(TOOLS)/govulncheck
+$(GOVULNCHECK): PACKAGE=golang.org/x/vuln/cmd/govulncheck
 
 # Phony targets to build tools from .tools module (no go install; binaries in .bin/)
 gotestfmt: $(GOTESTFMT) ## Build gotestfmt from .tools
@@ -426,6 +445,49 @@ check-golden-files: package
 	fi
 	git status --porcelain -- tool/internal/instrument/testdata/golden/ | grep -q . && (echo "Golden files have untracked changes"; exit 1) || true
 	echo "Golden files are up to date"
+
+##@ Security
+
+.ONESHELL:
+govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulnerabilities
+	@echo "Running govulncheck across $(words $(GOVULNCHECK_CORE_MODULES)) core modules..."
+	@set -uo pipefail
+	@status=0
+	@for moddir in $(GOVULNCHECK_CORE_MODULES); do \
+		echo "==> govulncheck $$moddir"; \
+		(cd "$$moddir" && "$(GOVULNCHECK)" ./...) || status=1; \
+	done; \
+	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found"; exit 1; fi; \
+	echo "govulncheck: no reachable vulnerabilities found"
+
+# Build each integration test app with otelc, then scan the resulting binary.
+# Binary mode sees injected instrumentation (including //go:build ignore sources
+# and field-injection modules like database/sql) that source mode cannot analyze.
+.ONESHELL:
+govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps (binary mode) for known Go vulnerabilities
+	@echo "Running govulncheck -mode=binary across $(words $(GOVULNCHECK_TEST_APPS)) instrumented test apps..."
+	@set -uo pipefail
+	@status=0
+	@app_bin=app$(EXT)
+	@otelc="$(CURDIR)/$(BINARY_NAME)$(EXT)"
+	@for appdir in $(GOVULNCHECK_TEST_APPS); do \
+		app=$$(basename "$$appdir"); \
+		echo "==> otelc go build $$app"; \
+		if ! (cd "$$appdir" && "$$otelc" go build -a -o "$$app_bin" .); then \
+			echo "govulncheck/instrumentation: failed to build $$app"; \
+			status=1; \
+			(cd "$$appdir" && "$$otelc" cleanup) || true; \
+			continue; \
+		fi; \
+		echo "==> govulncheck -mode=binary $$app"; \
+		if ! "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin"; then \
+			status=1; \
+		fi; \
+		rm -f "$$appdir/$$app_bin"; \
+		(cd "$$appdir" && "$$otelc" cleanup) || true; \
+	done; \
+	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found or build failed"; exit 1; fi; \
+	echo "govulncheck: no reachable vulnerabilities found"
 
 ##@ Benchmarking
 
