@@ -601,3 +601,22 @@ func TestFindModVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestFindGoSources(t *testing.T) {
+	dir := t.TempDir()
+	srcA := filepath.Join(dir, "a.go")
+	srcB := filepath.Join(dir, "b.go")
+	require.NoError(t, os.WriteFile(srcA, []byte("package p\n"), 0o644))
+	require.NoError(t, os.WriteFile(srcB, []byte("package p\n"), 0o644))
+
+	args := []string{"-p", "example.com/p", srcA, srcB}
+	dep, err := findGoSources(context.Background(), args, map[string]string{})
+	require.NoError(t, err)
+	require.NotNil(t, dep)
+
+	assert.Equal(t, "example.com/p", dep.ImportPath)
+	require.Len(t, dep.Sources, 2)
+	for _, s := range dep.Sources {
+		assert.True(t, filepath.IsAbs(s), "source path must be absolute: %s", s)
+	}
+}

@@ -66,6 +66,27 @@ func main() {}
 			input:    "",
 			expected: "",
 		},
+		{
+			// Regression test for #1069: a whole-file substring replace
+			// deleted this text from the string literal and the comment,
+			// since both happen to contain "//go:build ignore" without being
+			// a build-constraint line themselves.
+			name: "preserves the tag text inside a string literal and comment prose",
+			input: `//go:build ignore
+
+package hooks
+
+// Every file rule source must carry //go:build ignore at the top.
+const marker = "//go:build ignore"
+`,
+			expected: `
+
+package hooks
+
+// Every file rule source must carry //go:build ignore at the top.
+const marker = "//go:build ignore"
+`,
+		},
 	}
 
 	for _, tt := range tests {

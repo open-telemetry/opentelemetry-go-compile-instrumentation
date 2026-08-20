@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
@@ -556,4 +558,31 @@ func TestExtractBuildFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsSetup(t *testing.T) {
+	// isSetup is currently a stub that always reports false.
+	assert.False(t, isSetup())
+}
+
+// TestSetupPhaseLogDelegators exercises the thin slog delegators on SetupPhase.
+// They must forward to the underlying logger without panicking.
+func TestSetupPhaseLogDelegators(t *testing.T) {
+	sp := newTestSetupPhase()
+	assert.NotPanics(t, func() {
+		sp.Info("info", "k", "v")
+		sp.Warn("warn", "k", "v")
+		sp.Error("error", "k", "v")
+		sp.Debug("debug", "k", "v")
+	})
+}
+
+func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	// A package with no Go files has an empty package directory and must be
+	// skipped without error.
+	pkgs := []*packages.Package{{PkgPath: "example.com/empty"}}
+	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{})
+	require.NoError(t, err)
 }
