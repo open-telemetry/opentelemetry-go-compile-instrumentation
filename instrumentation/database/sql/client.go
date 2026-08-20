@@ -192,6 +192,9 @@ func beforeTxInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Cont
 		return
 	}
 	instrumentStart(ictx, ctx, "begin", "START TRANSACTION", db.Endpoint, db.DriverName, db.DSN, db.DbName)
+	if data, ok := ictx.GetData().(map[string]interface{}); ok {
+		data["parentCtx"] = ctx
+	}
 }
 
 func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
@@ -214,6 +217,10 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	tx.DriverName = dbRequest.DriverName
 	tx.DSN = dbRequest.Dsn
 	tx.DbName = dbRequest.DbName
+	if parentCtx, ok := callData["parentCtx"].(context.Context); ok {
+		tx.OtelCtx = parentCtx
+	}
+	instrumentEnd(ictx, err)
 }
 
 func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Context) {
@@ -511,7 +518,11 @@ func beforeTxCommitInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	ctx := context.Background()
+	if tx.OtelCtx != nil {
+		ctx = tx.OtelCtx
+	}
+	instrumentStart(ictx, ctx, "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 func afterTxCommitInstrumentation(ictx hook.HookContext, err error) {
@@ -528,7 +539,11 @@ func beforeTxRollbackInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	ctx := context.Background()
+	if tx.OtelCtx != nil {
+		ctx = tx.OtelCtx
+	}
+	instrumentStart(ictx, ctx, "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 func afterTxRollbackInstrumentation(ictx hook.HookContext, err error) {
