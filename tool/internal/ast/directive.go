@@ -135,6 +135,19 @@ func FileHasDirective(file *dst.File, directive string) bool {
 	return found
 }
 
+// FuncLeadHasDirective reports whether the function declaration's leading
+// decorations contain the given directive. It inspects only the leading
+// decorations (the comments directly above the func), not the body or trailing
+// decorations, mirroring FileHasLeadingDirective for files.
+func FuncLeadHasDirective(funcDecl *dst.FuncDecl, directive string) bool {
+	for _, dec := range funcDecl.Decs.Start {
+		if MatchDirective(dec, directive) {
+			return true
+		}
+	}
+	return false
+}
+
 // FuncDirectiveMatch pairs a function declaration matched by
 // FindFuncsByDirective with the key:value arguments parsed from its matching
 // directive comment

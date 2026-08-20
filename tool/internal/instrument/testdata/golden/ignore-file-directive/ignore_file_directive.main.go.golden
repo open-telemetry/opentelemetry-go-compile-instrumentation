@@ -1,0 +1,154 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+//otelc:ignore
+
+package main
+
+import _ "unsafe"
+
+func SkippedFunc(p1 string) {}
+
+//otelc:instrument
+func ForcedFunc(p1 string) {
+	//line <generated>:1
+	if hookContext191951179, _ := OtelBeforeTrampoline_ForcedFunc191951179(&p1); false {
+	} else {
+		defer OtelAfterTrampoline_ForcedFunc191951179(hookContext191951179)
+	}
+	//line main.go:11:28
+}
+
+// BothFunc carries both directives; //otelc:ignore must win over
+// //otelc:instrument, so it is not instrumented.
+//otelc:instrument
+//otelc:ignore
+func BothFunc(p1 string) {}
+
+// T is targeted by a non-func (struct) rule. File-level //otelc:ignore skips
+// non-func rules unconditionally (they are not overridable), so no field is
+// added.
+type T struct{}
+
+func main() {}
+
+//line <generated>:1
+type HookContextImpl191951179 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl191951179) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl191951179) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl191951179) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl191951179) GetData() interface{}     { return c.data }
+func (c *HookContextImpl191951179) GetKeyData(key string) interface{} {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
+	}
+	return nil
+}
+
+func (c *HookContextImpl191951179) SetKeyData(key string, val interface{}) {
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
+	}
+	m[key] = val
+}
+
+func (c *HookContextImpl191951179) HasKeyData(key string) bool {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
+	}
+	return false
+}
+
+func (c *HookContextImpl191951179) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*string))
+	}
+	return nil
+}
+
+func (c *HookContextImpl191951179) SetParam(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		if val == nil {
+			*(c.params[0].(*string)) = *new(string)
+		} else {
+			*(c.params[0].(*string)) = val.(string)
+		}
+	}
+}
+
+func (c *HookContextImpl191951179) GetReturnVal(idx int) interface{} {
+	switch idx {
+	}
+	return nil
+}
+
+func (c *HookContextImpl191951179) SetReturnVal(idx int, val interface{}) {
+	switch idx {
+	}
+}
+func (c *HookContextImpl191951179) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl191951179) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl191951179) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl191951179) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_ForcedFunc191951179(param0 *string) (hookContext *HookContextImpl191951179, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "HBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl191951179{}
+	hookContext.params = []interface{}{param0}
+	hookContext.funcName = "ForcedFunc"
+	hookContext.packageName = "main"
+	if HBefore != nil {
+		HBefore(hookContext, *param0)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_ForcedFunc191951179(hookContext HookContext) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "HAfter")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl191951179).returnVals = []interface{}{}
+	if HAfter != nil {
+		HAfter(hookContext)
+	}
+}
+
+//go:linkname HBefore testdata/golden/ignore-file-directive.HBefore
+func HBefore(hookContext HookContext, param0 string)
+
+//go:linkname HAfter testdata/golden/ignore-file-directive.HAfter
+func HAfter(hookContext HookContext)

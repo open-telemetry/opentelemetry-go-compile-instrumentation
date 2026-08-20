@@ -21,6 +21,9 @@ import (
 const (
 	tJumpLabel       = "/* __TRAMPOLINE_JUMP_IF__ */"
 	otelcGlobalsFile = "otelc.globals.go"
+
+	directiveIgnore     = "otelc:ignore"
+	directiveInstrument = "otelc:instrument"
 )
 
 func makeName(r *rule.InstFuncRule, funcDecl *dst.FuncDecl, isBefore bool) string {
@@ -380,20 +383,31 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 	return root, nil
 }
 
-func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
+// applyFuncRule instruments the function targeted by rule and reports whether a
+// trampoline was actually inserted (true) or the rule was skipped (false). The
+// bool lets the caller avoid writing an otelc.globals.go file for a package
+// whose only func rules were skipped via //otelc:ignore.
+func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) (bool, error) {
 	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !ok {
-		return ex.Newf("can not find function %s", rule.Func)
+		return false, ex.Newf("can not find function %s", rule.Func)
+	}
+	// A function-level //otelc:ignore opts this function out even when a rule
+	// matches it. The func rule then contributes no instrumented function, so it
+	// must not force a globals file to be written for the package.
+	if ast.FuncLeadHasDirective(funcDecl, directiveIgnore) {
+		ip.Debug("Skip func rule due to //otelc:ignore", "func", rule.Func, "rule", rule.Name)
+		return false, nil
 	}
 
 	// Apply imports for every matching rule, including ones de-duplicated below:
 	// two rules with the same content identity may still declare different
 	// imports, and skipping them could drop an import the hook code needs.
 	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
-		return err
+		return false, err
 	}
 
 	// De-duplicate trampoline/HookContext emission for rules that resolve to the
@@ -404,16 +418,18 @@ func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	if _, seen := ip.appliedFuncIdentities[id]; seen {
 		ip.Debug("Skipping duplicate func rule trampoline (imports already applied)",
 			"rule", rule.Name, "func", rule.Func)
-		return nil
+		// The identical rule already inserted a trampoline for this function, so
+		// the function is instrumented and the globals file is still required.
+		return true, nil
 	}
 
 	if err = ip.insertTJump(rule, funcDecl); err != nil {
-		return err
+		return false, err
 	}
 	if ip.appliedFuncIdentities == nil {
 		ip.appliedFuncIdentities = make(map[string]struct{})
 	}
 	ip.appliedFuncIdentities[id] = struct{}{}
 	ip.Info("Apply func rule", "rule", rule)
-	return nil
+	return true, nil
 }
