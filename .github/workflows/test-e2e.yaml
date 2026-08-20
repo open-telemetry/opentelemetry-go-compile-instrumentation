@@ -78,9 +78,16 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # ratchet:arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache otelc Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: test/.otelc-gocache
+          key: ${{ runner.os }}-${{ matrix.platform.arch }}-otelc-gocache-e2e-v2-${{ hashFiles('go.mod', '**/go.mod', '**/go.sum',
+            'Makefile', 'tool/**', 'pkg/**', 'instrumentation/**', 'test/apps/**', 'test/testutil/**', 'test/e2e/**') }}
       - run: make test-e2e
         env:
           GOARCH: ${{ matrix.platform.arch }}
+          OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache
 
   done:
     name: Done (E2E Tests)
