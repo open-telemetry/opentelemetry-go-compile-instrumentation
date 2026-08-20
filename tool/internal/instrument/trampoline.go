@@ -36,6 +36,7 @@ const (
 	trampolineHookContextName       = "hookContext"
 	trampolineHookContextType       = "HookContext"
 	trampolineInterfaceType         = "interface{}"
+	trampolineEmptyStructType       = "struct{}"
 	trampolineSkipName              = "skip"
 	trampolineSetParamName          = "SetParam"
 	trampolineGetParamName          = "GetParam"
@@ -277,6 +278,58 @@ func funcTypeName(t *dst.FuncType) string {
 	return "func(" + strings.Join(params, ", ") + ")" + resStr
 }
 
+// structTypeName builds a normalized name for an anonymous struct type from its
+// field names and types, so structurally different struct types (e.g. distinct
+// field sets) don't collide on a shared "struct{...}" placeholder in
+// hookTypeMatches. Named struct types never reach here: baseTypeName resolves a
+// *dst.SelectorExpr/*dst.Ident (a named type reference) to its name before
+// getting to the underlying type declaration.
+func structTypeName(t *dst.StructType) string {
+	if t.Fields == nil || len(t.Fields.List) == 0 {
+		return trampolineEmptyStructType
+	}
+	parts := make([]string, 0, len(t.Fields.List))
+	for _, f := range t.Fields.List {
+		fType := baseTypeName(f.Type)
+		if len(f.Names) == 0 {
+			// Embedded field.
+			parts = append(parts, fType)
+			continue
+		}
+		for _, n := range f.Names {
+			parts = append(parts, n.Name+" "+fType)
+		}
+	}
+	return "struct{" + strings.Join(parts, "; ") + "}"
+}
+
+// interfaceTypeName builds a normalized name for an anonymous interface type from
+// its method set, so structurally different interfaces (e.g. io.Reader vs.
+// io.Writer) don't collide on a shared "interface{...}" placeholder in
+// hookTypeMatches. The empty interface still normalizes to trampolineInterfaceType
+// so it keeps matching any/interface{} via isAnyOrInterface.
+func interfaceTypeName(t *dst.InterfaceType) string {
+	if t.Methods == nil || len(t.Methods.List) == 0 {
+		return trampolineInterfaceType
+	}
+	parts := make([]string, 0, len(t.Methods.List))
+	for _, m := range t.Methods.List {
+		if len(m.Names) == 0 {
+			// Embedded interface.
+			parts = append(parts, baseTypeName(m.Type))
+			continue
+		}
+		for _, n := range m.Names {
+			sig := baseTypeName(m.Type)
+			if ft, ok := m.Type.(*dst.FuncType); ok {
+				sig = strings.TrimPrefix(funcTypeName(ft), "func")
+			}
+			parts = append(parts, n.Name+sig)
+		}
+	}
+	return "interface{" + strings.Join(parts, "; ") + "}"
+}
+
 // baseTypeName extracts the normalized type name for signature matching, stripping package prefixes
 // and outermost pointer indirection so that target types and hook types can be compared directly.
 // This is necessary because trampolines take pointers (*T) to allow mutating/capturing arguments and return values,
@@ -305,15 +358,9 @@ func baseTypeName(expr dst.Expr) string {
 	case *dst.ChanType:
 		return chanTypeName(t)
 	case *dst.InterfaceType:
-		if t.Methods == nil || len(t.Methods.List) == 0 {
-			return trampolineInterfaceType
-		}
-		return "interface{...}"
+		return interfaceTypeName(t)
 	case *dst.StructType:
-		if t.Fields == nil || len(t.Fields.List) == 0 {
-			return "struct{}"
-		}
-		return "struct{...}"
+		return structTypeName(t)
 	case *dst.FuncType:
 		return funcTypeName(t)
 	case *dst.IndexExpr:
@@ -347,15 +394,20 @@ func sliceOrEllipsisElt(s string) (string, bool) {
 
 // hookTypeMatches reports whether hookBase matches the expected trampBase type.
 func hookTypeMatches(trampBase, hookBase string) bool {
+	// hookBase is checked for any/interface{} first, so by the time trampBase is
+	// considered below, hookBase is already known not to be any/interface{} —
+	// isAnyOrInterface(trampBase) && isAnyOrInterface(hookBase) can never hold.
 	if isAnyOrInterface(hookBase) {
 		return true
 	}
-	if trampBase != "" && (trampBase == hookBase || (isAnyOrInterface(trampBase) && isAnyOrInterface(hookBase))) {
+	if trampBase != "" && trampBase == hookBase {
 		return true
 	}
 	if tElt, tOk := sliceOrEllipsisElt(trampBase); tOk {
 		if hElt, hOk := sliceOrEllipsisElt(hookBase); hOk {
-			return tElt == hElt || isAnyOrInterface(hElt) || (isAnyOrInterface(tElt) && isAnyOrInterface(hElt))
+			// isAnyOrInterface(hElt) alone already covers the case where both
+			// tElt and hElt are any/interface{}.
+			return tElt == hElt || isAnyOrInterface(hElt)
 		}
 	}
 	return false

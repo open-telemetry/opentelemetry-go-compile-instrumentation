@@ -49,6 +49,21 @@ func TestBaseTypeName(t *testing.T) {
 			expected: "interface{}",
 		},
 		{
+			name:     "non-empty interface type",
+			typeSrc:  "interface{ Read(p []byte) (n int, err error) }",
+			expected: "interface{Read([]byte) (int, error)}",
+		},
+		{
+			name:     "empty struct type",
+			typeSrc:  "struct{}",
+			expected: "struct{}",
+		},
+		{
+			name:     "non-empty struct type",
+			typeSrc:  "struct{ Name string }",
+			expected: "struct{Name string}",
+		},
+		{
 			name:     "array type",
 			typeSrc:  "[]int",
 			expected: "[]int",
@@ -279,6 +294,48 @@ func H1Before(ctx hook.HookContext, p1 []int) {}`,
 			before:      true,
 			expectError: true,
 			errorMsg:    "type mismatch, expected []string, got []int",
+		},
+		{
+			// Regression: baseTypeName used to normalize every non-empty
+			// interface to the literal placeholder "interface{...}", so
+			// structurally distinct interfaces collided and falsely matched.
+			name: "invalid - distinct anonymous interfaces don't collide",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *interface{ Read(p []byte) (n int, err error) }) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 interface{ Write(p []byte) (n int, err error) }) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch",
+		},
+		{
+			name: "valid before hook - matching anonymous interfaces",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *interface{ Read(p []byte) (n int, err error) }) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 interface{ Read(p []byte) (n int, err error) }) {}`,
+			before: true,
+		},
+		{
+			// Same class of bug as the anonymous interface case above, but for
+			// anonymous struct types.
+			name: "invalid - distinct anonymous structs don't collide",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *struct{ Name string }) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 struct{ Age int }) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch",
 		},
 	}
 
