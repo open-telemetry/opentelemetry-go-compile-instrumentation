@@ -198,7 +198,7 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	return tjump
 }
 
-func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStmt) {
+func (ip *instrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStmt) {
 	found := false
 	if len(funcDecl.Body.List) > 0 {
 		firstStmt := funcDecl.Body.List[0]
@@ -243,7 +243,7 @@ func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 	}
 }
 
-func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
+func (ip *instrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
 	util.Assert(funcDecl.Name.Name == t.Func, "sanity check")
 
 	// Record the target function for the whole trampoline creation process
@@ -274,7 +274,7 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 
 	// Record the trampoline-jump-if as they can be optimized later, they are
 	// performance-critical
-	ip.tjumps = append(ip.tjumps, &TJump{target: funcDecl, ifStmt: tjump, rule: t})
+	ip.tjumps = append(ip.tjumps, &tJump{target: funcDecl, ifStmt: tjump, rule: t})
 
 	// Find if there is already a trampoline-jump-if, insert new tjump if so,
 	// otherwise prepend to block body.
@@ -300,14 +300,14 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	return ip.createTrampoline(t)
 }
 
-func (ip *InstrumentPhase) addCompileArg(newArg string) {
+func (ip *instrumentPhase) addCompileArg(newArg string) {
 	ip.compileArgs = append(ip.compileArgs, newArg)
 }
 
 //go:embed api.tmpl
 var templateAPI string
 
-func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
+func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	// Prepare trampoline code header
 	p := ast.NewAstParser()
 	trampoline, err := p.ParseSource("package " + pkgName)
@@ -335,7 +335,7 @@ func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
 	return nil
 }
 
-func (ip *InstrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
+func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
 	// Write the instrumented AST to the new file in the working directory
 	newFile := filepath.Join(ip.workDir, filepath.Base(oldFile))
 	err := ast.WriteFile(newFile, root)
@@ -367,7 +367,7 @@ func (ip *InstrumentPhase) writeInstrumented(root *dst.File, oldFile string) err
 	return nil
 }
 
-func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
+func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 	ip.parser = ast.NewAstParser()
 	root, err := ip.parser.Parse(file, parser.ParseComments)
 	if err != nil {
@@ -376,11 +376,11 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 	ip.target = root
 	// Every time we parse a file, we need to reset the trampoline jumps
 	// because they are associated with one certain file
-	ip.tjumps = make([]*TJump, 0)
+	ip.tjumps = make([]*tJump, 0)
 	return root, nil
 }
 
-func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
+func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
 	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {
 		return err

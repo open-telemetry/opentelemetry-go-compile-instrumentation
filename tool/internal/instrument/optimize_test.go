@@ -152,7 +152,7 @@ func TestRemoveAfterTrampolineCall(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ifStmt := parseIfStmt(t, tt.source)
-			tjump := &TJump{ifStmt: ifStmt}
+			tjump := &tJump{ifStmt: ifStmt}
 
 			err := removeAfterTrampolineCall(tjump)
 			if tt.expectError {
@@ -266,7 +266,7 @@ func TestNewHookContextImpl(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			targetFunc := parseFunc(t, tt.funcSrc)
-			tjump := &TJump{
+			tjump := &tJump{
 				target: targetFunc,
 				rule: &rule.InstFuncRule{
 					Func: targetFunc.Name.Name,
@@ -310,7 +310,7 @@ func TestStripTJumpLabel(t *testing.T) {
 			// parseIfStmt already adds tJumpLabel, so we add extra decorations
 			ifStmt.Decs.If = append(ifStmt.Decs.If, tt.extraDecorations...)
 
-			tjump := &TJump{ifStmt: ifStmt}
+			tjump := &tJump{ifStmt: ifStmt}
 
 			stripTJumpLabel(tjump)
 			assert.Empty(t, ifStmt.Decs.If)
@@ -328,7 +328,7 @@ func TestOptimizeTJumps_NoAfterHook(t *testing.T) {
 	}`
 
 	ifStmt := parseIfStmt(t, source)
-	tjump := &TJump{
+	tjump := &tJump{
 		ifStmt: ifStmt,
 		rule: &rule.InstFuncRule{
 			After: "", // No After hook
@@ -361,7 +361,7 @@ func TestRemoveBeforeTrampolineCall(t *testing.T) {
 	targetFunc := parseFunc(t, funcSrc)
 	ifStmt := parseIfStmt(t, ifSrc)
 
-	tjump := &TJump{
+	tjump := &tJump{
 		target: targetFunc,
 		ifStmt: ifStmt,
 		rule: &rule.InstFuncRule{
@@ -398,7 +398,7 @@ func TestRemoveAfterTrampolineDecl(t *testing.T) {
 	func testFunc(param1 string) {}`
 
 	targetFunc := parseFunc(t, funcSrc)
-	tjump := &TJump{
+	tjump := &tJump{
 		target: targetFunc,
 		rule: &rule.InstFuncRule{
 			Func:   targetFunc.Name.Name,
@@ -583,7 +583,7 @@ func TestFlattenTJump(t *testing.T) {
 			hookFunc := parseFunc(t, tt.hookSrc)
 			ifStmt := parseIfStmt(t, ifSrc)
 
-			tjump := &TJump{
+			tjump := &tJump{
 				target: nil, // Not used in this optimization scenario
 				ifStmt: ifStmt,
 				rule: &rule.InstFuncRule{

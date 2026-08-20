@@ -169,7 +169,7 @@ func H1Before(ctx hook.HookContext, p1 string, p2 string) {}`,
 			trampFunc := parseFunc(t, tt.trampSrc)
 			hookFunc := parseFunc(t, tt.hookSrc)
 
-			ip := &InstrumentPhase{}
+			ip := &instrumentPhase{}
 			if tt.before {
 				ip.beforeTrampFunc = trampFunc
 			} else {
