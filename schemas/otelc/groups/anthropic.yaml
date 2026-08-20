@@ -74,4 +74,6 @@ groups:
       - ref: gen_ai.usage.cache_read.input_tokens
       - ref: gen_ai.usage.cache_creation.input_tokens
       - ref: gen_ai.request.is_stream
+      - ref: server.address
+      - ref: server.port
       - ref: error.type

@@ -57,13 +57,14 @@ func TestAnthropicClient(t *testing.T) {
 			testutil.RequireGenAIClientSemconv(
 				t,
 				span,
-				"anthropic",          // system
-				"chat",               // operationName
-				tc.model,             // requestModel
-				"local",              // providerName (127.0.0.1 maps to "local")
-				"msg-test-123",       // responseID
-				tc.model,             // responseModel
-				[]string{"end_turn"}, // finishReasons
+				"anthropic",                     // system
+				"chat",                          // operationName
+				tc.model,                        // requestModel
+				"local",                         // providerName (127.0.0.1 maps to "local")
+				server.Listener.Addr().String(), // serverEndpoint
+				"msg-test-123",                  // responseID
+				tc.model,                        // responseModel
+				[]string{"end_turn"},            // finishReasons
 				inputTokens,
 				outputTokens,
 				inputTokens+outputTokens, // totalTokens (computed)

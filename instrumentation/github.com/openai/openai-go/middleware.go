@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
+	"go.opentelemetry.io/otelc/pkg/netutil"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
@@ -158,6 +159,13 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			semconv.GenAIOperationName(opName),
 			semconv.GenAIRequestModel(model),
 			semconv.GenAIProviderName(provider),
+		}
+		serverAddress, serverPort := netutil.HTTPServerEndpoint(req.URL)
+		if serverAddress != "" && serverPort > 0 {
+			baseAttrs = append(baseAttrs,
+				otelsemconv.ServerAddress(serverAddress),
+				otelsemconv.ServerPort(serverPort),
+			)
 		}
 		spanAttrs = append(baseAttrs, spanAttrs...)
 

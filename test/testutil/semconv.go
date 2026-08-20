@@ -136,17 +136,29 @@ func RequireRedisClientSemconv(
 func RequireGenAIClientSemconv(
 	t *testing.T,
 	span ptrace.Span,
-	system, operationName, requestModel, providerName string,
+	system, operationName, requestModel, providerName, serverEndpoint string,
 	responseID, responseModel string,
 	finishReasons []string,
 	inputTokens, outputTokens, totalTokens int64,
 ) {
+	serverAddress, portText, err := net.SplitHostPort(serverEndpoint)
+	if err != nil {
+		t.Fatalf("split GenAI server endpoint %q: %v", serverEndpoint, err)
+	}
+	serverPort, err := strconv.ParseInt(portText, 10, 64)
+	if err != nil {
+		t.Fatalf("parse GenAI server port %q: %v", portText, err)
+	}
+
 	// Required attributes
 	RequireAttribute(t, span, "gen_ai.system", system)
 	RequireAttribute(t, span, "gen_ai.operation.name", operationName)
 	RequireAttribute(t, span, "gen_ai.request.model", requestModel)
 	// Recommended attributes
 	RequireAttribute(t, span, "gen_ai.provider.name", providerName)
+	RequireAttribute(t, span, string(semconv.ServerAddressKey), serverAddress)
+	// Conditionally required whenever server.address is set.
+	RequireAttribute(t, span, string(semconv.ServerPortKey), serverPort)
 	RequireAttribute(t, span, "gen_ai.response.id", responseID)
 	RequireAttribute(t, span, "gen_ai.response.model", responseModel)
 	if len(finishReasons) > 0 {

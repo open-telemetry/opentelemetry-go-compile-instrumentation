@@ -52,7 +52,7 @@ func TestOtelMiddleware_ChatCompletion(t *testing.T) {
 	reqBody := `{"model":"gpt-4","max_tokens":100,"temperature":0.7,"top_p":0.9,"frequency_penalty":0.5,"presence_penalty":0.3}`
 	req, _ := http.NewRequest(
 		"POST",
-		"http://api.openai.com/v1/chat/completions",
+		"https://api.openai.com/v1/chat/completions",
 		io.NopCloser(bytes.NewReader([]byte(reqBody))),
 	)
 
@@ -80,6 +80,8 @@ func TestOtelMiddleware_ChatCompletion(t *testing.T) {
 	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
 	assertAttribute(t, attrs, "gen_ai.request.model", "gpt-4")
 	assertAttribute(t, attrs, "gen_ai.provider.name", "openai")
+	assertAttribute(t, attrs, "server.address", "api.openai.com")
+	assertInt64Attribute(t, attrs, "server.port", 443)
 	assertAttribute(t, attrs, "gen_ai.response.id", "chatcmpl-123")
 	assertAttribute(t, attrs, "gen_ai.response.model", "gpt-4")
 	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 10)
@@ -424,14 +426,16 @@ func TestOtelMiddleware_ResponseBodyReadError(t *testing.T) {
 
 func TestOtelMiddleware_ProviderDetection(t *testing.T) {
 	tests := []struct {
-		name     string
-		host     string
-		expected string
+		name            string
+		host            string
+		expected        string
+		expectedAddress string
+		expectedPort    int64
 	}{
-		{"deepseek", "api.deepseek.com", "deepseek"},
-		{"azure", "myendpoint.azure.com", "azure"},
-		{"local", "localhost:11434", "local"},
-		{"groq", "api.groq.com", "groq"},
+		{"deepseek", "api.deepseek.com", "deepseek", "api.deepseek.com", 80},
+		{"azure", "myendpoint.azure.com", "azure", "myendpoint.azure.com", 80},
+		{"local", "localhost:11434", "local", "localhost", 11434},
+		{"groq", "api.groq.com", "groq", "api.groq.com", 80},
 	}
 
 	for _, tt := range tests {
@@ -460,7 +464,10 @@ func TestOtelMiddleware_ProviderDetection(t *testing.T) {
 
 			spans := sr.Ended()
 			require.Len(t, spans, 1)
-			assertAttribute(t, spans[0].Attributes(), "gen_ai.provider.name", tt.expected)
+			attrs := spans[0].Attributes()
+			assertAttribute(t, attrs, "gen_ai.provider.name", tt.expected)
+			assertAttribute(t, attrs, "server.address", tt.expectedAddress)
+			assertInt64Attribute(t, attrs, "server.port", tt.expectedPort)
 		})
 	}
 }
