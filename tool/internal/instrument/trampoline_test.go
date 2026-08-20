@@ -191,7 +191,7 @@ func TestBaseTypeName(t *testing.T) {
 }
 
 func TestBaseTypeName_NilExpr(t *testing.T) {
-	assert.Equal(t, "", baseTypeName(nil))
+	assert.Empty(t, baseTypeName(nil))
 }
 
 func TestCheckHookDecl(t *testing.T) {
