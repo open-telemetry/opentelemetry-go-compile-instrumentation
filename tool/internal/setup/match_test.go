@@ -1147,6 +1147,60 @@ func Target(value string) error { return nil }
 	assert.Equal(t, "matching", matchedFuncRules[0].Name)
 }
 
+func TestParseRuleFromYamlDeterministicOrder(t *testing.T) {
+	yamlContent := []byte(`
+zebra:
+  target: main
+  func: Example
+  raw: "_ = 1"
+alpha:
+  target: main
+  func: Example
+  raw: "_ = 1"
+mangle:
+  target: main
+  func: Example
+  raw: "_ = 1"
+`)
+
+	rules, err := parseRuleFromYaml(yamlContent)
+	require.NoError(t, err)
+	require.Len(t, rules, 3)
+
+	names := make([]string, len(rules))
+	for i, r := range rules {
+		names[i] = r.GetName()
+	}
+	require.Equal(t, []string{"alpha", "mangle", "zebra"}, names)
+}
+
+func TestLoadCustomRulesDeterministicOrder(t *testing.T) {
+	content := `zebra:
+  target: main
+  func: Example
+  raw: "_ = 1"
+alpha:
+  target: main
+  func: Example
+  raw: "_ = 1"
+mangle:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+
+	p := writeCustomRules(t, "order.yaml", content)
+
+	rules, err := loadCustomRules(p)
+	require.NoError(t, err)
+	require.Len(t, rules, 3)
+
+	names := make([]string, len(rules))
+	for i, r := range rules {
+		names[i] = r.GetName()
+	}
+	require.Equal(t, []string{"alpha", "mangle", "zebra"}, names)
+}
+
 func TestRunMatch_EmptyRules(t *testing.T) {
 	dep := &Dependency{
 		ImportPath: "example.com/noop",

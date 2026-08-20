@@ -28,6 +28,7 @@
   - [5. Directive Rule](#5-directive-rule)
   - [6. File Addition Rule](#6-file-addition-rule)
   - [7. Named Declaration Rule](#7-named-declaration-rule)
+  - [8. Composite Literal Rule](#8-composite-literal-rule)
 
 This document explains the different types of instrumentation rules used by the Go compile-time instrumentation tool. These rules, defined in YAML files, allow for the injection of code into target Go packages.
 
@@ -111,8 +112,8 @@ instrument_sql_exec:
 - Composition sub-groups `all-of`, `one-of`, `not` may appear at any position
   to compose nested selector groups.
 - Point selector keys recognized at the top of `where`:
-  `func`, `recv`, `struct`, `function_call`, `directive`, `kind`,
-  `identifier`.
+  `func`, `recv`, `struct`, `struct_literal`, `function_call`, `directive`,
+  `kind`, `identifier`.
 - File-level predicates live under `where.file`.
 - `target` and `version` **must not** appear inside `where`. They are
   package-scope selectors and stay top-level.
@@ -280,6 +281,7 @@ Rules:
 | `wrap_call`         | `InstCallRule`      |
 | `expand_directive`  | `InstDirectiveRule` |
 | `assign_value`      | `InstDeclRule`      |
+| `set_fields`        | `InstLitRule`       |
 
 **Planned:** rule type will be derived from the modifier key in `do`. The current implementation still infers from field presence and ignores the modifier name; see #546 for the planned migration.
 
@@ -1202,3 +1204,100 @@ This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTra
 - If `replace` matches multiple names in a single declaration (e.g., `var a, b = ...`), the replacement expression is cloned and assigned to each name.
 - If `wrap` matches multiple initialized values in a single declaration, each initializer is wrapped independently.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.
+
+### 8. Composite Literal Rule
+
+This rule sets fields on composite (struct) literals of a given type, wherever those literals are written in the target package. It reaches values that are constructed inline, which the Function Hook Rule and Call Wrapping Rule cannot see because there is no function to hook.
+
+**Use Cases:**
+
+- Configuring a third-party type that has no constructor, so every consumer writes the literal by hand.
+- Marking the values one package creates, so instrumentation elsewhere can tell them apart from values created by application code.
+
+**Selectors (under `where`):**
+
+- `struct_literal` (string, required): The qualified type name in the form `package/path.TypeName`.
+
+**Modifier (`do: - set_fields:`):**
+
+- `field` (list of objects, required): The fields to set on each matched literal. Each object contains:
+  - `name` (string, required): The field name.
+  - `value` (string, optional): A Go expression assigned to the field. When `wrap` is also set, it applies only to literals that omit the field.
+  - `wrap` (string, optional): A Go expression template applied to the value the literal already assigns to this field. `{{ . }}` is substituted with that expression.
+
+At least one of `value` or `wrap` must be set. They describe different situations, so both may be set on one entry. This differs from `assign_value`, where `replace` and `wrap` are mutually exclusive: a declaration either has an initializer or does not, whereas whether a field is present varies from one literal to the next.
+
+| Keys    | Field present | Field absent            |
+| ------- | ------------- | ----------------------- |
+| `value` | overridden    | set                     |
+| `wrap`  | wrapped       | skipped, with a warning |
+| both    | wrapped       | set                     |
+
+Top-level `imports` (map[string]string, optional): Additional imports needed by the injected values. Same format as [Top-level fields](#top-level-fields).
+
+**Example:**
+
+```yaml
+mark_internal_transports:
+  target: example.com/tracer
+  where:
+    struct_literal: net/http.Transport
+  do:
+    - set_fields:
+        field:
+          - name: Internal
+            value: "true"
+```
+
+```go
+&http.Transport{MaxIdleConns: 100}
+// → &http.Transport{Internal: true, MaxIdleConns: 100}
+```
+
+The `Internal` field itself comes from a separate [Struct Field Injection Rule](#2-struct-field-injection-rule) against `net/http`; this rule only sets values.
+
+**Example with `wrap`:**
+
+`value` can only assign an expression the rule spells out in full. Use `wrap` when the replacement has to build on whatever the literal already assigns, which is often a value computed at the construction site and therefore impossible to name in a rule:
+
+```yaml
+instrument_clients:
+  target: example.com/app
+  where:
+    struct_literal: net/http.Client
+  do:
+    - set_fields:
+        field:
+          - name: Transport
+            wrap: "otelhttp.NewTransport({{ . }})"
+            value: "otelhttp.NewTransport(http.DefaultTransport)"
+  imports:
+    http: "net/http"
+    otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+```
+
+```go
+// a client that sets its own transport has it wrapped
+&http.Client{Transport: myTransport}
+// → &http.Client{Transport: otelhttp.NewTransport(myTransport)}
+
+// one that does not gets value instead. An absent Transport means
+// http.DefaultTransport, so naming it explicitly instruments the client
+// rather than wrapping a nil.
+&http.Client{}
+// → &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+```
+
+**Matching:**
+
+`struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
+
+**Notes:**
+
+- Not matched: unqualified literals of a type declared in the target package itself (`Transport{...}`), literals with an elided type such as elements of a slice literal (`[]http.Transport{{...}}`), and chained qualifiers (`outer.http.Transport{...}`).
+- A field already present is modified in place, keeping its position. A field not present is prepended. Every other element is left alone.
+- Go rejects a literal that mixes keyed and positional elements, so a positional literal (`image.Point{1, 2}`) cannot take these fields. Such literals are skipped with a warning rather than producing code that does not compile.
+- `value` must be a valid Go expression and `wrap` must produce one. Neither is type-checked against the field at rule-definition time, so a mismatch surfaces as a compile error in the instrumented build.
+- `wrap` must contain `{{ . }}`; a template without it is rejected at load time.
+- This rule sets named fields, so it cannot restructure a literal as a whole: no reordering or removing elements, and one field's expression cannot read another's.
+- Setting the same field twice in one rule is rejected at load time.

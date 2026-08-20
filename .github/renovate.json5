@@ -8,6 +8,11 @@
     'before 8am on the 1st and 15th day of the month',
   ],
   updateNotScheduled: false,
+  // Cooldown: don't raise a bump PR until a release has aged, so yanked or
+  // compromised releases are caught before they enter the tree. Renovate's
+  // equivalent of Dependabot's `cooldown`.
+  minimumReleaseAge: '5 days',
+  internalChecksFilter: 'strict',
   customManagers: [
     {
       customType: 'regex',
