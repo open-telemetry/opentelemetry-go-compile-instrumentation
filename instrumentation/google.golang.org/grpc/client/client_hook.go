@@ -259,8 +259,8 @@ func (h *clientStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 				span.RecordError(rs.Error)
 			}
 			span.SetAttributes(statusAttr)
-			span.End()
 		}
+		span.End()
 
 		// Record metrics
 		if gctx != nil {
