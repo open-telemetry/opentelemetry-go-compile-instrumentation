@@ -406,7 +406,7 @@ func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 			return filepath.SkipDir
 		}
 
-		if !d.IsDir() && util.IsRuleFileName(d.Name()) {
+		if !d.IsDir() && util.IsRuleFile(d.Name()) {
 			filesToProcess = append(filesToProcess, p)
 		}
 

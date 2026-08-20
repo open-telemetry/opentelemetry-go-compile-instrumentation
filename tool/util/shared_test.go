@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsRuleFileName(t *testing.T) {
+func TestIsRuleFile(t *testing.T) {
 	tests := map[string]bool{
 		"otelc.yaml":        true,
 		"otelc.yml":         true,
@@ -30,7 +30,7 @@ func TestIsRuleFileName(t *testing.T) {
 
 	for filename, expected := range tests {
 		t.Run(filename, func(t *testing.T) {
-			assert.Equal(t, expected, IsRuleFileName(filename))
+			assert.Equal(t, expected, IsRuleFile(filename))
 		})
 	}
 }

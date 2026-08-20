@@ -45,7 +45,7 @@ func InstrumentedTargets(t *testing.T, rulesRoot string) map[string][]string {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !util.IsRuleFileName(d.Name()) {
+		if d.IsDir() || !util.IsRuleFile(d.Name()) {
 			return nil
 		}
 		data, readErr := os.ReadFile(path) //nolint:gosec

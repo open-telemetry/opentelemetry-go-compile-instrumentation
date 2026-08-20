@@ -120,7 +120,7 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			}
 			return nil
 		}
-		if !util.IsRuleFileName(d.Name()) {
+		if !util.IsRuleFile(d.Name()) {
 			return nil
 		}
 
