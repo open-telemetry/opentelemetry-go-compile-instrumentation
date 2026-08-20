@@ -113,7 +113,7 @@ func TestBeforeAfterDoRequest_Success(t *testing.T) {
 	sr, reader := setupTestProviders(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
 
-	parent := context.Background()
+	parent := t.Context()
 	ictx := hooktest.NewMockHookContext(
 		(*linodego.Client)(nil),
 		parent,
@@ -149,7 +149,7 @@ func TestBeforeAfterDoRequest_Success(t *testing.T) {
 
 	// doRequest does not emit metrics (operation-level only).
 	var rm metricdata.ResourceMetrics
-	require.NoError(t, reader.Collect(context.Background(), &rm))
+	require.NoError(t, reader.Collect(t.Context(), &rm))
 	require.False(t, hasMetric(rm, "linodego.client.request.duration"))
 	require.False(t, hasMetric(rm, "linodego.client.operation.duration"))
 }
@@ -158,7 +158,7 @@ func TestBeforeAfterDoRequest_ErrorWithStatus(t *testing.T) {
 	sr, _ := setupTestProviders(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
 
-	parent := context.Background()
+	parent := t.Context()
 	ictx := hooktest.NewMockHookContext()
 
 	BeforeDoRequest(ictx, nil, parent, "GET", "linode/instances/999", nil, nil)
@@ -178,7 +178,7 @@ func TestBeforeAfterDoRequest_PlainError(t *testing.T) {
 	sr, _ := setupTestProviders(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
 
-	parent := context.Background()
+	parent := t.Context()
 	ictx := hooktest.NewMockHookContext()
 
 	BeforeDoRequest(ictx, nil, parent, "GET", "linode/instances/1", nil, nil)
@@ -195,7 +195,7 @@ func TestBeforeDoRequest_Disabled(t *testing.T) {
 	sr, _ := setupTestProviders(t)
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "linodego")
 
-	parent := context.Background()
+	parent := t.Context()
 	ictx := hooktest.NewMockHookContext(nil, parent, "GET", "x", nil, nil)
 
 	BeforeDoRequest(ictx, nil, parent, "GET", "x", nil, nil)
@@ -209,7 +209,7 @@ func TestPublicMethodHooks_Success(t *testing.T) {
 	sr, reader := setupTestProviders(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
 
-	parent := context.Background()
+	parent := t.Context()
 	ictx := hooktest.NewMockHookContext(nil, parent, 123)
 	ictx.FuncName = "GetInstance"
 
@@ -230,7 +230,7 @@ func TestPublicMethodHooks_Success(t *testing.T) {
 	assert.Equal(t, "GetInstance", attrs["code.function.name"])
 
 	var rm metricdata.ResourceMetrics
-	require.NoError(t, reader.Collect(context.Background(), &rm))
+	require.NoError(t, reader.Collect(t.Context(), &rm))
 	require.True(t, hasMetric(rm, "linodego.client.operation.duration"))
 	require.False(t, hasMetric(rm, "linodego.client.request.duration"))
 }
@@ -239,7 +239,7 @@ func TestPublicMethodHooks_Error(t *testing.T) {
 	sr, _ := setupTestProviders(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
 
-	parent := context.Background()
+	parent := t.Context()
 	ictx := hooktest.NewMockHookContext(nil, parent, 999)
 	ictx.FuncName = "GetInstance"
 
@@ -258,9 +258,9 @@ func TestPublicMethodHooks_Disabled(t *testing.T) {
 	sr, _ := setupTestProviders(t)
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "linodego")
 
-	ictx := hooktest.NewMockHookContext(nil, context.Background())
+	ictx := hooktest.NewMockHookContext(nil, t.Context())
 	ictx.FuncName = "ListRegions"
-	BeforeAPICall1(ictx, nil, context.Background())
+	BeforeAPICall1(ictx, nil, t.Context())
 	AfterAPICall2(ictx, nil, nil)
 	assert.Empty(t, sr.Ended())
 }

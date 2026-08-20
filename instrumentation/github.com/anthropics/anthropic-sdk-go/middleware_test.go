@@ -124,7 +124,7 @@ func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
 func durationCount(t *testing.T, reader *sdkmetric.ManualReader) uint64 {
 	t.Helper()
 	var rm metricdata.ResourceMetrics
-	require.NoError(t, reader.Collect(context.Background(), &rm))
+	require.NoError(t, reader.Collect(t.Context(), &rm))
 	for _, sm := range rm.ScopeMetrics {
 		for _, m := range sm.Metrics {
 			if m.Name != "gen_ai.client.operation.duration" {

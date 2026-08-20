@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"fmt"
 	goast "go/ast"
 	"go/importer"
@@ -40,7 +39,7 @@ func Target(value string) error { return nil }
 		Signature:    &sig,
 	}
 
-	err = newTestPhase().applyFuncRule(context.Background(), funcRule, root)
+	err = newTestPhase().applyFuncRule(t.Context(), funcRule, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can not find function Target")
 }

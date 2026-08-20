@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"go/token"
 	"testing"
 
@@ -61,7 +60,7 @@ func TestApplyCallRule_Success(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("traced({{ . }})")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	err := newTestPhase().applyCallRule(t.Context(), r, file)
 
 	require.NoError(t, err)
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
@@ -80,7 +79,7 @@ func TestApplyCallRule_NonCallExprResult(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("{{ . }}.Response")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	err := newTestPhase().applyCallRule(t.Context(), r, file)
 
 	require.NoError(t, err)
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
@@ -93,7 +92,7 @@ func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("wrapper({{")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	err := newTestPhase().applyCallRule(t.Context(), r, file)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rule has no compiled replacement template")
@@ -359,7 +358,7 @@ func TestAppendCallArgs_WithReplace(t *testing.T) {
 		Replace:      "wrapper({{ . }})",
 	}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	err := newTestPhase().applyCallRule(t.Context(), r, file)
 	require.NoError(t, err)
 
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
@@ -464,7 +463,7 @@ func TestApplyCallRule_NoMatchIsNoOp(t *testing.T) {
 		Replace:      "Wrapper({{ . }})",
 	}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	err := newTestPhase().applyCallRule(t.Context(), r, file)
 
 	require.NoError(t, err, "applyCallRule must no-op when no calls match")
 }
@@ -500,7 +499,7 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("not a valid expression {{ . }}")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	err := newTestPhase().applyCallRule(t.Context(), r, file)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to wrap")

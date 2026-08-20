@@ -41,7 +41,7 @@ func newGinContextWithRoute(t *testing.T, method, routePattern, url string, span
 
 	req := httptest.NewRequest(method, url, nil)
 	if span != nil {
-		ctx := trace.ContextWithSpan(context.Background(), span)
+		ctx := trace.ContextWithSpan(t.Context(), span)
 		req = req.WithContext(ctx)
 	}
 
@@ -67,7 +67,7 @@ func setupContextTracer(t *testing.T) (*tracetest.SpanRecorder, trace.Tracer) {
 func TestBeforeNext_UpdatesSpanNameAndRoute(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
 
 	ictx := hooktest.NewMockHookContext(c)
@@ -89,14 +89,14 @@ func TestBeforeNext_UpdatesSpanNameAndRoute(t *testing.T) {
 func TestBeforeNext_EmptyRouteIsNoop(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 
 	// gin.CreateTestContext produces a context with no router match,
 	// so FullPath() returns "". BeforeNext should be a no-op.
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/does-not-exist", nil).
-		WithContext(trace.ContextWithSpan(context.Background(), span))
+		WithContext(trace.ContextWithSpan(t.Context(), span))
 
 	ictx := hooktest.NewMockHookContext(c)
 	BeforeNext(ictx, c)
@@ -109,7 +109,7 @@ func TestBeforeNext_EmptyRouteIsNoop(t *testing.T) {
 func TestBeforeNext_IdempotentOnMultipleNextCalls(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/items/:id", "/items/7", span)
 	ictx := hooktest.NewMockHookContext(c)
 
@@ -148,7 +148,7 @@ func TestBeforeNext_NonRecordingSpanDoesNotBurnGate(t *testing.T) {
 
 	// Second call: attach a recording span. Because the previous call did not
 	// burn the gate, this call must still enrich the span.
-	_, recording := tr.Start(context.Background(), "GET")
+	_, recording := tr.Start(t.Context(), "GET")
 	c.Request = c.Request.WithContext(
 		trace.ContextWithSpan(c.Request.Context(), recording),
 	)
@@ -171,7 +171,7 @@ func TestBeforeNext_DisabledInstrumentation(t *testing.T) {
 
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
 
 	ictx := hooktest.NewMockHookContext(c)
@@ -199,7 +199,7 @@ func TestBeforeNext_NotInEnabledList(t *testing.T) {
 
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
 
 	ictx := hooktest.NewMockHookContext(c)
@@ -218,7 +218,7 @@ func TestBeforeNext_InEnabledList(t *testing.T) {
 
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
 
 	ictx := hooktest.NewMockHookContext(c)
@@ -235,7 +235,7 @@ func TestAfterNext_DisabledInstrumentation(t *testing.T) {
 
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
 
 	ictx := hooktest.NewMockHookContext(c)
@@ -259,7 +259,7 @@ func TestAfterNext_UsesBeforeNextGateDecision(t *testing.T) {
 	// gin is enabled when BeforeNext runs.
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
 
 	ictx := hooktest.NewMockHookContext(c)
@@ -288,7 +288,7 @@ func TestAfterNext_UsesBeforeNextGateDecision(t *testing.T) {
 func TestAfterNext_RecordsGinErrors(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/users/:id", "/users/42", span)
 
 	ictx := hooktest.NewMockHookContext(c)
@@ -316,7 +316,7 @@ func TestAfterNext_RecordsGinErrors(t *testing.T) {
 func TestAfterNext_NoErrorsIsNoop(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/ping", "/ping", span)
 
 	ictx := hooktest.NewMockHookContext(c)
@@ -332,7 +332,7 @@ func TestAfterNext_NoErrorsIsNoop(t *testing.T) {
 func TestAfterNext_RecordsOnlyAtOutermostReturn(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 
-	_, span := tr.Start(context.Background(), "GET")
+	_, span := tr.Start(t.Context(), "GET")
 	c := newGinContextWithRoute(t, "GET", "/items/:id", "/items/7", span)
 	ictx := hooktest.NewMockHookContext(c)
 

@@ -115,7 +115,7 @@ func runTest(t *testing.T, testName string) {
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
 
-	args := compileArgs(tempDir, helpers, importPath, packageFiles...)
+	args := compileArgs(t, tempDir, helpers, importPath, packageFiles...)
 	err := Toolexec(ctx, args, false)
 
 	if testName == invalidReceiver {
@@ -389,12 +389,12 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 	_ = os.WriteFile(matchedFile, matchedJSON, 0o644)
 }
 
-func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceFiles ...string) []string {
+func compileArgs(t *testing.T, tempDir string, helpers []helperPkg, importPath string, sourceFiles ...string) []string {
 	output, _ := exec.Command("go", "env", "GOTOOLDIR").Output()
 
 	// Create importcfg file for the test
 	importCfgPath := filepath.Join(tempDir, "importcfg")
-	createImportCfg(importCfgPath, helpers)
+	createImportCfg(t, importCfgPath, helpers)
 
 	args := make([]string, 0, 11+len(sourceFiles))
 	args = append(
@@ -412,10 +412,10 @@ func compileArgs(tempDir string, helpers []helperPkg, importPath string, sourceF
 
 // createImportCfg creates an importcfg file with standard library packages
 // and any additional helper packages built for the testcase.
-func createImportCfg(path string, helpers []helperPkg) {
+func createImportCfg(t *testing.T, path string, helpers []helperPkg) {
 	// Get standard library package locations
 	// We'll use go list to populate common packages
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Start with an empty config
 	cfg := struct {

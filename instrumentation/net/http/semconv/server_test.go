@@ -4,7 +4,6 @@
 package semconv
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 	"testing"
@@ -252,7 +251,7 @@ func TestHTTPServerRecordMetrics(t *testing.T) {
 
 	// Should not panic
 	server.RecordMetrics(
-		context.Background(),
+		t.Context(),
 		"example.com",
 		req,
 		200,         // statusCode

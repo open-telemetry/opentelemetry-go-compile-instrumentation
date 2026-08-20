@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"go/token"
 	"testing"
 
@@ -36,7 +35,7 @@ func TestApplyStructRule_NonStructType_ReturnsError(t *testing.T) {
 		NewField:     []*rule.InstStructField{{Name: "Traced", Type: "bool"}},
 	}
 
-	err := newTestPhase().applyStructRule(context.Background(), r, file)
+	err := newTestPhase().applyStructRule(t.Context(), r, file)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `can not find struct "Foo"`)
@@ -57,7 +56,7 @@ func TestApplyStructRule_GroupedTypeBlock_TargetsNamedStruct(t *testing.T) {
 		NewField:     []*rule.InstStructField{{Name: "X", Type: "int"}},
 	}
 
-	err := newTestPhase().applyStructRule(context.Background(), r, file)
+	err := newTestPhase().applyStructRule(t.Context(), r, file)
 
 	require.NoError(t, err)
 	require.Len(t, target.Fields.List, 1)

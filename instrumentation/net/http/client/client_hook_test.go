@@ -38,7 +38,7 @@ func TestBeforeRoundTrip(t *testing.T) {
 	tests := []struct {
 		name            string
 		setupEnv        func(t *testing.T)
-		setupRequest    func() *http.Request
+		setupRequest    func(t *testing.T) *http.Request
 		expectSpan      bool
 		validateSpan    func(*testing.T, trace.Span)
 		validateRequest func(*testing.T, *http.Request)
@@ -48,7 +48,7 @@ func TestBeforeRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupRequest: func() *http.Request {
+			setupRequest: func(t *testing.T) *http.Request {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
 				return req
 			},
@@ -66,7 +66,7 @@ func TestBeforeRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupRequest: func() *http.Request {
+			setupRequest: func(t *testing.T) *http.Request {
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
 				return req
 			},
@@ -77,7 +77,7 @@ func TestBeforeRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupRequest: func() *http.Request {
+			setupRequest: func(t *testing.T) *http.Request {
 				req, _ := http.NewRequest("POST", "http://localhost:4318/v1/traces", nil)
 				req.Header.Set("User-Agent", "OTel OTLP Exporter Go/1.0")
 				return req
@@ -89,7 +89,7 @@ func TestBeforeRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupRequest: func() *http.Request {
+			setupRequest: func(t *testing.T) *http.Request {
 				req, _ := http.NewRequest("POST", "http://example.com/api/data", nil)
 				return req
 			},
@@ -100,8 +100,8 @@ func TestBeforeRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupRequest: func() *http.Request {
-				ctx := context.WithValue(context.Background(), "test-key", "test-value")
+			setupRequest: func(t *testing.T) *http.Request {
+				ctx := context.WithValue(t.Context(), "test-key", "test-value")
 				req, _ := http.NewRequestWithContext(ctx, "GET", "http://example.com/path", nil)
 				return req
 			},
@@ -117,7 +117,7 @@ func TestBeforeRoundTrip(t *testing.T) {
 			tt.setupEnv(t)
 			sr, _ := setupTestTracer(t)
 
-			req := tt.setupRequest()
+			req := tt.setupRequest(t)
 			mockCtx := hooktest.NewMockHookContext()
 			transport := &http.Transport{}
 
@@ -150,9 +150,9 @@ func TestBeforeRoundTrip(t *testing.T) {
 					tt.validateRequest(t, newReq)
 				}
 			} else {
-				// No span should be created
-				data := mockCtx.GetData()
-				assert.Nil(t, data, "no data should be stored when instrumentation disabled")
+				spans := sr.Ended()
+				assert.Equal(t, 0, len(spans), "no span should be ended")
+				assert.Nil(t, mockCtx.GetData(), "no data should be stored")
 			}
 		})
 	}
@@ -162,7 +162,7 @@ func TestAfterRoundTrip(t *testing.T) {
 	tests := []struct {
 		name         string
 		setupEnv     func(t *testing.T)
-		setupContext func(*sdktrace.TracerProvider) hook.HookContext
+		setupContext func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext
 		response     *http.Response
 		err          error
 		validateSpan func(*testing.T, []sdktrace.ReadOnlySpan)
@@ -172,10 +172,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(t.Context(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -201,10 +201,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(t.Context(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -233,10 +233,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(t.Context(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -263,10 +263,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(t.Context(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -292,7 +292,7 @@ func TestAfterRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				return hooktest.NewMockHookContext()
 			},
 			response: &http.Response{
@@ -310,10 +310,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
 				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				ctx, span := testTracer.Start(t.Context(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetData(map[string]interface{}{
@@ -343,7 +343,7 @@ func TestAfterRoundTrip(t *testing.T) {
 			tt.setupEnv(t)
 			sr, tp := setupTestTracer(t)
 
-			mockCtx := tt.setupContext(tp)
+			mockCtx := tt.setupContext(t, tp)
 
 			AfterRoundTrip(mockCtx, tt.response, tt.err)
 

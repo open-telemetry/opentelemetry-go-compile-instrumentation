@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"go/token"
 	"io"
 	"log/slog"
@@ -119,27 +118,93 @@ func TestWrapDeclValue_InvalidTemplate(t *testing.T) {
 
 // --- applyDeclRule integration tests ---
 
-// makeVarFile builds a minimal *dst.File containing a single var declaration.
-//
-//	var <name> int = <initExpr>
-//
-// Pass initExpr=nil to produce a declaration with no initializer.
-func makeVarFile(name string, initExpr dst.Expr) *dst.File {
-	spec := &dst.ValueSpec{
-		Names: []*dst.Ident{{Name: name}},
-		Type:  &dst.Ident{Name: "int"},
-	}
-	if initExpr != nil {
-		spec.Values = []dst.Expr{initExpr}
+// makeVarFile builds a minimal *dst.File declaring a package-level variable.
+func makeVarFile(name string, init dst.Expr) *dst.File {
+	var values []dst.Expr
+	if init != nil {
+		values = []dst.Expr{init}
 	}
 	return &dst.File{
 		Name: &dst.Ident{Name: "main"},
 		Decls: []dst.Decl{
 			&dst.GenDecl{
-				Tok:   token.VAR,
-				Specs: []dst.Spec{spec},
+				Tok: token.VAR,
+				Specs: []dst.Spec{
+					&dst.ValueSpec{
+						Names:  []*dst.Ident{{Name: name}},
+						Values: values,
+					},
+				},
 			},
 		},
+	}
+}
+
+// makeConstFile builds a minimal *dst.File declaring a package-level constant.
+func makeConstFile(name string, init dst.Expr) *dst.File {
+	return &dst.File{
+		Name: &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.CONST,
+				Specs: []dst.Spec{
+					&dst.ValueSpec{
+						Names:  []*dst.Ident{{Name: name}},
+						Values: []dst.Expr{init},
+					},
+				},
+			},
+		},
+	}
+}
+
+// makeGroupedDeclFile builds a *dst.File declaring multiple package-level
+// variables/constants in a single `var (...)` or `const (...)` block.
+func makeGroupedDeclFile(tok token.Token, specs ...dst.Spec) *dst.File {
+	return &dst.File{
+		Name:  &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{&dst.GenDecl{Tok: tok, Specs: specs}},
+	}
+}
+
+// makeGroupedTypeFile builds a *dst.File declaring multiple types in a single
+// `type (...)` block.
+func makeGroupedTypeFile(specs ...dst.Spec) *dst.File {
+	return &dst.File{
+		Name:  &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{&dst.GenDecl{Tok: token.TYPE, Specs: specs}},
+	}
+}
+
+// makeMultiNameVarFile builds a *dst.File declaring multiple names in one Spec:
+//
+//	var A, B = 1, 2
+func makeMultiNameVarFile(names []string, values []dst.Expr) *dst.File {
+	idents := make([]*dst.Ident, len(names))
+	for i, n := range names {
+		idents[i] = &dst.Ident{Name: n}
+	}
+	return &dst.File{
+		Name: &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.VAR,
+				Specs: []dst.Spec{
+					&dst.ValueSpec{
+						Names:  idents,
+						Values: values,
+					},
+				},
+			},
+		},
+	}
+}
+
+// makeFuncDeclFile builds a *dst.File containing only the given function declaration.
+func makeFuncDeclFile(fn *dst.FuncDecl) *dst.File {
+	return &dst.File{
+		Name:  &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{fn},
 	}
 }
 
@@ -152,7 +217,7 @@ func TestApplyDeclRule_WrapExpression_Success(t *testing.T) {
 		Wrap:         "double({{ . }})",
 	}
 
-	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+	err := newTestPhase().applyDeclRule(t.Context(), r, file)
 
 	require.NoError(t, err)
 	spec := file.Decls[0].(*dst.GenDecl).Specs[0].(*dst.ValueSpec)
@@ -172,7 +237,7 @@ func TestApplyDeclRule_WrapExpression_DeclarationNotFound(t *testing.T) {
 		Wrap:         "double({{ . }})",
 	}
 
-	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+	err := newTestPhase().applyDeclRule(t.Context(), r, file)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `"X"`)
@@ -187,7 +252,7 @@ func TestApplyDeclRule_WrapExpression_NoInitializer(t *testing.T) {
 		Wrap:         "double({{ . }})",
 	}
 
-	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+	err := newTestPhase().applyDeclRule(t.Context(), r, file)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "wrap requires an existing initializer")
@@ -251,7 +316,7 @@ func TestApplyDeclRule_EmptyKind_FunctionTarget(t *testing.T) {
 		Replace:    "CustomHandler",
 	}
 
-	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+	err := newTestPhase().applyDeclRule(t.Context(), r, file)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is not a var or const declaration")

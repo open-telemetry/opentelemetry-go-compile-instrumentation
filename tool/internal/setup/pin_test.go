@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"context"
 	"fmt"
 	"go/token"
 	"io"
@@ -1235,7 +1234,7 @@ func TestPrepareVendoredBuild(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 
 	args := []string{"build", "./..."}
-	got, err := prepareVendoredBuild(context.Background(), util.LoggerFromContext(context.Background()), args)
+	got, err := prepareVendoredBuild(t.Context(), util.LoggerFromContext(t.Context()), args)
 	require.NoError(t, err)
 	assert.Equal(t, args, got)
 }

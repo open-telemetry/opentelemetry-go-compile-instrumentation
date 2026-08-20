@@ -32,54 +32,55 @@ func setupTestTracer(t *testing.T) *tracetest.SpanRecorder {
 func TestGetRedisV9Statement(t *testing.T) {
 	tests := []struct {
 		name     string
-		cmd      redis.Cmder
+		args     []any
 		expected string
 	}{
 		{
 			name:     "GET command",
-			cmd:      redis.NewCmd(context.Background(), "get", "mykey"),
+			args:     []any{"get", "mykey"},
 			expected: "get mykey",
 		},
 		{
 			name:     "SET command with value",
-			cmd:      redis.NewCmd(context.Background(), "set", "mykey", "myvalue"),
+			args:     []any{"set", "mykey", "myvalue"},
 			expected: "set mykey myvalue",
 		},
 		{
 			name:     "HSET command",
-			cmd:      redis.NewCmd(context.Background(), "hset", "myhash", "field1", "value1"),
+			args:     []any{"hset", "myhash", "field1", "value1"},
 			expected: "hset myhash field1 value1",
 		},
 		{
 			name:     "DEL command",
-			cmd:      redis.NewCmd(context.Background(), "del", "key1", "key2"),
+			args:     []any{"del", "key1", "key2"},
 			expected: "del key1 key2",
 		},
 		{
 			name:     "command with nil arg",
-			cmd:      redis.NewCmd(context.Background(), "set", nil),
+			args:     []any{"set", nil},
 			expected: "set <nil>",
 		},
 		{
 			name:     "command with int arg",
-			cmd:      redis.NewCmd(context.Background(), "expire", "mykey", 60),
+			args:     []any{"expire", "mykey", 60},
 			expected: "expire mykey 60",
 		},
 		{
 			name:     "command with bool arg true",
-			cmd:      redis.NewCmd(context.Background(), "set", "mykey", true),
+			args:     []any{"set", "mykey", true},
 			expected: "set mykey true",
 		},
 		{
 			name:     "command with bool arg false",
-			cmd:      redis.NewCmd(context.Background(), "set", "mykey", false),
+			args:     []any{"set", "mykey", false},
 			expected: "set mykey false",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getRedisV9Statement(tt.cmd)
+			cmd := redis.NewCmd(t.Context(), tt.args...)
+			result := getRedisV9Statement(cmd)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -88,49 +89,50 @@ func TestGetRedisV9Statement(t *testing.T) {
 func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
 	tests := []struct {
 		name     string
-		cmd      redis.Cmder
+		args     []any
 		expected string
 	}{
 		{
 			name:     "AUTH with password only",
-			cmd:      redis.NewCmd(context.Background(), "auth", "s3cret"),
+			args:     []any{"auth", "s3cret"},
 			expected: "auth ?",
 		},
 		{
 			name:     "AUTH with username and password",
-			cmd:      redis.NewCmd(context.Background(), "auth", "default", "s3cret"),
+			args:     []any{"auth", "default", "s3cret"},
 			expected: "auth ? ?",
 		},
 		{
 			name:     "AUTH uppercase",
-			cmd:      redis.NewCmd(context.Background(), "AUTH", "s3cret"),
+			args:     []any{"AUTH", "s3cret"},
 			expected: "AUTH ?",
 		},
 		{
 			name:     "HELLO handshake with AUTH",
-			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			args:     []any{"hello", 3, "auth", "default", "s3cret"},
 			expected: "hello 3 auth ? ?",
 		},
 		{
 			name:     "HELLO keeps SETNAME visible",
-			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret", "setname", "myapp"),
+			args:     []any{"hello", 3, "auth", "default", "s3cret", "setname", "myapp"},
 			expected: "hello 3 auth ? ? setname myapp",
 		},
 		{
 			name:     "HELLO without AUTH is untouched",
-			cmd:      redis.NewCmd(context.Background(), "hello", 3),
+			args:     []any{"hello", 3},
 			expected: "hello 3",
 		},
 		{
 			name:     "key literally named auth is not a credential",
-			cmd:      redis.NewCmd(context.Background(), "get", "auth", "token"),
+			args:     []any{"get", "auth", "token"},
 			expected: "get auth token",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getRedisV9Statement(tt.cmd)
+			cmd := redis.NewCmd(t.Context(), tt.args...)
+			result := getRedisV9Statement(cmd)
 			assert.Equal(t, tt.expected, result)
 			assert.NotContains(t, result, "s3cret", "the password must never reach db.query.text")
 		})
@@ -215,8 +217,8 @@ func TestProcessHook_CreatesSpan(t *testing.T) {
 		return nil
 	})
 
-	cmd := redis.NewCmd(context.Background(), "get", "mykey")
-	err := processHook(context.Background(), cmd)
+	cmd := redis.NewCmd(t.Context(), "get", "mykey")
+	err := processHook(t.Context(), cmd)
 	assert.NoError(t, err)
 
 	spans := sr.Ended()
@@ -248,8 +250,8 @@ func TestProcessHook_RecordsError(t *testing.T) {
 		return expectedErr
 	})
 
-	cmd := redis.NewCmd(context.Background(), "get", "mykey")
-	err := processHook(context.Background(), cmd)
+	cmd := redis.NewCmd(t.Context(), "get", "mykey")
+	err := processHook(t.Context(), cmd)
 	assert.Equal(t, expectedErr, err)
 
 	spans := sr.Ended()
@@ -276,8 +278,8 @@ func TestProcessHook_RedisNilNotError(t *testing.T) {
 		return redis.Nil
 	})
 
-	cmd := redis.NewCmd(context.Background(), "get", "nonexistent")
-	err := processHook(context.Background(), cmd)
+	cmd := redis.NewCmd(t.Context(), "get", "nonexistent")
+	err := processHook(t.Context(), cmd)
 	// redis.Nil must be propagated so callers can detect cache misses via errors.Is
 	assert.ErrorIs(t, err, redis.Nil)
 
@@ -300,8 +302,8 @@ func TestProcessHook_Disabled(t *testing.T) {
 		return nil
 	})
 
-	cmd := redis.NewCmd(context.Background(), "get", "mykey")
-	err := processHook(context.Background(), cmd)
+	cmd := redis.NewCmd(t.Context(), "get", "mykey")
+	err := processHook(t.Context(), cmd)
 	assert.NoError(t, err)
 
 	spans := sr.Ended()
@@ -320,11 +322,11 @@ func TestProcessPipelineHook_CreatesSpan(t *testing.T) {
 	})
 
 	cmds := []redis.Cmder{
-		redis.NewCmd(context.Background(), "get", "key1"),
-		redis.NewCmd(context.Background(), "set", "key2", "val2"),
-		redis.NewCmd(context.Background(), "del", "key3"),
+		redis.NewCmd(t.Context(), "get", "key1"),
+		redis.NewCmd(t.Context(), "set", "key2", "val2"),
+		redis.NewCmd(t.Context(), "del", "key3"),
 	}
-	err := pipelineHook(context.Background(), cmds)
+	err := pipelineHook(t.Context(), cmds)
 	assert.NoError(t, err)
 
 	spans := sr.Ended()
@@ -356,9 +358,9 @@ func TestProcessPipelineHook_TruncatesLongPipeline(t *testing.T) {
 	// Create more than 10 commands
 	cmds := make([]redis.Cmder, 15)
 	for i := range cmds {
-		cmds[i] = redis.NewCmd(context.Background(), "get", "key")
+		cmds[i] = redis.NewCmd(t.Context(), "get", "key")
 	}
-	err := pipelineHook(context.Background(), cmds)
+	err := pipelineHook(t.Context(), cmds)
 	assert.NoError(t, err)
 
 	spans := sr.Ended()
@@ -378,9 +380,9 @@ func TestProcessPipelineHook_RecordsError(t *testing.T) {
 	})
 
 	cmds := []redis.Cmder{
-		redis.NewCmd(context.Background(), "get", "key1"),
+		redis.NewCmd(t.Context(), "get", "key1"),
 	}
-	err := pipelineHook(context.Background(), cmds)
+	err := pipelineHook(t.Context(), cmds)
 	assert.Equal(t, expectedErr, err)
 
 	spans := sr.Ended()
@@ -407,9 +409,9 @@ func TestProcessPipelineHook_Disabled(t *testing.T) {
 	})
 
 	cmds := []redis.Cmder{
-		redis.NewCmd(context.Background(), "get", "key1"),
+		redis.NewCmd(t.Context(), "get", "key1"),
 	}
-	err := pipelineHook(context.Background(), cmds)
+	err := pipelineHook(t.Context(), cmds)
 	assert.NoError(t, err)
 
 	spans := sr.Ended()
@@ -428,7 +430,7 @@ func TestDialHook_Success(t *testing.T) {
 		return clientConn, nil
 	})
 
-	conn, err := dialHook(context.Background(), "tcp", "localhost:6379")
+	conn, err := dialHook(t.Context(), "tcp", "localhost:6379")
 	assert.NoError(t, err)
 	assert.NotNil(t, conn)
 }
@@ -441,7 +443,7 @@ func TestDialHook_Error(t *testing.T) {
 		return nil, expectedErr
 	})
 
-	conn, err := dialHook(context.Background(), "tcp", "localhost:6379")
+	conn, err := dialHook(t.Context(), "tcp", "localhost:6379")
 	assert.Equal(t, expectedErr, err)
 	assert.Nil(t, conn)
 }

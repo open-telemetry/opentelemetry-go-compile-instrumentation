@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -832,7 +831,7 @@ func TestCollectImports_UnquoteError(t *testing.T) {
 
 func TestWalkInstrumentationParseError(t *testing.T) {
 	err := walkInstrumentation(
-		context.Background(),
+		t.Context(),
 		[]string{filepath.Join(t.TempDir(), "nope.go")},
 		func(v *instrumentationVisit) (bool, error) { return false, nil },
 	)

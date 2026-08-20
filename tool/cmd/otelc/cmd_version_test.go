@@ -5,7 +5,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,7 +24,7 @@ func TestCommandVersion(t *testing.T) {
 		Writer:   &buf,
 		Commands: []*cli.Command{&commandVersion},
 	}
-	require.NoError(t, app.Run(context.Background(), []string{"otelc", "version", "--verbose"}))
+	require.NoError(t, app.Run(t.Context(), []string{"otelc", "version", "--verbose"}))
 
 	out := buf.String()
 	assert.Contains(t, out, "otelc version")

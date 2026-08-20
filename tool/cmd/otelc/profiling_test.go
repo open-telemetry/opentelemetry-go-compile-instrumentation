@@ -34,7 +34,7 @@ func runInitProfiling(t *testing.T, args ...string) error {
 		Before: initProfiling,
 		Action: func(context.Context, *cli.Command) error { return nil },
 	}
-	return app.Run(context.Background(), append([]string{"otelc"}, args...))
+	return app.Run(t.Context(), append([]string{"otelc"}, args...))
 }
 
 func TestInitProfiling(t *testing.T) {
@@ -116,7 +116,7 @@ func TestStopProfiling(t *testing.T) {
 			Flags:  profilingFlags(),
 			Action: stopProfiling,
 		}
-		require.NoError(t, app.Run(context.Background(), []string{"otelc"}))
+		require.NoError(t, app.Run(t.Context(), []string{"otelc"}))
 	})
 
 	t.Run("stops an active session without summary", func(t *testing.T) {
@@ -130,7 +130,7 @@ func TestStopProfiling(t *testing.T) {
 			Flags:  profilingFlags(),
 			Action: stopProfiling,
 		}
-		require.NoError(t, app.Run(context.Background(), []string{"otelc"}))
+		require.NoError(t, app.Run(t.Context(), []string{"otelc"}))
 		assert.Nil(t, activeSession, "session must be cleared after stop")
 	})
 
@@ -145,7 +145,7 @@ func TestStopProfiling(t *testing.T) {
 			Flags:  profilingFlags(),
 			Action: stopProfiling,
 		}
-		require.NoError(t, app.Run(context.Background(), []string{"otelc", "--profile-summary"}))
+		require.NoError(t, app.Run(t.Context(), []string{"otelc", "--profile-summary"}))
 		assert.Nil(t, activeSession)
 	})
 }

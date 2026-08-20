@@ -87,7 +87,7 @@ func TestServerContextExtraction(t *testing.T) {
 		SpanID:     expectedSpanID,
 		TraceFlags: trace.FlagsSampled,
 	})
-	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+	ctx := trace.ContextWithSpanContext(t.Context(), sc)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 	// Make request
@@ -167,7 +167,7 @@ func TestServerCreatesChildSpan(t *testing.T) {
 		SpanID:     parentSpanID,
 		TraceFlags: trace.FlagsSampled,
 	})
-	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+	ctx := trace.ContextWithSpanContext(t.Context(), sc)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 	// Make request
@@ -299,7 +299,7 @@ func TestServerDistributedTracing(t *testing.T) {
 	defer mainService.Close()
 
 	// Create initial context (simulating entry point)
-	ctx, rootSpan := tracer.Start(context.Background(), "entry_point")
+	ctx, rootSpan := tracer.Start(t.Context(), "entry_point")
 
 	// Make request to main service
 	req, err := http.NewRequest(http.MethodGet, mainService.URL, nil)

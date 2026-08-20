@@ -157,7 +157,7 @@ func TestAfterProcessDeltas(t *testing.T) {
 	for _, tt := range []struct {
 		name         string
 		setupEnv     func(t *testing.T)
-		setupContext func(*sdktrace.TracerProvider) hook.HookContext
+		setupContext func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext
 		err          error
 		validateSpan func(t *testing.T, spans []sdktrace.ReadOnlySpan)
 	}{
@@ -166,9 +166,9 @@ func TestAfterProcessDeltas(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
+				_, span := testTracer.Start(t.Context(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetKeyData("span", span)
@@ -186,9 +186,9 @@ func TestAfterProcessDeltas(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
+				_, span := testTracer.Start(t.Context(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetKeyData("span", span)
@@ -212,7 +212,7 @@ func TestAfterProcessDeltas(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				return hooktest.NewMockHookContext()
 			},
 			err: nil,
@@ -226,9 +226,9 @@ func TestAfterProcessDeltas(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
+				_, span := testTracer.Start(t.Context(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetKeyData("span", span)
@@ -247,7 +247,7 @@ func TestAfterProcessDeltas(t *testing.T) {
 			tt.setupEnv(t)
 			sr, tp := setupTestTracer(t)
 
-			mockCtx := tt.setupContext(tp)
+			mockCtx := tt.setupContext(t, tp)
 			afterProcessDeltas(mockCtx, tt.err)
 
 			spans := sr.Ended()
@@ -315,7 +315,7 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 	for _, tt := range []struct {
 		name         string
 		setupEnv     func(t *testing.T)
-		setupContext func(*sdktrace.TracerProvider) hook.HookContext
+		setupContext func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext
 		err          error
 		validateSpan func(t *testing.T, spans []sdktrace.ReadOnlySpan)
 	}{
@@ -324,9 +324,9 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
+				_, span := testTracer.Start(t.Context(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetKeyData("span", span)
@@ -344,9 +344,9 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
+				_, span := testTracer.Start(t.Context(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetKeyData("span", span)
@@ -370,7 +370,7 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				return hooktest.NewMockHookContext()
 			},
 			err: nil,
@@ -384,9 +384,9 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
-			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+			setupContext: func(t *testing.T, tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				_, span := testTracer.Start(context.Background(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
+				_, span := testTracer.Start(t.Context(), "k8s.informer.objects.process", trace.WithSpanKind(trace.SpanKindInternal))
 
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetKeyData("span", span)
@@ -405,7 +405,7 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 			tt.setupEnv(t)
 			sr, tp := setupTestTracer(t)
 
-			mockCtx := tt.setupContext(tp)
+			mockCtx := tt.setupContext(t, tp)
 			afterProcessDeltasInBatch(mockCtx, tt.err)
 
 			spans := sr.Ended()

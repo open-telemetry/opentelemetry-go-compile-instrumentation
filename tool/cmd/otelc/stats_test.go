@@ -22,7 +22,7 @@ func runInitStats(t *testing.T, args ...string) error {
 		Before: initStats,
 		Action: func(context.Context, *cli.Command) error { return nil },
 	}
-	return app.Run(context.Background(), append([]string{"otelc"}, args...))
+	return app.Run(t.Context(), append([]string{"otelc"}, args...))
 }
 
 func TestInitStats(t *testing.T) {

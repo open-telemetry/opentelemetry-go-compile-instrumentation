@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +24,7 @@ func TestSetupPhaseStore(t *testing.T) {
 
 	// An empty rule set resolves no paths and writes an empty JSON array to the
 	// matched-rule file.
-	err := sp.store(context.Background(), []*rule.InstRuleSet{}, map[string]bool{})
+	err := sp.store(t.Context(), []*rule.InstRuleSet{}, map[string]bool{})
 	require.NoError(t, err)
 
 	matchedFile := util.GetMatchedRuleFile()
@@ -43,7 +42,7 @@ func TestSetupPhaseStoreCreateError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
 	sp := newTestSetupPhase()
-	err := sp.store(context.Background(), []*rule.InstRuleSet{}, map[string]bool{})
+	err := sp.store(t.Context(), []*rule.InstRuleSet{}, map[string]bool{})
 	require.Error(t, err)
 }
 

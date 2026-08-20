@@ -64,8 +64,8 @@ func TestBeforeWriteMessages_InjectsHeadersAndStartsSpans(t *testing.T) {
 		{Key: []byte("k2"), Value: []byte("world"), Topic: "override"},
 	}
 
-	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
-	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	ictx := hooktest.NewMockHookContext(w, t.Context(), msgs)
+	BeforeWriteMessages(ictx, w, t.Context(), msgs...)
 
 	// Each message must carry the propagated trace context.
 	for i := range msgs {
@@ -103,8 +103,8 @@ func TestBeforeWriteMessages_InvalidUTF8MessageKey(t *testing.T) {
 	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders"}
 	msgs := []kafka.Message{{Key: []byte{'o', 0xff, 'k'}, Value: []byte("hello")}}
 
-	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
-	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	ictx := hooktest.NewMockHookContext(w, t.Context(), msgs)
+	BeforeWriteMessages(ictx, w, t.Context(), msgs...)
 	AfterWriteMessages(ictx, nil)
 
 	spans := sr.Ended()
@@ -120,8 +120,8 @@ func TestAfterWriteMessages_RecordsError(t *testing.T) {
 	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders"}
 	msgs := []kafka.Message{{Value: []byte("hello")}}
 
-	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
-	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	ictx := hooktest.NewMockHookContext(w, t.Context(), msgs)
+	BeforeWriteMessages(ictx, w, t.Context(), msgs...)
 	AfterWriteMessages(ictx, errors.New("broker unavailable"))
 
 	spans := sr.Ended()
@@ -137,8 +137,8 @@ func TestWriteMessages_Disabled(t *testing.T) {
 	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders"}
 	msgs := []kafka.Message{{Value: []byte("hello")}}
 
-	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
-	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	ictx := hooktest.NewMockHookContext(w, t.Context(), msgs)
+	BeforeWriteMessages(ictx, w, t.Context(), msgs...)
 	AfterWriteMessages(ictx, nil)
 
 	assert.Empty(t, sr.Ended())
@@ -158,8 +158,8 @@ func TestAfterWriteMessages_PartialFailure(t *testing.T) {
 		{Key: []byte("k2"), Value: []byte("world")},
 	}
 
-	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
-	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	ictx := hooktest.NewMockHookContext(w, t.Context(), msgs)
+	BeforeWriteMessages(ictx, w, t.Context(), msgs...)
 
 	// Simulate a partial failure: the first message succeeds, the second fails.
 	writeErrs := kafka.WriteErrors{nil, errors.New("write failed")}
@@ -191,8 +191,8 @@ func TestAfterWriteMessages_AlwaysEndsSpans(t *testing.T) {
 
 	// BeforeWriteMessages runs while kafka is enabled — spans are created and
 	// trace headers are injected into the messages.
-	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
-	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	ictx := hooktest.NewMockHookContext(w, t.Context(), msgs)
+	BeforeWriteMessages(ictx, w, t.Context(), msgs...)
 
 	// Simulate instrumentation being disabled between Before and After.
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "kafka")

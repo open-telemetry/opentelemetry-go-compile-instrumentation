@@ -69,7 +69,7 @@ func TestReadMessage_LinksToProducerAndSetsAttrs(t *testing.T) {
 		TraceFlags: trace.FlagsSampled,
 		Remote:     true,
 	})
-	producerCtx := trace.ContextWithSpanContext(context.Background(), sc)
+	producerCtx := trace.ContextWithSpanContext(t.Context(), sc)
 
 	var headers []kafka.Header
 	propagator.Inject(producerCtx, kafkaprop.NewHeaderCarrier(&headers))
@@ -89,8 +89,8 @@ func TestReadMessage_LinksToProducerAndSetsAttrs(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = r.Close() })
 
-	ictx := hooktest.NewMockHookContext(r, context.Background())
-	BeforeReadMessage(ictx, r, context.Background())
+	ictx := hooktest.NewMockHookContext(r, t.Context())
+	BeforeReadMessage(ictx, r, t.Context())
 	AfterReadMessage(ictx, msg, nil)
 
 	spans := sr.Ended()
@@ -130,8 +130,8 @@ func TestReadMessage_InvalidUTF8MessageKey(t *testing.T) {
 		Value:     []byte("hello"),
 	}
 
-	ictx := hooktest.NewMockHookContext(r, context.Background())
-	BeforeReadMessage(ictx, r, context.Background())
+	ictx := hooktest.NewMockHookContext(r, t.Context())
+	BeforeReadMessage(ictx, r, t.Context())
 	AfterReadMessage(ictx, msg, nil)
 
 	spans := sr.Ended()
@@ -150,8 +150,8 @@ func TestReadMessage_RecordsError(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = r.Close() })
 
-	ictx := hooktest.NewMockHookContext(r, context.Background())
-	BeforeReadMessage(ictx, r, context.Background())
+	ictx := hooktest.NewMockHookContext(r, t.Context())
+	BeforeReadMessage(ictx, r, t.Context())
 	AfterReadMessage(ictx, kafka.Message{}, errors.New("read timeout"))
 
 	spans := sr.Ended()
@@ -177,8 +177,8 @@ func TestReadMessage_Disabled(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = r.Close() })
 
-	ictx := hooktest.NewMockHookContext(r, context.Background())
-	BeforeReadMessage(ictx, r, context.Background())
+	ictx := hooktest.NewMockHookContext(r, t.Context())
+	BeforeReadMessage(ictx, r, t.Context())
 	AfterReadMessage(ictx, kafka.Message{Topic: "orders"}, nil)
 
 	assert.Empty(t, sr.Ended())
@@ -202,7 +202,7 @@ func TestExtractContext(t *testing.T) {
 		TraceFlags: trace.FlagsSampled,
 		Remote:     true,
 	})
-	producerCtx := trace.ContextWithSpanContext(context.Background(), sc)
+	producerCtx := trace.ContextWithSpanContext(t.Context(), sc)
 
 	var headers []kafka.Header
 	propagator.Inject(producerCtx, kafkaprop.NewHeaderCarrier(&headers))
