@@ -54,6 +54,11 @@ func TestBaseTypeName(t *testing.T) {
 			expected: "interface{Read([]byte) (int, error)}",
 		},
 		{
+			name:     "interface type with embedded interface",
+			typeSrc:  "interface{ pkg.Reader }",
+			expected: "interface{Reader}",
+		},
+		{
 			name:     "empty struct type",
 			typeSrc:  "struct{}",
 			expected: "struct{}",
@@ -62,6 +67,11 @@ func TestBaseTypeName(t *testing.T) {
 			name:     "non-empty struct type",
 			typeSrc:  "struct{ Name string }",
 			expected: "struct{Name string}",
+		},
+		{
+			name:     "struct type with embedded field",
+			typeSrc:  "struct{ pkg.Base }",
+			expected: "struct{Base}",
 		},
 		{
 			name:     "array type",
