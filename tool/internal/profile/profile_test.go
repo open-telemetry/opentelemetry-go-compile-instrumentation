@@ -16,7 +16,20 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/util"
 )
+
+func init() {
+	mode := os.Getenv("TEST_MOCK_GO_TOOL")
+	base := strings.ToLower(filepath.Base(os.Args[0]))
+	if mode != "" || base == "go" || base == "go.exe" {
+		if mode == "stderr" {
+			_, _ = fmt.Fprintln(os.Stderr, "merge failed")
+		}
+		os.Exit(1)
+	}
+}
 
 func TestParseTypes(t *testing.T) {
 	tests := []struct {
@@ -406,16 +419,20 @@ func TestMergeTypeGoToolFailsWithStderr(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "otelc-cpu-1.pprof"), []byte("data"), 0o644))
 
 	bin := t.TempDir()
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	name := "go"
 	if runtime.GOOS == "windows" {
-		script := filepath.Join(bin, "go.bat")
-		require.NoError(t, os.WriteFile(script, []byte("@echo merge failed 1>&2\r\nexit /b 1\r\n"), 0o644))
-	} else {
-		script := filepath.Join(bin, "go")
-		require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nprintf 'merge failed\n' 1>&2\nexit 1\n"), 0o755))
+		name += ".exe"
 	}
+	mockGo := filepath.Join(bin, name)
+	require.NoError(t, util.CopyFile(exe, mockGo))
+
+	t.Setenv("TEST_MOCK_GO_TOOL", "stderr")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, CPU)
+	err = mergeType(context.Background(), dir, CPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge failed")
 }
@@ -425,16 +442,20 @@ func TestMergeTypeGoToolFailsWithoutStderr(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "otelc-cpu-1.pprof"), []byte("data"), 0o644))
 
 	bin := t.TempDir()
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	name := "go"
 	if runtime.GOOS == "windows" {
-		script := filepath.Join(bin, "go.bat")
-		require.NoError(t, os.WriteFile(script, []byte("@exit /b 1\r\n"), 0o644))
-	} else {
-		script := filepath.Join(bin, "go")
-		require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+		name += ".exe"
 	}
+	mockGo := filepath.Join(bin, name)
+	require.NoError(t, util.CopyFile(exe, mockGo))
+
+	t.Setenv("TEST_MOCK_GO_TOOL", "silent")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, CPU)
+	err = mergeType(context.Background(), dir, CPU)
 	require.Error(t, err)
 }
 
