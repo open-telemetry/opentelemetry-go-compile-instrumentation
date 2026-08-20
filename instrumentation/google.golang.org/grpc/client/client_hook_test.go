@@ -588,3 +588,30 @@ func TestClientStatsHandler_OTELExporterFiltering(t *testing.T) {
 		})
 	}
 }
+
+type nonRecordingSpan struct {
+	trace.Span
+	ended bool
+}
+
+func (s *nonRecordingSpan) IsRecording() bool {
+	return false
+}
+
+func (s *nonRecordingSpan) End(_ ...trace.SpanEndOption) {
+	s.ended = true
+}
+
+func TestClientStatsHandler_HandleRPC_NonRecordingSpan(t *testing.T) {
+	handler := newClientStatsHandler()
+
+	mockSpan := &nonRecordingSpan{Span: trace.SpanFromContext(t.Context())}
+	ctx := trace.ContextWithSpan(t.Context(), mockSpan)
+
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-10 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	assert.True(t, mockSpan.ended, "span.End() must be called for non-recording spans")
+}
