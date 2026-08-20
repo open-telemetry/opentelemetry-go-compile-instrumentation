@@ -129,7 +129,7 @@ func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, 
 		return nil, ex.Wrapf(err, "failed to get GOWORK environment variable")
 	}
 	goWorkPath := strings.TrimSpace(string(goWorkOutput))
-	if goWorkPath != "" {
+	if goWorkPath != "" && goWorkPath != "off" {
 		goWorkSumPath := filepath.Join(filepath.Dir(goWorkPath), "go.work.sum")
 		files = append(files, goWorkSumPath)
 	}

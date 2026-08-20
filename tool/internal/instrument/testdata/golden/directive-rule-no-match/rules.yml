@@ -1,0 +1,10 @@
+span_directive_no_match:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          fmt.Println("span start: {{.FuncName}}")
+  imports:
+    fmt: "fmt"

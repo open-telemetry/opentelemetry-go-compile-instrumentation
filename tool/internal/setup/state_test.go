@@ -193,6 +193,22 @@ func TestGetBackupFiles(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "GOWORK=off does not track go.work.sum",
+			setup: func(t *testing.T, tmp string) string {
+				t.Setenv("GOWORK", "off")
+				moduleDir := filepath.Join(tmp, "mod")
+				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
+				return moduleDir
+			},
+			wantFiles: func(_, moduleDir string) []string {
+				return []string{
+					filepath.Join(moduleDir, "go.mod"),
+					filepath.Join(moduleDir, "go.sum"),
+					filepath.Join(moduleDir, ToolFileCanonical),
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -473,4 +489,26 @@ func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
 			assert.Equal(t, firstResult, files, "getBackupFiles output must be deterministic across multiple calls")
 		}
 	}
+}
+
+func TestStateManagerDiscard(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	s := NewStateManager()
+
+	// Track a non-existent path so Commit writes a manifest, then Discard must
+	// remove the manifest and the snapshot directory.
+	require.NoError(t, s.Track(util.GetBuildTemp("ghost.txt")))
+	require.FileExists(t, util.GetBuildTemp(stateFileName))
+
+	require.NoError(t, s.Discard())
+
+	_, err := os.Stat(util.GetBuildTemp(stateFileName))
+	assert.True(t, os.IsNotExist(err), "manifest must be removed")
+}
+
+func TestStateManagerDiscardEmpty(t *testing.T) {
+	// Discarding an empty state manager is a no-op.
+	require.NoError(t, NewStateManager().Discard())
 }

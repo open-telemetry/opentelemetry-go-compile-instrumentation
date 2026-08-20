@@ -101,10 +101,6 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 }
 
 func AfterServeHTTP(ictx hook.HookContext) {
-	if !serverEnabler.Enable() {
-		return
-	}
-
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterServeHTTP: no span from before hook")

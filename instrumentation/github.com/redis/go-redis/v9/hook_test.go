@@ -111,6 +111,11 @@ func TestGetRedisV9Statement(t *testing.T) {
 			expected: "hello 3 setname myclient auth ? ?",
 		},
 		{
+			name:     "HELLO SETNAME client named auth then AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "setname", "auth", "auth", "user", "s3cret"),
+			expected: "hello 3 setname auth auth ? ?",
+		},
+		{
 			name:     "AUTH StatusCmd as Auth() sends",
 			cmd:      redis.NewStatusCmd(context.Background(), "auth", "s3cret"),
 			expected: "auth ?",
@@ -126,6 +131,58 @@ func TestGetRedisV9Statement(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := getRedisV9Statement(tt.cmd)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      redis.Cmder
+		expected string
+	}{
+		{
+			name:     "AUTH with password only",
+			cmd:      redis.NewCmd(context.Background(), "auth", "s3cret"),
+			expected: "auth ?",
+		},
+		{
+			name:     "AUTH with username and password",
+			cmd:      redis.NewCmd(context.Background(), "auth", "default", "s3cret"),
+			expected: "auth ? ?",
+		},
+		{
+			name:     "AUTH uppercase",
+			cmd:      redis.NewCmd(context.Background(), "AUTH", "s3cret"),
+			expected: "AUTH ?",
+		},
+		{
+			name:     "HELLO handshake with AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			expected: "hello 3 auth ? ?",
+		},
+		{
+			name:     "HELLO keeps SETNAME visible",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret", "setname", "myapp"),
+			expected: "hello 3 auth ? ? setname myapp",
+		},
+		{
+			name:     "HELLO without AUTH is untouched",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3),
+			expected: "hello 3",
+		},
+		{
+			name:     "key literally named auth is not a credential",
+			cmd:      redis.NewCmd(context.Background(), "get", "auth", "token"),
+			expected: "get auth token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getRedisV9Statement(tt.cmd)
+			assert.Equal(t, tt.expected, result)
+			assert.NotContains(t, result, "s3cret", "the password must never reach db.query.text")
 		})
 	}
 }
