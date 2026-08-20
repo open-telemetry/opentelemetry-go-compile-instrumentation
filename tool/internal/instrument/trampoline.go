@@ -232,6 +232,8 @@ func arrayTypeName(t *dst.ArrayType) string {
 			lenStr = l.Value
 		case *dst.Ident:
 			lenStr = l.Name
+		default:
+			lenStr = ""
 		}
 	}
 	return "[" + lenStr + "]" + baseTypeName(t.Elt)
@@ -278,12 +280,6 @@ func funcTypeName(t *dst.FuncType) string {
 	return "func(" + strings.Join(params, ", ") + ")" + resStr
 }
 
-// structTypeName builds a normalized name for an anonymous struct type from its
-// field names and types, so structurally different struct types (e.g. distinct
-// field sets) don't collide on a shared "struct{...}" placeholder in
-// hookTypeMatches. Named struct types never reach here: baseTypeName resolves a
-// *dst.SelectorExpr/*dst.Ident (a named type reference) to its name before
-// getting to the underlying type declaration.
 func structTypeName(t *dst.StructType) string {
 	if t.Fields == nil || len(t.Fields.List) == 0 {
 		return trampolineEmptyStructType
@@ -303,11 +299,6 @@ func structTypeName(t *dst.StructType) string {
 	return "struct{" + strings.Join(parts, "; ") + "}"
 }
 
-// interfaceTypeName builds a normalized name for an anonymous interface type from
-// its method set, so structurally different interfaces (e.g. io.Reader vs.
-// io.Writer) don't collide on a shared "interface{...}" placeholder in
-// hookTypeMatches. The empty interface still normalizes to trampolineInterfaceType
-// so it keeps matching any/interface{} via isAnyOrInterface.
 func interfaceTypeName(t *dst.InterfaceType) string {
 	if t.Methods == nil || len(t.Methods.List) == 0 {
 		return trampolineInterfaceType
@@ -330,15 +321,11 @@ func interfaceTypeName(t *dst.InterfaceType) string {
 	return "interface{" + strings.Join(parts, "; ") + "}"
 }
 
-// baseTypeName extracts the normalized type name for signature matching, stripping package prefixes
-// and outermost pointer indirection so that target types and hook types can be compared directly.
-// This is necessary because trampolines take pointers (*T) to allow mutating/capturing arguments and return values,
-// and hooks may use package-qualified types (hook.HookContext) while trampolines use local types (HookContext).
-// Examples: *int → int, pkg.Type → Type, *pkg.Type → Type, interface{} → interface{}, []int → []int, ...string → ...string
+// baseTypeName normalizes a type expression for signature matching by stripping
+// package qualifiers and the outermost pointer while preserving composite type
+// constructors, so trampoline and hook parameter types can be compared directly.
+// Examples: *pkg.Type → Type, []int → []int, ...string → ...string
 func baseTypeName(expr dst.Expr) string {
-	if expr == nil {
-		return ""
-	}
 	switch t := expr.(type) {
 	case *dst.Ident:
 		if t.Name == "any" {
@@ -364,16 +351,22 @@ func baseTypeName(expr dst.Expr) string {
 	case *dst.FuncType:
 		return funcTypeName(t)
 	case *dst.IndexExpr:
-		return baseTypeName(t.X) + "[" + baseTypeName(t.Index) + "]"
+		return indexListType(t.X, []dst.Expr{t.Index})
 	case *dst.IndexListExpr:
-		indices := make([]string, 0, len(t.Indices))
-		for _, idx := range t.Indices {
-			indices = append(indices, baseTypeName(idx))
-		}
-		return baseTypeName(t.X) + "[" + strings.Join(indices, ", ") + "]"
+		return indexListType(t.X, t.Indices)
 	default:
 		return ""
 	}
+}
+
+// indexListType builds a normalized name for a generic type instantiation
+// (X[Index] or X[Index1, Index2, ...]) from its base type and index expressions.
+func indexListType(x dst.Expr, indices []dst.Expr) string {
+	parts := make([]string, 0, len(indices))
+	for _, idx := range indices {
+		parts = append(parts, baseTypeName(idx))
+	}
+	return baseTypeName(x) + "[" + strings.Join(parts, ", ") + "]"
 }
 
 // isAnyOrInterface reports whether the type string represents an empty interface (any / interface{}).
@@ -392,11 +385,9 @@ func sliceOrEllipsisElt(s string) (string, bool) {
 	return "", false
 }
 
-// hookTypeMatches reports whether hookBase matches the expected trampBase type.
-func hookTypeMatches(trampBase, hookBase string) bool {
-	// hookBase is checked for any/interface{} first, so by the time trampBase is
-	// considered below, hookBase is already known not to be any/interface{} —
-	// isAnyOrInterface(trampBase) && isAnyOrInterface(hookBase) can never hold.
+// matchBaseType reports whether hookBase matches the expected trampBase type.
+func matchBaseType(trampBase, hookBase string) bool {
+	// The any-typed parameter can accept any trampoline parameter.
 	if isAnyOrInterface(hookBase) {
 		return true
 	}
@@ -439,7 +430,7 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 		for i, trampField := range beforeTrampParams.List {
 			trampBase := baseTypeName(trampField.Type)
 			hookBase := baseTypeName(beforeHookParams.List[i+1].Type)
-			if !hookTypeMatches(trampBase, hookBase) {
+			if !matchBaseType(trampBase, hookBase) {
 				return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 					i+1, trampBase, hookBase)
 			}
@@ -463,7 +454,7 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	for i, trampField := range afterTrampParams.List {
 		trampBase := baseTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
-		if !hookTypeMatches(trampBase, hookBase) {
+		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 				i, trampBase, hookBase)
 		}
