@@ -5,9 +5,11 @@ package v3
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func TestClassifyOperation(t *testing.T) {
@@ -127,4 +129,88 @@ func TestParseChatResponse_Valid(t *testing.T) {
 	assert.Equal(t, int64(10), resp.Usage.PromptTokens)
 	assert.Equal(t, int64(20), resp.Usage.CompletionTokens)
 	assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+}
+
+func TestEndpointAttributes(t *testing.T) {
+	tests := []struct {
+		name          string
+		reqURL        string
+		reqHost       string
+		expectedAttrs []attribute.KeyValue
+	}{
+		{
+			name:   "standard default https port is omitted",
+			reqURL: "https://api.openai.com/v1/chat/completions",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "api.openai.com"),
+			},
+		},
+		{
+			name:   "explicit standard https port 443 is omitted",
+			reqURL: "https://api.openai.com:443/v1/chat/completions",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "api.openai.com"),
+			},
+		},
+		{
+			name:   "standard default http port 80 is omitted",
+			reqURL: "http://localhost/v1/chat/completions",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "localhost"),
+			},
+		},
+		{
+			name:   "custom non-default port on localhost",
+			reqURL: "http://localhost:11434/v1/chat/completions",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "localhost"),
+				attribute.Int("server.port", 11434),
+			},
+		},
+		{
+			name:   "custom non-default port on https",
+			reqURL: "https://custom-proxy.internal:8443/v1/chat/completions",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "custom-proxy.internal"),
+				attribute.Int("server.port", 8443),
+			},
+		},
+		{
+			name:   "ipv6 address with custom port",
+			reqURL: "http://[::1]:8080/v1/chat/completions",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "::1"),
+				attribute.Int("server.port", 8080),
+			},
+		},
+		{
+			name:    "fallback to req.Host with port when URL host is empty",
+			reqURL:  "/v1/chat/completions",
+			reqHost: "localhost:11434",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "localhost"),
+				attribute.Int("server.port", 11434),
+			},
+		},
+		{
+			name:    "fallback to req.Host without port when URL host is empty",
+			reqURL:  "/v1/chat/completions",
+			reqHost: "api.openai.com",
+			expectedAttrs: []attribute.KeyValue{
+				attribute.String("server.address", "api.openai.com"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("POST", tt.reqURL, nil)
+			assert.NoError(t, err)
+			if tt.reqHost != "" {
+				req.Host = tt.reqHost
+			}
+			attrs := endpointAttributes(req)
+			assert.Equal(t, tt.expectedAttrs, attrs)
+		})
+	}
 }

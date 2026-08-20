@@ -117,3 +117,15 @@ func TestGenAIResponseTimeToFirstToken(t *testing.T) {
 	assert.Equal(t, attribute.Key("gen_ai.response.time_to_first_token"), kv.Key)
 	assert.Equal(t, int64(1500), kv.Value.AsInt64())
 }
+
+func TestServerAddress(t *testing.T) {
+	kv := ServerAddress("api.anthropic.com")
+	assert.Equal(t, attribute.Key("server.address"), kv.Key)
+	assert.Equal(t, "api.anthropic.com", kv.Value.AsString())
+}
+
+func TestServerPort(t *testing.T) {
+	kv := ServerPort(8080)
+	assert.Equal(t, attribute.Key("server.port"), kv.Key)
+	assert.Equal(t, int64(8080), kv.Value.AsInt64())
+}

@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +44,53 @@ func getProviderName(host string) string {
 		}
 	}
 	return "anthropic"
+}
+
+func endpointAttributes(req *http.Request) []attribute.KeyValue {
+	var host string
+	var portStr string
+	if req.URL != nil {
+		host = req.URL.Hostname()
+		portStr = req.URL.Port()
+	}
+	if host == "" && req.Host != "" {
+		if h, p, err := net.SplitHostPort(req.Host); err == nil {
+			host = h
+			portStr = p
+		} else {
+			host = req.Host
+		}
+	}
+	if host == "" {
+		return nil
+	}
+
+	attrs := make([]attribute.KeyValue, 0, 2)
+	attrs = append(attrs, semconv.ServerAddress(host))
+
+	if portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil && port > 0 {
+			scheme := ""
+			if req.URL != nil {
+				scheme = req.URL.Scheme
+			}
+			if !isDefaultPort(scheme, port) {
+				attrs = append(attrs, semconv.ServerPort(port))
+			}
+		}
+	}
+	return attrs
+}
+
+func isDefaultPort(scheme string, port int) bool {
+	switch scheme {
+	case "https":
+		return port == 443
+	case "http":
+		return port == 80
+	default:
+		return port == 443 || port == 80
+	}
 }
 
 type operationType int
@@ -115,6 +164,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			semconv.GenAIRequestModel(model),
 			semconv.GenAIProviderName(provider),
 		}
+		baseAttrs = append(baseAttrs, endpointAttributes(req)...)
 		spanAttrs = append(baseAttrs, spanAttrs...)
 
 		ctx := req.Context()
