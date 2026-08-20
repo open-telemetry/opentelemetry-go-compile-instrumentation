@@ -237,6 +237,26 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+func TestGetProfileFilesBracketedDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "profile-[test]")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+
+	pidFile := filepath.Join(dir, "otelc-heap-12345.pprof")
+	if err := os.WriteFile(pidFile, []byte("data"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	files, err := getProfileFiles(dir, Heap)
+	if err != nil {
+		t.Fatalf("getProfileFiles() error: %v", err)
+	}
+	if len(files) != 1 || files[0] != pidFile {
+		t.Errorf("getProfileFiles() = %v, want [%q]", files, pidFile)
+	}
+}
+
 func TestMergeTraceSkipped(t *testing.T) {
 	dir := t.TempDir()
 
@@ -355,16 +375,18 @@ func TestWriteHeapProfileCreateError(t *testing.T) {
 	require.ErrorContains(t, err, "create heap profile")
 }
 
-func TestMergeTypeGlobError(t *testing.T) {
-	// An unclosed bracket in the directory name makes filepath.Glob fail.
-	dir := filepath.Join(t.TempDir(), "a[")
-	err := mergeType(context.Background(), dir, CPU)
+func TestMergeTypeReadDirError(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "not-a-dir")
+	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0o644))
+	err := mergeType(context.Background(), filePath, CPU)
 	require.Error(t, err)
+	require.ErrorContains(t, err, "read cpu profile directory")
 }
 
 func TestMergeReturnsMergeError(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "a[")
-	err := Merge(context.Background(), dir, []Type{CPU})
+	filePath := filepath.Join(t.TempDir(), "not-a-dir")
+	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0o644))
+	err := Merge(context.Background(), filePath, []Type{CPU})
 	require.Error(t, err)
 }
 
@@ -385,8 +407,14 @@ func TestMergeTypeGoToolFailsWithStderr(t *testing.T) {
 
 	bin := t.TempDir()
 	if runtime.GOOS == "windows" {
-		script := filepath.Join(bin, "go.bat")
-		require.NoError(t, os.WriteFile(script, []byte("@echo merge failed 1>&2\r\nexit /b 1\r\n"), 0o644))
+		require.NoError(
+			t,
+			os.WriteFile(filepath.Join(bin, "go.cmd"), []byte("@echo merge failed 1>&2\r\nexit /b 1\r\n"), 0o644),
+		)
+		require.NoError(
+			t,
+			os.WriteFile(filepath.Join(bin, "go.bat"), []byte("@echo merge failed 1>&2\r\nexit /b 1\r\n"), 0o644),
+		)
 	} else {
 		script := filepath.Join(bin, "go")
 		require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nprintf 'merge failed\n' 1>&2\nexit 1\n"), 0o755))
@@ -404,8 +432,8 @@ func TestMergeTypeGoToolFailsWithoutStderr(t *testing.T) {
 
 	bin := t.TempDir()
 	if runtime.GOOS == "windows" {
-		script := filepath.Join(bin, "go.bat")
-		require.NoError(t, os.WriteFile(script, []byte("@exit /b 1\r\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "go.cmd"), []byte("@exit /b 1\r\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "go.bat"), []byte("@exit /b 1\r\n"), 0o644))
 	} else {
 		script := filepath.Join(bin, "go")
 		require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755))

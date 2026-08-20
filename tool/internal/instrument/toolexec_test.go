@@ -198,8 +198,8 @@ func TestTrackAddedImports(t *testing.T) {
 		require.NoError(t, err)
 
 		// No file should be created
-		pattern := util.GetAddedImportsPattern()
-		files, _ := filepath.Glob(pattern)
+		files, err := getAddedImportTrackingFiles()
+		require.NoError(t, err)
 		assert.Empty(t, files)
 	})
 
@@ -381,6 +381,29 @@ func TestCleanupImportTrackingFiles(t *testing.T) {
 		// Should not panic
 		CleanupImportTrackingFiles()
 	})
+
+	t.Run("handles work directory paths with glob characters", func(t *testing.T) {
+		tempDir := filepath.Join(t.TempDir(), "project-[dev]")
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+		buildDir := util.GetBuildTempDir()
+		err := os.MkdirAll(buildDir, 0o755)
+		require.NoError(t, err)
+
+		file1 := filepath.Join(buildDir, "added_imports.1234.json")
+		data1, _ := json.Marshal(map[string]string{"fmt": "/path/to/fmt.a"})
+		require.NoError(t, os.WriteFile(file1, data1, 0o644))
+
+		result, err := loadAddedImports(t.Context())
+		require.NoError(t, err)
+
+		expected := map[string]string{"fmt": "/path/to/fmt.a"}
+		assert.Equal(t, expected, result)
+
+		CleanupImportTrackingFiles()
+		_, statErr := os.Stat(file1)
+		assert.True(t, os.IsNotExist(statErr), "tracking file should be cleaned up")
+	})
 }
 
 // goCompileToolPath returns the path to the toolchain's compile binary, which
@@ -522,8 +545,9 @@ func TestCleanupImportTrackingFilesGlobError(t *testing.T) {
 func TestLoadAddedImportsGlobError(t *testing.T) {
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	t.Setenv(util.EnvOtelcWorkDir, filepath.Join(t.TempDir(), "bad[glob"))
-	_, err := loadAddedImports(ctx)
-	require.Error(t, err)
+	result, err := loadAddedImports(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, result)
 }
 
 func TestLoadAddedImportsReadError(t *testing.T) {
