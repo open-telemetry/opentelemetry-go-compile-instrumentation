@@ -3,10 +3,22 @@
 
 package ast
 
-import "strings"
+import (
+	"go/build/constraint"
+	"strings"
+)
 
-// StripBuildIgnore removes //go:build ignore constraints from Go source so the
-// file can be parsed and injected into a target package at compile time.
+// StripBuildIgnore removes genuine "//go:build ignore" constraint lines from
+// content, line by line. It leaves every other occurrence of that text —
+// inside a string literal, inside comment prose, anywhere that isn't itself a
+// build-constraint line — untouched. See #1069: a whole-file substring replace
+// corrupted both of those.
 func StripBuildIgnore(content string) string {
-	return strings.ReplaceAll(content, "//go:build ignore", "")
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if constraint.IsGoBuild(line) {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
 }
