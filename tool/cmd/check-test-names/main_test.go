@@ -38,7 +38,7 @@ func TestCheckTreeAllowlistedPasses(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "pkg/foo/bar_test.go", "package foo\n")
 
-	violations, err := checkTree(root, map[string]string{"pkg/foo/bar_test.go": "documented exception"})
+	violations, err := checkTree(root, []string{"pkg/foo/bar_test.go"})
 	require.NoError(t, err)
 	assert.Empty(t, violations)
 }
@@ -89,26 +89,40 @@ func TestCheckTreeReportsAllViolationsSorted(t *testing.T) {
 	assert.Equal(t, "pkg/foo/zebra_test.go", violations[1].path)
 }
 
-func TestReportNoViolationsPasses(t *testing.T) {
+func TestCheckAndReportNoViolationsPasses(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pkg/foo/foo.go", "package foo\n")
+	writeFile(t, root, "pkg/foo/foo_test.go", "package foo\n")
 	var out, errOut bytes.Buffer
 
-	ok := report(&out, &errOut, nil)
+	ok := checkAndReport(root, &out, &errOut)
 
 	assert.True(t, ok)
 	assert.Contains(t, out.String(), "All test files follow the naming convention.")
 	assert.Empty(t, errOut.String())
 }
 
-func TestReportViolationsFails(t *testing.T) {
+func TestCheckAndReportViolationsFails(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pkg/foo/bar_test.go", "package foo\n")
 	var out, errOut bytes.Buffer
-	violations := []violation{{path: "pkg/foo/bar_test.go", expectedSource: "pkg/foo/bar.go"}}
 
-	ok := report(&out, &errOut, violations)
+	ok := checkAndReport(root, &out, &errOut)
 
 	assert.False(t, ok)
 	assert.Empty(t, out.String())
 	assert.Contains(t, errOut.String(), "pkg/foo/bar_test.go (expected pkg/foo/bar.go)")
 	assert.Contains(t, errOut.String(), "tool/cmd/check-test-names/allowlist.go")
+}
+
+func TestCheckAndReportWalkErrorFails(t *testing.T) {
+	var out, errOut bytes.Buffer
+
+	ok := checkAndReport(filepath.Join(t.TempDir(), "does-not-exist"), &out, &errOut)
+
+	assert.False(t, ok)
+	assert.Empty(t, out.String())
+	assert.Contains(t, errOut.String(), "walk")
 }
 
 func TestRunUsesRealAllowlist(t *testing.T) {

@@ -3,11 +3,7 @@
 
 // Command check-test-names verifies that every unit test file under this
 // repository's Go packages pairs 1:1 with a source file of the same name in
-// the same directory (foo_test.go <-> foo.go). Prefix-style pairing (e.g.
-// foo_extra_test.go treated as belonging to foo.go) is rejected on purpose:
-// it is how segmented, hard-to-navigate test files crept into the tree
-// before. Legitimate exceptions are registered in allowlist.go together with
-// the reason they can't follow the 1:1 rule.
+// the same directory (foo_test.go <-> foo.go).
 package main
 
 import (
@@ -44,20 +40,21 @@ var exemptScenarioDirs = map[string]bool{ //nolint:gochecknoglobals // private l
 }
 
 func main() {
-	violations, err := run(".")
-	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	if !report(os.Stdout, os.Stderr, violations) {
+	if !checkAndReport(".", os.Stdout, os.Stderr) {
 		os.Exit(1)
 	}
 }
 
-// report writes the check's outcome to out (on success) or errOut (on
-// failure) and returns whether the check passed. Separated from main so
-// tests can exercise both outcomes without depending on os.Exit.
-func report(out, errOut io.Writer, violations []violation) bool {
+// checkAndReport runs the check against root and writes its outcome to out
+// (on success) or errOut (on failure), returning whether the check passed.
+// It holds everything main does apart from the exit code, so tests can cover
+// it without depending on os.Exit.
+func checkAndReport(root string, out, errOut io.Writer) bool {
+	violations, err := run(root)
+	if err != nil {
+		_, _ = fmt.Fprintln(errOut, err)
+		return false
+	}
 	if len(violations) > 0 {
 		_, _ = fmt.Fprintln(errOut, "Test files without a matching source file "+
 			"(foo_test.go must pair with foo.go in the same directory):")
@@ -67,7 +64,7 @@ func report(out, errOut io.Writer, violations []violation) bool {
 		_, _ = fmt.Fprintln(
 			errOut,
 			"\nIf this is a legitimate exception (platform-specific build, fuzz target, shared test helper, ...), "+
-				"add it to the allowlist in tool/cmd/check-test-names/allowlist.go with a comment explaining why it can't follow the 1:1 rule.",
+				"add it to the allowlist in tool/cmd/check-test-names/allowlist.go.",
 		)
 		return false
 	}
@@ -87,10 +84,15 @@ func run(root string) ([]violation, error) {
 }
 
 // checkTree walks root looking for naming-convention violations among
-// "*_test.go" files, exempting anything in allow (keyed by slash-separated
-// path relative to root). It is separated from run so tests can exercise it
+// "*_test.go" files, exempting anything in allow (slash-separated paths
+// relative to root). It is separated from run so tests can exercise it
 // against a temporary tree with their own allowlist.
-func checkTree(root string, allow map[string]string) ([]violation, error) {
+func checkTree(root string, allow []string) ([]violation, error) {
+	allowed := make(map[string]bool, len(allow))
+	for _, a := range allow {
+		allowed[a] = true
+	}
+
 	var violations []violation
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -115,7 +117,7 @@ func checkTree(root string, allow map[string]string) ([]violation, error) {
 		if !strings.HasSuffix(d.Name(), "_test.go") {
 			return nil
 		}
-		if _, ok := allow[relSlash]; ok {
+		if allowed[relSlash] {
 			return nil
 		}
 
