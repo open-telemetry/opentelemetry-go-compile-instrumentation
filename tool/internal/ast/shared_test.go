@@ -49,7 +49,7 @@ func parseSharedFixture(t *testing.T) *dst.File {
 
 func TestListFuncDecls(t *testing.T) {
 	file := parseSharedFixture(t)
-	decls := ListFuncDecls(file)
+	decls := listFuncDecls(file)
 	require.Len(t, decls, 6)
 	names := make([]string, 0, len(decls))
 	for _, decl := range decls {
@@ -235,20 +235,20 @@ func TestFindVarDecl(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	t.Run("finds existing var", func(t *testing.T) {
-		genDecl, spec := FindVarDecl(file, "GlobalVar")
+		genDecl, spec := findVarDecl(file, "GlobalVar")
 		require.NotNil(t, genDecl)
 		require.NotNil(t, spec)
 		assert.Equal(t, "GlobalVar", spec.Names[0].Name)
 	})
 
 	t.Run("does not find const as var", func(t *testing.T) {
-		genDecl, spec := FindVarDecl(file, "MaxRetries")
+		genDecl, spec := findVarDecl(file, "MaxRetries")
 		assert.Nil(t, genDecl)
 		assert.Nil(t, spec)
 	})
 
 	t.Run("not found returns nil pair", func(t *testing.T) {
-		genDecl, spec := FindVarDecl(file, "Unknown")
+		genDecl, spec := findVarDecl(file, "Unknown")
 		assert.Nil(t, genDecl)
 		assert.Nil(t, spec)
 	})
@@ -258,20 +258,20 @@ func TestFindConstDecl(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	t.Run("finds existing const", func(t *testing.T) {
-		genDecl, spec := FindConstDecl(file, "MaxRetries")
+		genDecl, spec := findConstDecl(file, "MaxRetries")
 		require.NotNil(t, genDecl)
 		require.NotNil(t, spec)
 		assert.Equal(t, "MaxRetries", spec.Names[0].Name)
 	})
 
 	t.Run("does not find var as const", func(t *testing.T) {
-		genDecl, spec := FindConstDecl(file, "GlobalVar")
+		genDecl, spec := findConstDecl(file, "GlobalVar")
 		assert.Nil(t, genDecl)
 		assert.Nil(t, spec)
 	})
 
 	t.Run("not found returns nil pair", func(t *testing.T) {
-		genDecl, spec := FindConstDecl(file, "Unknown")
+		genDecl, spec := findConstDecl(file, "Unknown")
 		assert.Nil(t, genDecl)
 		assert.Nil(t, spec)
 	})
@@ -281,12 +281,12 @@ func TestFindTypeDecl(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	t.Run("finds existing type", func(t *testing.T) {
-		decl := FindTypeDecl(file, "MyStruct")
+		decl := findTypeDecl(file, "MyStruct")
 		require.NotNil(t, decl)
 	})
 
 	t.Run("not found returns nil", func(t *testing.T) {
-		decl := FindTypeDecl(file, "NoSuchType")
+		decl := findTypeDecl(file, "NoSuchType")
 		assert.Nil(t, decl)
 	})
 }
@@ -704,14 +704,14 @@ func TestMakeAndIsUnusedIdent(t *testing.T) {
 
 func TestIsStringLit(t *testing.T) {
 	lit := StringLit("hello")
-	assert.True(t, IsStringLit(lit, "hello"))
-	assert.False(t, IsStringLit(lit, "world"))
+	assert.True(t, isStringLit(lit, "hello"))
+	assert.False(t, isStringLit(lit, "world"))
 
 	// A non-string-literal expression is never a string literal.
-	assert.False(t, IsStringLit(Ident("hello"), "hello"))
+	assert.False(t, isStringLit(Ident("hello"), "hello"))
 
 	// An integer literal has the wrong Kind.
-	assert.False(t, IsStringLit(IntLit(3), "3"))
+	assert.False(t, isStringLit(IntLit(3), "3"))
 }
 
 func TestIsInterfaceType(t *testing.T) {

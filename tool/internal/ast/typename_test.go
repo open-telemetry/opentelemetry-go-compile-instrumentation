@@ -456,7 +456,7 @@ func TestDefaultImportAlias(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := DefaultImportAlias(tt.input)
+			got := defaultImportAlias(tt.input)
 			assert.Equal(t, tt.want, got)
 		})
 	}

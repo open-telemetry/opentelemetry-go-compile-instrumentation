@@ -172,7 +172,7 @@ func TestSetupOpenTelemetryPropagatorsFromEnv(t *testing.T) {
 	setupOpenTelemetry(Config{InstrumentationName: "test-inst"})
 
 	fields := otel.GetTextMapPropagator().Fields()
-	assert.Contains(t, fields, "x-b3-traceid",
+	assert.Contains(t, fields, "b3",
 		"OTEL_PROPAGATORS=b3 should install the b3 propagator")
 	assert.NotContains(t, fields, "traceparent",
 		"the default tracecontext propagator should be replaced")

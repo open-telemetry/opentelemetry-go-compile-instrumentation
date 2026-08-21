@@ -28,32 +28,32 @@ func TestParseTypes(t *testing.T) {
 		{
 			name:  "single cpu",
 			input: "cpu",
-			want:  []Type{CPU},
+			want:  []Type{typeCPU},
 		},
 		{
 			name:  "single heap",
 			input: "heap",
-			want:  []Type{Heap},
+			want:  []Type{typeHeap},
 		},
 		{
 			name:  "single trace",
 			input: "trace",
-			want:  []Type{Trace},
+			want:  []Type{typeTrace},
 		},
 		{
 			name:  "all three",
 			input: "cpu,heap,trace",
-			want:  []Type{CPU, Heap, Trace},
+			want:  []Type{typeCPU, typeHeap, typeTrace},
 		},
 		{
 			name:  "spaces around entries trimmed",
 			input: "cpu, heap",
-			want:  []Type{CPU, Heap},
+			want:  []Type{typeCPU, typeHeap},
 		},
 		{
 			name:  "leading and trailing whitespace",
 			input: "  cpu,heap  ",
-			want:  []Type{CPU, Heap},
+			want:  []Type{typeCPU, typeHeap},
 		},
 		{
 			name:  "empty string",
@@ -109,7 +109,7 @@ func TestParseTypes(t *testing.T) {
 func TestStartStopCPU(t *testing.T) {
 	dir := t.TempDir()
 
-	s, err := Start(dir, []Type{CPU})
+	s, err := Start(dir, []Type{typeCPU})
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestStartStopCPU(t *testing.T) {
 func TestStartStopHeap(t *testing.T) {
 	dir := t.TempDir()
 
-	s, err := Start(dir, []Type{Heap})
+	s, err := Start(dir, []Type{typeHeap})
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestStartStopHeap(t *testing.T) {
 func TestStartStopTrace(t *testing.T) {
 	dir := t.TempDir()
 
-	s, err := Start(dir, []Type{Trace})
+	s, err := Start(dir, []Type{typeTrace})
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestStartStopAll(t *testing.T) {
 	dir := t.TempDir()
 	pid := os.Getpid()
 
-	s, err := Start(dir, []Type{CPU, Heap, Trace})
+	s, err := Start(dir, []Type{typeCPU, typeHeap, typeTrace})
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestStartCreatesDirectory(t *testing.T) {
 	base := t.TempDir()
 	dir := filepath.Join(base, "nested", "profile", "dir")
 
-	s, err := Start(dir, []Type{Heap})
+	s, err := Start(dir, []Type{typeHeap})
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestStartInvalidDir(t *testing.T) {
 	}
 	_ = f.Close()
 
-	_, err := Start(filepath.Join(f.Name(), "subdir"), []Type{Heap})
+	_, err := Start(filepath.Join(f.Name(), "subdir"), []Type{typeHeap})
 	if err == nil {
 		t.Fatal("Start() with invalid dir returned nil error, want error")
 	}
@@ -216,7 +216,7 @@ func TestMerge(t *testing.T) {
 	dir := t.TempDir()
 
 	// Produce a real PID-stamped heap profile to merge.
-	s, err := Start(dir, []Type{Heap})
+	s, err := Start(dir, []Type{typeHeap})
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestMerge(t *testing.T) {
 	pidFile := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
 	assertFileExists(t, pidFile)
 
-	if mergeErr := Merge(context.Background(), dir, []Type{Heap}); mergeErr != nil {
+	if mergeErr := Merge(context.Background(), dir, []Type{typeHeap}); mergeErr != nil {
 		t.Fatalf("Merge() error: %v", mergeErr)
 	}
 
@@ -240,9 +240,9 @@ func TestMerge(t *testing.T) {
 func TestMergeTraceSkipped(t *testing.T) {
 	dir := t.TempDir()
 
-	// Trace profiles cannot be merged, so Merge is a no-op for them and must not
+	// typeTrace profiles cannot be merged, so Merge is a no-op for them and must not
 	// create a merged trace file.
-	if err := Merge(context.Background(), dir, []Type{Trace}); err != nil {
+	if err := Merge(context.Background(), dir, []Type{typeTrace}); err != nil {
 		t.Fatalf("Merge() error: %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "otelc-trace.pprof")); !os.IsNotExist(statErr) {
@@ -252,7 +252,7 @@ func TestMergeTraceSkipped(t *testing.T) {
 
 func TestMergeNoFiles(t *testing.T) {
 	// With no matching profile files present, Merge succeeds without writing anything.
-	if err := Merge(context.Background(), t.TempDir(), []Type{Heap, CPU}); err != nil {
+	if err := Merge(context.Background(), t.TempDir(), []Type{typeHeap, typeCPU}); err != nil {
 		t.Fatalf("Merge() error: %v", err)
 	}
 }
@@ -280,7 +280,7 @@ func TestStartCPUCreateFileError(t *testing.T) {
 	path := filepath.Join(dir, fmt.Sprintf("otelc-cpu-%d.pprof", os.Getpid()))
 	require.NoError(t, os.Mkdir(path, 0o755))
 
-	_, err := Start(dir, []Type{CPU})
+	_, err := Start(dir, []Type{typeCPU})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create CPU profile")
 }
@@ -293,7 +293,7 @@ func TestStartCPUProfileAlreadyRunning(t *testing.T) {
 	require.NoError(t, pprof.StartCPUProfile(f))
 	defer pprof.StopCPUProfile()
 
-	_, err = Start(dir, []Type{CPU})
+	_, err = Start(dir, []Type{typeCPU})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "start CPU profile")
 }
@@ -303,7 +303,7 @@ func TestStartTraceCreateFileError(t *testing.T) {
 	path := filepath.Join(dir, fmt.Sprintf("otelc-%d.trace", os.Getpid()))
 	require.NoError(t, os.Mkdir(path, 0o755))
 
-	_, err := Start(dir, []Type{Trace})
+	_, err := Start(dir, []Type{typeTrace})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create trace file")
 }
@@ -316,14 +316,14 @@ func TestStartTraceAlreadyRunning(t *testing.T) {
 	require.NoError(t, trace.Start(f))
 	defer trace.Stop()
 
-	_, err = Start(dir, []Type{Trace})
+	_, err = Start(dir, []Type{typeTrace})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "start execution trace")
 }
 
 func TestStopCPUCloseError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{CPU})
+	s, err := Start(dir, []Type{typeCPU})
 	require.NoError(t, err)
 	require.NotNil(t, s.cpuFile)
 	require.NoError(t, s.cpuFile.Close())
@@ -335,7 +335,7 @@ func TestStopCPUCloseError(t *testing.T) {
 
 func TestStopTraceCloseError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{Trace})
+	s, err := Start(dir, []Type{typeTrace})
 	require.NoError(t, err)
 	require.NotNil(t, s.traceFile)
 	require.NoError(t, s.traceFile.Close())
@@ -358,13 +358,13 @@ func TestWriteHeapProfileCreateError(t *testing.T) {
 func TestMergeTypeGlobError(t *testing.T) {
 	// An unclosed bracket in the directory name makes filepath.Glob fail.
 	dir := filepath.Join(t.TempDir(), "a[")
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 }
 
 func TestMergeReturnsMergeError(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "a[")
-	err := Merge(context.Background(), dir, []Type{CPU})
+	err := Merge(context.Background(), dir, []Type{typeCPU})
 	require.Error(t, err)
 }
 
@@ -374,7 +374,7 @@ func TestMergeTypeCreateOutputError(t *testing.T) {
 	// The merged output path is blocked by a directory.
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "otelc-cpu.pprof"), 0o755))
 
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create merged")
 }
@@ -393,7 +393,7 @@ func TestMergeTypeGoToolFailsWithStderr(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge failed")
 }
@@ -412,13 +412,13 @@ func TestMergeTypeGoToolFailsWithoutStderr(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 }
 
 func TestStopHeapWriteError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{Heap})
+	s, err := Start(dir, []Type{typeHeap})
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -435,7 +435,7 @@ func TestMergeTypeGoToolNotFound(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "otelc-cpu-1.pprof"), []byte("data"), 0o644))
 	t.Setenv("PATH", "")
 
-	err := mergeType(context.Background(), dir, CPU)
+	err := mergeType(context.Background(), dir, typeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge cpu profiles")
 }

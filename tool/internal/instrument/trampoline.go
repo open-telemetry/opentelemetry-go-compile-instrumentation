@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/token"
 	"strconv"
+	"strings"
 
 	"github.com/dave/dst"
 
@@ -35,6 +36,7 @@ const (
 	trampolineHookContextName       = "hookContext"
 	trampolineHookContextType       = "HookContext"
 	trampolineInterfaceType         = "interface{}"
+	trampolineEmptyStructType       = "struct{}"
 	trampolineSkipName              = "skip"
 	trampolineSetParamName          = "SetParam"
 	trampolineGetParamName          = "GetParam"
@@ -68,14 +70,14 @@ const (
 //go:embed impl.tmpl
 var templateImpl string
 
-func (ip *InstrumentPhase) addDecl(decl dst.Decl) {
+func (ip *instrumentPhase) addDecl(decl dst.Decl) {
 	util.Assert(ip.target != nil, "sanity check")
 	ip.target.Decls = append(ip.target.Decls, decl)
 }
 
 // ensureUnsafeImport ensures that the unsafe package is imported in the target file.
 // This is required when using //go:linkname directives.
-func (ip *InstrumentPhase) ensureUnsafeImport() {
+func (ip *instrumentPhase) ensureUnsafeImport() {
 	for _, decl := range ip.target.Decls {
 		genDecl, ok := decl.(*dst.GenDecl)
 		if !ok || genDecl.Tok != token.IMPORT {
@@ -92,7 +94,7 @@ func (ip *InstrumentPhase) ensureUnsafeImport() {
 	ip.target.Decls = append([]dst.Decl{unsafeImport}, ip.target.Decls...)
 }
 
-func (ip *InstrumentPhase) materializeTemplate() error {
+func (ip *instrumentPhase) materializeTemplate() error {
 	// Read trampoline template and materialize before and after function
 	// declarations based on that
 	p := ast.NewAstParser()
@@ -222,32 +224,189 @@ func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
 	return target, nil
 }
 
-// baseTypeName returns the unqualified type name, stripping pointers and package prefixes.
-// This is needed because trampolines use pointer types (*string) while hooks use value types (string),
-// and hooks may use package-qualified types (hook.HookContext) while trampolines use local types (HookContext).
-// Examples: *int → int, pkg.Type → Type, *pkg.Type → Type, interface{} → interface{}, []int → int, ...string → string
+func arrayTypeName(t *dst.ArrayType) string {
+	lenStr := ""
+	if t.Len != nil {
+		switch l := t.Len.(type) {
+		case *dst.BasicLit:
+			lenStr = l.Value
+		case *dst.Ident:
+			lenStr = l.Name
+		default:
+			lenStr = ""
+		}
+	}
+	return "[" + lenStr + "]" + baseTypeName(t.Elt)
+}
+
+func chanTypeName(t *dst.ChanType) string {
+	switch t.Dir {
+	case dst.SEND:
+		return "chan<- " + baseTypeName(t.Value)
+	case dst.RECV:
+		return "<-chan " + baseTypeName(t.Value)
+	default:
+		return "chan " + baseTypeName(t.Value)
+	}
+}
+
+func fieldListTypes(fl *dst.FieldList) []string {
+	if fl == nil {
+		return nil
+	}
+	var res []string
+	for _, f := range fl.List {
+		fType := baseTypeName(f.Type)
+		if len(f.Names) > 0 {
+			for range f.Names {
+				res = append(res, fType)
+			}
+		} else {
+			res = append(res, fType)
+		}
+	}
+	return res
+}
+
+func funcTypeName(t *dst.FuncType) string {
+	params := fieldListTypes(t.Params)
+	results := fieldListTypes(t.Results)
+	resStr := ""
+	if len(results) == 1 {
+		resStr = " " + results[0]
+	} else if len(results) > 1 {
+		resStr = " (" + strings.Join(results, ", ") + ")"
+	}
+	return "func(" + strings.Join(params, ", ") + ")" + resStr
+}
+
+func structTypeName(t *dst.StructType) string {
+	if t.Fields == nil || len(t.Fields.List) == 0 {
+		return trampolineEmptyStructType
+	}
+	parts := make([]string, 0, len(t.Fields.List))
+	for _, f := range t.Fields.List {
+		fType := baseTypeName(f.Type)
+		if len(f.Names) == 0 {
+			// Embedded field.
+			parts = append(parts, fType)
+			continue
+		}
+		for _, n := range f.Names {
+			parts = append(parts, n.Name+" "+fType)
+		}
+	}
+	return "struct{" + strings.Join(parts, "; ") + "}"
+}
+
+func interfaceTypeName(t *dst.InterfaceType) string {
+	if t.Methods == nil || len(t.Methods.List) == 0 {
+		return trampolineInterfaceType
+	}
+	parts := make([]string, 0, len(t.Methods.List))
+	for _, m := range t.Methods.List {
+		if len(m.Names) == 0 {
+			// Embedded interface.
+			parts = append(parts, baseTypeName(m.Type))
+			continue
+		}
+		for _, n := range m.Names {
+			sig := baseTypeName(m.Type)
+			if ft, ok := m.Type.(*dst.FuncType); ok {
+				sig = strings.TrimPrefix(funcTypeName(ft), "func")
+			}
+			parts = append(parts, n.Name+sig)
+		}
+	}
+	return "interface{" + strings.Join(parts, "; ") + "}"
+}
+
+// baseTypeName normalizes a type expression for signature matching by stripping
+// package qualifiers and the outermost pointer while preserving composite type
+// constructors, so trampoline and hook parameter types can be compared directly.
+// Examples: *pkg.Type → Type, []int → []int, ...string → ...string
 func baseTypeName(expr dst.Expr) string {
 	switch t := expr.(type) {
 	case *dst.Ident:
+		if t.Name == "any" {
+			return trampolineInterfaceType
+		}
 		return t.Name
 	case *dst.StarExpr:
 		return baseTypeName(t.X)
 	case *dst.SelectorExpr:
 		return t.Sel.Name
 	case *dst.ArrayType:
-		return baseTypeName(t.Elt)
+		return arrayTypeName(t)
 	case *dst.Ellipsis:
-		return baseTypeName(t.Elt)
+		return "..." + baseTypeName(t.Elt)
+	case *dst.MapType:
+		return "map[" + baseTypeName(t.Key) + "]" + baseTypeName(t.Value)
+	case *dst.ChanType:
+		return chanTypeName(t)
 	case *dst.InterfaceType:
-		return trampolineInterfaceType
+		return interfaceTypeName(t)
+	case *dst.StructType:
+		return structTypeName(t)
+	case *dst.FuncType:
+		return funcTypeName(t)
+	case *dst.IndexExpr:
+		return indexListType(t.X, []dst.Expr{t.Index})
+	case *dst.IndexListExpr:
+		return indexListType(t.X, t.Indices)
 	default:
 		return ""
 	}
 }
 
+// indexListType builds a normalized name for a generic type instantiation
+// (X[Index] or X[Index1, Index2, ...]) from its base type and index expressions.
+func indexListType(x dst.Expr, indices []dst.Expr) string {
+	parts := make([]string, 0, len(indices))
+	for _, idx := range indices {
+		parts = append(parts, baseTypeName(idx))
+	}
+	return baseTypeName(x) + "[" + strings.Join(parts, ", ") + "]"
+}
+
+// isAnyOrInterface reports whether the type string represents an empty interface (any / interface{}).
+func isAnyOrInterface(s string) bool {
+	return s == "any" || s == trampolineInterfaceType
+}
+
+// sliceOrEllipsisElt returns the element type and true if s is a slice or ellipsis type.
+func sliceOrEllipsisElt(s string) (string, bool) {
+	if strings.HasPrefix(s, "[]") {
+		return s[2:], true
+	}
+	if strings.HasPrefix(s, "...") {
+		return s[3:], true
+	}
+	return "", false
+}
+
+// matchBaseType reports whether hookBase matches the expected trampBase type.
+func matchBaseType(trampBase, hookBase string) bool {
+	// The any-typed parameter can accept any trampoline parameter.
+	if isAnyOrInterface(hookBase) {
+		return true
+	}
+	if trampBase != "" && trampBase == hookBase {
+		return true
+	}
+	if tElt, tOk := sliceOrEllipsisElt(trampBase); tOk {
+		if hElt, hOk := sliceOrEllipsisElt(hookBase); hOk {
+			// isAnyOrInterface(hElt) alone already covers the case where both
+			// tElt and hElt are any/interface{}.
+			return tElt == hElt || isAnyOrInterface(hElt)
+		}
+	}
+	return false
+}
+
 // checkHookDecl checks if the hook function declaration is correct, i.e. if they
 // have correct signature (parameter count and types)
-func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) error {
+func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) error {
 	// TargetFunc:  func A(a int, b string) (ret string)
 	// BeforeTramp: func B(a *int, b *string) (ctx *HookContext, skip bool)
 	// BeforeHook:  func C(ctx *HookContext, a int, b string)
@@ -271,7 +430,7 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 		for i, trampField := range beforeTrampParams.List {
 			trampBase := baseTypeName(trampField.Type)
 			hookBase := baseTypeName(beforeHookParams.List[i+1].Type)
-			if hookBase != trampolineInterfaceType && hookBase != "any" && trampBase != hookBase {
+			if !matchBaseType(trampBase, hookBase) {
 				return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 					i+1, trampBase, hookBase)
 			}
@@ -295,7 +454,7 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	for i, trampField := range afterTrampParams.List {
 		trampBase := baseTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
-		if hookBase != trampolineInterfaceType && hookBase != "any" && trampBase != hookBase {
+		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 				i, trampBase, hookBase)
 		}
@@ -303,7 +462,7 @@ func (ip *InstrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	return nil
 }
 
-func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
+func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	// Query whether the parameter is a variadic parameter in the target function
 	targetParams := findTargetParamType(ip.targetFunc)
 	isEllipsis := func(i int) bool { return ast.IsEllipsis(targetParams.List[i].Type) }
@@ -330,7 +489,7 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
 }
 
-func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule) {
+func (ip *instrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 	var args []dst.Expr
 	for i, field := range ip.afterTrampFunc.Type.Params.List {
 		// If it's the first HookContext parameter, pass it directly
@@ -355,7 +514,7 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 	insertAtEnd(ip.afterTrampFunc, iff)
 }
 
-func (ip *InstrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {
+func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {
 	fnName := getHookFuncName(t, before)
 	funcDecl := &dst.FuncDecl{
 		Name: ast.Ident(fnName),
@@ -389,7 +548,7 @@ func insertAtEnd(funcDecl *dst.FuncDecl, stmt dst.Stmt) {
 	insertAt(funcDecl, stmt, len(funcDecl.Body.List))
 }
 
-func (ip *InstrumentPhase) renameTrampFunc(t *rule.InstFuncRule) {
+func (ip *instrumentPhase) renameTrampFunc(t *rule.InstFuncRule) {
 	// Randomize trampoline function names
 	ip.beforeTrampFunc.Name.Name = makeName(t, ip.targetFunc, trampolineBefore)
 	dst.Inspect(ip.beforeTrampFunc, func(node dst.Node) bool {
@@ -503,7 +662,7 @@ func findTargetGenericType(file *dst.File, targetFunc *dst.FuncDecl) *dst.FieldL
 	return trampolineTypeParams
 }
 
-func (ip *InstrumentPhase) buildTrampSignature(before bool) {
+func (ip *instrumentPhase) buildTrampSignature(before bool) {
 	var fields *dst.FieldList
 	if before {
 		beforeTramp := ip.beforeTrampFunc
@@ -530,7 +689,7 @@ func (ip *InstrumentPhase) buildTrampSignature(before bool) {
 	}
 }
 
-func (ip *InstrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool) (*dst.FieldList, error) {
+func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool) (*dst.FieldList, error) {
 	// TargetFunc: func A(a int, b string) (ret string)
 	// BeforeHook: func B(ctx *HookContext, a int, b string)
 	// AfterHook:  func C(ctx *HookContext, ret string)
@@ -602,7 +761,7 @@ func assignSliceLiteral(assignStmt *dst.AssignStmt, vals []dst.Expr) bool {
 }
 
 // populateHookContext populates the hook context before hook invocation
-func (ip *InstrumentPhase) populateHookContext(before bool) bool {
+func (ip *instrumentPhase) populateHookContext(before bool) bool {
 	funcDecl := ip.beforeTrampFunc
 	if !before {
 		funcDecl = ip.afterTrampFunc
@@ -657,7 +816,7 @@ func (ip *InstrumentPhase) populateHookContext(before bool) bool {
 // implementHookContext effectively "implements" the HookContext interface by
 // renaming occurrences of HookContextImpl to HookContextImpl{suffix} in the
 // trampoline template
-func (ip *InstrumentPhase) implementHookContext(t *rule.InstFuncRule) {
+func (ip *instrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 	suffix := t.Identity()
 	structType := util.AssertType[*dst.TypeSpec](ip.hookCtxDecl.Specs[0])
 	util.Assert(structType.Name.Name == trampolineHookContextImplType,
@@ -892,7 +1051,7 @@ func rewriteReturnValMethods(targetFunc *dst.FuncDecl, methodSetRetVal, methodGe
 	}
 }
 
-func (ip *InstrumentPhase) rewriteHookContextMethods() {
+func (ip *instrumentPhase) rewriteHookContextMethods() {
 	util.Assert(len(ip.hookCtxMethods) > 4, "sanity check")
 	var methodSetParam, methodGetParam, methodGetRetVal, methodSetRetVal *dst.FuncDecl
 	for _, decl := range ip.hookCtxMethods {
@@ -1049,7 +1208,7 @@ func processFieldList(fields []*dst.Field, typeParams *dst.FieldList) []*dst.Fie
 	return result
 }
 
-func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
+func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
 	// Build hook function signature and check if it is correct
 	paramTypes, err := ip.buildHookSignature(t, before)
 	if err != nil {
@@ -1074,7 +1233,7 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	return nil
 }
 
-func (ip *InstrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
+func (ip *instrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
 	// Ensure unsafe package is imported since we use //go:linkname directives
 	ip.ensureUnsafeImport()
 	// Materialize various declarations from template file, no one wants to see

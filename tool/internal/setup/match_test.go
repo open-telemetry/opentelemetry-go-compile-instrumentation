@@ -603,29 +603,6 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	require.Len(t, rules, 2)
 }
 
-func TestIsRuleFile(t *testing.T) {
-	tests := []struct {
-		filename string
-		expected bool
-	}{
-		{"otelc.yaml", true},
-		{"otelc.yml", true},
-		{"client.otelc.yaml", true},
-		{"server.otelc.yml", true},
-		{"rules.yaml", false},
-		{"otelc.client.yaml", false},
-		{"otelc", false},
-		{"otelc.txt", false},
-		{"otelc.yaml.bak", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.filename, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isRuleFile(tt.filename))
-		})
-	}
-}
-
 func TestLoadRulesFromToolFiles(t *testing.T) {
 	t.Run("loads rules from tool files", func(t *testing.T) {
 		tmp := t.TempDir()
@@ -689,7 +666,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 			false, nil)
 
 		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
-		require.ErrorIs(t, err, ErrNotInstrumentation)
+		require.ErrorIs(t, err, errNotInstrumentation)
 	})
 }
 
@@ -746,7 +723,7 @@ func TestLoadDefaultRules(t *testing.T) {
 	require.Equal(t, "dummyrule", rules[0].GetName()) // writeInstrumentationModule adds a rule named "dummyrule"
 
 	// Verify that when no rules are found, no error is returned and nil is returned.
-	os.Remove(filepath.Join(tmp, ToolFileCanonical))
+	os.Remove(filepath.Join(tmp, toolFileCanonical))
 	rules, err = sp.loadRules(t.Context(), moduleDirs)
 	require.NoError(t, err)
 	require.Nil(t, rules)
@@ -1044,8 +1021,8 @@ func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 
 // Helper functions for constructing test data
 
-func newTestSetupPhase() *SetupPhase {
-	return &SetupPhase{
+func newTestSetupPhase() *setupPhase {
+	return &setupPhase{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
@@ -1168,6 +1145,60 @@ func Target(value string) error { return nil }
 	matchedFuncRules := set.AllFuncRules()
 	require.Len(t, matchedFuncRules, 1)
 	assert.Equal(t, "matching", matchedFuncRules[0].Name)
+}
+
+func TestParseRuleFromYamlDeterministicOrder(t *testing.T) {
+	yamlContent := []byte(`
+zebra:
+  target: main
+  func: Example
+  raw: "_ = 1"
+alpha:
+  target: main
+  func: Example
+  raw: "_ = 1"
+mangle:
+  target: main
+  func: Example
+  raw: "_ = 1"
+`)
+
+	rules, err := parseRuleFromYaml(yamlContent)
+	require.NoError(t, err)
+	require.Len(t, rules, 3)
+
+	names := make([]string, len(rules))
+	for i, r := range rules {
+		names[i] = r.GetName()
+	}
+	require.Equal(t, []string{"alpha", "mangle", "zebra"}, names)
+}
+
+func TestLoadCustomRulesDeterministicOrder(t *testing.T) {
+	content := `zebra:
+  target: main
+  func: Example
+  raw: "_ = 1"
+alpha:
+  target: main
+  func: Example
+  raw: "_ = 1"
+mangle:
+  target: main
+  func: Example
+  raw: "_ = 1"`
+
+	p := writeCustomRules(t, "order.yaml", content)
+
+	rules, err := loadCustomRules(p)
+	require.NoError(t, err)
+	require.Len(t, rules, 3)
+
+	names := make([]string, len(rules))
+	for i, r := range rules {
+		names[i] = r.GetName()
+	}
+	require.Equal(t, []string{"alpha", "mangle", "zebra"}, names)
 }
 
 func TestRunMatch_EmptyRules(t *testing.T) {
@@ -1549,7 +1580,7 @@ func TestRunMatch_WarnsOnUnresolvedVersion(t *testing.T) {
 	const importPath = "example.com/mypkg"
 
 	var buf bytes.Buffer
-	sp := &SetupPhase{
+	sp := &setupPhase{
 		logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	}
 
@@ -1891,9 +1922,9 @@ func TestMatchDeps_RunMatchError(t *testing.T) {
 func TestLoadRules_FindToolFilesError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 	dir := t.TempDir()
-	err := os.WriteFile(filepath.Join(dir, ToolFileCanonical), []byte("package main"), 0o644)
+	err := os.WriteFile(filepath.Join(dir, toolFileCanonical), []byte("package main"), 0o644)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(dir, ToolFileAlias), []byte("package main"), 0o644)
+	err = os.WriteFile(filepath.Join(dir, toolFileAlias), []byte("package main"), 0o644)
 	require.NoError(t, err)
 
 	sp := newTestSetupPhase()

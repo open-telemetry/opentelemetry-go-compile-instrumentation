@@ -14,6 +14,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsRuleFile(t *testing.T) {
+	tests := map[string]bool{
+		"otelc.yaml":        true,
+		"otelc.yml":         true,
+		"client.otelc.yaml": true,
+		"server.otelc.yml":  true,
+		"rules.yaml":        false,
+		"rules.yml":         false,
+		"otelc.client.yaml": false,
+		"otelc":             false,
+		"otelc.txt":         false,
+		"otelc.yaml.bak":    false,
+	}
+
+	for filename, expected := range tests {
+		t.Run(filename, func(t *testing.T) {
+			assert.Equal(t, expected, IsRuleFile(filename))
+		})
+	}
+}
+
 func TestVersionInRange(t *testing.T) {
 	tests := []struct {
 		name           string
