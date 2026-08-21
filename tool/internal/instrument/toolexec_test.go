@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -91,7 +92,7 @@ func TestInterceptVetUsesPreservedCgoSource(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, data, 0o600))
 
 	args := []string{vetToolName, "-tests", configPath}
-	got, err := interceptVet(args)
+	got, err := interceptVet(t.Context(), args)
 	require.NoError(t, err)
 	assert.Equal(t, args, got)
 
@@ -112,12 +113,25 @@ func TestInterceptVetIgnoresCgoSourceWithoutPreservedCopy(t *testing.T) {
 	original := []byte(`{"GoFiles":["source.go","source.cgo1.go"]}`)
 	require.NoError(t, os.WriteFile(configPath, original, 0o600))
 
-	_, err := interceptVet([]string{vetToolName, configPath})
+	_, err := interceptVet(t.Context(), []string{vetToolName, configPath})
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 	assert.Equal(t, original, data)
+}
+
+func TestInterceptVetLogsUnexpectedArguments(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), logger)
+	args := []string{vetToolName, "-tests"}
+
+	got, err := interceptVet(ctx, args)
+
+	require.NoError(t, err)
+	assert.Equal(t, args, got)
+	assert.Contains(t, logs.String(), "vet invocation missing expected vet.cfg argument")
 }
 
 func TestUpdateImportConfig(t *testing.T) {

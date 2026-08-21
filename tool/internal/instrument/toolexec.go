@@ -355,13 +355,19 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 
 const vetToolName = "vet"
 
-func interceptVet(args []string) ([]string, error) {
+func interceptVet(ctx context.Context, args []string) ([]string, error) {
 	if len(args) == 0 {
 		return args, nil
 	}
 
 	configPath := args[len(args)-1]
 	if filepath.Base(configPath) != "vet.cfg" {
+		util.LoggerFromContext(ctx).DebugContext(
+			ctx,
+			"vet invocation missing expected vet.cfg argument",
+			"args",
+			args,
+		)
 		return args, nil
 	}
 
@@ -527,7 +533,7 @@ func interceptToolCommand(ctx context.Context, args []string) ([]string, error) 
 		return interceptLink(ctx, args)
 	}
 	if len(args) > 0 && strings.TrimSuffix(filepath.Base(args[0]), ".exe") == vetToolName {
-		return interceptVet(args)
+		return interceptVet(ctx, args)
 	}
 	return args, nil
 }
