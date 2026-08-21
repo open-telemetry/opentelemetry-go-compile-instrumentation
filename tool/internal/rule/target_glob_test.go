@@ -17,6 +17,8 @@ func TestIsGlobTarget(t *testing.T) {
 		{"example.com/svc", false},
 		{"net/http", false},
 		{"", false},
+		{"*", true},
+		{"**", true},
 		{"example.com/svc/*", true},
 		{"example.com/svc/**", true},
 		{"example.com/*/handler", true},
@@ -41,6 +43,8 @@ func TestIsRootTarget(t *testing.T) {
 		{"example.com/svc", false},
 		{"", false},
 		{"$root/**", false},
+		{"*", false},
+		{"**", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.target, func(t *testing.T) {
@@ -70,6 +74,8 @@ func TestValidateTarget(t *testing.T) {
 		{name: "char class", target: "example.com/svc/v[12]"},
 		{name: "question mark", target: "example.com/svc/v?"},
 		{name: "brace alternation", target: "example.com/{svc,api}"},
+		{name: "star alone", target: "*"},
+		{name: "double star alone", target: "**"},
 
 		// Valid: doublestar treats a "**" fused with other characters in a
 		// segment as a plain "*" (e.g. "svc**" behaves like "svc*"), so these
@@ -134,6 +140,11 @@ func TestMatchGlobTarget(t *testing.T) {
 		{"a/**/b/**/c", "a/b/c", true},
 		{"a/**/b/**/c", "a/x/b/z/d", false},
 		{"**/**/**/**/**/**/**/**/x", "a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/y", false},
+
+		// Bare * matches singular segments, including the empty path.
+		{"*", "anything", true},
+		{"*", "anything/at/all", false},
+		{"*", "", true},
 
 		// Bare ** matches everything including the empty path.
 		{"**", "anything/at/all", true},
