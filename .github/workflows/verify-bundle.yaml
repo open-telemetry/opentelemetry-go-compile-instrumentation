@@ -49,12 +49,27 @@ jobs:
     steps:
       - name: Check result
         run: |
-          result="${{ needs.verify-bundle.result }}"
-          echo "Test result: $result"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "✅ Tests passed or were skipped"
-            exit 0
-          else
-            echo "❌ Tests failed"
+          changes_result="${{ needs.changes.result }}"
+          bundle_changed="${{ needs.changes.outputs.bundle }}"
+          bundle_result="${{ needs.verify-bundle.result }}"
+          echo "Changes result: $changes_result"
+          echo "Bundle changed: $bundle_changed"
+          echo "Bundle result: $bundle_result"
+          if [[ "$changes_result" != "success" ]]; then
+            echo "❌ Change detection failed"
             exit 1
           fi
+          if [[ "$bundle_changed" == "false" ]]; then
+            echo "✅ No relevant bundle changes; verification skipped"
+            exit 0
+          fi
+          if [[ "$bundle_changed" != "true" ]]; then
+            echo "❌ Unexpected change detection output: $bundle_changed"
+            exit 1
+          fi
+          if [[ "$bundle_result" == "success" ]]; then
+            echo "✅ Bundle verification passed"
+            exit 0
+          fi
+          echo "❌ Bundle verification failed"
+          exit 1
