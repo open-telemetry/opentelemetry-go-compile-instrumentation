@@ -21,6 +21,17 @@ func resetHookState() {
 	formatterInit = false
 }
 
+func hasTraceHook(logger *logrus.Logger) bool {
+	for _, hooks := range logger.Hooks {
+		for _, h := range hooks {
+			if _, ok := h.(*traceHook); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestLogEnabler_Enable(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -137,6 +148,7 @@ func TestAfterLogrusNew_NilMapAtCallTime(t *testing.T) {
 	fieldInitMap = nil
 	formatterInit = false
 	hookInitMu.Unlock()
+	t.Cleanup(resetHookState)
 
 	ictx := hooktest.NewMockHookContext()
 	logger := logrus.New()
@@ -144,15 +156,7 @@ func TestAfterLogrusNew_NilMapAtCallTime(t *testing.T) {
 		AfterLogrusNew(ictx, logger)
 	})
 
-	hasHook := false
-	for _, hooks := range logger.Hooks {
-		for _, h := range hooks {
-			if _, ok := h.(*traceHook); ok {
-				hasHook = true
-			}
-		}
-	}
-	assert.True(t, hasHook)
+	assert.True(t, hasTraceHook(logger))
 }
 
 // TestAfterLogrusWithField_NilMapAtCallTime is the AfterLogrusWithField
@@ -164,6 +168,7 @@ func TestAfterLogrusWithField_NilMapAtCallTime(t *testing.T) {
 	fieldInitMap = nil
 	formatterInit = false
 	hookInitMu.Unlock()
+	t.Cleanup(resetHookState)
 
 	ictx := hooktest.NewMockHookContext()
 	logger := logrus.New()
@@ -172,15 +177,7 @@ func TestAfterLogrusWithField_NilMapAtCallTime(t *testing.T) {
 		AfterLogrusWithField(ictx, entry)
 	})
 
-	hasHook := false
-	for _, hooks := range logger.Hooks {
-		for _, h := range hooks {
-			if _, ok := h.(*traceHook); ok {
-				hasHook = true
-			}
-		}
-	}
-	assert.True(t, hasHook)
+	assert.True(t, hasTraceHook(logger))
 }
 
 func TestAfterLogrusNew_Disabled(t *testing.T) {
