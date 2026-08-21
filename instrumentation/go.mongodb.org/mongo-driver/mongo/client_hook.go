@@ -28,6 +28,10 @@ var enabler = mongoEnabler{}
 // chainMonitors returns a CommandMonitor that invokes each non-nil callback of
 // both user and otel in turn (user first), so a caller's own CommandMonitor
 // keeps firing alongside the OTel one instead of being replaced by it.
+//
+// Hardcodes the three CommandMonitor callbacks (Started/Succeeded/Failed). If a
+// future mongo-driver release adds another callback field, it must be added here
+// too, or it will be silently dropped from the chain.
 func chainMonitors(userMonitor, otel *event.CommandMonitor) *event.CommandMonitor {
 	return &event.CommandMonitor{
 		Started: func(ctx context.Context, e *event.CommandStartedEvent) {
@@ -71,14 +75,20 @@ func chainMonitors(userMonitor, otel *event.CommandMonitor) *event.CommandMonito
 // last — can never be overridden by, or silently override, anything the caller
 // already passed in.
 func injectMonitor(opts []*options.ClientOptions) []*options.ClientOptions {
+	merged := options.MergeClientOptions(opts...)
 	otelMonitor := otelmongo.NewMonitor()
 	monitor := otelMonitor
-	if existing := options.MergeClientOptions(opts...).Monitor; existing != nil {
-		monitor = chainMonitors(existing, otelMonitor)
+	if merged.Monitor != nil {
+		monitor = chainMonitors(merged.Monitor, otelMonitor)
 	}
+	// Set only Monitor, and carry the caller's effective HTTPClient forward, so the
+	// appended element is a no-op for every field except Monitor. Using
+	// options.Client() here would inject its default HTTPClient which, being last in
+	// the merge, silently replaces a caller's custom one.
+	injected := &options.ClientOptions{Monitor: monitor, HTTPClient: merged.HTTPClient}
 	// Full slice expression forces a new backing array so this never mutates a
 	// caller-owned slice passed in via `opts...`.
-	return append(opts[:len(opts):len(opts)], options.Client().SetMonitor(monitor))
+	return append(opts[:len(opts):len(opts)], injected)
 }
 
 // BeforeConnect intercepts mongo.Connect and injects the OTel command monitor
