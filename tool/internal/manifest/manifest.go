@@ -18,6 +18,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/data"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -134,18 +135,14 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
 		}
 		for _, name := range slices.Sorted(maps.Keys(rules)) {
-			rule := rules[name]
-			if validateErr := util.ValidateVersionRange(rule.VersionRange); validateErr != nil {
-				return ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
+			entry, ok, entryErr := manifestEntry(modulePath, path, name, rules[name])
+			if entryErr != nil {
+				return entryErr
 			}
-			if rule.Target == "" {
+			if !ok {
 				continue
 			}
-			entries = append(entries, Entry{
-				ModulePath:   modulePath,
-				Target:       rule.Target,
-				VersionRange: rule.VersionRange,
-			})
+			entries = append(entries, entry)
 		}
 		return nil
 	})
@@ -153,4 +150,21 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		return nil, ex.Wrapf(err, "loading rules for module %s", modulePath)
 	}
 	return entries, nil
+}
+
+func manifestEntry(modulePath, path, name string, ruleConfig yamlRule) (Entry, bool, error) {
+	if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
+		return Entry{}, false, ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
+	}
+	if ruleConfig.Target == "" {
+		return Entry{}, false, nil
+	}
+	if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
+		return Entry{}, false, ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
+	}
+	return Entry{
+		ModulePath:   modulePath,
+		Target:       ruleConfig.Target,
+		VersionRange: ruleConfig.VersionRange,
+	}, true, nil
 }
