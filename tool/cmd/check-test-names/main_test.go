@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -70,6 +71,12 @@ func TestCheckTreeDemoAndDotDirsIgnored(t *testing.T) {
 	assert.Empty(t, violations)
 }
 
+func TestCheckTreeMissingRootErrors(t *testing.T) {
+	_, err := checkTree(filepath.Join(t.TempDir(), "does-not-exist"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "walk")
+}
+
 func TestCheckTreeReportsAllViolationsSorted(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "pkg/foo/zebra_test.go", "package foo\n")
@@ -80,6 +87,28 @@ func TestCheckTreeReportsAllViolationsSorted(t *testing.T) {
 	require.Len(t, violations, 2)
 	assert.Equal(t, "pkg/foo/apple_test.go", violations[0].path)
 	assert.Equal(t, "pkg/foo/zebra_test.go", violations[1].path)
+}
+
+func TestReportNoViolationsPasses(t *testing.T) {
+	var out, errOut bytes.Buffer
+
+	ok := report(&out, &errOut, nil)
+
+	assert.True(t, ok)
+	assert.Contains(t, out.String(), "All test files follow the naming convention.")
+	assert.Empty(t, errOut.String())
+}
+
+func TestReportViolationsFails(t *testing.T) {
+	var out, errOut bytes.Buffer
+	violations := []violation{{path: "pkg/foo/bar_test.go", expectedSource: "pkg/foo/bar.go"}}
+
+	ok := report(&out, &errOut, violations)
+
+	assert.False(t, ok)
+	assert.Empty(t, out.String())
+	assert.Contains(t, errOut.String(), "pkg/foo/bar_test.go (expected pkg/foo/bar.go)")
+	assert.Contains(t, errOut.String(), "tool/cmd/check-test-names/allowlist.go")
 }
 
 func TestRunUsesRealAllowlist(t *testing.T) {

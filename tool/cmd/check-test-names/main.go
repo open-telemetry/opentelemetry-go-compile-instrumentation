@@ -12,6 +12,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -48,20 +49,30 @@ func main() {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if !report(os.Stdout, os.Stderr, violations) {
+		os.Exit(1)
+	}
+}
+
+// report writes the check's outcome to out (on success) or errOut (on
+// failure) and returns whether the check passed. Separated from main so
+// tests can exercise both outcomes without depending on os.Exit.
+func report(out, errOut io.Writer, violations []violation) bool {
 	if len(violations) > 0 {
-		_, _ = fmt.Fprintln(os.Stderr, "Test files without a matching source file "+
+		_, _ = fmt.Fprintln(errOut, "Test files without a matching source file "+
 			"(foo_test.go must pair with foo.go in the same directory):")
 		for _, v := range violations {
-			_, _ = fmt.Fprintf(os.Stderr, "  %s (expected %s)\n", v.path, v.expectedSource)
+			_, _ = fmt.Fprintf(errOut, "  %s (expected %s)\n", v.path, v.expectedSource)
 		}
 		_, _ = fmt.Fprintln(
-			os.Stderr,
+			errOut,
 			"\nIf this is a legitimate exception (platform-specific build, fuzz target, shared test helper, ...), "+
 				"add it to the allowlist in tool/cmd/check-test-names/allowlist.go with a comment explaining why it can't follow the 1:1 rule.",
 		)
-		os.Exit(1)
+		return false
 	}
-	_, _ = fmt.Println("All test files follow the naming convention.")
+	_, _ = fmt.Fprintln(out, "All test files follow the naming convention.")
+	return true
 }
 
 type violation struct {
