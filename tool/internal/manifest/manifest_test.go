@@ -5,6 +5,7 @@ package manifest
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,6 +35,11 @@ empty:
 client:
   target: example.com/client
 `)
+	writeRuleFile(t, root, "parent/ranged.otelc.yaml", `
+ranged:
+  target: example.com/ranged
+  version: v1.0.0,v2.0.0
+`)
 	writeRuleFile(t, root, "parent/ignored.yaml", `
 ignored:
   target: example.com/ignored
@@ -51,9 +57,91 @@ server:
 	require.Equal(t, Manifest{
 		{ModulePath: "example.com/nested", Target: "example.com/server", VersionRange: "v1.5.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/client"},
+		{ModulePath: "example.com/parent", Target: "example.com/ranged", VersionRange: "v1.0.0,v2.0.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v1.0.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v2.0.0"},
 	}, got)
+}
+
+func TestGenerateRejectsInvalidVersionRanges(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  string
+		version string
+		wantErr string
+	}{
+		{
+			name:    "empty end bound",
+			target:  "example.com/target",
+			version: "v1.0.0,",
+			wantErr: `version "v1.0.0," must use non-empty start and end bounds`,
+		},
+		{
+			name:    "too many commas",
+			target:  "example.com/target",
+			version: "v1.0.0,v2.0.0,v3.0.0",
+			wantErr: `version "v1.0.0,v2.0.0,v3.0.0" must contain at most one comma`,
+		},
+		{
+			name:    "invalid semver",
+			target:  "example.com/target",
+			version: "not-a-version",
+			wantErr: `version "not-a-version" must be a valid semantic version`,
+		},
+		{
+			name:    "inverted bounds",
+			target:  "example.com/target",
+			version: "v2.0.0,v1.0.0",
+			wantErr: `version "v2.0.0,v1.0.0" must have a lower bound below the upper bound`,
+		},
+		{
+			name:    "empty target",
+			version: "v1.0.0,",
+			wantErr: `version "v1.0.0," must use non-empty start and end bounds`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeModule(t, root, "module", "example.com/test")
+			target := ""
+			if test.target != "" {
+				target = "  target: " + test.target + "\n"
+			}
+			writeRuleFile(
+				t,
+				root,
+				"module/otelc.yaml",
+				fmt.Sprintf("invalid:\n%s  version: %s\n", target, test.version),
+			)
+
+			_, err := Generate(root)
+			require.ErrorContains(t, err, test.wantErr)
+			require.ErrorContains(t, err, `validating version for rule "invalid" in file otelc.yaml`)
+			require.ErrorContains(t, err, "loading rules for module example.com/test")
+			require.ErrorContains(t, err, "generating manifest from")
+		})
+	}
+}
+
+func TestGenerateReportsInvalidRulesDeterministically(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "module", "example.com/test")
+	writeRuleFile(t, root, "module/otelc.yaml", `
+z-invalid:
+  target: example.com/z
+  version: not-a-version
+a-invalid:
+  target: example.com/a
+  version: v1.0.0,
+`)
+
+	for range 10 {
+		_, err := Generate(root)
+		require.ErrorContains(t, err, `validating version for rule "a-invalid" in file otelc.yaml`)
+		require.ErrorContains(t, err, `version "v1.0.0," must use non-empty start and end bounds`)
+	}
 }
 
 func TestGenerateErrors(t *testing.T) {
