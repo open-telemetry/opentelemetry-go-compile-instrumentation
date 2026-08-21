@@ -621,15 +621,16 @@ Top-level `imports` (map[string]string, optional): A map of imports to inject in
 
 **Template Placeholders:**
 
-| Placeholder              | Replaced with                                                            |
-| ------------------------ | ------------------------------------------------------------------------ |
-| `{{.FuncName}}`          | The name of the target function                                          |
-| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver |
-| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                      |
-| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                         |
-| `{{.FuncReturnCount}}`   | The number of return values                                              |
+| Placeholder              | Replaced with                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `{{.FuncName}}`          | The name of the target function                                                      |
+| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver             |
+| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                                  |
+| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                                     |
+| `{{.FuncReturnCount}}`   | The number of return values                                                          |
+| `{{.Receiver}}`          | The identifier of the target method's receiver; errors if the target has no receiver |
 
-Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values, and blank (`_`) names, are assigned a synthetic name the first time a template references them. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with a descriptive error. Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are also available.
+Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values, and blank (`_`) names, are assigned a synthetic name the first time a template references them. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index, or `{{.Receiver}}` on a function with no receiver) fails the build with a descriptive error. Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are also available.
 
 **Example with function template variables:**
 
@@ -645,6 +646,22 @@ raw_args:
 ```
 
 Given `func divide(a int, b int) (int, error) { ... }`, the injected code becomes `println("enter divide, arg0=a")`.
+
+**Example with `{{.Receiver}}`:**
+
+```yaml
+raw_receiver:
+  target: main
+  where:
+    func: Divide
+    recv: "*Calculator"
+  do:
+    - inject_code:
+        raw: |-
+          println("enter {{ .FuncName }}, recv={{ .Receiver }}")
+```
+
+Given `func (c *Calculator) Divide(a int, b int) (int, error) { ... }`, the injected code becomes `println("enter Divide, recv=c")`.
 
 **Example:**
 
@@ -758,9 +775,9 @@ Currently supported replace string features:
 
 **Function Template Variables:**
 
-In addition to `{{ . }}`, `replace` supports the shared function template variables, referenced as fields on the template's `.` — `{{.FuncName}}`, `{{.FuncArgument N}}`, `{{.FuncReturn N}}`, `{{.FuncArgumentCount}}`, and `{{.FuncReturnCount}}`. These resolve against the **enclosing function**: the named top-level function whose body contains the matched call site (not the matched call's own arguments). Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent.
+In addition to `{{ . }}`, `replace` supports the shared function template variables, referenced as fields on the template's `.` — `{{.FuncName}}`, `{{.FuncArgument N}}`, `{{.FuncReturn N}}`, `{{.FuncArgumentCount}}`, `{{.FuncReturnCount}}`, and `{{.Receiver}}`. These resolve against the **enclosing function**: the named top-level function whose body contains the matched call site (not the matched call's own arguments). Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent.
 
-A call site with no enclosing function has none of these available, so using one there fails the build with a descriptive error. Unnamed parameters and return values and blank (`_`) names, are assigned a synthetic name the first time a template references them.
+A call site with no enclosing function has none of these available, so using one there fails the build with a descriptive error. `{{.Receiver}}` additionally fails the build if the enclosing function is not a method (has no receiver). Unnamed parameters and return values and blank (`_`) names, are assigned a synthetic name the first time a template references them.
 
 ```yaml
 wrap_println:
@@ -790,6 +807,41 @@ func Handler(name string) {
 func Handler(name string) {
     (func() (int, error) {
         println("handler arg:", name)
+        return fmt.Println("hello")
+    })()
+}
+```
+
+**Example with `{{.Receiver}}`:**
+
+```yaml
+wrap_println_recv:
+  target: main
+  where:
+    function_call: fmt.Println
+  do:
+    - wrap_call:
+        replace: |-
+          (func() (int, error) {
+            println("handler recv:", {{ .Receiver }})
+            return {{ . }}
+          })()
+```
+
+Given:
+
+```go
+func (h Handler) Serve(name string) {
+    fmt.Println("hello")
+}
+```
+
+`{{ .Receiver }}` resolves to `h`:
+
+```go
+func (h Handler) Serve(name string) {
+    (func() (int, error) {
+        println("handler recv:", h)
         return fmt.Println("hello")
     })()
 }
