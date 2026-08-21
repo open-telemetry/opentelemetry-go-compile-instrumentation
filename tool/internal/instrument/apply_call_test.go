@@ -173,6 +173,64 @@ func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 	assert.Contains(t, err.Error(), "rule has no compiled replacement template")
 }
 
+func TestApplyCallRule_AppendArgs(t *testing.T) {
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("")
+	r.AppendArgs = []string{"traced.Context()"}
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, file, "f")
+	stmt := fn.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	require.Len(t, call.Args, 2, "append_args must append onto the matched call")
+	assert.True(t, fileImportsPath(file, "fmt"), "import must be added for the append_args-only match")
+}
+
+func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
+	// No matching call site: applyCallRule must no-op, including skipping
+	// import injection, even though Imports is set on the rule.
+	file := makeCallFile(&dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "fmt", Path: "fmt"},
+			Sel: &dst.Ident{Name: "Println"},
+		},
+		Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"hello"`}},
+	})
+	r := httpGetRule("")
+	r.AppendArgs = []string{"traced.Context()"}
+	r.Imports = map[string]string{"traced": "example.com/traced"}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.False(t, fileImportsPath(file, "example.com/traced"))
+}
+
+func TestApplyCallRule_ImportAliasMismatch(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run() {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "import alias mismatch")
+}
+
 func TestApplyCallRule_FuncArgumentUsesEnclosingFunction(t *testing.T) {
 	root := parseFile(t, `package main
 
@@ -384,6 +442,72 @@ func f() {}
 	used := usedRuleImports(root, nil)
 
 	assert.Nil(t, used)
+}
+
+func TestUsedRuleImports_PlainIdentifierWithoutSelector(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	use(traced)
+}
+`)
+	ruleImports := map[string]string{"traced": "fmt"}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Empty(t, used)
+}
+
+func TestUsedRuleImports_ChainedSelector(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	pkg.traced.Call()
+}
+`)
+	ruleImports := map[string]string{"traced": "fmt"}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Empty(t, used)
+}
+
+func TestUsedRuleImports_MultipleReferencesCountedOnce(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	traced.Call()
+	traced.Call()
+}
+`)
+	ruleImports := map[string]string{"traced": "fmt"}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
+}
+
+func TestUsedRuleImports_MixedAliasKinds(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	traced.Call()
+}
+`)
+	ruleImports := map[string]string{
+		"traced": "fmt",
+		"unused": "example.com/unused",
+		"_":      "example.com/sideeffect",
+		".":      "example.com/dotimport",
+	}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Equal(t, map[string]string{
+		"traced": "fmt",
+		"_":      "example.com/sideeffect",
+		".":      "example.com/dotimport",
+	}, used)
 }
 
 func TestApplyCallRule_FuncTagWithoutEnclosingFunctionErrors(t *testing.T) {
