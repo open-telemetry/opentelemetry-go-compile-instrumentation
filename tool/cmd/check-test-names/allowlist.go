@@ -10,7 +10,11 @@ package main
 // than an escape hatch for the segmented test files the naming rule exists
 // to prevent (see the discussion on #1128). Paths are slash-separated,
 // relative to the repository root.
-var allowlist = map[string]string{
+// seeV1PackageRationale is shared by the v2/v3 openai-go allowlist entries,
+// which mirror their v1 counterpart's rationale exactly.
+const seeV1PackageRationale = "see the v1 package rationale."
+
+var allowlist = map[string]string{ //nolint:gochecknoglobals // private lookup table
 	"tool/internal/instrument/toolexec_exec_test.go": "exercises the !windows subprocess-exec path of toolexec.go; " +
 		"toolexec_test.go already covers the shared, platform-independent behavior.",
 	"tool/internal/instrument/render_raw_code_test.go": "pending fold into apply_raw_test.go (open PR #1189); " +
@@ -31,12 +35,12 @@ var allowlist = map[string]string{
 
 	"instrumentation/github.com/openai/openai-go/middleware_integration_test.go": "end-to-end test driving the " +
 		"full middleware.go pipeline against a real HTTP round trip, distinct from middleware_test.go's unit cases.",
-	"instrumentation/github.com/openai/openai-go/v2/middleware_integration_test.go": "see the v1 package rationale.",
-	"instrumentation/github.com/openai/openai-go/v3/middleware_integration_test.go": "see the v1 package rationale.",
+	"instrumentation/github.com/openai/openai-go/v2/middleware_integration_test.go": seeV1PackageRationale,
+	"instrumentation/github.com/openai/openai-go/v3/middleware_integration_test.go": seeV1PackageRationale,
 	"instrumentation/github.com/openai/openai-go/testhelpers_test.go": "shared test-only attribute-assertion helpers; " +
 		"no corresponding production source file.",
-	"instrumentation/github.com/openai/openai-go/v2/testhelpers_test.go": "see the v1 package rationale.",
-	"instrumentation/github.com/openai/openai-go/v3/testhelpers_test.go": "see the v1 package rationale.",
+	"instrumentation/github.com/openai/openai-go/v2/testhelpers_test.go": seeV1PackageRationale,
+	"instrumentation/github.com/openai/openai-go/v3/testhelpers_test.go": seeV1PackageRationale,
 
 	"instrumentation/net/http/client/propagation_test.go": "end-to-end trace-context propagation test spanning " +
 		"client_hook.go and server_hook.go behavior together; not scoped to one source file.",

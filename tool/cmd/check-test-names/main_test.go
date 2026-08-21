@@ -82,6 +82,17 @@ func TestCheckTreeReportsAllViolationsSorted(t *testing.T) {
 	assert.Equal(t, "pkg/foo/zebra_test.go", violations[1].path)
 }
 
+func TestRunUsesRealAllowlist(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pkg/foo/foo.go", "package foo\n")
+	writeFile(t, root, "pkg/foo/foo_test.go", "package foo\n")
+	t.Chdir(root)
+
+	violations, err := run(".")
+	require.NoError(t, err)
+	assert.Empty(t, violations)
+}
+
 func writeFile(t *testing.T, root, relative, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relative))

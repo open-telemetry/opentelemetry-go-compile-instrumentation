@@ -22,7 +22,7 @@ import (
 
 // skipDirNames are directory names skipped wherever they occur: generated
 // fixtures and vendored code that don't follow (or need) this convention.
-var skipDirNames = map[string]bool{
+var skipDirNames = map[string]bool{ //nolint:gochecknoglobals // private lookup table
 	"testdata":     true,
 	"vendor":       true,
 	"demo":         true,
@@ -33,7 +33,7 @@ var skipDirNames = map[string]bool{
 // relative to the repository root. They exercise built binaries and fixture
 // apps rather than pairing 1:1 with a source file, so the naming rule below
 // does not apply to them.
-var exemptScenarioDirs = map[string]bool{
+var exemptScenarioDirs = map[string]bool{ //nolint:gochecknoglobals // private lookup table
 	"test/integration":    true,
 	"test/e2e":            true,
 	"test/bench":          true,
@@ -49,15 +49,19 @@ func main() {
 		os.Exit(1)
 	}
 	if len(violations) > 0 {
-		_, _ = fmt.Fprintln(os.Stderr, "Test files without a matching source file (foo_test.go must pair with foo.go in the same directory):")
+		_, _ = fmt.Fprintln(os.Stderr, "Test files without a matching source file "+
+			"(foo_test.go must pair with foo.go in the same directory):")
 		for _, v := range violations {
 			_, _ = fmt.Fprintf(os.Stderr, "  %s (expected %s)\n", v.path, v.expectedSource)
 		}
-		_, _ = fmt.Fprintln(os.Stderr, "\nIf this is a legitimate exception (platform-specific build, fuzz target, shared test helper, ...), "+
-			"add it to the allowlist in tool/cmd/check-test-names/allowlist.go with a comment explaining why it can't follow the 1:1 rule.")
+		_, _ = fmt.Fprintln(
+			os.Stderr,
+			"\nIf this is a legitimate exception (platform-specific build, fuzz target, shared test helper, ...), "+
+				"add it to the allowlist in tool/cmd/check-test-names/allowlist.go with a comment explaining why it can't follow the 1:1 rule.",
+		)
 		os.Exit(1)
 	}
-	fmt.Println("All test files follow the naming convention.")
+	_, _ = fmt.Println("All test files follow the naming convention.")
 }
 
 type violation struct {
@@ -105,7 +109,7 @@ func checkTree(root string, allow map[string]string) ([]violation, error) {
 		}
 
 		source := strings.TrimSuffix(d.Name(), "_test.go") + ".go"
-		if _, err := os.Stat(filepath.Join(filepath.Dir(p), source)); err == nil {
+		if _, statErr := os.Stat(filepath.Join(filepath.Dir(p), source)); statErr == nil {
 			return nil
 		}
 
