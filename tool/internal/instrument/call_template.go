@@ -113,6 +113,16 @@ func (d *callTemplateData) FuncReturnCount() (int, error) {
 	return d.enclosing.FuncReturnCount(), nil
 }
 
+// Receiver returns the identifier of the enclosing method's receiver, or an
+// error if there is no enclosing function or the enclosing function has no
+// receiver. Template usage: {{.Receiver}}
+func (d *callTemplateData) Receiver() (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.Receiver()
+}
+
 // compileExpression executes the template with the given expression node as
 // the placeholder value, parses the result, and returns the transformed expression.
 // enclosing is the function declaration that contains node, or
