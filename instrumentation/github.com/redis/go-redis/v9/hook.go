@@ -194,6 +194,9 @@ func redisV9HelloAuthIndex(args []interface{}) int {
 		if !redisV9ArgEqualFold(args[i], redisAuthCmd) {
 			continue
 		}
+		// AUTH and SETNAME each take a fixed number of args in the HELLO
+		// grammar, so a client literally named "auth" can only appear
+		// directly after "setname" - a one-token lookback is enough.
 		if i > 1 && redisV9ArgEqualFold(args[i-1], redisSetNameOption) {
 			continue
 		}

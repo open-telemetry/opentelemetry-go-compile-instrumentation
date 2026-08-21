@@ -125,6 +125,11 @@ func TestGetRedisV9Statement(t *testing.T) {
 			cmd:      redis.NewMapStringInterfaceCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
 			expected: "hello 3 auth ? ?",
 		},
+		{
+			name:     "HELLO AUTH truncated (missing password)",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "user"),
+			expected: "hello 3 auth ?",
+		},
 	}
 
 	for _, tt := range tests {
