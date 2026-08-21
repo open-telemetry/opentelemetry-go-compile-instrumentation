@@ -4,11 +4,151 @@
 package v2
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
+
+// setupTestMeter wires the package-level operationDuration histogram to a
+// manual reader so tests can assert what was recorded.
+func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	setupTestTracer(t)
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(mp)
+	var err error
+	operationDuration, err = mp.Meter("test").Float64Histogram(
+		"gen_ai.client.operation.duration", metric.WithUnit("s"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = mp.Shutdown(context.Background())
+		operationDuration = nil
+	})
+	return reader
+}
+
+// durationDataPoints returns all data points for gen_ai.client.operation.duration.
+func durationDataPoints(t *testing.T, reader *sdkmetric.ManualReader) []metricdata.HistogramDataPoint[float64] {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "gen_ai.client.operation.duration" {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			require.True(t, ok, "gen_ai.client.operation.duration must be a float64 histogram")
+			return hist.DataPoints
+		}
+	}
+	return nil
+}
+
+// TestOtelMiddleware_RecordsDuration verifies a successful chat completion
+// emits exactly one gen_ai.client.operation.duration measurement.
+func TestOtelMiddleware_RecordsDuration(t *testing.T) {
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":"chatcmpl-1","model":"gpt-4","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}`,
+			)),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1, "duration should be recorded once on success")
+	assert.Equal(t, uint64(1), dps[0].Count)
+	_, ok := dps[0].Attributes.Value(attribute.Key("error.type"))
+	assert.False(t, ok, "error.type must not be present on success")
+}
+
+// TestOtelMiddleware_RecordsDurationOnHTTPError verifies the duration is
+// recorded and error.type (numeric status code) is set on HTTP >=400 responses.
+func TestOtelMiddleware_RecordsDurationOnHTTPError(t *testing.T) {
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Status:     "429 Too Many Requests",
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1, "duration should be recorded once on HTTP error")
+	assert.Equal(t, uint64(1), dps[0].Count)
+	val, ok := dps[0].Attributes.Value(attribute.Key("error.type"))
+	require.True(t, ok, "error.type must be present on HTTP error")
+	assert.Equal(t, "429", val.AsString())
+}
+
+// TestOtelMiddleware_RecordsDurationOnTransportError verifies the duration is
+// recorded and error.type is set when next() returns an error.
+func TestOtelMiddleware_RecordsDurationOnTransportError(t *testing.T) {
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`))),
+	)
+	wantErr := errors.New("connection refused")
+	next := func(r *http.Request) (*http.Response, error) {
+		return nil, wantErr
+	}
+
+	_, err := middleware(req, next)
+	require.ErrorIs(t, err, wantErr)
+
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1, "duration should be recorded once on transport error")
+	assert.Equal(t, uint64(1), dps[0].Count)
+	_, ok := dps[0].Attributes.Value(attribute.Key("error.type"))
+	require.True(t, ok, "error.type must be present on transport error")
+}
 
 func TestClassifyOperation(t *testing.T) {
 	tests := []struct {
