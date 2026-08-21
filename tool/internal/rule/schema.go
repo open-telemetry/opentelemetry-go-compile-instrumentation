@@ -19,6 +19,7 @@ const (
 	selectorFunc              selector = "func"
 	selectorRecv              selector = "recv"
 	selectorStruct            selector = "struct"
+	selectorStructLiteral     selector = "struct_literal"
 	selectorFunctionCall      selector = "function_call"
 	selectorDirective         selector = "directive"
 	selectorKind              selector = "kind"
@@ -45,6 +46,7 @@ const (
 	modifierWrapCall        modifier = "wrap_call"
 	modifierExpandDirective modifier = "expand_directive"
 	modifierAssignValue     modifier = "assign_value"
+	modifierSetFields       modifier = "set_fields"
 )
 
 // String forms used as YAML / map keys. Existing call sites (normalize,
@@ -56,6 +58,7 @@ const (
 	SelFunc              = string(selectorFunc)
 	selRecv              = string(selectorRecv)
 	SelStruct            = string(selectorStruct)
+	SelStructLiteral     = string(selectorStructLiteral)
 	SelFunctionCall      = string(selectorFunctionCall)
 	SelDirective         = string(selectorDirective)
 	selKind              = string(selectorKind)
@@ -128,6 +131,7 @@ func allSelectors() []selector {
 		selectorFunc,
 		selectorRecv,
 		selectorStruct,
+		selectorStructLiteral,
 		selectorFunctionCall,
 		selectorDirective,
 		selectorKind,
@@ -156,5 +160,6 @@ func allModifiers() []modifier {
 		modifierWrapCall,
 		modifierExpandDirective,
 		modifierAssignValue,
+		modifierSetFields,
 	}
 }

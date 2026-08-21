@@ -50,12 +50,27 @@ jobs:
     steps:
       - name: Check result
         run: |
-          result="${{ needs.check-license-headers.result }}"
-          echo "Test result: $result"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "✅ Tests passed or were skipped"
-            exit 0
-          else
-            echo "❌ Tests failed"
+          changes_result="${{ needs.changes.result }}"
+          code_changed="${{ needs.changes.outputs.code }}"
+          license_result="${{ needs.check-license-headers.result }}"
+          echo "Changes result: $changes_result"
+          echo "Code changed: $code_changed"
+          echo "License result: $license_result"
+          if [[ "$changes_result" != "success" ]]; then
+            echo "❌ Change detection failed"
             exit 1
           fi
+          if [[ "$code_changed" == "false" ]]; then
+            echo "✅ No relevant code changes; license check skipped"
+            exit 0
+          fi
+          if [[ "$code_changed" != "true" ]]; then
+            echo "❌ Unexpected change detection output: $code_changed"
+            exit 1
+          fi
+          if [[ "$license_result" == "success" ]]; then
+            echo "✅ License check passed"
+            exit 0
+          fi
+          echo "❌ License check failed"
+          exit 1

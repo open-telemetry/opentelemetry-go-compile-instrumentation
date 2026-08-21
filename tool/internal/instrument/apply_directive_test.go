@@ -17,21 +17,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
-// countImportSpecs counts the import specs declared in the file. Import
-// injection appends to root.Decls rather than root.Imports, so the decls are
-// what a file written back out actually reflects.
-func countImportSpecs(root *dst.File) int {
-	count := 0
-	for _, decl := range root.Decls {
-		genDecl, ok := decl.(*dst.GenDecl)
-		if !ok || genDecl.Tok != token.IMPORT {
-			continue
-		}
-		count += len(genDecl.Specs)
-	}
-	return count
-}
-
 // The directive sits on a statement inside a function body, so it annotates no
 // top-level func and the rule matches nothing.
 const directiveInsideBodySource = `package main

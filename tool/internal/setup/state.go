@@ -23,6 +23,7 @@ import (
 const (
 	stateDir      = "state"
 	stateFileName = "state.json"
+	goWorkOff     = "off"
 )
 
 // stateManager tracks the original state of files so they can later be restored.
@@ -129,7 +130,7 @@ func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, 
 		return nil, ex.Wrapf(err, "failed to get GOWORK environment variable")
 	}
 	goWorkPath := strings.TrimSpace(string(goWorkOutput))
-	if goWorkPath != "" && goWorkPath != "off" {
+	if goWorkPath != "" && goWorkPath != goWorkOff {
 		goWorkSumPath := filepath.Join(filepath.Dir(goWorkPath), "go.work.sum")
 		files = append(files, goWorkSumPath)
 	}

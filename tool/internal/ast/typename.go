@@ -65,7 +65,7 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 		// tests with no backing *dst.File): compare against importPath's last
 		// segment. Note this cannot rescue a miskeyed map — a tail match here
 		// would imply ident.Name is a key, so the lookup above would have hit.
-		return DefaultImportAlias(t.importPath) == ident.Name && t.name == n.Sel.Name
+		return defaultImportAlias(t.importPath) == ident.Name && t.name == n.Sel.Name
 
 	case *dst.StarExpr:
 		inner := parsedTypeName{importPath: t.importPath, name: t.name}
@@ -133,7 +133,7 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 // it: that resolves unaliased imports with pkgload.ResolvePackageName (a
 // go/packages load that ex.Fatalf's on failure), which is too costly and too fatal
 // for the setup/match path, where this runs for every compiled package in the build.
-// The cost is that the default name here is a syntactic guess; see DefaultImportAlias.
+// The cost is that the default name here is a syntactic guess; see defaultImportAlias.
 //
 // Returns nil when file is nil.
 func ImportAliasMap(file *dst.File) map[string]string {
@@ -166,7 +166,7 @@ func ImportAliasMap(file *dst.File) map[string]string {
 		if err != nil {
 			continue
 		}
-		alias := DefaultImportAlias(path)
+		alias := defaultImportAlias(path)
 		if imp.Name != nil {
 			alias = imp.Name.Name
 		}
@@ -180,7 +180,7 @@ func ImportAliasMap(file *dst.File) map[string]string {
 	return aliases
 }
 
-// DefaultImportAlias (also aliased as ImportPathTail) returns the local identifier
+// defaultImportAlias (also aliased as ImportPathTail) returns the local identifier
 // conventionally used to reference an import path: its last segment, ignoring a
 // Go module major-version suffix ("/v2".."/vN", or gopkg.in's ".vN"), which is
 // part of the module path but not of the package name, e.g. "net/http" -> "http",
@@ -189,7 +189,7 @@ func ImportAliasMap(file *dst.File) map[string]string {
 // This is a convention, not a guarantee: a package may declare a name unrelated
 // to its path (e.g. "github.com/redis/go-redis/v9" declares "redis"). Such
 // packages are matched only when the importing file aliases them explicitly.
-func DefaultImportAlias(path string) string {
+func defaultImportAlias(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" || path == "." || path == "/" {
 		return ""

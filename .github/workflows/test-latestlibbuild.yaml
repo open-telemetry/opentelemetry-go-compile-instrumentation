@@ -76,12 +76,27 @@ jobs:
     steps:
       - name: Check result
         run: |
-          result="${{ needs.test-latestlibbuild.result }}"
-          echo "Test result: $result"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "✅ Tests passed or were skipped"
-            exit 0
-          else
-            echo "❌ Tests failed"
+          changes_result="${{ needs.changes.result }}"
+          code_changed="${{ needs.changes.outputs.code }}"
+          latestlibbuild_result="${{ needs.test-latestlibbuild.result }}"
+          echo "Changes result: $changes_result"
+          echo "Code changed: $code_changed"
+          echo "LatestLibBuild result: $latestlibbuild_result"
+          if [[ "$changes_result" != "success" ]]; then
+            echo "❌ Change detection failed"
             exit 1
           fi
+          if [[ "$code_changed" == "false" ]]; then
+            echo "✅ No relevant code changes; tests skipped"
+            exit 0
+          fi
+          if [[ "$code_changed" != "true" ]]; then
+            echo "❌ Unexpected change detection output: $code_changed"
+            exit 1
+          fi
+          if [[ "$latestlibbuild_result" == "success" ]]; then
+            echo "✅ Tests passed"
+            exit 0
+          fi
+          echo "❌ Tests failed"
+          exit 1

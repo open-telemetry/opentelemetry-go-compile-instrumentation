@@ -67,6 +67,39 @@
       ],
       enabled: false,
     },
+    {
+      // k8s.io/client-go v0.36.3 (and the k8s.io/apimachinery, k8s.io/api,
+      // and adjacent modules bumped alongside it) requires Go 1.26, which
+      // our CI toolchain does not support yet. Ignore updates to this
+      // family until the toolchain moves to 1.26+.
+      matchManagers: [
+        'gomod',
+      ],
+      matchPackageNames: [
+        'k8s.io/api',
+        'k8s.io/apimachinery',
+        'k8s.io/client-go',
+        'k8s.io/klog/v2',
+        'k8s.io/kube-openapi',
+        'k8s.io/utils',
+        'sigs.k8s.io/json',
+        'sigs.k8s.io/structured-merge-diff/v6',
+      ],
+      enabled: false,
+    },
+    {
+      // ratchet v0.12.0 raises .tools/go.mod's go directive to 1.25.12,
+      // which our CI toolchain (installed from the root go.mod's go 1.25.0)
+      // can't build with GOTOOLCHAIN=local. Ignore updates until the
+      // toolchain moves to 1.25.12+.
+      matchManagers: [
+        'gomod',
+      ],
+      matchPackageNames: [
+        'github.com/sethvargo/ratchet',
+      ],
+      enabled: false,
+    },
   ],
   labels: [
     'dependencies',

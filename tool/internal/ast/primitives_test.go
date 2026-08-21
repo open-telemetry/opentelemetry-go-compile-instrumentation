@@ -425,7 +425,7 @@ func TestCallTo(t *testing.T) {
 			},
 		},
 		{
-			name:       "multiple type parameters creates IndexListExpr",
+			name:       "multiple type parameters creates indexListExpr",
 			funcName:   "MultiGeneric",
 			funcSource: "func MultiGeneric[T any, U comparable](x T, y U) {}",
 			args:       []dst.Expr{Ident("x"), Ident("y")},

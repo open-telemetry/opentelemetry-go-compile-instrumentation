@@ -19,17 +19,12 @@ type DirectiveArg struct {
 	Value string
 }
 
-// MatchDirective checks if a single decoration string matches the given directive.
+// matchDirective checks if a single decoration string matches the given directive.
 // The decoration must be a line comment (starting with //) with no space after //,
 // and the directive name must follow immediately. If there is text after the directive
-// name, it must be separated by whitespace.
-func MatchDirective(dec, directive string) bool {
-	_, ok := matchDirective(dec, directive)
-	return ok
-}
-
-// matchDirective is the internal helper that checks if a decoration matches
-// the directive and returns the remainder string after the directive name.
+// name, it must be separated by whitespace. The bool return alone answers "does this
+// decoration match"; the string return is the remainder after the directive name, used
+// by callers that also need the directive's arguments.
 func matchDirective(dec, directive string) (string, bool) {
 	s := strings.TrimSpace(dec)
 	if !strings.HasPrefix(s, "//") {
@@ -60,9 +55,9 @@ func matchDirective(dec, directive string) (string, bool) {
 	return rest, true
 }
 
-// ParseDirectiveArgs finds the directive in the decoration string, extracts
+// parseDirectiveArgs finds the directive in the decoration string, extracts
 // the text after the directive name, and parses it into key:value arguments.
-func ParseDirectiveArgs(dec, directive string) ([]DirectiveArg, error) {
+func parseDirectiveArgs(dec, directive string) ([]DirectiveArg, error) {
 	rest, ok := matchDirective(dec, directive)
 	if !ok {
 		return nil, ex.Newf("decoration does not match directive %q", directive)
@@ -119,13 +114,13 @@ func FileHasDirective(file *dst.File, directive string) bool {
 			return true
 		}
 		for _, dec := range decs.Start {
-			if MatchDirective(dec, directive) {
+			if _, matched := matchDirective(dec, directive); matched {
 				found = true
 				return false
 			}
 		}
 		for _, dec := range decs.End {
-			if MatchDirective(dec, directive) {
+			if _, matched := matchDirective(dec, directive); matched {
 				found = true
 				return false
 			}
@@ -147,7 +142,7 @@ type FuncDirectiveMatch struct {
 // before the package clause that matches the given directive.
 func FileHasLeadingDirective(file *dst.File, directive string) bool {
 	for _, dec := range file.Decs.Start {
-		if MatchDirective(dec, directive) {
+		if _, matched := matchDirective(dec, directive); matched {
 			return true
 		}
 	}
@@ -165,10 +160,10 @@ func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatc
 			continue
 		}
 		for _, dec := range funcDecl.Decs.Start {
-			if !MatchDirective(dec, directive) {
+			if _, matched := matchDirective(dec, directive); !matched {
 				continue
 			}
-			args, err := ParseDirectiveArgs(dec, directive)
+			args, err := parseDirectiveArgs(dec, directive)
 			if err != nil {
 				return nil, ex.Wrapf(err, "parsing directive args for func %s", funcDecl.Name.Name)
 			}
