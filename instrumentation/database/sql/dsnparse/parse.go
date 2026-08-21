@@ -316,10 +316,14 @@ func parseMySQLDSN(dsn string) DSNInfo {
 		// (tcp, bare host, bare port) has no '/' in the address at all, so
 		// using the last '/' there gives the same split as the first.
 		sep := strings.IndexByte
+		searchIn := rest
 		if isMySQLUnixAddr(rest) {
 			sep = strings.LastIndexByte
+			if q := strings.IndexByte(rest, '?'); q >= 0 {
+				searchIn = rest[:q]
+			}
 		}
-		if sl := sep(rest, '/'); sl >= 0 {
+		if sl := sep(searchIn, '/'); sl >= 0 {
 			addrStr = rest[:sl]
 			dbPart = rest[sl:]
 		} else {
