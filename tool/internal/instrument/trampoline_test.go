@@ -575,6 +575,18 @@ func TestContainsTypeParameter(t *testing.T) {
 	assert.True(t, containsTypeParameter(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp))
 	assert.True(t, containsTypeParameter(&dst.MapType{Key: dst.NewIdent("string"), Value: dst.NewIdent("T")}, tp))
 
+	// Generic index expressions
+	assert.True(t, containsTypeParameter(&dst.IndexExpr{X: dst.NewIdent("Container"), Index: dst.NewIdent("T")}, tp))
+	assert.False(t, containsTypeParameter(&dst.IndexExpr{X: dst.NewIdent("Container"), Index: dst.NewIdent("int")}, tp))
+	assert.True(t, containsTypeParameter(
+		&dst.IndexListExpr{X: dst.NewIdent("Container"), Indices: []dst.Expr{dst.NewIdent("T"), dst.NewIdent("U")}},
+		tp,
+	))
+	assert.False(t, containsTypeParameter(
+		&dst.IndexListExpr{X: dst.NewIdent("Container"), Indices: []dst.Expr{dst.NewIdent("int"), dst.NewIdent("string")}},
+		tp,
+	))
+
 	// Non-matching identifiers
 	assert.False(t, containsTypeParameter(dst.NewIdent("string"), tp))
 	assert.False(t, containsTypeParameter(dst.NewIdent("T"), nil))
@@ -586,8 +598,10 @@ func TestContainsTypeParameter(t *testing.T) {
 			&dst.SelectorExpr{
 				X:   dst.NewIdent("pkg"),
 				Sel: dst.NewIdent("T"),
-			}, tp),
-		"selector name pkg.T should not match")
+			}, tp,
+		),
+		"selector name pkg.T should not match",
+	)
 
 	funcType := &dst.FuncType{
 		Params: &dst.FieldList{List: []*dst.Field{

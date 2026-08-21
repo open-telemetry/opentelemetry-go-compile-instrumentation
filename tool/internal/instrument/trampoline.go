@@ -528,7 +528,8 @@ func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.Fie
 		},
 		Decs: dst.FuncDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName)),
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName),
+			),
 		},
 	}
 
@@ -1124,7 +1125,7 @@ func containsTypeParameterInExprs(exprs []dst.Expr, typeParams *dst.FieldList) b
 }
 
 // containsTypeParameterInFields checks if any field in fields contains a type parameter
-func containsTypeParameterInFields(fields *dst.FieldList, typeParams *dst.FieldList) bool {
+func containsTypeParameterInFields(fields, typeParams *dst.FieldList) bool {
 	if fields == nil {
 		return false
 	}
