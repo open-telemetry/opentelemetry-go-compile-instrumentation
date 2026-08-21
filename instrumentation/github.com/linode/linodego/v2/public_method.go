@@ -7,6 +7,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/linode/linodego/v2"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2/semconv"
@@ -36,7 +37,14 @@ func beforeAPICall(ictx hook.HookContext, params ...interface{}) {
 		}
 	}
 
-	attrs := semconv.LinodegoOperationTraceAttrs(operation)
+	var serverAddress string
+	if len(params) > 0 {
+		if client, ok := params[0].(*linodego.Client); ok {
+			serverAddress = getHostURL(client)
+		}
+	}
+
+	attrs := semconv.LinodegoOperationTraceAttrs(operation, serverAddress)
 	ctx, span := tracer.Start(ctx,
 		semconv.OperationSpanName(operation),
 		trace.WithSpanKind(trace.SpanKindClient),
@@ -52,6 +60,7 @@ func beforeAPICall(ictx hook.HookContext, params ...interface{}) {
 	ictx.SetKeyData(keyStart, time.Now())
 	ictx.SetKeyData(keyOperation, operation)
 	ictx.SetKeyData(keyCtx, ctx)
+	ictx.SetKeyData(keyServerAddress, serverAddress)
 
 	logger.Debug("BeforeAPICall", "operation", operation)
 }
@@ -74,10 +83,11 @@ func afterAPICall(ictx hook.HookContext, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	serverAddress, _ := ictx.GetKeyData(keyServerAddress).(string)
 
 	statusCode := finishSpanWithError(span, err)
 	if !start.IsZero() {
-		metrics.RecordOperationDuration(ctx, time.Since(start).Seconds(), operation, statusCode)
+		metrics.RecordOperationDuration(ctx, time.Since(start).Seconds(), operation, statusCode, serverAddress)
 	}
 
 	logger.Debug("AfterAPICall completed", "operation", operation)

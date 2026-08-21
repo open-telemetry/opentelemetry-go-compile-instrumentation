@@ -24,6 +24,8 @@ package v2
 
 import (
 	"context"
+	"net/url"
+	"reflect"
 	"sync"
 
 	"github.com/linode/linodego/v2"
@@ -44,18 +46,28 @@ const (
 	// doRequest param indices (receiver is 0).
 	ctxParamIndex = 1
 
-	keySpan      = "span"
-	keyStart     = "start"
-	keyOperation = "operation"
-	keyCtx       = "ctx"
+	keySpan          = "span"
+	keyStart         = "start"
+	keyOperation     = "operation"
+	keyCtx           = "ctx"
+	keyServerAddress = "serverAddress"
 )
 
 var (
-	logger   = runtime.Logger()
-	tracer   trace.Tracer
-	metrics  semconv.Metrics
-	initOnce sync.Once
+	logger     = runtime.Logger()
+	tracer     trace.Tracer
+	metrics    semconv.Metrics
+	initOnce   sync.Once
+	getHostURL = defaultHostURLGetter
 )
+
+// setHostURLGetter is called via go:linkname by host_extractor.go (injected into package linodego)
+// to replace the reflection fallback with direct access to Client.hostURL.
+func setHostURLGetter(fn func(*linodego.Client) string) {
+	if fn != nil {
+		getHostURL = fn
+	}
+}
 
 // linodegoEnabler controls whether library instrumentation is enabled.
 type linodegoEnabler struct{}
@@ -65,6 +77,35 @@ func (linodegoEnabler) Enable() bool {
 }
 
 var enabler = linodegoEnabler{}
+
+// defaultHostURLGetter returns the API host a linodego.Client is currently
+// configured to call. Used as a fallback during unit testing when otelc
+// rules are not active.
+func defaultHostURLGetter(client *linodego.Client) (host string) {
+	if client == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			host = ""
+		}
+	}()
+
+	v := reflect.ValueOf(client)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return ""
+	}
+	f := v.Elem().FieldByName("hostURL")
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+
+	parsed, err := url.Parse(f.String())
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Host
+}
 
 func initInstrumentation() {
 	initOnce.Do(func() {
@@ -88,7 +129,7 @@ func initInstrumentation() {
 // as interface{} per the instrument guide.
 func BeforeDoRequest(
 	ictx hook.HookContext,
-	_ *linodego.Client,
+	client *linodego.Client,
 	ctx context.Context,
 	method, endpoint string,
 	_ interface{}, // requestParams
@@ -101,8 +142,9 @@ func BeforeDoRequest(
 	initInstrumentation()
 
 	req := semconv.LinodegoRequest{
-		Method:   method,
-		Endpoint: endpoint,
+		Method:        method,
+		Endpoint:      endpoint,
+		ServerAddress: getHostURL(client),
 	}
 	attrs := semconv.LinodegoRequestTraceAttrs(req)
 	spanName := semconv.SpanName(method, endpoint)

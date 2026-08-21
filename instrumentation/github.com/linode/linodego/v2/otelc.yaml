@@ -11,3 +11,12 @@ linodego_hook_dorequest:
         before: BeforeDoRequest
         after: AfterDoRequest
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
+linodego_host_extractor:
+  target: github.com/linode/linodego/v2
+  version: v2.0.0
+  do:
+    - add_file:
+        file: host_extractor.go
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2"
+
