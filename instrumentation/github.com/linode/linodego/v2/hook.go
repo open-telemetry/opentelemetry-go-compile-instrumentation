@@ -24,6 +24,7 @@ package v2
 
 import (
 	"context"
+	"strconv"
 	"sync"
 
 	"github.com/linode/linodego/v2"
@@ -135,25 +136,23 @@ func AfterDoRequest(ictx hook.HookContext, err error) {
 	defer span.End()
 
 	if err != nil {
-		span.RecordError(err)
-		if code, ok := semconv.StatusCodeFromError(err); ok {
-			span.SetAttributes(semconv.LinodegoErrorTraceAttrs(err)...)
-			if sc, desc := semconv.HTTPClientStatus(code); sc != codes.Unset {
-				span.SetStatus(sc, desc)
-			}
-		} else {
-			span.SetStatus(codes.Error, err.Error())
-		}
+		finishSpanWithError(span, err)
 		logger.Debug("AfterDoRequest error", "error", err)
 	}
 
 	logger.Debug("AfterDoRequest completed")
 }
 
-// finishSpanWithError records error details on a span (shared by public methods).
-func finishSpanWithError(span trace.Span, err error) int {
+// finishSpanWithError records error details on a span (shared by public
+// methods) and reports the outcome so the caller can attach it to the
+// operation.duration metric. statusCode is the HTTP status code when known.
+// errorType is a low-cardinality error indicator ("" on success): the status
+// code as a string when known, otherwise the Go type of err, so a request
+// that never reached the server (timeout, connection failure, context
+// cancellation, ...) is still distinguishable from a successful call.
+func finishSpanWithError(span trace.Span, err error) (statusCode int, errorType string) {
 	if err == nil {
-		return 0
+		return 0, ""
 	}
 	span.RecordError(err)
 	if code, ok := semconv.StatusCodeFromError(err); ok {
@@ -161,8 +160,10 @@ func finishSpanWithError(span trace.Span, err error) int {
 		if sc, desc := semconv.HTTPClientStatus(code); sc != codes.Unset {
 			span.SetStatus(sc, desc)
 		}
-		return code
+		return code, strconv.Itoa(code)
 	}
+	et := semconv.ErrorType(err)
+	span.SetAttributes(et)
 	span.SetStatus(codes.Error, err.Error())
-	return 0
+	return 0, et.Value.AsString()
 }

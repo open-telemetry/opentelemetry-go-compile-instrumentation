@@ -133,7 +133,7 @@ func TestMetricsRecord(t *testing.T) {
 
 	m := NewMetrics(mp.Meter("test"))
 	ctx := context.Background()
-	m.RecordOperationDuration(ctx, 0.12, "GetInstance", 200)
+	m.RecordOperationDuration(ctx, 0.12, "GetInstance", 200, "")
 
 	var rm metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(ctx, &rm))
@@ -150,7 +150,7 @@ func TestMetricsRecord(t *testing.T) {
 }
 
 func TestMetricAttributes_ModerateCardinality(t *testing.T) {
-	m := attrsToMap(MetricAttributes("GetInstance", 404))
+	m := attrsToMap(MetricAttributes("GetInstance", 404, ""))
 	assert.Equal(t, DefaultServerAddress, m["server.address"])
 	assert.Equal(t, "GetInstance", m["code.function.name"])
 	assert.Equal(t, int64(404), m["http.response.status_code"])
@@ -162,8 +162,20 @@ func TestMetricAttributes_ModerateCardinality(t *testing.T) {
 	assert.False(t, hasMethod)
 
 	// Success path without a status code omits the status attribute.
-	m = attrsToMap(MetricAttributes("ListRegions", 0))
+	m = attrsToMap(MetricAttributes("ListRegions", 0, ""))
 	assert.Equal(t, "ListRegions", m["code.function.name"])
+	_, hasStatus := m["http.response.status_code"]
+	assert.False(t, hasStatus)
+	_, hasErrType := m["error.type"]
+	assert.False(t, hasErrType)
+}
+
+func TestMetricAttributes_ErrorTypeWithoutStatusCode(t *testing.T) {
+	// A failure that never produced an HTTP status code (timeout, connection
+	// error, ...) must still be distinguishable from a success: error.type is
+	// set even though statusCode is 0.
+	m := attrsToMap(MetricAttributes("ListRegions", 0, "*errors.errorString"))
+	assert.Equal(t, "*errors.errorString", m["error.type"])
 	_, hasStatus := m["http.response.status_code"]
 	assert.False(t, hasStatus)
 }
@@ -171,7 +183,29 @@ func TestMetricAttributes_ModerateCardinality(t *testing.T) {
 func TestNewMetricsNilMeter(t *testing.T) {
 	m := NewMetrics(nil)
 	// Should not panic.
-	m.RecordOperationDuration(context.Background(), 1, "GetInstance", 0)
+	m.RecordOperationDuration(context.Background(), 1, "GetInstance", 0, "")
+}
+
+func TestErrorType(t *testing.T) {
+	kv := ErrorType(errors.New("boom"))
+	assert.Equal(t, "error.type", string(kv.Key))
+	assert.Equal(t, "*errors.errorString", kv.Value.AsString())
+
+	kv = ErrorType(statusErr{code: 0, msg: "custom"})
+	assert.Equal(
+		t,
+		"go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2/semconv.statusErr",
+		kv.Value.AsString(),
+	)
+
+	// Wrapped errors (e.g. fmt.Errorf("...: %w", err)) report the root cause's
+	// type, not the wrapper's, so alerts group on the underlying failure.
+	kv = ErrorType(fmt.Errorf("request failed: %w", statusErr{code: 0, msg: "custom"}))
+	assert.Equal(
+		t,
+		"go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2/semconv.statusErr",
+		kv.Value.AsString(),
+	)
 }
 
 func attrsToMap(attrs []attribute.KeyValue) map[string]interface{} {
