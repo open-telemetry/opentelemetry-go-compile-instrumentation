@@ -5,9 +5,21 @@ package runtime
 
 import (
 	"os"
-	"slices"
 	"strings"
+	"sync/atomic"
 )
+
+type configCache struct {
+	sdkDisabled   string
+	enabledRaw    string
+	disabledRaw   string
+	isSdkDisabled bool
+	hasEnabled    bool
+	enabledMap    map[string]struct{}
+	disabledMap   map[string]struct{}
+}
+
+var instConfigCache atomic.Pointer[configCache]
 
 // SetupOTelSDK initializes the OpenTelemetry SDK.
 //
@@ -63,37 +75,78 @@ func SetupOTelSDK() {
 // Instrumented checks if instrumentation is enabled via environment variables.
 //
 // Environment variables (following OTel JS pattern):
+//   - OTEL_SDK_DISABLED: If set to "true", all instrumentations are disabled
 //   - OTEL_GO_ENABLED_INSTRUMENTATIONS: comma-separated list of enabled instrumentations (e.g., "nethttp,grpc")
 //   - OTEL_GO_DISABLED_INSTRUMENTATIONS: comma-separated list of disabled instrumentations (e.g., "nethttp")
 //
 // Logic:
-//  1. If OTEL_GO_ENABLED_INSTRUMENTATIONS is set, only those instrumentations are enabled
-//  2. Then OTEL_GO_DISABLED_INSTRUMENTATIONS is applied to disable specific ones
-//  3. If neither is set, all instrumentations are enabled by default
+//  1. If OTEL_SDK_DISABLED is "true", returns false
+//  2. If OTEL_GO_ENABLED_INSTRUMENTATIONS is set, only those instrumentations are enabled
+//  3. Then OTEL_GO_DISABLED_INSTRUMENTATIONS is applied to disable specific ones
+//  4. If neither is set, all instrumentations are enabled by default
 //
 // The instrumentationName should be lowercase (e.g., "nethttp", "grpc").
+//
+// The three env vars above are still read via os.Getenv on every call; what's
+// cached is the parsed list -> map[string]struct{} conversion, so repeated
+// calls skip re-splitting and re-allocating those lists as long as the env
+// vars haven't changed. See BenchmarkInstrumented for the unset vs.
+// configured-list allocation counts this caching actually buys.
 func Instrumented(instrumentationName string) bool {
 	name := strings.ToLower(instrumentationName)
 
-	// Check if specific instrumentations are enabled
+	sdkDisabled := os.Getenv("OTEL_SDK_DISABLED")
 	enabledList := os.Getenv("OTEL_GO_ENABLED_INSTRUMENTATIONS")
-	if enabledList != "" {
-		enabled := parseInstrumentationList(enabledList)
-		if !slices.Contains(enabled, name) {
+	disabledList := os.Getenv("OTEL_GO_DISABLED_INSTRUMENTATIONS")
+
+	cached := instConfigCache.Load()
+	if cached == nil || cached.sdkDisabled != sdkDisabled || cached.enabledRaw != enabledList ||
+		cached.disabledRaw != disabledList {
+		cached = buildConfigCache(sdkDisabled, enabledList, disabledList)
+		instConfigCache.Store(cached)
+	}
+
+	if cached.isSdkDisabled {
+		return false
+	}
+
+	if cached.hasEnabled {
+		if _, ok := cached.enabledMap[name]; !ok {
 			return false
 		}
 	}
 
-	// Check if this instrumentation is explicitly disabled
-	disabledList := os.Getenv("OTEL_GO_DISABLED_INSTRUMENTATIONS")
-	if disabledList != "" {
-		disabled := parseInstrumentationList(disabledList)
-		if slices.Contains(disabled, name) {
-			return false
-		}
+	if _, ok := cached.disabledMap[name]; ok {
+		return false
 	}
 
 	return true
+}
+
+func buildConfigCache(sdkDisabled, enabledList, disabledList string) *configCache {
+	c := &configCache{
+		sdkDisabled:   sdkDisabled,
+		enabledRaw:    enabledList,
+		disabledRaw:   disabledList,
+		isSdkDisabled: strings.EqualFold(sdkDisabled, "true"),
+	}
+
+	if enabledList != "" {
+		c.hasEnabled = true
+		c.enabledMap = make(map[string]struct{})
+		for _, item := range parseInstrumentationList(enabledList) {
+			c.enabledMap[item] = struct{}{}
+		}
+	}
+
+	if disabledList != "" {
+		c.disabledMap = make(map[string]struct{})
+		for _, item := range parseInstrumentationList(disabledList) {
+			c.disabledMap[item] = struct{}{}
+		}
+	}
+
+	return c
 }
 
 // parseInstrumentationList parses a comma-separated list of instrumentation names.
