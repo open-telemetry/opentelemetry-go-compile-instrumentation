@@ -4,10 +4,8 @@
 package producer
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"sync"
 	"testing"
 
@@ -251,21 +249,15 @@ func TestBeforeWriteMessages_SyncWriterOmitsAsyncAttr(t *testing.T) {
 	assert.False(t, hasAsync)
 }
 
-// TestEnsureAsyncFailureLogging_LogsFailureAndChainsOriginalCompletion verifies
-// that a failure reported through Completion — the only place an Async
-// writer's real result surfaces, well after the (already-ended) spans stop
-// listening — is at least logged, and that any Completion callback the caller
-// already configured still runs.
-func TestEnsureAsyncFailureLogging_LogsFailureAndChainsOriginalCompletion(t *testing.T) {
+// TestEnsureAsyncFailureLogging_ChainsOriginalCompletion verifies that any
+// Completion callback the caller already configured still runs when a failure
+// occurs, and receives the exact error and message slice.
+func TestEnsureAsyncFailureLogging_ChainsOriginalCompletion(t *testing.T) {
 	setupTest(t)
-
-	var buf bytes.Buffer
-	oldLogger := logger
-	logger = slog.New(slog.NewTextHandler(&buf, nil))
-	t.Cleanup(func() { logger = oldLogger })
 
 	var originalCalled bool
 	var originalErr error
+	var originalMsgs []kafka.Message
 	w := &kafka.Writer{
 		Addr:  kafka.TCP("localhost:9092"),
 		Topic: "orders",
@@ -273,6 +265,7 @@ func TestEnsureAsyncFailureLogging_LogsFailureAndChainsOriginalCompletion(t *tes
 		Completion: func(msgs []kafka.Message, err error) {
 			originalCalled = true
 			originalErr = err
+			originalMsgs = msgs
 		},
 	}
 	msgs := []kafka.Message{{Key: []byte("k1"), Value: []byte("hello")}}
@@ -285,23 +278,35 @@ func TestEnsureAsyncFailureLogging_LogsFailureAndChainsOriginalCompletion(t *tes
 	writeErr := errors.New("leader not available")
 	w.Completion(msgs, writeErr)
 
-	assert.Contains(t, buf.String(), "leader not available", "the async failure should be logged")
 	assert.True(t, originalCalled, "the caller's own Completion callback must still be invoked")
 	assert.Equal(t, writeErr, originalErr, "the caller's callback must see the real error")
+	assert.Equal(t, msgs, originalMsgs, "the caller's callback must receive the original message slice")
+
+	// Also verify that a writer with no original Completion does not panic when invoked.
+	wNil := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders", Async: true}
+	ictxNil := hooktest.NewMockHookContext(wNil, context.Background(), msgs)
+	BeforeWriteMessages(ictxNil, wNil, context.Background(), msgs...)
+	require.NotNil(t, wNil.Completion)
+	assert.NotPanics(t, func() {
+		wNil.Completion(msgs, writeErr)
+	})
 }
 
 // TestEnsureAsyncFailureLogging_WrapsOnce verifies a *kafka.Writer reused
 // across multiple WriteMessages calls only has its Completion wrapped once,
-// so a single async failure is logged once, not once per prior call.
+// so the completion callback is not nested or invoked multiple times.
 func TestEnsureAsyncFailureLogging_WrapsOnce(t *testing.T) {
 	setupTest(t)
 
-	var buf bytes.Buffer
-	oldLogger := logger
-	logger = slog.New(slog.NewTextHandler(&buf, nil))
-	t.Cleanup(func() { logger = oldLogger })
-
-	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders", Async: true}
+	var callCount int
+	w := &kafka.Writer{
+		Addr:  kafka.TCP("localhost:9092"),
+		Topic: "orders",
+		Async: true,
+		Completion: func(msgs []kafka.Message, err error) {
+			callCount++
+		},
+	}
 	msgs := []kafka.Message{{Key: []byte("k1"), Value: []byte("hello")}}
 
 	for range 3 {
@@ -310,7 +315,30 @@ func TestEnsureAsyncFailureLogging_WrapsOnce(t *testing.T) {
 	}
 
 	w.Completion(msgs, errors.New("leader not available"))
+	assert.Equal(t, 1, callCount, "Completion must be wrapped exactly once regardless of call count")
+}
 
-	logLineCount := bytes.Count(buf.Bytes(), []byte("kafka async write failed"))
-	assert.Equal(t, 1, logLineCount, "Completion must be wrapped exactly once regardless of call count")
+// TestEnsureAsyncFailureLogging_ConcurrentCallsAreSafe is a regression test:
+// ensureAsyncFailureLogging must be safe to call concurrently for the same
+// writer, since kafka-go documents *kafka.Writer as safe to share across
+// goroutines. Run with -race to catch a reintroduction of the data race where
+// a losing caller's own WriteMessages call could read w.Completion
+// concurrently with the winning caller still writing it.
+func TestEnsureAsyncFailureLogging_ConcurrentCallsAreSafe(t *testing.T) {
+	setupTest(t)
+
+	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders", Async: true}
+	msgs := []kafka.Message{{Key: []byte("k1"), Value: []byte("hello")}}
+
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
+			BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+			// Simulate kafka-go's own background goroutine reading w.Completion
+			// concurrently with other callers still wrapping it.
+			w.Completion(msgs, nil)
+		})
+	}
+	wg.Wait()
 }

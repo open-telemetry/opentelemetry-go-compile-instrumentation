@@ -58,6 +58,11 @@ type KafkaRequest struct {
 // producer spans for kafka.Writer.Async writes so consumers of the trace data
 // don't mistake enqueue-time duration and Unset/Ok status for confirmed
 // delivery (see KafkaRequest.Async).
+//
+// Deliberately emitted only as `true`, never as an explicit `false` for the
+// synchronous path: keeping the attribute absent for the (overwhelmingly more
+// common) sync case avoids adding an attribute to every producer span just to
+// say "this one is trustworthy", which is the default assumption anyway.
 const messagingKafkaAsyncKey = attribute.Key("messaging.kafka.async")
 
 // KafkaMessageKey returns a Kafka message key as a valid UTF-8 string.
