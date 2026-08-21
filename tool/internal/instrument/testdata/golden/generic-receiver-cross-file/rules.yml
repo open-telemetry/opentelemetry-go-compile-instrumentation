@@ -1,0 +1,10 @@
+generic_receiver_cross_file_rule:
+  target: main
+  where:
+    func: GenericMethod
+    recv: "*GenStruct"
+  do:
+    - inject_hooks:
+        before: GenericMethodBefore
+        after: GenericMethodAfter
+        path: testdata/golden/generic-receiver-cross-file

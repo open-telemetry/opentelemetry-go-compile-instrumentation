@@ -1,0 +1,126 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	_ "unsafe"
+	"fmt"
+)
+
+func (g *GenStruct[T]) GenericMethod(p1 T) (_unnamedRetVal_4098921025_0 T) {
+	//line <generated>:1
+	if hookContext4098921025, _ := OtelBeforeTrampoline_GenericMethod4098921025(&g, &p1); false {
+	} else {
+		defer OtelAfterTrampoline_GenericMethod4098921025(hookContext4098921025, &_unnamedRetVal_4098921025_0)
+	}
+	//line main.go:7:2
+	return p1
+}
+
+//line <generated>:1
+type HookContextImpl4098921025 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl4098921025) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl4098921025) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl4098921025) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl4098921025) GetData() interface{}     { return c.data }
+func (c *HookContextImpl4098921025) GetKeyData(key string) interface{} {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
+	}
+	return nil
+}
+
+func (c *HookContextImpl4098921025) SetKeyData(key string, val interface{}) {
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
+	}
+	m[key] = val
+}
+
+func (c *HookContextImpl4098921025) HasKeyData(key string) bool {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
+	}
+	return false
+}
+
+func (c *HookContextImpl4098921025) GetParam(idx int) interface{} {
+	panic("GetParam is unsupported for generic functions")
+}
+
+func (c *HookContextImpl4098921025) SetParam(idx int, val interface{}) {
+	panic("SetParam is unsupported for generic functions")
+}
+
+func (c *HookContextImpl4098921025) GetReturnVal(idx int) interface{} {
+	panic("GetReturnVal is unsupported for generic functions")
+}
+
+func (c *HookContextImpl4098921025) SetReturnVal(idx int, val interface{}) {
+	panic("SetReturnVal is unsupported for generic functions")
+}
+func (c *HookContextImpl4098921025) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl4098921025) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl4098921025) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl4098921025) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_GenericMethod4098921025[T fmt.Stringer](recv0 **GenStruct[T], param0 *T) (hookContext *HookContextImpl4098921025, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "GenericMethodBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl4098921025{}
+	hookContext.params = []interface{}{recv0, param0}
+	hookContext.funcName = "GenericMethod"
+	hookContext.packageName = "main"
+	if GenericMethodBefore != nil {
+		GenericMethodBefore(hookContext, *recv0, *param0)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+func OtelAfterTrampoline_GenericMethod4098921025[T fmt.Stringer](hookContext HookContext, arg0 *T) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "GenericMethodAfter")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext.(*HookContextImpl4098921025).returnVals = []interface{}{arg0}
+	if GenericMethodAfter != nil {
+		GenericMethodAfter(hookContext, *arg0)
+	}
+}
+
+//go:linkname GenericMethodBefore testdata/golden/generic-receiver-cross-file.GenericMethodBefore
+func GenericMethodBefore(hookContext HookContext, recv0 interface{}, param0 interface{})
+
+//go:linkname GenericMethodAfter testdata/golden/generic-receiver-cross-file.GenericMethodAfter
+func GenericMethodAfter(hookContext HookContext, arg0 interface{})

@@ -116,6 +116,67 @@ func TestGetExisting(t *testing.T) {
 	}
 }
 
+func TestResolveAlias(t *testing.T) {
+	tests := []struct {
+		name     string
+		root     *dst.File
+		alias    string
+		wantPath string
+		wantOK   bool
+	}{
+		{
+			name: "explicit alias",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{
+								Name: dst.NewIdent("ctx"),
+								Path: &dst.BasicLit{Value: `"context"`},
+							},
+						},
+					},
+				},
+			},
+			alias:    "ctx",
+			wantPath: "context",
+			wantOK:   true,
+		},
+		{
+			name: "implicit alias resolved from package name",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{Path: &dst.BasicLit{Value: `"net/http"`}},
+						},
+					},
+				},
+			},
+			alias:    "http",
+			wantPath: "net/http",
+			wantOK:   true,
+		},
+		{
+			name:     "alias not found",
+			root:     &dst.File{},
+			alias:    "constraints",
+			wantPath: "",
+			wantOK:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, ok := ResolveAlias(t.Context(), tt.root, tt.alias)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantPath, path)
+		})
+	}
+}
+
 func TestCreateSpec(t *testing.T) {
 	tests := []struct {
 		name        string

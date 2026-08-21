@@ -243,7 +243,7 @@ func (ip *instrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 	}
 }
 
-func (ip *instrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
+func (ip *instrumentPhase) insertTJump(ctx context.Context, t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
 	util.Assert(funcDecl.Name.Name == t.Func, "sanity check")
 
 	// Record the target function for the whole trampoline creation process
@@ -297,7 +297,7 @@ func (ip *instrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	// hook context for the real hook code. Once all preparations are done, it
 	// jumps to the real hook code. Note that each trampoline has its own hook
 	// context implementation, which is generated dynamically.
-	return ip.createTrampoline(t)
+	return ip.createTrampoline(ctx, t)
 }
 
 func (ip *instrumentPhase) addCompileArg(newArg string) {
@@ -374,6 +374,11 @@ func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 		return nil, ex.Wrapf(err, "parsing source file %s", file)
 	}
 	ip.target = root
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return nil, ex.Wrap(err)
+	}
+	ip.targetPath = abs
 	// Every time we parse a file, we need to reset the trampoline jumps
 	// because they are associated with one certain file
 	ip.tjumps = make([]*tJump, 0)
@@ -407,7 +412,7 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 		return nil
 	}
 
-	if err = ip.insertTJump(rule, funcDecl); err != nil {
+	if err = ip.insertTJump(ctx, rule, funcDecl); err != nil {
 		return err
 	}
 	if ip.appliedFuncIdentities == nil {

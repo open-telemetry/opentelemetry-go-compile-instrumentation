@@ -106,6 +106,19 @@ func FindNew(ctx context.Context, root *dst.File, ruleImports map[string]string,
 	return result
 }
 
+// ResolveAlias reports the import path alias refers to within root's own
+// import declarations, using the same alias resolution parseFile already
+// performs (explicit aliases, or pkgload.ResolvePackageName for implicit
+// ones). This is used to look up what a package-qualifier in an expression
+// copied out of root (e.g. "constraints" in constraints.Ordered) refers to,
+// when that expression is about to be written into a different file that may
+// not share the same alias for that import path.
+func ResolveAlias(ctx context.Context, root *dst.File, alias string, buildFlags ...string) (string, bool) {
+	m := parseFile(ctx, root, buildFlags...)
+	path, ok := m.AliasToPath[alias]
+	return path, ok
+}
+
 // getExisting returns a map of alias -> path for all imports in the file.
 // For imports without explicit aliases, the package name is used as the key.
 func getExisting(ctx context.Context, root *dst.File, buildFlags ...string) map[string]string {

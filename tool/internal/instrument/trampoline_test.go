@@ -5,12 +5,15 @@ package instrument
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestBaseTypeName(t *testing.T) {
@@ -766,7 +769,10 @@ func TestExtractReceiverTypeParams(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file, recvType := parseReceiverType(t, tt.recvSrc)
 
-			params := extractReceiverTypeParams(file, recvType)
+			ip := newTestPhase()
+			ip.target = file
+			params, err := ip.extractReceiverTypeParams(t.Context(), recvType)
+			require.NoError(t, err)
 
 			if tt.expected == nil {
 				assert.Nil(t, params, "a receiver without type parameters should produce no field list")
@@ -786,7 +792,10 @@ func TestExtractReceiverTypeParams(t *testing.T) {
 func TestExtractReceiverTypeParamsConstraint_NoMatchingDecl(t *testing.T) {
 	file, recvType := parseReceiverType(t, "*GenStruct[T, U]")
 
-	params := extractReceiverTypeParams(file, recvType)
+	ip := newTestPhase()
+	ip.target = file
+	params, err := ip.extractReceiverTypeParams(t.Context(), recvType)
+	require.NoError(t, err)
 	require.NotNil(t, params)
 	require.Len(t, params.List, 2)
 
@@ -840,7 +849,10 @@ func TestExtractReceiverTypeParamsConstraint_Recovered(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file, recvType := parseReceiverTypeWithDecl(t, tt.imports, tt.typeDecl, tt.recvSrc)
 
-			params := extractReceiverTypeParams(file, recvType)
+			ip := newTestPhase()
+			ip.target = file
+			params, err := ip.extractReceiverTypeParams(t.Context(), recvType)
+			require.NoError(t, err)
 			require.NotNil(t, params)
 			require.Len(t, params.List, 1)
 			assert.Equal(t, tt.wantNames, typeParamNames(t, params))
@@ -869,7 +881,10 @@ func TestExtractReceiverTypeParamsConstraint_MultipleParams(t *testing.T) {
 		"type GenStruct[T, U comparable, V any] struct{}",
 		"GenStruct[T, U, V]")
 
-	params := extractReceiverTypeParams(file, recvType)
+	ip := newTestPhase()
+	ip.target = file
+	params, err := ip.extractReceiverTypeParams(t.Context(), recvType)
+	require.NoError(t, err)
 	require.NotNil(t, params)
 	require.Len(t, params.List, 3)
 	assert.Equal(t, []string{"T", "U", "V"}, typeParamNames(t, params))
@@ -879,6 +894,436 @@ func TestExtractReceiverTypeParamsConstraint_MultipleParams(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, want, constraint.Name)
 	}
+}
+
+// TestResolveGenericTypeDecl_CrossFile covers the whole-package fallback: the
+// generic type's declaration lives in a different file of the same package
+// than the method being instrumented, so the same-file lookup misses and the
+// sibling-file search must find it instead.
+func TestResolveGenericTypeDecl_CrossFile(t *testing.T) {
+	methodFile, _ := parseReceiverType(t, "*GenStruct[T]")
+
+	parser := ast.NewAstParser()
+	declFile, err := parser.ParseSource("package main\n\ntype GenStruct[T comparable] struct{}\n")
+	require.NoError(t, err)
+
+	ip := newTestPhase()
+	ip.target = methodFile
+	ip.siblingASTs = map[string]*dst.File{"decl.go": declFile}
+
+	params, found := ip.resolveGenericTypeDecl("GenStruct")
+
+	require.NotNil(t, params)
+	assert.Same(t, declFile, found, "resolveGenericTypeDecl must report which file the declaration came from")
+	require.Len(t, params.List, 1)
+	constraint, ok := params.List[0].Type.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "comparable", constraint.Name)
+}
+
+// TestResolveGenericTypeDecl_SameFileFastPathSkipsSiblingLoad confirms the
+// same-file hit never touches sibling discovery at all: ip.siblingASTs stays
+// nil, so a package with many files pays no parsing cost for a method whose
+// generic type is declared right there in the same file (the common case).
+func TestResolveGenericTypeDecl_SameFileFastPathSkipsSiblingLoad(t *testing.T) {
+	file, _ := parseReceiverTypeWithDecl(t, "", "type GenStruct[T comparable] struct{}", "GenStruct[T]")
+
+	ip := newTestPhase()
+	ip.target = file
+	// No compileArgs/targetPath configured, so if loadSiblingASTs were called
+	// it would have nothing to work with anyway -- but the point of this test
+	// is that it must not even be invoked in the first place.
+
+	params, found := ip.resolveGenericTypeDecl("GenStruct")
+
+	require.NotNil(t, params)
+	assert.Same(t, file, found)
+	assert.Nil(t, ip.siblingASTs, "same-file hit must not trigger sibling loading at all")
+}
+
+// TestResolveGenericTypeDecl_CachesSiblingASTsAcrossCalls proves the sibling
+// cache is genuinely reused, not rebuilt on every lookup, by loading it once
+// from real files on disk and then removing the sibling file before the
+// second call: if resolveGenericTypeDecl reloaded from disk instead of
+// reusing ip.siblingASTs, the second call would find nothing and return nil.
+func TestResolveGenericTypeDecl_CachesSiblingASTsAcrossCalls(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.go")
+	sibling := filepath.Join(dir, "sibling.go")
+	require.NoError(t, os.WriteFile(target, []byte("package main\nfunc (g *GenStruct[T]) M() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(sibling, []byte("package main\ntype GenStruct[T comparable] struct{}\n"), 0o644))
+
+	absTarget, err := filepath.Abs(target)
+	require.NoError(t, err)
+
+	targetFile, err := ast.ParseFileFast(target)
+	require.NoError(t, err)
+
+	ip := newTestPhase()
+	ip.target = targetFile
+	ip.targetPath = absTarget
+	ip.compileArgs = []string{target, sibling}
+
+	require.Nil(t, ip.siblingASTs, "precondition: cache must start empty so the first call performs a real load")
+	params1, found1 := ip.resolveGenericTypeDecl("GenStruct")
+	require.NotNil(t, params1)
+	require.NotNil(t, found1)
+	require.NotNil(t, ip.siblingASTs, "first call should have populated the cache")
+
+	// Remove the sibling file. A second call that (incorrectly) reloads from
+	// disk would find nothing; a second call that reuses the cache still
+	// succeeds.
+	require.NoError(t, os.Remove(sibling))
+
+	params2, found2 := ip.resolveGenericTypeDecl("GenStruct")
+	assert.NotNil(t, params2, "second call should still succeed by reusing the cached sibling ASTs")
+	assert.NotNil(t, found2)
+}
+
+// TestResolveGenericTypeDecl_FindsDeclarationInEarlierProcessedFile is a
+// regression test for a real bug: instrument() processes a package's files in
+// one shared *instrumentPhase, calling parseFile (which updates ip.target and
+// ip.targetPath) once per file. If the sibling cache were built excluding
+// whichever file happened to be "current" at the moment of the first
+// cross-file lookup, that exclusion would stick for the rest of the package's
+// instrumentation -- a type declared in an earlier-processed file would
+// become permanently unfindable from every later file, silently degrading to
+// any exactly like the bug this package exists to fix. This reproduces that
+// exact sequence: a lookup miss while processing the file that will later
+// hold the real declaration, followed by a lookup for it from a different
+// file.
+func TestResolveGenericTypeDecl_FindsDeclarationInEarlierProcessedFile(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.go")
+	b := filepath.Join(dir, "b.go")
+	require.NoError(t, os.WriteFile(a,
+		[]byte("package main\ntype Box[T comparable] struct{}\nfunc (o *Other[T]) X() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(b, []byte("package main\nfunc (g *Box[T]) M() {}\n"), 0o644))
+
+	ip := newTestPhase()
+	ip.compileArgs = []string{a, b}
+
+	// Process a.go first, exactly like instrument()'s per-file loop.
+	_, err := ip.parseFile(a)
+	require.NoError(t, err)
+	// A cross-file miss here (looking up a type that doesn't exist anywhere)
+	// is what used to permanently seed the cache without a.go in it.
+	_, found := ip.resolveGenericTypeDecl("Other")
+	assert.Nil(t, found)
+
+	// Now process b.go, whose method's receiver type is declared back in a.go.
+	_, err = ip.parseFile(b)
+	require.NoError(t, err)
+
+	params, declFile := ip.resolveGenericTypeDecl("Box")
+	require.NotNil(t, params, "Box[T comparable], declared in a.go, must still be found while processing b.go")
+	require.NotNil(t, declFile)
+	constraint, ok := params.List[0].Type.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "comparable", constraint.Name)
+}
+
+// TestResolveGenericTypeDecl_NotFoundAnywhere locks in the graceful
+// whole-package fallback: when the type isn't declared in ip.target or in any
+// sibling file, resolveGenericTypeDecl must return (nil, nil) rather than an
+// error, so callers fall back to any exactly as they did before cross-file
+// search existed.
+func TestResolveGenericTypeDecl_NotFoundAnywhere(t *testing.T) {
+	methodFile, _ := parseReceiverType(t, "*GenStruct[T]")
+
+	parser := ast.NewAstParser()
+	unrelated, err := parser.ParseSource("package main\n\ntype SomethingElse[T any] struct{}\n")
+	require.NoError(t, err)
+
+	ip := newTestPhase()
+	ip.target = methodFile
+	ip.siblingASTs = map[string]*dst.File{"other.go": unrelated}
+
+	params, found := ip.resolveGenericTypeDecl("GenStruct")
+
+	assert.Nil(t, params)
+	assert.Nil(t, found)
+}
+
+// TestExtractReceiverTypeParamsConstraint_CrossFileRecovered exercises the
+// full extractReceiverTypeParams path (not just resolveGenericTypeDecl
+// directly) against a cross-file declaration, confirming the recovered
+// constraint is the real one, not any.
+func TestExtractReceiverTypeParamsConstraint_CrossFileRecovered(t *testing.T) {
+	methodFile, recvType := parseReceiverType(t, "*GenStruct[T]")
+
+	parser := ast.NewAstParser()
+	declFile, err := parser.ParseSource("package main\n\ntype GenStruct[T comparable] struct{}\n")
+	require.NoError(t, err)
+
+	ip := newTestPhase()
+	ip.target = methodFile
+	ip.siblingASTs = map[string]*dst.File{"decl.go": declFile}
+
+	params, err := ip.extractReceiverTypeParams(t.Context(), recvType)
+	require.NoError(t, err)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 1)
+
+	constraint, ok := params.List[0].Type.(*dst.Ident)
+	require.True(t, ok, "expected the constraint to be a plain identifier")
+	assert.Equal(t, "comparable", constraint.Name)
+}
+
+// funcDeclFromSource parses src and returns its enclosing file plus the first
+// top-level func declaration found in it.
+func funcDeclFromSource(t *testing.T, src string) (*dst.File, *dst.FuncDecl) {
+	t.Helper()
+	parser := ast.NewAstParser()
+	file, err := parser.ParseSource(src)
+	require.NoError(t, err)
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*dst.FuncDecl); ok {
+			return file, fn
+		}
+	}
+	require.Fail(t, "no function declaration found in source")
+	return nil, nil
+}
+
+// TestFindTargetGenericType covers every combination findTargetGenericType
+// assembles a trampoline's type-parameter list from: no generics at all,
+// receiver-only generics, method-own generics with no receiver, and the
+// combined case (a generic receiver whose method also declares its own type
+// parameter, e.g. func (c *Type1[K]) Target[V any]() V) -- the one branch of
+// this function that had no test coverage of any kind before this change.
+func TestFindTargetGenericType(t *testing.T) {
+	t.Run("no receiver, no method type params", func(t *testing.T) {
+		file, fn := funcDeclFromSource(t, "package main\nfunc Plain(a int) {}")
+		ip := newTestPhase()
+		ip.target = file
+
+		params, err := ip.findTargetGenericType(t.Context(), fn)
+		require.NoError(t, err)
+		assert.Nil(t, params)
+	})
+
+	t.Run("receiver-only generics", func(t *testing.T) {
+		file, fn := funcDeclFromSource(t,
+			"package main\ntype GenStruct[T comparable] struct{}\nfunc (g *GenStruct[T]) M() {}")
+		ip := newTestPhase()
+		ip.target = file
+
+		params, err := ip.findTargetGenericType(t.Context(), fn)
+		require.NoError(t, err)
+		require.NotNil(t, params)
+		assert.Equal(t, []string{"T"}, typeParamNames(t, params))
+	})
+
+	t.Run("method-own type params only, no receiver", func(t *testing.T) {
+		file, fn := funcDeclFromSource(t, "package main\nfunc Generic[V any](v V) V { return v }")
+		ip := newTestPhase()
+		ip.target = file
+
+		params, err := ip.findTargetGenericType(t.Context(), fn)
+		require.NoError(t, err)
+		require.NotNil(t, params)
+		assert.Equal(t, []string{"V"}, typeParamNames(t, params))
+	})
+
+	t.Run("combined: receiver generics plus the method's own type params", func(t *testing.T) {
+		file, fn := funcDeclFromSource(t,
+			"package main\n"+
+				"type Type1[K comparable] struct{}\n"+
+				"func (c *Type1[K]) Target(v K) {}")
+		// Give Target its own type parameter in addition to the receiver's,
+		// mirroring func (c *Type1[K]) Target[V any]() V from the doc comment --
+		// built directly since the parser's receiver-vs-method type param
+		// split is what's under test, not the source syntax for declaring both.
+		fn.Type.TypeParams = &dst.FieldList{List: []*dst.Field{{
+			Names: []*dst.Ident{ast.Ident("V")},
+			Type:  ast.Ident("any"),
+		}}}
+		ip := newTestPhase()
+		ip.target = file
+
+		params, err := ip.findTargetGenericType(t.Context(), fn)
+		require.NoError(t, err)
+		require.NotNil(t, params)
+		// Receiver's own type params come first, then the method's, per the
+		// combining logic in findTargetGenericType.
+		require.Len(t, params.List, 2)
+		assert.Equal(t, []string{"K", "V"}, typeParamNames(t, params))
+		kConstraint, ok := params.List[0].Type.(*dst.Ident)
+		require.True(t, ok)
+		assert.Equal(t, "comparable", kConstraint.Name,
+			"receiver constraint must still be recovered in the combined case")
+		vConstraint, ok := params.List[1].Type.(*dst.Ident)
+		require.True(t, ok)
+		assert.Equal(t, "any", vConstraint.Name)
+	})
+
+	t.Run("propagates an error from constraint import injection instead of swallowing it", func(t *testing.T) {
+		methodFile, fn := funcDeclFromSource(t, "package main\nfunc (g *GenStruct[T]) M() {}")
+		declFile, err := ast.NewAstParser().ParseSource(
+			"package main\nimport \"fmt\"\ntype GenStruct[T fmt.Stringer] struct{}")
+		require.NoError(t, err)
+
+		ip := newTestPhase()
+		// The target file already imports a different path under the alias
+		// "fmt", conflicting with what the cross-file constraint needs.
+		ip.target = fileWithImport("fmt", "some/other/package")
+		ip.target.Decls = append(ip.target.Decls, methodFile.Decls...)
+		ip.siblingASTs = map[string]*dst.File{"decl.go": declFile}
+
+		_, err = ip.findTargetGenericType(t.Context(), fn)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "import conflict")
+	})
+}
+
+// TestBuildTrampSignature covers the one place findTargetGenericType's result
+// is actually consumed for codegen: the trampoline function's own
+// Type.TypeParams, plus the dereferencing every parameter field goes through
+// regardless of genericity.
+func TestBuildTrampSignature(t *testing.T) {
+	t.Run("generic receiver: type params attached, params dereferenced", func(t *testing.T) {
+		file, fn := funcDeclFromSource(t,
+			"package main\ntype GenStruct[T comparable] struct{}\nfunc (g *GenStruct[T]) M(p1 T) {}")
+		ip := newTestPhase()
+		ip.target = file
+		ip.targetFunc = fn
+		ip.beforeTrampFunc = &dst.FuncDecl{Type: &dst.FuncType{}}
+
+		genericTypes, err := ip.findTargetGenericType(t.Context(), fn)
+		require.NoError(t, err)
+
+		ip.buildTrampSignature(genericTypes, trampolineBefore)
+
+		require.NotNil(t, ip.beforeTrampFunc.Type.TypeParams)
+		assert.Equal(t, []string{"T"}, typeParamNames(t, ip.beforeTrampFunc.Type.TypeParams))
+		constraint, ok := ip.beforeTrampFunc.Type.TypeParams.List[0].Type.(*dst.Ident)
+		require.True(t, ok)
+		assert.Equal(t, "comparable", constraint.Name)
+		// The assigned TypeParams must be an independent clone, not the same
+		// node genericTypes points at -- buildTrampSignature is called once per
+		// trampoline (Before and After), and each needs to own its own AST
+		// subtree rather than share one.
+		assert.NotSame(t, genericTypes, ip.beforeTrampFunc.Type.TypeParams)
+
+		// Every param field (receiver included) must come out pointer-wrapped so
+		// the trampoline can address/modify the target function's own values.
+		for _, field := range ip.beforeTrampFunc.Type.Params.List {
+			_, isPointer := field.Type.(*dst.StarExpr)
+			assert.True(t, isPointer, "field %v should be dereferenced to a pointer type", field.Names)
+		}
+	})
+
+	t.Run("non-generic: no type params attached", func(t *testing.T) {
+		file, fn := funcDeclFromSource(t, "package main\nfunc Plain(a int) {}")
+		ip := newTestPhase()
+		ip.target = file
+		ip.targetFunc = fn
+		ip.afterTrampFunc = &dst.FuncDecl{Type: &dst.FuncType{}}
+
+		genericTypes, err := ip.findTargetGenericType(t.Context(), fn)
+		require.NoError(t, err)
+		require.Nil(t, genericTypes)
+
+		ip.buildTrampSignature(genericTypes, trampolineAfter)
+		assert.Nil(t, ip.afterTrampFunc.Type.TypeParams)
+	})
+}
+
+// TestRewriteHookContextMethods_GenericPanicsAndErrorPropagation covers the
+// generic-vs-non-generic branch directly (rather than only through golden
+// fixtures) and, more importantly, that an error surfaced while resolving the
+// target's generic type (e.g. a conflicting import needed by a cross-file
+// constraint. genericTypes is resolved directly via findTargetGenericType
+// rather than by this function -- see createTrampoline's doc comment for why
+// -- so this only covers the generic-vs-non-generic branch, not error
+// propagation; TestCreateTrampoline_PropagatesGenericTypeResolutionError
+// covers the error path at the level where it actually now surfaces.
+func TestRewriteHookContextMethods_GenericPanics(t *testing.T) {
+	newMaterializedPhase := func(t *testing.T) *instrumentPhase {
+		t.Helper()
+		ip := newTestPhase()
+		ip.target = &dst.File{}
+		require.NoError(t, ip.materializeTemplate())
+		return ip
+	}
+
+	findMethod := func(t *testing.T, ip *instrumentPhase, name string) *dst.FuncDecl {
+		t.Helper()
+		for _, decl := range ip.hookCtxMethods {
+			if decl.Name.Name == name {
+				return decl
+			}
+		}
+		require.Failf(t, "method not found", "%s not present in hookCtxMethods", name)
+		return nil
+	}
+
+	t.Run("generic target: accessor methods become panics", func(t *testing.T) {
+		ip := newMaterializedPhase(t)
+		src, fn := funcDeclFromSource(t,
+			"package main\ntype GenStruct[T comparable] struct{}\nfunc (g *GenStruct[T]) M() {}")
+		ip.targetFunc = fn
+		// The generic-receiver lookup needs its declaration reachable from
+		// ip.target; materializeTemplate already populated ip.target with the
+		// trampoline template's own decls, so append the source's decls too.
+		ip.target.Decls = append(ip.target.Decls, src.Decls...)
+
+		genericTypes, err := ip.findTargetGenericType(t.Context(), fn)
+		require.NoError(t, err)
+		require.NotNil(t, genericTypes)
+
+		ip.rewriteHookContextMethods(genericTypes)
+
+		getParam := findMethod(t, ip, trampolineGetParamName)
+		require.Len(t, getParam.Body.List, 1)
+		_, isPanic := getParam.Body.List[0].(*dst.ExprStmt)
+		assert.True(t, isPanic, "GetParam body should have been replaced with a single panic statement")
+	})
+
+	t.Run("non-generic target: accessor methods keep their real bodies", func(t *testing.T) {
+		ip := newMaterializedPhase(t)
+		_, fn := funcDeclFromSource(t, "package main\nfunc Plain(a int) (int, error) { return a, nil }")
+		ip.targetFunc = fn
+
+		genericTypes, err := ip.findTargetGenericType(t.Context(), fn)
+		require.NoError(t, err)
+		require.Nil(t, genericTypes)
+
+		ip.rewriteHookContextMethods(genericTypes)
+
+		getParam := findMethod(t, ip, trampolineGetParamName)
+		require.Greater(t, len(getParam.Body.List), 1,
+			"a non-generic target must keep GetParam's real switch-based body, not a bare panic")
+	})
+}
+
+// TestCreateTrampoline_PropagatesGenericTypeResolutionError proves the
+// error-propagation contract this whole restructuring depends on: genericTypes
+// is now resolved exactly once, at the top of createTrampoline, and every
+// consumer (rewriteHookContextMethods, buildTrampSignature for both Before and
+// After, buildHookSignature via callHookFunc) is handed the already-resolved
+// value instead of re-deriving it. This confirms a resolution failure (e.g. a
+// cross-file constraint's import conflicting with one already in ip.target)
+// surfaces from createTrampoline itself, before any of those consumers run.
+func TestCreateTrampoline_PropagatesGenericTypeResolutionError(t *testing.T) {
+	ip := newTestPhase()
+	ip.target = &dst.File{}
+	methodFile, fn := funcDeclFromSource(t, "package main\nfunc (g *GenStruct[T]) M() {}")
+	declFile, err := ast.NewAstParser().ParseSource(
+		"package main\nimport \"fmt\"\ntype GenStruct[T fmt.Stringer] struct{}")
+	require.NoError(t, err)
+
+	// ip.target already carries a conflicting "fmt" alias from a prior rule
+	// application on this file.
+	ip.target.Decls = append(ip.target.Decls, fileWithImport("fmt", "some/other/package").Decls...)
+	ip.target.Decls = append(ip.target.Decls, methodFile.Decls...)
+	ip.siblingASTs = map[string]*dst.File{"decl.go": declFile}
+	ip.targetFunc = fn
+
+	err = ip.createTrampoline(t.Context(), &rule.InstFuncRule{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "import conflict")
 }
 
 // TestReceiverBaseTypeName_NonIdent covers the defensive fallback directly: a
@@ -927,7 +1372,10 @@ func TestExtractReceiverTypeParamsNestedPointer(t *testing.T) {
 	file, inner := parseReceiverType(t, "*GenStruct[T]")
 	nested := &dst.StarExpr{X: inner}
 
-	params := extractReceiverTypeParams(file, nested)
+	ip := newTestPhase()
+	ip.target = file
+	params, err := ip.extractReceiverTypeParams(t.Context(), nested)
+	require.NoError(t, err)
 
 	require.NotNil(t, params)
 	assert.Equal(t, []string{"T"}, typeParamNames(t, params))
