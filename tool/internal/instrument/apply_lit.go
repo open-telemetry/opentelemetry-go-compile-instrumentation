@@ -164,7 +164,8 @@ func (ip *instrumentPhase) setLitFields(
 				changed = true
 				continue
 			}
-			wrapped, err := setter.wrap.compileExpression(existing.Value)
+			// Composite literal fields have no enclosing function context.
+			wrapped, err := setter.wrap.compileExpression(existing.Value, nil)
 			if err != nil {
 				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}

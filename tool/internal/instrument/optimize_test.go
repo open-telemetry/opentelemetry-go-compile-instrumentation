@@ -24,9 +24,7 @@ func parseFunc(t *testing.T, source string) *dst.FuncDecl {
 // Helper function to parse Go source code into a function decl, alongside
 // its enclosing file's import alias map (see ast.ImportAliasMap).
 func parseFuncWithImports(t *testing.T, source string) (*dst.FuncDecl, map[string]string) {
-	parser := ast.NewAstParser()
-	file, err := parser.ParseSource(source)
-	require.NoError(t, err)
+	file := parseFile(t, source)
 	for _, decl := range file.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
 			return funcDecl, ast.ImportAliasMap(file)

@@ -55,6 +55,79 @@ func httpGetRule(replace string) *rule.InstCallRule {
 	}
 }
 
+func TestWalkCallsWithEnclosingFunc_VisitsAllCallsWithEnclosingFunc(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "fmt"
+
+var result = fmt.Sprintf("x")
+
+func A() {
+	fmt.Println("a")
+}
+
+func B() {
+	fmt.Println("b1")
+	fmt.Println("b2")
+}
+`)
+
+	var enclosingNames []string
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing *dst.FuncDecl) bool {
+		name := "<none>"
+		if enclosing != nil {
+			name = enclosing.Name.Name
+		}
+		enclosingNames = append(enclosingNames, name)
+		return true
+	})
+
+	assert.Equal(t, []string{"<none>", "A", "B", "B"}, enclosingNames)
+}
+
+func TestWalkCallsWithEnclosingFunc_StopsWithinDecl(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "fmt"
+
+func A() {
+	fmt.Println("first")
+	fmt.Println("second")
+}
+`)
+
+	visited := 0
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, _ *dst.FuncDecl) bool {
+		visited++
+		return false
+	})
+
+	assert.Equal(t, 1, visited, "must stop inspecting further calls within the same decl once fn returns false")
+}
+
+func TestWalkCallsWithEnclosingFunc_StopsAcrossDecls(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "fmt"
+
+func A() {
+	fmt.Println("a")
+}
+
+func B() {
+	fmt.Println("b")
+}
+`)
+
+	var visited []string
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing *dst.FuncDecl) bool {
+		visited = append(visited, enclosing.Name.Name)
+		return false
+	})
+
+	assert.Equal(t, []string{"A"}, visited)
+}
+
 // --- applyCallRule tests ---
 
 func TestApplyCallRule_Success(t *testing.T) {
@@ -89,7 +162,7 @@ func TestApplyCallRule_NonCallExprResult(t *testing.T) {
 }
 
 func TestApplyCallRule_InvalidTemplate(t *testing.T) {
-	// An unclosed template tag fails fasttemplate parsing in newCallTemplate.
+	// An unclosed template tag fails text/template parsing in newCallTemplate.
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("wrapper({{")
 
@@ -97,6 +170,66 @@ func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rule has no compiled replacement template")
+}
+
+func TestApplyCallRule_FuncArgumentUsesEnclosingFunction(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Handler(name string) {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced({{ .FuncArgument 0 }}, {{ . }})")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	handler := findFuncDeclInFile(t, root, "Handler")
+	stmt := handler.Body.List[0].(*dst.ExprStmt)
+	outerCall, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	require.Len(t, outerCall.Args, 2)
+	nameArg, ok := outerCall.Args[0].(*dst.Ident)
+	require.True(t, ok, "expected *dst.Ident, got %T", outerCall.Args[0])
+	assert.Equal(t, "name", nameArg.Name)
+}
+
+func TestApplyCallRule_FuncTagWithoutEnclosingFunctionErrors(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+var resp, _ = http.Get("url")
+`)
+	r := httpGetRule("traced({{ .FuncName }}, {{ . }})")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no enclosing function is available")
+}
+
+// findFuncDeclInFile returns the top-level function declaration named name.
+func findFuncDeclInFile(t *testing.T, root *dst.File, name string) *dst.FuncDecl {
+	t.Helper()
+	for _, decl := range root.Decls {
+		if fn, ok := decl.(*dst.FuncDecl); ok && fn.Name.Name == name {
+			return fn
+		}
+	}
+	require.Fail(t, "function not found", "name: %s", name)
+	return nil
+}
+
+// parseFile parses source into a *dst.File.
+func parseFile(t *testing.T, source string) *dst.File {
+	t.Helper()
+	parser := ast.NewAstParser()
+	root, err := parser.ParseSource(source)
+	require.NoError(t, err)
+	return root
 }
 
 // --- matchesCallRule tests ---
