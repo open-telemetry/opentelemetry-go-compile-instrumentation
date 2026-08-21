@@ -16,6 +16,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	toolast "go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // placeholderIdent is substituted for "{{ . }}" during template execution,
@@ -57,6 +58,11 @@ func (t *callTemplate) String() string {
 
 type callTemplateData struct {
 	enclosing *funcTemplateData
+
+	// isCall and callArgs describe the wrapped expression when it is a
+	// function call (e.g. wrap_call's matched call site)
+	isCall   bool
+	callArgs []dst.Expr
 }
 
 // String implements fmt.Stringer so "{{ . }}" renders as placeholderIdent.
@@ -113,6 +119,43 @@ func (d *callTemplateData) FuncReturnCount() (int, error) {
 	return d.enclosing.FuncReturnCount(), nil
 }
 
+// FuncArgumentOfType returns the identifier of the first parameter of the
+// enclosing function (excluding the receiver) whose type matches typeStr
+// or "" if none match. Template usage: {{.FuncArgumentOfType "context.Context"}}
+func (d *callTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.FuncArgumentOfType(typeStr)
+}
+
+func notACallErr() error {
+	return ex.Newf("requires the wrapped expression to be a function call")
+}
+
+// CallArgumentCount returns the number of arguments in the wrapped call
+// expression. Only available when the wrapped expression is itself
+// a function call. Template usage: {{.CallArgumentCount}}
+func (d *callTemplateData) CallArgumentCount() (int, error) {
+	if !d.isCall {
+		return 0, notACallErr()
+	}
+	return len(d.callArgs), nil
+}
+
+// CallArgument returns the source text of the idx-th (0-indexed) argument of
+// the wrapped call expression. Only available when the wrapped expression is
+// itself a function call. Template usage: {{.CallArgument N}}
+func (d *callTemplateData) CallArgument(idx int) (string, error) {
+	if !d.isCall {
+		return "", notACallErr()
+	}
+	if idx < 0 || idx >= len(d.callArgs) {
+		return "", ex.Newf("CallArgument index %d out of range [0, %d)", idx, len(d.callArgs))
+	}
+	return exprSourceText(d.callArgs[idx])
+}
+
 // compileExpression executes the template with the given expression node as
 // the placeholder value, parses the result, and returns the transformed expression.
 // enclosing is the function declaration that contains node, or
@@ -130,6 +173,10 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 	data := &callTemplateData{}
 	if enclosing != nil {
 		data.enclosing = newFuncTemplateData(enclosing, nil, nil, "")
+	}
+	if call, ok := unwrap(node).(*dst.CallExpr); ok {
+		data.isCall = true
+		data.callArgs = call.Args
 	}
 
 	var sb strings.Builder
@@ -180,10 +227,7 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 	}
 
 	// Replace placeholder with the actual node
-	result, replaced := replacePlaceholder(exprStmt.X, node)
-	if !replaced {
-		return nil, ex.New("template output did not contain placeholder expression")
-	}
+	result, _ := replacePlaceholder(exprStmt.X, node)
 
 	resultExpr, ok := result.(dst.Expr)
 	if !ok {
@@ -191,6 +235,17 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 	}
 
 	return resultExpr, nil
+}
+
+// unwrap strips any enclosing parentheses from expr, e.g. (foo()) -> foo().
+func unwrap(expr dst.Expr) dst.Expr {
+	for {
+		paren, ok := expr.(*dst.ParenExpr)
+		if !ok {
+			return expr
+		}
+		expr = paren.X
+	}
 }
 
 // parseGoExpression parses a Go expression string into a dst.Expr.
@@ -253,6 +308,41 @@ func parseSnippetFuncDecl(src, label string) (*dst.FuncDecl, error) {
 		return nil, ex.Newf("unexpected AST shape for %q", label)
 	}
 	return funcDecl, nil
+}
+
+// exprSourceText renders expr back into Go source text.
+func exprSourceText(expr dst.Expr) (string, error) {
+	cloned := util.AssertType[dst.Expr](dst.Clone(expr))
+	synthetic := &dst.File{
+		Name: toolast.Ident("_"),
+		Decls: []dst.Decl{
+			&dst.FuncDecl{
+				Name: toolast.Ident("_"),
+				Type: &dst.FuncType{Params: &dst.FieldList{}},
+				Body: &dst.BlockStmt{List: []dst.Stmt{&dst.ExprStmt{X: cloned}}},
+			},
+		},
+	}
+
+	restorer := decorator.NewRestorer()
+	if _, err := restorer.RestoreFile(synthetic); err != nil {
+		return "", ex.Wrapf(err, "failed to restore expression to source")
+	}
+	return nodeSourceText(restorer, cloned)
+}
+
+// nodeSourceText looks up node's restored counterpart in restorer and
+// renders it back to Go source text.
+func nodeSourceText(restorer *decorator.Restorer, node dst.Node) (string, error) {
+	astNode, ok := restorer.Ast.Nodes[node]
+	if !ok {
+		return "", ex.New("failed to locate restored node")
+	}
+	var buf strings.Builder
+	if err := format.Node(&buf, restorer.Fset, astNode); err != nil {
+		return "", ex.Wrapf(err, "failed to format node")
+	}
+	return buf.String(), nil
 }
 
 // replacePlaceholder replaces all occurrences of _.PLACEHOLDER_0 in the AST
