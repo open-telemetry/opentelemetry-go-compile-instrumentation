@@ -32,15 +32,18 @@ func IsGlobTarget(target string) bool {
 	return strings.ContainsAny(target, globMeta)
 }
 
-// ValidateTarget rejects malformed glob targets at load time so that a bad rule
-// fails loudly during parsing rather than silently matching nothing during the
-// setup phase. Pattern syntax is bmatcuk/doublestar's; see
-// https://github.com/bmatcuk/doublestar#patterns for the full grammar.
+// ValidateTarget rejects an empty target and malformed glob targets at load
+// time so that a bad rule fails loudly during parsing rather than silently
+// matching nothing (or landing under exactRules[""] and never matching any
+// real import path) during the setup phase. Pattern syntax is
+// bmatcuk/doublestar's; see https://github.com/bmatcuk/doublestar#patterns
+// for the full grammar.
 //
-// An empty target is rejected upstream by the rule loader (parseRuleFromYaml)
-// before it reaches ValidateTarget; a non-glob target is a literal import path
-// and is always valid.
+// A non-glob, non-empty target is a literal import path and is always valid.
 func ValidateTarget(target string) error {
+	if strings.TrimSpace(target) == "" {
+		return ex.Newf("target cannot be empty")
+	}
 	if strings.Contains(strings.ToLower(target), TargetRoot) && target != TargetRoot {
 		return ex.Newf("target %q must be exactly %q", target, TargetRoot)
 	}

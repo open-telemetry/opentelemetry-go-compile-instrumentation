@@ -59,8 +59,12 @@ func TestValidateTarget(t *testing.T) {
 	}{
 		// Exact targets are never glob-validated.
 		{name: "exact path", target: "example.com/svc"},
-		{name: "empty path", target: ""},
 		{name: "root target", target: "$root"},
+
+		// Empty (or whitespace-only) targets are always rejected: they are the
+		// sole package selector, and an empty one would silently never match.
+		{name: "empty path", target: "", wantErr: true},
+		{name: "whitespace-only path", target: "   ", wantErr: true},
 
 		// Valid glob patterns.
 		{name: "single segment star", target: "example.com/svc/*"},

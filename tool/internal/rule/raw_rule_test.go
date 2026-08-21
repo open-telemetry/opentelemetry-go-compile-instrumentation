@@ -125,6 +125,18 @@ raw: "println({{ .FuncArgument 0 }})"
 			yaml:    "target: main\nfunc: Bar\nraw: \"println({{ FuncArgument 0 )\"",
 			wantErr: true,
 		},
+		{
+			name:    "empty target is rejected",
+			ruleID:  "raw9",
+			yaml:    "target: \"\"\nfunc: Bar\nraw: println()",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace-only target is rejected",
+			ruleID:  "raw10",
+			yaml:    "target: \"   \"\nfunc: Bar\nraw: println()",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
