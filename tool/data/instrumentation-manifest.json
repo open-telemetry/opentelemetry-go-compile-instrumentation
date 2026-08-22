@@ -81,6 +81,11 @@
     "target": "go.opentelemetry.io/otel/trace"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/google.golang.org/genai",
+    "target": "google.golang.org/genai",
+    "versionRange": "v1.0.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/client",
     "target": "google.golang.org/grpc"
   },

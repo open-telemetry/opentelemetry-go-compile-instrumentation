@@ -6,7 +6,7 @@ No manual code changes required.
 ## Why Use This Tool?
 
 - **Zero-code instrumentation** - Automatically instrument your entire application without modifying source code
-- **Third-party library support** - Instrument dependencies and libraries you don't control (HTTP, gRPC, database/sql, Redis, OpenAI, Anthropic, and more)
+- **Third-party library support** - Instrument dependencies and libraries you don't control (HTTP, gRPC, database/sql, Redis, OpenAI, Anthropic, Gemini, and more)
 - **Complete decoupling** - Keep your codebase free from instrumentation concerns
 - **Flexible deployment** - Integrate at development time or in your CI/CD pipeline
 
@@ -128,6 +128,7 @@ The following libraries are automatically instrumented:
 | `k8s.io/client-go` | K8s resource spans |
 | `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
 | `github.com/anthropics/anthropic-sdk-go` | GenAI spans |
+| `google.golang.org/genai` | GenAI spans |
 | `github.com/segmentio/kafka-go` | Kafka messaging spans |
 | `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
 | `github.com/linode/linodego/v2` | HTTP client spans and metrics |
