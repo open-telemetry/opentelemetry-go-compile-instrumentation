@@ -465,7 +465,11 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	// Query whether the parameter is a variadic parameter in the target function
 	targetParams := findTargetParamType(ip.targetFunc)
-	isEllipsis := func(i int) bool { return ast.IsEllipsis(targetParams.List[i].Type) }
+	genericTypes := findTargetGenericType(ip.target, ip.targetFunc)
+	isEllipsis := func(i int) bool {
+		return ast.IsEllipsis(targetParams.List[i].Type) &&
+			!containsTypeParameter(targetParams.List[i].Type, genericTypes)
+	}
 
 	args := []dst.Expr{ast.Ident(trampolineHookContextName)}
 	for i, field := range ip.beforeTrampFunc.Type.Params.List {
@@ -524,7 +528,8 @@ func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.Fie
 		},
 		Decs: dst.FuncDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName)),
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName),
+			),
 		},
 	}
 
@@ -1109,6 +1114,69 @@ func makeMethodPanic(method *dst.FuncDecl, message string) {
 	method.Body.List = []dst.Stmt{panicStmt}
 }
 
+// containsTypeParameterInExprs checks if any expression in exprs contains a type parameter
+func containsTypeParameterInExprs(exprs []dst.Expr, typeParams *dst.FieldList) bool {
+	for _, expr := range exprs {
+		if containsTypeParameter(expr, typeParams) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsTypeParameterInFields checks if any field in fields contains a type parameter
+func containsTypeParameterInFields(fields, typeParams *dst.FieldList) bool {
+	if fields == nil {
+		return false
+	}
+	for _, field := range fields.List {
+		if containsTypeParameter(field.Type, typeParams) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsTypeParameter checks if a type expression contains any type parameters
+func containsTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
+	if typeParams == nil {
+		return false
+	}
+	if isTypeParameter(t, typeParams) {
+		return true
+	}
+
+	switch tType := t.(type) {
+	case *dst.StarExpr:
+		return containsTypeParameter(tType.X, typeParams)
+	case *dst.ArrayType:
+		return containsTypeParameter(tType.Elt, typeParams)
+	case *dst.MapType:
+		return containsTypeParameter(tType.Key, typeParams) || containsTypeParameter(tType.Value, typeParams)
+	case *dst.ChanType:
+		return containsTypeParameter(tType.Value, typeParams)
+	case *dst.Ellipsis:
+		return containsTypeParameter(tType.Elt, typeParams)
+	case *dst.IndexExpr:
+		return containsTypeParameter(tType.X, typeParams) || containsTypeParameter(tType.Index, typeParams)
+	case *dst.IndexListExpr:
+		return containsTypeParameter(tType.X, typeParams) || containsTypeParameterInExprs(tType.Indices, typeParams)
+	case *dst.ParenExpr:
+		return containsTypeParameter(tType.X, typeParams)
+	case *dst.StructType:
+		return containsTypeParameterInFields(tType.Fields, typeParams)
+	case *dst.InterfaceType:
+		return containsTypeParameterInFields(tType.Methods, typeParams)
+	case *dst.FuncType:
+		return containsTypeParameterInFields(tType.Params, typeParams) ||
+			containsTypeParameterInFields(tType.Results, typeParams)
+	case *dst.Ident, *dst.SelectorExpr:
+		return false
+	default:
+		return false
+	}
+}
+
 // isTypeParameter checks if a type expression is a bare type parameter identifier
 func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	if typeParams == nil {
@@ -1132,80 +1200,11 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 // replaceTypeParamsWithAny replaces type parameters with interface{} for use in
 // non-generic contexts like HookContextImpl methods
 func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
-	if isTypeParameter(t, typeParams) {
+	if containsTypeParameter(t, typeParams) {
 		return ast.InterfaceType()
 	}
 
-	// For complex types like *T, []T, map[K]V, etc., handle them recursively
-	switch tType := t.(type) {
-	case *dst.StarExpr:
-		// *T -> *interface{}
-		return ast.DereferenceOf(replaceTypeParamsWithAny(tType.X, typeParams))
-	case *dst.ArrayType:
-		// []T -> []interface{}
-		return ast.ArrayType(replaceTypeParamsWithAny(tType.Elt, typeParams))
-	case *dst.MapType:
-		// map[K]V -> map[interface{}]interface{}
-		return &dst.MapType{
-			Key:   replaceTypeParamsWithAny(tType.Key, typeParams),
-			Value: replaceTypeParamsWithAny(tType.Value, typeParams),
-		}
-	case *dst.ChanType:
-		// chan T, <-chan T, chan<- T -> chan interface{}, etc.
-		return &dst.ChanType{
-			Dir:   tType.Dir,
-			Value: replaceTypeParamsWithAny(tType.Value, typeParams),
-		}
-	case *dst.IndexExpr:
-		// GenStruct[T] -> interface{} (for generic receiver methods)
-		// The hook function expects interface{} for generic types
-		return ast.InterfaceType()
-	case *dst.IndexListExpr:
-		// GenStruct[T, U] -> interface{} (for generic receiver methods with multiple type params)
-		return ast.InterfaceType()
-	case *dst.Ellipsis:
-		// ...T -> []T
-		// Preserve variadic syntax. This maintains variadic semantics in the
-		// generated hook signatures
-		return ast.Ellipsis(replaceTypeParamsWithAny(tType.Elt, typeParams))
-	case *dst.FuncType:
-		newFuncType := &dst.FuncType{}
-		if tType.Params != nil {
-			newFuncType.Params = &dst.FieldList{
-				List: processFieldList(tType.Params.List, typeParams),
-			}
-		}
-		if tType.Results != nil {
-			newFuncType.Results = &dst.FieldList{
-				List: processFieldList(tType.Results.List, typeParams),
-			}
-		}
-		return newFuncType
-	case *dst.Ident, *dst.SelectorExpr, *dst.InterfaceType:
-		// Base types without type parameters, return as-is
-		return t
-	default:
-		// Unsupported cases:
-		// - Other uncommon type expressions
-		util.Unimplemented(fmt.Sprintf("unexpected generic type: %T", tType))
-		return t
-	}
-}
-
-func processFieldList(fields []*dst.Field, typeParams *dst.FieldList) []*dst.Field {
-	result := make([]*dst.Field, len(fields))
-	for i, field := range fields {
-		newField := &dst.Field{}
-		if field.Names != nil {
-			newField.Names = make([]*dst.Ident, len(field.Names))
-			for j, name := range field.Names {
-				newField.Names[j] = dst.NewIdent(name.Name)
-			}
-		}
-		newField.Type = replaceTypeParamsWithAny(field.Type, typeParams)
-		result[i] = newField
-	}
-	return result
+	return t
 }
 
 func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
