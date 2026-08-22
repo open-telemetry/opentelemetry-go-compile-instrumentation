@@ -20,5 +20,7 @@ The full list of changes can be found in the compare view for the respective rel
 
 ### Fixed
 
+- `redis.Ring` shards configured up front via `RingOptions.Addrs` are now instrumented. Previously only shards added after client construction were hooked, so pre-configured shards (the common case) emitted no spans at all. ⚠️ Rings that emitted nothing before now emit per-command client spans, and any manual `AddHook`/`ForEachShard` workaround should be removed to avoid duplicate spans. ([#1098](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1098))
+
 <!-- Released section -->
 <!-- Don't change this section unless doing release -->
