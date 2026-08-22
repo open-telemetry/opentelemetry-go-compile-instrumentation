@@ -542,7 +542,10 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
-	insert := "-toolexec=" + execPath + " toolexec"
+	// cmd/go splits the -toolexec value on whitespace (internal/quoted), so
+	// a path containing spaces — "Program Files" being the obvious one —
+	// must be quoted or only the first chunk reaches the tool (#1207).
+	insert := "-toolexec=" + quoteForGo(execPath) + " toolexec"
 	const additionalCount = 2
 	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
 	// Add "go build"
@@ -663,4 +666,14 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	}
 	logger.InfoContext(ctx, "Instrumentation completed successfully")
 	return nil
+}
+
+// quoteForGo quotes a value for cmd/go's internal/quoted splitting: the
+// -toolexec flag value is split on whitespace, so paths with spaces must be
+// wrapped in double quotes. cmd/go's splitter does not process backslash
+// escapes (unlike strconv.Quote), so a plain quote wrap is the correct form;
+// like go itself, values containing a literal double quote cannot be
+// represented (#1207).
+func quoteForGo(v string) string {
+	return `"` + v + `"`
 }
