@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -158,7 +159,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		// still answers with SSE, end the span without response attributes
 		// rather than hold it open on a body we do not accumulate yet.
 		contentType := resp.Header.Get("Content-Type")
-		if strings.HasPrefix(contentType, "text/event-stream") {
+		if isSSEContentType(contentType) {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
 			span.End()
 			return resp, nil
@@ -168,6 +169,18 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		return resp, nil
 	}
+}
+
+// isSSEContentType reports whether a Content-Type header names the SSE media
+// type. HTTP media types are case-insensitive and may carry parameters, so the
+// raw prefix check used previously misclassified headers like
+// "Text/Event-Stream; charset=utf-8".
+func isSSEContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(mediaType, "text/event-stream")
 }
 
 func handleNonStreamingResponse(resp *http.Response, span trace.Span) {
