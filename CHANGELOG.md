@@ -20,5 +20,7 @@ The full list of changes can be found in the compare view for the respective rel
 
 ### Fixed
 
+- Trampoline generation now re-scopes a recovered generic constraint to the receiver's type parameter names, so an inter-parameter constraint on a renamed receiver (`type M[K any, V ~[]K]` used as `func (m M[A, B]) ...`) produces compilable code instead of referring to a name it never declares. ([#1169](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1169))
+
 <!-- Released section -->
 <!-- Don't change this section unless doing release -->

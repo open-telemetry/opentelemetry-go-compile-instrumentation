@@ -923,22 +923,24 @@ func extractReceiverTypeParams(file *dst.File, recvType dst.Expr) *dst.FieldList
 		// GenStruct[T] - single type parameter
 		if ident, ok := t.Index.(*dst.Ident); ok {
 			original := findGenericTypeDecl(file, receiverBaseTypeName(t.X))
+			nameMap := receiverNameMap(original, []dst.Expr{t.Index})
 			return &dst.FieldList{
 				List: []*dst.Field{{
 					Names: []*dst.Ident{ident},
-					Type:  receiverConstraintAt(original, 0),
+					Type:  remapConstraintNames(receiverConstraintAt(original, 0), nameMap),
 				}},
 			}
 		}
 	case *dst.IndexListExpr:
 		// GenStruct[T, U, ...] - multiple type parameters
 		original := findGenericTypeDecl(file, receiverBaseTypeName(t.X))
+		nameMap := receiverNameMap(original, t.Indices)
 		fields := make([]*dst.Field, 0, len(t.Indices))
 		for i, idx := range t.Indices {
 			if ident, ok := idx.(*dst.Ident); ok {
 				fields = append(fields, &dst.Field{
 					Names: []*dst.Ident{ident},
-					Type:  receiverConstraintAt(original, i),
+					Type:  remapConstraintNames(receiverConstraintAt(original, i), nameMap),
 				})
 			}
 		}
@@ -947,6 +949,69 @@ func extractReceiverTypeParams(file *dst.File, recvType dst.Expr) *dst.FieldList
 		}
 	}
 	return nil
+}
+
+// receiverNameMap maps a generic type declaration's parameter names to the
+// names the method receiver uses for them. A receiver is free to rename the
+// type parameters (type M[K any, V any] with func (m M[A, B]) M()), and the
+// mapping is positional, so declaration parameter K at position 0 maps to
+// receiver name A. Only genuine renames are recorded; identical names are left
+// out so the returned map is empty in the common case.
+func receiverNameMap(declParams *dst.FieldList, recvArgs []dst.Expr) map[string]string {
+	declNames := typeParamDeclNames(declParams)
+	nameMap := make(map[string]string)
+	for i, arg := range recvArgs {
+		ident, ok := arg.(*dst.Ident)
+		if !ok || i >= len(declNames) {
+			continue
+		}
+		if declNames[i] != "" && declNames[i] != ident.Name {
+			nameMap[declNames[i]] = ident.Name
+		}
+	}
+	return nameMap
+}
+
+// typeParamDeclNames returns a type parameter list's names in positional order,
+// flattening grouped parameters (type M[K, V any] declares K then V).
+func typeParamDeclNames(params *dst.FieldList) []string {
+	if params == nil {
+		return nil
+	}
+	var names []string
+	for _, field := range params.List {
+		if len(field.Names) == 0 {
+			names = append(names, "")
+			continue
+		}
+		for _, name := range field.Names {
+			names = append(names, name.Name)
+		}
+	}
+	return names
+}
+
+// remapConstraintNames rewrites type parameter identifiers inside a constraint
+// so it reads in the receiver's naming rather than the declaration's. An
+// inter-parameter constraint refers to a sibling parameter by the declaration's
+// name (type M[K any, V ~[]K] carries ~[]K on V), and the receiver may have
+// renamed that sibling. Cloning the constraint verbatim would leave the
+// trampoline referring to a name it never declares, so the generated code would
+// not compile; renaming the identifiers keeps every reference in scope. With no
+// renames the constraint is returned untouched.
+func remapConstraintNames(constraint dst.Expr, nameMap map[string]string) dst.Expr {
+	if len(nameMap) == 0 {
+		return constraint
+	}
+	dst.Inspect(constraint, func(node dst.Node) bool {
+		if ident, ok := node.(*dst.Ident); ok {
+			if renamed, found := nameMap[ident.Name]; found {
+				ident.Name = renamed
+			}
+		}
+		return true
+	})
+	return constraint
 }
 
 // receiverBaseTypeName returns the local identifier naming a receiver's generic

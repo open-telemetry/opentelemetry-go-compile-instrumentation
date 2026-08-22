@@ -932,3 +932,49 @@ func TestExtractReceiverTypeParamsNestedPointer(t *testing.T) {
 	require.NotNil(t, params)
 	assert.Equal(t, []string{"T"}, typeParamNames(t, params))
 }
+
+// TestExtractReceiverTypeParamsConstraint_RenamedInterParam covers a receiver
+// that renames the type parameters while a constraint refers to a sibling
+// parameter. type M[K any, V ~[]K] used as func (m M[A, B]) must recover V's
+// constraint as ~[]A, following the receiver's names, not the declaration's ~[]K.
+// A verbatim ~[]K would refer to a name the trampoline never declares and would
+// not compile.
+func TestExtractReceiverTypeParamsConstraint_RenamedInterParam(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type M[K any, V ~[]K] struct{ k K; v V }", "M[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+	require.Len(t, params.List, 2)
+
+	// The second parameter's constraint is ~[]A: a ~ over a slice of the first
+	// receiver parameter, re-scoped from the declaration's ~[]K.
+	tilde, ok := params.List[1].Type.(*dst.UnaryExpr)
+	require.True(t, ok, "constraint should be a ~ expression")
+	slice, ok := tilde.X.(*dst.ArrayType)
+	require.True(t, ok, "constraint should be ~[]T")
+	elem, ok := slice.Elt.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "A", elem.Name,
+		"inter-parameter constraint must use the receiver name A, not the declaration name K")
+}
+
+// TestTypeParamDeclNames covers the positional flattening directly: a nil list
+// yields no names, a grouped field (type M[K, V any] declares K then V under
+// one field) contributes each name in order, and a field with no names, which
+// valid Go does not produce, still advances by one empty slot rather than being
+// dropped.
+func TestTypeParamDeclNames(t *testing.T) {
+	assert.Nil(t, typeParamDeclNames(nil))
+
+	params := &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{ast.Ident("K"), ast.Ident("V")}, Type: ast.Ident("any")},
+			{Names: nil, Type: ast.Ident("comparable")},
+			{Names: []*dst.Ident{ast.Ident("T")}, Type: ast.Ident("any")},
+		},
+	}
+
+	assert.Equal(t, []string{"K", "V", "", "T"}, typeParamDeclNames(params))
+}
