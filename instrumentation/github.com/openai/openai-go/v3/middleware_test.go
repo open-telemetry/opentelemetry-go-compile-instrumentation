@@ -8,6 +8,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
+
+	semconv "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3/semconv"
 )
 
 func TestClassifyOperation(t *testing.T) {
@@ -127,4 +131,45 @@ func TestParseChatResponse_Valid(t *testing.T) {
 	assert.Equal(t, int64(10), resp.Usage.PromptTokens)
 	assert.Equal(t, int64(20), resp.Usage.CompletionTokens)
 	assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+}
+
+// TestParseCompletionRequest_Penalties covers frequency_penalty and
+// presence_penalty on the legacy completions endpoint.
+//
+// CompletionNewParams carries both, and parseChatRequest already records them,
+// so previously a completions span silently lost two sampling parameters that
+// the chat path reported for an otherwise identical request.
+func TestParseCompletionRequest_Penalties(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-3.5-turbo-instruct",
+		"prompt":"hello",
+		"frequency_penalty":0.5,
+		"presence_penalty":-0.25
+	}`)
+
+	model, attrs := parseCompletionRequest(body)
+	assert.Equal(t, "gpt-3.5-turbo-instruct", model)
+
+	got := map[attribute.Key]attribute.Value{}
+	for _, a := range attrs {
+		got[a.Key] = a.Value
+	}
+
+	require.Contains(t, got, semconv.GenAIRequestFrequencyPenaltyKey)
+	assert.InDelta(t, 0.5, got[semconv.GenAIRequestFrequencyPenaltyKey].AsFloat64(), 1e-9)
+
+	require.Contains(t, got, semconv.GenAIRequestPresencePenaltyKey)
+	assert.InDelta(t, -0.25, got[semconv.GenAIRequestPresencePenaltyKey].AsFloat64(), 1e-9)
+}
+
+// Absent penalties must stay absent rather than being reported as zero, since
+// 0 is a meaningful value for both parameters.
+func TestParseCompletionRequest_PenaltiesOmitted(t *testing.T) {
+	body := []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":"hello"}`)
+
+	_, attrs := parseCompletionRequest(body)
+	for _, a := range attrs {
+		assert.NotEqual(t, semconv.GenAIRequestFrequencyPenaltyKey, a.Key)
+		assert.NotEqual(t, semconv.GenAIRequestPresencePenaltyKey, a.Key)
+	}
 }
