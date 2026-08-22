@@ -43,17 +43,17 @@ func TestGetRedisV9Statement(t *testing.T) {
 		{
 			name:     "SET command with value",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", "myvalue"),
-			expected: "set mykey myvalue",
+			expected: "set mykey ?",
 		},
 		{
 			name:     "HSET command",
 			cmd:      redis.NewCmd(context.Background(), "hset", "myhash", "field1", "value1"),
-			expected: "hset myhash field1 value1",
+			expected: "hset myhash ? ?",
 		},
 		{
 			name:     "DEL command",
 			cmd:      redis.NewCmd(context.Background(), "del", "key1", "key2"),
-			expected: "del key1 key2",
+			expected: "del key1 ?",
 		},
 		{
 			name:     "command with nil arg",
@@ -63,17 +63,17 @@ func TestGetRedisV9Statement(t *testing.T) {
 		{
 			name:     "command with int arg",
 			cmd:      redis.NewCmd(context.Background(), "expire", "mykey", 60),
-			expected: "expire mykey 60",
+			expected: "expire mykey ?",
 		},
 		{
 			name:     "command with bool arg true",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", true),
-			expected: "set mykey true",
+			expected: "set mykey ?",
 		},
 		{
 			name:     "command with bool arg false",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", false),
-			expected: "set mykey false",
+			expected: "set mykey ?",
 		},
 		{
 			name:     "AUTH password",
@@ -179,7 +179,7 @@ func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
 		{
 			name:     "key literally named auth is not a credential",
 			cmd:      redis.NewCmd(context.Background(), "get", "auth", "token"),
-			expected: "get auth token",
+			expected: "get auth ?",
 		},
 	}
 
@@ -190,6 +190,83 @@ func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
 			assert.NotContains(t, result, "s3cret", "the password must never reach db.query.text")
 		})
 	}
+}
+
+// TestGetRedisV9Statement_RedactsCommandValues is the regression test for
+// https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1200:
+// by default, db.query.text must never contain the data values applications
+// write to Redis, only the command name and (conventionally) the key.
+func TestGetRedisV9Statement_RedactsCommandValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      redis.Cmder
+		expected string
+	}{
+		{
+			name:     "SET redacts the value",
+			cmd:      redis.NewCmd(context.Background(), "set", "session:42", "s3cret-session-token"),
+			expected: "set session:42 ?",
+		},
+		{
+			name:     "HSET redacts field and value",
+			cmd:      redis.NewCmd(context.Background(), "hset", "user:42", "email", "alice@example.com"),
+			expected: "hset user:42 ? ?",
+		},
+		{
+			name:     "LPUSH redacts every pushed element",
+			cmd:      redis.NewCmd(context.Background(), "lpush", "queue", "job1", "job2", "job3"),
+			expected: "lpush queue ? ? ?",
+		},
+		{
+			name:     "GET has no value to redact",
+			cmd:      redis.NewCmd(context.Background(), "get", "mykey"),
+			expected: "get mykey",
+		},
+		{
+			name:     "PING takes no arguments beyond the command name",
+			cmd:      redis.NewCmd(context.Background(), "ping"),
+			expected: "ping",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getRedisV9Statement(tt.cmd)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestProcessHook_RedactsCommandValues exercises the full ProcessHook path
+// (not just getRedisV9Statement) to confirm the span actually produced for
+// an ordinary write command carries no sensitive value in db.query.text.
+func TestProcessHook_RedactsCommandValues(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
+		return nil
+	})
+
+	cmd := redis.NewCmd(context.Background(), "set", "session:42", "s3cret-session-token")
+	err := processHook(context.Background(), cmd)
+	assert.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	queryText := ""
+	for _, attr := range spans[0].Attributes() {
+		if string(attr.Key) == "db.query.text" {
+			queryText = attr.Value.AsString()
+			break
+		}
+	}
+	assert.Equal(t, "set session:42 ?", queryText)
+	assert.NotContains(t, queryText, "s3cret-session-token", "the value must never reach db.query.text")
 }
 
 func TestRedisV9AppendArg(t *testing.T) {

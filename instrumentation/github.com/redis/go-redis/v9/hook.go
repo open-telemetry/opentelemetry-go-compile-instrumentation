@@ -34,6 +34,10 @@ const (
 	redisSetNameOption   = "setname"
 	redisHelloAuthArgN   = 2
 	redisQueryTextRedact = "?"
+	// redisValueArgsStart is the index at which a command's data-value
+	// arguments conventionally begin: args[0] is the command name, args[1]
+	// is the key. See redisV9RedactRange.
+	redisValueArgsStart = 2
 )
 
 func initInstrumentation() {
@@ -150,7 +154,7 @@ func (o *otelRedisHook) DialHook(next redis.DialHook) redis.DialHook {
 
 func getRedisV9Statement(cmd redis.Cmder) string {
 	args := cmd.Args()
-	redactStart, redactEnd := redisV9CredentialRedactRange(cmd.Name(), args)
+	redactStart, redactEnd := redisV9RedactRange(cmd.Name(), args)
 
 	b := make([]byte, 0, 64)
 	for i, arg := range args {
@@ -172,10 +176,26 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 	return string(b)
 }
 
-// redisV9CredentialRedactRange returns a half-open index range of args that
-// must not appear in db.query.text. AUTH arguments are credentials. HELLO
-// AUTH username/password are too; SETNAME and the protocol version are not.
-func redisV9CredentialRedactRange(name string, args []interface{}) (start, end int) {
+// redisV9RedactRange returns a half-open index range of args that must not
+// appear in db.query.text.
+//
+// AUTH and HELLO get a narrow, credential-shaped rule: AUTH's arguments are
+// credentials outright, and HELLO's AUTH username/password sub-arguments are
+// too (SETNAME and the protocol version are not).
+//
+// Every other command redacts everything after args[1]. Unlike SQL, a Redis
+// command's arguments are not a query template plus bindable parameters:
+// SET's value, HSET's field/value pairs, LPUSH's elements, and so on are the
+// application data being written, indistinguishable from the command shape
+// without a per-command grammar. args[0] is always the command name and
+// args[1] is conventionally the key, so this keeps "what command touched
+// what key" visible while never emitting a value. It also over-redacts
+// arguments that happen not to be sensitive (e.g. EXPIRE's TTL) and, for
+// multi-key commands like MSET, redacts keys past the first as if they were
+// values - both accepted trade-offs for never leaking one by default. See
+// https://opentelemetry.io/docs/specs/semconv/db/redis/, which calls for
+// query text to be sanitized or opt-in rather than captured by default.
+func redisV9RedactRange(name string, args []interface{}) (start, end int) {
 	switch name {
 	case redisAuthCmd:
 		if len(args) > 1 {
@@ -184,6 +204,10 @@ func redisV9CredentialRedactRange(name string, args []interface{}) (start, end i
 	case redisHelloCmd:
 		if i := redisV9HelloAuthIndex(args); i >= 0 {
 			return i + 1, min(i+1+redisHelloAuthArgN, len(args))
+		}
+	default:
+		if len(args) > redisValueArgsStart {
+			return redisValueArgsStart, len(args)
 		}
 	}
 	return 0, 0
