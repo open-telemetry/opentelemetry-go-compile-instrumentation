@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,6 +38,146 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 			require.Contains(t, err.Error(), "supported")
 		})
 	}
+}
+
+func TestToolexecInsertArg(t *testing.T) {
+	t.Run("builds the -toolexec flag for a normal path", func(t *testing.T) {
+		insert, err := toolexecInsertArg("/usr/local/bin/otelc")
+		require.NoError(t, err)
+		assert.Equal(t, "-toolexec=/usr/local/bin/otelc toolexec", insert)
+	})
+
+	t.Run("wraps the error with the offending path when it can't be quoted", func(t *testing.T) {
+		path := `/home/it's "me"/otelc`
+		_, err := toolexecInsertArg(path)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("%q", path))
+	})
+}
+
+func TestToolexecBuildArgs(t *testing.T) {
+	t.Run("inserts -work and the quoted -toolexec ahead of the caller's args", func(t *testing.T) {
+		got, err := toolexecBuildArgs([]string{"build", "-o", "app", "./cmd"}, "/opt/my tools/otelc", false)
+		require.NoError(t, err)
+		assert.Equal(t, []string{
+			"go", "build", "-work",
+			`-toolexec='/opt/my tools/otelc' toolexec`,
+			"-o", "app", "./cmd",
+		}, got)
+	})
+
+	t.Run("neutralizes -mod=vendor when vendored", func(t *testing.T) {
+		got, err := toolexecBuildArgs([]string{"build", "-mod=vendor", "."}, "/usr/bin/otelc", true)
+		require.NoError(t, err)
+		assert.NotContains(t, got, "-mod=vendor")
+	})
+
+	t.Run("adds the generated runtime file for file targets", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		got, err := toolexecBuildArgs([]string{"build", "main.go"}, "/usr/bin/otelc", false)
+		require.NoError(t, err)
+		assert.Contains(t, got, otelcRuntimeFile)
+	})
+
+	t.Run("propagates the error when the path can't be quoted", func(t *testing.T) {
+		_, err := toolexecBuildArgs([]string{"build", "."}, `/home/it's "me"/otelc`, false)
+		require.Error(t, err)
+	})
+}
+
+// runBuildWithToolexec drives buildWithToolexec with the command runner
+// stubbed out, returning the argv and env it would have run. The real runner
+// must never fire here: its -toolexec target is os.Executable(), which under
+// `go test` is the test binary, so it would re-invoke itself without bound.
+// toolexecInvocation is the command buildWithToolexec would have run.
+type toolexecInvocation struct {
+	argv []string
+	env  []string
+}
+
+func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecInvocation {
+	t.Helper()
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	var got toolexecInvocation
+	original := runBuildCmd
+	t.Cleanup(func() { runBuildCmd = original })
+	runBuildCmd = func(_ context.Context, gotEnv []string, gotArgs ...string) error {
+		got = toolexecInvocation{argv: gotArgs, env: gotEnv}
+		return nil
+	}
+
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action: func(ctx context.Context, c *cli.Command) error {
+			return buildWithToolexec(ctx, c, vendored)
+		},
+	}
+	require.NoError(t, cmd.Run(t.Context(), args))
+	return got
+}
+
+func TestBuildWithToolexec(t *testing.T) {
+	t.Run("runs go with -work and a -toolexec pointing at this executable", func(t *testing.T) {
+		got := runBuildWithToolexec(t, []string{"go", "build", "."}, false)
+
+		require.NotEmpty(t, got.argv)
+		assert.Equal(t, "go", got.argv[0])
+		assert.Equal(t, "build", got.argv[1])
+		assert.Contains(t, got.argv, "-work")
+		assert.Contains(t, strings.Join(got.argv, " "), "-toolexec=")
+		assert.Contains(t, strings.Join(got.env, "\n"), util.EnvOtelcWorkDir+"=")
+	})
+
+	t.Run("forwards build flags and neutralizes vendor mode", func(t *testing.T) {
+		got := runBuildWithToolexec(t, []string{"go", "build", "-race", "-mod=vendor", "."}, true)
+
+		assert.NotContains(t, got.argv, "-mod=vendor", "vendor mode is rewritten for the instrumented build")
+		assert.Contains(t, strings.Join(got.env, "\n"), util.EnvOtelcBuildFlags+"=",
+			"context-affecting flags are forwarded to the toolexec child")
+	})
+
+	t.Run("does not build when the go cache cannot be prepared", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		t.Setenv(util.EnvOtelcWorkDir, dir)
+		t.Setenv("GOCACHE", "") // so setupGoCache allocates its own cache dir
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+		// A regular file where the cache directory belongs makes MkdirAll fail.
+		require.NoError(t, os.WriteFile(util.GetBuildTemp("gocache"), []byte("x"), 0o644))
+
+		ran := false
+		original := runBuildCmd
+		t.Cleanup(func() { runBuildCmd = original })
+		runBuildCmd = func(context.Context, []string, ...string) error {
+			ran = true
+			return nil
+		}
+
+		cmd := &cli.Command{
+			Name:            "go",
+			SkipFlagParsing: true,
+			Action: func(ctx context.Context, c *cli.Command) error {
+				return buildWithToolexec(ctx, c, false)
+			},
+		}
+		err := cmd.Run(t.Context(), []string{"go", "build", "."})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "go cache")
+		assert.False(t, ran, "the build must not start when the cache is unusable")
+	})
 }
 
 func TestGetPackages(t *testing.T) {

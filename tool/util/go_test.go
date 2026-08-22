@@ -673,6 +673,60 @@ func TestQuoteGoflagsToken(t *testing.T) {
 	}
 }
 
+func TestBuildToolexecFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		execPath string
+		want     string
+		wantErr  bool
+	}{
+		{
+			name:     "path without spaces stays unquoted",
+			execPath: "/usr/local/bin/otelc",
+			want:     "-toolexec=/usr/local/bin/otelc toolexec",
+		},
+		{
+			name:     "path with spaces is single quoted",
+			execPath: `C:\Program Files\otelc\otelc.exe`,
+			want:     `-toolexec='C:\Program Files\otelc\otelc.exe' toolexec`,
+		},
+		{
+			name:     "path with a single quote falls back to double quotes",
+			execPath: "/home/it's me/otelc",
+			want:     `-toolexec="/home/it's me/otelc" toolexec`,
+		},
+		{
+			name:     "path with both quote characters errors",
+			execPath: `/home/it's "me"/otelc`,
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildToolexecFlag(tt.execPath)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// A -toolexec entry built by BuildToolexecFlag carries its own inner quotes
+// once the executable path has a space, so stripping has to see past them.
+func TestStripToolexecFromGoflagsWithNestedQuotes(t *testing.T) {
+	inner, err := BuildToolexecFlag(`C:\Program Files\otelc\otelc.exe`)
+	require.NoError(t, err)
+	token, err := QuoteGoflagsToken(inner)
+	require.NoError(t, err)
+
+	assert.Empty(t, StripToolexecFromGoflags(token))
+	assert.Equal(t, "-mod=mod", StripToolexecFromGoflags("-mod=mod "+token))
+	assert.Equal(t, "-mod=mod", StripToolexecFromGoflags(token+" -mod=mod"))
+}
+
 func TestNewFileScanner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lines.txt")
 	require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644))
