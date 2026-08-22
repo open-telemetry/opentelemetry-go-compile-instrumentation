@@ -542,7 +542,10 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
-	insert := "-toolexec=" + execPath + " toolexec"
+	insert, err := util.BuildToolexecFlag(execPath)
+	if err != nil {
+		return ex.Wrapf(err, "building -toolexec flag for %q", execPath)
+	}
 	const additionalCount = 2
 	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
 	// Add "go build"
