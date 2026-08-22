@@ -4,6 +4,8 @@
 package client
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -44,6 +46,13 @@ func initInstrumentation() {
 	})
 }
 
+// debugEnabled gates per-request Debug calls: slog evaluates arguments before
+// checking the level, so an unguarded call pays for req.URL.String() and
+// attribute boxing on every request even when debug logging is off.
+func debugEnabled() bool {
+	return logger.Enabled(context.Background(), slog.LevelDebug)
+}
+
 // netHttpClientEnabler controls whether client instrumentation is enabled
 type netHttpClientEnabler struct{}
 
@@ -53,9 +62,17 @@ func (n netHttpClientEnabler) Enable() bool {
 
 var clientEnabler = netHttpClientEnabler{}
 
+// hookData carries span state from BeforeRoundTrip to AfterRoundTrip. A typed
+// struct instead of SetKeyData's map[string]interface{} keeps the per-request
+// cost to a single small allocation with no map or string hashing.
+type hookData struct {
+	span  trace.Span
+	start time.Time
+}
+
 func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http.Request) {
+	// This runs once per outbound request; keep the disabled path free of logging.
 	if !clientEnabler.Enable() {
-		logger.Debug("HTTP client instrumentation disabled")
 		return
 	}
 
@@ -67,16 +84,20 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 	ua := req.Header.Get("User-Agent")
 	if strings.HasPrefix(ua, otelExporterPrefix) || strings.HasPrefix(ua, "OTel Go OTLP") ||
 		strings.HasPrefix(ua, "OTel-Go-OTLP") {
-		logger.Debug("Skipping OTel exporter request", "user_agent", ua)
+		if debugEnabled() {
+			logger.Debug("Skipping OTel exporter request", "user_agent", ua)
+		}
 		return
 	}
 
 	initInstrumentation()
 
-	logger.Debug("BeforeRoundTrip called",
-		"method", req.Method,
-		"url", req.URL.String(),
-		"host", req.Host)
+	if debugEnabled() {
+		logger.Debug("BeforeRoundTrip called",
+			"method", req.Method,
+			"url", req.URL.String(),
+			"host", req.Host)
+	}
 
 	ctx := req.Context()
 
@@ -99,25 +120,23 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 	ictx.SetParam(requestParamIndex, newReq)
 
 	// Store data for after hook
-	ictx.SetData(map[string]interface{}{
-		"ctx":   ctx,
-		"span":  span,
-		"req":   req,
-		"start": time.Now(),
+	ictx.SetData(&hookData{
+		span:  span,
+		start: time.Now(),
 	})
 }
 
 func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
-	span, ok := ictx.GetKeyData("span").(trace.Span)
-	if !ok || span == nil {
+	data, ok := ictx.GetData().(*hookData)
+	if !ok || data == nil || data.span == nil {
 		logger.Debug("AfterRoundTrip: no span from before hook")
 		return
 	}
+	span := data.span
 	defer span.End()
 
 	// Add response attributes
 	if res != nil {
-		startTime, _ := ictx.GetKeyData("start").(time.Time)
 		attrs := semconv.HTTPClientResponseTraceAttrs(res)
 		span.SetAttributes(attrs...)
 
@@ -127,11 +146,13 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 			span.SetStatus(code, desc)
 		}
 
-		logger.Debug("AfterRoundTrip called",
-			"method", res.Request.Method,
-			"url", res.Request.URL.String(),
-			"status_code", res.StatusCode,
-			"duration_ms", time.Since(startTime).Milliseconds())
+		if debugEnabled() {
+			logger.Debug("AfterRoundTrip called",
+				"method", res.Request.Method,
+				"url", res.Request.URL.String(),
+				"status_code", res.StatusCode,
+				"duration_ms", time.Since(data.start).Milliseconds())
+		}
 	}
 
 	// Handle error
@@ -141,6 +162,4 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 		span.SetAttributes(semconv.HTTPClientErrorType(err))
 		logger.Debug("AfterRoundTrip called with error", "error", err)
 	}
-
-	logger.Debug("AfterRoundTrip completed")
 }
