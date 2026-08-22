@@ -706,6 +706,13 @@ func TestEnableNestedToolexec(t *testing.T) {
 	exe, err := os.Executable()
 	require.NoError(t, err)
 
+	// Built rather than hardcoded: the quoting depends on whether the test
+	// binary's own path contains a space, which varies by machine.
+	innerFlag, err := util.BuildToolexecFlag(exe)
+	require.NoError(t, err)
+	wantToken, err := util.QuoteGoflagsToken(innerFlag)
+	require.NoError(t, err)
+
 	t.Run("appends to existing GOFLAGS and sets the nested marker", func(t *testing.T) {
 		t.Setenv("GOFLAGS", "-mod=mod")
 		t.Setenv(util.EnvOtelcNestedToolexec, "")
@@ -714,7 +721,7 @@ func TestEnableNestedToolexec(t *testing.T) {
 
 		goflags := os.Getenv("GOFLAGS")
 		assert.Contains(t, goflags, "-mod=mod", "existing flags are preserved")
-		assert.Contains(t, goflags, "'-toolexec="+exe+" toolexec'", "otelc is added as the toolexec")
+		assert.Contains(t, goflags, wantToken, "otelc is added as the toolexec")
 		assert.Equal(t, "1", os.Getenv(util.EnvOtelcNestedToolexec))
 	})
 
@@ -724,8 +731,83 @@ func TestEnableNestedToolexec(t *testing.T) {
 
 		require.NoError(t, EnableNestedToolexec())
 
-		assert.Equal(t, "'-toolexec="+exe+" toolexec'", os.Getenv("GOFLAGS"))
+		assert.Equal(t, wantToken, os.Getenv("GOFLAGS"))
 	})
+
+	t.Run("GOFLAGS survives both splits cmd/go performs", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcNestedToolexec, "")
+
+		require.NoError(t, EnableNestedToolexec())
+
+		assert.Equal(t, []string{exe, "toolexec"}, parseToolexecFromGoflags(t, os.Getenv("GOFLAGS")))
+	})
+
+	t.Run("a spaced executable path survives both splits", func(t *testing.T) {
+		// EnableNestedToolexec resolves its own path, so the spaced case is
+		// exercised by composing GOFLAGS the same way and parsing it back.
+		spaced := filepath.Join(string(filepath.Separator)+"opt", "my tools", "otelc")
+		inner, buildErr := util.BuildToolexecFlag(spaced)
+		require.NoError(t, buildErr)
+		token, quoteErr := util.QuoteGoflagsToken(inner)
+		require.NoError(t, quoteErr)
+
+		assert.Equal(t, []string{spaced, "toolexec"}, parseToolexecFromGoflags(t, token))
+	})
+
+	t.Run("a path containing a single quote is rejected with an actionable error", func(t *testing.T) {
+		// Both quote kinds end up in the token, which GOFLAGS cannot encode.
+		inner, buildErr := util.BuildToolexecFlag("/home/it's me/otelc")
+		require.NoError(t, buildErr, "the inner flag itself is representable")
+
+		_, quoteErr := util.QuoteGoflagsToken(inner)
+		require.Error(t, quoteErr, "but it cannot be nested inside GOFLAGS")
+	})
+}
+
+// splitQuoted mirrors cmd/internal/quoted.Split, which is what cmd/go uses for
+// both GOFLAGS and the -toolexec value: whitespace-separated, with `'` or `"`
+// grouping, and no unescaping inside a quoted run. Reimplemented here rather
+// than reusing the production helpers so the tests below check the round trip
+// against the real format instead of against otelc's own encoder.
+func splitQuoted(t *testing.T, s string) []string {
+	t.Helper()
+	isSpace := func(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+	var out []string
+	for len(s) > 0 {
+		for len(s) > 0 && isSpace(s[0]) {
+			s = s[1:]
+		}
+		if len(s) == 0 {
+			break
+		}
+		if q := s[0]; q == '"' || q == '\'' {
+			s = s[1:]
+			end := strings.IndexByte(s, q)
+			require.GreaterOrEqual(t, end, 0, "unterminated %c-quoted run in %q", q, s)
+			out = append(out, s[:end])
+			s = s[end+1:]
+			continue
+		}
+		end := 0
+		for end < len(s) && !isSpace(s[end]) {
+			end++
+		}
+		out = append(out, s[:end])
+		s = s[end:]
+	}
+	return out
+}
+
+// parseToolexecFromGoflags walks the same two split layers cmd/go does and
+// returns the argv it would end up executing for -toolexec.
+func parseToolexecFromGoflags(t *testing.T, goflags string) []string {
+	t.Helper()
+	flags := splitQuoted(t, goflags)
+	require.Len(t, flags, 1, "expected a lone -toolexec flag in %q", goflags)
+	value, ok := strings.CutPrefix(flags[0], "-toolexec=")
+	require.True(t, ok, "flag %q is not a -toolexec entry", flags[0])
+	return splitQuoted(t, value)
 }
 
 // versionMarkerPattern documents the exact tool-ID shape the go build cache

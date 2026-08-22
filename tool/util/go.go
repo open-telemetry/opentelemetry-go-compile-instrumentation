@@ -171,6 +171,18 @@ func QuoteGoflagsToken(token string) (string, error) {
 	}
 }
 
+// BuildToolexecFlag returns the -toolexec flag that points the go command at
+// the given executable in toolexec mode. execPath is quoted because cmd/go
+// splits the flag's value with cmd/internal/quoted.Split, so an unquoted path
+// containing a space would be read as a path plus extra arguments.
+func BuildToolexecFlag(execPath string) (string, error) {
+	quotedPath, err := QuoteGoflagsToken(execPath)
+	if err != nil {
+		return "", ex.Wrapf(err, "quoting otelc executable path for -toolexec")
+	}
+	return "-toolexec=" + quotedPath + " toolexec", nil
+}
+
 // FindFlagValue finds the value of a flag in the command line.
 func FindFlagValue(cmd []string, flag string) string {
 	flagWithValue := flag + "="
