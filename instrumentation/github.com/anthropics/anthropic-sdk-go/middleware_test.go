@@ -653,3 +653,24 @@ func assertBoolAttribute(t *testing.T, attrs []attribute.KeyValue, key string, e
 	require.True(t, ok, "attribute %s not found", key)
 	assert.Equal(t, expected, val.AsBool(), "attribute %s", key)
 }
+
+func TestIsSSEContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		want        bool
+	}{
+		{"lowercase", "text/event-stream", true},
+		{"mixed case", "Text/Event-Stream", true},
+		{"uppercase with parameter", "TEXT/EVENT-STREAM; charset=utf-8", true},
+		{"json", "application/json", false},
+		{"empty", "", false},
+		{"prefix only", "text/event-streamx", false},
+		{"malformed parameter", "text/event-stream; ::", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isSSEContentType(tt.contentType))
+		})
+	}
+}
