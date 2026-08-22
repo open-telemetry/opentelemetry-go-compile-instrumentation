@@ -36,24 +36,24 @@ func TestGetRedisV9Statement(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "GET command",
+			name:     "GET command with only key",
 			cmd:      redis.NewCmd(context.Background(), "get", "mykey"),
 			expected: "get mykey",
 		},
 		{
-			name:     "SET command with value",
+			name:     "SET command redacts value by default",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", "myvalue"),
-			expected: "set mykey myvalue",
+			expected: "set mykey ?",
 		},
 		{
-			name:     "HSET command",
+			name:     "HSET command redacts field values by default",
 			cmd:      redis.NewCmd(context.Background(), "hset", "myhash", "field1", "value1"),
-			expected: "hset myhash field1 value1",
+			expected: "hset myhash ? ?",
 		},
 		{
-			name:     "DEL command",
+			name:     "DEL command redacts second key by default",
 			cmd:      redis.NewCmd(context.Background(), "del", "key1", "key2"),
-			expected: "del key1 key2",
+			expected: "del key1 ?",
 		},
 		{
 			name:     "command with nil arg",
@@ -61,19 +61,52 @@ func TestGetRedisV9Statement(t *testing.T) {
 			expected: "set <nil>",
 		},
 		{
-			name:     "command with int arg",
+			name:     "command with int arg redacted by default",
 			cmd:      redis.NewCmd(context.Background(), "expire", "mykey", 60),
-			expected: "expire mykey 60",
+			expected: "expire mykey ?",
 		},
 		{
-			name:     "command with bool arg true",
+			name:     "command with bool arg true redacted by default",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", true),
-			expected: "set mykey true",
+			expected: "set mykey ?",
 		},
 		{
-			name:     "command with bool arg false",
+			name:     "command with bool arg false redacted by default",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", false),
-			expected: "set mykey false",
+			expected: "set mykey ?",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getRedisV9Statement(tt.cmd)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetRedisV9Statement_CaptureFull(t *testing.T) {
+	t.Setenv("OTEL_REDIS_CAPTURE_FULL_STATEMENT", "true")
+
+	tests := []struct {
+		name     string
+		cmd      redis.Cmder
+		expected string
+	}{
+		{
+			name:     "SET command captures full value",
+			cmd:      redis.NewCmd(context.Background(), "set", "mykey", "myvalue"),
+			expected: "set mykey myvalue",
+		},
+		{
+			name:     "HSET command captures full values",
+			cmd:      redis.NewCmd(context.Background(), "hset", "myhash", "field1", "value1"),
+			expected: "hset myhash field1 value1",
+		},
+		{
+			name:     "GET command unchanged",
+			cmd:      redis.NewCmd(context.Background(), "get", "mykey"),
+			expected: "get mykey",
 		},
 		{
 			name:     "AUTH password",
@@ -164,12 +197,12 @@ func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
 		{
 			name:     "HELLO handshake with AUTH",
 			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
-			expected: "hello 3 auth ? ?",
+			expected: "hello 3 ? ? ?",
 		},
 		{
-			name:     "HELLO keeps SETNAME visible",
+			name:     "HELLO with SETNAME",
 			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret", "setname", "myapp"),
-			expected: "hello 3 auth ? ? setname myapp",
+			expected: "hello 3 ? ? ? ? ?",
 		},
 		{
 			name:     "HELLO without AUTH is untouched",
@@ -179,7 +212,7 @@ func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
 		{
 			name:     "key literally named auth is not a credential",
 			cmd:      redis.NewCmd(context.Background(), "get", "auth", "token"),
-			expected: "get auth token",
+			expected: "get auth ?",
 		},
 	}
 
@@ -188,6 +221,40 @@ func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
 			result := getRedisV9Statement(tt.cmd)
 			assert.Equal(t, tt.expected, result)
 			assert.NotContains(t, result, "s3cret", "the password must never reach db.query.text")
+		})
+	}
+}
+
+func TestGetRedisV9Statement_CredentialsAlwaysRedacted(t *testing.T) {
+	t.Setenv("OTEL_REDIS_CAPTURE_FULL_STATEMENT", "true")
+
+	tests := []struct {
+		name     string
+		cmd      redis.Cmder
+		expected string
+	}{
+		{
+			name:     "AUTH credentials redacted even with full capture",
+			cmd:      redis.NewCmd(context.Background(), "auth", "s3cret"),
+			expected: "auth ?",
+		},
+		{
+			name:     "AUTH with username redacted even with full capture",
+			cmd:      redis.NewCmd(context.Background(), "auth", "default", "s3cret"),
+			expected: "auth ? ?",
+		},
+		{
+			name:     "HELLO AUTH redacted even with full capture",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			expected: "hello 3 auth ? ?",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getRedisV9Statement(tt.cmd)
+			assert.Equal(t, tt.expected, result)
+			assert.NotContains(t, result, "s3cret")
 		})
 	}
 }
@@ -308,7 +375,7 @@ func TestProcessHook_RedactsAuthCredentials(t *testing.T) {
 			name:      "HELLO AUTH",
 			cmd:       redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
 			spanName:  "hello",
-			wantQuery: "hello 3 auth ? ?",
+			wantQuery: "hello 3 ? ? ?",
 		},
 	}
 
@@ -340,6 +407,63 @@ func TestProcessHook_RedactsAuthCredentials(t *testing.T) {
 			assert.Equal(t, tt.wantQuery, queryText)
 			assert.NotContains(t, queryText, "s3cret")
 		})
+	}
+}
+
+func TestProcessHook_RedactsValues(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
+		return nil
+	})
+
+	cmd := redis.NewCmd(context.Background(), "set", "session:42", "s3cret-session-token")
+	err := processHook(context.Background(), cmd)
+	assert.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	for _, attr := range span.Attributes() {
+		if string(attr.Key) == "db.query.text" {
+			val := attr.Value.AsString()
+			assert.Equal(t, "set session:42 ?", val)
+			assert.NotContains(t, val, "s3cret-session-token",
+				"sensitive value must not appear in db.query.text by default")
+		}
+	}
+}
+
+func TestProcessHook_CaptureFullStatement(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+	t.Setenv("OTEL_REDIS_CAPTURE_FULL_STATEMENT", "true")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
+		return nil
+	})
+
+	cmd := redis.NewCmd(context.Background(), "set", "session:42", "s3cret-session-token")
+	err := processHook(context.Background(), cmd)
+	assert.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	for _, attr := range span.Attributes() {
+		if string(attr.Key) == "db.query.text" {
+			val := attr.Value.AsString()
+			assert.Equal(t, "set session:42 s3cret-session-token", val)
+		}
 	}
 }
 
@@ -447,6 +571,38 @@ func TestProcessPipelineHook_CreatesSpan(t *testing.T) {
 	}
 	assert.Equal(t, "redis", attrMap["db.system.name"])
 	assert.Equal(t, "pipeline", attrMap["db.operation.name"])
+}
+
+func TestProcessPipelineHook_RedactsValues(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
+		return nil
+	})
+
+	cmds := []redis.Cmder{
+		redis.NewCmd(context.Background(), "set", "key1", "secret-value"),
+		redis.NewCmd(context.Background(), "hset", "hash", "field", "sensitive-data"),
+	}
+	err := pipelineHook(context.Background(), cmds)
+	assert.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	for _, attr := range spans[0].Attributes() {
+		if string(attr.Key) == "db.query.text" {
+			val := attr.Value.AsString()
+			assert.NotContains(t, val, "secret-value",
+				"sensitive value must not appear in pipeline db.query.text")
+			assert.NotContains(t, val, "sensitive-data",
+				"sensitive value must not appear in pipeline db.query.text")
+		}
+	}
 }
 
 func TestProcessPipelineHook_TruncatesLongPipeline(t *testing.T) {
