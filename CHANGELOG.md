@@ -20,5 +20,7 @@ The full list of changes can be found in the compare view for the respective rel
 
 ### Fixed
 
+- database/sql spans created by a before hook are now always ended, even if instrumentation is disabled mid-operation. The after hooks and `instrumentEnd` re-checked `Enable()` and returned before `span.End()`, so a span created while enabled leaked if instrumentation was disabled before the operation completed. This mirrors the net/http fix in [#1094](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1094). ([#1206](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1206))
+
 <!-- Released section -->
 <!-- Don't change this section unless doing release -->
