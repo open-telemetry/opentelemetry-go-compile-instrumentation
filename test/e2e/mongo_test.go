@@ -42,7 +42,10 @@ func TestMongo(t *testing.T) {
 	testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
 	testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
 	testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
-	testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
+	// Do not hardcode 127.0.0.1: on Linux CI Docker often binds to the bridge
+	// address (e.g. 172.17.0.1). Assert the peer attribute is present instead.
+	testutil.RequireAttributeExists(t, insertSpan, "network.peer.address")
+	require.NotEmpty(t, testutil.Attrs(insertSpan)["network.peer.address"])
 	testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
 }
 
@@ -51,8 +54,8 @@ func startMongoContainer(t *testing.T) string {
 
 	ctx := t.Context()
 	mongoContainer, err := mongodb.Run(ctx, "mongo:7")
-	testcontainers.CleanupContainer(t, mongoContainer)
 	require.NoError(t, err)
+	testcontainers.CleanupContainer(t, mongoContainer)
 
 	uri, err := mongoContainer.ConnectionString(ctx)
 	require.NoError(t, err)
