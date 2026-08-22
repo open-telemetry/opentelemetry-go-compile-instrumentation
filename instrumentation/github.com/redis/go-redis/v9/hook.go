@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,16 +149,25 @@ func (o *otelRedisHook) DialHook(next redis.DialHook) redis.DialHook {
 	}
 }
 
+// captureFullStatement reports whether db.query.text should include
+// full command argument values. When false (the default), only the
+// command name and key are captured; all subsequent arguments are
+// replaced with "?" to avoid leaking sensitive data into traces.
+func captureFullStatement() bool {
+	return strings.EqualFold(os.Getenv("OTEL_REDIS_CAPTURE_FULL_STATEMENT"), "true")
+}
+
 func getRedisV9Statement(cmd redis.Cmder) string {
 	args := cmd.Args()
-	redactStart, redactEnd := redisV9CredentialRedactRange(cmd.Name(), args)
+	credStart, credEnd := redisV9CredentialRedactRange(cmd.Name(), args)
+	valStart, valEnd := redisV9ValueRedactRange(args)
 
 	b := make([]byte, 0, 64)
 	for i, arg := range args {
 		if i > 0 {
 			b = append(b, ' ')
 		}
-		if i >= redactStart && i < redactEnd {
+		if (i >= credStart && i < credEnd) || (i >= valStart && i < valEnd) {
 			b = append(b, redisQueryTextRedact...)
 			continue
 		}
@@ -187,6 +197,17 @@ func redisV9CredentialRedactRange(name string, args []interface{}) (start, end i
 		}
 	}
 	return 0, 0
+}
+
+// redisV9ValueRedactRange returns a half-open index range [2, len(args)) of
+// arguments that carry data values and should be redacted by default. Returns
+// (0, 0) when OTEL_REDIS_CAPTURE_FULL_STATEMENT is "true" or the command
+// has no value arguments (index <= 1).
+func redisV9ValueRedactRange(args []interface{}) (start, end int) {
+	if len(args) <= 2 || captureFullStatement() {
+		return 0, 0
+	}
+	return 2, len(args)
 }
 
 func redisV9HelloAuthIndex(args []interface{}) int {
