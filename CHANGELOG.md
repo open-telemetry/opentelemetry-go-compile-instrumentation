@@ -13,6 +13,7 @@ The full list of changes can be found in the compare view for the respective rel
 ### Changed
 
 - ⚠️ **Breaking Change:** Template variable `{{ FuncName }}` should now be accessed with `{{ .FuncName }}`. ([#729](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/729))
+- `otelc go build` no longer rewrites the tool file or runs `go mod tidy` during a re-pin when neither the tool file nor `go.mod` changed and `go.sum` is present. ([#1136](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1136))
 
 ### Deprecated
 
