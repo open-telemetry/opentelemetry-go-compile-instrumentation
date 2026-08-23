@@ -583,7 +583,10 @@ func TestContainsTypeParameter(t *testing.T) {
 		tp,
 	))
 	assert.False(t, containsTypeParameter(
-		&dst.IndexListExpr{X: dst.NewIdent("Container"), Indices: []dst.Expr{dst.NewIdent("int"), dst.NewIdent("string")}},
+		&dst.IndexListExpr{
+			X:       dst.NewIdent("Container"),
+			Indices: []dst.Expr{dst.NewIdent("int"), dst.NewIdent("string")},
+		},
 		tp,
 	))
 
