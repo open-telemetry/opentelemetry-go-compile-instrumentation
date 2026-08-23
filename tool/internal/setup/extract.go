@@ -82,9 +82,9 @@ func extractGZip(bundleReader io.Reader, targetDir string) error {
 		return ex.Wrap(err)
 	}
 
-	gzReader, gzErr := gzip.NewReader(bundleReader)
-	if gzErr != nil {
-		return ex.Wrap(gzErr)
+	gzReader, err := gzip.NewReader(bundleReader)
+	if err != nil {
+		return ex.Wrap(err)
 	}
 	defer func() {
 		_ = gzReader.Close()
