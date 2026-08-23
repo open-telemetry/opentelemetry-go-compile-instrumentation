@@ -47,7 +47,23 @@ type KafkaRequest struct {
 	HasPartition bool
 	// HasOffset indicates whether Offset holds a meaningful value.
 	HasOffset bool
+	// Async indicates the producer span covers a fire-and-forget write to a
+	// kafka.Writer with Async enabled: the span only reflects local hand-off to
+	// the client library, not confirmed delivery, so its duration and status
+	// must not be read as broker round-trip latency or delivery success.
+	Async bool
 }
+
+// messagingKafkaAsyncKey has no OpenTelemetry semantic convention yet; it marks
+// producer spans for kafka.Writer.Async writes so consumers of the trace data
+// don't mistake enqueue-time duration and Unset/Ok status for confirmed
+// delivery (see KafkaRequest.Async).
+//
+// Deliberately emitted only as `true`, never as an explicit `false` for the
+// synchronous path: keeping the attribute absent for the (overwhelmingly more
+// common) sync case avoids adding an attribute to every producer span just to
+// say "this one is trustworthy", which is the default assumption anyway.
+const messagingKafkaAsyncKey = attribute.Key("messaging.kafka.async")
 
 // KafkaMessageKey returns a Kafka message key as a valid UTF-8 string.
 // Invalid UTF-8 sequences are replaced with the Unicode replacement character.
@@ -68,6 +84,9 @@ func KafkaRequestTraceAttrs(req KafkaRequest) []attribute.KeyValue {
 	switch req.Operation {
 	case KafkaOperationSend:
 		attrs = append(attrs, semconv.MessagingOperationTypeSend)
+		if req.Async {
+			attrs = append(attrs, messagingKafkaAsyncKey.Bool(true))
+		}
 	case KafkaOperationReceive:
 		attrs = append(attrs, semconv.MessagingOperationTypeReceive)
 	}

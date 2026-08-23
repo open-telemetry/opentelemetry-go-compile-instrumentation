@@ -43,6 +43,31 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 	return nil
 }
 
+// walkCallsWithEnclosingFunc visits every *dst.CallExpr in root and invokes fn
+// with the call and the top-level *dst.FuncDecl that contains it. Returns nil for
+// calls outside any function body, e.g. a package-level variable
+// initializer.
+func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool) {
+	stopped := false
+	for _, decl := range root.Decls {
+		if stopped {
+			return
+		}
+		enclosing, _ := decl.(*dst.FuncDecl)
+		dst.Inspect(decl, func(node dst.Node) bool {
+			if stopped {
+				return false
+			}
+			call, ok := node.(*dst.CallExpr)
+			if ok && !fn(call, enclosing) {
+				stopped = true
+				return false
+			}
+			return true
+		})
+	}
+}
+
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
@@ -60,18 +85,11 @@ func (*instrumentPhase) applyCallReplace(
 	// re-matching the original call pointer inside its own wrapper.
 	replacements := make(map[*dst.CallExpr]dst.Expr)
 	var wrapError error
-	dst.Inspect(root, func(node dst.Node) bool {
-		if wrapError != nil {
-			return false
-		}
-		call, ok := node.(*dst.CallExpr)
-		if !ok {
-			return true
-		}
+	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
 		if !matchesCallRule(call, r, importAliases) {
 			return true
 		}
-		wrapped, wrapErr := tmpl.compileExpression(call)
+		wrapped, wrapErr := tmpl.compileExpression(call, enclosing)
 		if wrapErr != nil {
 			wrapError = wrapErr
 			return false

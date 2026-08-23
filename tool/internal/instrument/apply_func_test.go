@@ -272,9 +272,7 @@ func TestSyntheticNamesDoNotShadowBareStyleGlobal(t *testing.T) {
 // function declaration it contains.
 func parseFileFunc(t *testing.T, source string) (*dst.File, *dst.FuncDecl) {
 	t.Helper()
-	parser := ast.NewAstParser()
-	file, err := parser.ParseSource(source)
-	require.NoError(t, err)
+	file := parseFile(t, source)
 	for _, decl := range file.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
 			return file, funcDecl
