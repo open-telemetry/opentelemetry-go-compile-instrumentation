@@ -158,6 +158,7 @@ func ImportAliasMap(file *dst.File) map[string]string {
 	}
 
 	aliases := make(map[string]string, len(specs))
+	explicit := make(map[string]bool, len(specs))
 	for _, imp := range specs {
 		if imp.Path == nil {
 			continue
@@ -167,15 +168,31 @@ func ImportAliasMap(file *dst.File) map[string]string {
 			continue
 		}
 		alias := defaultImportAlias(path)
+		isExplicit := false
 		if imp.Name != nil {
 			alias = imp.Name.Name
+			isExplicit = true
 		}
 		// Blank and dot imports don't introduce a qualified identifier that a
 		// type reference could use, so they can't participate in matching.
 		if alias == "" || alias == "_" || alias == "." {
 			continue
 		}
-		aliases[alias] = path
+
+		if existing, exists := aliases[alias]; exists && existing != path {
+			if isExplicit {
+				aliases[alias] = path
+				explicit[alias] = true
+			} else if !explicit[alias] {
+				// Disambiguate: two distinct default aliases collide; remove ambiguous key.
+				delete(aliases, alias)
+			}
+		} else {
+			aliases[alias] = path
+			if isExplicit {
+				explicit[alias] = true
+			}
+		}
 	}
 	return aliases
 }
