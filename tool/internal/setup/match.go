@@ -93,6 +93,9 @@ func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
 			if err3 := util.ValidateVersionRange(r.GetVersion()); err3 != nil {
 				return nil, ex.Wrapf(err3, "rule %q", name)
 			}
+			if err3 := rule.ValidateExcludeTargets(r.GetExcludeTargets()); err3 != nil {
+				return nil, ex.Wrapf(err3, "rule %q", name)
+			}
 			rules = append(rules, r)
 		}
 	}
@@ -110,6 +113,20 @@ func isRuleFile(name string) bool {
 
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
+}
+
+func filterExcludedTargets(importPath string, rules []rule.InstRule) []rule.InstRule {
+	if len(rules) == 0 {
+		return rules
+	}
+	filtered := rules[:0]
+	for _, r := range rules {
+		if rule.MatchesExcludeTargets(importPath, r.GetExcludeTargets()) {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	return filtered
 }
 
 type targetRule struct {
@@ -182,6 +199,7 @@ func (sp *SetupPhase) runMatch(
 		relevantRules = sp.matchGlobRules(dep, relevantRules, globRules)
 	}
 
+	relevantRules = filterExcludedTargets(dep.ImportPath, relevantRules)
 	if len(relevantRules) == 0 {
 		return set, nil
 	}
