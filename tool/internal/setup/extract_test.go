@@ -311,3 +311,13 @@ func TestExtractGZip_SkipsZipSlip(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractGZipInvalidGzip(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	corrupted := bytes.NewReader([]byte("not gzip data"))
+
+	err := extractGZip(corrupted, tmpDir)
+	require.Error(t, err)
+}
