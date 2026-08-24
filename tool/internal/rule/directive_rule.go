@@ -50,7 +50,7 @@ func (r *InstDirectiveRule) validate() error {
 	if strings.TrimSpace(r.Template) == "" {
 		return ex.Newf("template cannot be empty")
 	}
-	if _, err := ParseDirectiveTemplate(r.Template); err != nil {
+	if _, err := ParseFuncTemplate(r.Template); err != nil {
 		return ex.Wrapf(err, "invalid template syntax")
 	}
 	return nil

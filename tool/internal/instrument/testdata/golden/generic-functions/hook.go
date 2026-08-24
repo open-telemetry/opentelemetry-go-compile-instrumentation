@@ -9,6 +9,10 @@ import (
 	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
+// These hooks read their values from their own parameters rather than through
+// ctx.GetParam/GetReturnVal: those methods panic for generic targets, so the
+// positional parameters below are the only way to reach the values.
+
 func GenericFuncBefore(ctx hook.HookContext, p1 interface{}, p2 int) {}
 
 func GenericFuncAfter(ctx hook.HookContext, r1 interface{}, r2 error) {}

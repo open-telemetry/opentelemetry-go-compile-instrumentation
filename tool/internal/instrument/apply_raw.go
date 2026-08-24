@@ -47,6 +47,22 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 	}
 }
 
+// renderRawCode renders the shared function template variables (FuncName,
+// FuncArgument N, FuncReturn N, ...) in raw code injected by a raw rule. Raw
+// code that does not contain "{{" is returned unchanged. hash salts synthetic
+// argument/return names the same way InstRawRule.Identity salts other rules'
+// trampoline/template names.
+func renderRawCode(raw string, decl *dst.FuncDecl, hash string) (string, error) {
+	if !strings.Contains(raw, "{{") {
+		return raw, nil
+	}
+	tmpl, err := rule.ParseFuncTemplate(raw)
+	if err != nil {
+		return "", ex.Wrap(err)
+	}
+	return tmpl.Execute(newFuncTemplateData(decl, nil, nil, hash))
+}
+
 type insertPos struct {
 	pattern   *regexp.Regexp
 	placement string
@@ -116,9 +132,15 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
+
+	raw, err := renderRawCode(r.Raw, decl, r.Identity())
+	if err != nil {
+		return ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
+	}
+
 	// Parse the raw code into AST statements
 	p := ast.NewAstParser()
-	stmts, err := p.ParseSnippet(r.Raw)
+	stmts, err := p.ParseSnippet(raw)
 	if err != nil {
 		return err
 	}
@@ -130,7 +152,10 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 			return ex.Wrapf(restoreErr, "failed to restore the AST")
 		}
 
-		pattern := regexp.MustCompile(r.Pattern)
+		pattern, compileErr := regexp.Compile(r.Pattern)
+		if compileErr != nil {
+			return ex.Wrapf(compileErr, "invalid raw rule pattern %q", r.Pattern)
+		}
 		pos := insertPos{
 			pattern:   pattern,
 			placement: r.Placement,
@@ -151,7 +176,7 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 
 // applyRawRule injects the raw code into the target function at the beginning
 // of the function.
-func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
+func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
 	// Find the target function to be instrumented
 	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {

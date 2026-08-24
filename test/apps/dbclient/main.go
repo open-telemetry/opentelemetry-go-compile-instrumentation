@@ -13,17 +13,29 @@ import (
 	"log"
 	"log/slog"
 
-	_ "go.opentelemetry.io/otelc/test/shared/testdb"
+	"go.opentelemetry.io/otelc/test/shared/testdb"
 )
 
 var (
 	driverName = flag.String("driver", "testdb", "The database driver name")
 	dsn        = flag.String("dsn", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", "The data source name")
-	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-fail, prepare, all")
+	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-fail, prepare, opendb, all")
 )
 
 func main() {
 	flag.Parse()
+
+	if *op == "opendb" {
+		// Exercises sql.OpenDB's driver.Connector path (hook_opendb), as
+		// opposed to sql.Open's driver-name-string path exercised by every
+		// other op: the connector wraps the registered "mysql" test driver
+		// without going through sql.Open's driverName argument at all.
+		db := sql.OpenDB(testdb.NewConnector(*dsn))
+		defer db.Close()
+		doPing(context.Background(), db)
+		slog.Info("database operations completed successfully")
+		return
+	}
 
 	db, err := sql.Open(*driverName, *dsn)
 	if err != nil {

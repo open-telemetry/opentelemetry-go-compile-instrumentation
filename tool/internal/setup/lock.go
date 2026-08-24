@@ -56,7 +56,7 @@ func withBuildLock(ctx context.Context, fn func(context.Context) error) error {
 	if buildLockHeld(ctx) {
 		return fn(ctx)
 	}
-	release, err := AcquireBuildLock(ctx)
+	release, err := acquireBuildLock(ctx)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func withBuildLock(ctx context.Context, fn func(context.Context) error) error {
 	return fn(contextWithBuildLockHeld(ctx))
 }
 
-// AcquireBuildLock serializes otelc invocations that mutate the module.
+// acquireBuildLock serializes otelc invocations that mutate the module.
 // Without it, concurrent runs race on go.mod/go.sum and .otelc-build/ and
 // a second invocation can snapshot already-mutated state as its "original".
 // If the work dir does not exist the call is a no-op (nothing to protect).
@@ -72,7 +72,7 @@ func withBuildLock(ctx context.Context, fn func(context.Context) error) error {
 // file; the holder removes the file on release so a stale handle must be
 // detected and retried rather than treated as a win.
 // The returned release function must be called (deferred) by the caller.
-func AcquireBuildLock(ctx context.Context) (func(), error) {
+func acquireBuildLock(ctx context.Context) (func(), error) {
 	logger := util.LoggerFromContext(ctx)
 	path := buildLockPath()
 

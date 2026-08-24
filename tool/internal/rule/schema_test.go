@@ -11,90 +11,90 @@ import (
 )
 
 func TestIsValidSelector(t *testing.T) {
-	for _, sel := range AllSelectors() {
-		assert.Truef(t, IsValidSelector(string(sel)), "AllSelectors entry %q must be valid", sel)
+	for _, sel := range allSelectors() {
+		assert.Truef(t, isValidSelector(string(sel)), "allSelectors entry %q must be valid", sel)
 	}
-	assert.False(t, IsValidSelector("bogus"))
-	assert.False(t, IsValidSelector(""))
-	assert.False(t, IsValidSelector("inject_hooks")) // modifier, not selector
+	assert.False(t, isValidSelector("bogus"))
+	assert.False(t, isValidSelector(""))
+	assert.False(t, isValidSelector("inject_hooks")) // modifier, not selector
 }
 
 func TestIsValidModifier(t *testing.T) {
-	for _, mod := range AllModifiers() {
-		assert.Truef(t, IsValidModifier(string(mod)), "AllModifiers entry %q must be valid", mod)
+	for _, mod := range allModifiers() {
+		assert.Truef(t, isValidModifier(string(mod)), "allModifiers entry %q must be valid", mod)
 	}
-	assert.False(t, IsValidModifier("bogus"))
-	assert.False(t, IsValidModifier(""))
-	assert.False(t, IsValidModifier("inject_hook")) // typo of inject_hooks
-	assert.False(t, IsValidModifier("func"))        // selector, not modifier
+	assert.False(t, isValidModifier("bogus"))
+	assert.False(t, isValidModifier(""))
+	assert.False(t, isValidModifier("inject_hook")) // typo of inject_hooks
+	assert.False(t, isValidModifier("func"))        // selector, not modifier
 }
 
 func TestAllSelectorsComplete(t *testing.T) {
-	got := AllSelectors()
+	got := allSelectors()
 	require.Len(t, got, len(selectors))
-	seen := make(map[Selector]struct{}, len(got))
+	seen := make(map[selector]struct{}, len(got))
 	for _, sel := range got {
 		_, dup := seen[sel]
-		assert.Falsef(t, dup, "duplicate selector %q in AllSelectors", sel)
+		assert.Falsef(t, dup, "duplicate selector %q in allSelectors", sel)
 		seen[sel] = struct{}{}
 		_, registered := selectors[sel]
-		assert.Truef(t, registered, "AllSelectors entry %q missing from selectors map", sel)
+		assert.Truef(t, registered, "allSelectors entry %q missing from selectors map", sel)
 	}
 }
 
 func TestAllModifiersComplete(t *testing.T) {
-	got := AllModifiers()
+	got := allModifiers()
 	require.Len(t, got, len(modifiers))
-	seen := make(map[Modifier]struct{}, len(got))
+	seen := make(map[modifier]struct{}, len(got))
 	for _, mod := range got {
 		_, dup := seen[mod]
-		assert.Falsef(t, dup, "duplicate modifier %q in AllModifiers", mod)
+		assert.Falsef(t, dup, "duplicate modifier %q in allModifiers", mod)
 		seen[mod] = struct{}{}
 		_, registered := modifiers[mod]
-		assert.Truef(t, registered, "AllModifiers entry %q missing from modifiers map", mod)
+		assert.Truef(t, registered, "allModifiers entry %q missing from modifiers map", mod)
 	}
 }
 
 func TestStringAliasesMatchTypedConstants(t *testing.T) {
 	selectorCases := []struct {
 		alias string
-		typed Selector
+		typed selector
 	}{
-		{SelTarget, SelectorTarget},
-		{SelVersion, SelectorVersion},
-		{SelFunc, SelectorFunc},
-		{SelRecv, SelectorRecv},
-		{SelStruct, SelectorStruct},
-		{SelFunctionCall, SelectorFunctionCall},
-		{SelDirective, SelectorDirective},
-		{SelKind, SelectorKind},
-		{SelIdentifier, SelectorIdentifier},
-		{SelSignature, SelectorSignature},
-		{SelSignatureContains, SelectorSignatureContains},
-		{SelResult, SelectorResult},
-		{SelLastResult, SelectorLastResult},
-		{SelParam, SelectorParam},
-		{SelPattern, SelectorPattern},
-		{SelPlacement, SelectorPlacement},
-		{WhereFile, SelectorFile},
-		{CombAllOf, SelectorAllOf},
-		{CombOneOf, SelectorOneOf},
-		{CombNot, SelectorNot},
+		{selTarget, selectorTarget},
+		{selVersion, selectorVersion},
+		{SelFunc, selectorFunc},
+		{selRecv, selectorRecv},
+		{SelStruct, selectorStruct},
+		{SelFunctionCall, selectorFunctionCall},
+		{SelDirective, selectorDirective},
+		{selKind, selectorKind},
+		{SelIdentifier, selectorIdentifier},
+		{selSignature, selectorSignature},
+		{selSignatureContains, selectorSignatureContains},
+		{selResult, selectorResult},
+		{selLastResult, selectorLastResult},
+		{selParam, selectorParam},
+		{selPattern, selectorPattern},
+		{selPlacement, selectorPlacement},
+		{WhereFile, selectorFile},
+		{combAllOf, selectorAllOf},
+		{combOneOf, selectorOneOf},
+		{combNot, selectorNot},
 	}
 	for _, c := range selectorCases {
 		assert.Equalf(t, string(c.typed), c.alias, "alias must equal string(%v)", c.typed)
 	}
 	modifierCases := []struct {
 		alias string
-		typed Modifier
+		typed modifier
 	}{
-		{"inject_hooks", ModifierInjectHooks},
-		{"inject_code", ModifierInjectCode},
-		{"add_struct_fields", ModifierAddStructFields},
-		{"add_file", ModifierAddFile},
-		{"wrap_call", ModifierWrapCall},
-		{"expand_directive", ModifierExpandDirective},
-		{"assign_value", ModifierAssignValue},
+		{"inject_hooks", modifierInjectHooks},
+		{"inject_code", modifierInjectCode},
+		{"add_struct_fields", modifierAddStructFields},
+		{"add_file", modifierAddFile},
+		{"wrap_call", modifierWrapCall},
+		{"expand_directive", modifierExpandDirective},
+		{"assign_value", modifierAssignValue},
 	}
 	for _, c := range modifierCases {
 		assert.Equalf(t, string(c.typed), c.alias, "alias must equal string(%v)", c.typed)

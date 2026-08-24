@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package setup_test
+package setup
 
 import (
 	"os"
@@ -14,23 +14,22 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
-	"go.opentelemetry.io/otelc/tool/internal/setup"
 )
 
-// --- Filter interface and context ---
+// --- filter interface and context ---
 
 func TestMatchContext_EmptyDecls(t *testing.T) {
 	tree := &dst.File{Name: &dst.Ident{Name: "pkg"}, Decls: nil}
-	ctx := &setup.MatchContext{
+	ctx := &matchContext{
 		SourceFile: "/tmp/empty.go",
 		AST:        tree,
 	}
 
-	if (&setup.FuncFilter{Func: "Missing"}).Match(ctx) {
-		t.Fatal("FuncFilter.Match(empty decls) = true, want false")
+	if (&funcFilter{Func: "Missing"}).Match(ctx) {
+		t.Fatal("funcFilter.Match(empty decls) = true, want false")
 	}
-	if (&setup.StructFilter{Struct: "Missing"}).Match(ctx) {
-		t.Fatal("StructFilter.Match(empty decls) = true, want false")
+	if (&structFilter{Struct: "Missing"}).Match(ctx) {
+		t.Fatal("structFilter.Match(empty decls) = true, want false")
 	}
 }
 
@@ -53,14 +52,14 @@ func TestIsTestFilter_Match(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := &setup.MatchContext{
+			ctx := &matchContext{
 				IsTest:     tt.isTest,
 				SourceFile: "/tmp/source.go",
 				AST:        tree,
 			}
-			f := &setup.IsTestFilter{ShouldMatch: tt.shouldMatch}
+			f := &isTestFilter{ShouldMatch: tt.shouldMatch}
 			if got := f.Match(ctx); got != tt.want {
-				t.Fatalf("IsTestFilter{ShouldMatch:%v}.Match({IsTest:%v}) = %v, want %v",
+				t.Fatalf("isTestFilter{ShouldMatch:%v}.Match({IsTest:%v}) = %v, want %v",
 					tt.shouldMatch, tt.isTest, got, tt.want)
 			}
 		})
@@ -69,14 +68,14 @@ func TestIsTestFilter_Match(t *testing.T) {
 
 // --- Leaf filters ---
 
-func parseSource(t *testing.T, src string) *setup.MatchContext {
+func parseSource(t *testing.T, src string) *matchContext {
 	t.Helper()
 	parser := ast.NewAstParser()
 	tree, err := parser.ParseSource(src)
 	if err != nil {
 		t.Fatalf("parseSource: %v", err)
 	}
-	return &setup.MatchContext{
+	return &matchContext{
 		SourceFile: "/tmp/source.go",
 		AST:        tree,
 	}
@@ -92,19 +91,19 @@ func (m *MyType) Method() {}
 
 	tests := []struct {
 		name string
-		f    *setup.FuncFilter
+		f    *funcFilter
 		want bool
 	}{
-		{name: "free function", f: &setup.FuncFilter{Func: "Foo"}, want: true},
-		{name: "method with recv", f: &setup.FuncFilter{Func: "Method", Recv: "*MyType"}, want: true},
-		{name: "wrong recv", f: &setup.FuncFilter{Func: "Method", Recv: "*Other"}, want: false},
-		{name: "method without recv", f: &setup.FuncFilter{Func: "Method"}, want: false},
+		{name: "free function", f: &funcFilter{Func: "Foo"}, want: true},
+		{name: "method with recv", f: &funcFilter{Func: "Method", Recv: "*MyType"}, want: true},
+		{name: "wrong recv", f: &funcFilter{Func: "Method", Recv: "*Other"}, want: false},
+		{name: "method without recv", f: &funcFilter{Func: "Method"}, want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.f.Match(ctx); got != tt.want {
-				t.Fatalf("FuncFilter.Match() = %v, want %v", got, tt.want)
+				t.Fatalf("funcFilter.Match() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -118,19 +117,19 @@ type Reader interface{ Read() error }
 func NotAStruct() {}
 `)
 
-	if !(&setup.StructFilter{Struct: "Server"}).Match(ctx) {
-		t.Fatal("StructFilter.Match(Server) = false, want true")
+	if !(&structFilter{Struct: "Server"}).Match(ctx) {
+		t.Fatal("structFilter.Match(Server) = false, want true")
 	}
-	if (&setup.StructFilter{Struct: "Reader"}).Match(ctx) {
-		t.Fatal("StructFilter.Match(Reader) = true, want false")
+	if (&structFilter{Struct: "Reader"}).Match(ctx) {
+		t.Fatal("structFilter.Match(Reader) = true, want false")
 	}
-	// Interfaces no longer match, so `not: has_struct` now *includes* files
+	// Interfaces no longer match, so `Not: has_struct` now *includes* files
 	// declaring an interface of that name, where it previously excluded them.
-	if !(&setup.Not{Inner: &setup.StructFilter{Struct: "Reader"}}).Match(ctx) {
-		t.Fatal("Not(StructFilter(Reader)).Match = false, want true")
+	if !(&not{Inner: &structFilter{Struct: "Reader"}}).Match(ctx) {
+		t.Fatal("not(structFilter(Reader)).Match = false, want true")
 	}
-	if (&setup.StructFilter{Struct: "NotAStruct"}).Match(ctx) {
-		t.Fatal("StructFilter.Match(NotAStruct) = true, want false")
+	if (&structFilter{Struct: "NotAStruct"}).Match(ctx) {
+		t.Fatal("structFilter.Match(NotAStruct) = true, want false")
 	}
 }
 
@@ -170,9 +169,9 @@ func TestPackageNameFilter_Match(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := parseSource(t, tt.src)
-			f := &setup.PackageNameFilter{Name: tt.filterName}
+			f := &packageNameFilter{Name: tt.filterName}
 			if got := f.Match(ctx); got != tt.want {
-				t.Fatalf("PackageNameFilter{Name:%q}.Match(package %q) = %v, want %v",
+				t.Fatalf("packageNameFilter{Name:%q}.Match(package %q) = %v, want %v",
 					tt.filterName, ctx.AST.Name.Name, got, tt.want)
 			}
 		})
@@ -203,57 +202,57 @@ func TestDirectiveFilter_Match(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := parseSource(t, tt.src)
-			f := &setup.DirectiveFilter{Directive: tt.directive}
+			f := &directiveFilter{Directive: tt.directive}
 			if got := f.Match(ctx); got != tt.want {
-				t.Fatalf("DirectiveFilter{Directive:%q}.Match() = %v, want %v",
+				t.Fatalf("directiveFilter{Directive:%q}.Match() = %v, want %v",
 					tt.directive, got, tt.want)
 			}
 		})
 	}
 }
 
-// --- Build ---
+// --- build ---
 
 func TestBuild_NilWhere(t *testing.T) {
-	f, err := setup.Build(nil)
+	f, err := build(nil)
 	if err != nil {
-		t.Fatalf("Build(nil) error = %v, want nil", err)
+		t.Fatalf("build(nil) error = %v, want nil", err)
 	}
 	if f != nil {
-		t.Errorf("Build(nil) = %T, want nil", f)
+		t.Errorf("build(nil) = %T, want nil", f)
 	}
 }
 
 func TestBuild_FuncFilter(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{HasFunc: "ServeHTTP", HasRecv: "*serverHandler"}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
+		t.Fatalf("build(%+v) error = %v, want nil", where, err)
 	}
-	ff, ok := f.(*setup.FuncFilter)
+	ff, ok := f.(*funcFilter)
 	if !ok {
-		t.Fatalf("Build() returned %T, want *setup.FuncFilter", f)
+		t.Fatalf("build() returned %T, want *funcFilter", f)
 	}
 	if ff.Func != "ServeHTTP" {
-		t.Errorf("FuncFilter.Func = %q, want %q", ff.Func, "ServeHTTP")
+		t.Errorf("funcFilter.Func = %q, want %q", ff.Func, "ServeHTTP")
 	}
 	if ff.Recv != "*serverHandler" {
-		t.Errorf("FuncFilter.Recv = %q, want %q", ff.Recv, "*serverHandler")
+		t.Errorf("funcFilter.Recv = %q, want %q", ff.Recv, "*serverHandler")
 	}
 }
 
 func TestBuild_StructFilter(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{HasStruct: "Server"}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
+		t.Fatalf("build(%+v) error = %v, want nil", where, err)
 	}
-	sf, ok := f.(*setup.StructFilter)
+	sf, ok := f.(*structFilter)
 	if !ok {
-		t.Fatalf("Build() returned %T, want *setup.StructFilter", f)
+		t.Fatalf("build() returned %T, want *structFilter", f)
 	}
 	if sf.Struct != "Server" {
-		t.Errorf("StructFilter.Struct = %q, want %q", sf.Struct, "Server")
+		t.Errorf("structFilter.Struct = %q, want %q", sf.Struct, "Server")
 	}
 }
 
@@ -262,59 +261,59 @@ func boolPtr(b bool) *bool { return &b }
 func TestBuild_IsTestFilter(t *testing.T) {
 	t.Run("true matches test packages", func(t *testing.T) {
 		where := &rule.WhereDef{File: &rule.FilterDef{IsTest: boolPtr(true)}}
-		f, err := setup.Build(where)
+		f, err := build(where)
 		if err != nil {
-			t.Fatalf("Build(IsTest=true) error = %v, want nil", err)
+			t.Fatalf("build(IsTest=true) error = %v, want nil", err)
 		}
-		itf, ok := f.(*setup.IsTestFilter)
+		itf, ok := f.(*isTestFilter)
 		if !ok {
-			t.Fatalf("Build(IsTest=true) returned %T, want *setup.IsTestFilter", f)
+			t.Fatalf("build(IsTest=true) returned %T, want *isTestFilter", f)
 		}
 		if !itf.ShouldMatch {
-			t.Errorf("IsTestFilter.ShouldMatch = false, want true")
+			t.Errorf("isTestFilter.ShouldMatch = false, want true")
 		}
 	})
 
 	t.Run("false matches non-test packages", func(t *testing.T) {
 		where := &rule.WhereDef{File: &rule.FilterDef{IsTest: boolPtr(false)}}
-		f, err := setup.Build(where)
+		f, err := build(where)
 		if err != nil {
-			t.Fatalf("Build(IsTest=false) error = %v, want nil", err)
+			t.Fatalf("build(IsTest=false) error = %v, want nil", err)
 		}
-		itf, ok := f.(*setup.IsTestFilter)
+		itf, ok := f.(*isTestFilter)
 		if !ok {
-			t.Fatalf("Build(IsTest=false) returned %T, want *setup.IsTestFilter", f)
+			t.Fatalf("build(IsTest=false) returned %T, want *isTestFilter", f)
 		}
 		if itf.ShouldMatch {
-			t.Errorf("IsTestFilter.ShouldMatch = true, want false")
+			t.Errorf("isTestFilter.ShouldMatch = true, want false")
 		}
 	})
 
 	t.Run("nil is_test leaves filter nil", func(t *testing.T) {
-		// A nil IsTest must not produce an IsTestFilter — it means "unset".
+		// A nil IsTest must not produce an isTestFilter — it means "unset".
 		// We exercise this indirectly: a FilterDef with only IsTest==nil has no
-		// active predicate and Build must return an error, not silently
+		// active predicate and build must return an error, not silently
 		// construct a filter that treats nil as false.
 		where := &rule.WhereDef{File: &rule.FilterDef{}}
-		_, err := setup.Build(where)
+		_, err := build(where)
 		if err == nil {
-			t.Fatal("Build(empty FilterDef) error = nil, want error: nil IsTest must not count as active predicate")
+			t.Fatal("build(empty FilterDef) error = nil, want error: nil IsTest must not count as active predicate")
 		}
 	})
 }
 
 func TestBuild_PackageNameFilter(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{HasPackage: "main"}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(HasPackage=%q) error = %v, want nil", "main", err)
+		t.Fatalf("build(HasPackage=%q) error = %v, want nil", "main", err)
 	}
-	pnf, ok := f.(*setup.PackageNameFilter)
+	pnf, ok := f.(*packageNameFilter)
 	if !ok {
-		t.Fatalf("Build() returned %T, want *setup.PackageNameFilter", f)
+		t.Fatalf("build() returned %T, want *packageNameFilter", f)
 	}
 	if pnf.Name != "main" {
-		t.Errorf("PackageNameFilter.Name = %q, want %q", pnf.Name, "main")
+		t.Errorf("packageNameFilter.Name = %q, want %q", pnf.Name, "main")
 	}
 }
 
@@ -411,8 +410,8 @@ func TestBuild_ErrorCases(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := setup.Build(tt.where); err == nil {
-				t.Fatalf("Build(%+v) error = nil, want error", tt.where)
+			if _, err := build(tt.where); err == nil {
+				t.Fatalf("build(%+v) error = nil, want error", tt.where)
 			}
 		})
 	}
@@ -423,43 +422,43 @@ func TestBuild_AllOf(t *testing.T) {
 		{HasFunc: "Foo"},
 		{HasStruct: "Bar"},
 	}}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
+		t.Fatalf("build(%+v) error = %v, want nil", where, err)
 	}
-	allOf, ok := f.(setup.AllOf)
+	gotAllOf, ok := f.(allOf)
 	if !ok {
-		t.Fatalf("Build() returned %T, want setup.AllOf", f)
+		t.Fatalf("build() returned %T, want allOf", f)
 	}
-	if len(allOf) != 2 {
-		t.Fatalf("AllOf len = %d, want 2", len(allOf))
+	if len(gotAllOf) != 2 {
+		t.Fatalf("allOf len = %d, want 2", len(gotAllOf))
 	}
-	if _, isFunc := allOf[0].(*setup.FuncFilter); !isFunc {
-		t.Errorf("AllOf[0] = %T, want *setup.FuncFilter", allOf[0])
+	if _, isFunc := gotAllOf[0].(*funcFilter); !isFunc {
+		t.Errorf("allOf[0] = %T, want *funcFilter", gotAllOf[0])
 	}
-	if _, isStruct := allOf[1].(*setup.StructFilter); !isStruct {
-		t.Errorf("AllOf[1] = %T, want *setup.StructFilter", allOf[1])
+	if _, isStruct := gotAllOf[1].(*structFilter); !isStruct {
+		t.Errorf("allOf[1] = %T, want *structFilter", gotAllOf[1])
 	}
 }
 
 func TestBuild_AllOf_Empty(t *testing.T) {
 	// An explicit empty all-of: [] is present (non-nil slice) and compiles to an
-	// empty AllOf that matches vacuously, rather than erroring with "no active
+	// empty allOf that matches vacuously, rather than erroring with "no active
 	// predicate".
 	where := &rule.WhereDef{File: &rule.FilterDef{AllOf: []rule.FilterDef{}}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(empty AllOf) error = %v, want nil", err)
+		t.Fatalf("build(empty allOf) error = %v, want nil", err)
 	}
-	allOf, ok := f.(setup.AllOf)
+	gotAllOf, ok := f.(allOf)
 	if !ok {
-		t.Fatalf("Build(empty AllOf) = %T, want setup.AllOf", f)
+		t.Fatalf("build(empty allOf) = %T, want allOf", f)
 	}
-	if len(allOf) != 0 {
-		t.Fatalf("AllOf len = %d, want 0", len(allOf))
+	if len(gotAllOf) != 0 {
+		t.Fatalf("allOf len = %d, want 0", len(gotAllOf))
 	}
-	if !allOf.Match(nil) {
-		t.Error("empty AllOf.Match(nil) = false, want true (vacuous truth)")
+	if !gotAllOf.Match(nil) {
+		t.Error("empty allOf.Match(nil) = false, want true (vacuous truth)")
 	}
 }
 
@@ -467,28 +466,28 @@ func TestBuild_AllOf_Nested(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{AllOf: []rule.FilterDef{
 		{AllOf: []rule.FilterDef{{HasFunc: "Foo"}}},
 	}}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(nested AllOf) error = %v, want nil", err)
+		t.Fatalf("build(nested allOf) error = %v, want nil", err)
 	}
-	outer, ok := f.(setup.AllOf)
+	outer, ok := f.(allOf)
 	if !ok || len(outer) != 1 {
-		t.Fatalf("Build(nested) = %T, want setup.AllOf of len 1", f)
+		t.Fatalf("build(nested) = %T, want allOf of len 1", f)
 	}
-	if _, isNested := outer[0].(setup.AllOf); !isNested {
-		t.Errorf("AllOf[0] = %T, want nested setup.AllOf", outer[0])
+	if _, isNested := outer[0].(allOf); !isNested {
+		t.Errorf("allOf[0] = %T, want nested allOf", outer[0])
 	}
 }
 
 func TestBuild_AllOf_InvalidChild(t *testing.T) {
 	// An empty child FilterDef has no active predicate and must fail the build.
 	where := &rule.WhereDef{File: &rule.FilterDef{AllOf: []rule.FilterDef{{}}}}
-	if _, err := setup.Build(where); err == nil {
-		t.Fatal("Build(AllOf with empty child) error = nil, want error")
+	if _, err := build(where); err == nil {
+		t.Fatal("build(allOf with empty child) error = nil, want error")
 	}
 }
 
-// stubFilter is a Filter whose Match result is fixed, used to test AllOf
+// stubFilter is a filter whose Match result is fixed, used to test allOf
 // composition without parsing source. It records call count to assert
 // short-circuiting.
 type stubFilter struct {
@@ -496,7 +495,7 @@ type stubFilter struct {
 	calls  *int
 }
 
-func (s stubFilter) Match(*setup.MatchContext) bool {
+func (s stubFilter) Match(*matchContext) bool {
 	if s.calls != nil {
 		*s.calls++
 	}
@@ -506,17 +505,17 @@ func (s stubFilter) Match(*setup.MatchContext) bool {
 func TestAllOf_Match(t *testing.T) {
 	tests := []struct {
 		name     string
-		children setup.AllOf
+		children allOf
 		want     bool
 	}{
-		{"empty is vacuously true", setup.AllOf{}, true},
-		{"all children match", setup.AllOf{stubFilter{result: true}, stubFilter{result: true}}, true},
-		{"one child fails", setup.AllOf{stubFilter{result: true}, stubFilter{result: false}}, false},
+		{"empty is vacuously true", allOf{}, true},
+		{"all children match", allOf{stubFilter{result: true}, stubFilter{result: true}}, true},
+		{"one child fails", allOf{stubFilter{result: true}, stubFilter{result: false}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.children.Match(nil); got != tt.want {
-				t.Errorf("AllOf.Match() = %v, want %v", got, tt.want)
+				t.Errorf("allOf.Match() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -524,9 +523,9 @@ func TestAllOf_Match(t *testing.T) {
 
 func TestAllOf_Match_ShortCircuits(t *testing.T) {
 	calls := 0
-	a := setup.AllOf{stubFilter{result: false, calls: &calls}, stubFilter{result: true, calls: &calls}}
+	a := allOf{stubFilter{result: false, calls: &calls}, stubFilter{result: true, calls: &calls}}
 	if a.Match(nil) {
-		t.Fatal("AllOf.Match() = true, want false")
+		t.Fatal("allOf.Match() = true, want false")
 	}
 	if calls != 1 {
 		t.Errorf("evaluated %d children, want 1 (short-circuit on first non-match)", calls)
@@ -535,22 +534,22 @@ func TestAllOf_Match_ShortCircuits(t *testing.T) {
 
 func TestBuild_OneOf_Empty(t *testing.T) {
 	// An explicit empty one-of: [] is present (non-nil slice) and compiles to an
-	// empty OneOf that matches nothing (vacuous false), rather than erroring with
+	// empty oneOf that matches nothing (vacuous false), rather than erroring with
 	// "no active predicate".
 	where := &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{}}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(empty OneOf) error = %v, want nil", err)
+		t.Fatalf("build(empty oneOf) error = %v, want nil", err)
 	}
-	oneOf, ok := f.(setup.OneOf)
+	gotOneOf, ok := f.(oneOf)
 	if !ok {
-		t.Fatalf("Build(empty OneOf) = %T, want setup.OneOf", f)
+		t.Fatalf("build(empty oneOf) = %T, want oneOf", f)
 	}
-	if len(oneOf) != 0 {
-		t.Fatalf("OneOf len = %d, want 0", len(oneOf))
+	if len(gotOneOf) != 0 {
+		t.Fatalf("oneOf len = %d, want 0", len(gotOneOf))
 	}
-	if oneOf.Match(nil) {
-		t.Error("empty OneOf.Match(nil) = true, want false (no member matches)")
+	if gotOneOf.Match(nil) {
+		t.Error("empty oneOf.Match(nil) = true, want false (no member matches)")
 	}
 }
 
@@ -559,22 +558,22 @@ func TestBuild_OneOf(t *testing.T) {
 		{HasFunc: "Foo"},
 		{HasStruct: "Bar"},
 	}}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
+		t.Fatalf("build(%+v) error = %v, want nil", where, err)
 	}
-	oneOf, ok := f.(setup.OneOf)
+	gotOneOf, ok := f.(oneOf)
 	if !ok {
-		t.Fatalf("Build() returned %T, want setup.OneOf", f)
+		t.Fatalf("build() returned %T, want oneOf", f)
 	}
-	if len(oneOf) != 2 {
-		t.Fatalf("OneOf len = %d, want 2", len(oneOf))
+	if len(gotOneOf) != 2 {
+		t.Fatalf("oneOf len = %d, want 2", len(gotOneOf))
 	}
-	if _, isFunc := oneOf[0].(*setup.FuncFilter); !isFunc {
-		t.Errorf("OneOf[0] = %T, want *setup.FuncFilter", oneOf[0])
+	if _, isFunc := gotOneOf[0].(*funcFilter); !isFunc {
+		t.Errorf("oneOf[0] = %T, want *funcFilter", gotOneOf[0])
 	}
-	if _, isStruct := oneOf[1].(*setup.StructFilter); !isStruct {
-		t.Errorf("OneOf[1] = %T, want *setup.StructFilter", oneOf[1])
+	if _, isStruct := gotOneOf[1].(*structFilter); !isStruct {
+		t.Errorf("oneOf[1] = %T, want *structFilter", gotOneOf[1])
 	}
 }
 
@@ -582,41 +581,41 @@ func TestBuild_OneOf_Nested(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{
 		{OneOf: []rule.FilterDef{{HasFunc: "Foo"}}},
 	}}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(nested OneOf) error = %v, want nil", err)
+		t.Fatalf("build(nested oneOf) error = %v, want nil", err)
 	}
-	outer, ok := f.(setup.OneOf)
+	outer, ok := f.(oneOf)
 	if !ok || len(outer) != 1 {
-		t.Fatalf("Build(nested) = %T, want setup.OneOf of len 1", f)
+		t.Fatalf("build(nested) = %T, want oneOf of len 1", f)
 	}
-	if _, isNested := outer[0].(setup.OneOf); !isNested {
-		t.Errorf("OneOf[0] = %T, want nested setup.OneOf", outer[0])
+	if _, isNested := outer[0].(oneOf); !isNested {
+		t.Errorf("oneOf[0] = %T, want nested oneOf", outer[0])
 	}
 }
 
 func TestBuild_OneOf_InvalidChild(t *testing.T) {
 	// An empty child FilterDef has no active predicate and must fail the build.
 	where := &rule.WhereDef{File: &rule.FilterDef{OneOf: []rule.FilterDef{{}}}}
-	if _, err := setup.Build(where); err == nil {
-		t.Fatal("Build(OneOf with empty child) error = nil, want error")
+	if _, err := build(where); err == nil {
+		t.Fatal("build(oneOf with empty child) error = nil, want error")
 	}
 }
 
 func TestOneOf_Match(t *testing.T) {
 	tests := []struct {
 		name     string
-		children setup.OneOf
+		children oneOf
 		want     bool
 	}{
-		{"empty never matches", setup.OneOf{}, false},
-		{"one child matches", setup.OneOf{stubFilter{result: false}, stubFilter{result: true}}, true},
-		{"no children match", setup.OneOf{stubFilter{result: false}, stubFilter{result: false}}, false},
+		{"empty never matches", oneOf{}, false},
+		{"one child matches", oneOf{stubFilter{result: false}, stubFilter{result: true}}, true},
+		{"no children match", oneOf{stubFilter{result: false}, stubFilter{result: false}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.children.Match(nil); got != tt.want {
-				t.Errorf("OneOf.Match() = %v, want %v", got, tt.want)
+				t.Errorf("oneOf.Match() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -624,9 +623,9 @@ func TestOneOf_Match(t *testing.T) {
 
 func TestOneOf_Match_ShortCircuits(t *testing.T) {
 	calls := 0
-	o := setup.OneOf{stubFilter{result: true, calls: &calls}, stubFilter{result: false, calls: &calls}}
+	o := oneOf{stubFilter{result: true, calls: &calls}, stubFilter{result: false, calls: &calls}}
 	if !o.Match(nil) {
-		t.Fatal("OneOf.Match() = false, want true")
+		t.Fatal("oneOf.Match() = false, want true")
 	}
 	if calls != 1 {
 		t.Errorf("evaluated %d children, want 1 (short-circuit on first match)", calls)
@@ -635,49 +634,49 @@ func TestOneOf_Match_ShortCircuits(t *testing.T) {
 
 func TestBuild_Not(t *testing.T) {
 	where := &rule.WhereDef{File: &rule.FilterDef{Not: &rule.FilterDef{HasStruct: "Mock"}}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(%+v) error = %v, want nil", where, err)
+		t.Fatalf("build(%+v) error = %v, want nil", where, err)
 	}
-	not, ok := f.(*setup.Not)
+	not, ok := f.(*not)
 	if !ok {
-		t.Fatalf("Build() returned %T, want *setup.Not", f)
+		t.Fatalf("build() returned %T, want *not", f)
 	}
-	if _, isStruct := not.Inner.(*setup.StructFilter); !isStruct {
-		t.Errorf("Not.Inner = %T, want *setup.StructFilter", not.Inner)
+	if _, isStruct := not.Inner.(*structFilter); !isStruct {
+		t.Errorf("not.Inner = %T, want *structFilter", not.Inner)
 	}
 }
 
 func TestBuild_Not_Nested(t *testing.T) {
-	// not wrapping a not (double negation) compiles to nested Not combinators.
+	// not wrapping a not (double negation) compiles to nested not combinators.
 	where := &rule.WhereDef{File: &rule.FilterDef{Not: &rule.FilterDef{Not: &rule.FilterDef{HasFunc: "Foo"}}}}
-	f, err := setup.Build(where)
+	f, err := build(where)
 	if err != nil {
-		t.Fatalf("Build(nested Not) error = %v, want nil", err)
+		t.Fatalf("build(nested not) error = %v, want nil", err)
 	}
-	outer, ok := f.(*setup.Not)
+	outer, ok := f.(*not)
 	if !ok {
-		t.Fatalf("Build(nested) = %T, want *setup.Not", f)
+		t.Fatalf("build(nested) = %T, want *not", f)
 	}
-	if _, isNested := outer.Inner.(*setup.Not); !isNested {
-		t.Errorf("Not.Inner = %T, want nested *setup.Not", outer.Inner)
+	if _, isNested := outer.Inner.(*not); !isNested {
+		t.Errorf("not.Inner = %T, want nested *not", outer.Inner)
 	}
 }
 
 func TestBuild_Not_InvalidChild(t *testing.T) {
 	// An empty inner FilterDef has no active predicate and must fail the build.
 	where := &rule.WhereDef{File: &rule.FilterDef{Not: &rule.FilterDef{}}}
-	if _, err := setup.Build(where); err == nil {
-		t.Fatal("Build(Not with empty inner) error = nil, want error")
+	if _, err := build(where); err == nil {
+		t.Fatal("build(not with empty inner) error = nil, want error")
 	}
 }
 
 func TestNot_Match(t *testing.T) {
-	if (&setup.Not{Inner: stubFilter{result: true}}).Match(nil) {
-		t.Error("Not.Match() over a matching inner = true, want false")
+	if (&not{Inner: stubFilter{result: true}}).Match(nil) {
+		t.Error("not.Match() over a matching inner = true, want false")
 	}
-	if !(&setup.Not{Inner: stubFilter{result: false}}).Match(nil) {
-		t.Error("Not.Match() over a non-matching inner = false, want true")
+	if !(&not{Inner: stubFilter{result: false}}).Match(nil) {
+		t.Error("not.Match() over a non-matching inner = false, want true")
 	}
 }
 
@@ -690,7 +689,7 @@ type filterExpected struct {
 	Directive   string `yaml:"directive"`
 	ShouldMatch *bool  `yaml:"should_match"`
 	// Children describes the expected sub-filters for combinator types
-	// (e.g. AllOf). It is nil for leaf filters.
+	// (e.g. allOf). It is nil for leaf filters.
 	Children []filterExpected `yaml:"children"`
 }
 
@@ -724,15 +723,15 @@ func runYAMLRoundTripCase(t *testing.T, dir, name string) {
 		t.Fatalf("yaml.Unmarshal(%q) error = %v", name, unmarshalErr)
 	}
 
-	got, buildErr := setup.Build(&rule.WhereDef{File: &def})
+	got, buildErr := build(&rule.WhereDef{File: &def})
 	if strings.HasPrefix(name, "err_") {
 		if buildErr == nil {
-			t.Fatalf("Build(%q) error = nil, want error", name)
+			t.Fatalf("build(%q) error = nil, want error", name)
 		}
 		return
 	}
 	if buildErr != nil {
-		t.Fatalf("Build(%q) error = %v, want nil", name, buildErr)
+		t.Fatalf("build(%q) error = %v, want nil", name, buildErr)
 	}
 
 	expectedFile := filepath.Join(dir, strings.TrimSuffix(name, ".yml")+".expected")
@@ -756,52 +755,52 @@ func loadExpectedFilter(t *testing.T, path string) filterExpected {
 	return want
 }
 
-func assertBuiltFilter(t *testing.T, name string, got setup.Filter, want filterExpected) {
+func assertBuiltFilter(t *testing.T, name string, got filter, want filterExpected) {
 	t.Helper()
 
 	switch want.Type {
 	case "FuncFilter":
-		funcFilter, ok := got.(*setup.FuncFilter)
+		funcFilter, ok := got.(*funcFilter)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want *setup.FuncFilter", name, got)
+			t.Fatalf("build(%q) = %T, want *funcFilter", name, got)
 		}
 		if funcFilter.Func != want.Func || funcFilter.Recv != want.Recv {
-			t.Fatalf("Build(%q) = %+v, want func=%q recv=%q", name, funcFilter, want.Func, want.Recv)
+			t.Fatalf("build(%q) = %+v, want func=%q recv=%q", name, funcFilter, want.Func, want.Recv)
 		}
 	case "StructFilter":
-		structFilter, ok := got.(*setup.StructFilter)
+		structFilter, ok := got.(*structFilter)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want *setup.StructFilter", name, got)
+			t.Fatalf("build(%q) = %T, want *structFilter", name, got)
 		}
 		if structFilter.Struct != want.Struct {
-			t.Fatalf("Build(%q) = %+v, want struct=%q", name, structFilter, want.Struct)
+			t.Fatalf("build(%q) = %+v, want struct=%q", name, structFilter, want.Struct)
 		}
 	case "DirectiveFilter":
-		directiveFilter, ok := got.(*setup.DirectiveFilter)
+		directiveFilter, ok := got.(*directiveFilter)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want *setup.DirectiveFilter", name, got)
+			t.Fatalf("build(%q) = %T, want *directiveFilter", name, got)
 		}
 		if directiveFilter.Directive != want.Directive {
-			t.Fatalf("Build(%q) = %+v, want directive=%q", name, directiveFilter, want.Directive)
+			t.Fatalf("build(%q) = %+v, want directive=%q", name, directiveFilter, want.Directive)
 		}
 	case "PackageNameFilter":
-		pnf, ok := got.(*setup.PackageNameFilter)
+		pnf, ok := got.(*packageNameFilter)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want *setup.PackageNameFilter", name, got)
+			t.Fatalf("build(%q) = %T, want *packageNameFilter", name, got)
 		}
 		if pnf.Name != want.Package {
-			t.Fatalf("Build(%q) PackageNameFilter.Name = %q, want %q", name, pnf.Name, want.Package)
+			t.Fatalf("build(%q) packageNameFilter.Name = %q, want %q", name, pnf.Name, want.Package)
 		}
 	case "IsTestFilter":
-		itf, ok := got.(*setup.IsTestFilter)
+		itf, ok := got.(*isTestFilter)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want *setup.IsTestFilter", name, got)
+			t.Fatalf("build(%q) = %T, want *isTestFilter", name, got)
 		}
 		if want.ShouldMatch == nil {
-			t.Fatalf("expected file %q has type IsTestFilter but no should_match field", name)
+			t.Fatalf("expected file %q has type isTestFilter but no should_match field", name)
 		}
 		if itf.ShouldMatch != *want.ShouldMatch {
-			t.Fatalf("Build(%q) IsTestFilter.ShouldMatch = %v, want %v", name, itf.ShouldMatch, *want.ShouldMatch)
+			t.Fatalf("build(%q) isTestFilter.ShouldMatch = %v, want %v", name, itf.ShouldMatch, *want.ShouldMatch)
 		}
 	case "AllOf", "OneOf", "Not":
 		assertBuiltCombinator(t, name, got, want)
@@ -810,43 +809,43 @@ func assertBuiltFilter(t *testing.T, name string, got setup.Filter, want filterE
 	}
 }
 
-// assertBuiltCombinator verifies AllOf/OneOf/Not combinator filters and recurses
+// assertBuiltCombinator verifies allOf/oneOf/not combinator filters and recurses
 // into their children. It is split out of assertBuiltFilter so that neither
 // function exceeds the linter's cognitive-complexity budget.
-func assertBuiltCombinator(t *testing.T, name string, got setup.Filter, want filterExpected) {
+func assertBuiltCombinator(t *testing.T, name string, got filter, want filterExpected) {
 	t.Helper()
 
 	switch want.Type {
 	case "AllOf":
-		allOf, ok := got.(setup.AllOf)
+		gotAllOf, ok := got.(allOf)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want setup.AllOf", name, got)
+			t.Fatalf("build(%q) = %T, want allOf", name, got)
 		}
-		if len(allOf) != len(want.Children) {
-			t.Fatalf("Build(%q) AllOf len = %d, want %d", name, len(allOf), len(want.Children))
+		if len(gotAllOf) != len(want.Children) {
+			t.Fatalf("build(%q) allOf len = %d, want %d", name, len(gotAllOf), len(want.Children))
 		}
-		for i := range allOf {
-			assertBuiltFilter(t, name, allOf[i], want.Children[i])
+		for i := range gotAllOf {
+			assertBuiltFilter(t, name, gotAllOf[i], want.Children[i])
 		}
 	case "OneOf":
-		oneOf, ok := got.(setup.OneOf)
+		gotOneOf, ok := got.(oneOf)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want setup.OneOf", name, got)
+			t.Fatalf("build(%q) = %T, want oneOf", name, got)
 		}
-		if len(oneOf) != len(want.Children) {
-			t.Fatalf("Build(%q) OneOf len = %d, want %d", name, len(oneOf), len(want.Children))
+		if len(gotOneOf) != len(want.Children) {
+			t.Fatalf("build(%q) oneOf len = %d, want %d", name, len(gotOneOf), len(want.Children))
 		}
-		for i := range oneOf {
-			assertBuiltFilter(t, name, oneOf[i], want.Children[i])
+		for i := range gotOneOf {
+			assertBuiltFilter(t, name, gotOneOf[i], want.Children[i])
 		}
 	case "Not":
-		not, ok := got.(*setup.Not)
+		gotNot, ok := got.(*not)
 		if !ok {
-			t.Fatalf("Build(%q) = %T, want *setup.Not", name, got)
+			t.Fatalf("build(%q) = %T, want *not", name, got)
 		}
 		if len(want.Children) != 1 {
-			t.Fatalf("Build(%q) Not expects exactly 1 child, got %d", name, len(want.Children))
+			t.Fatalf("build(%q) not expects exactly 1 child, got %d", name, len(want.Children))
 		}
-		assertBuiltFilter(t, name, not.Inner, want.Children[0])
+		assertBuiltFilter(t, name, gotNot.Inner, want.Children[0])
 	}
 }
