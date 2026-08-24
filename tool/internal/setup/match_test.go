@@ -1389,23 +1389,56 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 	require.False(t, matchedPaths["example.com/other"], "unrelated package must not match")
 }
 
-func TestFilterExcludedTargets_DoesNotMutateSharedSlice(t *testing.T) {
-	keepRule := globFuncRule("keep", "example.com/svc/users")
-	excludeRule := globFuncRule("exclude", "example.com/svc/users")
-	excludeRule.ExcludeTargets = []string{"example.com/svc/users"}
+func TestFilterExcludedTargets(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		assert.Nil(t, filterExcludedTargets("example.com/pkg", nil))
+		assert.Empty(t, filterExcludedTargets("example.com/pkg", []rule.InstRule{}))
+	})
 
-	shared := []rule.InstRule{keepRule, excludeRule}
-	original := append([]rule.InstRule(nil), shared...)
+	t.Run("does not mutate shared slice", func(t *testing.T) {
+		keepRule := globFuncRule("keep", "example.com/svc/users")
+		excludeRule := globFuncRule("exclude", "example.com/svc/users")
+		excludeRule.ExcludeTargets = []string{"example.com/svc/users"}
 
-	filtered := filterExcludedTargets("example.com/svc/users", shared)
-	require.Len(t, filtered, 1)
-	assert.Equal(t, keepRule, filtered[0])
-	assert.Equal(t, original, shared, "shared exactRules slice must not be mutated in place")
+		shared := []rule.InstRule{keepRule, excludeRule}
+		original := append([]rule.InstRule(nil), shared...)
 
-	noExclude := globFuncRule("no-exclude", "example.com/svc/users")
-	sharedNoExclude := []rule.InstRule{noExclude}
-	filteredNoExclude := filterExcludedTargets("example.com/svc/users", sharedNoExclude)
-	assert.Same(t, &sharedNoExclude[0], &filteredNoExclude[0], "zero-allocation path must return the original slice")
+		filtered := filterExcludedTargets("example.com/svc/users", shared)
+		require.Len(t, filtered, 1)
+		assert.Equal(t, keepRule, filtered[0])
+		assert.Equal(t, original, shared, "shared exactRules slice must not be mutated in place")
+
+		noExclude := globFuncRule("no-exclude", "example.com/svc/users")
+		sharedNoExclude := []rule.InstRule{noExclude}
+		filteredNoExclude := filterExcludedTargets("example.com/svc/users", sharedNoExclude)
+		assert.Same(
+			t,
+			&sharedNoExclude[0],
+			&filteredNoExclude[0],
+			"zero-allocation path must return the original slice",
+		)
+	})
+
+	t.Run("exclusion at start appends later rules", func(t *testing.T) {
+		excluded := globFuncRule("excluded", "example.com/svc/users")
+		excluded.ExcludeTargets = []string{"example.com/svc/users"}
+		keep := globFuncRule("keep", "example.com/svc/users")
+
+		filtered := filterExcludedTargets(
+			"example.com/svc/users",
+			[]rule.InstRule{excluded, keep},
+		)
+		require.Len(t, filtered, 1)
+		assert.Equal(t, keep, filtered[0])
+	})
+
+	t.Run("all excluded", func(t *testing.T) {
+		excluded := globFuncRule("excluded", "example.com/svc/users")
+		excluded.ExcludeTargets = []string{"example.com/svc/users"}
+
+		filtered := filterExcludedTargets("example.com/svc/users", []rule.InstRule{excluded})
+		assert.Empty(t, filtered)
+	})
 }
 
 func TestRunMatch_ExcludeTargetsGlob(t *testing.T) {
