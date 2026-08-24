@@ -185,6 +185,8 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 	}
 	userResult := sb.String()
 
+	placeholderRendered := strings.Contains(userResult, placeholderIdent)
+
 	// Wrap the result in a minimal function so we can parse it as Go code.
 	wrapped := "package _\nfunc _() {\n\t" + userResult + "\n}\n"
 
@@ -226,8 +228,12 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 		return nil, ex.Newf("expected expression statement, got %T", funcDecl.Body.List[0])
 	}
 
-	// Replace placeholder with the actual node
-	result, _ := replacePlaceholder(exprStmt.X, node)
+	result, replaced := replacePlaceholder(exprStmt.X, node)
+	if placeholderRendered && !replaced {
+		return nil, ex.New(
+			"template output did not contain expected placeholder expression for {{ . }}",
+		)
+	}
 
 	resultExpr, ok := result.(dst.Expr)
 	if !ok {

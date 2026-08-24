@@ -306,6 +306,72 @@ func TestCompileExpression_CallArgumentIsWrappedCallNotEnclosingFunc(t *testing.
 	assert.Equal(t, "outerParam", funcArg.Name, "FuncArgument must resolve to the enclosing function's parameter")
 }
 
+func TestCompileExpression_WithoutDotExpression(t *testing.T) {
+	tmpl, err := newCallTemplate(`replacement({{ .CallArgumentCount }})`)
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "sideEffectingCall"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}, &dst.Ident{Name: "b"}},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 1)
+	countLit, ok := resultCall.Args[0].(*dst.BasicLit)
+	require.True(t, ok, "expected *dst.BasicLit, got %T", resultCall.Args[0])
+	assert.Equal(t, "2", countLit.Value,
+		"CallArgumentCount must still resolve even without referencing the call itself")
+}
+
+func TestCompileExpression_PerBranchDotUsage(t *testing.T) {
+	tmpl, err := newCallTemplate(
+		`{{- if .CallArgumentCount -}}` +
+			`rebuilt({{ .CallArgument 0 }})` +
+			`{{- else -}}` +
+			`wrapped({{ . }})` +
+			`{{- end -}}`,
+	)
+	require.NoError(t, err)
+
+	t.Run("branch without dot drops the original call", func(t *testing.T) {
+		originalCall := &dst.CallExpr{
+			Fun:  &dst.Ident{Name: "getValue"},
+			Args: []dst.Expr{&dst.Ident{Name: "a"}},
+		}
+
+		result, resErr := tmpl.compileExpression(originalCall, nil)
+		require.NoError(t, resErr)
+
+		resultCall, ok := result.(*dst.CallExpr)
+		require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+		fn, ok := resultCall.Fun.(*dst.Ident)
+		require.True(t, ok)
+		assert.Equal(t, "rebuilt", fn.Name)
+	})
+
+	t.Run("branch with dot requires it to survive", func(t *testing.T) {
+		originalCall := &dst.CallExpr{
+			Fun: &dst.Ident{Name: "getValue"},
+		}
+
+		result, resErr := tmpl.compileExpression(originalCall, nil)
+		require.NoError(t, resErr)
+
+		resultCall, ok := result.(*dst.CallExpr)
+		require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+		fn, ok := resultCall.Fun.(*dst.Ident)
+		require.True(t, ok)
+		assert.Equal(t, "wrapped", fn.Name)
+		require.Len(t, resultCall.Args, 1)
+		_, ok = resultCall.Args[0].(*dst.CallExpr)
+		require.True(t, ok, "expected the original call to survive inside the wrapper")
+	})
+}
+
 func TestCompileExpression_CallArgumentCount(t *testing.T) {
 	tmpl, err := newCallTemplate("wrap({{ .CallArgumentCount }}, {{ . }})")
 	require.NoError(t, err)
@@ -591,15 +657,10 @@ func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
 	}
 
 	result, err := tmpl.compileExpression(originalCall, nil)
-	require.NoError(t, err)
 
-	resultCall, ok := result.(*dst.CallExpr)
-	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
-	require.Len(t, resultCall.Args, 1)
-
-	lit, ok := resultCall.Args[0].(*dst.BasicLit)
-	require.True(t, ok, "expected *dst.BasicLit, got %T", resultCall.Args[0])
-	assert.Equal(t, `"_.PLACEHOLDER_0"`, lit.Value)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "did not contain expected placeholder expression")
 }
 
 func TestCompileExpression_MultipleStatements(t *testing.T) {
