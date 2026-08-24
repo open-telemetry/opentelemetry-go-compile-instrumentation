@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -407,6 +408,11 @@ func emitUnresolvedSkipWarnings(
 }
 
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
+	original, readErr := os.ReadFile(toolFile)
+	if readErr != nil {
+		return ex.Wrapf(readErr, "reading tool file %s", toolFile)
+	}
+
 	p := ast.NewAstParser()
 
 	f, parseErr := p.Parse(toolFile, parser.ParseComments)
@@ -422,13 +428,46 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	updateGenerateDirective(f, opts)
 
-	if writeErr := ast.WriteFileAtomic(toolFile, f); writeErr != nil {
-		return writeErr
+	updated, printErr := ast.PrintFile(f)
+	if printErr != nil {
+		return ex.Wrapf(printErr, "printing tool file %s", toolFile)
 	}
 
-	_, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
+	toolFileChanged := !bytes.Equal(updated, original)
+	if toolFileChanged {
+		if writeErr := util.WriteFileAtomic(toolFile, updated); writeErr != nil {
+			return ex.Wrapf(writeErr, "writing tool file %s", toolFile)
+		}
+	}
+
+	goModChanged, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
 	if ensureErr != nil {
 		return ex.Wrapf(ensureErr, "ensuring otelc require in go.mod in %s", filepath.Dir(toolFile))
+	}
+
+	// go mod tidy loads the entire module graph and is by far the most
+	// expensive step of a re-pin, so skip it in the steady state: the tool
+	// file is already canonical, go.mod already carries the otelc require,
+	// and go.sum exists from whichever earlier run last changed them. Every
+	// path that mutates module state still tidies: pruning or directive
+	// changes flip toolFileChanged, adding the require/tool directive or a
+	// version bump flips goModChanged, and a missing go.sum (hand-deleted,
+	// or an earlier tidy that never completed) fails the PathExists check.
+	// The one gap left open is a stale-but-present go.sum after a tidy that
+	// errored out mid-run: the default build flow self-heals because the
+	// state manager reverts go.mod (so the next run re-adds the require and
+	// tidies), and in the standalone pin flow the next go build names the
+	// fix itself ("missing go.sum entry ... to add it: go mod tidy").
+	//
+	// Manual user edits to go.mod or the tool file are deliberately out of
+	// scope here: tidying those up is the user's responsibility, the same as
+	// in an uninstrumented project. That split was settled during the #655
+	// review, where this conditional shape was first proposed.
+	goSumPath := filepath.Join(filepath.Dir(toolFile), "go.sum")
+	if !toolFileChanged && !goModChanged && util.PathExists(goSumPath) {
+		util.LoggerFromContext(ctx).DebugContext(ctx,
+			"tool file and go.mod unchanged, skipping go mod tidy", "toolFile", toolFile)
+		return nil
 	}
 
 	if tidyErr := runModTidy(ctx, filepath.Dir(toolFile)); tidyErr != nil {
