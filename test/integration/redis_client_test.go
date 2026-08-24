@@ -37,7 +37,9 @@ func TestRedisClient(t *testing.T) {
 			spans := testutil.AllSpans(f.Traces())
 			require.GreaterOrEqual(t, len(spans), 3, "expected at least 3 spans (SET, GET, DEL)")
 
-			// Verify SET span
+			// Verify SET span. The value is redacted by default: db.query.text
+			// must never contain a command's data-value arguments (see
+			// https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1200).
 			setSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("db.operation.name", "set"),
@@ -47,7 +49,7 @@ func TestRedisClient(t *testing.T) {
 				setSpan,
 				"set",
 				server.Addr(),
-				"set testkey testvalue",
+				"set testkey ?",
 			)
 
 			// Verify GET span
