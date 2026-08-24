@@ -656,7 +656,17 @@ func TestQuoteGoflagsToken(t *testing.T) {
 		{name: "plain token unquoted", token: "-race", want: "-race"},
 		{name: "token with space uses single quotes", token: "foo bar", want: "'foo bar'"},
 		{name: "token with tab uses single quotes", token: "foo\tbar", want: "'foo\tbar'"},
-		{name: "token with single quote uses double quotes", token: "it's", want: `"it's"`},
+		// quoted.Split only opens a quoted field on a leading quote, so an
+		// interior quote is literal and must be left alone. Quoting it anyway
+		// would drag a second quote character into the token and break the
+		// outer quoting applied for GOFLAGS.
+		{name: "interior single quote stays unquoted", token: "it's", want: "it's"},
+		{name: "interior double quote stays unquoted", token: `say"hi"`, want: `say"hi"`},
+		{name: "interior quotes of both kinds stay unquoted", token: `a'b"c`, want: `a'b"c`},
+		// A leading quote would be read as an opening delimiter, so it does
+		// need wrapping even without whitespace.
+		{name: "leading single quote uses double quotes", token: "'foo", want: `"'foo"`},
+		{name: "leading double quote uses single quotes", token: `"foo`, want: `'"foo'`},
 		{name: "token with double quote uses single quotes", token: `say "hi"`, want: `'say "hi"'`},
 		{name: "token with both quotes errors", token: `a ' " b`, wantErr: true},
 	}
@@ -694,6 +704,15 @@ func TestBuildToolexecFlag(t *testing.T) {
 			name:     "path with a single quote falls back to double quotes",
 			execPath: "/home/it's me/otelc",
 			want:     `-toolexec="/home/it's me/otelc" toolexec`,
+		},
+		{
+			// Regression: a quote with no whitespace needs no quoting at all.
+			// Wrapping it used to leave both quote characters in the flag, which
+			// made the outer GOFLAGS quoting in EnableNestedToolexec fail for a
+			// path that is otherwise perfectly usable.
+			name:     "path with a quote but no space stays unquoted",
+			execPath: "/tmp/it's/otelc",
+			want:     "-toolexec=/tmp/it's/otelc toolexec",
 		},
 		{
 			name:     "path with both quote characters errors",

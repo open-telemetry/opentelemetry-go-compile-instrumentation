@@ -482,13 +482,15 @@ func EnableNestedToolexec() error {
 	}
 	toolexecFlag, err := util.QuoteGoflagsToken(innerFlag)
 	if err != nil {
-		// Only reachable when execPath contains a single quote: the inner
-		// quoting then has to use double quotes, leaving both kinds in the
-		// token. GOFLAGS is split by cmd/internal/quoted.Split, which has no
-		// escape syntax, so such a token simply cannot be represented there.
-		return ex.Wrapf(err, "otelc's own path %q contains a single quote, "+
-			"which cannot be passed to nested go commands through GOFLAGS; "+
-			"reinstall otelc under a path without one", execPath)
+		// Reachable whenever the finished flag holds both quote characters:
+		// the inner quoting supplies one kind to keep a spaced path together,
+		// and a quote already in execPath supplies the other. GOFLAGS is split
+		// by cmd/internal/quoted.Split, which has no escape syntax, so such a
+		// token simply cannot be represented there.
+		return ex.Wrapf(err, "otelc's own path %q cannot be passed to nested "+
+			"go commands through GOFLAGS, because quoting it there would need "+
+			"both quote characters and GOFLAGS has no way to escape either; "+
+			"reinstall otelc under a path without quote characters", execPath)
 	}
 	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + " " + toolexecFlag)
 	if err = os.Setenv("GOFLAGS", goflags); err != nil {
