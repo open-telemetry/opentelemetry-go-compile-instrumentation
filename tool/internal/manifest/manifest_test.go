@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -323,6 +324,30 @@ func TestLoadModulePathMissingFile(t *testing.T) {
 func TestLoadModuleEntriesMissingDirectory(t *testing.T) {
 	_, err := loadModuleEntries(filepath.Join(t.TempDir(), "missing"), "example.com/missing")
 	require.ErrorContains(t, err, "opening module root")
+}
+
+func TestLoadModuleEntriesReturnsNestedModuleStatErrors(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod permissions are not enforced consistently on Windows")
+	}
+
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "module")
+	blockedDir := filepath.Join(moduleDir, "blocked")
+	require.NoError(t, os.MkdirAll(blockedDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(moduleDir, "go.mod"),
+		[]byte("module example.com/module\n"),
+		0o644,
+	))
+
+	require.NoError(t, os.Chmod(blockedDir, 0))
+	t.Cleanup(func() {
+		_ = os.Chmod(blockedDir, 0o755)
+	})
+
+	_, err := loadModuleEntries(moduleDir, "example.com/module")
+	require.Error(t, err)
 }
 
 func TestLoadModuleEntriesRejectsEscapingRuleSymlink(t *testing.T) {
