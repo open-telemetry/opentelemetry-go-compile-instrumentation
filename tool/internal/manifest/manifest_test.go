@@ -40,6 +40,10 @@ ranged:
   target: example.com/ranged
   version: v1.0.0,v2.0.0
 `)
+	writeRuleFile(t, root, "parent/nonmodule/worker.otelc.yaml", `
+worker:
+  target: example.com/worker
+`)
 	writeRuleFile(t, root, "parent/ignored.yaml", `
 ignored:
   target: example.com/ignored
@@ -60,6 +64,7 @@ server:
 		{ModulePath: "example.com/parent", Target: "example.com/ranged", VersionRange: "v1.0.0,v2.0.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v1.0.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v2.0.0"},
+		{ModulePath: "example.com/parent", Target: "example.com/worker"},
 	}, got)
 }
 
