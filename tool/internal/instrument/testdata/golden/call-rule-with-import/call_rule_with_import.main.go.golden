@@ -3,19 +3,15 @@
 
 package main
 
-import (
-	"unsafe"
-
-	"fmt"
-)
+import "unsafe"
 
 func CallSizeof() {
 	x := 42
-	size := (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(x) })()
+	size := unsafe.Sizeof(x)
 	_ = size
 }
 
 func main() {
 	y := "hello"
-	_ = (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(y) })()
+	_ = unsafe.Sizeof(y)
 }

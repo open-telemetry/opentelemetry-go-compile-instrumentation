@@ -3,4 +3,4 @@
 
 package main
 
-type T struct{ NewField string }
+type T struct{}

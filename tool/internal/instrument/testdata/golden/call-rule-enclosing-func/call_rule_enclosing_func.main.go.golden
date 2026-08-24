@@ -6,10 +6,7 @@ package main
 import "fmt"
 
 func Handler(name string) {
-	(func() (int, error) {
-		println("handler arg:", name)
-		return fmt.Println("hello")
-	})()
+	fmt.Println("hello")
 }
 
 func main() { Handler("world") }

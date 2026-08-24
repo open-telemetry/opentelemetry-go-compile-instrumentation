@@ -13,7 +13,7 @@ func Positional(r io.Reader) io.LimitedReader {
 
 // The keyed form in the same file is still instrumented.
 func Keyed(r io.Reader) io.LimitedReader {
-	return io.LimitedReader{N: 50, R: r}
+	return io.LimitedReader{R: r}
 }
 
 func main() {

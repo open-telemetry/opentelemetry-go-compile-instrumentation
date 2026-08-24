@@ -7,5 +7,5 @@ import "fmt"
 
 func main() {
 	args := []any{"hello"}
-	fmt.Println(func(v ...any) []any { return append(v, "world") }(args...)...)
+	fmt.Println(args...)
 }

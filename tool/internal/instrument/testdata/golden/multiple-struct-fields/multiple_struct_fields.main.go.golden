@@ -3,8 +3,4 @@
 
 package main
 
-type T struct {
-	Field1 string
-	Field2 int
-	Field3 bool
-}
+type T struct{}

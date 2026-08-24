@@ -12,6 +12,6 @@ type MyStruct struct {
 func main() {
 	s := MyStruct{Field: 42}
 	// Test wrapping a call with a complex nested expression
-	size := (func() uintptr { return unsafe.Sizeof(s) })()
+	size := unsafe.Sizeof(s)
 	println(size)
 }

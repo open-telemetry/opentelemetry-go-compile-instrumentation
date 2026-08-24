@@ -3,6 +3,6 @@
 
 package main
 
-const MaxRetries = 99
+const MaxRetries = 3
 
 func main() {}

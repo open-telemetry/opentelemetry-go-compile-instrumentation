@@ -5,8 +5,6 @@ package main
 
 //otelc:span
 func foo() {
-	println("span start: foo")
-	defer println("span end: foo")
 	println("hello")
 }
 
