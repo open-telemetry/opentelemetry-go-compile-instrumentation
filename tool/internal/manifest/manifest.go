@@ -113,12 +113,13 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			return err
 		}
 		if d.IsDir() {
-			if path != "." {
-				if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
-					return fs.SkipDir
-				} else if !errors.Is(statErr, fs.ErrNotExist) {
-					return statErr
-				}
+			if path == "." {
+				return nil
+			}
+			if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
+				return fs.SkipDir
+			} else if !errors.Is(statErr, fs.ErrNotExist) {
+				return statErr
 			}
 			return nil
 		}
@@ -135,14 +136,21 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
 		}
 		for _, name := range slices.Sorted(maps.Keys(rules)) {
-			entry, ok, entryErr := manifestEntry(modulePath, path, name, rules[name])
-			if entryErr != nil {
-				return entryErr
+			ruleConfig := rules[name]
+			if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
 			}
-			if !ok {
+			if ruleConfig.Target == "" {
 				continue
 			}
-			entries = append(entries, entry)
+			if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
+			}
+			entries = append(entries, Entry{
+				ModulePath:   modulePath,
+				Target:       ruleConfig.Target,
+				VersionRange: ruleConfig.VersionRange,
+			})
 		}
 		return nil
 	})
@@ -150,21 +158,4 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		return nil, ex.Wrapf(err, "loading rules for module %s", modulePath)
 	}
 	return entries, nil
-}
-
-func manifestEntry(modulePath, path, name string, ruleConfig yamlRule) (Entry, bool, error) {
-	if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
-		return Entry{}, false, ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
-	}
-	if ruleConfig.Target == "" {
-		return Entry{}, false, nil
-	}
-	if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
-		return Entry{}, false, ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
-	}
-	return Entry{
-		ModulePath:   modulePath,
-		Target:       ruleConfig.Target,
-		VersionRange: ruleConfig.VersionRange,
-	}, true, nil
 }
