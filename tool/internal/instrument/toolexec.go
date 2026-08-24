@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,7 +27,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-type InstrumentPhase struct {
+type instrumentPhase struct {
 	logger *slog.Logger
 	// The working directory during compilation
 	workDir string
@@ -53,7 +54,7 @@ type InstrumentPhase struct {
 	// The methods of the hook context
 	hookCtxMethods []*dst.FuncDecl
 	// The trampoline jumps to be optimized
-	tjumps []*TJump
+	tjumps []*tJump
 	// Content identities (see InstFuncRule.Identity) of func rules already
 	// applied during this package's instrumentation. Used to de-duplicate rules
 	// that resolve to the same identity, which would otherwise emit duplicate
@@ -63,13 +64,13 @@ type InstrumentPhase struct {
 	appliedFuncIdentities map[string]struct{}
 }
 
-func (ip *InstrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
-func (ip *InstrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg, args...) }
-func (ip *InstrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
-func (ip *InstrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
+func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
+func (ip *instrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg, args...) }
+func (ip *instrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
+func (ip *instrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
 // keepForDebug keeps the the file to .otelc-build directory for debugging
-func (ip *InstrumentPhase) keepForDebug(name string) {
+func (ip *instrumentPhase) keepForDebug(name string) {
 	escape := func(s string) string {
 		dirName := strings.ReplaceAll(s, "/", "_")
 		dirName = strings.ReplaceAll(dirName, ".", "_")
@@ -86,7 +87,8 @@ func (ip *InstrumentPhase) keepForDebug(name string) {
 func stripCompleteFlag(args []string) []string {
 	for i, arg := range args {
 		if arg == "-complete" {
-			return append(args[:i], args[i+1:]...)
+			res := slices.Clone(args)
+			return slices.Delete(res, i, i+1)
 		}
 	}
 	return args
@@ -100,7 +102,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Extract -importcfg flag
 	importCfgPath := util.FindFlagValue(args, "-importcfg")
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:           util.LoggerFromContext(ctx),
 		workDir:          filepath.Dir(target),
 		compileArgs:      args,
@@ -142,7 +144,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 }
 
 // updateImportConfig updates the importcfg file with new imports that were added during instrumentation.
-func (ip *InstrumentPhase) updateImportConfig(ctx context.Context, newImports map[string]string) error {
+func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports map[string]string) error {
 	if ip.importConfigPath == "" {
 		// No importcfg file, skip (shouldn't happen in normal builds)
 		return nil
@@ -351,6 +353,77 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	return args, nil
 }
 
+const vetToolName = "vet"
+
+func interceptVet(ctx context.Context, args []string) ([]string, error) {
+	if len(args) == 0 {
+		return args, nil
+	}
+
+	configPath := args[len(args)-1]
+	if filepath.Base(configPath) != "vet.cfg" {
+		util.LoggerFromContext(ctx).DebugContext(
+			ctx,
+			"vet invocation missing expected vet.cfg argument",
+			"args",
+			args,
+		)
+		return args, nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading vet config")
+	}
+
+	var config map[string]json.RawMessage
+	if err = json.Unmarshal(data, &config); err != nil {
+		return nil, ex.Wrapf(err, "parsing vet config")
+	}
+
+	var goFiles []string
+	if err = json.Unmarshal(config["GoFiles"], &goFiles); err != nil {
+		return nil, ex.Wrapf(err, "parsing GoFiles from vet config")
+	}
+
+	var updated bool
+	for i, file := range goFiles {
+		if !strings.HasSuffix(file, ".cgo1.go") {
+			continue
+		}
+		vetFile := cgoVetSourcePath(file)
+		if _, statErr := os.Stat(vetFile); statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			return nil, ex.Wrapf(statErr, "checking preserved cgo source")
+		}
+		goFiles[i] = vetFile
+		updated = true
+	}
+	if !updated {
+		return args, nil
+	}
+
+	config["GoFiles"], err = json.Marshal(goFiles)
+	if err != nil {
+		return nil, ex.Wrapf(err, "encoding GoFiles for vet config")
+	}
+	data, err = json.Marshal(config)
+	if err != nil {
+		return nil, ex.Wrapf(err, "encoding vet config")
+	}
+	if err = os.WriteFile(configPath, data, 0o600); err != nil {
+		return nil, ex.Wrapf(err, "writing vet config")
+	}
+
+	return args, nil
+}
+
+func cgoVetSourcePath(path string) string {
+	return strings.TrimSuffix(path, ".cgo1.go") + ".otelc.vet.go"
+}
+
 // toolVersionLine appends an otelc marker to a `tool -V=full` line so the tool
 // ID (and every build cache key derived from it) differs from a plain build.
 // The rules hash is included so editing the config invalidates cached
@@ -448,7 +521,7 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	return err
 }
 
-// interceptToolCommand rewrites the compile and link commands otelc cares
+// interceptToolCommand rewrites the compile, link, and vet commands otelc cares
 // about; every other tool invocation is returned unchanged.
 func interceptToolCommand(ctx context.Context, args []string) ([]string, error) {
 	// Intercept compile commands for instrumentation
@@ -458,6 +531,9 @@ func interceptToolCommand(ctx context.Context, args []string) ([]string, error) 
 	// Intercept link commands to update importcfg with added dependencies
 	if util.IsLinkCommandWithArgs(args) {
 		return interceptLink(ctx, args)
+	}
+	if len(args) > 0 && strings.TrimSuffix(filepath.Base(args[0]), ".exe") == vetToolName {
+		return interceptVet(ctx, args)
 	}
 	return args, nil
 }

@@ -4,8 +4,6 @@
 package instrument
 
 import (
-	"strings"
-
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -79,8 +77,8 @@ import (
 // the structure of trampoline-jump-if and trampoline functions. Any change in
 // tjump should be carefully examined.
 
-// TJump describes a trampoline-jump-if optimization candidate
-type TJump struct {
+// tJump describes a trampoline-jump-if optimization candidate
+type tJump struct {
 	target *dst.FuncDecl      // Target function we are hooking on
 	ifStmt *dst.IfStmt        // Trampoline-jump-if statement
 	rule   *rule.InstFuncRule // Rule associated with the trampoline-jump-if
@@ -92,7 +90,7 @@ func mustTJump(ifStmt *dst.IfStmt) {
 	util.Assert(desc == tJumpLabel, "must be a trampoline-jump-if")
 }
 
-func removeAfterTrampolineCall(tjump *TJump) error {
+func removeAfterTrampolineCall(tjump *tJump) error {
 	ifStmt := tjump.ifStmt
 	util.Assert(len(ifStmt.Body.List) > 0, "must have then block statements")
 	util.AssertType[*dst.ExprStmt](ifStmt.Body.List[0])
@@ -121,13 +119,13 @@ func removeAfterTrampolineCall(tjump *TJump) error {
 // newHookContextImpl constructs a new HookContextImpl structure literal and
 // populates its Params && ReturnValues field with addresses of all arguments.
 // The HookContextImpl structure is used to pass arguments to the exit trampoline
-func newHookContextImpl(tjump *TJump) dst.Expr {
+func newHookContextImpl(tjump *tJump) dst.Expr {
 	targetFunc := tjump.target
 	structName := trampolineHookContextImplType + tjump.rule.Identity()
 
 	// Build params slice: []interface{}{&param1, &param2, ...}
 	// Use createHookArgs to handle underscore parameters correctly
-	paramNames := collectArguments(targetFunc)
+	paramNames := collectArguments(targetFunc, tjump.rule.Identity())
 	paramExprs := createTrampArgs(paramNames)
 	paramsSlice := ast.CompositeLit(
 		ast.ArrayType(ast.InterfaceType()),
@@ -137,7 +135,7 @@ func newHookContextImpl(tjump *TJump) dst.Expr {
 	// Build returnVals slice: []interface{}{&retval1, &retval2, ...}
 	returnExprs := make([]dst.Expr, 0)
 	if targetFunc.Type.Results != nil {
-		returnNames := collectReturnValues(targetFunc)
+		returnNames := collectReturnValues(targetFunc, tjump.rule.Identity())
 		returnExprs = createTrampArgs(returnNames)
 	}
 	returnValsSlice := ast.CompositeLit(
@@ -153,7 +151,7 @@ func newHookContextImpl(tjump *TJump) dst.Expr {
 	)
 }
 
-func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
+func removeBeforeTrampolineCall(targetFile *dst.File, tjump *tJump) error {
 	// Construct HookContext on the fly and pass to After trampoline defer call
 	hookContextExpr := newHookContextImpl(tjump)
 	// Find defer call to After and replace its call context with new one
@@ -187,7 +185,7 @@ func removeBeforeTrampolineCall(targetFile *dst.File, tjump *TJump) error {
 	return ex.Newf("can not remove Before trampoline function")
 }
 
-func removeAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
+func removeAfterTrampolineDecl(targetFile *dst.File, tjump *tJump) error {
 	afterTrampolineName := makeName(tjump.rule, tjump.target, false)
 	for i, decl := range targetFile.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
@@ -205,17 +203,36 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
 // 1. SetSkipCall is never called (so skip is always false)
 // 2. The HookContext parameter is only used as a receiver for method calls
 func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
-	// Check if the hook function contains any "SetSkipCall" string
-	// If found, the trampoline-jump-if cannot be flattened
+	if hookFunc.Type == nil || hookFunc.Type.Params == nil || len(hookFunc.Type.Params.List) == 0 {
+		return true
+	}
+	firstParam := hookFunc.Type.Params.List[0]
+	if len(firstParam.Names) == 0 {
+		// If the parameter is unnamed, it cannot be referenced in the body
+		// Thus it doesn't escape and SetSkipCall cannot be called.
+		return true
+	}
+
+	// The hook context parameter is always the first parameter of the hook function.
+	hookContextParam := firstParam.Names[0].Name
+
+	// Check if the hook function references SetSkipCall on the hook context.
+	// If found, the trampoline-jump-if cannot be flattened. Match the bare
+	// selector rather than requiring a CallExpr, so the method-value form
+	// (f := ctx.SetSkipCall) is caught too: the escape analysis below treats
+	// it as a valid receiver use and would otherwise allow flattening.
 	found := false
 	dst.Inspect(hookFunc, func(node dst.Node) bool {
-		if ident, ok := node.(*dst.Ident); ok {
-			if strings.Contains(ident.Name, trampolineSetSkipCallName) {
-				found = true
-				return false
-			}
-		}
 		if found {
+			return false
+		}
+		sel, isSel := node.(*dst.SelectorExpr)
+		if !isSel {
+			return true
+		}
+		id, isID := sel.X.(*dst.Ident)
+		if isID && id.Name == hookContextParam && sel.Sel.Name == trampolineSetSkipCallName {
+			found = true
 			return false
 		}
 		return true
@@ -226,7 +243,6 @@ func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
 
 	// Check if the hook context parameter escapes (used for non-method calls)
 	escape := false
-	hookContextParam := hookFunc.Type.Params.List[0].Names[0].Name
 	if hookContextParam == ast.IdentIgnore {
 		// If the parameter is ignored, it doesn't escape because it is not used
 		return true
@@ -261,7 +277,7 @@ func canFlattenTJump(hookFunc *dst.FuncDecl) bool {
 // flattenTJump transforms the trampoline-jump-if AST to a flattened form.
 // It sets the condition to false and empties the then block, effectively
 // converting the branching pattern to sequential execution.
-func flattenTJump(tjump *TJump, removedOnExit bool) error {
+func flattenTJump(tjump *tJump, removedOnExit bool) error {
 	// The current standard tjump pattern is as follows:
 	//
 	// 	if ctx, skip := otel_trampoline_before(&arg); skip {
@@ -332,12 +348,12 @@ func flattenTJump(tjump *TJump, removedOnExit bool) error {
 	return nil
 }
 
-func stripTJumpLabel(tjump *TJump) {
+func stripTJumpLabel(tjump *tJump) {
 	ifStmt := tjump.ifStmt
 	ifStmt.Decs.If = nil
 }
 
-func (ip *InstrumentPhase) optimizeTJumps() error {
+func (ip *instrumentPhase) optimizeTJumps() error {
 	for _, tjump := range ip.tjumps {
 		mustTJump(tjump.ifStmt)
 		// Strip the trampoline-jump-if anchor label as no longer needed

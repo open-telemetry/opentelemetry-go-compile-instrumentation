@@ -78,6 +78,25 @@ func TestDbClientRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
+			name: "sqlite driver (modernc.org/sqlite registers under \"sqlite\", not \"sqlite3\")",
+			req: DatabaseSqlRequest{
+				OpType:     "SELECT",
+				Sql:        "SELECT * FROM items",
+				Endpoint:   "sqlite",
+				DriverName: "sqlite",
+				Dsn:        "file:test.db",
+				DbName:     "test",
+			},
+			expected: map[string]any{
+				"db.system.name":    "sqlite",
+				"db.operation.name": "SELECT",
+				"db.namespace":      "test",
+				"server.address":    "sqlite",
+				"network.transport": "tcp",
+				"db.query.text":     "SELECT * FROM items",
+			},
+		},
+		{
 			name: "clickhouse driver maps to clickhouse system name",
 			req: DatabaseSqlRequest{
 				OpType:     "SELECT",
@@ -236,6 +255,27 @@ func TestDatabaseSqlRequest_Struct(t *testing.T) {
 	assert.Equal(t, "user:pass@tcp(localhost:3306)/db", req.Dsn)
 	assert.Equal(t, []any{1, "test"}, req.Params)
 	assert.Equal(t, "testdb", req.DbName)
+}
+
+func TestOperationName(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{name: "select", query: "SELECT * FROM users", want: "SELECT"},
+		{name: "lowercase", query: "insert into t values (1)", want: "INSERT"},
+		{name: "leading whitespace", query: "  \n\tupdate users set x=1", want: "UPDATE"},
+		{name: "empty", query: "", want: ""},
+		{name: "whitespace only", query: " \t\n ", want: ""},
+		{name: "single token", query: "ping", want: "PING"},
+		{name: "start transaction", query: "START TRANSACTION", want: "START"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, OperationName(tt.query))
+		})
+	}
 }
 
 func TestDbClientRequestTraceAttrs_ContainsExpectedKeys(t *testing.T) {

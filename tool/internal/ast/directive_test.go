@@ -82,8 +82,8 @@ func TestMatchDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := MatchDirective(tt.dec, tt.directive)
-			assert.Equal(t, tt.expected, result)
+			_, ok := matchDirective(tt.dec, tt.directive)
+			assert.Equal(t, tt.expected, ok)
 		})
 	}
 }
@@ -198,7 +198,7 @@ func TestParseDirectiveArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseDirectiveArgs(tt.dec, tt.directive)
+			result, err := parseDirectiveArgs(tt.dec, tt.directive)
 			if tt.hasError {
 				require.Error(t, err)
 				return
@@ -207,6 +207,94 @@ func TestParseDirectiveArgs(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestFindFuncsByDirective(t *testing.T) {
+	src := `package p
+//otelc:span span.name:"custom-op" tag:foo
+func Foo() {}
+
+//otelc:span
+func Bar() {}
+
+func Baz() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 2)
+
+	assert.Equal(t, "Foo", matches[0].Func.Name.Name)
+	assert.Equal(t, []DirectiveArg{{Key: "span.name", Value: "custom-op"}, {Key: "tag", Value: "foo"}}, matches[0].Args)
+
+	assert.Equal(t, "Bar", matches[1].Func.Name.Name)
+	assert.Empty(t, matches[1].Args)
+}
+
+func TestFindFuncsByDirective_NoMatches(t *testing.T) {
+	src := `package p
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+}
+
+func TestFindFuncsByDirective_SkipsNonFuncDecls(t *testing.T) {
+	src := `package p
+//otelc:span
+type T struct{}
+
+//otelc:span
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "Foo", matches[0].Func.Name.Name)
+}
+
+func TestFindFuncsByDirective_ParseArgsError(t *testing.T) {
+	src := `package p
+//otelc:span nocolon
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Foo")
+	assert.Nil(t, matches)
+}
+
+func TestFindFuncsByDirective_FirstMatchingDecorationWins(t *testing.T) {
+	src := `package p
+// a regular doc comment
+//otelc:span tag:first
+//otelc:span tag:second
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "first"}}, matches[0].Args)
 }
 
 func writeGoTempFile(t *testing.T, src string) string {
@@ -298,6 +386,43 @@ func (T) Bar() {}
 			tree, err := ParseFileFast(path)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, FileHasDirective(tree, tt.directive))
+		})
+	}
+}
+
+func TestFileHasLeadingDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		directive string
+		expected  bool
+	}{
+		{
+			name: "directive on function",
+			src: `package p
+//otelc:span
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  false,
+		},
+		{
+			name: "file level directive",
+			src: `//otelc:span
+package p
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, FileHasLeadingDirective(tree, tt.directive))
 		})
 	}
 }

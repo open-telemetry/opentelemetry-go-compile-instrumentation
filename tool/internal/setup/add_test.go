@@ -13,6 +13,7 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -102,13 +103,13 @@ func TestAddDeps(t *testing.T) {
 			tmpDir := t.TempDir()
 			sp := newTestSetupPhase()
 
-			stateManager := NewStateManager()
-			ctx := ContextWithStateManager(t.Context(), stateManager)
+			stateManager := newStateManager()
+			ctx := contextWithStateManager(t.Context(), stateManager)
 
 			err := sp.addDeps(ctx, tt.matched, tmpDir, tt.packageName)
 			require.NoError(t, err)
 
-			runtimeFilePath := filepath.Join(tmpDir, OtelcRuntimeFile)
+			runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
 
 			if tt.goldenFile == "" {
 				assert.NoFileExists(t, runtimeFilePath)
@@ -121,7 +122,8 @@ func TestAddDeps(t *testing.T) {
 
 			require.Contains(t, stateManager.files, runtimeFilePath)
 
-			golden.Assert(t, string(actual), tt.goldenFile)
+			actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+			golden.Assert(t, actualNorm, tt.goldenFile)
 		})
 	}
 }

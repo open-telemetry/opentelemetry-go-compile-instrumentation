@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
@@ -231,6 +233,20 @@ func TestSplitBuildTargets(t *testing.T) {
 			notPkgTargets: []string{"off"},
 			expectError:   false,
 		},
+		{
+			name:          "go test -exec value is not a package",
+			targets:       []string{"-exec", "sudo", "./pkg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"sudo"},
+			expectError:   false,
+		},
+		{
+			name:          "go test package before -exec flag",
+			targets:       []string{"./pkg", "-exec", "sudo"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"sudo"},
+			expectError:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -411,6 +427,16 @@ func TestExtractBuildFlags(t *testing.T) {
 			expected: []string{"-race"},
 		},
 		{
+			name:     "trimpath flag",
+			args:     []string{"build", "-trimpath", "./..."},
+			expected: []string{"-trimpath"},
+		},
+		{
+			name:     "trimpath false",
+			args:     []string{"build", "-trimpath=false", "./..."},
+			expected: []string{"-trimpath=false"},
+		},
+		{
 			name:     "mod flag",
 			args:     []string{"build", "-mod=vendor", "./..."},
 			expected: []string{"-mod=vendor"},
@@ -546,4 +572,31 @@ func TestExtractBuildFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsSetup(t *testing.T) {
+	// isSetup is currently a stub that always reports false.
+	assert.False(t, isSetup())
+}
+
+// TestSetupPhaseLogDelegators exercises the thin slog delegators on SetupPhase.
+// They must forward to the underlying logger without panicking.
+func TestSetupPhaseLogDelegators(t *testing.T) {
+	sp := newTestSetupPhase()
+	assert.NotPanics(t, func() {
+		sp.Info("info", "k", "v")
+		sp.Warn("warn", "k", "v")
+		sp.Error("error", "k", "v")
+		sp.Debug("debug", "k", "v")
+	})
+}
+
+func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	// A package with no Go files has an empty package directory and must be
+	// skipped without error.
+	pkgs := []*packages.Package{{PkgPath: "example.com/empty"}}
+	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{})
+	require.NoError(t, err)
 }

@@ -28,6 +28,7 @@
   - [5. Directive Rule](#5-directive-rule)
   - [6. File Addition Rule](#6-file-addition-rule)
   - [7. Named Declaration Rule](#7-named-declaration-rule)
+  - [8. Composite Literal Rule](#8-composite-literal-rule)
 
 This document explains the different types of instrumentation rules used by the Go compile-time instrumentation tool. These rules, defined in YAML files, allow for the injection of code into target Go packages.
 
@@ -113,8 +114,8 @@ instrument_sql_exec:
 - Composition sub-groups `all-of`, `one-of`, `not` may appear at any position
   to compose nested selector groups.
 - Point selector keys recognized at the top of `where`:
-  `func`, `recv`, `struct`, `function_call`, `directive`, `kind`,
-  `identifier`.
+  `func`, `recv`, `struct`, `struct_literal`, `function_call`, `directive`,
+  `kind`, `identifier`.
 - File-level predicates live under `where.file`.
 - `target` and `version` **must not** appear inside `where`. They are
   package-scope selectors and stay top-level.
@@ -142,11 +143,14 @@ instrument_sql_exec:
   compile with normal builds, so `is_test` cannot gate that code.
 - Exactly one leaf predicate must be active per `where.file` node;
   compositions are expressed via `all-of` / `one-of` / `not`.
+- `has_directive` matches source files that contain the specified Go compiler directive
+  in the file's leading run of comments (before the `package` clause). Directives
+  attached to declarations or other AST nodes are not treated as file-level directives.
 - During the setup phase, leaf predicates (`has_func`, `has_recv`,
-  `has_struct`, `has_package`, `is_test`) and the `where.file` combinators
-  documented below are executed. `has_directive`, and combinators placed at the
-  top level of `where` (outside `where.file`), are validated but return a
-  descriptive "not yet supported" error at build time.
+  `has_struct`, `has_directive`, `has_package`, `is_test`) and the `where.file` combinators
+  documented below are executed. Combinators placed at the top level of `where`
+  (outside `where.file`) are validated but return a descriptive "not yet supported"
+  error at build time.
 
 **`has_package` example — filter within a glob-matched package family:**
 
@@ -279,6 +283,7 @@ Rules:
 | `wrap_call`         | `InstCallRule`      |
 | `expand_directive`  | `InstDirectiveRule` |
 | `assign_value`      | `InstDeclRule`      |
+| `set_fields`        | `InstLitRule`       |
 
 **Planned:** rule type will be derived from the modifier key in `do`. The current implementation still infers from field presence and ignores the modifier name; see #546 for the planned migration.
 
@@ -612,9 +617,36 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 **Modifier (`do: - inject_code:`):**
 
-- `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function.
+- `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function. If the string contains `{{`, it is additionally rendered as a Go standard [text/template](https://pkg.go.dev/text/template) template using the shared function template variables below before being parsed; code with no `{{` is injected verbatim, unaffected by this rendering step.
 
 Top-level `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Top-level fields](#top-level-fields).
+
+**Template Placeholders:**
+
+| Placeholder              | Replaced with                                                            |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `{{.FuncName}}`          | The name of the target function                                          |
+| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver |
+| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                      |
+| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                         |
+| `{{.FuncReturnCount}}`   | The number of return values                                              |
+
+Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values, and blank (`_`) names, are assigned a synthetic name the first time a template references them. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with a descriptive error. Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are also available.
+
+**Example with function template variables:**
+
+```yaml
+raw_args:
+  target: main
+  where:
+    func: divide
+  do:
+    - inject_code:
+        raw: |-
+          println("enter {{ .FuncName }}, arg0={{ .FuncArgument 0 }}")
+```
+
+Given `func divide(a int, b int) (int, error) { ... }`, the injected code becomes `println("enter divide, arg0=a")`.
 
 **Example:**
 
@@ -714,7 +746,7 @@ Top-level `imports` (map[string]string, optional): Additional imports needed for
 
 **`replace` String System:**
 
-The `replace` field uses Go's standard `text/template` package for code generation. This provides:
+The `replace` field uses Go's standard [text/template](https://pkg.go.dev/text/template) package for code generation. This provides:
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
 - **Type Safety**: The replace string is compiled at rule creation time and validated
@@ -725,6 +757,45 @@ Currently supported replace string features:
 - Simple wrapping: `wrapper({{ . }})`
 - IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
 - Complex expressions with multiple statements using IIFE
+
+**Function Template Variables:**
+
+In addition to `{{ . }}`, `replace` supports the shared function template variables, referenced as fields on the template's `.` — `{{.FuncName}}`, `{{.FuncArgument N}}`, `{{.FuncReturn N}}`, `{{.FuncArgumentCount}}`, and `{{.FuncReturnCount}}`. These resolve against the **enclosing function**: the named top-level function whose body contains the matched call site (not the matched call's own arguments). Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent.
+
+A call site with no enclosing function has none of these available, so using one there fails the build with a descriptive error. Unnamed parameters and return values and blank (`_`) names, are assigned a synthetic name the first time a template references them.
+
+```yaml
+wrap_println:
+  target: main
+  where:
+    function_call: fmt.Println
+  do:
+    - wrap_call:
+        replace: |-
+          (func() (int, error) {
+            println("handler arg:", {{ .FuncArgument 0 }})
+            return {{ . }}
+          })()
+```
+
+Given:
+
+```go
+func Handler(name string) {
+    fmt.Println("hello")
+}
+```
+
+`{{ .FuncArgument 0 }}` resolves to `name`:
+
+```go
+func Handler(name string) {
+    (func() (int, error) {
+        println("handler arg:", name)
+        return fmt.Println("hello")
+    })()
+}
+```
 
 **`append_args` Semantics:**
 
@@ -945,19 +1016,33 @@ This rule instruments functions annotated with a magic comment (a "directive") b
 
 **Selectors (under `where`):**
 
-- `directive` (string, required): The directive name to match, without the leading `//`. Must not contain spaces. For example, `otelc:span` matches the comment `//otelc:span`. Note that a space after `//` (e.g., `// otelc:span`) does **not** match — the directive must immediately follow `//`.
+- `directive` (string, required): The directive name to match, without the leading `//`. Must not contain spaces. For example, `otelc:span` matches the comment `//otelc:span`. Note that a space after `//` (e.g., `// otelc:span`) does **not** match — the directive must immediately follow `//`. Any text after the directive name (separated by whitespace) is parsed as `key:value` arguments — see `{{.DirectiveArgs}}` / `{{.DirectiveArg key}}` below.
 
 **Modifier (`do: - expand_directive:`):**
 
-- `template` (string, required): Go statements to prepend to each matching function body. Rendered with [fasttemplate](https://github.com/valyala/fasttemplate) using `{{` / `}}` delimiters. The only supported placeholder is `{{FuncName}}`, which is replaced with the name of the annotated function.
+- `template` (string, required): Go statements to prepend to each matching function body. Rendered with Go's standard [text/template](https://pkg.go.dev/text/template) using `{{` / `}}` delimiters. Supported placeholders are the shared function template variables listed below, referenced as fields on the template's `.` (e.g. `{{.FuncName}}`). Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent.
 
 Top-level `imports` (map[string]string, optional): Additional imports needed by the injected code. Same format as [Top-level fields](#top-level-fields).
 
 **Template Placeholders:**
 
-| Placeholder    | Replaced with                      |
-| -------------- | ---------------------------------- |
-| `{{FuncName}}` | The name of the annotated function |
+| Placeholder                     | Replaced with                                                               |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `{{.FuncName}}`                 | The name of the annotated function                                          |
+| `{{.FuncArgument N}}`           | The identifier of the N-th (0-indexed) parameter, excluding the receiver    |
+| `{{.FuncReturn N}}`             | The identifier of the N-th (0-indexed) return value                         |
+| `{{.FuncArgumentCount}}`        | The number of parameters, excluding the receiver                            |
+| `{{.FuncReturnCount}}`          | The number of return values                                                 |
+| `{{.FuncArgumentOfType type}}`  | The first parameter (excluding the receiver) matching the given type, or "" |
+| `{{.FuncReturnOfType type}}`    | The first return value matching the given type, or ""                       |
+| `{{.DirectiveArgs}}`            | The `key:value` arguments parsed from the matched directive comment         |
+| `{{.DirectiveArg key}}`         | The value of the named directive argument, or "" if not present             |
+
+Unnamed parameters and return values (e.g. `func(int, string)`) and blank (`_`) names are assigned a synthetic name the first time a template references them, so they can be read via `{{.FuncArgument N}}` / `{{.FuncReturn N}}` like any other. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with an error.
+
+`{{.DirectiveArgs}}` and `{{.DirectiveArg key}}` read the `key:value` arguments that followed the directive name in the matched comment (e.g. `span.name:"custom-op" tag:foo` in `//otelc:span span.name:"custom-op" tag:foo`). Arguments are whitespace-separated `key:value` pairs; a value may be a Go double-quoted string (supporting the usual Go escape sequences), but single-quoted values are rejected. A directive comment with no arguments yields an empty `{{.DirectiveArgs}}`, and `{{.DirectiveArg key}}` returns "" for any key when the argument is absent.
+
+Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are available alongside the placeholders above. Note that every `{{ ... }}` span is parsed as a template action, so incidental adjacent Go braces (e.g. a composite literal like `[]Point{{X: 1, Y: 2}}`) will fail to parse — the same limitation Datadog/orchestrion's `code.Template` has for the same reason.
 
 **Example:**
 
@@ -969,15 +1054,15 @@ span_directive:
   do:
     - expand_directive:
         template: |-
-          println("span start: {{FuncName}}")
-          defer println("span end: {{FuncName}}")
+          println("span start: {{ .FuncName }}, arg0={{ .FuncArgument 0 }}")
+          defer println("span end: {{ .FuncName }}")
 ```
 
 Given this source file:
 
 ```go
 //otelc:span
-func foo() {
+func foo(name string) {
     println("hello")
 }
 ```
@@ -986,10 +1071,46 @@ The instrumented output becomes:
 
 ```go
 //otelc:span
-func foo() {
-    println("span start: foo")
+func foo(name string) {
+    println("span start: foo, arg0=name")
     defer println("span end: foo")
     println("hello")
+}
+```
+
+**Example: `FuncArgumentOfType`, `FuncReturnOfType`, and `DirectiveArg`**
+
+```yaml
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          println("span name:", {{ printf "%q" (.DirectiveArg "span.name") }})
+          println("ctx arg:", {{ .FuncArgumentOfType "context.Context" }} != nil)
+          println("err ret:", {{ .FuncReturnOfType "error" }} == nil)
+```
+
+Given:
+
+```go
+//otelc:span span.name:"custom-op"
+func divide(ctx context.Context, a int, b int) (int, error) {
+    return a / b, nil
+}
+```
+
+`{{ .DirectiveArg "span.name" }}` resolves to `custom-op`, `{{ .FuncArgumentOfType "context.Context" }}` resolves to `ctx`, and `{{ .FuncReturnOfType "error" }}` resolves to the synthesized name for the unnamed `error` result:
+
+```go
+//otelc:span span.name:"custom-op"
+func divide(ctx context.Context, a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
+    println("span name:", "custom-op")
+    println("ctx arg:", ctx != nil)
+    println("err ret:", _unnamedRetVal1 == nil)
+    return a / b, nil
 }
 ```
 
@@ -999,7 +1120,8 @@ func foo() {
 - The `//` must not be followed by a space (i.e., `//otelc:span`, not `// otelc:span`).
 - The `directive` field must not include the leading `//`.
 - Functions without the directive comment are not affected.
-- Multiple functions in the same file can carry the directive; each gets the template applied independently with its own `{{FuncName}}`.
+- Multiple functions in the same file can carry the directive; each gets the template applied independently with its own placeholder values.
+- `FuncArgumentOfType` and `FuncReturnOfType` match on syntactic type name only (e.g. `context.Context`, `*http.Request`, `error`).
 
 ### 6. File Addition Rule
 
@@ -1120,6 +1242,103 @@ This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTra
 - `replace` must be a valid Go expression (not a statement).
 - `wrap` must contain `{{ . }}` as a placeholder for the original expression. The template must produce exactly one expression.
 - `wrap` returns an error at instrumentation time if the matched declaration has no initializer (e.g., `var X T` without `= ...`).
-- If `replace` matches multiple names in a single declaration (e.g., `var a, b = ...`), the replacement expression is cloned and assigned to each name.
-- If `wrap` matches multiple initialized values in a single declaration, each initializer is wrapped independently.
+- If `replace` targets one name in a multi-name declaration (e.g., `var a, b = ...`), only that name's initializer is replaced; sibling names are left untouched. If the declaration's names and initializers don't correspond one-to-one (e.g., a tuple-valued `var a, b = f()`), the rule reports an error instead of guessing.
+- If `wrap` targets one name in a multi-name declaration, only that name's initializer is wrapped; sibling names are left untouched. The same one-to-one requirement applies as for `replace`.
 - Omitting `kind` matches the first symbol with the given name regardless of kind.
+
+### 8. Composite Literal Rule
+
+This rule sets fields on composite (struct) literals of a given type, wherever those literals are written in the target package. It reaches values that are constructed inline, which the Function Hook Rule and Call Wrapping Rule cannot see because there is no function to hook.
+
+**Use Cases:**
+
+- Configuring a third-party type that has no constructor, so every consumer writes the literal by hand.
+- Marking the values one package creates, so instrumentation elsewhere can tell them apart from values created by application code.
+
+**Selectors (under `where`):**
+
+- `struct_literal` (string, required): The qualified type name in the form `package/path.TypeName`.
+
+**Modifier (`do: - set_fields:`):**
+
+- `field` (list of objects, required): The fields to set on each matched literal. Each object contains:
+  - `name` (string, required): The field name.
+  - `value` (string, optional): A Go expression assigned to the field. When `wrap` is also set, it applies only to literals that omit the field.
+  - `wrap` (string, optional): A Go expression template applied to the value the literal already assigns to this field. `{{ . }}` is substituted with that expression.
+
+At least one of `value` or `wrap` must be set. They describe different situations, so both may be set on one entry. This differs from `assign_value`, where `replace` and `wrap` are mutually exclusive: a declaration either has an initializer or does not, whereas whether a field is present varies from one literal to the next.
+
+| Keys    | Field present | Field absent            |
+| ------- | ------------- | ----------------------- |
+| `value` | overridden    | set                     |
+| `wrap`  | wrapped       | skipped, with a warning |
+| both    | wrapped       | set                     |
+
+Top-level `imports` (map[string]string, optional): Additional imports needed by the injected values. Same format as [Top-level fields](#top-level-fields).
+
+**Example:**
+
+```yaml
+mark_internal_transports:
+  target: example.com/tracer
+  where:
+    struct_literal: net/http.Transport
+  do:
+    - set_fields:
+        field:
+          - name: Internal
+            value: "true"
+```
+
+```go
+&http.Transport{MaxIdleConns: 100}
+// → &http.Transport{Internal: true, MaxIdleConns: 100}
+```
+
+The `Internal` field itself comes from a separate [Struct Field Injection Rule](#2-struct-field-injection-rule) against `net/http`; this rule only sets values.
+
+**Example with `wrap`:**
+
+`value` can only assign an expression the rule spells out in full. Use `wrap` when the replacement has to build on whatever the literal already assigns, which is often a value computed at the construction site and therefore impossible to name in a rule:
+
+```yaml
+instrument_clients:
+  target: example.com/app
+  where:
+    struct_literal: net/http.Client
+  do:
+    - set_fields:
+        field:
+          - name: Transport
+            wrap: "otelhttp.NewTransport({{ . }})"
+            value: "otelhttp.NewTransport(http.DefaultTransport)"
+  imports:
+    http: "net/http"
+    otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+```
+
+```go
+// a client that sets its own transport has it wrapped
+&http.Client{Transport: myTransport}
+// → &http.Client{Transport: otelhttp.NewTransport(myTransport)}
+
+// one that does not gets value instead. An absent Transport means
+// http.DefaultTransport, so naming it explicitly instruments the client
+// rather than wrapping a nil.
+&http.Client{}
+// → &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+```
+
+**Matching:**
+
+`struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
+
+**Notes:**
+
+- Not matched: unqualified literals of a type declared in the target package itself (`Transport{...}`), literals with an elided type such as elements of a slice literal (`[]http.Transport{{...}}`), and chained qualifiers (`outer.http.Transport{...}`).
+- A field already present is modified in place, keeping its position. A field not present is prepended. Every other element is left alone.
+- Go rejects a literal that mixes keyed and positional elements, so a positional literal (`image.Point{1, 2}`) cannot take these fields. Such literals are skipped with a warning rather than producing code that does not compile.
+- `value` must be a valid Go expression and `wrap` must produce one. Neither is type-checked against the field at rule-definition time, so a mismatch surfaces as a compile error in the instrumented build.
+- `wrap` must contain `{{ . }}`; a template without it is rejected at load time.
+- This rule sets named fields, so it cannot restructure a literal as a whole: no reordering or removing elements, and one field's expression cannot read another's.
+- Setting the same field twice in one rule is rejected at load time.

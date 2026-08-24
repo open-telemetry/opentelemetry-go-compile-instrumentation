@@ -4,14 +4,48 @@
 package setup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
+
+func TestSetupPhaseStore(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	sp := newTestSetupPhase()
+
+	// An empty rule set resolves no paths and writes an empty JSON array to the
+	// matched-rule file.
+	err := sp.store(context.Background(), []*rule.InstRuleSet{}, map[string]bool{})
+	require.NoError(t, err)
+
+	matchedFile := util.GetMatchedRuleFile()
+	assert.Equal(t, filepath.Join(util.GetBuildTempDir(), "matched.json"), matchedFile)
+
+	data, err := os.ReadFile(matchedFile)
+	require.NoError(t, err)
+	assert.Equal(t, "[]", string(data))
+}
+
+func TestSetupPhaseStoreCreateError(t *testing.T) {
+	// Point the work dir at a location whose .otelc-build path does not exist,
+	// so os.Create fails and store returns a wrapped error.
+	workDir := filepath.Join(t.TempDir(), "missing")
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	sp := newTestSetupPhase()
+	err := sp.store(context.Background(), []*rule.InstRuleSet{}, map[string]bool{})
+	require.Error(t, err)
+}
 
 func TestResolveRulePaths(t *testing.T) {
 	dir := t.TempDir()

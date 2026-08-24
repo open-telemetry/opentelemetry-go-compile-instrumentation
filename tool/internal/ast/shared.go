@@ -16,7 +16,7 @@ import (
 )
 
 func findFuncDecls(root *dst.File, lambda func(*dst.FuncDecl) bool) []*dst.FuncDecl {
-	funcDecls := ListFuncDecls(root)
+	funcDecls := listFuncDecls(root)
 
 	// The function with receiver and the function without receiver may have
 	// the same name, so they need to be classified into the same name
@@ -156,7 +156,7 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	if !ok {
 		return nil, false, ex.Newf("unexpected %T value", r)
 	}
-	ok, err := funcDeclMatchesFilters(funcDecl, rr)
+	ok, err := funcDeclMatchesFilters(funcDecl, rr, root)
 	if err != nil {
 		return nil, false, err
 	}
@@ -166,7 +166,7 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	return funcDecl, true, nil
 }
 
-func ListFuncDecls(root *dst.File) []*dst.FuncDecl {
+func listFuncDecls(root *dst.File) []*dst.FuncDecl {
 	funcDecls := make([]*dst.FuncDecl, 0)
 	for _, decl := range root.Decls {
 		funcDecl, ok := decl.(*dst.FuncDecl)
@@ -178,19 +178,15 @@ func ListFuncDecls(root *dst.File) []*dst.FuncDecl {
 	return funcDecls
 }
 
-func FindStructDecl(root *dst.File, structName string) *dst.GenDecl {
-	return FindTypeDecl(root, structName)
-}
-
-// FindVarDecl finds a package-level variable declaration by name.
+// findVarDecl finds a package-level variable declaration by name.
 // Returns the enclosing GenDecl and the matching ValueSpec, or nil if not found.
-func FindVarDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
+func findVarDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
 	return findValueDecl(root, name, token.VAR)
 }
 
-// FindConstDecl finds a package-level constant declaration by name.
+// findConstDecl finds a package-level constant declaration by name.
 // Returns the enclosing GenDecl and the matching ValueSpec, or nil if not found.
-func FindConstDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
+func findConstDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
 	return findValueDecl(root, name, token.CONST)
 }
 
@@ -215,8 +211,8 @@ func findValueDecl(root *dst.File, name string, tok token.Token) (*dst.GenDecl, 
 	return nil, nil
 }
 
-// FindTypeDecl finds a package-level type declaration by name (any kind: struct, interface, alias, etc).
-func FindTypeDecl(root *dst.File, name string) *dst.GenDecl {
+// findTypeDecl finds a package-level type declaration by name (any kind: struct, interface, alias, etc).
+func findTypeDecl(root *dst.File, name string) *dst.GenDecl {
 	for _, decl := range root.Decls {
 		genDecl, ok := decl.(*dst.GenDecl)
 		if !ok || genDecl.Tok != token.TYPE {
@@ -242,15 +238,15 @@ func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 			return n
 		}
 	case "var":
-		if _, spec := FindVarDecl(root, name); spec != nil {
+		if _, spec := findVarDecl(root, name); spec != nil {
 			return spec
 		}
 	case "const":
-		if _, spec := FindConstDecl(root, name); spec != nil {
+		if _, spec := findConstDecl(root, name); spec != nil {
 			return spec
 		}
 	case "type":
-		if n := FindTypeDecl(root, name); n != nil {
+		if n := findTypeDecl(root, name); n != nil {
 			return n
 		}
 	default:
@@ -258,13 +254,13 @@ func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 		if fn := FindFuncDeclWithoutRecv(root, name); fn != nil {
 			return fn
 		}
-		if _, spec := FindVarDecl(root, name); spec != nil {
+		if _, spec := findVarDecl(root, name); spec != nil {
 			return spec
 		}
-		if _, spec := FindConstDecl(root, name); spec != nil {
+		if _, spec := findConstDecl(root, name); spec != nil {
 			return spec
 		}
-		if n := FindTypeDecl(root, name); n != nil {
+		if n := findTypeDecl(root, name); n != nil {
 			return n
 		}
 	}
@@ -284,7 +280,7 @@ func IsUnusedIdent(ident *dst.Ident) bool {
 	return ident.Name == IdentIgnore
 }
 
-func IsStringLit(expr dst.Expr, val string) bool {
+func isStringLit(expr dst.Expr, val string) bool {
 	lit, ok := expr.(*dst.BasicLit)
 	if !ok {
 		return false
@@ -310,12 +306,32 @@ func IsEllipsis(t dst.Expr) bool {
 	return ok
 }
 
-func AddStructField(decl dst.Decl, name, t string) {
-	gen := util.AssertType[*dst.GenDecl](decl)
-	fd := Field(name, Ident(t))
-	ty := util.AssertType[*dst.TypeSpec](gen.Specs[0])
-	st := util.AssertType[*dst.StructType](ty.Type)
-	st.Fields.List = append(st.Fields.List, fd)
+// FindStructType returns the *dst.StructType declared under name, or nil if there
+// is no such top-level type or the named type is not a struct (e.g. an interface,
+// alias, or named non-struct type). Unlike findTypeDecl it resolves the specific
+// spec by name, so it is correct for grouped `type ( ... )` blocks.
+func FindStructType(root *dst.File, name string) *dst.StructType {
+	gen := findTypeDecl(root, name)
+	if gen == nil {
+		return nil
+	}
+	for _, spec := range gen.Specs {
+		ts, ok := spec.(*dst.TypeSpec)
+		if !ok || ts.Name.Name != name {
+			continue
+		}
+		st, ok := ts.Type.(*dst.StructType)
+		if !ok {
+			return nil
+		}
+		return st
+	}
+	return nil
+}
+
+// AddStructField appends a field named name of type t to the given struct.
+func AddStructField(st *dst.StructType, name, t string) {
+	st.Fields.List = append(st.Fields.List, Field(name, Ident(t)))
 }
 
 // funcDeclMatchesFilters reports whether funcDecl satisfies all signature
@@ -328,11 +344,19 @@ func AddStructField(decl dst.Decl, name, t string) {
 // Matching uses structural comparison of dst.Expr nodes (no type checker).
 // For the scalar-type filters this means an exact type-name match rather than
 // full interface-satisfaction checking.
-func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool, error) {
+//
+// Qualified type names are resolved against imports, which maps the local
+// identifier used at a use site to its real import path (see ImportAliasMap).
+// Matching is therefore relative to the enclosing file's import declarations.
+func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, root *dst.File) (bool, error) {
+	if r.Signature == nil && r.SignatureContains == nil && r.Result == "" && r.LastResult == "" && r.Param == "" {
+		return true, nil
+	}
+	imports := ImportAliasMap(root)
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
-		ok, err := matchesExactSignature(ft, r.Signature)
+		ok, err := matchesExactSignature(ft, r.Signature, imports)
 		if err != nil {
 			return false, err
 		}
@@ -341,7 +365,7 @@ func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool,
 		}
 	}
 	if r.SignatureContains != nil {
-		ok, err := matchesSignatureContains(ft, r.SignatureContains)
+		ok, err := matchesSignatureContains(ft, r.SignatureContains, imports)
 		if err != nil {
 			return false, err
 		}
@@ -350,7 +374,7 @@ func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool,
 		}
 	}
 	if r.Result != "" {
-		ok, err := fieldListContainsType(ft.Results, r.Result)
+		ok, err := fieldListContainsType(ft.Results, r.Result, imports)
 		if err != nil {
 			return false, err
 		}
@@ -359,7 +383,7 @@ func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool,
 		}
 	}
 	if r.LastResult != "" {
-		ok, err := matchesLastResult(ft.Results, r.LastResult)
+		ok, err := matchesLastResult(ft.Results, r.LastResult, imports)
 		if err != nil {
 			return false, err
 		}
@@ -368,7 +392,7 @@ func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool,
 		}
 	}
 	if r.Param != "" {
-		ok, err := fieldListContainsType(ft.Params, r.Param)
+		ok, err := fieldListContainsType(ft.Params, r.Param, imports)
 		if err != nil {
 			return false, err
 		}
@@ -381,19 +405,19 @@ func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule) (bool,
 
 // matchesExactSignature returns true when funcType has exactly the parameter
 // and result types listed in sig, compared field-by-field in order.
-func matchesExactSignature(ft *dst.FuncType, sig *rule.FuncSignature) (bool, error) {
-	ok, err := matchesFieldList(sig.Args, ft.Params)
+func matchesExactSignature(ft *dst.FuncType, sig *rule.FuncSignature, imports map[string]string) (bool, error) {
+	ok, err := matchesFieldList(sig.Args, ft.Params, imports)
 	if err != nil || !ok {
 		return ok, err
 	}
-	return matchesFieldList(sig.Returns, ft.Results)
+	return matchesFieldList(sig.Returns, ft.Results, imports)
 }
 
 // matchesFieldList returns true when expected type strings match the types in
 // fields exactly (same count, same order).
 // Multi-name fields (e.g. "a, b int") are expanded inline so each name maps
 // to exactly one type slot — without cloning AST nodes.
-func matchesFieldList(expected []string, fields *dst.FieldList) (bool, error) {
+func matchesFieldList(expected []string, fields *dst.FieldList, imports map[string]string) (bool, error) {
 	if len(expected) == 0 {
 		return fields == nil || len(fields.List) == 0, nil
 	}
@@ -417,7 +441,7 @@ func matchesFieldList(expected []string, fields *dst.FieldList) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if !tn.matches(types[i]) {
+		if !tn.matches(types[i], imports) {
 			return false, nil
 		}
 	}
@@ -427,9 +451,9 @@ func matchesFieldList(expected []string, fields *dst.FieldList) (bool, error) {
 // matchesSignatureContains returns true when funcType contains any of the
 // expected argument types among its parameters OR any of the expected return
 // types among its results.
-func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature) (bool, error) {
+func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature, imports map[string]string) (bool, error) {
 	for _, expected := range sig.Args {
-		ok, err := fieldListContainsType(ft.Params, expected)
+		ok, err := fieldListContainsType(ft.Params, expected, imports)
 		if err != nil {
 			return false, err
 		}
@@ -438,7 +462,7 @@ func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature) (bool, 
 		}
 	}
 	for _, expected := range sig.Returns {
-		ok, err := fieldListContainsType(ft.Results, expected)
+		ok, err := fieldListContainsType(ft.Results, expected, imports)
 		if err != nil {
 			return false, err
 		}
@@ -450,7 +474,7 @@ func matchesSignatureContains(ft *dst.FuncType, sig *rule.FuncSignature) (bool, 
 }
 
 // matchesLastResult returns true when the last entry in fields matches typeStr.
-func matchesLastResult(fields *dst.FieldList, typeStr string) (bool, error) {
+func matchesLastResult(fields *dst.FieldList, typeStr string, imports map[string]string) (bool, error) {
 	if fields == nil || len(fields.List) == 0 {
 		return false, nil
 	}
@@ -458,7 +482,7 @@ func matchesLastResult(fields *dst.FieldList, typeStr string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return tn.matches(fields.List[len(fields.List)-1].Type), nil
+	return tn.matches(fields.List[len(fields.List)-1].Type, imports), nil
 }
 
 // SplitMultiNameFields splits fields that have multiple names into separate fields.

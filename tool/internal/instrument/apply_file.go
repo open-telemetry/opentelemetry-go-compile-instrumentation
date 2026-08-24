@@ -6,9 +6,9 @@ package instrument
 import (
 	"context"
 	"fmt"
+	"go/build/constraint"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -17,27 +17,27 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
+// stripBuildIgnoreTag removes genuine "//go:build ignore" constraint lines
+// from content, line by line. It leaves every other occurrence of that text —
+// inside a string literal, inside comment prose, anywhere that isn't itself a
+// build-constraint line — untouched. See #1069: a whole-file substring
+// replace corrupted both of those.
 func stripBuildIgnoreTag(content string) string {
-	return strings.ReplaceAll(content, "//go:build ignore", "")
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if constraint.IsGoBuild(line) {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // applyFileRule introduces the new file to the target package at compile time.
-func (ip *InstrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
-	// List all files in the rule module path
-	files, err := util.ListFiles(rule.ResolvedPath)
-	if err != nil {
-		return ex.Wrapf(err, "listing files for rule %s in dir %s (import path %s)",
-			rule.Name, rule.ResolvedPath, rule.Path)
+func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
+	file := filepath.Join(rule.ResolvedPath, rule.File)
+	if !util.PathExists(file) {
+		return ex.Newf("file %s not found in %s", rule.File, rule.ResolvedPath)
 	}
-
-	// Find the new file we want to introduce
-	index := slices.IndexFunc(files, func(file string) bool {
-		return strings.HasSuffix(file, rule.File)
-	})
-	if index == -1 {
-		return ex.Newf("file %s not found", rule.File)
-	}
-	file := files[index]
 
 	// Parse the new file into AST nodes and modify it as needed.
 	// Keep processing in-memory to avoid mutating shared temp rule files.

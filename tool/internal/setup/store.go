@@ -6,7 +6,7 @@ package setup
 import (
 	"context"
 	"encoding/json"
-	"os"
+	"slices"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -23,13 +23,19 @@ import (
 func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
 	cache := make(map[string]string)
 
+	dirs := make([]string, 0, len(moduleDirs))
+	for dir := range moduleDirs {
+		dirs = append(dirs, dir)
+	}
+	slices.Sort(dirs)
+
 	resolve := func(goPath string) (string, error) {
 		if dir, ok := cache[goPath]; ok {
 			return dir, nil
 		}
 
 		var lastErr error
-		for moduleDir := range moduleDirs {
+		for _, moduleDir := range dirs {
 			pkgs, err := packages.Load(&packages.Config{
 				Mode:    packages.NeedFiles,
 				Context: ctx,
@@ -81,26 +87,20 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 
 // store stores the matched rules to the file
 // It's the pair of the InstrumentPhase.load
-func (sp *SetupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
+func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
 	if err := resolveRulePaths(ctx, matched, moduleDirs); err != nil {
 		return ex.Wrapf(err, "resolving rule paths")
 	}
-
-	f := util.GetMatchedRuleFile()
-	file, err := os.Create(f)
-	if err != nil {
-		return ex.Wrapf(err, "failed to create file %s", f)
-	}
-	defer file.Close()
 
 	bs, err := json.Marshal(matched)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal rules to JSON")
 	}
 
-	_, err = file.Write(bs)
+	f := util.GetMatchedRuleFile()
+	err = util.WriteFileAtomic(f, bs)
 	if err != nil {
-		return ex.Wrapf(err, "failed to write JSON to file %s", f)
+		return ex.Wrapf(err, "failed to write matched rules to file %s", f)
 	}
 	sp.Info("Stored matched sets", "path", f)
 	return nil

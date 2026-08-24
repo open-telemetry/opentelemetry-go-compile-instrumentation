@@ -36,6 +36,14 @@ const (
 	OtelcToolExe           = "otelc"
 )
 
+// IsRuleFile reports whether name identifies an otelc rule file.
+func IsRuleFile(name string) bool {
+	return name == "otelc.yml" ||
+		name == "otelc.yaml" ||
+		strings.HasSuffix(name, ".otelc.yml") ||
+		strings.HasSuffix(name, ".otelc.yaml")
+}
+
 func GetMatchedRuleFile() string {
 	const matchedRuleFile = "matched.json"
 	return GetBuildTemp(matchedRuleFile)
@@ -54,11 +62,19 @@ func GetAddedImportsPattern() string {
 	return GetBuildTemp("added_imports.*.json")
 }
 
+// GetOtelcWorkDir returns the otelc working directory. It first checks the
+// OTELC_WORK_DIR environment variable; if unset, it falls back to the current
+// working directory. If the working directory cannot be determined, the process
+// exits via ex.Fatalf, since otelc cannot safely place build artifacts without
+// a known base path.
 func GetOtelcWorkDir() string {
 	wd := os.Getenv(EnvOtelcWorkDir)
 	if wd == "" {
-		wd, _ = os.Getwd()
-		return wd
+		var err error
+		wd, err = os.Getwd()
+		if err != nil {
+			ex.Fatalf("failed to get working directory: %v", err)
+		}
 	}
 	return wd
 }

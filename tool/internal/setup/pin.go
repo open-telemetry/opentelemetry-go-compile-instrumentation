@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -185,7 +186,7 @@ func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) err
 			return nil
 		}
 
-		if !isRuleFile(d.Name()) {
+		if !util.IsRuleFile(d.Name()) {
 			return nil
 		}
 
@@ -306,28 +307,34 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	return true, nil
 }
 
-func matchInstrumentationImports(deps []*Dependency, ruleset map[string][]yamlRule) map[string]bool {
+func matchInstrumentationImports(
+	deps []*Dependency,
+	ruleset map[string][]yamlRule,
+	warn func(msg string, args ...any),
+) map[string]bool {
 	imports := make(map[string]bool)
+
+	// Record the first unresolved-version skip per instrumentation module.
+	// Warnings are emitted after matching so we only complain when the module
+	// was not imported by any other rule/dep (avoids false positives).
+	skipped := make(map[string]unresolvedSkip)
 
 	// Match only on target + version.
 	for _, dep := range deps {
 		for modPath, rules := range ruleset {
 			for _, r := range rules {
-				switch {
-				case rule.IsRootTarget(r.Target):
-					// always add root targets
-					// they will be further matched in setup phase
+				tm := instrumentationRuleMatchesDep(dep, r)
+				if tm.isRoot {
+					// always add root targets; they are further matched in setup
 					imports[modPath] = true
 					continue
-				case rule.IsGlobTarget(r.Target):
-					if !rule.MatchGlobTarget(r.Target, dep.ImportPath) {
-						continue
-					}
-				case r.Target != dep.ImportPath:
+				}
+				if !tm.matched {
 					continue
 				}
 
 				if !util.VersionInRange(dep.Version, r.VersionRange) {
+					recordUnresolvedSkip(skipped, modPath, dep, r.VersionRange)
 					continue
 				}
 
@@ -336,7 +343,67 @@ func matchInstrumentationImports(deps []*Dependency, ruleset map[string][]yamlRu
 		}
 	}
 
+	emitUnresolvedSkipWarnings(warn, imports, skipped)
 	return imports
+}
+
+type unresolvedSkip struct {
+	dep          string
+	versionRange string
+}
+
+type instrumentationTargetMatch struct {
+	matched bool
+	isRoot  bool
+}
+
+// instrumentationRuleMatchesDep reports whether r's target matches dep.
+// Root targets always pin the instrumentation module.
+func instrumentationRuleMatchesDep(dep *Dependency, r yamlRule) instrumentationTargetMatch {
+	switch {
+	case rule.IsRootTarget(r.Target):
+		return instrumentationTargetMatch{matched: true, isRoot: true}
+	case rule.IsGlobTarget(r.Target):
+		return instrumentationTargetMatch{matched: rule.MatchGlobTarget(r.Target, dep.ImportPath)}
+	default:
+		return instrumentationTargetMatch{matched: r.Target == dep.ImportPath}
+	}
+}
+
+func recordUnresolvedSkip(
+	skipped map[string]unresolvedSkip,
+	modPath string,
+	dep *Dependency,
+	versionRange string,
+) {
+	if !unresolvedVersionSkip(dep.Version, versionRange) {
+		return
+	}
+	if _, ok := skipped[modPath]; ok {
+		return
+	}
+	skipped[modPath] = unresolvedSkip{
+		dep:          dep.ImportPath,
+		versionRange: versionRange,
+	}
+}
+
+func emitUnresolvedSkipWarnings(
+	warn func(msg string, args ...any),
+	imports map[string]bool,
+	skipped map[string]unresolvedSkip,
+) {
+	if warn == nil {
+		return
+	}
+	for modPath, s := range skipped {
+		if imports[modPath] {
+			continue
+		}
+		warnUnresolvedVersionSkip(warn, s.dep, s.versionRange,
+			"instrumentation", modPath,
+		)
+	}
 }
 
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
@@ -380,7 +447,7 @@ func updatePinnedProjects(
 	prunedImports := make(map[string]map[string]bool, len(toolFiles))
 
 	walkErr := walkInstrumentation(ctx, toolFiles,
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			pruneImport := func(reason error) {
 				logger.WarnContext(ctx, "invalid instrumentation import",
 					"importPath", v.Config.ImportPath,
@@ -404,7 +471,7 @@ func updatePinnedProjects(
 			}
 
 			if v.Config.Error != nil {
-				if errors.Is(v.Config.Error, ErrNotInstrumentation) {
+				if errors.Is(v.Config.Error, errNotInstrumentation) {
 					pruneImport(v.Config.Error)
 					return false, nil
 				}
@@ -469,7 +536,9 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	}
 
 	// We expect every built-in instrumentation module to be importable
-	imports := matchInstrumentationImports(deps, ruleset)
+	imports := matchInstrumentationImports(deps, ruleset, func(msg string, args ...any) {
+		logger.WarnContext(ctx, msg, args...)
+	})
 
 	// Nothing to instrument? Warn and skip generating tool file.
 	if len(imports) == 0 {
@@ -477,7 +546,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 			os.Stderr,
 			"Warning: no instrumentations matched, checked %d dependencies. Skipping generating %s file.\n",
 			len(deps),
-			ToolFileCanonical,
+			toolFileCanonical,
 		)
 		logger.WarnContext(ctx, "no instrumentations matched, skipping generating tool file")
 
@@ -487,8 +556,9 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
 	f := generateOtelInstrumentationGo(imports, opts)
-	for moduleDir := range moduleDirs {
-		path := filepath.Join(moduleDir, ToolFileCanonical)
+	dirs := slices.Sorted(maps.Keys(moduleDirs))
+	for _, moduleDir := range dirs {
+		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
 		}
@@ -602,10 +672,10 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	return generatePinnedProjects(ctx, moduleDirs, opts)
 }
 
-// AutoPin is a convenience function that automatically tracks generated/modified files before calling Pin
+// autoPin is a convenience function that automatically tracks generated/modified files before calling Pin
 // in order to restore them after the build completes.
-func AutoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
-	stateManager, found := StateManagerFromContext(ctx)
+func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
+	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		return nil, ex.New("state manager not found in context")
 	}

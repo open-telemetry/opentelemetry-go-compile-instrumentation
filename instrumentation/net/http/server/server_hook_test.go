@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/pkg/hook"
@@ -314,8 +315,8 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			statusCode: 200,
 			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
-				// Span should not be ended because instrumentation is disabled
-				assert.Equal(t, 0, len(spans))
+				// The span should still be ended when instrumentation is disabled.
+				assert.Equal(t, 1, len(spans))
 			},
 		},
 		{
@@ -345,6 +346,68 @@ func TestAfterServeHTTP(t *testing.T) {
 				// Should still work with default 200
 				span := spans[0]
 				assert.Equal(t, codes.Unset, span.Status().Code)
+			},
+		},
+		{
+			name: "matched route renames span and sets http.route",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				ctx, span := testTracer.Start(
+					context.Background(),
+					"GET",
+					trace.WithSpanKind(trace.SpanKindServer),
+				)
+
+				req := httptest.NewRequest("GET", "http://example.com/hello/world", nil)
+				req.Pattern = "GET /hello/{name}"
+
+				mockCtx := hooktest.NewMockHookContext()
+				mockCtx.SetParam(1, &writerWrapper{ResponseWriter: httptest.NewRecorder(), statusCode: 200})
+				mockCtx.SetParam(2, req)
+				mockCtx.SetData(map[string]interface{}{"ctx": ctx, "span": span})
+				return mockCtx
+			},
+			statusCode: 200,
+			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
+				require.Len(t, spans, 1)
+				span := spans[0]
+				assert.Equal(t, "GET /hello/{name}", span.Name())
+				assert.Contains(t, span.Attributes(), semconv.HTTPRoute("/hello/{name}"))
+			},
+		},
+		{
+			// gin and chi name the span themselves and leave r.Pattern empty.
+			name: "unmatched route leaves span name alone",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				ctx, span := testTracer.Start(
+					context.Background(),
+					"GET /set/by/gin",
+					trace.WithSpanKind(trace.SpanKindServer),
+				)
+
+				req := httptest.NewRequest("GET", "http://example.com/hello/world", nil)
+
+				mockCtx := hooktest.NewMockHookContext()
+				mockCtx.SetParam(1, &writerWrapper{ResponseWriter: httptest.NewRecorder(), statusCode: 200})
+				mockCtx.SetParam(2, req)
+				mockCtx.SetData(map[string]interface{}{"ctx": ctx, "span": span})
+				return mockCtx
+			},
+			statusCode: 200,
+			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
+				require.Len(t, spans, 1)
+				span := spans[0]
+				assert.Equal(t, "GET /set/by/gin", span.Name())
+				for _, attr := range span.Attributes() {
+					assert.NotEqual(t, semconv.HTTPRouteKey, attr.Key, "http.route must not be set")
+				}
 			},
 		},
 	}
@@ -465,4 +528,29 @@ func TestWriterWrapper_IntegrationWithHandler(t *testing.T) {
 			assert.Equal(t, tt.expectedBody, rec.Body.String())
 		})
 	}
+}
+
+func TestAfterServeHTTP_DisabledAfterStart_Regression(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+
+	initOnce = *new(sync.Once)
+	sr, _ := setupTestTracer(t)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	mockCtx := hooktest.NewMockHookContext()
+
+	BeforeServeHTTP(mockCtx, nil, w, req)
+
+	ended := sr.Ended()
+	assert.Empty(t, ended, "span should not be ended before AfterServeHTTP")
+
+	// Disable instrumentation while the request is in flight.
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "nethttp")
+
+	AfterServeHTTP(mockCtx)
+
+	ended = sr.Ended()
+	require.Len(t, ended, 1, "[] should have 1 item(s), but has 0")
+	assert.Equal(t, "GET", ended[0].Name())
 }

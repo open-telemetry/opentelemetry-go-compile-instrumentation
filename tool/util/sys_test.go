@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,13 +21,13 @@ func TestRunCmd(t *testing.T) {
 		expectErr bool
 	}{
 		{
-			name:      "simple echo command",
-			args:      []string{"echo", "hello"},
+			name:      "simple go command",
+			args:      []string{"go", "version"},
 			expectErr: false,
 		},
 		{
 			name:      "command with multiple arguments",
-			args:      []string{"echo", "hello", "world"},
+			args:      []string{"go", "env", "GOOS"},
 			expectErr: false,
 		},
 		{
@@ -503,4 +504,27 @@ func TestWriteFileAtomic(t *testing.T) {
 			require.Empty(t, matches)
 		})
 	}
+}
+
+func TestCRC32(t *testing.T) {
+	// CRC32 is deterministic and returns a decimal string.
+	got := CRC32("hello")
+	assert.Equal(t, CRC32("hello"), got, "must be deterministic")
+	assert.NotEqual(t, CRC32("hello"), CRC32("world"), "distinct inputs differ")
+
+	// The empty string hashes to 0.
+	assert.Equal(t, "0", CRC32(""))
+}
+
+func TestIsUnixAndIsWindows(t *testing.T) {
+	// Exactly the current platform family must report true; the two are
+	// mutually exclusive on every supported OS.
+	assert.NotEqual(t, isUnix(), IsWindows())
+}
+
+func TestNormalizePath(t *testing.T) {
+	// NormalizePath cleans and converts separators to forward slashes.
+	assert.Equal(t, "a/b/c", NormalizePath("a/b/./c"))
+	assert.Equal(t, "a/c", NormalizePath("a/b/../c"))
+	assert.Equal(t, ".", NormalizePath(""))
 }

@@ -44,8 +44,12 @@ type FilterDef struct {
 
 	HasFunc      string `json:"has_func,omitempty"      yaml:"has_func,omitempty"`      // match files that declare this function
 	HasRecv      string `json:"has_recv,omitempty"      yaml:"has_recv,omitempty"`      // narrow has_func to this receiver type; requires has_func
-	HasStruct    string `json:"has_struct,omitempty"    yaml:"has_struct,omitempty"`    // match files that declare this struct type
 	HasDirective string `json:"has_directive,omitempty" yaml:"has_directive,omitempty"` // match files carrying this //go: directive (validated, not yet executed)
+
+	// HasStruct matches files declaring this name as a struct type; an interface
+	// or alias of the same name does not. This inverts under not, which selects
+	// files it would otherwise skip when the name is an interface.
+	HasStruct string `json:"has_struct,omitempty" yaml:"has_struct,omitempty"`
 
 	// HasPackage matches source files whose declared package clause equals this
 	// name. The declared name is read from the parsed AST (the `package foo`
@@ -80,13 +84,14 @@ type WhereDef struct {
 	OneOf []WhereDef `json:"one-of,omitempty" yaml:"one-of,omitempty"`
 	Not   *WhereDef  `json:"not,omitempty"    yaml:"not,omitempty"`
 
-	Func         string `json:"func,omitempty"          yaml:"func,omitempty"`
-	Recv         string `json:"recv,omitempty"          yaml:"recv,omitempty"`
-	Struct       string `json:"struct,omitempty"        yaml:"struct,omitempty"`
-	FunctionCall string `json:"function_call,omitempty" yaml:"function_call,omitempty"`
-	Directive    string `json:"directive,omitempty"     yaml:"directive,omitempty"`
-	Kind         string `json:"kind,omitempty"          yaml:"kind,omitempty"`
-	Identifier   string `json:"identifier,omitempty"    yaml:"identifier,omitempty"`
+	Func          string `json:"func,omitempty"           yaml:"func,omitempty"`
+	Recv          string `json:"recv,omitempty"           yaml:"recv,omitempty"`
+	Struct        string `json:"struct,omitempty"         yaml:"struct,omitempty"`
+	StructLiteral string `json:"struct_literal,omitempty" yaml:"struct_literal,omitempty"`
+	FunctionCall  string `json:"function_call,omitempty"  yaml:"function_call,omitempty"`
+	Directive     string `json:"directive,omitempty"      yaml:"directive,omitempty"`
+	Kind          string `json:"kind,omitempty"           yaml:"kind,omitempty"`
+	Identifier    string `json:"identifier,omitempty"     yaml:"identifier,omitempty"`
 }
 
 // InstBaseRule is the base rule for all instrumentation rules.
@@ -119,6 +124,7 @@ type InstRuleSet struct {
 	FuncRules      map[string][]*InstFuncRule      `json:"func_rules"`
 	StructRules    map[string][]*InstStructRule    `json:"struct_rules"`
 	CallRules      map[string][]*InstCallRule      `json:"call_rules"`
+	LitRules       map[string][]*InstLitRule       `json:"lit_rules"`
 	DirectiveRules map[string][]*InstDirectiveRule `json:"directive_rules"`
 	DeclRules      map[string][]*InstDeclRule      `json:"decl_rules"`
 	FileRules      []*InstFileRule                 `json:"file_rules"`
@@ -133,6 +139,7 @@ func NewInstRuleSet(importPath string) *InstRuleSet {
 		FuncRules:      make(map[string][]*InstFuncRule),
 		StructRules:    make(map[string][]*InstStructRule),
 		CallRules:      make(map[string][]*InstCallRule),
+		LitRules:       make(map[string][]*InstLitRule),
 		DirectiveRules: make(map[string][]*InstDirectiveRule),
 		DeclRules:      make(map[string][]*InstDeclRule),
 		FileRules:      make([]*InstFileRule, 0),
@@ -145,6 +152,7 @@ func (irs *InstRuleSet) String() string {
 		fmt.Sprintf("func=%v", irs.FuncRules),
 		fmt.Sprintf("struct=%v", irs.StructRules),
 		fmt.Sprintf("call=%v", irs.CallRules),
+		fmt.Sprintf("lit=%v", irs.LitRules),
 		fmt.Sprintf("directive=%v", irs.DirectiveRules),
 		fmt.Sprintf("decl=%v", irs.DeclRules),
 		fmt.Sprintf("file=%v", irs.FileRules),
@@ -158,6 +166,7 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.StructRules) == 0 &&
 			len(irs.RawRules) == 0 &&
 			len(irs.CallRules) == 0 &&
+			len(irs.LitRules) == 0 &&
 			len(irs.DirectiveRules) == 0 &&
 			len(irs.DeclRules) == 0 &&
 			len(irs.FileRules) == 0)
@@ -184,6 +193,10 @@ func (irs *InstRuleSet) AddStructRule(file string, rule *InstStructRule) {
 
 func (irs *InstRuleSet) AddCallRule(file string, rule *InstCallRule) {
 	addRule(file, rule, irs.CallRules)
+}
+
+func (irs *InstRuleSet) AddLitRule(file string, rule *InstLitRule) {
+	addRule(file, rule, irs.LitRules)
 }
 
 func (irs *InstRuleSet) AddDirectiveRule(file string, rule *InstDirectiveRule) {

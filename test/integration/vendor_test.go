@@ -32,6 +32,7 @@ const vendoredAppMain = `package main
 import (
 	"flag"
 	"fmt"
+	"log"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,7 +47,7 @@ func main() {
 	})
 
 	if err := r.Run(fmt.Sprintf(":%d", *port)); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 `
@@ -82,7 +83,7 @@ func TestVendoredBuild(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	testutil.WaitForSpanFlush(t)
+	f.WaitForSpans(1)
 
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(1)

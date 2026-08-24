@@ -30,16 +30,19 @@ jobs:
               - 'Makefile'
               - 'tool/**'
               - 'pkg/**'
+              - 'instrumentation/**/*.yaml'
+              - 'instrumentation/**/*.yml'
               - 'test/**'
               - '.github/workflows/test-latestlibbuild.yaml'
 
   test-latestlibbuild:
-    name: LatestLibBuild Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
+    name: LatestLibBuild Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }} shard ${{ matrix.shard }})
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
+        shard: [0, 1]
         platform:
           - os: ubuntu-latest
             arch: amd64
@@ -61,6 +64,8 @@ jobs:
       - name: Build and test
         env:
           GOARCH: ${{ matrix.platform.arch }}
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: "2"
         run: make test-latestlibbuild
 
   done:
@@ -71,12 +76,27 @@ jobs:
     steps:
       - name: Check result
         run: |
-          result="${{ needs.test-latestlibbuild.result }}"
-          echo "Test result: $result"
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "✅ Tests passed or were skipped"
-            exit 0
-          else
-            echo "❌ Tests failed"
+          changes_result="${{ needs.changes.result }}"
+          code_changed="${{ needs.changes.outputs.code }}"
+          latestlibbuild_result="${{ needs.test-latestlibbuild.result }}"
+          echo "Changes result: $changes_result"
+          echo "Code changed: $code_changed"
+          echo "LatestLibBuild result: $latestlibbuild_result"
+          if [[ "$changes_result" != "success" ]]; then
+            echo "❌ Change detection failed"
             exit 1
           fi
+          if [[ "$code_changed" == "false" ]]; then
+            echo "✅ No relevant code changes; tests skipped"
+            exit 0
+          fi
+          if [[ "$code_changed" != "true" ]]; then
+            echo "❌ Unexpected change detection output: $code_changed"
+            exit 1
+          fi
+          if [[ "$latestlibbuild_result" == "success" ]]; then
+            echo "✅ Tests passed"
+            exit 0
+          fi
+          echo "❌ Tests failed"
+          exit 1
