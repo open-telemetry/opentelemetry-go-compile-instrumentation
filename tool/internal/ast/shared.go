@@ -51,32 +51,55 @@ func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	switch expr := recvTypeExpr.(type) {
 	case *dst.StarExpr: // func (*Recv)T or func (*Recv[T])T
 		// Check if X is an Ident (non-generic) or IndexExpr/IndexListExpr (generic)
+		// or a qualified SelectorExpr: *bufio.Writer
 		switch x := expr.X.(type) {
 		case *dst.Ident:
 			// Non-generic pointer receiver: *MyStruct
 			return "*" + x.Name
+		case *dst.SelectorExpr:
+			// Qualified pointer receiver: *pkg.Type — match on the type name only
+			if x.Sel != nil {
+				return "*" + x.Sel.Name
+			}
 		case *dst.IndexExpr:
 			// Generic pointer receiver with single type param: *GenStruct[T]
+			// or *pkg.GenStruct[T]
 			if baseIdent, ok := x.X.(*dst.Ident); ok {
 				return "*" + baseIdent.Name
+			}
+			if sel, ok := x.X.(*dst.SelectorExpr); ok && sel.Sel != nil {
+				return "*" + sel.Sel.Name
 			}
 		case *dst.IndexListExpr:
 			// Generic pointer receiver with multiple type params: *GenStruct[T, U]
 			if baseIdent, ok := x.X.(*dst.Ident); ok {
 				return "*" + baseIdent.Name
 			}
+			if sel, ok := x.X.(*dst.SelectorExpr); ok && sel.Sel != nil {
+				return "*" + sel.Sel.Name
+			}
 		}
 	case *dst.Ident: // func (Recv)T
 		return expr.Name
+	case *dst.SelectorExpr: // func (pkg.Recv)T
+		if expr.Sel != nil {
+			return expr.Sel.Name
+		}
 	case *dst.IndexExpr:
 		// Generic value receiver with single type param: GenStruct[T]
 		if baseIdent, ok := expr.X.(*dst.Ident); ok {
 			return baseIdent.Name
 		}
+		if sel, ok := expr.X.(*dst.SelectorExpr); ok && sel.Sel != nil {
+			return sel.Sel.Name
+		}
 	case *dst.IndexListExpr:
 		// Generic value receiver with multiple type params: GenStruct[T, U]
 		if baseIdent, ok := expr.X.(*dst.Ident); ok {
 			return baseIdent.Name
+		}
+		if sel, ok := expr.X.(*dst.SelectorExpr); ok && sel.Sel != nil {
+			return sel.Sel.Name
 		}
 	}
 	return ""
@@ -101,11 +124,10 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 		baseType := stripGenericTypes(recvTypeExpr)
 
 		if baseType == "" {
-			msg := fmt.Sprintf("unexpected receiver type: %T", recvTypeExpr)
-			util.Unimplemented(msg)
-		}
+		return false
+	}
 
-		return baseType == recv && name == funcName
+	return baseType == recv && name == funcName
 	})
 
 	if len(decls) == 0 {
