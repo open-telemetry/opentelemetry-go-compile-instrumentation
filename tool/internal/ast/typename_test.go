@@ -359,6 +359,57 @@ func f() {}
 		assert.Equal(t, "text/template", imports["txttemplate"])
 	})
 
+	t.Run("explicit alias overrides existing default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"html/template"
+	template "text/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "text/template", imports["template"])
+	})
+
+	t.Run("explicit alias takes precedence over subsequent default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	template "text/template"
+	"html/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "text/template", imports["template"])
+	})
+
+	t.Run("duplicate identical import path is preserved", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"html/template"
+	"html/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "html/template", imports["template"])
+	})
+
 	t.Run("package name unrelated to import path is not resolved by convention", func(t *testing.T) {
 		// github.com/redis/go-redis/v9 declares package "redis", not "go-redis".
 		p := NewAstParser()
