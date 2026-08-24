@@ -133,12 +133,11 @@ func TestBeforeServeHTTP(t *testing.T) {
 				assert.Equal(t, 0, len(spans), "span should not be ended in Before hook")
 
 				// Check that data was stored
-				data, ok := mockCtx.GetData().(map[string]interface{})
+				data, ok := mockCtx.GetData().(*hookData)
 				require.True(t, ok, "data should be stored")
 				require.NotNil(t, data, "data should not be nil")
 
-				span, ok := data["span"].(trace.Span)
-				require.True(t, ok, "span should be in data")
+				span := data.span
 				require.NotNil(t, span, "span should not be nil")
 
 				if tt.validateSpan != nil {
@@ -184,7 +183,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				ctx, span := testTracer.Start(
+				_, span := testTracer.Start(
 					context.Background(),
 					"GET /path",
 					trace.WithSpanKind(trace.SpanKindServer),
@@ -196,10 +195,7 @@ func TestAfterServeHTTP(t *testing.T) {
 					statusCode:     200,
 				}
 				mockCtx.SetParam(1, wrapper)
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			statusCode: 200,
@@ -216,7 +212,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				ctx, span := testTracer.Start(
+				_, span := testTracer.Start(
 					context.Background(),
 					"GET /notfound",
 					trace.WithSpanKind(trace.SpanKindServer),
@@ -228,10 +224,7 @@ func TestAfterServeHTTP(t *testing.T) {
 					statusCode:     404,
 				}
 				mockCtx.SetParam(1, wrapper)
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			statusCode: 404,
@@ -249,7 +242,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				ctx, span := testTracer.Start(
+				_, span := testTracer.Start(
 					context.Background(),
 					"GET /error",
 					trace.WithSpanKind(trace.SpanKindServer),
@@ -261,10 +254,7 @@ func TestAfterServeHTTP(t *testing.T) {
 					statusCode:     500,
 				}
 				mockCtx.SetParam(1, wrapper)
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			statusCode: 500,
@@ -295,7 +285,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				ctx, span := testTracer.Start(
+				_, span := testTracer.Start(
 					context.Background(),
 					"GET /path",
 					trace.WithSpanKind(trace.SpanKindServer),
@@ -307,10 +297,7 @@ func TestAfterServeHTTP(t *testing.T) {
 					statusCode:     200,
 				}
 				mockCtx.SetParam(1, wrapper)
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			statusCode: 200,
@@ -326,7 +313,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				ctx, span := testTracer.Start(
+				_, span := testTracer.Start(
 					context.Background(),
 					"GET /path",
 					trace.WithSpanKind(trace.SpanKindServer),
@@ -334,10 +321,7 @@ func TestAfterServeHTTP(t *testing.T) {
 
 				mockCtx := hooktest.NewMockHookContext()
 				// Don't set param 1, defaults to 200
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			statusCode: 200,
@@ -355,7 +339,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				ctx, span := testTracer.Start(
+				_, span := testTracer.Start(
 					context.Background(),
 					"GET",
 					trace.WithSpanKind(trace.SpanKindServer),
@@ -367,7 +351,7 @@ func TestAfterServeHTTP(t *testing.T) {
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetParam(1, &writerWrapper{ResponseWriter: httptest.NewRecorder(), statusCode: 200})
 				mockCtx.SetParam(2, req)
-				mockCtx.SetData(map[string]interface{}{"ctx": ctx, "span": span})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			statusCode: 200,
@@ -386,7 +370,7 @@ func TestAfterServeHTTP(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				ctx, span := testTracer.Start(
+				_, span := testTracer.Start(
 					context.Background(),
 					"GET /set/by/gin",
 					trace.WithSpanKind(trace.SpanKindServer),
@@ -397,7 +381,7 @@ func TestAfterServeHTTP(t *testing.T) {
 				mockCtx := hooktest.NewMockHookContext()
 				mockCtx.SetParam(1, &writerWrapper{ResponseWriter: httptest.NewRecorder(), statusCode: 200})
 				mockCtx.SetParam(2, req)
-				mockCtx.SetData(map[string]interface{}{"ctx": ctx, "span": span})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			statusCode: 200,
@@ -553,4 +537,24 @@ func TestAfterServeHTTP_DisabledAfterStart_Regression(t *testing.T) {
 	ended = sr.Ended()
 	require.Len(t, ended, 1, "[] should have 1 item(s), but has 0")
 	assert.Equal(t, "GET", ended[0].Name())
+}
+
+// BenchmarkServeHTTPHooks measures the per-request overhead of the hook pair.
+// Run with -benchmem to see the allocation count.
+func BenchmarkServeHTTPHooks(b *testing.B) {
+	b.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	tp := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	b.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	req := httptest.NewRequest("GET", "http://example.com/path", nil)
+	w := httptest.NewRecorder()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		mockCtx := hooktest.NewMockHookContext()
+		BeforeServeHTTP(mockCtx, nil, w, req)
+		AfterServeHTTP(mockCtx)
+	}
 }
