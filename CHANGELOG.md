@@ -10,6 +10,8 @@ The full list of changes can be found in the compare view for the respective rel
 
 ### Added
 
+- Compile-time instrumentation for `google.golang.org/genai`, emitting GenAI client spans for Gemini Developer API and Vertex AI `generateContent` calls. ([#1153](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1153))
+
 ### Changed
 
 - ⚠️ **Breaking Change:** Template variable `{{ FuncName }}` should now be accessed with `{{ .FuncName }}`. ([#729](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/729))
