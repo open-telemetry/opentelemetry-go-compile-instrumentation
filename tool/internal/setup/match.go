@@ -119,12 +119,21 @@ func filterExcludedTargets(importPath string, rules []rule.InstRule) []rule.Inst
 	if len(rules) == 0 {
 		return rules
 	}
-	filtered := rules[:0]
-	for _, r := range rules {
+	var filtered []rule.InstRule
+	for i, r := range rules {
 		if rule.MatchesExcludeTargets(importPath, r.GetExcludeTargets()) {
+			if filtered == nil {
+				filtered = make([]rule.InstRule, 0, len(rules))
+				filtered = append(filtered, rules[:i]...)
+			}
 			continue
 		}
-		filtered = append(filtered, r)
+		if filtered != nil {
+			filtered = append(filtered, r)
+		}
+	}
+	if filtered == nil {
+		return rules
 	}
 	return filtered
 }

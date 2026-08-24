@@ -1389,6 +1389,25 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 	require.False(t, matchedPaths["example.com/other"], "unrelated package must not match")
 }
 
+func TestFilterExcludedTargets_DoesNotMutateSharedSlice(t *testing.T) {
+	keepRule := globFuncRule("keep", "example.com/svc/users")
+	excludeRule := globFuncRule("exclude", "example.com/svc/users")
+	excludeRule.ExcludeTargets = []string{"example.com/svc/users"}
+
+	shared := []rule.InstRule{keepRule, excludeRule}
+	original := append([]rule.InstRule(nil), shared...)
+
+	filtered := filterExcludedTargets("example.com/svc/users", shared)
+	require.Len(t, filtered, 1)
+	assert.Equal(t, keepRule, filtered[0])
+	assert.Equal(t, original, shared, "shared exactRules slice must not be mutated in place")
+
+	noExclude := globFuncRule("no-exclude", "example.com/svc/users")
+	sharedNoExclude := []rule.InstRule{noExclude}
+	filteredNoExclude := filterExcludedTargets("example.com/svc/users", sharedNoExclude)
+	assert.Same(t, &sharedNoExclude[0], &filteredNoExclude[0], "zero-allocation path must return the original slice")
+}
+
 func TestRunMatch_ExcludeTargetsGlob(t *testing.T) {
 	usersFile := writeGoSource(t, "users.go", "package users\n\nfunc Handler() {}\n")
 	otelFile := writeGoSource(
