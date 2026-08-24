@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -74,6 +75,63 @@ func TestStripCompleteFlag(t *testing.T) {
 			assert.Equal(t, origArgs, tt.args, "original slice should not be mutated")
 		})
 	}
+}
+
+func TestInterceptVetUsesPreservedCgoSource(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "vet.cfg")
+	cgoPath := filepath.Join(tempDir, "source.cgo1.go")
+	vetPath := cgoVetSourcePath(cgoPath)
+	require.NoError(t, os.WriteFile(vetPath, []byte("package example"), 0o600))
+	inputConfig := map[string]any{
+		"GoFiles":    []string{"source.go", cgoPath},
+		"ImportPath": "example.com/cgo",
+	}
+	data, err := json.Marshal(inputConfig)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(configPath, data, 0o600))
+
+	args := []string{vetToolName, "-tests", configPath}
+	got, err := interceptVet(t.Context(), args)
+	require.NoError(t, err)
+	assert.Equal(t, args, got)
+
+	data, err = os.ReadFile(configPath)
+	require.NoError(t, err)
+	var config map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &config))
+
+	var goFiles []string
+	require.NoError(t, json.Unmarshal(config["GoFiles"], &goFiles))
+	assert.Equal(t, []string{"source.go", vetPath}, goFiles)
+	assert.JSONEq(t, `"example.com/cgo"`, string(config["ImportPath"]))
+}
+
+func TestInterceptVetIgnoresCgoSourceWithoutPreservedCopy(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "vet.cfg")
+	original := []byte(`{"GoFiles":["source.go","source.cgo1.go"]}`)
+	require.NoError(t, os.WriteFile(configPath, original, 0o600))
+
+	_, err := interceptVet(t.Context(), []string{vetToolName, configPath})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, original, data)
+}
+
+func TestInterceptVetLogsUnexpectedArguments(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), logger)
+	args := []string{vetToolName, "-tests"}
+
+	got, err := interceptVet(ctx, args)
+
+	require.NoError(t, err)
+	assert.Equal(t, args, got)
+	assert.Contains(t, logs.String(), "vet invocation missing expected vet.cfg argument")
 }
 
 func TestUpdateImportConfig(t *testing.T) {

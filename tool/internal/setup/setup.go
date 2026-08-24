@@ -108,6 +108,7 @@ var testFlagsWithValues = map[string]bool{
 	"-coverprofile":         true,
 	"-cpu":                  true,
 	"-cpuprofile":           true,
+	"-exec":                 true,
 	"-fuzz":                 true,
 	"-fuzzminimizetime":     true,
 	"-fuzztime":             true,

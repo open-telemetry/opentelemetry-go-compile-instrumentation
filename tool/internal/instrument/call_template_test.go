@@ -41,6 +41,141 @@ func TestNewCallTemplate_EmptyTemplate(t *testing.T) {
 	assert.Equal(t, text, tmpl.String())
 }
 
+func TestCallTemplateData_FuncName(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncName()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler() {}")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		name, err := d.FuncName()
+
+		require.NoError(t, err)
+		assert.Equal(t, "Handler", name)
+	})
+}
+
+func TestCallTemplateData_FuncArgument(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncArgument(0)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler(name string) {}")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		arg, err := d.FuncArgument(0)
+
+		require.NoError(t, err)
+		assert.Equal(t, "name", arg)
+	})
+}
+
+func TestCallTemplateData_FuncReturn(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncReturn(0)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler() (err error) { return nil }")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		ret, err := d.FuncReturn(0)
+
+		require.NoError(t, err)
+		assert.Equal(t, "err", ret)
+	})
+}
+
+func TestCallTemplateData_FuncArgumentCount(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncArgumentCount()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler(a, b string) {}")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		count, err := d.FuncArgumentCount()
+
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+	})
+}
+
+func TestCallTemplateData_FuncReturnCount(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncReturnCount()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler() (int, error) { return 0, nil }")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		count, err := d.FuncReturnCount()
+
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+	})
+}
+
+func TestCompileExpression_FuncArgumentWithEnclosingFunc(t *testing.T) {
+	tmpl, err := newCallTemplate("traced({{ .FuncArgument 0 }}, {{ . }})")
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\nfunc Handler(name string) {}")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	result, err := tmpl.compileExpression(originalCall, enclosing)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+	nameArg, ok := resultCall.Args[0].(*dst.Ident)
+	require.True(t, ok, "expected *dst.Ident, got %T", resultCall.Args[0])
+	assert.Equal(t, "name", nameArg.Name)
+}
+
+func TestCompileExpression_FuncTagWithoutEnclosingFuncErrors(t *testing.T) {
+	tmpl, err := newCallTemplate("traced({{ .FuncName }})")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	_, err = tmpl.compileExpression(originalCall, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no enclosing function is available")
+}
+
 func TestCompileExpression_SimpleWrapping(t *testing.T) {
 	tmpl, err := newCallTemplate("wrapper({{ . }})")
 	require.NoError(t, err)
@@ -50,7 +185,7 @@ func TestCompileExpression_SimpleWrapping(t *testing.T) {
 		Fun: &dst.Ident{Name: "funcCall"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -81,7 +216,7 @@ func TestCompileExpression_IIFE(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -100,7 +235,7 @@ func TestCompileExpression_MultiplePlaceholders(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -122,7 +257,7 @@ func TestCompileExpression_InvalidGoSyntax(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -137,7 +272,7 @@ func TestCompileExpression_ComplexNestedExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "inner"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -166,7 +301,7 @@ func TestCompileExpression_WithBinaryExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -189,7 +324,7 @@ func TestCompileExpression_SelectorExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "getStruct"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -214,7 +349,7 @@ func TestCompileExpression_EmptyResult(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	// Should error because the function body is empty
 	require.Error(t, err)
@@ -230,7 +365,7 @@ func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -245,7 +380,7 @@ func TestCompileExpression_MultipleStatements(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -262,7 +397,7 @@ func TestCompileExpression_NonExpressionStatement(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall)
+	result, err := tmpl.compileExpression(originalCall, nil)
 
 	// Should error because it's not an expression statement
 	require.Error(t, err)
@@ -523,16 +658,11 @@ func TestReplacePlaceholder_NonSelectorNode(t *testing.T) {
 }
 
 func TestCompileExpression_UnknownTemplateTag(t *testing.T) {
-	tmpl, err := newCallTemplate("wrapper({{ something }})")
-	require.NoError(t, err)
-
-	originalCall := &dst.CallExpr{
-		Fun: &dst.Ident{Name: "funcCall"},
-	}
-
-	result, err := tmpl.compileExpression(originalCall)
+	// text/template rejects an unrecognized bare identifier like "something"
+	// at parse time (as an undefined function call), so newCallTemplate is
+	// where the error now surfaces rather than compileExpression.
+	_, err := newCallTemplate("wrapper({{ something }})")
 	require.Error(t, err)
-	assert.Nil(t, result)
 }
 
 func TestParseGoExpression_NonExpressionStatement(t *testing.T) {

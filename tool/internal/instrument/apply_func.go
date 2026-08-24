@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/parser"
 	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 
@@ -338,6 +339,14 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
 	// Write the instrumented AST to the new file in the working directory
 	newFile := filepath.Join(ip.workDir, filepath.Base(oldFile))
+	if strings.HasSuffix(oldFile, ".cgo1.go") {
+		// The vet configuration refers to cgo's generated source. Preserve that
+		// source because vet must not analyze otelc's injected declarations.
+		vetFile := cgoVetSourcePath(oldFile)
+		if err := util.CopyFile(oldFile, vetFile); err != nil {
+			return ex.Wrapf(err, "preserving cgo source for vet %s", oldFile)
+		}
+	}
 	err := ast.WriteFile(newFile, root)
 	if err != nil {
 		return ex.Wrapf(err, "writing instrumented file %s", newFile)
