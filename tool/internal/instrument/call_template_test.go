@@ -357,6 +357,23 @@ func TestCompileExpression_EmptyResult(t *testing.T) {
 	assert.Contains(t, err.Error(), "function body is empty")
 }
 
+func TestCompileExpression_WhitespaceOnlyResult(t *testing.T) {
+	// A template producing only whitespace must be treated the same as an
+	// empty result, not surfaced as an opaque parse error.
+	tmpl, err := newCallTemplate("   \n\t  ")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun: &dst.Ident{Name: "test"},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "function body is empty")
+}
+
 func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
 	tmpl, err := newCallTemplate(`wrapper("{{ . }}")`)
 	require.NoError(t, err)
@@ -682,4 +699,42 @@ func TestParseGoTypeExpression_NoType(t *testing.T) {
 	_, err := parseGoTypeExpression("= 1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected spec shape")
+}
+
+func TestParseGoExpression_Success(t *testing.T) {
+	expr, err := parseGoExpression("grpc.WithInsecure()")
+	require.NoError(t, err)
+
+	call, ok := expr.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", expr)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	assert.Equal(t, "WithInsecure", sel.Sel.Name)
+}
+
+func TestParseGoExpression_MultipleStatementsRejected(t *testing.T) {
+	// Regression test: parseSnippetFuncDecl used to only look at the first
+	// statement of the parsed body, silently discarding any statements after
+	// it (e.g. "a(); b()" would parse as just "a()"). The shared
+	// AstParser.ParseSnippet-backed implementation must reject this instead.
+	_, err := parseGoExpression("a(); b()")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not parse as a single statement")
+}
+
+func TestParseGoTypeExpression_Success(t *testing.T) {
+	typeExpr, err := parseGoTypeExpression("grpc.DialOption")
+	require.NoError(t, err)
+
+	sel, ok := typeExpr.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", typeExpr)
+	assert.Equal(t, "DialOption", sel.Sel.Name)
+}
+
+func TestParseGoTypeExpression_MultipleStatementsRejected(t *testing.T) {
+	// Regression test: mirrors TestParseGoExpression_MultipleStatementsRejected
+	// for the type-string parsing path.
+	_, err := parseGoTypeExpression("int\nvar y int")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not parse as a single statement")
 }
