@@ -91,7 +91,7 @@ func insertRawAtPattern(
 			return true
 		}
 
-		text, err := nodeSourceText(restorer, stmt)
+		text, err := ast.RenderNode(restorer, stmt)
 		if err != nil {
 			logger.Warn("Failed to restore AST node to source code", "error", err)
 			return true

@@ -8,11 +8,8 @@ import (
 	"testing"
 
 	"github.com/dave/dst"
-	"github.com/dave/dst/decorator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	toolast "go.opentelemetry.io/otelc/tool/internal/ast"
 )
 
 func TestNewCallTemplate_Success(t *testing.T) {
@@ -973,85 +970,4 @@ func TestParseGoTypeExpression_NoType(t *testing.T) {
 	_, err := parseGoTypeExpression("= 1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected spec shape")
-}
-
-func TestExprSourceText(t *testing.T) {
-	tests := []struct {
-		name string
-		expr dst.Expr
-		want string
-	}{
-		{
-			name: "identifier",
-			expr: &dst.Ident{Name: "foo"},
-			want: "foo",
-		},
-		{
-			name: "call expression",
-			expr: &dst.CallExpr{
-				Fun:  &dst.Ident{Name: "f"},
-				Args: []dst.Expr{&dst.Ident{Name: "a"}, &dst.Ident{Name: "b"}},
-			},
-			want: "f(a, b)",
-		},
-		{
-			name: "binary expression",
-			expr: &dst.BinaryExpr{
-				X:  &dst.Ident{Name: "a"},
-				Op: token.ADD,
-				Y:  &dst.Ident{Name: "b"},
-			},
-			want: "a + b",
-		},
-		{
-			name: "selector expression",
-			expr: &dst.SelectorExpr{
-				X:   &dst.Ident{Name: "pkg"},
-				Sel: &dst.Ident{Name: "Func"},
-			},
-			want: "pkg.Func",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			text, err := exprSourceText(tt.expr)
-
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, text)
-		})
-	}
-}
-
-func TestNodeSourceText(t *testing.T) {
-	node := &dst.Ident{Name: "a"}
-	synthetic := &dst.File{
-		Name: toolast.Ident("_"),
-		Decls: []dst.Decl{
-			&dst.FuncDecl{
-				Name: toolast.Ident("_"),
-				Type: &dst.FuncType{Params: &dst.FieldList{}},
-				Body: &dst.BlockStmt{List: []dst.Stmt{&dst.ExprStmt{X: node}}},
-			},
-		},
-	}
-	restorer := decorator.NewRestorer()
-	_, err := restorer.RestoreFile(synthetic)
-	require.NoError(t, err)
-
-	t.Run("known node renders its source text", func(t *testing.T) {
-		text, txtErr := nodeSourceText(restorer, node)
-
-		require.NoError(t, txtErr)
-		assert.Equal(t, "a", text)
-	})
-
-	t.Run("node not present in the restorer errors", func(t *testing.T) {
-		unrelated := &dst.Ident{Name: "unrelated"}
-
-		_, txtErr := nodeSourceText(restorer, unrelated)
-
-		require.Error(t, txtErr)
-		assert.Contains(t, txtErr.Error(), "failed to locate restored node")
-	})
 }

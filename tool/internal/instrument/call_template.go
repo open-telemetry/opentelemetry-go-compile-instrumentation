@@ -16,7 +16,6 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	toolast "go.opentelemetry.io/otelc/tool/internal/ast"
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // placeholderIdent is substituted for "{{ . }}" during template execution,
@@ -153,7 +152,7 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 	if idx < 0 || idx >= len(d.callArgs) {
 		return "", ex.Newf("CallArgument index %d out of range [0, %d)", idx, len(d.callArgs))
 	}
-	return exprSourceText(d.callArgs[idx])
+	return toolast.RenderExpr(d.callArgs[idx])
 }
 
 // compileExpression executes the template with the given expression node as
@@ -314,41 +313,6 @@ func parseSnippetFuncDecl(src, label string) (*dst.FuncDecl, error) {
 		return nil, ex.Newf("unexpected AST shape for %q", label)
 	}
 	return funcDecl, nil
-}
-
-// exprSourceText renders expr back into Go source text.
-func exprSourceText(expr dst.Expr) (string, error) {
-	cloned := util.AssertType[dst.Expr](dst.Clone(expr))
-	synthetic := &dst.File{
-		Name: toolast.Ident("_"),
-		Decls: []dst.Decl{
-			&dst.FuncDecl{
-				Name: toolast.Ident("_"),
-				Type: &dst.FuncType{Params: &dst.FieldList{}},
-				Body: &dst.BlockStmt{List: []dst.Stmt{&dst.ExprStmt{X: cloned}}},
-			},
-		},
-	}
-
-	restorer := decorator.NewRestorer()
-	if _, err := restorer.RestoreFile(synthetic); err != nil {
-		return "", ex.Wrapf(err, "failed to restore expression to source")
-	}
-	return nodeSourceText(restorer, cloned)
-}
-
-// nodeSourceText looks up node's restored counterpart in restorer and
-// renders it back to Go source text.
-func nodeSourceText(restorer *decorator.Restorer, node dst.Node) (string, error) {
-	astNode, ok := restorer.Ast.Nodes[node]
-	if !ok {
-		return "", ex.New("failed to locate restored node")
-	}
-	var buf strings.Builder
-	if err := format.Node(&buf, restorer.Fset, astNode); err != nil {
-		return "", ex.Wrapf(err, "failed to format node")
-	}
-	return buf.String(), nil
 }
 
 // replacePlaceholder replaces all occurrences of _.PLACEHOLDER_0 in the AST
