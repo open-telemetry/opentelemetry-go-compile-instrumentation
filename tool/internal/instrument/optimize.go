@@ -198,6 +198,25 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *TJump) error {
 	return ex.Newf("can not remove After trampoline function")
 }
 
+func removeUnusedHookContextMethods(targetFile *dst.File, tjump *TJump) {
+	structName := trampolineHookContextImplType + tjump.rule.Identity()
+	var newDecls []dst.Decl
+	for _, decl := range targetFile.Decls {
+		if funcDecl, ok := decl.(*dst.FuncDecl); ok && funcDecl.Recv != nil && len(funcDecl.Recv.List) > 0 {
+			if starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr); ok {
+				if ident, ok := starExpr.X.(*dst.Ident); ok && ident.Name == structName {
+					name := funcDecl.Name.Name
+					if name == "GetReturnVal" || name == "SetReturnVal" || name == "GetReturnValCount" {
+						continue
+					}
+				}
+			}
+		}
+		newDecls = append(newDecls, decl)
+	}
+	targetFile.Decls = newDecls
+}
+
 // canFlattenTJump checks if the tjump can be safely flattened based on
 // the hook function's usage of HookContext. Returns true if:
 // 1. SetSkipCall is never called (so skip is always false)
@@ -376,6 +395,7 @@ func (ip *InstrumentPhase) optimizeTJumps() error {
 			if err != nil {
 				return err
 			}
+			removeUnusedHookContextMethods(ip.target, tjump)
 			removedOnExit = true
 		}
 
