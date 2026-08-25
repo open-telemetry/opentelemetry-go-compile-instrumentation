@@ -18,6 +18,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/data"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -112,12 +113,13 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			return err
 		}
 		if d.IsDir() {
-			if path != "." {
-				if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
-					return fs.SkipDir
-				} else if !errors.Is(statErr, fs.ErrNotExist) {
-					return statErr
-				}
+			if path == "." {
+				return nil
+			}
+			if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
+				return fs.SkipDir
+			} else if !errors.Is(statErr, fs.ErrNotExist) {
+				return statErr
 			}
 			return nil
 		}
@@ -134,17 +136,20 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
 		}
 		for _, name := range slices.Sorted(maps.Keys(rules)) {
-			rule := rules[name]
-			if validateErr := util.ValidateVersionRange(rule.VersionRange); validateErr != nil {
+			ruleConfig := rules[name]
+			if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
 				return ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
 			}
-			if rule.Target == "" {
+			if ruleConfig.Target == "" {
 				continue
+			}
+			if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
 			}
 			entries = append(entries, Entry{
 				ModulePath:   modulePath,
-				Target:       rule.Target,
-				VersionRange: rule.VersionRange,
+				Target:       ruleConfig.Target,
+				VersionRange: ruleConfig.VersionRange,
 			})
 		}
 		return nil

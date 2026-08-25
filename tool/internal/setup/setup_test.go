@@ -233,6 +233,20 @@ func TestSplitBuildTargets(t *testing.T) {
 			notPkgTargets: []string{"off"},
 			expectError:   false,
 		},
+		{
+			name:          "go test -exec value is not a package",
+			targets:       []string{"-exec", "sudo", "./pkg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"sudo"},
+			expectError:   false,
+		},
+		{
+			name:          "go test package before -exec flag",
+			targets:       []string{"./pkg", "-exec", "sudo"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"sudo"},
+			expectError:   false,
+		},
 	}
 
 	for _, tt := range tests {
