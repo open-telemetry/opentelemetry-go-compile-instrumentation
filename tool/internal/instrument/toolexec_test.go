@@ -804,8 +804,8 @@ func TestEnableNestedToolexec(t *testing.T) {
 		// exercised by calling the extracted helper directly and parsing the
 		// result back the way cmd/go would.
 		spaced := filepath.Join(string(filepath.Separator)+"opt", "my tools", "otelc")
-		token, err := nestedToolexecGoflagsToken(spaced)
-		require.NoError(t, err)
+		token, tokenErr := nestedToolexecGoflagsToken(spaced)
+		require.NoError(t, tokenErr)
 
 		assert.Equal(t, []string{spaced, "toolexec"}, parseToolexecFromGoflags(t, token))
 	})
@@ -815,9 +815,9 @@ func TestEnableNestedToolexec(t *testing.T) {
 		// a quote already in the path supplies the other. Either kind gets us
 		// there, so the rejection is not specific to single quotes.
 		for _, path := range []string{`/home/it's me/otelc`, `/home/my "tools"/otelc`} {
-			_, err := nestedToolexecGoflagsToken(path)
-			require.Error(t, err, "%q should not be representable in GOFLAGS", path)
-			assert.Contains(t, err.Error(), "cannot be passed to nested go commands through GOFLAGS")
+			_, tokenErr := nestedToolexecGoflagsToken(path)
+			require.Error(t, tokenErr, "%q should not be representable in GOFLAGS", path)
+			assert.Contains(t, tokenErr.Error(), "cannot be passed to nested go commands through GOFLAGS")
 		}
 	})
 
@@ -828,17 +828,17 @@ func TestEnableNestedToolexec(t *testing.T) {
 		// nestedToolexecGoflagsToken adds no message of its own for this one,
 		// BuildToolexecFlag's error already names execPath, so this asserts on
 		// its wording rather than anything added downstream.
-		_, err := nestedToolexecGoflagsToken(`/home/it's "here"/otelc`)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "quoting otelc executable path for -toolexec")
+		_, tokenErr := nestedToolexecGoflagsToken(`/home/it's "here"/otelc`)
+		require.Error(t, tokenErr)
+		assert.Contains(t, tokenErr.Error(), "quoting otelc executable path for -toolexec")
 	})
 
 	t.Run("a path with an interior quote but no space survives both splits", func(t *testing.T) {
 		// quoted.Split reads an interior quote literally, so this path needs no
 		// quoting and must keep working rather than being rejected.
 		quoted := "/opt/it's/otelc"
-		token, err := nestedToolexecGoflagsToken(quoted)
-		require.NoError(t, err)
+		token, tokenErr := nestedToolexecGoflagsToken(quoted)
+		require.NoError(t, tokenErr)
 
 		assert.Equal(t, []string{quoted, "toolexec"}, parseToolexecFromGoflags(t, token))
 	})
