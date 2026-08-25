@@ -353,6 +353,77 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	return args, nil
 }
 
+const vetToolName = "vet"
+
+func interceptVet(ctx context.Context, args []string) ([]string, error) {
+	if len(args) == 0 {
+		return args, nil
+	}
+
+	configPath := args[len(args)-1]
+	if filepath.Base(configPath) != "vet.cfg" {
+		util.LoggerFromContext(ctx).DebugContext(
+			ctx,
+			"vet invocation missing expected vet.cfg argument",
+			"args",
+			args,
+		)
+		return args, nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading vet config")
+	}
+
+	var config map[string]json.RawMessage
+	if err = json.Unmarshal(data, &config); err != nil {
+		return nil, ex.Wrapf(err, "parsing vet config")
+	}
+
+	var goFiles []string
+	if err = json.Unmarshal(config["GoFiles"], &goFiles); err != nil {
+		return nil, ex.Wrapf(err, "parsing GoFiles from vet config")
+	}
+
+	var updated bool
+	for i, file := range goFiles {
+		if !strings.HasSuffix(file, ".cgo1.go") {
+			continue
+		}
+		vetFile := cgoVetSourcePath(file)
+		if _, statErr := os.Stat(vetFile); statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			return nil, ex.Wrapf(statErr, "checking preserved cgo source")
+		}
+		goFiles[i] = vetFile
+		updated = true
+	}
+	if !updated {
+		return args, nil
+	}
+
+	config["GoFiles"], err = json.Marshal(goFiles)
+	if err != nil {
+		return nil, ex.Wrapf(err, "encoding GoFiles for vet config")
+	}
+	data, err = json.Marshal(config)
+	if err != nil {
+		return nil, ex.Wrapf(err, "encoding vet config")
+	}
+	if err = os.WriteFile(configPath, data, 0o600); err != nil {
+		return nil, ex.Wrapf(err, "writing vet config")
+	}
+
+	return args, nil
+}
+
+func cgoVetSourcePath(path string) string {
+	return strings.TrimSuffix(path, ".cgo1.go") + ".otelc.vet.go"
+}
+
 // toolVersionLine appends an otelc marker to a `tool -V=full` line so the tool
 // ID (and every build cache key derived from it) differs from a plain build.
 // The rules hash is included so editing the config invalidates cached
@@ -450,7 +521,7 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	return err
 }
 
-// interceptToolCommand rewrites the compile and link commands otelc cares
+// interceptToolCommand rewrites the compile, link, and vet commands otelc cares
 // about; every other tool invocation is returned unchanged.
 func interceptToolCommand(ctx context.Context, args []string) ([]string, error) {
 	// Intercept compile commands for instrumentation
@@ -460,6 +531,9 @@ func interceptToolCommand(ctx context.Context, args []string) ([]string, error) 
 	// Intercept link commands to update importcfg with added dependencies
 	if util.IsLinkCommandWithArgs(args) {
 		return interceptLink(ctx, args)
+	}
+	if len(args) > 0 && strings.TrimSuffix(filepath.Base(args[0]), ".exe") == vetToolName {
+		return interceptVet(ctx, args)
 	}
 	return args, nil
 }

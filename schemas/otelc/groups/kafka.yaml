@@ -9,13 +9,29 @@ groups:
   #
   # The kafka-go instrumentation is trace-only: it creates one producer span
   # per sent message and one consumer span per read message, and records no
-  # metrics. Every attribute is standard upstream OpenTelemetry messaging
-  # telemetry, referenced with `ref:`. `messaging.system` is always `kafka`.
-  # Consumer-only attributes (`messaging.consumer.group.name`,
-  # `messaging.destination.partition.id`, `messaging.kafka.offset`) are not set
-  # on producer spans.
+  # metrics. `messaging.system` is always `kafka`. Consumer-only attributes
+  # (`messaging.consumer.group.name`, `messaging.destination.partition.id`,
+  # `messaging.kafka.offset`) are not set on producer spans. Almost every
+  # attribute is standard upstream OpenTelemetry messaging telemetry,
+  # referenced with `ref:`. One producer-only attribute is not covered
+  # upstream and is declared locally with `id:` below: `messaging.kafka.async`.
   # ---------------------------------------------------------------------------
 
+  - id: registry.otelc.messaging.kafka
+    type: attribute_group
+    display_name: otelc Kafka attributes
+    brief: >
+      Kafka attributes emitted by the kafka-go instrumentation that are not covered by the upstream OpenTelemetry messaging
+      semantic conventions.
+    attributes:
+      - id: messaging.kafka.async
+        type: boolean
+        stability: development
+        brief: >
+          Whether the message was sent through a kafka.Writer with Async enabled. When true, the span only reflects local
+          hand-off to the client library, not confirmed broker delivery, so its duration and status must not be read as broker
+          round-trip latency or delivery success. Only ever emitted as `true`; omitted (not `false`) for synchronous writes,
+          where the span already reflects a confirmed broker round-trip.
   - id: span.otelc.messaging.kafka.producer
     type: span
     span_kind: producer
@@ -30,6 +46,7 @@ groups:
       - ref: messaging.message.body.size
       - ref: server.address
       - ref: server.port
+      - ref: messaging.kafka.async
 
   - id: span.otelc.messaging.kafka.consumer
     type: span
