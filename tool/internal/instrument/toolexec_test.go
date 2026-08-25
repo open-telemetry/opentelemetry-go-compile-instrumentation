@@ -766,9 +766,7 @@ func TestEnableNestedToolexec(t *testing.T) {
 
 	// Built rather than hardcoded: the quoting depends on whether the test
 	// binary's own path contains a space, which varies by machine.
-	innerFlag, err := util.BuildToolexecFlag(exe)
-	require.NoError(t, err)
-	wantToken, err := util.QuoteGoflagsToken(innerFlag)
+	wantToken, err := nestedToolexecGoflagsToken(exe)
 	require.NoError(t, err)
 
 	t.Run("appends to existing GOFLAGS and sets the nested marker", func(t *testing.T) {
@@ -803,12 +801,11 @@ func TestEnableNestedToolexec(t *testing.T) {
 
 	t.Run("a spaced executable path survives both splits", func(t *testing.T) {
 		// EnableNestedToolexec resolves its own path, so the spaced case is
-		// exercised by composing GOFLAGS the same way and parsing it back.
+		// exercised by calling the extracted helper directly and parsing the
+		// result back the way cmd/go would.
 		spaced := filepath.Join(string(filepath.Separator)+"opt", "my tools", "otelc")
-		inner, buildErr := util.BuildToolexecFlag(spaced)
-		require.NoError(t, buildErr)
-		token, quoteErr := util.QuoteGoflagsToken(inner)
-		require.NoError(t, quoteErr)
+		token, err := nestedToolexecGoflagsToken(spaced)
+		require.NoError(t, err)
 
 		assert.Equal(t, []string{spaced, "toolexec"}, parseToolexecFromGoflags(t, token))
 	})
@@ -818,22 +815,27 @@ func TestEnableNestedToolexec(t *testing.T) {
 		// a quote already in the path supplies the other. Either kind gets us
 		// there, so the rejection is not specific to single quotes.
 		for _, path := range []string{`/home/it's me/otelc`, `/home/my "tools"/otelc`} {
-			inner, buildErr := util.BuildToolexecFlag(path)
-			require.NoError(t, buildErr, "the inner flag itself is representable")
-
-			_, quoteErr := util.QuoteGoflagsToken(inner)
-			require.Error(t, quoteErr, "but %q cannot be nested inside GOFLAGS", path)
+			_, err := nestedToolexecGoflagsToken(path)
+			require.Error(t, err, "%q should not be representable in GOFLAGS", path)
+			assert.Contains(t, err.Error(), "cannot be passed to nested go commands through GOFLAGS")
 		}
+	})
+
+	t.Run("a spaced path already carrying both quotes fails building the inner flag", func(t *testing.T) {
+		// Distinct from the case above: here execPath itself has both quote
+		// characters plus whitespace, so BuildToolexecFlag's own quoting of
+		// execPath fails before the inner/outer nesting is even attempted.
+		_, err := nestedToolexecGoflagsToken(`/home/it's "here"/otelc`)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "building nested -toolexec flag")
 	})
 
 	t.Run("a path with an interior quote but no space survives both splits", func(t *testing.T) {
 		// quoted.Split reads an interior quote literally, so this path needs no
 		// quoting and must keep working rather than being rejected.
 		quoted := "/opt/it's/otelc"
-		inner, buildErr := util.BuildToolexecFlag(quoted)
-		require.NoError(t, buildErr)
-		token, quoteErr := util.QuoteGoflagsToken(inner)
-		require.NoError(t, quoteErr)
+		token, err := nestedToolexecGoflagsToken(quoted)
+		require.NoError(t, err)
 
 		assert.Equal(t, []string{quoted, "toolexec"}, parseToolexecFromGoflags(t, token))
 	})
