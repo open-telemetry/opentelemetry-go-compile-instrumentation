@@ -159,6 +159,8 @@ func ImportAliasMap(file *dst.File) map[string]string {
 
 	aliases := make(map[string]string, len(specs))
 	explicit := make(map[string]bool, len(specs))
+	ambiguous := make(map[string]bool, len(specs))
+
 	for _, imp := range specs {
 		if imp.Path == nil {
 			continue
@@ -179,18 +181,17 @@ func ImportAliasMap(file *dst.File) map[string]string {
 			continue
 		}
 
-		if existing, exists := aliases[alias]; exists && existing != path {
-			if isExplicit {
-				aliases[alias] = path
-				explicit[alias] = true
-			} else if !explicit[alias] {
-				// Disambiguate: two distinct default aliases collide; remove ambiguous key.
-				delete(aliases, alias)
-			}
-		} else {
+		if isExplicit {
 			aliases[alias] = path
-			if isExplicit {
-				explicit[alias] = true
+			explicit[alias] = true
+			delete(ambiguous, alias)
+		} else if !explicit[alias] {
+			if existing, exists := aliases[alias]; exists && existing != path {
+				// Disambiguate: two or more distinct default aliases collide; remove key and track as ambiguous.
+				delete(aliases, alias)
+				ambiguous[alias] = true
+			} else if !ambiguous[alias] {
+				aliases[alias] = path
 			}
 		}
 	}

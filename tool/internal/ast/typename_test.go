@@ -341,6 +341,24 @@ func f() {}
 		assert.NotContains(t, imports, "template")
 	})
 
+	t.Run("three-way unaliased colliding default aliases remain ambiguous", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"example.com/foo/util"
+	"example.com/bar/util"
+	"example.com/baz/util"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.NotContains(t, imports, "util")
+	})
+
 	t.Run("explicit alias overrides colliding default alias", func(t *testing.T) {
 		p := NewAstParser()
 		file, err := p.ParseSource(`package main
