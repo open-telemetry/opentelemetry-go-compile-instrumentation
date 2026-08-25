@@ -156,6 +156,7 @@ func TestSplitBuildTargets(t *testing.T) {
 		fileTargets   []string
 		notPkgTargets []string // must NOT be parsed as packages (e.g. flag values)
 		expectError   bool
+		wantErr       string
 	}{
 		{
 			name:        "all package targets",
@@ -247,6 +248,24 @@ func TestSplitBuildTargets(t *testing.T) {
 			notPkgTargets: []string{"sudo"},
 			expectError:   false,
 		},
+		{
+			name:        "go test -run flag requires a value",
+			targets:     []string{"-run"},
+			expectError: true,
+			wantErr:     `flag "-run" requires a value`,
+		},
+		{
+			name:        "go test -exec flag requires a value",
+			targets:     []string{"./pkg", "-exec"},
+			expectError: true,
+			wantErr:     `flag "-exec" requires a value`,
+		},
+		{
+			name:        "go build -o flag requires a value",
+			targets:     []string{"./pkg", "-o"},
+			expectError: true,
+			wantErr:     `flag "-o" requires a value`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -254,6 +273,9 @@ func TestSplitBuildTargets(t *testing.T) {
 			pkgTargets, fileTargets, err := splitBuildTargets(tt.targets)
 			if tt.expectError {
 				require.Error(t, err)
+				if tt.wantErr != "" {
+					require.ErrorContains(t, err, tt.wantErr)
+				}
 				assert.Nil(t, pkgTargets)
 				assert.Nil(t, fileTargets)
 			} else {

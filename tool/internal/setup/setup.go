@@ -219,6 +219,9 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 
 		if strings.HasPrefix(arg, "-") {
 			if !strings.Contains(arg, "=") && (flagsWithPathValues[arg] || testFlagsWithValues[arg]) {
+				if i+1 >= len(args) {
+					return nil, nil, ex.Newf("flag %q requires a value", arg)
+				}
 				i++ // skip this flag's separate value
 			}
 			continue
