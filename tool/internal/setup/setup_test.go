@@ -622,3 +622,120 @@ func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{})
 	require.NoError(t, err)
 }
+
+func TestGetBuildPackages_LoadErrors(t *testing.T) {
+	ctx := t.Context()
+	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
+
+	// File targets with non-existent -C flag
+	_, err := getBuildPackages(ctx, []string{"-C", nonExistentDir, "main.go"})
+	require.Error(t, err)
+
+	// Package targets with non-existent -C flag
+	_, err = getBuildPackages(ctx, []string{"-C", nonExistentDir, "./pkg"})
+	require.Error(t, err)
+
+	// Default targets with non-existent -C flag
+	_, err = getBuildPackages(ctx, []string{"-C", nonExistentDir})
+	require.Error(t, err)
+}
+
+func TestRootModulePaths_ResolveError(t *testing.T) {
+	ctx := t.Context()
+	pkgs := []*packages.Package{
+		{
+			PkgPath: "example.com/foo",
+			GoFiles: []string{filepath.Join(t.TempDir(), "nonexistent", "foo.go")},
+		},
+	}
+	_, err := rootModulePaths(ctx, pkgs)
+	require.Error(t, err)
+}
+
+func TestGenerateRuntimePerPackage_AddDepsError(t *testing.T) {
+	sp := newTestSetupPhase()
+	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
+
+	pkgs := []*packages.Package{
+		{
+			PkgPath: "example.com/foo",
+			Name:    "foo",
+			GoFiles: []string{filepath.Join(nonExistentDir, "foo.go")},
+		},
+	}
+	rset := rule.NewInstRuleSet("example.com/foo")
+	rset.FuncRules["foo.go"] = []*rule.InstFuncRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Func:         "Foo",
+			Before:       "BeforeFoo",
+			Path:         "example.com/hook",
+		},
+	}
+	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{rset})
+	require.Error(t, err)
+}
+
+func TestSetup_AutoPinError(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+
+	// Make stateDir a regular file so autoPin fails in setupLocked on all platforms (line 392)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	snapshotDir := util.GetBuildTemp(stateDir)
+	_ = os.RemoveAll(snapshotDir)
+	require.NoError(t, os.WriteFile(snapshotDir, []byte("file"), 0o644))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "."})
+	require.Error(t, err)
+}
+
+func TestSetup_FindDepsErrorWithRules(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcRules, "some-rule-config")
+
+	// Ensure build temp dir is a regular file so listBuildPlan in findDeps fails (line 401)
+	_ = os.RemoveAll(util.GetBuildTempDir())
+	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("file"), 0o644))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "."})
+	require.Error(t, err)
+}
+
+func TestSetup_MatchDepsError(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcRules, "/nonexistent/rules.yaml")
+	_ = os.RemoveAll(util.GetBuildTempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "."})
+	require.Error(t, err)
+}
+
+func TestSetupLocked_FindModuleDirsError(t *testing.T) {
+	// A standalone .go file outside any Go module causes FindModuleDirs to fail in setupLocked (line 377)
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	mainFile := filepath.Join(tmp, "main.go")
+	mustWriteFile(t, mainFile, "package main\nfunc main() {}\n")
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", mainFile})
+	require.Error(t, err)
+}

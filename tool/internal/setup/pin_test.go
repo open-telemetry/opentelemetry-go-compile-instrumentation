@@ -1239,3 +1239,177 @@ func TestPrepareVendoredBuild(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, args, got)
 }
+
+func TestPinLocked_GetBuildPackagesError(t *testing.T) {
+	_, err := Pin(t.Context(), PinOptions{
+		Args: []string{"-o"}, // missing required flag value
+	})
+	require.Error(t, err)
+}
+
+func TestAutoPin_TrackAllError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	modDir := filepath.Join(tmp, "mod")
+	require.NoError(t, os.MkdirAll(modDir, 0o755))
+	mustWriteFile(t, filepath.Join(modDir, "go.mod"), "module example.com")
+
+	// Snapshot destination dir as file so TrackAll fails on all platforms (including Windows)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	snapshotDir := util.GetBuildTemp(stateDir)
+	_ = os.RemoveAll(snapshotDir)
+	require.NoError(t, os.WriteFile(snapshotDir, []byte("file"), 0o644))
+
+	sm := newStateManager()
+	ctx := contextWithStateManager(t.Context(), sm)
+
+	_, err := autoPin(ctx, map[string]bool{modDir: true}, "build", []string{"."})
+	require.Error(t, err)
+}
+
+func TestRemoveImports_UnquoteError(t *testing.T) {
+	f := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.IMPORT,
+				Specs: []dst.Spec{
+					&dst.ImportSpec{
+						Path: &dst.BasicLit{
+							Kind:  token.STRING,
+							Value: `unquoted"invalid`,
+						},
+					},
+				},
+			},
+		},
+	}
+	err := removeImports(f, map[string]bool{"foo": true})
+	require.Error(t, err)
+}
+
+func TestAutoPin_GetBackupFilesError(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // canceled context causes getBackupFiles to fail
+
+	sm := newStateManager()
+	ctx = contextWithStateManager(ctx, sm)
+
+	_, err := autoPin(ctx, map[string]bool{"/some/dir": true}, "build", []string{"."})
+	require.Error(t, err)
+}
+
+func TestGeneratePinnedProjects_FindDepsError(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // canceled context causes findDeps to fail
+
+	_, err := generatePinnedProjects(ctx, map[string]bool{"/some/dir": true}, PinOptions{})
+	require.Error(t, err)
+}
+
+func TestPinLocked_FindModuleDirsError(t *testing.T) {
+	// A standalone .go file outside any Go module causes FindModuleDirs in pinLocked to fail on line 651
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	mainFile := filepath.Join(tmp, "main.go")
+	mustWriteFile(t, mainFile, "package main\nfunc main() {}\n")
+
+	_, err := Pin(t.Context(), PinOptions{Args: []string{mainFile}})
+	require.Error(t, err)
+}
+
+func TestGeneratePinnedProjects_LoadMinimalRulesError(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	// Create a corrupted go.mod in rules root to fail loadMinimalRules (pin.go:531)
+	instDir := filepath.Join(util.GetBuildTempDir(), unzippedInstDir, "badmod")
+	require.NoError(t, os.MkdirAll(instDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(instDir, "go.mod"), []byte("invalid go.mod"), 0o644))
+
+	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{})
+	require.Error(t, err)
+}
+
+func TestGeneratePinnedProjects_SyncDepsError(t *testing.T) {
+	goMod := `module example.com/test
+
+go 1.21
+
+require (
+	go.opentelemetry.io/otelc v0.0.0
+	nonexistent.invalid/pkg v1.0.0
+)
+`
+	tempDir, _, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(tempDir, "main.go"),
+			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
+			0o644,
+		),
+	)
+	ruleFile := filepath.Join(util.GetBuildTempDir(), unzippedInstDir, "net", "http", "client", "rules.yaml")
+	require.NoError(t, os.WriteFile(ruleFile, []byte("rule1:\n  target: net/http\n  func: Get\n"), 0o644))
+
+	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{
+		Args: []string{"."},
+	})
+	require.Error(t, err)
+}
+
+func TestGeneratePinnedProjects_EnsureOtelcRequireError(t *testing.T) {
+	goMod := `module example.com/test
+
+go 1.21
+`
+	tempDir, _, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(tempDir, "main.go"),
+			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
+			0o644,
+		),
+	)
+	ruleFile := filepath.Join(util.GetBuildTempDir(), unzippedInstDir, "net", "http", "client", "rules.yaml")
+	require.NoError(t, os.WriteFile(ruleFile, []byte("rule1:\n  target: net/http\n  func: Get\n"), 0o644))
+
+	// Corrupt go.mod so ensureOtelcRequire fails in generatePinnedProjects (line 563)
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte("invalid go.mod {"), 0o644))
+
+	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{})
+	require.Error(t, err)
+}
+
+func TestGeneratePinnedProjects_ExtractBundleError(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte("module example.com/test\n\ngo 1.21\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
+
+	buildTemp := util.GetBuildTempDir()
+	require.NoError(t, os.MkdirAll(buildTemp, 0o755))
+	pkgPath := filepath.Join(buildTemp, unzippedPkgDir)
+	require.NoError(t, os.WriteFile(pkgPath, []byte("file"), 0o644))
+
+	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{
+		Args: []string{"."},
+	})
+	require.Error(t, err)
+}
+
+func TestUpdateToolFile_RemoveImportsError(t *testing.T) {
+	tempDir := t.TempDir()
+	toolFile := filepath.Join(tempDir, "otel.instrumentation.go")
+	content := "package main\n\nimport _ `pkg\nnewline`\n"
+	require.NoError(t, os.WriteFile(toolFile, []byte(content), 0o644))
+
+	err := updateToolFile(t.Context(), toolFile, map[string]bool{"foo": true}, PinOptions{})
+	require.Error(t, err)
+}

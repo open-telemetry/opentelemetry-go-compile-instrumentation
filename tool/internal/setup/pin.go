@@ -411,12 +411,12 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	f, parseErr := p.Parse(toolFile, parser.ParseComments)
 	if parseErr != nil {
-		return ex.Wrapf(parseErr, "parsing tool file %s", toolFile)
+		return parseErr
 	}
 
 	if len(prunedImports) > 0 {
 		if removeErr := removeImports(f, prunedImports); removeErr != nil {
-			return ex.Wrapf(removeErr, "removing imports from %s", toolFile)
+			return removeErr
 		}
 	}
 
@@ -428,14 +428,10 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	_, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
 	if ensureErr != nil {
-		return ex.Wrapf(ensureErr, "ensuring otelc require in go.mod in %s", filepath.Dir(toolFile))
+		return ensureErr
 	}
 
-	if tidyErr := runModTidy(ctx, filepath.Dir(toolFile)); tidyErr != nil {
-		return ex.Wrapf(tidyErr, "running go mod tidy in %s", filepath.Dir(toolFile))
-	}
-
-	return nil
+	return runModTidy(ctx, filepath.Dir(toolFile))
 }
 
 func updatePinnedProjects(
@@ -522,17 +518,17 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	// No tool file found? Try generating one.
 	deps, findDepsErr := findDeps(ctx, subcommand, opts.Args)
 	if findDepsErr != nil {
-		return nil, ex.Wrapf(findDepsErr, "finding dependencies")
+		return nil, findDepsErr
 	}
 
 	extractErr := extractOtelcBundle()
 	if extractErr != nil {
-		return nil, ex.Wrapf(extractErr, "extracting otelc package")
+		return nil, extractErr
 	}
 
 	ruleset, err := loadMinimalRules(filepath.Join(util.GetBuildTempDir(), unzippedInstDir))
 	if err != nil {
-		return nil, ex.Wrapf(err, "loading instrumentation rules")
+		return nil, err
 	}
 
 	// We expect every built-in instrumentation module to be importable
@@ -564,11 +560,11 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 		}
 
 		if _, ensureErr := ensureOtelcRequire(moduleDir, util.Version); ensureErr != nil {
-			return nil, ex.Wrapf(ensureErr, "ensuring otelc require in go.mod in %s", moduleDir)
+			return nil, ensureErr
 		}
 
 		if syncErr := syncDeps(ctx, imports, moduleDir); syncErr != nil {
-			return nil, ex.Wrapf(syncErr, "syncing dependencies in %s", moduleDir)
+			return nil, syncErr
 		}
 
 		keepForDebug(ctx, path)
@@ -640,19 +636,19 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 		// forcing module mode and rewriting vendor/ paths to module mode.
 		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
 		if err != nil {
-			return nil, ex.Wrapf(err, "preparing vendored build")
+			return nil, err
 		}
 		opts.Args = args
 
 		// Use opts.Args to find module directories
 		pkgs, getErr := getBuildPackages(ctx, opts.Args)
 		if getErr != nil {
-			return nil, ex.Wrapf(getErr, "getting build packages")
+			return nil, getErr
 		}
 
 		moduleDirs, err = pkgload.FindModuleDirs(ctx, pkgs)
 		if err != nil {
-			return nil, ex.Wrapf(err, "finding module directories")
+			return nil, err
 		}
 	}
 
@@ -682,10 +678,10 @@ func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string,
 
 	backupFiles, getBackupErr := getBackupFiles(ctx, moduleDirs)
 	if getBackupErr != nil {
-		return nil, ex.Wrapf(getBackupErr, "getting backup files")
+		return nil, getBackupErr
 	}
 	if trackErr := stateManager.TrackAll(backupFiles...); trackErr != nil {
-		return nil, ex.Wrapf(trackErr, "tracking backup files")
+		return nil, trackErr
 	}
 
 	pinResult, pinErr := Pin(ctx, PinOptions{
