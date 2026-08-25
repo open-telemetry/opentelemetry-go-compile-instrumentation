@@ -547,7 +547,9 @@ func nestedToolexecGoflagsToken(execPath string) (string, error) {
 	// single token when cmd/go splits GOFLAGS.
 	innerFlag, err := util.BuildToolexecFlag(execPath)
 	if err != nil {
-		return "", ex.Wrapf(err, "building nested -toolexec flag for %q", execPath)
+		// BuildToolexecFlag's own error is already stackful and already names
+		// execPath, so there is nothing to add here; see #1231.
+		return "", err
 	}
 	toolexecFlag, err := util.QuoteGoflagsToken(innerFlag)
 	if err != nil {

@@ -825,9 +825,12 @@ func TestEnableNestedToolexec(t *testing.T) {
 		// Distinct from the case above: here execPath itself has both quote
 		// characters plus whitespace, so BuildToolexecFlag's own quoting of
 		// execPath fails before the inner/outer nesting is even attempted.
+		// nestedToolexecGoflagsToken adds no message of its own for this one,
+		// BuildToolexecFlag's error already names execPath, so this asserts on
+		// its wording rather than anything added downstream.
 		_, err := nestedToolexecGoflagsToken(`/home/it's "here"/otelc`)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "building nested -toolexec flag")
+		assert.Contains(t, err.Error(), "quoting otelc executable path for -toolexec")
 	})
 
 	t.Run("a path with an interior quote but no space survives both splits", func(t *testing.T) {
