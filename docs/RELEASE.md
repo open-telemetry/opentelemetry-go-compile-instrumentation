@@ -81,7 +81,7 @@ workflow completes:
 `make build-all` compiles `otelc` for the following platforms:
 
 | OS      | Architecture | Binary name                  |
-|---------|-------------|------------------------------|
+|---------|--------------|------------------------------|
 | Linux   | amd64        | `otelc-linux-amd64`          |
 | Linux   | arm64        | `otelc-linux-arm64`          |
 | macOS   | amd64        | `otelc-darwin-amd64`         |
@@ -95,9 +95,11 @@ All binaries are uploaded to the GitHub release as downloadable assets.
 After the release is published:
 
 1. **Download a binary** for your platform from the release page and run:
+
    ```sh
    ./otelc version
    ```
+
    Confirm it prints the expected version, commit hash, and build date.
 
 2. **Verify the GitHub release** lists all 5 platform binaries.
@@ -115,6 +117,7 @@ For critical bug fixes between scheduled releases:
 
 2. If `main` has moved on with unrelated changes that should not be included,
    create a release branch from the previous tag:
+
    ```sh
    git checkout -b release/v0.2.x v0.2.0
    git cherry-pick <fix-commit-sha>
