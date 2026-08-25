@@ -62,7 +62,7 @@ func (ap *AstParser) ParseSnippet(source string) ([]dst.Stmt, error) {
 	if source == "" {
 		return nil, ex.New("empty source")
 	}
-	snippet := "package main; func _() {" + source + "}"
+	snippet := "package main; func _() {" + source + "\n}"
 	file, err := decorator.ParseFile(ap.fset, "", snippet, 0)
 	if err != nil {
 		return nil, ex.Wrap(err)
