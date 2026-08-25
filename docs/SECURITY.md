@@ -43,7 +43,7 @@ Older minor releases do not receive backported security patches.
 ## Security Contacts
 
 Security reports are reviewed by the project maintainers listed in
-[`.github/CODEOWNERS`](.github/CODEOWNERS). The OpenTelemetry Technical
+[`.github/CODEOWNERS`](../.github/CODEOWNERS). The OpenTelemetry Technical
 Committee can be reached at **<security@opentelemetry.io>** for
 escalations.
 

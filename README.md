@@ -82,7 +82,7 @@ make test
 We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [development docs](./docs/).
 
 This project follows the [OpenTelemetry Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md).
-Please also review our [AI usage policy](AI_POLICY.md) if you use AI tools in your workflow.
+Please also review our [AI usage policy](docs/AI_POLICY.md) if you use AI tools in your workflow.
 
 Here is a list of community roles with current and previous members:
 

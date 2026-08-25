@@ -12,7 +12,7 @@ between scheduled releases when a critical bug or security issue is found.
 ## Release Shepherd
 
 Each release is owned by a **release shepherd** — one of the project
-[maintainers](README.md#maintainers). The shepherd is responsible for
+[maintainers](../README.md#maintainers). The shepherd is responsible for
 driving the release end-to-end: tagging, monitoring the workflow, and
 publishing the final release notes.
 
@@ -48,7 +48,7 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-Pushing the tag triggers the [Release workflow](.github/workflows/release.yml)
+Pushing the tag triggers the [Release workflow](../.github/workflows/release.yml)
 automatically.
 
 ### 2. Monitor the Release workflow
