@@ -117,6 +117,17 @@ func TestWrapDeclValue_InvalidTemplate(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to wrap expression")
 }
 
+func TestWrapDeclValue_MalformedTemplateSyntax(t *testing.T) {
+	spec := &dst.ValueSpec{
+		Names:  []*dst.Ident{{Name: "X"}},
+		Values: []dst.Expr{&dst.Ident{Name: "x"}},
+	}
+
+	err := wrapDeclValue(spec, "{{ unclosed", 0)
+
+	require.Error(t, err)
+}
+
 // --- applyDeclRule integration tests ---
 
 // makeVarFile builds a minimal *dst.File containing a single var declaration.

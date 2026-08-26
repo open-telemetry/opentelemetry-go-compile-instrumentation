@@ -39,11 +39,7 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 		return ex.Wrapf(err, "failed to format go.mod file")
 	}
 	const perm = 0o644
-	err = util.WriteFileAtomic(gomod, data, perm)
-	if err != nil {
-		return ex.Wrapf(err, "failed to write go.mod file")
-	}
-	return nil
+	return util.WriteFileAtomic(gomod, data, perm)
 }
 
 func runModTidy(ctx context.Context, moduleDir string) error {

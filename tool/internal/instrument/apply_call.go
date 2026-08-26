@@ -113,7 +113,7 @@ func (*instrumentPhase) applyCallReplace(
 ) (bool, error) {
 	tmpl, err := newCallTemplate(r.Replace)
 	if err != nil {
-		return false, ex.Wrapf(err, "rule has no compiled replacement template")
+		return false, err
 	}
 
 	// Pass 1: collect matching calls and pre-compute replacements to avoid
@@ -134,7 +134,7 @@ func (*instrumentPhase) applyCallReplace(
 	})
 
 	if wrapError != nil {
-		return false, ex.Wrapf(wrapError, "failed to wrap matched call")
+		return false, wrapError
 	}
 
 	if len(replacements) == 0 {
