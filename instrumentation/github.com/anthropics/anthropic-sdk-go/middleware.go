@@ -158,7 +158,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		// still answers with SSE, end the span without response attributes
 		// rather than hold it open on a body we do not accumulate yet.
 		contentType := resp.Header.Get("Content-Type")
-		if strings.HasPrefix(contentType, "text/event-stream") {
+		if strings.HasPrefix(strings.ToLower(contentType), "text/event-stream") {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
 			span.End()
 			return resp, nil
