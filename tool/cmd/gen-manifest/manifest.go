@@ -1,10 +1,9 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package manifest
+package main
 
 import (
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"maps"
@@ -16,7 +15,6 @@ import (
 	"golang.org/x/mod/modfile"
 	"gopkg.in/yaml.v3"
 
-	"go.opentelemetry.io/otelc/tool/data"
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -73,14 +71,6 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 		return strings.Compare(a.VersionRange, b.VersionRange)
 	})
 	manifest = slices.Compact(manifest)
-	return manifest, nil
-}
-
-func load() (Manifest, error) {
-	var manifest Manifest
-	if err := json.Unmarshal(data.GetManifestJSON(), &manifest); err != nil {
-		return nil, ex.Wrapf(err, "loading embedded instrumentation manifest")
-	}
 	return manifest, nil
 }
 
