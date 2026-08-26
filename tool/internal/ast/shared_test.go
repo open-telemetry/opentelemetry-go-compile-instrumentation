@@ -792,8 +792,33 @@ func TestStripGenericTypes(t *testing.T) {
 			want: "*GenStruct",
 		},
 		{
+			name: "parenthesized value receiver",
+			expr: &dst.ParenExpr{X: Ident("MyStruct")},
+			want: "MyStruct",
+		},
+		{
+			name: "parenthesized pointer receiver",
+			expr: &dst.ParenExpr{X: &dst.StarExpr{X: Ident("MyStruct")}},
+			want: "*MyStruct",
+		},
+		{
+			name: "parenthesized generic receiver",
+			expr: &dst.ParenExpr{X: &dst.IndexExpr{X: Ident("GenStruct"), Index: Ident("T")}},
+			want: "GenStruct",
+		},
+		{
+			name: "pointer to parenthesized receiver",
+			expr: &dst.StarExpr{X: &dst.ParenExpr{X: Ident("MyStruct")}},
+			want: "*MyStruct",
+		},
+		{
 			name: "unrecognized expression yields empty",
 			expr: &dst.SelectorExpr{X: Ident("pkg"), Sel: Ident("Type")},
+			want: "",
+		},
+		{
+			name: "pointer to unrecognized expression yields empty",
+			expr: &dst.StarExpr{X: &dst.SelectorExpr{X: Ident("pkg"), Sel: Ident("Type")}},
 			want: "",
 		},
 	}
@@ -883,4 +908,45 @@ func TestRenderNode(t *testing.T) {
 		require.Error(t, txtErr)
 		assert.Contains(t, txtErr.Error(), "failed to locate restored node")
 	})
+}
+
+// TestFindFuncDeclParenthesizedReceiver covers the reachable parenthesized
+// receiver forms. These compile and appear in unformatted dependency source, and
+// before the graceful-no-match change an unrecognized receiver ended the build
+// via util.Unimplemented. They should now match the base type like the
+// unparenthesized forms.
+func TestFindFuncDeclParenthesizedReceiver(t *testing.T) {
+	src := `package main
+
+type T struct{}
+
+func (r (T)) Value() {}
+
+func (r (*T)) Pointer() {}
+`
+	file, err := NewAstParser().ParseSource(src)
+	require.NoError(t, err)
+
+	value, ok, err := FindFuncDecl(file, &rule.InstFuncRule{Func: "Value", Recv: "T"})
+	require.NoError(t, err)
+	require.True(t, ok, "parenthesized value receiver (r (T)) should match")
+	assert.Equal(t, "Value", value.Name.Name)
+
+	pointer, ok, err := FindFuncDecl(file, &rule.InstFuncRule{Func: "Pointer", Recv: "*T"})
+	require.NoError(t, err)
+	require.True(t, ok, "parenthesized pointer receiver (r (*T)) should match")
+	assert.Equal(t, "Pointer", pointer.Name.Name)
+}
+
+// TestFindFuncDeclUnrecognizedReceiverNoMatch covers the graceful degradation: a
+// receiver shape stripGenericTypes does not recognize returns no match rather
+// than ending the build. A qualified receiver does not compile and so never
+// reaches the tool from real source, but the guard must still not abort.
+func TestFindFuncDeclUnrecognizedReceiverNoMatch(t *testing.T) {
+	file := parseSharedFixture(t)
+
+	// Drive the guard directly with a synthetic qualified receiver, the shape
+	// that used to trigger util.Unimplemented.
+	fnDecl := findFuncDecl(file, "Method", "pkg.MyStruct")
+	assert.Nil(t, fnDecl, "an unrecognized receiver should be a no match, not a build abort")
 }
