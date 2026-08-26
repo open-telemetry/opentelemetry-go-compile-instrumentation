@@ -265,12 +265,12 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	goModPath := filepath.Join(moduleDir, "go.mod")
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
-		return false, err
+		return false, ex.Wrap(err)
 	}
 
 	f, err := modfile.Parse(goModPath, data, nil)
 	if err != nil {
-		return false, err
+		return false, ex.Wrap(err)
 	}
 
 	modified := false
@@ -285,7 +285,7 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 
 	if !hasTool {
 		if addErr := f.AddTool(util.OtelcToolCmdRoot); addErr != nil {
-			return false, addErr
+			return false, ex.Wrap(err)
 		}
 		modified = true
 	}
