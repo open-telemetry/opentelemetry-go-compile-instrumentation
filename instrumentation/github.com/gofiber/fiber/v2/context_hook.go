@@ -84,10 +84,8 @@ func AfterNext(ictx hook.HookContext) {
 	}
 
 	status := c.Response().StatusCode()
-	if status >= 400 {
-		if status >= 500 {
-			span.SetStatus(codes.Error, "")
-		}
-		span.SetAttributes(semconv.HTTPResponseStatusCodeKey.Int(status))
+	if status >= 500 {
+		span.SetStatus(codes.Error, "")
 	}
+	span.SetAttributes(semconv.HTTPResponseStatusCodeKey.Int(status))
 }

@@ -79,13 +79,19 @@ func TestFiberBeforeAndAfterNext(t *testing.T) {
 	assert.Equal(t, "GET /user/:id", spans[0].Name)
 
 	hasRouteAttr := false
+	hasStatusAttr := false
 	for _, attr := range spans[0].Attributes {
 		if attr.Key == semconv.HTTPRouteKey {
 			assert.Equal(t, "/user/:id", attr.Value.AsString())
 			hasRouteAttr = true
 		}
+		if attr.Key == semconv.HTTPResponseStatusCodeKey {
+			assert.Equal(t, int64(200), attr.Value.AsInt64())
+			hasStatusAttr = true
+		}
 	}
 	assert.True(t, hasRouteAttr)
+	assert.True(t, hasStatusAttr)
 }
 
 func TestFiberAfterNext_ErrorStatus(t *testing.T) {
@@ -118,4 +124,13 @@ func TestFiberAfterNext_ErrorStatus(t *testing.T) {
 	spans := exporter.GetSpans()
 	require.Len(t, spans, 1)
 	assert.Equal(t, codes.Error, spans[0].Status.Code)
+
+	hasStatusAttr := false
+	for _, attr := range spans[0].Attributes {
+		if attr.Key == semconv.HTTPResponseStatusCodeKey {
+			assert.Equal(t, int64(500), attr.Value.AsInt64())
+			hasStatusAttr = true
+		}
+	}
+	assert.True(t, hasStatusAttr)
 }
