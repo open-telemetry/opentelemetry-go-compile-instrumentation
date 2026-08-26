@@ -145,12 +145,17 @@ func (n HTTPClient) RequestTraceAttrs(req *http.Request) []attribute.KeyValue {
 
 	var u string
 	if req.URL != nil {
-		// Remove any username/password info that may be in the URL.
+		// Remove any username/password info and redact sensitive query
+		// parameter values before capturing the URL, per the URL semantic
+		// conventions.
 		userinfo := req.URL.User
+		rawQuery := req.URL.RawQuery
 		req.URL.User = nil
+		req.URL.RawQuery = redactQuery(rawQuery)
 		u = req.URL.String()
-		// Restore any username/password info that was removed.
+		// Restore the original userinfo and query string.
 		req.URL.User = userinfo
+		req.URL.RawQuery = rawQuery
 	}
 	attrs = append(attrs, semconv.URLFull(u))
 
