@@ -4,7 +4,6 @@
 package ast
 
 import (
-	"fmt"
 	"go/format"
 	"go/token"
 	"strconv"
@@ -52,24 +51,19 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 // - GenStruct[T] -> GenStruct
 func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	switch expr := recvTypeExpr.(type) {
-	case *dst.StarExpr: // func (*Recv)T or func (*Recv[T])T
-		// Check if X is an Ident (non-generic) or IndexExpr/IndexListExpr (generic)
-		switch x := expr.X.(type) {
-		case *dst.Ident:
-			// Non-generic pointer receiver: *MyStruct
-			return "*" + x.Name
-		case *dst.IndexExpr:
-			// Generic pointer receiver with single type param: *GenStruct[T]
-			if baseIdent, ok := x.X.(*dst.Ident); ok {
-				return "*" + baseIdent.Name
-			}
-		case *dst.IndexListExpr:
-			// Generic pointer receiver with multiple type params: *GenStruct[T, U]
-			if baseIdent, ok := x.X.(*dst.Ident); ok {
-				return "*" + baseIdent.Name
-			}
+	case *dst.StarExpr: // func (*Recv), func (*Recv[T]), or func (*(Recv))
+		// Recurse into the pointed-to expression so pointer receivers compose
+		// with every other shape, parenthesised forms included. A base that is
+		// itself unrecognised yields "" rather than a bare "*".
+		if inner := stripGenericTypes(expr.X); inner != "" {
+			return "*" + inner
 		}
-	case *dst.Ident: // func (Recv)T
+	case *dst.ParenExpr: // func ((Recv)), func ((*Recv)), or func ((Recv[T]))
+		// Go permits parenthesised receiver types; unwrap and reuse the same
+		// rules. gofmt removes these parentheses, so they are rare, but the
+		// parser still produces them for unformatted dependency source.
+		return stripGenericTypes(expr.X)
+	case *dst.Ident: // func (Recv)
 		return expr.Name
 	case *dst.IndexExpr:
 		// Generic value receiver with single type param: GenStruct[T]
@@ -103,9 +97,14 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 		recvTypeExpr := funcDecl.Recv.List[0].Type
 		baseType := stripGenericTypes(recvTypeExpr)
 
+		// A receiver shape stripGenericTypes does not recognise is one this rule
+		// cannot be selecting, so treat it as no match rather than ending the
+		// whole build. The parenthesised and pointer forms are handled above;
+		// this guards any remaining shape, for example a qualified receiver from
+		// source that would not itself compile, without aborting on an unrelated
+		// function.
 		if baseType == "" {
-			msg := fmt.Sprintf("unexpected receiver type: %T", recvTypeExpr)
-			util.Unimplemented(msg)
+			return false
 		}
 
 		return baseType == recv && name == funcName
