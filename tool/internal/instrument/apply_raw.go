@@ -6,7 +6,6 @@ package instrument
 import (
 	"context"
 	"fmt"
-	"go/format"
 	"regexp"
 	"strings"
 
@@ -92,19 +91,14 @@ func insertRawAtPattern(
 			return true
 		}
 
-		astNode, nodeFound := restorer.Ast.Nodes[stmt]
-		if !nodeFound {
-			return true
-		}
-
-		var buf strings.Builder
-		if err := format.Node(&buf, restorer.Fset, astNode); err != nil {
+		text, err := ast.RenderNode(restorer, stmt)
+		if err != nil {
 			logger.Warn("Failed to restore AST node to source code", "error", err)
 			return true
 		}
 
-		logger.Debug("Matching statement with pattern", "stmt", buf.String(), "pattern", pos.pattern.String())
-		if !pos.pattern.MatchString(buf.String()) {
+		logger.Debug("Matching statement with pattern", "stmt", text, "pattern", pos.pattern.String())
+		if !pos.pattern.MatchString(text) {
 			return true
 		}
 

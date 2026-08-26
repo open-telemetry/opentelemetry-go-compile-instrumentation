@@ -512,3 +512,21 @@ func TestStateManagerDiscardEmpty(t *testing.T) {
 	// Discarding an empty state manager is a no-op.
 	require.NoError(t, newStateManager().Discard())
 }
+
+func TestStateManagerTrack_CopyFails(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	src := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, src, "module example.com")
+
+	// Make stateDir a regular file so CopyFile fails on all platforms (including Windows)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	snapshotDir := util.GetBuildTemp(stateDir)
+	_ = os.RemoveAll(snapshotDir)
+	require.NoError(t, os.WriteFile(snapshotDir, []byte("file"), 0o644))
+
+	sm := newStateManager()
+	err := sm.Track(src)
+	require.Error(t, err)
+}

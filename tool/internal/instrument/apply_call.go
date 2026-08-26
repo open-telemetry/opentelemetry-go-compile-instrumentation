@@ -35,12 +35,47 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		return nil
 	}
 
-	if err := ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
 		return err
 	}
 	ip.Info("Apply call rule", "rule", r)
 
 	return nil
+}
+
+// usedRuleImports returns the subset of ruleImports whose alias is actually
+// referenced somewhere in root. It must be called after the rule's append_args/replace
+// modifications have already been applied to root.
+//
+// Blank ("_") and dot (".") aliases are always kept.
+func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]string {
+	if len(ruleImports) == 0 {
+		return nil
+	}
+
+	used := make(map[string]string, len(ruleImports))
+	for alias, path := range ruleImports {
+		if alias == "_" || alias == "." {
+			used[alias] = path
+		}
+	}
+
+	dst.Inspect(root, func(node dst.Node) bool {
+		sel, ok := node.(*dst.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, identOk := sel.X.(*dst.Ident)
+		if !identOk {
+			return true
+		}
+		if path, importOk := ruleImports[ident.Name]; importOk {
+			used[ident.Name] = path
+		}
+		return true
+	})
+
+	return used
 }
 
 // walkCallsWithEnclosingFunc visits every *dst.CallExpr in root and invokes fn
@@ -78,7 +113,7 @@ func (*instrumentPhase) applyCallReplace(
 ) (bool, error) {
 	tmpl, err := newCallTemplate(r.Replace)
 	if err != nil {
-		return false, ex.Wrapf(err, "rule has no compiled replacement template")
+		return false, err
 	}
 
 	// Pass 1: collect matching calls and pre-compute replacements to avoid
@@ -99,7 +134,7 @@ func (*instrumentPhase) applyCallReplace(
 	})
 
 	if wrapError != nil {
-		return false, ex.Wrapf(wrapError, "failed to wrap matched call")
+		return false, wrapError
 	}
 
 	if len(replacements) == 0 {

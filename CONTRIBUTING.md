@@ -227,7 +227,7 @@ make adr-list
 
 ## AI Usage
 
-This project welcomes the use of AI tools. Please read the [AI Usage Policy](AI_POLICY.md) before
+This project welcomes the use of AI tools. Please read the [AI Usage Policy](docs/AI_POLICY.md) before
 contributing. The critical rule is: **you must understand every line of code you submit.**
 Contributors using AI tools are held to the same quality standards as any other contribution.
 
@@ -324,20 +324,18 @@ Enter the newly created directory and add your fork as a new remote:
 git remote add <YOUR_FORK> git@github.com:<YOUR_GITHUB_USERNAME>/opentelemetry-go-compile-instrumentation
 ```
 
-Check out a new branch, make modifications, run linters and tests, update
-`CHANGELOG.md`, and push the branch to your fork:
+Check out a new branch, make modifications, run linters and tests, and push
+the branch to your fork:
 
 ```sh
 git checkout -b <YOUR_BRANCH_NAME>
 # edit files
-# update changelog
 git add -p
 git commit
 git push <YOUR_FORK> <YOUR_BRANCH_NAME>
 ```
 
 Open a pull request against the main `opentelemetry-go-compile-instrumentation` repo.
-Be sure to add the pull request ID to the entry you added to `CHANGELOG.md`.
 
 Avoid rebasing and force-pushing to your branch to facilitate reviewing the pull request.
 Rewriting Git history makes it difficult to keep track of iterations during code review.
@@ -407,5 +405,5 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 
 ## Release Process
 
-See [RELEASE.md](RELEASE.md) for the full release process, including release
+See [docs/RELEASE.md](docs/RELEASE.md) for the full release process, including release
 cadence, tagging conventions, cross-compilation targets, and hotfix guidance.
