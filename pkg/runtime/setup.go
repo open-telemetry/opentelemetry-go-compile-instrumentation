@@ -174,7 +174,7 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
 		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
 	)
-	if os.Getenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR") == "true" {
+	if useSimpleSpanProcessor() {
 		spanProcessor = sdktrace.NewSimpleSpanProcessor(traceExporter)
 		logger.Debug("using SimpleSpanProcessor for immediate span export")
 	}
@@ -189,6 +189,10 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 
 	logger.Info("trace provider initialized with auto-export")
 	return nil
+}
+
+func useSimpleSpanProcessor() bool {
+	return strings.EqualFold(os.Getenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR"), "true")
 }
 
 // setupMeterProvider creates and configures the meter provider
