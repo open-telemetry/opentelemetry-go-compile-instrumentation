@@ -261,7 +261,7 @@ func TestCompileExpression_InvalidGoSyntax(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "failed to parse generated code")
+	assert.Contains(t, err.Error(), "can not parse snippet")
 }
 
 func TestCompileExpression_ComplexNestedExpression(t *testing.T) {
@@ -354,7 +354,7 @@ func TestCompileExpression_EmptyResult(t *testing.T) {
 	// Should error because the function body is empty
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "function body is empty")
+	assert.Contains(t, err.Error(), "empty source")
 }
 
 func TestCompileExpression_WhitespaceOnlyResult(t *testing.T) {
@@ -371,7 +371,7 @@ func TestCompileExpression_WhitespaceOnlyResult(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "function body is empty")
+	assert.Contains(t, err.Error(), "empty source")
 }
 
 func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {

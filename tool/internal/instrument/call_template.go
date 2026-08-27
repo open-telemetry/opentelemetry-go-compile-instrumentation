@@ -134,18 +134,9 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 	}
 	userResult := sb.String()
 
-	// An empty template result would otherwise surface as an opaque "empty
-	// source" error from ParseSnippet; call it out explicitly instead.
-	if strings.TrimSpace(userResult) == "" {
-		return nil, ex.New("function body is empty")
-	}
-
 	stmts, err := toolast.NewAstParser().ParseSnippet(userResult)
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", userResult)
-	}
-	if len(stmts) == 0 {
-		return nil, ex.New("function body is empty")
+		return nil, err
 	}
 	if len(stmts) != 1 {
 		return nil, ex.Newf("expected single expression statement, got %d statements", len(stmts))
@@ -174,7 +165,7 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 func parseGoExpression(expr string) (dst.Expr, error) {
 	stmts, err := toolast.NewAstParser().ParseSnippet(expr)
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to parse expression %q", expr)
+		return nil, err
 	}
 	if len(stmts) != 1 {
 		return nil, ex.Newf("expression %q did not parse as a single statement (got %d)", expr, len(stmts))
@@ -192,7 +183,7 @@ func parseGoExpression(expr string) (dst.Expr, error) {
 func parseGoTypeExpression(typeStr string) (dst.Expr, error) {
 	stmts, err := toolast.NewAstParser().ParseSnippet("var _ " + typeStr)
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to parse type %q", typeStr)
+		return nil, err
 	}
 	if len(stmts) != 1 {
 		return nil, ex.Newf("type %q did not parse as a single statement (got %d)", typeStr, len(stmts))

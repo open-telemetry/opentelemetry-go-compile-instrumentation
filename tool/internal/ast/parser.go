@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
@@ -59,13 +60,13 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 
 // ParseSnippet parses the AST from incomplete source code snippet.
 func (ap *AstParser) ParseSnippet(source string) ([]dst.Stmt, error) {
-	if source == "" {
+	if strings.TrimSpace(source) == "" {
 		return nil, ex.New("empty source")
 	}
 	snippet := "package main; func _() {" + source + "\n}"
 	file, err := decorator.ParseFile(ap.fset, "", snippet, 0)
 	if err != nil {
-		return nil, ex.Wrap(err)
+		return nil, ex.Wrapf(err, "can not parse snippet %s", source)
 	}
 	funcDecl := util.AssertType[*dst.FuncDecl](file.Decls[0])
 	return funcDecl.Body.List, nil
