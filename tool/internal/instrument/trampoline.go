@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dave/dst"
 
@@ -94,14 +95,23 @@ func (ip *instrumentPhase) ensureUnsafeImport() {
 	ip.target.Decls = append([]dst.Decl{unsafeImport}, ip.target.Decls...)
 }
 
+// parsedTemplateImpl parses the static impl.tmpl source once per process;
+// materializeTemplate runs once per instrumented func rule and clones this
+// prototype instead of re-parsing, since cloning is significantly cheaper.
+//
+//nolint:gochecknoglobals // memoized parse of an embedded constant, not mutable state
+var parsedTemplateImpl = sync.OnceValues(func() (*dst.File, error) {
+	return ast.NewAstParser().ParseSource(templateImpl)
+})
+
 func (ip *instrumentPhase) materializeTemplate() error {
 	// Read trampoline template and materialize before and after function
 	// declarations based on that
-	p := ast.NewAstParser()
-	astRoot, err := p.ParseSource(templateImpl)
+	proto, err := parsedTemplateImpl()
 	if err != nil {
 		return err
 	}
+	astRoot := util.AssertType[*dst.File](dst.Clone(proto))
 
 	ip.varDecls = make([]dst.Decl, 0)
 	ip.hookCtxMethods = make([]*dst.FuncDecl, 0)
@@ -181,42 +191,55 @@ func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 	return true
 }
 
-func findHookFile(rule *rule.InstFuncRule) (string, error) {
+// parseHookFileCached parses file once per process and reuses the result
+// across every hook lookup that touches it, whether for the same func rule
+// looked up twice (createTrampoline and optimizeTJumps) or a different rule
+// whose hook happens to live in a file already scanned for another rule.
+func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
+	if root, ok := ip.parsedHookFiles[file]; ok {
+		return root, nil
+	}
+	root, err := ast.ParseFile(file)
+	if err != nil {
+		return nil, err
+	}
+	if ip.parsedHookFiles == nil {
+		ip.parsedHookFiles = make(map[string]*dst.File)
+	}
+	ip.parsedHookFiles[file] = root
+	return root, nil
+}
+
+// findHookFile locates the file in rule.ResolvedPath defining rule's hooks
+// and returns it already parsed, since the caller needs both.
+func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.File, error) {
 	files, err0 := util.ListFiles(rule.ResolvedPath)
 	if err0 != nil {
-		return "", err0
+		return "", nil, err0
 	}
 	for _, file := range files {
 		if !util.IsGoFile(file) {
 			continue
 		}
-		root, err := ast.ParseFileFast(file)
+		root, err := ip.parseHookFileCached(file)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if isHookDefined(root, rule) {
-			return file, nil
+			return file, root, nil
 		}
 	}
-	return "", ex.Newf("no hook {%s,%s} found for %s from %v",
+	return "", nil, ex.Newf("no hook {%s,%s} found for %s from %v",
 		rule.Before, rule.After, rule.Func, files)
 }
 
-func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
-	file, err := findHookFile(t)
+// getHookFunc resolves the Before/After hook function declaration for t.
+func (ip *instrumentPhase) getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
+	file, root, err := ip.findHookFile(t)
 	if err != nil {
 		return nil, err
 	}
-	root, err := ast.ParseFile(file) // Complete parse
-	if err != nil {
-		return nil, err
-	}
-	var target *dst.FuncDecl
-	if before {
-		target = ast.FindFuncDeclWithoutRecv(root, t.Before)
-	} else {
-		target = ast.FindFuncDeclWithoutRecv(root, t.After)
-	}
+	target := ast.FindFuncDeclWithoutRecv(root, getHookFuncName(t, before))
 	if target == nil {
 		return nil, ex.Newf("hook %s or %s not found from %s",
 			t.Before, t.After, file)
@@ -707,7 +730,7 @@ func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool)
 		field.Type = replaceTypeParamsWithAny(field.Type, genericTypes)
 	}
 	// Get the hook function declaration
-	hookFunc, err := getHookFunc(t, before)
+	hookFunc, err := ip.getHookFunc(t, before)
 	if err != nil {
 		return nil, err
 	}
