@@ -114,10 +114,9 @@ func TestWriterWrapper_Hijack_NotSupported(t *testing.T) {
 	}
 
 	conn, rw, err := wrapper.Hijack()
-	require.Error(t, err)
+	require.ErrorIs(t, err, http.ErrNotSupported)
 	assert.Nil(t, conn)
 	assert.Nil(t, rw)
-	assert.Contains(t, err.Error(), "does not implement http.Hijacker")
 }
 
 // mockFlusher is a mock ResponseWriter that implements the Flusher interface
@@ -239,3 +238,20 @@ func TestWriterWrapper_MultipleStatusCodes(t *testing.T) {
 		})
 	}
 }
+
+func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
+	wrapper := &writerWrapper{
+		// A bare ResponseWriter with no Flush support.
+		ResponseWriter: nonFlusher{httptest.NewRecorder()},
+		statusCode:     http.StatusOK,
+	}
+
+	require.ErrorIs(t, wrapper.FlushError(), http.ErrNotSupported)
+}
+
+// nonFlusher hides the recorder's Flush method.
+type nonFlusher struct{ rec *httptest.ResponseRecorder }
+
+func (n nonFlusher) Header() http.Header         { return n.rec.Header() }
+func (n nonFlusher) Write(b []byte) (int, error) { return n.rec.Write(b) }
+func (n nonFlusher) WriteHeader(code int)        { n.rec.WriteHeader(code) }
