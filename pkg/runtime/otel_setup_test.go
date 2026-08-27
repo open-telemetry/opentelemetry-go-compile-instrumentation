@@ -92,13 +92,13 @@ func TestInstrumented(t *testing.T) {
 		},
 	}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", tt.enabledList)
-				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", tt.disabledList)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", tt.enabledList)
+			t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", tt.disabledList)
 
-				result := Instrumented(tt.instrumentationName)
-				assert.Equal(t, tt.expected, result)
-			})
-		}
+			result := Instrumented(tt.instrumentationName)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
