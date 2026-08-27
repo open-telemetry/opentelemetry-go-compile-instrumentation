@@ -364,19 +364,6 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 		// because there might be more than one trampoline-jump-if in the same
 		// function, they are nested in the else block. See findJumpPoint for
 		// more details.
-		//
-		// We deliberately do NOT also strip the GetParam/SetParam/GetReturnVal/
-		// SetReturnVal methods off HookContextImpl{suffix} here, even for a
-		// generic target where rewriteHookContextMethods already makes all four
-		// panic unconditionally (regardless of whether an After hook exists).
-		// *HookContextImpl{suffix} is passed to the Before hook as a
-		// hook.HookContext interface value (see checkHookDecl), so it must keep
-		// satisfying the full interface or the generated code stops compiling.
-		// The panicking stubs also double as an intentional runtime guard: a
-		// hook author who calls one of these methods on a generic target gets
-		// an immediate, clear panic instead of silently wrong behavior. See
-		// testdata/golden/generic-before-only/hook.go for the documented
-		// workaround (read values from the hook's own positional parameters).
 		removedOnExit := false
 		rule := tjump.rule
 		if rule.After == "" {
