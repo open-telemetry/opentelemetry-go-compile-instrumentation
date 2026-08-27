@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -105,6 +106,7 @@ func setupTestTracer(t *testing.T) *tracetest.SpanRecorder {
 // manual reader so tests can assert what was recorded.
 func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
 	t.Helper()
+	setupTestTracer(t)
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	otel.SetMeterProvider(mp)
@@ -142,6 +144,24 @@ func durationCount(t *testing.T, reader *sdkmetric.ManualReader) uint64 {
 	return 0
 }
 
+// durationDataPoints returns all data points for gen_ai.client.operation.duration.
+func durationDataPoints(t *testing.T, reader *sdkmetric.ManualReader) []metricdata.HistogramDataPoint[float64] {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "gen_ai.client.operation.duration" {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			require.True(t, ok, "gen_ai.client.operation.duration must be a float64 histogram")
+			return hist.DataPoints
+		}
+	}
+	return nil
+}
+
 // TestOtelMiddleware_RecordsDuration verifies a successful Messages call emits
 // exactly one gen_ai.client.operation.duration measurement.
 func TestOtelMiddleware_RecordsDuration(t *testing.T) {
@@ -160,7 +180,8 @@ func TestOtelMiddleware_RecordsDuration(t *testing.T) {
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
 			Body: io.NopCloser(strings.NewReader(
-				`{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`)),
+				`{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`,
+			)),
 		}, nil
 	}
 
@@ -171,7 +192,8 @@ func TestOtelMiddleware_RecordsDuration(t *testing.T) {
 }
 
 // TestOtelMiddleware_RecordsDurationOnError verifies the duration is recorded
-// even when the call fails, so error latency is observable too.
+// even when the call fails, so error latency is observable too. It also
+// verifies that error.type is set on the metric as a numeric status code.
 func TestOtelMiddleware_RecordsDurationOnError(t *testing.T) {
 	setupTestTracer(t)
 	reader := setupTestMeter(t)
@@ -195,7 +217,42 @@ func TestOtelMiddleware_RecordsDurationOnError(t *testing.T) {
 	_, err := middleware(req, next)
 	require.NoError(t, err)
 
-	assert.Equal(t, uint64(1), durationCount(t, reader), "duration should be recorded once on HTTP error")
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1, "duration should be recorded once on HTTP error")
+	assert.Equal(t, uint64(1), dps[0].Count)
+	// error.type on the metric must be the numeric status code.
+	val, ok := dps[0].Attributes.Value(attribute.Key("error.type"))
+	require.True(t, ok, "error.type must be present on the metric data point")
+	assert.Equal(t, "429", val.AsString())
+}
+
+// TestOtelMiddleware_RecordsDurationOnTransportError verifies the duration is
+// recorded and error.type is set when next() returns an error.
+func TestOtelMiddleware_RecordsDurationOnTransportError(t *testing.T) {
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+	wantErr := errors.New("connection refused")
+	next := func(r *http.Request) (*http.Response, error) {
+		return nil, wantErr
+	}
+
+	_, err := middleware(req, next)
+	require.ErrorIs(t, err, wantErr)
+
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1, "duration should be recorded once on transport error")
+	assert.Equal(t, uint64(1), dps[0].Count)
+	// error.type on the metric should reflect the Go error type.
+	_, ok := dps[0].Attributes.Value(attribute.Key("error.type"))
+	require.True(t, ok, "error.type must be present on the metric data point")
 }
 
 // TestOtelMiddleware_Messages defines the expected span shape for a
@@ -518,7 +575,7 @@ func TestOtelMiddleware_HTTPError(t *testing.T) {
 
 			spans := sr.Ended()
 			require.Len(t, spans, 1)
-			assertAttribute(t, spans[0].Attributes(), "error.type", tt.status)
+			assertAttribute(t, spans[0].Attributes(), "error.type", strconv.Itoa(tt.statusCode))
 			assert.Equal(t, codes.Error, spans[0].Status().Code)
 
 			events := spans[0].Events()
