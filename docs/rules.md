@@ -1209,18 +1209,7 @@ This rule would take the file `new_helpers.go` from the `github.com/my-org/my-re
 
 **Import Handling:**
 
-File rules typically don't need the `imports` field because the added file already contains its own import declarations. However, you can use the top-level `imports:` to add additional imports to the file being added:
-
-```yaml
-add_file_with_extra_imports:
-  target: main
-  do:
-    - add_file:
-        file: "helpers.go"
-        path: "github.com/my-org/my-repo/instrumentation/helpers"
-  imports:
-    log: "log" # Add extra import to the copied file
-```
+Declare any imports the added file needs in the `.go` source itself (for example `import "log"`). Do not use the top-level YAML `imports:` field with `add_file` — that field is for snippet-injecting rules (raw/call/struct/etc.) that insert code into existing files. During setup, otelc discovers imports from the `add_file` source and blank-registers them in `otelc.runtime.go` so they enter the build graph before toolexec.
 
 ### 7. Named Declaration Rule
 
