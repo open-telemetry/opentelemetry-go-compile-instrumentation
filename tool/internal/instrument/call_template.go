@@ -118,6 +118,16 @@ func (d *callTemplateData) FuncReturnCount() (int, error) {
 	return d.enclosing.FuncReturnCount(), nil
 }
 
+// Receiver returns the identifier of the enclosing method's receiver, or an
+// error if there is no enclosing function or the enclosing function has no
+// receiver. Template usage: {{.Receiver}}
+func (d *callTemplateData) Receiver() (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.Receiver()
+}
+
 // FuncArgumentOfType returns the identifier of the first parameter of the
 // enclosing function (excluding the receiver) whose type matches typeStr
 // or "" if none match. Template usage: {{.FuncArgumentOfType "context.Context"}}
