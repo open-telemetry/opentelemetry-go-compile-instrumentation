@@ -89,11 +89,11 @@ make help
   - `make lint/action` - Lint GitHub Actions workflows
   - `make lint/makefile` - Lint Makefile
   - `make lint/license-header` - Check license headers (has dedicated CI workflow)
-  - `make lint/license-header/fix` - Apply license headers to Go files
+  - `make lint/license-header/fix` - Apply license headers to Go and shell files
 
 #### License Headers
 
-All Go files must include the proper license header. The license header configuration is defined in `license.yml` which handles exclusions for vendor directories, temporary files, and generated code.
+All Go and shell files must include the proper license header. The required headers and path exclusions are managed in `.github/scripts/license-check.sh`.
 
 To check and fix license headers:
 
