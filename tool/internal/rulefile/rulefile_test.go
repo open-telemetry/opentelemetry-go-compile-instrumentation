@@ -40,6 +40,7 @@ rule:
 			wantRules:   []string{"rule"},
 		},
 		{name: "empty", wantVersion: LegacyVersion, wantLegacy: true},
+		{name: "invalid yaml", content: "rule: {", wantErr: "did not find expected node content"},
 		{name: "non mapping root", content: "- rule", wantErr: "root must be a mapping"},
 		{name: "missing v prefix", content: `version: "1.0.0"`, wantErr: "not a valid release version"},
 		{name: "empty version", content: `version: ""`, wantErr: "not a valid release version"},

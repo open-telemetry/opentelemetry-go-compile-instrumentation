@@ -136,6 +136,15 @@ func TestGenerateRejectsInvalidVersionRanges(t *testing.T) {
 	}
 }
 
+func TestGenerateRejectsInvalidRuleValue(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "module", "example.com/test")
+	writeRuleFile(t, root, "module/otelc.yaml", `invalid: value`)
+
+	_, err := Generate(root)
+	require.ErrorContains(t, err, `parsing rule "invalid" in otelc.yaml`)
+}
+
 func TestGenerateReportsInvalidRulesDeterministically(t *testing.T) {
 	root := t.TempDir()
 	writeModule(t, root, "module", "example.com/test")

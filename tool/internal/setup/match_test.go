@@ -1187,10 +1187,21 @@ hook:
 }
 
 func TestCheckRuleFileVersion(t *testing.T) {
+	t.Run("accepts supported requirement", func(t *testing.T) {
+		err := checkRuleFileVersionFor("otelc.yaml", []byte(`version: "v1.0.0"`), "v1.1.0", nil)
+		require.NoError(t, err)
+	})
+
 	t.Run("rejects newer requirement", func(t *testing.T) {
 		err := checkRuleFileVersionFor("client.otelc.yaml", []byte(`version: "v1.1.0"`), "v1.0.0", nil)
 		require.ErrorContains(t, err, "client.otelc.yaml")
 		require.ErrorContains(t, err, "requires otelc >= v1.1.0")
+	})
+
+	t.Run("rejects malformed metadata", func(t *testing.T) {
+		err := checkRuleFileVersionFor("otelc.yaml", []byte(`version: 1`), "v1.0.0", nil)
+		require.ErrorContains(t, err, "minimum otelc version must be a string")
+		require.ErrorContains(t, err, "otelc.yaml")
 	})
 
 	t.Run("warns for legacy file", func(t *testing.T) {
