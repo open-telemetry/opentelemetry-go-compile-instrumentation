@@ -42,7 +42,7 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 	manifest := make(Manifest, 0)
 	err := filepath.WalkDir(instrumentationRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 		if d.IsDir() || d.Name() != "go.mod" || filepath.Dir(path) == instrumentationRoot {
 			return nil
@@ -110,7 +110,7 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 	rootFS := root.FS()
 	err = fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 		if d.IsDir() {
 			if path == "." {
@@ -119,7 +119,7 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
 				return fs.SkipDir
 			} else if !errors.Is(statErr, fs.ErrNotExist) {
-				return statErr
+				return ex.Wrapf(statErr, "stat %s/go.mod", path)
 			}
 			return nil
 		}
