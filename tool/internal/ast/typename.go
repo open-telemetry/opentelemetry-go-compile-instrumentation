@@ -59,10 +59,8 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 			return t.importPath == ident.Path && t.name == n.Sel.Name
 		}
 		if imports != nil {
-			if resolved, importOk := imports[ident.Name]; importOk {
-				return t.importPath == resolved && t.name == n.Sel.Name
-			}
-			return false
+			resolved, importOk := imports[ident.Name]
+			return importOk && t.importPath == resolved && t.name == n.Sel.Name
 		}
 		// No import context at all (imports == nil, e.g. hand-built AST nodes in
 		// tests with no backing *dst.File): compare against importPath's last
@@ -139,26 +137,30 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 // The cost is that the default name here is a syntactic guess; see defaultImportAlias.
 //
 // Returns nil when file is nil.
+func collectImportSpecs(file *dst.File) []*dst.ImportSpec {
+	if len(file.Imports) > 0 {
+		return file.Imports
+	}
+	var specs []*dst.ImportSpec
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			if importSpec, isImport := spec.(*dst.ImportSpec); isImport {
+				specs = append(specs, importSpec)
+			}
+		}
+	}
+	return specs
+}
+
 func ImportAliasMap(file *dst.File) map[string]string {
 	if file == nil {
 		return nil
 	}
-	var specs []*dst.ImportSpec
-	if len(file.Imports) > 0 {
-		specs = file.Imports
-	} else {
-		for _, decl := range file.Decls {
-			genDecl, ok := decl.(*dst.GenDecl)
-			if !ok || genDecl.Tok != token.IMPORT {
-				continue
-			}
-			for _, spec := range genDecl.Specs {
-				if importSpec, isImport := spec.(*dst.ImportSpec); isImport {
-					specs = append(specs, importSpec)
-				}
-			}
-		}
-	}
+	specs := collectImportSpecs(file)
 
 	aliases := make(map[string]string, len(specs))
 	explicit := make(map[string]bool, len(specs))
@@ -182,26 +184,32 @@ func ImportAliasMap(file *dst.File) map[string]string {
 		if alias == "" || alias == "_" || alias == "." {
 			continue
 		}
-		if existingPath, exists := aliases[alias]; exists {
-			if existingPath != path {
-				if isExplicit && !explicit[alias] {
-					// New explicit alias overrides previous default alias
-					aliases[alias] = path
-					explicit[alias] = true
-					delete(collided, alias)
-				} else if !isExplicit && explicit[alias] {
-					// Previous explicit alias wins over new default alias
-					continue
-				} else {
-					// Collision between two default aliases (or two conflicting explicit aliases)
-					collided[alias] = true
-				}
-			}
-		} else {
+
+		existingPath, exists := aliases[alias]
+		if !exists {
 			aliases[alias] = path
 			if isExplicit {
 				explicit[alias] = true
 			}
+			continue
+		}
+
+		if existingPath == path {
+			continue
+		}
+
+		switch {
+		case isExplicit && !explicit[alias]:
+			// New explicit alias overrides previous default alias
+			aliases[alias] = path
+			explicit[alias] = true
+			delete(collided, alias)
+		case !isExplicit && explicit[alias]:
+			// Previous explicit alias wins over new default alias
+			continue
+		default:
+			// Collision between two default aliases (or two conflicting explicit aliases)
+			collided[alias] = true
 		}
 	}
 

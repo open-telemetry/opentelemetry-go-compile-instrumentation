@@ -578,4 +578,3 @@ func TestTypeNameMatches_StrictImportContext(t *testing.T) {
 	// Without import context (imports == nil), path-tail matching still works for test AST nodes.
 	assert.True(t, tn.matches(node, nil))
 }
-
