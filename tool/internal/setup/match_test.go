@@ -612,7 +612,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		})
 		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, nil)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -629,7 +629,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		})
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, nil)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -647,7 +647,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, nil)
 		require.NoError(t, err)
 		require.Len(t, rules, 2)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -665,7 +665,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "notinstrumentation"), "example.com/notinstrumentation",
 			false, nil)
 
-		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, nil)
 		require.ErrorIs(t, err, errNotInstrumentation)
 	})
 }
@@ -1174,6 +1174,39 @@ mangle:
 	require.Equal(t, []string{"alpha", "mangle", "zebra"}, names)
 }
 
+func TestParseRuleFromYamlMinimumVersion(t *testing.T) {
+	rules, err := parseRuleFromYaml([]byte(`version: "v1.0.0"
+hook:
+  target: main
+  func: Example
+  raw: "_ = 1"
+`))
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	assert.Equal(t, "hook", rules[0].GetName())
+}
+
+func TestCheckRuleFileVersion(t *testing.T) {
+	t.Run("rejects newer requirement", func(t *testing.T) {
+		err := checkRuleFileVersionFor("client.otelc.yaml", []byte(`version: "v1.1.0"`), "v1.0.0", nil)
+		require.ErrorContains(t, err, "client.otelc.yaml")
+		require.ErrorContains(t, err, "requires otelc >= v1.1.0")
+	})
+
+	t.Run("warns for legacy file", func(t *testing.T) {
+		var message string
+		var args []any
+		err := checkRuleFileVersion("otelc.yaml", []byte("rule: {}"), func(msg string, values ...any) {
+			message = msg
+			args = values
+		})
+		require.NoError(t, err)
+		assert.Contains(t, message, "no minimum otelc version")
+		assert.Contains(t, args, "otelc.yaml")
+		assert.Contains(t, args, "v1.0.0")
+	})
+}
+
 func TestLoadCustomRulesDeterministicOrder(t *testing.T) {
 	content := `zebra:
   target: main
@@ -1190,7 +1223,7 @@ mangle:
 
 	p := writeCustomRules(t, "order.yaml", content)
 
-	rules, err := loadCustomRules(p)
+	rules, err := loadCustomRules(p, nil)
 	require.NoError(t, err)
 	require.Len(t, rules, 3)
 
@@ -1886,7 +1919,7 @@ func TestRulesFromDirWalkError(t *testing.T) {
 
 func TestLoadCustomRulesStatError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
-	_, err := loadCustomRules(filepath.Join(t.TempDir(), "nope.yaml"))
+	_, err := loadCustomRules(filepath.Join(t.TempDir(), "nope.yaml"), nil)
 	require.Error(t, err)
 }
 

@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/rulefile"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -121,31 +122,46 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		if readErr != nil {
 			return ex.Wrapf(readErr, "reading rule file %s", path)
 		}
-		var rules map[string]yamlRule
-		if unmarshalErr := yaml.Unmarshal(content, &rules); unmarshalErr != nil {
-			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
+		ruleEntries, parseErr := parseRuleEntries(content, path, modulePath)
+		if parseErr != nil {
+			return parseErr
 		}
-		for _, name := range slices.Sorted(maps.Keys(rules)) {
-			ruleConfig := rules[name]
-			if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
-				return ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
-			}
-			if ruleConfig.Target == "" {
-				continue
-			}
-			if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
-				return ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
-			}
-			entries = append(entries, Entry{
-				ModulePath:   modulePath,
-				Target:       ruleConfig.Target,
-				VersionRange: ruleConfig.VersionRange,
-			})
-		}
+		entries = append(entries, ruleEntries...)
 		return nil
 	})
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading rules for module %s", modulePath)
+	}
+	return entries, nil
+}
+
+func parseRuleEntries(content []byte, path, modulePath string) (Manifest, error) {
+	doc, err := rulefile.Parse(content)
+	if err != nil {
+		return nil, ex.Wrapf(err, "parsing rule file %s", path)
+	}
+
+	entries := make(Manifest, 0, len(doc.Rules))
+	for _, name := range slices.Sorted(maps.Keys(doc.Rules)) {
+		node := doc.Rules[name]
+		var ruleConfig yamlRule
+		if decodeErr := node.Decode(&ruleConfig); decodeErr != nil {
+			return nil, ex.Wrapf(decodeErr, "parsing rule %q in %s", name, path)
+		}
+		if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
+			return nil, ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
+		}
+		if ruleConfig.Target == "" {
+			continue
+		}
+		if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
+			return nil, ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
+		}
+		entries = append(entries, Entry{
+			ModulePath:   modulePath,
+			Target:       ruleConfig.Target,
+			VersionRange: ruleConfig.VersionRange,
+		})
 	}
 	return entries, nil
 }

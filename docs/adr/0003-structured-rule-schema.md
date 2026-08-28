@@ -40,9 +40,12 @@ decision so future contributors do not re-litigate the question.
 
 Adopt a **2-tier `where`/`do` schema** for all instrumentation rules.
 
-A rule has exactly the following top-level shape:
+A rule file reserves the top-level `version` key for its minimum required `otelc`
+version. Each remaining top-level entry is a rule with the following shape:
 
 ```yaml
+version: "v1.0.0"
+
 rule_name:
   target: <package selector>          # required
   version: <version range>            # optional

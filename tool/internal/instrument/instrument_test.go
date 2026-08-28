@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/rulefile"
 	"go.opentelemetry.io/otelc/tool/util"
 	"go.yaml.in/yaml/v3"
 	"gotest.tools/v3/golden"
@@ -153,14 +154,20 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, p.testName, rulesFileName))
 	require.NoError(t, err)
 
-	var rawRules map[string]map[string]any
-	yaml.Unmarshal(data, &rawRules)
+	doc, parseErr := rulefile.Parse(data)
+	require.NoError(t, parseErr)
+	rawRules := make(map[string]map[string]any, len(doc.Rules))
+	for name, node := range doc.Rules {
+		var fields map[string]any
+		require.NoError(t, node.Decode(&fields))
+		rawRules[name] = fields
+	}
 
 	// Parse the source AST once and reuse it for every rule's where.file gating
 	// below. The gating is per-rule, but the tree is shared, so N rules do not
 	// trigger N reparses of the same file.
-	sourceTree, parseErr := ast.ParseFileFast(p.sourceFile)
-	require.NoError(t, parseErr)
+	sourceTree, sourceParseErr := ast.ParseFileFast(p.sourceFile)
+	require.NoError(t, sourceParseErr)
 
 	ruleSet := &rule.InstRuleSet{
 		// PackageName is the Go package identifier (from the source clause);

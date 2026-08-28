@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/rulefile"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -172,7 +173,13 @@ type yamlRule struct {
 	VersionRange string `yaml:"version"`
 }
 
-func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) error {
+const goModFile = "go.mod"
+
+func loadModuleRules(
+	moduleDir, module, currentVersion string,
+	loaded map[string][]yamlRule,
+	warn func(string, ...any),
+) error {
 	return filepath.WalkDir(moduleDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return ex.Wrap(err)
@@ -180,7 +187,7 @@ func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) err
 
 		if d.IsDir() {
 			// Skip any submodules
-			if path != moduleDir && util.PathExists(filepath.Join(path, "go.mod")) {
+			if path != moduleDir && util.PathExists(filepath.Join(path, goModFile)) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -195,12 +202,23 @@ func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) err
 			return ex.Wrapf(readErr, "reading rule file %s", path)
 		}
 
-		var rules map[string]yamlRule
-		if unmarshalErr := yaml.Unmarshal(data, &rules); unmarshalErr != nil {
-			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
+		doc, parseErr := rulefile.Parse(data)
+		if parseErr != nil {
+			return ex.Wrapf(parseErr, "parsing rule file %s", path)
+		}
+		if doc.Legacy && warn != nil {
+			warn("rule file has no minimum otelc version; assuming legacy version", "file", path,
+				"version", rulefile.LegacyVersion)
+		}
+		if versionErr := rulefile.CheckVersion(currentVersion, doc.MinimumVersion); versionErr != nil {
+			return ex.Wrapf(versionErr, "rule file %s", path)
 		}
 
-		for _, r := range rules {
+		for name, node := range doc.Rules {
+			var r yamlRule
+			if decodeErr := node.Decode(&r); decodeErr != nil {
+				return ex.Wrapf(decodeErr, "parsing rule %q in %s", name, path)
+			}
 			if r.Target != "" {
 				loaded[module] = append(loaded[module], r)
 			}
@@ -210,7 +228,10 @@ func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) err
 	})
 }
 
-func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
+func loadMinimalRules(
+	rulesRoot, currentVersion string,
+	warn func(string, ...any),
+) (map[string][]yamlRule, error) {
 	loaded := make(map[string][]yamlRule)
 
 	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
@@ -220,7 +241,7 @@ func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
 		// rulesRoot is instrumentation/
 		// We want to load rules for submodules within instrumentation/
 		// Look for go.mod nested within instrumentation/
-		if d.IsDir() || d.Name() != "go.mod" || filepath.Dir(path) == rulesRoot {
+		if d.IsDir() || d.Name() != goModFile || filepath.Dir(path) == rulesRoot {
 			return nil
 		}
 
@@ -229,7 +250,7 @@ func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
 			return ex.Wrapf(err, "loading %s", path)
 		}
 
-		return loadModuleRules(filepath.Dir(path), modFile.Module.Mod.Path, loaded)
+		return loadModuleRules(filepath.Dir(path), modFile.Module.Mod.Path, currentVersion, loaded, warn)
 	})
 	if err != nil {
 		return nil, err
@@ -262,7 +283,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 }
 
 func ensureOtelcRequire(moduleDir, version string) (bool, error) {
-	goModPath := filepath.Join(moduleDir, "go.mod")
+	goModPath := filepath.Join(moduleDir, goModFile)
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return false, ex.Wrap(err)
@@ -434,6 +455,24 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 	return runModTidy(ctx, filepath.Dir(toolFile))
 }
 
+func validateRuleFiles(ctx context.Context, logger *slog.Logger, ruleFiles []string) error {
+	for _, ruleFile := range ruleFiles {
+		content, err := os.ReadFile(ruleFile)
+		if err != nil {
+			return ex.Wrapf(err, "reading %s", ruleFile)
+		}
+		if err = checkRuleFileVersion(ruleFile, content, func(msg string, args ...any) {
+			logger.WarnContext(ctx, msg, args...)
+		}); err != nil {
+			return err
+		}
+		if _, err = parseRuleFromYaml(content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func updatePinnedProjects(
 	ctx context.Context,
 	toolFiles []string,
@@ -478,16 +517,9 @@ func updatePinnedProjects(
 
 			// Also validate that all rule files in the import are valid.
 			if opts.Validate {
-				for _, ruleFile := range v.Config.RuleFiles {
-					content, readErr := os.ReadFile(ruleFile)
-					if readErr != nil {
-						return false, ex.Wrapf(readErr, "reading %s", ruleFile)
-					}
-
-					if _, parseErr := parseRuleFromYaml(content); parseErr != nil {
-						pruneImport(parseErr)
-						return false, nil
-					}
+				if validateErr := validateRuleFiles(ctx, logger, v.Config.RuleFiles); validateErr != nil {
+					pruneImport(validateErr)
+					return false, nil
 				}
 			}
 
@@ -526,7 +558,11 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 		return nil, extractErr
 	}
 
-	ruleset, err := loadMinimalRules(filepath.Join(util.GetBuildTempDir(), unzippedInstDir))
+	ruleset, err := loadMinimalRules(
+		filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
+		util.Version,
+		func(msg string, args ...any) { logger.WarnContext(ctx, msg, args...) },
+	)
 	if err != nil {
 		return nil, err
 	}

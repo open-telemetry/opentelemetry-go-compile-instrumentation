@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -707,6 +708,7 @@ func TestLoadMinimalRules_HappyPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
 
 	ruleContent := `
+version: "v1.0.0"
 rule1:
   target: example.com/target
   version: v1.0.0
@@ -718,12 +720,13 @@ rule1:
 	require.NoError(t, os.Mkdir(nested, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(nested, "go.mod"), []byte("module example.com/sub1/nested\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(nested, "otelc.yaml"), []byte(`
+version: "v1.0.0"
 ruleNested:
   target: example.com/nested-target
   version: v1.0.0
 `), 0o644))
 
-	rules, err := loadMinimalRules(dir)
+	rules, err := loadMinimalRules(dir, util.Version, nil)
 	require.NoError(t, err)
 
 	// make sure only 2 rules are loaded (sub1 and nested, sub1 doesn't load nested rules)
@@ -739,6 +742,64 @@ ruleNested:
 	require.Equal(t, "example.com/nested-target", rules["example.com/sub1/nested"][0].Target)
 }
 
+func TestLoadMinimalRulesMinimumVersionMetadata(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir := filepath.Join(dir, "module")
+	require.NoError(t, os.Mkdir(moduleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"),
+		[]byte("module example.com/module\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "otelc.yaml"), []byte(`
+version: "v1.1.0"
+rule:
+  target: example.com/target
+  version: v2.0.0,v3.0.0
+`), 0o644))
+
+	rules, err := loadMinimalRules(dir, util.Version, nil)
+	require.NoError(t, err)
+	require.Len(t, rules["example.com/module"], 1)
+	assert.Equal(t, "example.com/target", rules["example.com/module"][0].Target)
+	assert.Equal(t, "v2.0.0,v3.0.0", rules["example.com/module"][0].VersionRange)
+}
+
+func TestLoadMinimalRulesRejectsNewerOtelcVersion(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir := filepath.Join(dir, "module")
+	require.NoError(t, os.Mkdir(moduleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"),
+		[]byte("module example.com/module\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "otelc.yaml"), []byte(`
+version: "v1.1.0"
+rule:
+  target: example.com/target
+`), 0o644))
+
+	_, err := loadMinimalRules(dir, "v1.0.0", nil)
+	require.ErrorContains(t, err, "requires otelc >= v1.1.0")
+}
+
+func TestLoadMinimalRulesWarnsForLegacyFile(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir := filepath.Join(dir, "module")
+	require.NoError(t, os.Mkdir(moduleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"),
+		[]byte("module example.com/module\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "otelc.yaml"), []byte(`
+rule:
+  target: example.com/target
+`), 0o644))
+
+	warned := false
+	_, err := loadMinimalRules(dir, "v1.0.0", func(msg string, args ...any) {
+		warned = strings.Contains(msg, "no minimum otelc version") && slices.ContainsFunc(args, func(arg any) bool {
+			path, ok := arg.(string)
+			return ok && filepath.Base(path) == "otelc.yaml"
+		})
+	})
+	require.NoError(t, err)
+	assert.True(t, warned)
+}
+
 func TestLoadMinimalRules_InvalidGoMod(t *testing.T) {
 	dir := t.TempDir()
 
@@ -746,7 +807,7 @@ func TestLoadMinimalRules_InvalidGoMod(t *testing.T) {
 	require.NoError(t, os.Mkdir(sub1, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("invalid"), 0o644))
 
-	_, err := loadMinimalRules(dir)
+	_, err := loadMinimalRules(dir, util.Version, nil)
 	require.Error(t, err)
 }
 
@@ -758,7 +819,7 @@ func TestLoadMinimalRules_InvalidRuleYAML(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte("invalid: yaml: {"), 0o644))
 
-	_, err := loadMinimalRules(dir)
+	_, err := loadMinimalRules(dir, util.Version, nil)
 	require.Error(t, err)
 }
 
