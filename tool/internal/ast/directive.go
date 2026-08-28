@@ -19,17 +19,12 @@ type DirectiveArg struct {
 	Value string
 }
 
-// MatchDirective checks if a single decoration string matches the given directive.
+// matchDirective checks if a single decoration string matches the given directive.
 // The decoration must be a line comment (starting with //) with no space after //,
 // and the directive name must follow immediately. If there is text after the directive
-// name, it must be separated by whitespace.
-func MatchDirective(dec, directive string) bool {
-	_, ok := matchDirective(dec, directive)
-	return ok
-}
-
-// matchDirective is the internal helper that checks if a decoration matches
-// the directive and returns the remainder string after the directive name.
+// name, it must be separated by whitespace. The bool return alone answers "does this
+// decoration match"; the string return is the remainder after the directive name, used
+// by callers that also need the directive's arguments.
 func matchDirective(dec, directive string) (string, bool) {
 	s := strings.TrimSpace(dec)
 	if !strings.HasPrefix(s, "//") {
@@ -60,9 +55,9 @@ func matchDirective(dec, directive string) (string, bool) {
 	return rest, true
 }
 
-// ParseDirectiveArgs finds the directive in the decoration string, extracts
+// parseDirectiveArgs finds the directive in the decoration string, extracts
 // the text after the directive name, and parses it into key:value arguments.
-func ParseDirectiveArgs(dec, directive string) ([]DirectiveArg, error) {
+func parseDirectiveArgs(dec, directive string) ([]DirectiveArg, error) {
 	rest, ok := matchDirective(dec, directive)
 	if !ok {
 		return nil, ex.Newf("decoration does not match directive %q", directive)
@@ -86,9 +81,16 @@ func scanArgs(input string) ([]DirectiveArg, error) {
 	}
 	args := make([]DirectiveArg, 0, len(tokens))
 	for _, tok := range tokens {
-		key, value, found := strings.Cut(tok, ":")
+		key, value, found := cutUnquoted(tok, ':')
 		if !found {
-			return nil, ex.Newf("argument %q missing colon separator", tok)
+			return nil, ex.Newf("argument %q has no unquoted colon separator; "+
+				"quote only the value, as in key:\"a:b\"", tok)
+		}
+		if key == "" {
+			return nil, ex.Newf("argument %q has an empty key", tok)
+		}
+		if strings.ContainsRune(key, '"') {
+			return nil, ex.Newf("argument %q has a quoted or malformed key", tok)
 		}
 		if strings.HasPrefix(value, "'") {
 			return nil, ex.Newf("single-quoted values are not supported in argument %q", tok)
@@ -119,13 +121,13 @@ func FileHasDirective(file *dst.File, directive string) bool {
 			return true
 		}
 		for _, dec := range decs.Start {
-			if MatchDirective(dec, directive) {
+			if _, matched := matchDirective(dec, directive); matched {
 				found = true
 				return false
 			}
 		}
 		for _, dec := range decs.End {
-			if MatchDirective(dec, directive) {
+			if _, matched := matchDirective(dec, directive); matched {
 				found = true
 				return false
 			}
@@ -135,11 +137,19 @@ func FileHasDirective(file *dst.File, directive string) bool {
 	return found
 }
 
+// FuncDirectiveMatch pairs a function declaration matched by
+// FindFuncsByDirective with the key:value arguments parsed from its matching
+// directive comment
+type FuncDirectiveMatch struct {
+	Func *dst.FuncDecl
+	Args []DirectiveArg
+}
+
 // FileHasLeadingDirective returns true if the file contains a leading run of comments
 // before the package clause that matches the given directive.
 func FileHasLeadingDirective(file *dst.File, directive string) bool {
 	for _, dec := range file.Decs.Start {
-		if MatchDirective(dec, directive) {
+		if _, matched := matchDirective(dec, directive); matched {
 			return true
 		}
 	}
@@ -147,22 +157,28 @@ func FileHasLeadingDirective(file *dst.File, directive string) bool {
 }
 
 // FindFuncsByDirective returns all top-level function declarations whose
-// leading decorations contain the specified directive comment.
-func FindFuncsByDirective(file *dst.File, directive string) []*dst.FuncDecl {
-	var funcs []*dst.FuncDecl
+// leading decorations contain the specified directive comment, together with
+// the directive's key:value arguments for each match.
+func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatch, error) {
+	var matches []FuncDirectiveMatch
 	for _, decl := range file.Decls {
 		funcDecl, ok := decl.(*dst.FuncDecl)
 		if !ok {
 			continue
 		}
 		for _, dec := range funcDecl.Decs.Start {
-			if MatchDirective(dec, directive) {
-				funcs = append(funcs, funcDecl)
-				break
+			if _, matched := matchDirective(dec, directive); !matched {
+				continue
 			}
+			args, err := parseDirectiveArgs(dec, directive)
+			if err != nil {
+				return nil, ex.Wrapf(err, "parsing directive args for func %s", funcDecl.Name.Name)
+			}
+			matches = append(matches, FuncDirectiveMatch{Func: funcDecl, Args: args})
+			break
 		}
 	}
-	return funcs
+	return matches, nil
 }
 
 // tokenize splits input on whitespace, respecting double-quoted strings.
@@ -204,4 +220,29 @@ func tokenize(input string) ([]string, error) {
 		tokens = append(tokens, current.String())
 	}
 	return tokens, nil
+}
+
+// cutUnquoted splits tok at the first occurrence of sep that falls outside
+// a double-quoted region, mirroring tokenize's quote/escape tracking so a
+// separator inside a quoted key or value is never mistaken for the
+// key:value boundary. found is false if no such separator exists.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns; see doc comment above for result order
+func cutUnquoted(tok string, sep rune) (string, string, bool) {
+	inQuote := false
+	escaped := false
+
+	for i, ch := range tok {
+		switch {
+		case escaped:
+			escaped = false
+		case ch == '\\' && inQuote:
+			escaped = true
+		case ch == '"':
+			inQuote = !inQuote
+		case ch == sep && !inQuote:
+			return tok[:i], tok[i+utf8.RuneLen(sep):], true
+		}
+	}
+	return tok, "", false
 }

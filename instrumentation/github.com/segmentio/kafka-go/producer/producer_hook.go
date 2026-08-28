@@ -40,6 +40,25 @@ var (
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator
 	initOnce   sync.Once
+
+	// asyncCompletionOnce tracks, per *kafka.Writer, the sync.Once that guards
+	// installing the logging wrapper on Completion (see
+	// ensureAsyncFailureLogging), so a writer reused across many WriteMessages
+	// calls is only wrapped once. A sync.Once (rather than a plain
+	// LoadOrStore-guarded bool) matters here: it makes every concurrent caller
+	// for the same writer block until the wrap actually completes, including
+	// the ones that lose the race to perform it, which is what keeps the write
+	// to w.Completion from racing with kafka-go's own unsynchronized read of
+	// that field from a background completion goroutine spawned by a losing
+	// caller's WriteMessages call.
+	//
+	// Entries are keyed by the writer's own pointer and are never removed, so
+	// an application that creates short-lived *kafka.Writer values (uncommon,
+	// but not forbidden by kafka-go) leaks one entry per writer for the
+	// process's lifetime. kafka.Writer values are conventionally constructed
+	// once per process and reused for its lifetime, so this trades a
+	// theoretical leak for simplicity rather than being an oversight.
+	asyncCompletionOnce sync.Map //nolint:gochecknoglobals // per-writer wrap tracking, see comment above
 )
 
 func initInstrumentation() {
@@ -75,6 +94,16 @@ func BeforeWriteMessages(
 	}
 	initInstrumentation()
 
+	if w.Async {
+		// WriteMessages returns as soon as messages are enqueued, before the
+		// broker write happens, so any failure only ever reaches the caller
+		// through Completion — long after the spans below have already been
+		// ended by AfterWriteMessages. Without this, such failures are
+		// completely invisible: not on the span, not anywhere. Wrapping
+		// Completion at least surfaces them in the logs.
+		ensureAsyncFailureLogging(w)
+	}
+
 	endpoint := ""
 	if w.Addr != nil {
 		endpoint = w.Addr.String()
@@ -92,6 +121,7 @@ func BeforeWriteMessages(
 			Operation:       semconv.KafkaOperationSend,
 			MessageKey:      semconv.KafkaMessageKey(msgs[i].Key),
 			MessageBodySize: len(msgs[i].Value),
+			Async:           w.Async,
 		}
 		msgCtx, span := tracer.Start(ctx, topic+" send",
 			trace.WithSpanKind(trace.SpanKindProducer),
@@ -106,12 +136,71 @@ func BeforeWriteMessages(
 	ictx.SetData(spans)
 }
 
+// ensureAsyncFailureLogging installs a wrapper around w.Completion, preserving
+// any callback the caller already configured, so that write failures reported
+// asynchronously for an Async writer are at least logged. It runs at most once
+// per *kafka.Writer (see asyncCompletionOnce), and every concurrent caller for
+// the same writer blocks until that one run has finished, which is required
+// for correctness — see asyncCompletionOnce's doc comment.
+//
+// This assumes Completion is set once, at construction (or at least before
+// the writer is shared across goroutines) and not mutated afterward. If
+// application code reassigns w.Completion after this has already wrapped it,
+// that assignment silently replaces the wrapper installed here with no error
+// and no log line: asyncCompletionOnce still shows this writer as wrapped, so
+// a later call here won't re-wrap it, and the failure logging this function
+// adds just stops happening. This is not detected or guarded against.
+//
+// This does not attempt to correlate a failure back to the specific span(s)
+// for the affected message(s): by the time Completion fires, those spans have
+// already been ended by AfterWriteMessages (WriteMessages returns before the
+// broker write happens for an Async writer, so there is no later hook to defer
+// span-ending to). Reliable correlation would require either depending on a
+// configured propagator (silently finding nothing when one isn't set, which is
+// the OTel default) or attaching a tracking header to every outgoing message
+// that would then be visible to real Kafka consumers — both worse than not
+// correlating. Logging the failure is the honest, dependency-free improvement
+// over the previous behavior, where such failures were entirely invisible.
+//
+// Note: kafka-go's Writer.Close blocks on Completion callback calls, so the
+// extra work done here (the conditional logger.Error call) runs inside that
+// blocking window. Keep it cheap.
+func ensureAsyncFailureLogging(w *kafka.Writer) {
+	onceIface, _ := asyncCompletionOnce.LoadOrStore(w, new(sync.Once))
+	once, ok := onceIface.(*sync.Once)
+	if !ok {
+		return
+	}
+	once.Do(func() {
+		original := w.Completion
+		w.Completion = func(msgs []kafka.Message, err error) {
+			if err != nil {
+				logger.Error("kafka async write failed after WriteMessages returned; the producer span(s) for the affected message(s) were already ended without this outcome",
+					"error", err, "messageCount", len(msgs))
+			}
+			if original != nil {
+				original(msgs, err)
+			}
+		}
+	})
+}
+
 // AfterWriteMessages finalizes the producer spans created by BeforeWriteMessages.
 //
 // kafka.WriteMessages may return kafka.WriteErrors — a []error aligned with
 // the message slice — to indicate partial success. When that happens, only the
 // spans for messages whose entry is non-nil are marked as Error; the rest stay
 // Ok. For any other error type, the error is applied to every span.
+//
+// For an Async writer, a nil err here only means the messages were handed off
+// to the client library, not that the broker write succeeded: WriteMessages
+// returns before that happens, so these spans still end immediately with
+// enqueue-time duration and, in the absence of an error, Ok/Unset status —
+// that does not change here. This function only labels that fact: the
+// messaging.kafka.async attribute (set in BeforeWriteMessages) tells
+// consumers of the trace data not to read this span's duration and status as
+// confirmed broker delivery. It does not make the span's duration or status
+// itself reflect delivery.
 func AfterWriteMessages(ictx hook.HookContext, err error) {
 	spans, ok := ictx.GetData().([]trace.Span)
 	if !ok {

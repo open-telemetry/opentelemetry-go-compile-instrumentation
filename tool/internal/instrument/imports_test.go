@@ -210,8 +210,8 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a mock InstrumentPhase with no importcfg (to avoid actual file operations)
-			ip := &InstrumentPhase{}
+			// Create a mock instrumentPhase with no importcfg (to avoid actual file operations)
+			ip := &instrumentPhase{}
 
 			err := ip.addRuleImports(t.Context(), tt.root, tt.imports, "test-rule")
 			if tt.expectError {
@@ -229,7 +229,7 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 
 func TestUpdateImportConfigForFile(t *testing.T) {
 	t.Run("empty file has no imports to update", func(t *testing.T) {
-		ip := &InstrumentPhase{}
+		ip := &instrumentPhase{}
 		root := &dst.File{}
 
 		// Should not error - no imports to process
@@ -238,7 +238,7 @@ func TestUpdateImportConfigForFile(t *testing.T) {
 	})
 
 	t.Run("file with imports attempts update", func(t *testing.T) {
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			// No importcfg path, so updateImportConfig will return early
 			importConfigPath: "",
 		}

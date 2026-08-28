@@ -1,0 +1,65 @@
+name: govulncheck
+
+on:
+  pull_request:
+    paths:
+      - '**/*.go'
+      - '**/go.mod'
+      - '**/go.sum'
+      - 'Makefile'
+      - '.github/workflows/govulncheck.yaml'
+  schedule:
+    # Weekly, so newly-disclosed CVEs in unchanged dependencies are still caught.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+# Declare default permissions as read only.
+permissions: read-all
+
+jobs:
+  # Core modules (root, pkg). Soft on pull requests: a newly-disclosed stdlib/dep
+  # CVE with no fix released yet shouldn't red unrelated PRs on tooling code.
+  # Hard on the weekly schedule and manual runs, which exist to catch exactly
+  # those; a soft failure there concludes the whole run as success, leaving a red
+  # job buried in a green run that nobody is prompted to look at.
+  # Instrumentation (higher impact) stays hard-blocking on every trigger.
+  govulncheck:
+    name: govulncheck (core)
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          # Latest stable toolchain, not the go.mod version: govulncheck reports
+          # stdlib CVEs against the Go release running it, so pinning to go.mod
+          # would flag stdlib vulns already fixed in the current toolchain.
+          go-version: stable
+          cache-dependency-path: "**/go.mod"
+      - name: Run govulncheck
+        run: make govulncheck
+
+  # Instrumented integration-test binaries. Split out and kept hard-blocking
+  # because a vuln reachable from injected instrumentation is higher-impact
+  # than one in tooling. Uses govulncheck -mode=binary after otelc go build so
+  # //go:build ignore sources and field-injection modules (e.g. database/sql)
+  # are included — source scans of instrumentation/ miss both.
+  govulncheck-instrumentation:
+    name: govulncheck (instrumentation)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version: stable
+          cache-dependency-path: "**/go.mod"
+      - name: Build otelc and scan instrumented test apps
+        run: make govulncheck/instrumentation

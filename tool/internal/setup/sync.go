@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -38,11 +39,7 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 		return ex.Wrapf(err, "failed to format go.mod file")
 	}
 	const perm = 0o644
-	err = util.WriteFileAtomic(gomod, data, perm)
-	if err != nil {
-		return ex.Wrapf(err, "failed to write go.mod file")
-	}
-	return nil
+	return util.WriteFileAtomic(gomod, data, perm)
 }
 
 func runModTidy(ctx context.Context, moduleDir string) error {
@@ -231,9 +228,10 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	// instrumentation module contains shared semconv packages.
 	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
 
-	// Okay, now add all the replace directives to go.mod
+	// Okay, now add all the replace directives to go.mod in deterministic sorted order
 	changed := false
-	for oldPath, newPath := range replaces {
+	for _, oldPath := range slices.Sorted(maps.Keys(replaces)) {
+		newPath := replaces[oldPath]
 		added, addErr := addReplace(modfile, oldPath, newPath)
 		if addErr != nil {
 			return addErr

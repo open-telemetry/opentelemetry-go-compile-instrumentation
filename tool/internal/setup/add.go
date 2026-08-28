@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	OtelcRuntimeFile = "otelc.runtime.go"
+	otelcRuntimeFile = "otelc.runtime.go"
 )
 
 //nolint:gochecknoglobals // This is a constant
@@ -69,17 +69,17 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		// Second variable declaration
 		// //go:linkname _printstack%d %s.OtelPrintStackImpl
 		// var _printstack%d = func (bt []byte){ _otel_log.Print(string(bt)) }
-		// Build: string(bt)
+		// build: string(bt)
 		stringCall := &dst.CallExpr{
 			Fun:  ast.Ident("string"),
 			Args: []dst.Expr{ast.Ident("bt")},
 		}
-		// Build: _otel_log.Print(string(bt))
+		// build: _otel_log.Print(string(bt))
 		printCall := &dst.CallExpr{
 			Fun:  ast.SelectorExpr(ast.Ident("_otel_log"), "Print"),
 			Args: []dst.Expr{stringCall},
 		}
-		// Build: func (bt []byte) { _otel_log.Print(string(bt)) }
+		// build: func (bt []byte) { _otel_log.Print(string(bt)) }
 		printStackFunc := &dst.FuncLit{
 			Type: &dst.FuncType{
 				Params: &dst.FieldList{
@@ -113,7 +113,7 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
-func (sp *SetupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, packagePath, packageName string) error {
+func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, packagePath, packageName string) error {
 	funcRules := []*rule.InstFuncRule{}
 	fileRules := []*rule.InstFileRule{}
 	for _, m := range matched {
@@ -128,11 +128,11 @@ func (sp *SetupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	importDecls := genImportDecl(funcRules, fileRules)
 	// Generate the variable declarations that used by otel runtime
 	varDecls := genVarDecl(funcRules)
-	// Build the ast
+	// build the ast
 	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), packageName)
-	otelcRuntimeFilePath := filepath.Join(packagePath, OtelcRuntimeFile)
+	otelcRuntimeFilePath := filepath.Join(packagePath, otelcRuntimeFile)
 	// Track file in state manager
-	if stateManager, found := StateManagerFromContext(ctx); found {
+	if stateManager, found := stateManagerFromContext(ctx); found {
 		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
 			return err
 		}

@@ -66,6 +66,27 @@ func main() {}
 			input:    "",
 			expected: "",
 		},
+		{
+			// Regression test for #1069: a whole-file substring replace
+			// deleted this text from the string literal and the comment,
+			// since both happen to contain "//go:build ignore" without being
+			// a build-constraint line themselves.
+			name: "preserves the tag text inside a string literal and comment prose",
+			input: `//go:build ignore
+
+package hooks
+
+// Every file rule source must carry //go:build ignore at the top.
+const marker = "//go:build ignore"
+`,
+			expected: `
+
+package hooks
+
+// Every file rule source must carry //go:build ignore at the top.
+const marker = "//go:build ignore"
+`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -89,7 +110,7 @@ func Helper() string {
 `
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workDir: workDir,
 	}
@@ -128,7 +149,7 @@ func OrigHelper() {}
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "custom_helper.go"), []byte(customContent), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(origContent), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workDir: workDir,
 	}
@@ -156,7 +177,7 @@ func TestApplyFileRule_FileNotFound(t *testing.T) {
 	srcDir := t.TempDir()
 	workDir := t.TempDir()
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workDir: workDir,
 	}
@@ -185,7 +206,7 @@ func SubHelper() {}
 `
 	require.NoError(t, os.WriteFile(filepath.Join(subDir, "helper.go"), []byte(content), 0o644))
 
-	ip := &InstrumentPhase{
+	ip := &instrumentPhase{
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workDir: workDir,
 	}

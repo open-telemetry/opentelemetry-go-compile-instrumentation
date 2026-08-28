@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
@@ -154,6 +156,7 @@ func TestSplitBuildTargets(t *testing.T) {
 		fileTargets   []string
 		notPkgTargets []string // must NOT be parsed as packages (e.g. flag values)
 		expectError   bool
+		wantErr       string
 	}{
 		{
 			name:        "all package targets",
@@ -231,6 +234,38 @@ func TestSplitBuildTargets(t *testing.T) {
 			notPkgTargets: []string{"off"},
 			expectError:   false,
 		},
+		{
+			name:          "go test -exec value is not a package",
+			targets:       []string{"-exec", "sudo", "./pkg"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"sudo"},
+			expectError:   false,
+		},
+		{
+			name:          "go test package before -exec flag",
+			targets:       []string{"./pkg", "-exec", "sudo"},
+			pkgTargets:    []string{"./pkg"},
+			notPkgTargets: []string{"sudo"},
+			expectError:   false,
+		},
+		{
+			name:        "go test -run flag requires a value",
+			targets:     []string{"-run"},
+			expectError: true,
+			wantErr:     `flag "-run" requires a value`,
+		},
+		{
+			name:        "go test -exec flag requires a value",
+			targets:     []string{"./pkg", "-exec"},
+			expectError: true,
+			wantErr:     `flag "-exec" requires a value`,
+		},
+		{
+			name:        "go build -o flag requires a value",
+			targets:     []string{"./pkg", "-o"},
+			expectError: true,
+			wantErr:     `flag "-o" requires a value`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -238,6 +273,9 @@ func TestSplitBuildTargets(t *testing.T) {
 			pkgTargets, fileTargets, err := splitBuildTargets(tt.targets)
 			if tt.expectError {
 				require.Error(t, err)
+				if tt.wantErr != "" {
+					require.ErrorContains(t, err, tt.wantErr)
+				}
 				assert.Nil(t, pkgTargets)
 				assert.Nil(t, fileTargets)
 			} else {
@@ -556,4 +594,148 @@ func TestExtractBuildFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsSetup(t *testing.T) {
+	// isSetup is currently a stub that always reports false.
+	assert.False(t, isSetup())
+}
+
+// TestSetupPhaseLogDelegators exercises the thin slog delegators on SetupPhase.
+// They must forward to the underlying logger without panicking.
+func TestSetupPhaseLogDelegators(t *testing.T) {
+	sp := newTestSetupPhase()
+	assert.NotPanics(t, func() {
+		sp.Info("info", "k", "v")
+		sp.Warn("warn", "k", "v")
+		sp.Error("error", "k", "v")
+		sp.Debug("debug", "k", "v")
+	})
+}
+
+func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	// A package with no Go files has an empty package directory and must be
+	// skipped without error.
+	pkgs := []*packages.Package{{PkgPath: "example.com/empty"}}
+	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{})
+	require.NoError(t, err)
+}
+
+func TestGetBuildPackages_LoadErrors(t *testing.T) {
+	ctx := t.Context()
+	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
+
+	// File targets with non-existent -C flag
+	_, err := getBuildPackages(ctx, []string{"-C", nonExistentDir, "main.go"})
+	require.Error(t, err)
+
+	// Package targets with non-existent -C flag
+	_, err = getBuildPackages(ctx, []string{"-C", nonExistentDir, "./pkg"})
+	require.Error(t, err)
+
+	// Default targets with non-existent -C flag
+	_, err = getBuildPackages(ctx, []string{"-C", nonExistentDir})
+	require.Error(t, err)
+}
+
+func TestRootModulePaths_ResolveError(t *testing.T) {
+	ctx := t.Context()
+	pkgs := []*packages.Package{
+		{
+			PkgPath: "example.com/foo",
+			GoFiles: []string{filepath.Join(t.TempDir(), "nonexistent", "foo.go")},
+		},
+	}
+	_, err := rootModulePaths(ctx, pkgs)
+	require.Error(t, err)
+}
+
+func TestGenerateRuntimePerPackage_AddDepsError(t *testing.T) {
+	sp := newTestSetupPhase()
+	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
+
+	pkgs := []*packages.Package{
+		{
+			PkgPath: "example.com/foo",
+			Name:    "foo",
+			GoFiles: []string{filepath.Join(nonExistentDir, "foo.go")},
+		},
+	}
+	rset := rule.NewInstRuleSet("example.com/foo")
+	rset.FuncRules["foo.go"] = []*rule.InstFuncRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Func:         "Foo",
+			Before:       "BeforeFoo",
+			Path:         "example.com/hook",
+		},
+	}
+	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{rset})
+	require.Error(t, err)
+}
+
+func TestSetup_AutoPinError(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+
+	// Make stateDir a regular file so autoPin fails in setupLocked on all platforms (line 392)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	snapshotDir := util.GetBuildTemp(stateDir)
+	_ = os.RemoveAll(snapshotDir)
+	require.NoError(t, os.WriteFile(snapshotDir, []byte("file"), 0o644))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "."})
+	require.Error(t, err)
+}
+
+func TestSetup_FindDepsErrorWithRules(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcRules, "some-rule-config")
+
+	// Ensure build temp dir is a regular file so listBuildPlan in findDeps fails (line 401)
+	_ = os.RemoveAll(util.GetBuildTempDir())
+	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("file"), 0o644))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "."})
+	require.Error(t, err)
+}
+
+func TestSetup_MatchDepsError(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcRules, "/nonexistent/rules.yaml")
+	_ = os.RemoveAll(util.GetBuildTempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "."})
+	require.Error(t, err)
+}
+
+func TestSetupLocked_FindModuleDirsError(t *testing.T) {
+	// A standalone .go file outside any Go module causes FindModuleDirs to fail in setupLocked (line 377)
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	mainFile := filepath.Join(tmp, "main.go")
+	mustWriteFile(t, mainFile, "package main\nfunc main() {}\n")
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", mainFile})
+	require.Error(t, err)
 }
