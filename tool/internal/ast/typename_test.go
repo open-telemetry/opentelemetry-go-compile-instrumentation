@@ -522,3 +522,60 @@ func TestMatchesTypeName_UnsupportedNodeDoesNotMatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, matched)
 }
+
+func TestImportAliasMap_CollidingDefaultAliases(t *testing.T) {
+	t.Run("unaliased colliding default aliases are excluded", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"text/template"
+	"html/template"
+	"net/http"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "net/http", imports["http"])
+		assert.NotContains(t, imports, "template")
+	})
+
+	t.Run("explicit alias overrides colliding default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"text/template"
+	htmltemplate "html/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "text/template", imports["template"])
+		assert.Equal(t, "html/template", imports["htmltemplate"])
+	})
+}
+
+func TestTypeNameMatches_StrictImportContext(t *testing.T) {
+	node := &dst.SelectorExpr{
+		X:   &dst.Ident{Name: "req"},
+		Sel: &dst.Ident{Name: "Header"},
+	}
+
+	tn, err := parseTypeName("foo/req.Header")
+	require.NoError(t, err)
+
+	// When imports is provided, an unimported selector "req" must not fall back to path-tail match.
+	imports := map[string]string{"http": "net/http"}
+	assert.False(t, tn.matches(node, imports))
+
+	// Without import context (imports == nil), path-tail matching still works for test AST nodes.
+	assert.True(t, tn.matches(node, nil))
+}
+

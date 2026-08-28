@@ -58,8 +58,11 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 			// Populated by a resolving decorator; already the real import path.
 			return t.importPath == ident.Path && t.name == n.Sel.Name
 		}
-		if resolved, importOk := imports[ident.Name]; importOk {
-			return t.importPath == resolved && t.name == n.Sel.Name
+		if imports != nil {
+			if resolved, importOk := imports[ident.Name]; importOk {
+				return t.importPath == resolved && t.name == n.Sel.Name
+			}
+			return false
 		}
 		// No import context at all (imports == nil, e.g. hand-built AST nodes in
 		// tests with no backing *dst.File): compare against importPath's last
@@ -158,6 +161,9 @@ func ImportAliasMap(file *dst.File) map[string]string {
 	}
 
 	aliases := make(map[string]string, len(specs))
+	explicit := make(map[string]bool, len(specs))
+	collided := make(map[string]bool)
+
 	for _, imp := range specs {
 		if imp.Path == nil {
 			continue
@@ -166,8 +172,9 @@ func ImportAliasMap(file *dst.File) map[string]string {
 		if err != nil {
 			continue
 		}
+		isExplicit := imp.Name != nil
 		alias := defaultImportAlias(path)
-		if imp.Name != nil {
+		if isExplicit {
 			alias = imp.Name.Name
 		}
 		// Blank and dot imports don't introduce a qualified identifier that a
@@ -175,8 +182,33 @@ func ImportAliasMap(file *dst.File) map[string]string {
 		if alias == "" || alias == "_" || alias == "." {
 			continue
 		}
-		aliases[alias] = path
+		if existingPath, exists := aliases[alias]; exists {
+			if existingPath != path {
+				if isExplicit && !explicit[alias] {
+					// New explicit alias overrides previous default alias
+					aliases[alias] = path
+					explicit[alias] = true
+					delete(collided, alias)
+				} else if !isExplicit && explicit[alias] {
+					// Previous explicit alias wins over new default alias
+					continue
+				} else {
+					// Collision between two default aliases (or two conflicting explicit aliases)
+					collided[alias] = true
+				}
+			}
+		} else {
+			aliases[alias] = path
+			if isExplicit {
+				explicit[alias] = true
+			}
+		}
 	}
+
+	for c := range collided {
+		delete(aliases, c)
+	}
+
 	return aliases
 }
 
