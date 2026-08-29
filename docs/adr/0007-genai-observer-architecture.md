@@ -59,17 +59,19 @@ import (
 )
 
 type ExtractedData struct {
-	ID                 string
-	Model              string
-	PromptTokens       int64
-	CompletionTokens   int64
-	TotalTokens        int64
-	FinishReasons      []string
-	ContentDelta       string
-	ProviderAttributes []attribute.KeyValue
+	ID                       string
+	Model                    string
+	PromptTokens             int64
+	CompletionTokens         int64
+	TotalTokens              int64
+	CacheReadInputTokens     int64
+	CacheCreationInputTokens int64
+	FinishReasons            []string
+	ContentDelta             string
+	ProviderAttributes       []attribute.KeyValue
 }
 
-type ChunkExtractor func(rawEvent []byte) ExtractedData
+type ChunkExtractor func(rawFrame []byte) ExtractedData
 
 type Observer struct {}
 
@@ -80,10 +82,12 @@ func (o *Observer) ObserveHook(ctx context.Context, span trace.Span, data Extrac
 
 ### 2. HTTP SDK Instrumentation (OpenAI, Anthropic, Gemini)
 
-For SDKs operating at the HTTP transport layer, instrumentation is reduced to lightweight `ChunkExtractor` callbacks passed into `WrapStream()`:
-* **Protocol Framing:** The adapter handles raw stream buffering; the `ChunkExtractor` handles proprietary event framing (e.g., `data: [DONE]` vs `event: message_stop`).
-* **Time-To-First-Token (TTFT):** Calculated automatically upon receipt of the first non-empty event delta.
-* **Bounded Content Capture:** Enforces opt-in privacy constraints (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`) and strict 16 KiB / UTF-8 boundary truncation centrally, preventing OOM panics and malformed runes.
+For SDKs operating over HTTP SSE transports:
+* **Frame Splitting vs Event Decoding:** `Observer.WrapStream()` delimits stream chunks on standard SSE message boundaries (`\n\n`). This makes the transport reader protocol-agnostic: OpenAI single-line payloads (`data: {...}\n\n`) and Anthropic multi-line frames (`event: message_start\ndata: {...}\n\n`) are both delivered intact to the provider's `ChunkExtractor`.
+* **State Machine Dispatch:** The `ChunkExtractor` decodes provider-specific fields (e.g. Anthropic's `event: message_start` input tokens vs `event: message_delta` output tokens) and normalizes them into `ExtractedData`.
+* **Prompt Cache Normalization:** Cache read and creation metrics are mapped directly into `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_creation.input_tokens` without double-counting (OpenAI includes cached tokens in `prompt_tokens`, while Anthropic reports them separately).
+* **Time-To-First-Token (TTFT):** Measured automatically upon the first non-empty content delta.
+* **Bounded Content Capture:** Enforces opt-in privacy constraints (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`) and strict 16 KiB / UTF-8 boundary truncation centrally, preventing memory accumulation leaks and malformed runes.
 
 ### 3. Non-HTTP Hooks (LangChain & MCP)
 
