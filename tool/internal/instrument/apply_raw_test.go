@@ -334,6 +334,58 @@ func a() {
 	}
 }
 
+func TestInsertRawAtPatternSkipsUnrestorableStmt(t *testing.T) {
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
+
+	src := `package main
+
+func a() {
+	println("skip")
+	println("x")
+}
+`
+	fset := token.NewFileSet()
+	f, parseErr := parser.ParseFile(fset, "", src, parser.ParseComments)
+	require.NoError(t, parseErr)
+
+	dec := decorator.NewDecorator(fset)
+	dstFile, decorateErr := dec.DecorateFile(f)
+	require.NoError(t, decorateErr)
+
+	restorer := decorator.NewRestorer()
+	_, restoreErr := restorer.RestoreFile(dstFile)
+	require.NoError(t, restoreErr)
+
+	fn := dstFile.Decls[0].(*dst.FuncDecl)
+	// Replace the first statement with a node the restorer does not know.
+	// RenderNode then fails, the walker must warn and keep looking.
+	fn.Body.List[0] = &dst.ExprStmt{
+		X: &dst.CallExpr{
+			Fun:  dst.NewIdent("println"),
+			Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"skip"`}},
+		},
+	}
+
+	stmts := []dst.Stmt{
+		&dst.ExprStmt{
+			X: &dst.CallExpr{
+				Fun:  dst.NewIdent("print"),
+				Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"ok"`}},
+			},
+		},
+	}
+	pos := insertPos{
+		pattern:   regexp.MustCompile(`^println\("x"\)$`),
+		placement: "",
+	}
+	require.True(t, insertRawAtPattern(ctx, fn, restorer, pos, stmts))
+
+	var modifiedSrc strings.Builder
+	require.NoError(t, decorator.Fprint(&modifiedSrc, dstFile))
+	assert.Contains(t, modifiedSrc.String(), `print("ok")`)
+	assert.Contains(t, modifiedSrc.String(), `println("x")`)
+}
+
 func TestInsertRawInvalidRegexPattern(t *testing.T) {
 	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
 

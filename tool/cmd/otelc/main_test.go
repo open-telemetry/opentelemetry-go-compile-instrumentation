@@ -21,7 +21,7 @@ func TestInitLogger(t *testing.T) {
 		ctxCh := make(chan context.Context, 1)
 		app := &cli.Command{
 			Flags: []cli.Flag{
-				&cli.StringFlag{Name: "work-dir", Value: util.GetOtelcWorkDir()},
+				newWorkDirFlag(),
 				&cli.BoolFlag{Name: "debug", Sources: cli.EnvVars(util.EnvOtelcDebug)},
 			},
 			Before: initLogger,
@@ -36,7 +36,7 @@ func TestInitLogger(t *testing.T) {
 
 		args := []string{"otelc"}
 		if workDir != "" {
-			args = append(args, "--work-dir", workDir)
+			args = append(args, "--"+flagWorkDir, workDir)
 		}
 		if debug {
 			args = append(args, "--debug")
@@ -130,6 +130,84 @@ func TestInitLogger(t *testing.T) {
 	})
 }
 
+func TestInitLoggerToolexecWorkDir(t *testing.T) {
+	runToolexec := func(t *testing.T, extraArgs ...string) error {
+		t.Helper()
+		app := &cli.Command{
+			Flags: []cli.Flag{
+				newWorkDirFlag(),
+			},
+			Before: initLogger,
+			Commands: []*cli.Command{{
+				Name:            "toolexec",
+				SkipFlagParsing: true,
+				Action: func(ctx context.Context, _ *cli.Command) error {
+					return closeLogger(ctx)
+				},
+			}},
+		}
+		args := append([]string{"otelc"}, extraArgs...)
+		args = append(args, "toolexec")
+		return app.Run(context.Background(), args)
+	}
+
+	t.Run("discovers setup work dir when flag is unset", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, "")
+		module := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(module, util.BuildTempDir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(module, "go.mod"), []byte("module example.com/app\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(module)
+
+		if err := runToolexec(t); err != nil {
+			t.Fatal(err)
+		}
+		if got := os.Getenv(util.EnvOtelcWorkDir); got != module {
+			t.Fatalf("expected %s=%q, got %q", util.EnvOtelcWorkDir, module, got)
+		}
+		logPath := filepath.Join(module, util.BuildTempDir, debugLogFilename)
+		if _, err := os.Stat(logPath); err != nil {
+			t.Fatalf("expected log file at %s: %v", logPath, err)
+		}
+	})
+
+	t.Run("skips filesystem setup when none is discovered", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, "")
+		module := t.TempDir()
+		if err := os.WriteFile(filepath.Join(module, "go.mod"), []byte("module example.com/app\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(module)
+
+		if err := runToolexec(t); err != nil {
+			t.Fatal(err)
+		}
+		if got := os.Getenv(util.EnvOtelcWorkDir); got != "" {
+			t.Fatalf("expected %s unset, got %q", util.EnvOtelcWorkDir, got)
+		}
+		if _, err := os.Stat(filepath.Join(module, util.BuildTempDir)); !os.IsNotExist(err) {
+			t.Fatalf("expected no %s directory, stat err: %v", util.BuildTempDir, err)
+		}
+	})
+
+	t.Run("explicit flag is used without discovery", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, "")
+		workDir := t.TempDir()
+		cwd := t.TempDir()
+		t.Chdir(cwd)
+
+		if err := runToolexec(t, "--"+flagWorkDir, workDir); err != nil {
+			t.Fatal(err)
+		}
+		if got := os.Getenv(util.EnvOtelcWorkDir); got != workDir {
+			t.Fatalf("expected %s=%q, got %q", util.EnvOtelcWorkDir, workDir, got)
+		}
+	})
+}
+
 func TestCloseLoggerNoWriter(t *testing.T) {
 	// When initLogger never ran (e.g. it failed early), the context holds no log
 	// writer and closeLogger must be a no-op rather than panic.
@@ -150,7 +228,7 @@ func TestCleanupSubcommand(t *testing.T) {
 
 	app := &cli.Command{
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "work-dir", Value: util.GetOtelcWorkDir()},
+			newWorkDirFlag(),
 		},
 		Before:   initLogger,
 		Commands: []*cli.Command{&commandCleanup},
@@ -158,7 +236,7 @@ func TestCleanupSubcommand(t *testing.T) {
 			return closeLogger(ctx)
 		},
 	}
-	args := []string{"otelc", "--work-dir", workDir, "cleanup"}
+	args := []string{"otelc", "--" + flagWorkDir, workDir, "cleanup"}
 	if err := app.Run(context.Background(), args); err != nil {
 		t.Fatal(err)
 	}
