@@ -43,16 +43,16 @@ func TestMongoClientV1(t *testing.T) {
 			// Verify insert span matching the actual attributes from otelmongo
 			insertSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
-				testutil.HasAttribute("db.operation", "insert"),
+				testutil.HasAttribute("db.operation.name", "insert"),
 			)
 
 			// Assert MongoDB specific semantic conventions attributes
-			testutil.RequireAttribute(t, insertSpan, "db.system", "mongodb")
-			testutil.RequireAttribute(t, insertSpan, "db.operation", "insert")
-			testutil.RequireAttribute(t, insertSpan, "db.name", "testdb")
-			testutil.RequireAttribute(t, insertSpan, "db.mongodb.collection", "users")
-			testutil.RequireAttribute(t, insertSpan, "net.peer.name", "127.0.0.1")
-			testutil.RequireAttribute(t, insertSpan, "net.transport", "ip_tcp")
+			testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
+			testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
+			testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
+			testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+			testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
+			testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
 		})
 	}
 }

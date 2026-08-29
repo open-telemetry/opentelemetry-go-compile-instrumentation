@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/parser"
 	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 
@@ -49,20 +50,50 @@ func findJumpPoint(jumpIf *dst.IfStmt) *dst.BlockStmt {
 	return nil
 }
 
-func collectReturnValues(funcDecl *dst.FuncDecl) []string {
+// syntheticNamer returns a generator of "prefix_hash_N" identifiers. hash is
+// a per-rule value (see InstFuncRule.Identity) folded into every generated
+// name to prevent conflicts with other identifiers.
+// The signature (receiver, parameters, and results) is still checked defensively
+// so the generator never reuses a name that is already declared there or one
+// it has already generated.
+func syntheticNamer(funcDecl *dst.FuncDecl, hash string) func(prefix string) string {
+	taken := make(map[string]bool)
+	for _, list := range []*dst.FieldList{funcDecl.Recv, funcDecl.Type.Params, funcDecl.Type.Results} {
+		if list == nil {
+			continue
+		}
+		for _, field := range list.List {
+			for _, name := range field.Names {
+				taken[name.Name] = true
+			}
+		}
+	}
+	idx := 0
+	return func(prefix string) string {
+		for {
+			name := fmt.Sprintf("%s_%s_%d", prefix, hash, idx)
+			idx++
+			if !taken[name] {
+				taken[name] = true
+				return name
+			}
+		}
+	}
+}
+
+func collectReturnValues(funcDecl *dst.FuncDecl, hash string) []string {
 	// Add explicit names for return values, they can be further referenced if
 	// we're willing
 	var retVals []string // nil by default
 	if retList := funcDecl.Type.Results; retList != nil {
-		idx := 0
+		next := syntheticNamer(funcDecl, hash)
 		for _, field := range retList.List {
 			util.Assert(field.Type != nil, "why not otherwise")
 			if field.Names == nil {
 				// Unnamed Return Values, e.g. func() (int, string)
 				// Rename (for referenceability)
-				name := fmt.Sprintf("%s%d", unnamedRetValName, idx)
+				name := next(unnamedRetValName)
 				field.Names = []*dst.Ident{ast.Ident(name)}
-				idx++
 				// Collect (for further use)
 				retVals = append(retVals, name)
 			} else {
@@ -70,8 +101,7 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 				// Collect only (for further use)
 				for _, name := range field.Names {
 					if name.Name == ast.IdentIgnore {
-						name.Name = fmt.Sprintf("%s%d", ignoredRetValName, idx)
-						idx++
+						name.Name = next(ignoredRetValName)
 					}
 					retVals = append(retVals, name.Name)
 				}
@@ -82,18 +112,25 @@ func collectReturnValues(funcDecl *dst.FuncDecl) []string {
 	return retVals
 }
 
-func collectArguments(funcDecl *dst.FuncDecl) []string {
+func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 	args := make([]string, 0)
-	idx := 0
+	next := syntheticNamer(funcDecl, hash)
 	if ast.HasReceiver(funcDecl) {
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
-			// Named receiver, e.g. func (r R) F() {}
-			receiver := funcDecl.Recv.List[0].Names[0].Name
+			// Named receiver, e.g. func (r R) F() {} or func (_ R) F() {}
+			receiver := recv.Names[0].Name
+			if receiver == ast.IdentIgnore {
+				// Blank receiver: recv.Names holds "_" rather than being nil,
+				// so it falls into this branch, but "_" cannot have its
+				// address taken during trampoline generation the way a named
+				// receiver can. Assign it a generated name instead.
+				receiver = next(ignoredParam)
+				recv.Names[0].Name = receiver
+			}
 			args = append(args, receiver)
 		} else {
 			// Unnamed receiver, e.g. func (R) F() {}
-			receiver := fmt.Sprintf("%s%d", ignoredParam, idx)
-			idx++
+			receiver := next(ignoredParam)
 			funcDecl.Recv.List[0].Names = []*dst.Ident{ast.Ident(receiver)}
 			args = append(args, receiver)
 		}
@@ -103,16 +140,14 @@ func collectArguments(funcDecl *dst.FuncDecl) []string {
 		if field.Names == nil {
 			// Unnamed Parameters, e.g. func(int, string){}
 			// Assign a name for these parameters and collect it then
-			name := fmt.Sprintf("%s%d", ignoredParam, idx)
+			name := next(ignoredParam)
 			field.Names = []*dst.Ident{ast.Ident(name)}
-			idx++
 			args = append(args, name)
 		} else {
 			// Named Parameters, e.g. func(a int, b string){}
 			for _, name := range field.Names {
 				if name.Name == ast.IdentIgnore {
-					name.Name = fmt.Sprintf("%s%d", ignoredParam, idx)
-					idx++
+					name.Name = next(ignoredParam)
 				}
 				args = append(args, name.Name)
 			}
@@ -164,7 +199,7 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	return tjump
 }
 
-func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStmt) {
+func (ip *instrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStmt) {
 	found := false
 	if len(funcDecl.Body.List) > 0 {
 		firstStmt := funcDecl.Body.List[0]
@@ -209,17 +244,17 @@ func (ip *InstrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 	}
 }
 
-func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
+func (ip *instrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncDecl) error {
 	util.Assert(funcDecl.Name.Name == t.Func, "sanity check")
 
 	// Record the target function for the whole trampoline creation process
 	ip.targetFunc = funcDecl
 
 	// Collect return values from target function
-	retVals := collectReturnValues(funcDecl)
+	retVals := collectReturnValues(funcDecl, t.Identity())
 
 	// Collect all arguments from target function, including the receiver
-	args := collectArguments(funcDecl)
+	args := collectArguments(funcDecl, t.Identity())
 
 	// Generate the trampoline-jump-if. The trampoline-jump-if is a conditional
 	// jump that jumps to the trampoline function, it looks something like this
@@ -240,7 +275,7 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 
 	// Record the trampoline-jump-if as they can be optimized later, they are
 	// performance-critical
-	ip.tjumps = append(ip.tjumps, &TJump{target: funcDecl, ifStmt: tjump, rule: t})
+	ip.tjumps = append(ip.tjumps, &tJump{target: funcDecl, ifStmt: tjump, rule: t})
 
 	// Find if there is already a trampoline-jump-if, insert new tjump if so,
 	// otherwise prepend to block body.
@@ -266,14 +301,14 @@ func (ip *InstrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	return ip.createTrampoline(t)
 }
 
-func (ip *InstrumentPhase) addCompileArg(newArg string) {
+func (ip *instrumentPhase) addCompileArg(newArg string) {
 	ip.compileArgs = append(ip.compileArgs, newArg)
 }
 
 //go:embed api.tmpl
 var templateAPI string
 
-func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
+func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	// Prepare trampoline code header
 	p := ast.NewAstParser()
 	trampoline, err := p.ParseSource("package " + pkgName)
@@ -301,9 +336,17 @@ func (ip *InstrumentPhase) writeGlobals(pkgName string) error {
 	return nil
 }
 
-func (ip *InstrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
+func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
 	// Write the instrumented AST to the new file in the working directory
 	newFile := filepath.Join(ip.workDir, filepath.Base(oldFile))
+	if strings.HasSuffix(oldFile, ".cgo1.go") {
+		// The vet configuration refers to cgo's generated source. Preserve that
+		// source because vet must not analyze otelc's injected declarations.
+		vetFile := cgoVetSourcePath(oldFile)
+		if err := util.CopyFile(oldFile, vetFile); err != nil {
+			return ex.Wrapf(err, "preserving cgo source for vet %s", oldFile)
+		}
+	}
 	err := ast.WriteFile(newFile, root)
 	if err != nil {
 		return ex.Wrapf(err, "writing instrumented file %s", newFile)
@@ -333,7 +376,7 @@ func (ip *InstrumentPhase) writeInstrumented(root *dst.File, oldFile string) err
 	return nil
 }
 
-func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
+func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 	ip.parser = ast.NewAstParser()
 	root, err := ip.parser.Parse(file, parser.ParseComments)
 	if err != nil {
@@ -342,11 +385,11 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 	ip.target = root
 	// Every time we parse a file, we need to reset the trampoline jumps
 	// because they are associated with one certain file
-	ip.tjumps = make([]*TJump, 0)
+	ip.tjumps = make([]*tJump, 0)
 	return root, nil
 }
 
-func (ip *InstrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
+func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
 	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {
 		return err

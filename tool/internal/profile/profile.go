@@ -33,9 +33,9 @@ const (
 type Type string
 
 const (
-	CPU   Type = "cpu"
-	Heap  Type = "heap"
-	Trace Type = "trace"
+	typeCPU   Type = "cpu"
+	typeHeap  Type = "heap"
+	typeTrace Type = "trace"
 )
 
 // Session manages the lifecycle of active profiles for a single process.
@@ -61,7 +61,7 @@ func ParseTypes(s string) ([]Type, error) {
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		switch Type(p) {
-		case CPU, Heap, Trace:
+		case typeCPU, typeHeap, typeTrace:
 			types = append(types, Type(p))
 		default:
 			return nil, ex.Newf("unrecognized profile type %q (valid: cpu, heap, trace)", p)
@@ -82,7 +82,7 @@ func Start(dir string, types []Type) (*Session, error) {
 
 	for _, t := range types {
 		switch t {
-		case CPU:
+		case typeCPU:
 			path := s.filePath("otelc-cpu-%d.pprof")
 			f, err := os.Create(path)
 			if err != nil {
@@ -96,7 +96,7 @@ func Start(dir string, types []Type) (*Session, error) {
 				return nil, ex.Wrapf(startErr, "start CPU profile")
 			}
 			s.cpuFile = f
-		case Trace:
+		case typeTrace:
 			path := s.filePath("otelc-%d.trace")
 			f, err := os.Create(path)
 			if err != nil {
@@ -110,7 +110,7 @@ func Start(dir string, types []Type) (*Session, error) {
 				return nil, ex.Wrapf(startErr, "start execution trace")
 			}
 			s.traceFile = f
-		case Heap:
+		case typeHeap:
 			// Heap snapshot is taken at Stop time, nothing to start.
 		}
 	}
@@ -143,7 +143,7 @@ func (s *Session) Stop() error {
 	}
 
 	// Write heap snapshot at the end (captures final allocation state).
-	if slices.Contains(s.types, Heap) {
+	if slices.Contains(s.types, typeHeap) {
 		if err := s.writeHeapProfile(); err != nil {
 			errs = append(errs, ex.Wrapf(err, "write heap profile %q", s.filePath("otelc-heap-%d.pprof")))
 		}
@@ -162,7 +162,7 @@ func (s *Session) Stop() error {
 func Merge(ctx context.Context, dir string, types []Type) error {
 	var errs []error
 	for _, t := range types {
-		if t == Trace {
+		if t == typeTrace {
 			// Execution traces cannot be merged; leave them as-is.
 			continue
 		}

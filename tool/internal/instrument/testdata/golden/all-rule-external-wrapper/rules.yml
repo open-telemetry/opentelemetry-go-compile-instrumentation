@@ -47,6 +47,6 @@ log_directive_external:
     directive: "otelc:external-log"
   do:
     - expand_directive:
-        template: 'wrapper.Log("{{FuncName}}")'
+        template: 'wrapper.Log("{{.FuncName}}")'
   imports:
     wrapper: "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,8 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/data"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // Entry describes a distinct instrumentation module, target package, and
@@ -73,7 +76,7 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 	return manifest, nil
 }
 
-func Load() (Manifest, error) {
+func load() (Manifest, error) {
 	var manifest Manifest
 	if err := json.Unmarshal(data.GetManifestJSON(), &manifest); err != nil {
 		return nil, ex.Wrapf(err, "loading embedded instrumentation manifest")
@@ -110,16 +113,17 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			return err
 		}
 		if d.IsDir() {
-			if path != "." {
-				if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
-					return fs.SkipDir
-				} else if !errors.Is(statErr, fs.ErrNotExist) {
-					return statErr
-				}
+			if path == "." {
+				return nil
+			}
+			if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
+				return fs.SkipDir
+			} else if !errors.Is(statErr, fs.ErrNotExist) {
+				return statErr
 			}
 			return nil
 		}
-		if !isRuleFile(d.Name()) {
+		if !util.IsRuleFile(d.Name()) {
 			return nil
 		}
 
@@ -131,14 +135,21 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		if unmarshalErr := yaml.Unmarshal(content, &rules); unmarshalErr != nil {
 			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
 		}
-		for _, rule := range rules {
-			if rule.Target == "" {
+		for _, name := range slices.Sorted(maps.Keys(rules)) {
+			ruleConfig := rules[name]
+			if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
+			}
+			if ruleConfig.Target == "" {
 				continue
+			}
+			if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
 			}
 			entries = append(entries, Entry{
 				ModulePath:   modulePath,
-				Target:       rule.Target,
-				VersionRange: rule.VersionRange,
+				Target:       ruleConfig.Target,
+				VersionRange: ruleConfig.VersionRange,
 			})
 		}
 		return nil
@@ -147,11 +158,4 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		return nil, ex.Wrapf(err, "loading rules for module %s", modulePath)
 	}
 	return entries, nil
-}
-
-func isRuleFile(name string) bool {
-	return name == "otelc.yml" ||
-		name == "otelc.yaml" ||
-		strings.HasSuffix(name, ".otelc.yml") ||
-		strings.HasSuffix(name, ".otelc.yaml")
 }

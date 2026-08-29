@@ -9,11 +9,11 @@ package main
 
 import _ "unsafe"
 
-func Connect(dsn string) (_unnamedRetVal0 error) {
+func Connect(dsn string) (_unnamedRetVal_297295154_0 error) {
 	//line <generated>:1
 	if hookContext297295154, _ := OtelBeforeTrampoline_Connect297295154(&dsn); false {
 	} else {
-		defer OtelAfterTrampoline_Connect297295154(hookContext297295154, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_Connect297295154(hookContext297295154, &_unnamedRetVal_297295154_0)
 	}
 	//line main.go:11:2
 	println("connecting " + dsn)
