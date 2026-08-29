@@ -123,21 +123,10 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 	return tn.matches(node, imports), nil
 }
 
-// importAliasMap builds a map from the local identifier used to reference an
-// imported package within file (its explicit alias, or its default package
-// name when unaliased) to that package's real import path. It correctly disambiguates:
-//   - aliased imports (e.g. `import althttp "net/http"`)
-//   - distinct import paths that happen to share a last path segment (e.g.
-//     "text/template" vs "html/template", both conventionally "template")
-//
-// This deliberately duplicates tool/internal/imports.parseFile rather than reusing
-// it: that resolves unaliased imports with pkgload.ResolvePackageName (a
-// go/packages load that ex.Fatalf's on failure), which is too costly and too fatal
-// for the setup/match path, where this runs for every compiled package in the build.
-// The cost is that the default name here is a syntactic guess; see defaultImportAlias.
-//
-// Returns nil when file is nil.
 func collectImportSpecs(file *dst.File) []*dst.ImportSpec {
+	if file == nil {
+		return nil
+	}
 	if len(file.Imports) > 0 {
 		return file.Imports
 	}
@@ -156,6 +145,20 @@ func collectImportSpecs(file *dst.File) []*dst.ImportSpec {
 	return specs
 }
 
+// ImportAliasMap builds a map from the local identifier used to reference an
+// imported package within file (its explicit alias, or its default package
+// name when unaliased) to that package's real import path. It correctly disambiguates:
+//   - aliased imports (e.g. `import althttp "net/http"`)
+//   - distinct import paths that happen to share a last path segment (e.g.
+//     "text/template" vs "html/template", both conventionally "template")
+//
+// This deliberately duplicates tool/internal/imports.parseFile rather than reusing
+// it: that resolves unaliased imports with pkgload.ResolvePackageName (a
+// go/packages load that ex.Fatalf's on failure), which is too costly and too fatal
+// for the setup/match path, where this runs for every compiled package in the build.
+// The cost is that the default name here is a syntactic guess; see defaultImportAlias.
+//
+// Returns nil when file is nil.
 func ImportAliasMap(file *dst.File) map[string]string {
 	if file == nil {
 		return nil

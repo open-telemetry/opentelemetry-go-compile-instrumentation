@@ -261,6 +261,7 @@ func TestTypeNameMatches_ImportAliasResolution(t *testing.T) {
 
 func TestImportAliasMap(t *testing.T) {
 	t.Run("nil file returns nil", func(t *testing.T) {
+		assert.Nil(t, collectImportSpecs(nil))
 		assert.Nil(t, ImportAliasMap(nil))
 	})
 
@@ -559,6 +560,57 @@ func f() {}
 		imports := ImportAliasMap(file)
 		assert.Equal(t, "text/template", imports["template"])
 		assert.Equal(t, "html/template", imports["htmltemplate"])
+	})
+
+	t.Run("explicit alias wins over subsequent default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	template "text/template"
+	"html/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "text/template", imports["template"])
+	})
+
+	t.Run("colliding explicit aliases are excluded", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	tpl "text/template"
+	tpl "html/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.NotContains(t, imports, "tpl")
+	})
+
+	t.Run("duplicate identical import path is preserved", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"net/http"
+	"net/http"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "net/http", imports["http"])
 	})
 }
 
