@@ -76,6 +76,22 @@ func TestInstrumented(t *testing.T) {
 			instrumentationName: "nethttp",
 			expected:            true,
 		},
+		{
+			// A non-empty value that parses to no names carries no allowlist, so
+			// it must not disable everything.
+			name:                "comma-only enabled list stays enabled",
+			enabledList:         ",,",
+			disabledList:        "",
+			instrumentationName: "nethttp",
+			expected:            true,
+		},
+		{
+			name:                "whitespace-only enabled list stays enabled",
+			enabledList:         " , ",
+			disabledList:        "",
+			instrumentationName: "nethttp",
+			expected:            true,
+		},
 	}
 
 	for _, tt := range tests {

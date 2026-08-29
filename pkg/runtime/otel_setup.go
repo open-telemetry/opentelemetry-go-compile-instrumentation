@@ -75,13 +75,13 @@ func SetupOTelSDK() {
 func Instrumented(instrumentationName string) bool {
 	name := strings.ToLower(instrumentationName)
 
-	// Check if specific instrumentations are enabled
-	enabledList := os.Getenv("OTEL_GO_ENABLED_INSTRUMENTATIONS")
-	if enabledList != "" {
-		enabled := parseInstrumentationList(enabledList)
-		if !slices.Contains(enabled, name) {
-			return false
-		}
+	// Check if specific instrumentations are enabled. Gate on the parsed list,
+	// not the raw string: a value that is non-empty but parses to nothing (for
+	// example "," or "  ") carries no real names, so it should not be treated as
+	// an allowlist that disables everything.
+	enabled := parseInstrumentationList(os.Getenv("OTEL_GO_ENABLED_INSTRUMENTATIONS"))
+	if len(enabled) > 0 && !slices.Contains(enabled, name) {
+		return false
 	}
 
 	// Check if this instrumentation is explicitly disabled
