@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
-	"io"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -38,7 +37,7 @@ func TestRenameReturnValuesUsesStableBareNames(t *testing.T) {
 }
 
 func TestInsertRaw_SharedSyntheticName(t *testing.T) {
-	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
 
 	ruleA, err := rule.NewInstRawRule([]byte(`
 target: main
@@ -87,7 +86,7 @@ raw: "log({{ .FuncArgument 0 }})"
 }
 
 func TestInsertRawAtPattern(t *testing.T) {
-	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
 
 	tests := []struct {
 		name           string

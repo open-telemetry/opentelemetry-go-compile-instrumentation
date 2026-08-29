@@ -180,7 +180,7 @@ func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) err
 
 		if d.IsDir() {
 			// Skip any submodules
-			if path != moduleDir && util.PathExists(filepath.Join(path, "go.mod")) {
+			if path != moduleDir && util.PathExists(filepath.Join(path, goModFileName)) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -220,7 +220,7 @@ func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
 		// rulesRoot is instrumentation/
 		// We want to load rules for submodules within instrumentation/
 		// Look for go.mod nested within instrumentation/
-		if d.IsDir() || d.Name() != "go.mod" || filepath.Dir(path) == rulesRoot {
+		if d.IsDir() || d.Name() != goModFileName || filepath.Dir(path) == rulesRoot {
 			return nil
 		}
 
@@ -262,7 +262,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 }
 
 func ensureOtelcRequire(moduleDir, version string) (bool, error) {
-	goModPath := filepath.Join(moduleDir, "go.mod")
+	goModPath := filepath.Join(moduleDir, goModFileName)
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return false, err

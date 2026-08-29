@@ -6,7 +6,6 @@ package setup
 import (
 	"bytes"
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1023,7 +1022,7 @@ func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 
 func newTestSetupPhase() *setupPhase {
 	return &setupPhase{
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger: slog.New(slog.DiscardHandler),
 	}
 }
 

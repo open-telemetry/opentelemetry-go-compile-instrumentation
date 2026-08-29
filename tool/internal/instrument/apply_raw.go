@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/dave/dst"
@@ -93,11 +94,11 @@ func insertRawAtPattern(
 
 		text, err := ast.RenderNode(restorer, stmt)
 		if err != nil {
-			logger.Warn("Failed to restore AST node to source code", "error", err)
+			logger.WarnContext(ctx, "Failed to restore AST node to source code", "error", err)
 			return true
 		}
 
-		logger.Debug("Matching statement with pattern", "stmt", text, "pattern", pos.pattern.String())
+		logger.DebugContext(ctx, "Matching statement with pattern", "stmt", text, "pattern", pos.pattern.String())
 		if !pos.pattern.MatchString(text) {
 			return true
 		}
@@ -108,8 +109,8 @@ func insertRawAtPattern(
 				cursor.InsertBefore(s)
 			}
 		case "after":
-			for i := len(stmts) - 1; i >= 0; i-- {
-				cursor.InsertAfter(stmts[i])
+			for _, s := range slices.Backward(stmts) {
+				cursor.InsertAfter(s)
 			}
 		}
 

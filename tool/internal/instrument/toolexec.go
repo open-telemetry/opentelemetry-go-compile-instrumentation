@@ -157,7 +157,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 
 	var updated bool
 	for _, importPath := range newImports {
-		if importPath == "unsafe" || importPath == "C" {
+		if importPath == unsafePackageName || importPath == "C" {
 			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
 			continue
 		}

@@ -75,7 +75,7 @@ func NewInstDeclRule(data []byte, name string) (*InstDeclRule, error) {
 // An empty string ("") means match any kind.
 var validDeclKinds = map[string]bool{ //nolint:gochecknoglobals // private lookup table
 	"":      true, // match any
-	"func":  true,
+	SelFunc: true,
 	"var":   true,
 	"const": true,
 	"type":  true,
@@ -91,7 +91,7 @@ func (r *InstDeclRule) validate() error {
 	hasReplace := strings.TrimSpace(r.Replace) != ""
 	hasWrap := strings.TrimSpace(r.Wrap) != ""
 
-	if r.Kind == "func" || r.Kind == "type" {
+	if r.Kind == SelFunc || r.Kind == "type" {
 		if hasReplace {
 			return ex.Newf("replace is not valid when kind is %q", r.Kind)
 		}
