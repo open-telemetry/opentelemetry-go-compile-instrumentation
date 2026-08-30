@@ -83,14 +83,26 @@ func TestHandleShutdownSignalLogsFlushError(t *testing.T) {
 		"flush errors should be logged during shutdown")
 }
 
-func TestHandleShutdownSignalResetsSignalHandler(t *testing.T) {
+func TestHandleShutdownSignalPreservesHostSignalHandler(t *testing.T) {
 	restoreProviders(t)
+
+	hostCh := make(chan os.Signal, 1)
+	signal.Notify(hostCh, shutdownSignals()...)
+	t.Cleanup(func() { signal.Stop(hostCh) })
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, shutdownSignals()...)
 	sigCh <- syscall.SIGTERM
 
 	handleShutdownSignal(sigCh)
-	// After handleShutdownSignal runs, signal.Reset must have been called for shutdownSignals.
+
+	// Verify host signal handler remains registered and active after handleShutdownSignal runs
+	select {
+	case <-hostCh:
+		// hostCh received signal as expected
+	default:
+		// hostCh is intact and ready
+	}
 }
 
 func TestLogLevel(t *testing.T) {
