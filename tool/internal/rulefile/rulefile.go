@@ -34,8 +34,14 @@ func Parse(data []byte) (Document, error) {
 	}
 
 	result := Document{MinimumVersion: LegacyVersion, Legacy: true, Rules: make(map[string]yaml.Node)}
+	seen := make(map[string]struct{})
 	for i := 0; i < len(doc.Content); i += 2 {
 		name := doc.Content[i].Value
+		if _, ok := seen[name]; ok {
+			return Document{}, ex.Newf("mapping key %q already defined", name)
+		}
+		seen[name] = struct{}{}
+
 		value := doc.Content[i+1]
 		if name != "version" {
 			result.Rules[name] = *value

@@ -47,6 +47,22 @@ rule:
 		{name: "numeric version", content: `version: 1`, wantErr: "must be a string"},
 		{name: "mapping version", content: "version:\n  major: 1", wantErr: "must be a string"},
 		{
+			name: "duplicate rule",
+			content: `rule:
+  target: example.com/first
+rule:
+  target: example.com/second
+`,
+			wantErr: `mapping key "rule" already defined`,
+		},
+		{
+			name: "duplicate version",
+			content: `version: "v1.0.0"
+version: "v1.1.0"
+`,
+			wantErr: `mapping key "version" already defined`,
+		},
+		{
 			name:    "pseudo version",
 			content: `version: "v1.1.1-0.20260827000000-abcdefabcdef"`,
 			wantErr: "not a valid release version",
