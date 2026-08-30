@@ -1015,37 +1015,56 @@ func desugarType(param *dst.Field) dst.Expr {
 	return param.Type
 }
 
-func rewriteParamMethods(targetFunc *dst.FuncDecl, methodSetParam, methodGetParam *dst.BlockStmt) {
+func rewriteParamMethods(
+	targetFunc *dst.FuncDecl,
+	genericTypes *dst.FieldList,
+	methodSetParam, methodGetParam *dst.BlockStmt,
+) {
 	idx := 0
-	if ast.HasReceiver(targetFunc) {
-		recvType := targetFunc.Recv.List[0].Type
-		clause := setParamClause(idx, recvType)
-		methodSetParam.List = append(methodSetParam.List, clause)
-		clause = getParamClause(idx, recvType)
-		methodGetParam.List = append(methodGetParam.List, clause)
+	addClause := func(t dst.Expr) {
+		if referencesTypeParameter(t, genericTypes) {
+			methodSetParam.List = append(methodSetParam.List,
+				panicClause(idx, fmt.Sprintf("SetParam is unsupported for generic parameter at index %d", idx)))
+			methodGetParam.List = append(methodGetParam.List,
+				panicClause(idx, fmt.Sprintf("GetParam is unsupported for generic parameter at index %d", idx)))
+			idx++
+			return
+		}
+		methodSetParam.List = append(methodSetParam.List, setParamClause(idx, t))
+		methodGetParam.List = append(methodGetParam.List, getParamClause(idx, t))
 		idx++
+	}
+
+	if ast.HasReceiver(targetFunc) {
+		addClause(targetFunc.Recv.List[0].Type)
 	}
 	for _, param := range targetFunc.Type.Params.List {
 		paramType := desugarType(param)
 		for range param.Names {
-			clause := setParamClause(idx, paramType)
-			methodSetParam.List = append(methodSetParam.List, clause)
-			clause = getParamClause(idx, paramType)
-			methodGetParam.List = append(methodGetParam.List, clause)
-			idx++
+			addClause(paramType)
 		}
 	}
 }
 
-func rewriteReturnValMethods(targetFunc *dst.FuncDecl, methodSetRetVal, methodGetRetVal *dst.BlockStmt) {
+func rewriteReturnValMethods(
+	targetFunc *dst.FuncDecl,
+	genericTypes *dst.FieldList,
+	methodSetRetVal, methodGetRetVal *dst.BlockStmt,
+) {
 	idx := 0
 	for _, retval := range targetFunc.Type.Results.List {
 		retType := desugarType(retval)
 		for range retval.Names {
-			clause := getReturnValClause(idx, retType)
-			methodGetRetVal.List = append(methodGetRetVal.List, clause)
-			clause = setReturnValClause(idx, retType)
-			methodSetRetVal.List = append(methodSetRetVal.List, clause)
+			if referencesTypeParameter(retType, genericTypes) {
+				getMsg := fmt.Sprintf("GetReturnVal is unsupported for generic return value at index %d", idx)
+				setMsg := fmt.Sprintf("SetReturnVal is unsupported for generic return value at index %d", idx)
+				methodGetRetVal.List = append(methodGetRetVal.List, panicClause(idx, getMsg))
+				methodSetRetVal.List = append(methodSetRetVal.List, panicClause(idx, setMsg))
+				idx++
+				continue
+			}
+			methodGetRetVal.List = append(methodGetRetVal.List, getReturnValClause(idx, retType))
+			methodSetRetVal.List = append(methodSetRetVal.List, setReturnValClause(idx, retType))
 			idx++
 		}
 	}
@@ -1067,14 +1086,12 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 		}
 	}
 
-	// For generic functions, we need to panic the methods that are not supported
-	if findTargetGenericType(ip.target, ip.targetFunc) != nil {
-		makeMethodPanic(methodGetParam, "GetParam is unsupported for generic functions")
-		makeMethodPanic(methodGetRetVal, "GetReturnVal is unsupported for generic functions")
-		makeMethodPanic(methodSetParam, "SetParam is unsupported for generic functions")
-		makeMethodPanic(methodSetRetVal, "SetReturnVal is unsupported for generic functions")
-		return
-	}
+	// Generic type parameters (e.g. [T any]) aren't in scope in these methods,
+	// which are declared on a plain, non-generic HookContextImpl. A parameter or
+	// return value whose type mentions one can't be safely type-asserted here, so
+	// its case panics instead (see rewriteParamMethods/rewriteReturnValMethods);
+	// every other index is generated normally, generic function or not.
+	genericTypes := findTargetGenericType(ip.target, ip.targetFunc)
 
 	// nil handling now lives inside each case, so the type switch is always the
 	// first statement of every Get/Set method.
@@ -1086,18 +1103,19 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 	}
 	methodSetParamBody := findSwitchBlock(methodSetParam)
 	methodGetParamBody := findSwitchBlock(methodGetParam)
-	rewriteParamMethods(ip.targetFunc, methodSetParamBody, methodGetParamBody)
+	rewriteParamMethods(ip.targetFunc, genericTypes, methodSetParamBody, methodGetParamBody)
 
 	// Rewrite SetReturnVal and GetReturnVal methods
 	if ip.targetFunc.Type.Results != nil {
 		methodSetRetValBody := findSwitchBlock(methodSetRetVal)
 		methodGetRetValBody := findSwitchBlock(methodGetRetVal)
-		rewriteReturnValMethods(ip.targetFunc, methodSetRetValBody, methodGetRetValBody)
+		rewriteReturnValMethods(ip.targetFunc, genericTypes, methodSetRetValBody, methodGetRetValBody)
 	}
 }
 
-// makeMethodPanic replaces a method's body with a panic statement
-func makeMethodPanic(method *dst.FuncDecl, message string) {
+// panicClause returns a switch case for idx whose body unconditionally panics
+// with message.
+func panicClause(idx int, message string) *dst.CaseClause {
 	panicStmt := ast.ExprStmt(
 		ast.CallTo("panic", nil, []dst.Expr{
 			&dst.BasicLit{
@@ -1106,7 +1124,7 @@ func makeMethodPanic(method *dst.FuncDecl, message string) {
 			},
 		}),
 	)
-	method.Body.List = []dst.Stmt{panicStmt}
+	return ast.SwitchCase(ast.Exprs(ast.IntLit(idx)), ast.Stmts(panicStmt))
 }
 
 // isTypeParameter checks if a type expression is a bare type parameter identifier
@@ -1124,6 +1142,66 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 			if name.Name == ident.Name {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// referencesTypeParameter reports whether t mentions any of typeParams anywhere
+// in its structure: a bare parameter, or nested in a composite type such as
+// []T, map[string]T, or a generic-instantiated receiver like GenStruct[T].
+//
+// This mirrors replaceTypeParamsWithAny's recursion exactly (same cases, same
+// child expressions) rather than a dst.Inspect walk. dst.Walk's *Field case
+// visits Field.Names before Field.Type, so a generic dst.Inspect would also
+// match a parameter *name* that happens to collide with the type parameter
+// (e.g. cb func(T int), where the inner T merely names an int parameter) and
+// wrongly treat it as a reference.
+func referencesTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
+	if typeParams == nil || t == nil {
+		return false
+	}
+	if isTypeParameter(t, typeParams) {
+		return true
+	}
+	switch tType := t.(type) {
+	case *dst.StarExpr:
+		return referencesTypeParameter(tType.X, typeParams)
+	case *dst.ArrayType:
+		return referencesTypeParameter(tType.Elt, typeParams)
+	case *dst.MapType:
+		return referencesTypeParameter(tType.Key, typeParams) ||
+			referencesTypeParameter(tType.Value, typeParams)
+	case *dst.ChanType:
+		return referencesTypeParameter(tType.Value, typeParams)
+	case *dst.IndexExpr, *dst.IndexListExpr:
+		// GenStruct[T]/GenStruct[T, U]: same conservative treatment as
+		// replaceTypeParamsWithAny — any generic instantiation appearing where a
+		// type parameter is in scope is assumed to reference it.
+		return true
+	case *dst.Ellipsis:
+		return referencesTypeParameter(tType.Elt, typeParams)
+	case *dst.FuncType:
+		return fieldListReferencesTypeParameter(tType.Params, typeParams) ||
+			fieldListReferencesTypeParameter(tType.Results, typeParams)
+	case *dst.InterfaceType:
+		// An inline interface literal (e.g. interface{ Get() T }) references the
+		// type parameter if any of its methods' signatures do.
+		return fieldListReferencesTypeParameter(tType.Methods, typeParams)
+	default:
+		// *dst.Ident (non-type-param) and *dst.SelectorExpr are base types
+		// without type parameters.
+		return false
+	}
+}
+
+func fieldListReferencesTypeParameter(fields, typeParams *dst.FieldList) bool {
+	if fields == nil {
+		return false
+	}
+	for _, field := range fields.List {
+		if referencesTypeParameter(field.Type, typeParams) {
+			return true
 		}
 	}
 	return false
