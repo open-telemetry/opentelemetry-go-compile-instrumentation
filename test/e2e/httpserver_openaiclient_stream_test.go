@@ -6,7 +6,6 @@
 package test
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -75,17 +74,8 @@ func TestHTTPServerOpenAIClientStreaming(t *testing.T) {
 func startMockOpenAIStreamingServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		var reqBody struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if !reqBody.Stream {
+	return startMockOpenAIChatCompletionsServer(t, func(w http.ResponseWriter, req openAIChatCompletionRequest) {
+		if !req.Stream {
 			http.Error(w, "expected stream=true", http.StatusBadRequest)
 			return
 		}
@@ -96,15 +86,11 @@ func startMockOpenAIStreamingServer(t *testing.T) *httptest.Server {
 			"data: {\"id\":\"chatcmpl-stream\",\"model\":%q,\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n"+
 				"data: {\"id\":\"chatcmpl-stream\",\"model\":%q,\"choices\":[{\"delta\":{\"content\":\"!\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n"+
 				"data: [DONE]\n\n",
-			reqBody.Model,
-			reqBody.Model,
+			req.Model,
+			req.Model,
 		)
 		if _, err := w.Write([]byte(streamData)); err != nil {
 			t.Errorf("failed to write stream response: %v", err)
 		}
 	})
-
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
 }

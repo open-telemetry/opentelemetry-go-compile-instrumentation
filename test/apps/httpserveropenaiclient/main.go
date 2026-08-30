@@ -71,6 +71,10 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if len(completion.Choices) == 0 {
+			http.Error(w, "no completion choices returned", http.StatusInternalServerError)
+			return
+		}
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(completion.Choices[0].Message.Content))
