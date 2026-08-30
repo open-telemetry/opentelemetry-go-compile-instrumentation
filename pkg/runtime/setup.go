@@ -334,6 +334,7 @@ func handleShutdownSignal(sigCh chan os.Signal) {
 	// channel but reaches the app or the default disposition, keeping the
 	// "press again to force quit" behavior.
 	signal.Stop(sigCh)
+	signal.Reset(shutdownSignals()...)
 
 	logger.Info("received signal, flushing telemetry", "signal", sig.String())
 
