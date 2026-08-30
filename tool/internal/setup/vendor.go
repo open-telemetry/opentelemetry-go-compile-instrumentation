@@ -67,14 +67,20 @@ func isModToken(tok string) bool {
 // vendoring, so we respect the user's intent). -mod=mod is appended only when
 // no -mod/--mod token is present at all.
 func forceModMod(goflags string) string {
-	fields := strings.Fields(goflags)
+	// SplitGoflags keeps quoted tokens (such as -tags='foo bar') intact, unlike
+	// strings.Fields which would split them on the inner space.
+	fields := util.SplitGoflags(goflags)
 	hasMod := false
 	for i, f := range fields {
-		switch {
-		case isModVendorToken(f):
+		// The go command strips one layer of surrounding quotes from a GOFLAGS
+		// token before interpreting it, so a quoted flag such as '-mod=readonly'
+		// is a -mod flag. Match on the unquoted form, but keep the original
+		// token in the output so an existing -mod choice is preserved verbatim.
+		switch tok := util.UnquoteGoflagsToken(f); {
+		case isModVendorToken(tok):
 			fields[i] = modMod
 			hasMod = true
-		case isModToken(f):
+		case isModToken(tok):
 			hasMod = true
 		}
 	}
