@@ -53,19 +53,49 @@ func (c *HookContextImpl3330034316) HasKeyData(key string) bool {
 }
 
 func (c *HookContextImpl3330034316) GetParam(idx int) interface{} {
-	panic("GetParam is unsupported for generic functions")
+	switch idx {
+	case 0:
+		panic("GetParam is unsupported for generic parameter at index 0")
+	case 1:
+		return *(c.params[1].(*int))
+	}
+	return nil
 }
 
 func (c *HookContextImpl3330034316) SetParam(idx int, val interface{}) {
-	panic("SetParam is unsupported for generic functions")
+	switch idx {
+	case 0:
+		panic("SetParam is unsupported for generic parameter at index 0")
+	case 1:
+		if val == nil {
+			*(c.params[1].(*int)) = *new(int)
+		} else {
+			*(c.params[1].(*int)) = val.(int)
+		}
+	}
 }
 
 func (c *HookContextImpl3330034316) GetReturnVal(idx int) interface{} {
-	panic("GetReturnVal is unsupported for generic functions")
+	switch idx {
+	case 0:
+		panic("GetReturnVal is unsupported for generic return value at index 0")
+	case 1:
+		return *(c.returnVals[1].(*error))
+	}
+	return nil
 }
 
 func (c *HookContextImpl3330034316) SetReturnVal(idx int, val interface{}) {
-	panic("SetReturnVal is unsupported for generic functions")
+	switch idx {
+	case 0:
+		panic("SetReturnVal is unsupported for generic return value at index 0")
+	case 1:
+		if val == nil {
+			*(c.returnVals[1].(*error)) = *new(error)
+		} else {
+			*(c.returnVals[1].(*error)) = val.(error)
+		}
+	}
 }
 func (c *HookContextImpl3330034316) GetParamCount() int     { return len(c.params) }
 func (c *HookContextImpl3330034316) GetReturnValCount() int { return len(c.returnVals) }
