@@ -122,6 +122,16 @@ hook_generic:
         after: MyHookGenericAfter
         path: "go.opentelemetry.io/otelc/demo/app/basic/instrumentation"
 
+hook_query:
+  target: main
+  where:
+    func: Query
+  do:
+    - inject_hooks:
+        before: MyHookQueryBefore
+        after: MyHookQueryAfter
+        path: "go.opentelemetry.io/otelc/demo/app/basic/instrumentation"
+
 hook_generic_recv:
   target: main
   where:

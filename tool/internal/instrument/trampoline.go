@@ -1151,12 +1151,19 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 // in its structure: a bare parameter, or nested in a composite type such as
 // []T, map[string]T, or a generic-instantiated receiver like GenStruct[T].
 //
-// This mirrors replaceTypeParamsWithAny's recursion exactly (same cases, same
-// child expressions) rather than a dst.Inspect walk. dst.Walk's *Field case
-// visits Field.Names before Field.Type, so a generic dst.Inspect would also
-// match a parameter *name* that happens to collide with the type parameter
-// (e.g. cb func(T int), where the inner T merely names an int parameter) and
-// wrongly treat it as a reference.
+// This mirrors replaceTypeParamsWithAny's recursion (same cases, same child
+// expressions) rather than a dst.Inspect walk. dst.Walk's *Field case visits
+// Field.Names before Field.Type, so a generic dst.Inspect would also match a
+// parameter *name* that happens to collide with the type parameter (e.g. cb
+// func(T int), where the inner T merely names an int parameter) and wrongly
+// treat it as a reference.
+//
+// One case intentionally diverges: replaceTypeParamsWithAny treats
+// *dst.InterfaceType as an opaque base case (an inline interface literal is
+// returned as-is, unrewritten), but here an interface literal such as
+// interface{ Get() T } does reference the type parameter through its method
+// signature, so this recurses into its methods where the other function does
+// not.
 func referencesTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	if typeParams == nil || t == nil {
 		return false
