@@ -530,8 +530,8 @@ func TestImportAliasMap_CollidingDefaultAliases(t *testing.T) {
 		file, err := p.ParseSource(`package main
 
 import (
-	"text/template"
-	"html/template"
+	"example.com/m/bar"
+	"example.com/m/other/bar"
 	"net/http"
 )
 
@@ -541,7 +541,7 @@ func f() {}
 
 		imports := ImportAliasMap(file)
 		assert.Equal(t, "net/http", imports["http"])
-		assert.NotContains(t, imports, "template")
+		assert.NotContains(t, imports, "bar")
 	})
 
 	t.Run("explicit alias overrides colliding default alias", func(t *testing.T) {
@@ -549,8 +549,8 @@ func f() {}
 		file, err := p.ParseSource(`package main
 
 import (
-	"text/template"
-	htmltemplate "html/template"
+	"example.com/m/bar"
+	otherbar "example.com/m/other/bar"
 )
 
 func f() {}
@@ -558,8 +558,8 @@ func f() {}
 		require.NoError(t, err)
 
 		imports := ImportAliasMap(file)
-		assert.Equal(t, "text/template", imports["template"])
-		assert.Equal(t, "html/template", imports["htmltemplate"])
+		assert.Equal(t, "example.com/m/bar", imports["bar"])
+		assert.Equal(t, "example.com/m/other/bar", imports["otherbar"])
 	})
 
 	t.Run("explicit alias wins over subsequent default alias", func(t *testing.T) {
@@ -567,8 +567,8 @@ func f() {}
 		file, err := p.ParseSource(`package main
 
 import (
-	template "text/template"
-	"html/template"
+	bar "example.com/m/bar"
+	"example.com/m/other/bar"
 )
 
 func f() {}
@@ -576,7 +576,7 @@ func f() {}
 		require.NoError(t, err)
 
 		imports := ImportAliasMap(file)
-		assert.Equal(t, "text/template", imports["template"])
+		assert.Equal(t, "example.com/m/bar", imports["bar"])
 	})
 
 	t.Run("colliding explicit aliases are excluded", func(t *testing.T) {
@@ -584,8 +584,8 @@ func f() {}
 		file, err := p.ParseSource(`package main
 
 import (
-	tpl "text/template"
-	tpl "html/template"
+	tpl "example.com/m/bar"
+	tpl "example.com/m/other/bar"
 )
 
 func f() {}
