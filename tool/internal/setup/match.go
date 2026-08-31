@@ -407,7 +407,7 @@ func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 	// Recursively traverse to each directories and include the rule files
 	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 
 		if skipSubmodules && d.IsDir() && p != path && util.PathExists(filepath.Join(p, "go.mod")) {
