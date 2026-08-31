@@ -85,13 +85,10 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 	return nil
 }
 
-// store stores the matched rules to the file
-// It's the pair of the InstrumentPhase.load
-func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
-	if err := resolveRulePaths(ctx, matched, moduleDirs); err != nil {
-		return ex.Wrapf(err, "resolving rule paths")
-	}
-
+// store stores the matched rules to the file.
+// It's the pair of the InstrumentPhase.load.
+// Rule paths must already be resolved via resolveRulePaths.
+func (sp *setupPhase) store(_ context.Context, matched []*rule.InstRuleSet) error {
 	bs, err := json.Marshal(matched)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal rules to JSON")

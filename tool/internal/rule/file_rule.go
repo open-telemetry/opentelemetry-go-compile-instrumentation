@@ -26,6 +26,11 @@ type InstFileRule struct {
 	Path string `json:"path" yaml:"path"` // The import path where the file is located
 
 	ResolvedPath string `json:"resolved_path" yaml:"-"` // The local path of the package directory resolved from import path
+
+	// SourceImports are import paths discovered from the add_file source during
+	// setup. They are blank-registered in otelc.runtime.go and reused by
+	// apply_file to update importcfg without parsing the source again.
+	SourceImports []string `json:"source_imports,omitempty" yaml:"-"`
 }
 
 // NewInstFileRule loads and validates an InstFileRule from YAML data.

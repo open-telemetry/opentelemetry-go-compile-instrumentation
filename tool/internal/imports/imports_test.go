@@ -616,3 +616,50 @@ func TestCollectPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		root     *dst.File
+		expected []string
+	}{
+		{
+			name:     "nil file",
+			root:     nil,
+			expected: nil,
+		},
+		{
+			name:     "empty file",
+			root:     &dst.File{},
+			expected: nil,
+		},
+		{
+			name: "standard and blank imports",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{Path: &dst.BasicLit{Value: `"fmt"`}},
+							&dst.ImportSpec{
+								Name: dst.NewIdent("_"),
+								Path: &dst.BasicLit{Value: `"github.com/google/uuid"`},
+							},
+							&dst.ImportSpec{
+								Name: dst.NewIdent("eg"),
+								Path: &dst.BasicLit{Value: `"golang.org/x/sync/errgroup"`},
+							},
+						},
+					},
+				},
+			},
+			expected: []string{"fmt", "github.com/google/uuid", "golang.org/x/sync/errgroup"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, Paths(tt.root))
+		})
+	}
+}

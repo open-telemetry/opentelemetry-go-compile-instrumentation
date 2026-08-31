@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -91,7 +92,7 @@ const marker = "//go:build ignore"
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, stripBuildIgnoreTag(tt.input))
+			assert.Equal(t, tt.expected, ast.StripBuildIgnore(tt.input))
 		})
 	}
 }
@@ -228,4 +229,44 @@ func SubHelper() {}
 	require.NoError(t, err)
 	assert.Contains(t, string(outData), "package targetpkg")
 	assert.Contains(t, string(outData), "func SubHelper()")
+}
+
+func TestApplyFileRule_UsesCachedSourceImports(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+
+	content := `//go:build ignore
+
+package sourcepkg
+
+import "fmt"
+
+func Helper() { fmt.Println("hi") }
+`
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+		// No importcfg path: updateImportConfig returns early, but SourceImports
+		// must still be preferred over re-collecting from the AST.
+		importConfigPath: "",
+	}
+
+	fileRule := &rule.InstFileRule{
+		InstBaseRule:  rule.InstBaseRule{Name: "test_cached_source_imports"},
+		File:          "helper.go",
+		Path:          "example.com/mypkg",
+		ResolvedPath:  srcDir,
+		SourceImports: []string{"fmt", "log"},
+	}
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.NoError(t, err)
+
+	outData, err := os.ReadFile(filepath.Join(workDir, "otelc.helper.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(outData), `"fmt"`)
+	// Cached SourceImports are only used for importcfg, not injected into the AST.
+	assert.NotContains(t, string(outData), `"log"`)
 }
