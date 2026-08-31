@@ -1,0 +1,82 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # stripe-go (v81, v82) instrumentation emission contract.
+  #
+  # Both supported majors emit the same telemetry from the same chokepoint; the
+  # v81 and v82 semconv packages are byte-identical.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/stripe/stripe-go/v82/hook.go
+  #   instrumentation/github.com/stripe/stripe-go/v82/semconv/stripe.go
+  #
+  # One CLIENT span per logical Stripe API request, named
+  # "{METHOD} {url.template}" (e.g. "POST /v1/customers/{id}"). The span covers
+  # the backend's internal retry loop; per-attempt spans come from net/http
+  # client instrumentation when it is also enabled.
+  #
+  # url.template is the low-cardinality endpoint (resource IDs replaced by
+  # {id}) and is the only path form used for span names and metric labels.
+  # url.path keeps the real path on the span so the specific resource stays
+  # recoverable; it is never a metric label.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.stripe
+    type: attribute_group
+    display_name: otelc Stripe attributes
+    brief: >
+      Stripe attributes emitted by the stripe-go instrumentation that are not covered by the pinned upstream OpenTelemetry
+      semantic conventions.
+    attributes:
+      - id: stripe.request_id
+        type: string
+        stability: development
+        brief: >
+          Stripe's `Request-Id` for the call. This is the identifier Stripe support and the dashboard's request log key
+          off, so it is the join key between a span and the request as Stripe recorded it.
+        examples: [req_9tUAcSHnw5xQBK]
+      - id: stripe.error.code
+        type: string
+        stability: development
+        brief: The Stripe error code, present on errors that carry one.
+        examples: [card_declined, resource_missing]
+      - id: stripe.error.type
+        type: string
+        stability: development
+        brief: The Stripe error type.
+        examples: [card_error, invalid_request_error, api_error]
+
+  - id: span.otelc.stripe.client.request
+    type: span
+    span_kind: client
+    stability: development
+    brief: Stripe API request span, one per logical request including retries.
+    attributes:
+      - ref: http.request.method
+      - ref: url.template
+      - ref: url.path
+      - ref: server.address
+      - ref: server.port
+      - ref: http.response.status_code
+      # stripe.request_id is set whenever Stripe answered: from the response
+      # header on success, from the error body on failure.
+      - ref: stripe.request_id
+      - ref: error.type
+      # Set only on errors Stripe itself reported (not transport failures).
+      - ref: stripe.error.code
+      - ref: stripe.error.type
+
+  - id: metric.otelc.stripe.client.request.duration
+    type: metric
+    metric_name: stripe.client.request.duration
+    instrument: histogram
+    unit: s
+    stability: development
+    brief: >
+      Duration of Stripe API requests, including network retries performed inside the backend. Labeled by the templated
+      endpoint and HTTP status; never by paths that embed resource IDs.
+    attributes:
+      - ref: server.address
+      - ref: server.port
+      - ref: http.request.method
+      - ref: url.template
+      - ref: http.response.status_code

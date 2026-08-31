@@ -131,6 +131,7 @@ The following libraries are automatically instrumented:
 | `github.com/segmentio/kafka-go` | Kafka messaging spans |
 | `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
 | `github.com/linode/linodego/v2` | HTTP client spans and metrics |
+| `github.com/stripe/stripe-go` (v81/v82) | Stripe API client spans and metrics |
 | `log`, `log/slog`, `github.com/sirupsen/logrus` | Trace/span ID log correlation |
 
 ## Learn More

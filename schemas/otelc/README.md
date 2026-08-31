@@ -20,6 +20,7 @@ schemas/otelc/
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
+│   ├── stripe.yaml          # stripe/stripe-go (v81/v82) client spans + request metric
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
 │   ├── logs.yaml            # log, log/slog, logrus — no telemetry (correlation only)
 │   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
@@ -52,6 +53,7 @@ signals an undeclared instrumentation.
 | `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
 | `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
 | `github.com/gin-gonic/gin`                          | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
+| `github.com/stripe/stripe-go` (v81/v82)             | `stripe.yaml`       | Stripe API client spans + request-duration metric                      |
 | `go.opentelemetry.io/otel/init`                     | `otel-sdk.yaml`     | Go runtime metrics (`go.*`)                                            |
 | `go.opentelemetry.io/otel`                          | `otel-sdk.yaml`     | nothing — guards the global tracer provider                            |
 | `go.opentelemetry.io/otel/sdk/trace`                | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |
