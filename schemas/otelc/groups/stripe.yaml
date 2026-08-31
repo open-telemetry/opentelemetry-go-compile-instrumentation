@@ -18,6 +18,11 @@ groups:
   # {id}) and is the only path form used for span names and metric labels.
   # url.path keeps the real path on the span so the specific resource stays
   # recoverable; it is never a metric label.
+  #
+  # stripe.request_id is set whenever Stripe answered: from the response header
+  # on success, from the error body on failure. stripe.error.code and
+  # stripe.error.type are set only on errors Stripe itself reported, not on
+  # transport failures.
   # ---------------------------------------------------------------------------
 
   - id: registry.otelc.stripe
@@ -31,8 +36,8 @@ groups:
         type: string
         stability: development
         brief: >
-          Stripe's `Request-Id` for the call. This is the identifier Stripe support and the dashboard's request log key
-          off, so it is the join key between a span and the request as Stripe recorded it.
+          Stripe's `Request-Id` for the call. This is the identifier Stripe support and the dashboard's request log key off,
+          so it is the join key between a span and the request as Stripe recorded it.
         examples: [req_9tUAcSHnw5xQBK]
       - id: stripe.error.code
         type: string
@@ -57,11 +62,8 @@ groups:
       - ref: server.address
       - ref: server.port
       - ref: http.response.status_code
-      # stripe.request_id is set whenever Stripe answered: from the response
-      # header on success, from the error body on failure.
       - ref: stripe.request_id
       - ref: error.type
-      # Set only on errors Stripe itself reported (not transport failures).
       - ref: stripe.error.code
       - ref: stripe.error.type
 
@@ -72,8 +74,8 @@ groups:
     unit: s
     stability: development
     brief: >
-      Duration of Stripe API requests, including network retries performed inside the backend. Labeled by the templated
-      endpoint and HTTP status; never by paths that embed resource IDs.
+      Duration of Stripe API requests, including network retries performed inside the backend. Labeled by the templated endpoint
+      and HTTP status; never by paths that embed resource IDs.
     attributes:
       - ref: server.address
       - ref: server.port
