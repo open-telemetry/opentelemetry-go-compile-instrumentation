@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestParse(t *testing.T) {
@@ -37,6 +38,17 @@ rule:
 			wantVersion: LegacyVersion,
 			wantLegacy:  true,
 			wantRules:   []string{"rule"},
+		},
+		{
+			name: "sorted entries",
+			content: `zebra:
+  target: example.com/zebra
+alpha:
+  target: example.com/alpha
+`,
+			wantVersion: LegacyVersion,
+			wantLegacy:  true,
+			wantRules:   []string{"alpha", "zebra"},
 		},
 		{name: "empty", wantVersion: LegacyVersion, wantLegacy: true},
 		{name: "invalid yaml", content: "rule: {", wantErr: "did not find expected node content"},
@@ -83,6 +95,111 @@ version: "v1.1.0"
 			assert.Equal(t, test.wantRules, entryNames(doc.Entries))
 		})
 	}
+}
+
+func TestFileRules(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantType any
+		wantErr  string
+	}{
+		{
+			name:     "struct",
+			content:  "rule:\n  target: example.com/pkg\n  struct: Server\n",
+			wantType: &InstStructRule{},
+		},
+		{
+			name:     "file",
+			content:  "rule:\n  target: example.com/pkg\n  file: hook.go\n  path: example.com/hooks\n",
+			wantType: &InstFileRule{},
+		},
+		{
+			name:     "directive",
+			content:  "rule:\n  target: example.com/pkg\n  directive: otelc:span\n  template: _ = 0\n",
+			wantType: &InstDirectiveRule{},
+		},
+		{
+			name:     "raw",
+			content:  "rule:\n  target: example.com/pkg\n  func: Run\n  raw: _ = 0\n",
+			wantType: &InstRawRule{},
+		},
+		{
+			name:     "function",
+			content:  "rule:\n  target: example.com/pkg\n  func: Run\n  before: BeforeRun\n  path: example.com/hooks\n",
+			wantType: &InstFuncRule{},
+		},
+		{
+			name:     "function call",
+			content:  "rule:\n  target: example.com/pkg\n  function_call: net/http.Get\n  replace: tracedGet({{ . }})\n",
+			wantType: &InstCallRule{},
+		},
+		{
+			name:     "struct literal",
+			content:  "rule:\n  target: example.com/pkg\n  struct_literal: example.com/pkg.Client\n  field:\n    - name: Transport\n      value: tracedTransport\n",
+			wantType: &InstLitRule{},
+		},
+		{
+			name:     "identifier",
+			content:  "rule:\n  target: example.com/pkg\n  identifier: DefaultClient\n  replace: tracedClient\n",
+			wantType: &InstDeclRule{},
+		},
+		{
+			name:    "normalize error",
+			content: "rule:\n  target: example.com/pkg\n  where:\n    target: other.example/pkg\n  do:\n    inject_code:\n      raw: _ = 0\n",
+			wantErr: "target must be top-level",
+		},
+		{
+			name:    "constructor error",
+			content: "rule:\n  target: example.com/pkg\n  directive: ''\n",
+			wantErr: "directive",
+		},
+		{
+			name:    "unrecognized selector",
+			content: "rule:\n  target: example.com/pkg\n",
+			wantErr: "no recognised selector",
+		},
+		{
+			name:    "empty target",
+			content: "rule:\n  target: '  '\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "empty target",
+		},
+		{
+			name:    "invalid glob",
+			content: "rule:\n  target: example.com/[pkg\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "not a valid glob pattern",
+		},
+		{
+			name:    "invalid version range",
+			content: "rule:\n  target: example.com/pkg\n  version: v1.0.0,\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "non-empty start and end bounds",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file, err := ParseFile([]byte(test.content))
+			require.NoError(t, err)
+
+			rules, err := file.Rules()
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			assert.IsType(t, test.wantType, rules[0])
+		})
+	}
+}
+
+func TestFileRulesDecodeError(t *testing.T) {
+	var node yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("- value"), &node))
+	file := File{Entries: []Entry{{Name: "rule", Node: *node.Content[0]}}}
+
+	_, err := file.Rules()
+	require.ErrorContains(t, err, `parsing rule "rule"`)
 }
 
 func TestCheckVersion(t *testing.T) {
