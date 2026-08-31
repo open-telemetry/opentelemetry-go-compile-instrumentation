@@ -1,14 +1,13 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package rulefile
+package rule
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
 func TestParse(t *testing.T) {
@@ -42,6 +41,8 @@ rule:
 		{name: "empty", wantVersion: LegacyVersion, wantLegacy: true},
 		{name: "invalid yaml", content: "rule: {", wantErr: "did not find expected node content"},
 		{name: "non mapping root", content: "- rule", wantErr: "root must be a mapping"},
+		{name: "numeric key", content: "1: {}", wantErr: "mapping keys must be strings"},
+		{name: "complex key", content: "? [rule]\n: {}", wantErr: "mapping keys must be strings"},
 		{name: "missing v prefix", content: `version: "1.0.0"`, wantErr: "not a valid release version"},
 		{name: "empty version", content: `version: ""`, wantErr: "not a valid release version"},
 		{name: "numeric version", content: `version: 1`, wantErr: "must be a string"},
@@ -71,7 +72,7 @@ version: "v1.1.0"
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			doc, err := Parse([]byte(test.content))
+			doc, err := ParseFile([]byte(test.content))
 			if test.wantErr != "" {
 				require.ErrorContains(t, err, test.wantErr)
 				return
@@ -79,7 +80,7 @@ version: "v1.1.0"
 			require.NoError(t, err)
 			assert.Equal(t, test.wantVersion, doc.MinimumVersion)
 			assert.Equal(t, test.wantLegacy, doc.Legacy)
-			assert.ElementsMatch(t, test.wantRules, mapKeys(doc.Rules))
+			assert.Equal(t, test.wantRules, entryNames(doc.Entries))
 		})
 	}
 }
@@ -98,6 +99,7 @@ func TestCheckVersion(t *testing.T) {
 		{name: "development default", current: "v0.0.0", required: "v9.0.0"},
 		{name: "devel", current: "(devel)", required: "v9.0.0"},
 		{name: "empty", current: "", required: "v9.0.0"},
+		{name: "custom development build", current: "custom", required: "v9.0.0"},
 		{
 			name:     "pseudo version",
 			current:  "v1.1.1-0.20260827000000-abcdefabcdef",
@@ -117,10 +119,13 @@ func TestCheckVersion(t *testing.T) {
 	}
 }
 
-func mapKeys(values map[string]yaml.Node) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
+func entryNames(entries []Entry) []string {
+	if entries == nil {
+		return nil
 	}
-	return keys
+	names := make([]string, len(entries))
+	for i, entry := range entries {
+		names[i] = entry.Name
+	}
+	return names
 }

@@ -6,7 +6,6 @@ package main
 import (
 	"errors"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,7 +16,6 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
-	"go.opentelemetry.io/otelc/tool/internal/rulefile"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -136,26 +134,25 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 }
 
 func parseRuleEntries(content []byte, path, modulePath string) (Manifest, error) {
-	doc, err := rulefile.Parse(content)
+	doc, err := rule.ParseFile(content)
 	if err != nil {
 		return nil, ex.Wrapf(err, "parsing rule file %s", path)
 	}
 
-	entries := make(Manifest, 0, len(doc.Rules))
-	for _, name := range slices.Sorted(maps.Keys(doc.Rules)) {
-		node := doc.Rules[name]
+	entries := make(Manifest, 0, len(doc.Entries))
+	for _, entry := range doc.Entries {
 		var ruleConfig yamlRule
-		if decodeErr := node.Decode(&ruleConfig); decodeErr != nil {
-			return nil, ex.Wrapf(decodeErr, "parsing rule %q in %s", name, path)
+		if decodeErr := entry.Node.Decode(&ruleConfig); decodeErr != nil {
+			return nil, ex.Wrapf(decodeErr, "parsing rule %q in %s", entry.Name, path)
 		}
 		if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
-			return nil, ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
+			return nil, ex.Wrapf(validateErr, "validating version for rule %q in file %s", entry.Name, path)
 		}
 		if ruleConfig.Target == "" {
 			continue
 		}
 		if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
-			return nil, ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
+			return nil, ex.Wrapf(validateErr, "validating target for rule %q in file %s", entry.Name, path)
 		}
 		entries = append(entries, Entry{
 			ModulePath:   modulePath,

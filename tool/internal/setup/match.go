@@ -22,7 +22,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
-	"go.opentelemetry.io/otelc/tool/internal/rulefile"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -33,93 +32,12 @@ const (
 	matchDepsConcurrencyMultiplier = 2
 )
 
-// createRuleFromFields creates a rule instance based on the field type present
-// in the (already-normalized) flat YAML fields map produced by [rule.Normalize].
-func createRuleFromFields(raw []byte, name string, fields map[string]any) (rule.InstRule, error) {
-	switch {
-	case fields[rule.SelStruct] != nil:
-		return rule.NewInstStructRule(raw, name)
-	case fields[rule.WhereFile] != nil:
-		return rule.NewInstFileRule(raw, name)
-	case fields[rule.SelDirective] != nil:
-		return rule.NewInstDirectiveRule(raw, name)
-	case fields[rule.RawField] != nil:
-		return rule.NewInstRawRule(raw, name)
-	case fields[rule.SelFunc] != nil:
-		return rule.NewInstFuncRule(raw, name)
-	case fields[rule.SelFunctionCall] != nil:
-		return rule.NewInstCallRule(raw, name)
-	case fields[rule.SelStructLiteral] != nil:
-		return rule.NewInstLitRule(raw, name)
-	case fields[rule.SelIdentifier] != nil:
-		return rule.NewInstDeclRule(raw, name)
-	default:
-		return nil, ex.Newf("rule %q has no recognised selector", name)
-	}
-}
-
-func parseRuleFromYaml(content []byte) ([]rule.InstRule, error) {
-	doc, err := rulefile.Parse(content)
-	if err != nil {
-		return nil, ex.Wrap(err)
-	}
-	rules := make([]rule.InstRule, 0)
-	for _, name := range slices.Sorted(maps.Keys(doc.Rules)) {
-		node := doc.Rules[name]
-		var fields map[string]any
-		if err = node.Decode(&fields); err != nil {
-			return nil, ex.Wrapf(err, "parsing rule %q", name)
-		}
-		flatRules, normErr := rule.Normalize(fields)
-		if normErr != nil {
-			return nil, normErr
-		}
-		for _, flatFields := range flatRules {
-			raw, err1 := yaml.Marshal(flatFields)
-			if err1 != nil {
-				return nil, ex.Wrap(err1)
-			}
-
-			r, err2 := createRuleFromFields(raw, name, flatFields)
-			if err2 != nil {
-				return nil, err2
-			}
-			// target is the sole package selector and is required (docs/rules.md).
-			// An empty or whitespace-only target would land under exactRules[""]
-			// and silently never match any real import path, so reject it loudly
-			// at load time instead.
-			if strings.TrimSpace(r.GetTarget()) == "" {
-				return nil, ex.Newf("rule %q has an empty target; target is required", name)
-			}
-			// Reject ambiguous/invalid glob targets at load time so a bad rule
-			// fails loudly during parsing rather than silently matching nothing
-			// during the setup phase.
-			if err3 := rule.ValidateTarget(r.GetTarget()); err3 != nil {
-				return nil, ex.Wrapf(err3, "rule %q", name)
-			}
-			if err3 := util.ValidateVersionRange(r.GetVersion()); err3 != nil {
-				return nil, ex.Wrapf(err3, "rule %q", name)
-			}
-			rules = append(rules, r)
-		}
-	}
-	return rules, nil
-}
-
-func checkRuleFileVersion(path string, content []byte, warn func(string, ...any)) error {
-	return checkRuleFileVersionFor(path, content, util.Version, warn)
-}
-
-func checkRuleFileVersionFor(path string, content []byte, current string, warn func(string, ...any)) error {
-	doc, err := rulefile.Parse(content)
-	if err != nil {
-		return ex.Wrapf(err, "parsing rule file %s", path)
-	}
+func checkRuleFileVersion(path string, doc rule.File, current string, warn func(string, ...any)) error {
 	if doc.Legacy && warn != nil {
 		warn("rule file has no minimum otelc version; assuming legacy version", "file", path,
-			"version", rulefile.LegacyVersion)
+			"version", rule.LegacyVersion)
 	}
-	if err = rulefile.CheckVersion(current, doc.MinimumVersion); err != nil {
+	if err := rule.CheckVersion(current, doc.MinimumVersion); err != nil {
 		return ex.Wrapf(err, "rule file %s", path)
 	}
 	return nil
@@ -482,12 +400,16 @@ func loadCustomRules(ruleConfig string, warn func(string, ...any)) ([]rule.InstR
 			if err != nil {
 				return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
 			}
-			if err = checkRuleFileVersion(file, content, warn); err != nil {
+			doc, parseErr := rule.ParseFile(content)
+			if parseErr != nil {
+				return nil, ex.Wrapf(parseErr, "parsing rule file %s", file)
+			}
+			if err = checkRuleFileVersion(file, doc, util.Version, warn); err != nil {
 				return nil, err
 			}
 
 			var rules []rule.InstRule
-			rules, err = parseRuleFromYaml(content)
+			rules, err = doc.Rules()
 			if err != nil {
 				return nil, err
 			}
@@ -529,11 +451,15 @@ func loadRulesFromToolFiles(
 			if readErr != nil {
 				return false, ex.Wrapf(readErr, "reading %s", file)
 			}
-			if versionErr := checkRuleFileVersion(file, content, warn); versionErr != nil {
+			doc, parseErr := rule.ParseFile(content)
+			if parseErr != nil {
+				return false, ex.Wrapf(parseErr, "parsing rule file %s", file)
+			}
+			if versionErr := checkRuleFileVersion(file, doc, util.Version, warn); versionErr != nil {
 				return false, versionErr
 			}
 
-			rules, parseErr := parseRuleFromYaml(content)
+			rules, parseErr := doc.Rules()
 			if parseErr != nil {
 				return false, parseErr
 			}

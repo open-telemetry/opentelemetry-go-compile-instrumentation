@@ -28,7 +28,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
-	"go.opentelemetry.io/otelc/tool/internal/rulefile"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -202,22 +201,22 @@ func loadModuleRules(
 			return ex.Wrapf(readErr, "reading rule file %s", path)
 		}
 
-		doc, parseErr := rulefile.Parse(data)
+		doc, parseErr := rule.ParseFile(data)
 		if parseErr != nil {
 			return ex.Wrapf(parseErr, "parsing rule file %s", path)
 		}
 		if doc.Legacy && warn != nil {
 			warn("rule file has no minimum otelc version; assuming legacy version", "file", path,
-				"version", rulefile.LegacyVersion)
+				"version", rule.LegacyVersion)
 		}
-		if versionErr := rulefile.CheckVersion(currentVersion, doc.MinimumVersion); versionErr != nil {
+		if versionErr := rule.CheckVersion(currentVersion, doc.MinimumVersion); versionErr != nil {
 			return ex.Wrapf(versionErr, "rule file %s", path)
 		}
 
-		for name, node := range doc.Rules {
+		for _, entry := range doc.Entries {
 			var r yamlRule
-			if decodeErr := node.Decode(&r); decodeErr != nil {
-				return ex.Wrapf(decodeErr, "parsing rule %q in %s", name, path)
+			if decodeErr := entry.Node.Decode(&r); decodeErr != nil {
+				return ex.Wrapf(decodeErr, "parsing rule %q in %s", entry.Name, path)
 			}
 			if r.Target != "" {
 				loaded[module] = append(loaded[module], r)
@@ -461,12 +460,16 @@ func validateRuleFiles(ctx context.Context, logger *slog.Logger, ruleFiles []str
 		if err != nil {
 			return ex.Wrapf(err, "reading %s", ruleFile)
 		}
-		if err = checkRuleFileVersion(ruleFile, content, func(msg string, args ...any) {
+		doc, err := rule.ParseFile(content)
+		if err != nil {
+			return ex.Wrapf(err, "parsing rule file %s", ruleFile)
+		}
+		if err = checkRuleFileVersion(ruleFile, doc, util.Version, func(msg string, args ...any) {
 			logger.WarnContext(ctx, msg, args...)
 		}); err != nil {
 			return err
 		}
-		if _, err = parseRuleFromYaml(content); err != nil {
+		if _, err = doc.Rules(); err != nil {
 			return err
 		}
 	}
