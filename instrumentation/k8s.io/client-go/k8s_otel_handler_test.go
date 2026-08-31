@@ -14,6 +14,8 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -321,4 +323,85 @@ func TestOnDelete_TombstoneForwardsWrappedObject(t *testing.T) {
 	}
 	assert.Equal(t, "test-pod", attrMap["k8s.pod.name"], "span attributes should still reflect the unwrapped object")
 	assert.Equal(t, "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", attrMap["k8s.pod.uid"])
+}
+
+// stubObjectKinds wraps a real ObjectKinds implementation with a call
+// counter, so tests can assert the underlying registry scan actually ran
+// (or didn't run again), not just that the returned values look right.
+func stubObjectKinds(t *testing.T, real func(runtime.Object) ([]schema.GroupVersionKind, bool, error)) (stub func(runtime.Object) ([]schema.GroupVersionKind, bool, error), calls *int) {
+	t.Helper()
+	n := 0
+	return func(obj runtime.Object) ([]schema.GroupVersionKind, bool, error) {
+		n++
+		return real(obj)
+	}, &n
+}
+
+func TestLookupGVK_CachesPerType(t *testing.T) {
+	gvkCache = sync.Map{}
+	real := objectKindsFunc
+	stub, calls := stubObjectKinds(t, real)
+	objectKindsFunc = stub
+	t.Cleanup(func() { objectKindsFunc = real })
+
+	pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "a"}}
+	pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "b"}}
+
+	first := lookupGVK(pod1)
+	second := lookupGVK(pod2)
+	third := lookupGVK(pod1)
+
+	assert.Equal(t, 1, *calls,
+		"ObjectKinds should only run once per Go type, not once per event, even across different object instances")
+	assert.Equal(t, first, second)
+	assert.Equal(t, first, third)
+	assert.True(t, first.ok)
+	assert.Equal(t, "Pod", first.kind)
+	assert.Equal(t, "v1", first.apiVersion)
+}
+
+func TestLookupGVK_CachesDifferentTypesSeparately(t *testing.T) {
+	gvkCache = sync.Map{}
+	real := objectKindsFunc
+	stub, calls := stubObjectKinds(t, real)
+	objectKindsFunc = stub
+	t.Cleanup(func() { objectKindsFunc = real })
+
+	pod := lookupGVK(&corev1.Pod{})
+	node := lookupGVK(&corev1.Node{})
+
+	assert.Equal(t, 2, *calls, "two distinct Go types should each trigger their own lookup")
+	assert.Equal(t, "Pod", pod.kind)
+	assert.Equal(t, "Node", node.kind)
+	assert.NotEqual(t, pod, node)
+}
+
+func TestLookupGVK_CachesMisses(t *testing.T) {
+	gvkCache = sync.Map{}
+	real := objectKindsFunc
+	stub, calls := stubObjectKinds(t, real)
+	objectKindsFunc = stub
+	t.Cleanup(func() { objectKindsFunc = real })
+
+	// A type with no GVK registered in the scheme: unregisteredObject is
+	// runtime.Object-shaped but never added to scheme.Scheme, so ObjectKinds
+	// fails on it every time it's actually called.
+	obj := &unregisteredObject{}
+
+	first := lookupGVK(obj)
+	second := lookupGVK(obj)
+
+	assert.False(t, first.ok)
+	assert.Equal(t, first, second)
+	assert.Equal(t, 1, *calls, "a failed lookup should still be cached, not retried on every event")
+}
+
+// unregisteredObject implements runtime.Object but is deliberately never
+// registered with scheme.Scheme, so ObjectKinds always fails to resolve it.
+type unregisteredObject struct {
+	metav1.TypeMeta
+}
+
+func (o *unregisteredObject) DeepCopyObject() runtime.Object {
+	return &unregisteredObject{TypeMeta: o.TypeMeta}
 }
