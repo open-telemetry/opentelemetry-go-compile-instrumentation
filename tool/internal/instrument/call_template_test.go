@@ -147,6 +147,55 @@ func TestCallTemplateData_FuncReturnCount(t *testing.T) {
 	})
 }
 
+func TestCallTemplateData_Receiver(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.Receiver()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("enclosing function without receiver errors", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler() {}")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		_, err := d.Receiver()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no receiver")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Handler() {}")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		recv, err := d.Receiver()
+
+		require.NoError(t, err)
+		assert.Equal(t, "t", recv)
+	})
+}
+
+func TestCompileExpression_ReceiverWithEnclosingMethod(t *testing.T) {
+	tmpl, err := newCallTemplate("traced({{ .Receiver }}, {{ . }})")
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Handler() {}")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	result, err := tmpl.compileExpression(originalCall, enclosing)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+	recvArg, ok := resultCall.Args[0].(*dst.Ident)
+	require.True(t, ok, "expected *dst.Ident, got %T", resultCall.Args[0])
+	assert.Equal(t, "t", recvArg.Name)
+}
+
 func TestCallTemplateData_CallArgumentCount(t *testing.T) {
 	t.Run("not a call errors", func(t *testing.T) {
 		d := &callTemplateData{}
