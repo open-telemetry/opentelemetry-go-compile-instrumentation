@@ -1423,6 +1423,132 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 	require.False(t, matchedPaths["example.com/other"], "unrelated package must not match")
 }
 
+func TestFilterExcludedTargets(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		assert.Nil(t, filterExcludedTargets("example.com/pkg", nil))
+		assert.Empty(t, filterExcludedTargets("example.com/pkg", []rule.InstRule{}))
+	})
+
+	t.Run("does not mutate shared slice", func(t *testing.T) {
+		keepRule := globFuncRule("keep", "example.com/svc/users")
+		excludeRule := globFuncRule("exclude", "example.com/svc/users")
+		excludeRule.ExcludeTargets = []string{"example.com/svc/users"}
+
+		shared := []rule.InstRule{keepRule, excludeRule}
+		original := append([]rule.InstRule(nil), shared...)
+
+		filtered := filterExcludedTargets("example.com/svc/users", shared)
+		require.Len(t, filtered, 1)
+		assert.Equal(t, keepRule, filtered[0])
+		assert.Equal(t, original, shared, "shared exactRules slice must not be mutated in place")
+
+		noExclude := globFuncRule("no-exclude", "example.com/svc/users")
+		sharedNoExclude := []rule.InstRule{noExclude}
+		filteredNoExclude := filterExcludedTargets("example.com/svc/users", sharedNoExclude)
+		assert.Same(
+			t,
+			&sharedNoExclude[0],
+			&filteredNoExclude[0],
+			"zero-allocation path must return the original slice",
+		)
+	})
+
+	t.Run("exclusion at start appends later rules", func(t *testing.T) {
+		excluded := globFuncRule("excluded", "example.com/svc/users")
+		excluded.ExcludeTargets = []string{"example.com/svc/users"}
+		keep := globFuncRule("keep", "example.com/svc/users")
+
+		filtered := filterExcludedTargets(
+			"example.com/svc/users",
+			[]rule.InstRule{excluded, keep},
+		)
+		require.Len(t, filtered, 1)
+		assert.Equal(t, keep, filtered[0])
+	})
+
+	t.Run("all excluded", func(t *testing.T) {
+		excluded := globFuncRule("excluded", "example.com/svc/users")
+		excluded.ExcludeTargets = []string{"example.com/svc/users"}
+
+		filtered := filterExcludedTargets("example.com/svc/users", []rule.InstRule{excluded})
+		assert.Empty(t, filtered)
+	})
+}
+
+func TestRunMatch_ExcludeTargetsGlob(t *testing.T) {
+	usersFile := writeGoSource(t, "users.go", "package users\n\nfunc Handler() {}\n")
+	otelFile := writeGoSource(
+		t,
+		"otelgrpc.go",
+		"package otelgrpc\n\nfunc Handler() {}\n",
+	)
+
+	globRule := globFuncRule("glob-rule", "**")
+	globRule.ExcludeTargets = []string{
+		"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+	}
+	globRules := []targetRule{{target: globRule.Target, rule: globRule}}
+
+	sp := newTestSetupPhase()
+
+	usersDep := &Dependency{
+		ImportPath: "example.com/svc/users",
+		Sources:    []string{usersFile},
+		CgoFiles:   make(map[string]string),
+	}
+	usersSet, err := sp.runMatch(context.Background(), usersDep, map[string][]rule.InstRule{}, globRules)
+	require.NoError(t, err)
+	require.Len(t, usersSet.FuncRules, 1, "non-excluded package should match the glob rule")
+
+	otelDep := &Dependency{
+		ImportPath: "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+		Sources:    []string{otelFile},
+		CgoFiles:   make(map[string]string),
+	}
+	otelSet, err := sp.runMatch(context.Background(), otelDep, map[string][]rule.InstRule{}, globRules)
+	require.NoError(t, err)
+	require.True(t, otelSet.IsEmpty(), "excluded import path must not receive the rule")
+}
+
+func TestParseRuleFromYaml_ExcludeTargets(t *testing.T) {
+	content := []byte(`hook:
+  target: example.com/svc/**
+  exclude_targets:
+    - go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: BeforeHandler
+        path: example.com/hooks
+`)
+	rules, err := parseRuleFromYaml(content)
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	assert.Equal(
+		t,
+		[]string{"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"},
+		rules[0].GetExcludeTargets(),
+	)
+}
+
+func TestParseRuleFromYaml_InvalidExcludeTarget(t *testing.T) {
+	content := []byte(`hook:
+  target: example.com/svc
+  exclude_targets:
+    - "example.com/svc/["
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: BeforeHandler
+        path: example.com/hooks
+`)
+	_, err := parseRuleFromYaml(content)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "exclude_targets[0]")
+}
+
 func TestMatchDeps_RootTargetExpandsToRootModuleGlob(t *testing.T) {
 	dir := t.TempDir()
 	ruleFile := filepath.Join(dir, "root.yaml")

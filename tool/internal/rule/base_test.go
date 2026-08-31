@@ -14,16 +14,18 @@ import (
 func TestInstBaseRuleAccessors(t *testing.T) {
 	where := &WhereDef{Func: "Foo"}
 	base := &InstBaseRule{
-		Name:    "myrule",
-		Target:  "example.com/pkg",
-		Version: "v1.0.0,v2.0.0",
-		Where:   where,
+		Name:           "myrule",
+		Target:         "example.com/pkg",
+		Version:        "v1.0.0,v2.0.0",
+		ExcludeTargets: []string{"example.com/excluded"},
+		Where:          where,
 	}
 
 	assert.Equal(t, "myrule", base.String())
 	assert.Equal(t, "myrule", base.GetName())
 	assert.Equal(t, "example.com/pkg", base.GetTarget())
 	assert.Equal(t, "v1.0.0,v2.0.0", base.GetVersion())
+	assert.Equal(t, []string{"example.com/excluded"}, base.GetExcludeTargets())
 	assert.Same(t, where, base.GetWhere())
 
 	// InstBaseRule satisfies the InstRule interface.
