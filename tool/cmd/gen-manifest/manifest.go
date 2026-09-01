@@ -1,10 +1,9 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package manifest
+package main
 
 import (
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"maps"
@@ -16,7 +15,6 @@ import (
 	"golang.org/x/mod/modfile"
 	"gopkg.in/yaml.v3"
 
-	"go.opentelemetry.io/otelc/tool/data"
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -42,7 +40,7 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 	manifest := make(Manifest, 0)
 	err := filepath.WalkDir(instrumentationRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 		if d.IsDir() || d.Name() != "go.mod" || filepath.Dir(path) == instrumentationRoot {
 			return nil
@@ -76,14 +74,6 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 	return manifest, nil
 }
 
-func load() (Manifest, error) {
-	var manifest Manifest
-	if err := json.Unmarshal(data.GetManifestJSON(), &manifest); err != nil {
-		return nil, ex.Wrapf(err, "loading embedded instrumentation manifest")
-	}
-	return manifest, nil
-}
-
 func loadModulePath(path string) (string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -110,7 +100,7 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 	rootFS := root.FS()
 	err = fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 		if d.IsDir() {
 			if path == "." {
@@ -119,7 +109,7 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 			if _, statErr := fs.Stat(rootFS, path+"/go.mod"); statErr == nil {
 				return fs.SkipDir
 			} else if !errors.Is(statErr, fs.ErrNotExist) {
-				return statErr
+				return ex.Wrapf(statErr, "stat %s/go.mod", path)
 			}
 			return nil
 		}

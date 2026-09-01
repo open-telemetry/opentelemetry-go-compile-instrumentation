@@ -83,22 +83,22 @@ make help
 - `make format` - Format all code (Go + YAML + License Headers)
   - `make format/go` - Format Go code only using golangci-lint
   - `make format/yaml` - Format YAML files only using yamlfmt
-  - `make format/license` - Apply license headers to Go files
 - `make lint` - Run all linters (Go, YAML, GitHub Actions, Makefile)
   - `make lint/go` - Run golangci-lint on Go code
   - `make lint/yaml` - Lint YAML formatting
   - `make lint/action` - Lint GitHub Actions workflows
   - `make lint/makefile` - Lint Makefile
-  - `make lint/license` - Check license headers (has dedicated CI workflow)
+  - `make lint/license-header` - Check license headers (has dedicated CI workflow)
+  - `make lint/license-header/fix` - Apply license headers to Go and shell files
 
 #### License Headers
 
-All Go files must include the proper license header. The license header configuration is defined in `license.yml` which handles exclusions for vendor directories, temporary files, and generated code.
+All Go and shell files must include the proper license header. The required headers and path exclusions are managed in `.github/scripts/license-check.sh`.
 
 To check and fix license headers:
 
-- **Check license headers**: `make lint/license`
-- **Apply license headers**: `make format/license`
+- **Check license headers**: `make lint/license-header`
+- **Apply license headers**: `make lint/license-header/fix`
 
 The license header checker has a dedicated CI workflow (`check-license-headers.yaml`) that runs automatically on pull requests and pushes when Go files or the license configuration change.
 
