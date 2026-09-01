@@ -35,6 +35,23 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 	resolved := make(map[string]string, len(pending))
 	var lastErr error
 
+	// findPackage returns the single package in pkgs matching importPath, nil if
+	// none matched (the caller retries it against the next module dir), or an
+	// error if importPath ambiguously matched more than one package.
+	findPackage := func(pkgs []*packages.Package, importPath string) (*packages.Package, error) {
+		var found *packages.Package
+		for _, pkg := range pkgs {
+			if pkg.PkgPath != importPath || len(pkg.Errors) > 0 || pkg.Dir == "" {
+				continue
+			}
+			if found != nil {
+				return nil, ex.Newf("import path %q resolved to multiple packages", importPath)
+			}
+			found = pkg
+		}
+		return found, nil
+	}
+
 	for _, moduleDir := range dirs {
 		if len(pending) == 0 {
 			break
@@ -52,20 +69,14 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 
 		next := pending[:0]
 		for _, p := range pending {
-			var found *packages.Package
-			for _, pkg := range pkgs {
-				if pkg.PkgPath != p || len(pkg.Errors) > 0 || pkg.Dir == "" {
-					continue
-				}
-				if found != nil {
-					return ex.Newf("import path %q resolved to multiple packages", p)
-				}
-				found = pkg
-			}
-			if found == nil {
+			pkg, err := findPackage(pkgs, p)
+			switch {
+			case err != nil:
+				return err
+			case pkg == nil:
 				next = append(next, p)
-			} else {
-				resolved[p] = found.Dir
+			default:
+				resolved[p] = pkg.Dir
 			}
 		}
 		pending = next
