@@ -174,3 +174,40 @@ func TestMetricAttributesAreBounded(t *testing.T) {
 	assert.Equal(t, "GET", attrs["http.request.method"])
 	assert.Equal(t, int64(200), attrs["http.response.status_code"])
 }
+
+// TemplatePath's ID-shape heuristic cannot catch every user-chosen value (see
+// its own doc comment): a coupon, plan, product or SKU ID the caller picked
+// rather than one Stripe generated does not match the shape and survives as a
+// literal. That is fine on a span (one value per request), but on a metric
+// label it would mean an unbounded number of series. metricURLTemplate must
+// stop the label at the first unresolved segment rather than let it through.
+func TestMetricURLTemplateStopsAtUnresolvedID(t *testing.T) {
+	for _, path := range []string{
+		"/v1/coupons/summer",
+		"/v1/products/my-product",
+	} {
+		attrs := attrMap(MetricAttributes(Request{Method: "GET", Path: path}, 200))
+		assert.NotContains(t, attrs["url.template"], "summer")
+		assert.NotContains(t, attrs["url.template"], "my-product")
+	}
+
+	assert.Equal(t, "/v1/coupons", metricURLTemplate("/v1/coupons/summer"))
+	assert.Equal(t, "/v1/products", metricURLTemplate("/v1/products/my-product"))
+}
+
+// The truncation must not cost anything when TemplatePath did resolve the
+// segment: the common single-ID and nested sub-resource shapes, and the v2
+// case (which has one extra fixed namespace segment before the resource
+// name), all keep their full template on the metric label.
+func TestMetricURLTemplateKeepsResolvedIDs(t *testing.T) {
+	cases := map[string]string{
+		"/v1/customers/cus_NffrFeUfNV2Hib":                   "/v1/customers/{id}",
+		"/v1/customers/cus_NffrFeUfNV2Hib/sources/card_1Mvo": "/v1/customers/{id}/sources/{id}",
+		"/v1/payment_intents":                                "/v1/payment_intents",
+		"/v2/core/events/evt_1MvoiJ2eZvKYlo2C":               "/v2/core/events/{id}",
+		"/v2/core/events":                                    "/v2/core/events",
+	}
+	for path, want := range cases {
+		assert.Equal(t, want, metricURLTemplate(path), "path=%s", path)
+	}
+}

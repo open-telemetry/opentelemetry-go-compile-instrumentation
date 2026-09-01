@@ -102,6 +102,31 @@ func TestStripeEnabler(t *testing.T) {
 	}
 }
 
+// A nil request must not panic; there is nothing to build a span from.
+func TestBeforeRequestNilRequestIsNoop(t *testing.T) {
+	sr, _ := setupTestProviders(t)
+	ictx := newCallContext(nil)
+
+	require.NotPanics(t, func() {
+		BeforeRequest(ictx, nil, nil, nil, nil)
+	})
+	assert.Empty(t, sr.Ended())
+}
+
+// A request with no URL (never happens via net/http, but the hook signature
+// allows it) must also bail out before touching req.URL.
+func TestBeforeRequestNilURLIsNoop(t *testing.T) {
+	sr, _ := setupTestProviders(t)
+	req := &http.Request{}
+	ictx := newCallContext(req)
+
+	require.NotPanics(t, func() {
+		BeforeRequest(ictx, nil, req, nil, nil)
+	})
+	assert.Same(t, req, ictx.GetParam(reqParamIndex))
+	assert.Empty(t, sr.Ended())
+}
+
 func TestRequestSpanSuccess(t *testing.T) {
 	sr, _ := setupTestProviders(t)
 

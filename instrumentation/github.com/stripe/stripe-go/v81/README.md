@@ -119,8 +119,13 @@ stripe-go v82 into their build. Keep the two in sync when changing either.
   fail the build. `make test-latestlibbuild` is the guard. This is the cost of
   covering the whole SDK from one chokepoint instead of about 800 public
   methods.
-- **User-defined resource IDs are not templated.** See the span-naming section
-  above.
+- **User-defined resource IDs are not templated on spans.** See the span-naming
+  section above. Metric labels are safe from this: when the shape check cannot
+  confirm a segment is a Stripe-generated ID, the metric label stops at the
+  resource name (`/v1/coupons`) rather than include the unconfirmed value
+  (`/v1/coupons/summer`), so a metric series can never grow unbounded. Spans
+  keep the raw path either way, since url.path is per-request rather than an
+  aggregated label.
 
 ## Tests
 

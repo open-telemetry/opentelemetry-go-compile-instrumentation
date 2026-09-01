@@ -289,8 +289,9 @@ func NewMetrics(meter metric.Meter) Metrics {
 // MetricAttributes returns bounded-cardinality attributes for Stripe metrics.
 //
 // Included: server.address, server.port, http.request.method, url.template (the
-// ~500 Stripe endpoints), http.response.status_code. Deliberately excluded:
-// url.path and stripe.request_id. Both are unbounded, so they stay on spans.
+// ~150 Stripe resource collections), http.response.status_code. Deliberately
+// excluded: url.path and stripe.request_id. Both are unbounded, so they stay on
+// spans.
 func MetricAttributes(req Request, statusCode int) []attribute.KeyValue {
 	attrs := make([]attribute.KeyValue, 0, 5)
 	attrs = append(attrs, semconv.ServerAddress(serverOrDefault(req.ServerAddress)))
@@ -298,13 +299,48 @@ func MetricAttributes(req Request, statusCode int) []attribute.KeyValue {
 		attrs = append(attrs, semconv.ServerPort(req.ServerPort))
 	}
 	attrs = append(attrs, semconv.HTTPRequestMethodKey.String(normalizeMethod(req.Method)))
-	if tmpl := TemplatePath(req.Path); tmpl != "" {
+	if tmpl := metricURLTemplate(req.Path); tmpl != "" {
 		attrs = append(attrs, semconv.URLTemplate(tmpl))
 	}
 	if statusCode > 0 {
 		attrs = append(attrs, semconv.HTTPResponseStatusCode(statusCode))
 	}
 	return attrs
+}
+
+// metricURLTemplate returns a stricter template than TemplatePath, kept only
+// for the metric label.
+//
+// TemplatePath's shape heuristic cannot catch every user-chosen ID: values on
+// endpoints such as /v1/coupons/summer or /v1/products/my-product don't look
+// like a Stripe-generated ID, so TemplatePath leaves them untouched, and the
+// resulting template is unbounded. That is tolerable on a span (one value per
+// request, and url.path already carries the exact resource), but not on a
+// metric label, where every distinct value becomes a permanent series.
+//
+// The unbounded case can only start at one place: the first segment after the
+// fixed version/namespace/resource prefix, which is the sole point where a
+// caller-supplied value can stand where a Stripe-generated ID was expected. If
+// TemplatePath resolved that segment to IDPlaceholder, the request is
+// confirmed to be addressing a real Stripe object, and everything after it
+// (further IDs, or the small fixed vocabulary of sub-resource names) is kept
+// as-is, matching TemplatePath exactly. If it did not, this stops right there
+// instead of guessing, so a request the heuristic could not classify never
+// contributes an unbounded label value.
+func metricURLTemplate(path string) string {
+	tmpl := TemplatePath(path)
+	if tmpl == "" {
+		return ""
+	}
+	segments := strings.Split(tmpl, "/")
+	prefixLen := 3 // "", version, resource
+	if len(segments) > 1 && segments[1] == "v2" {
+		prefixLen = 4 // "", version, namespace, resource
+	}
+	if len(segments) <= prefixLen || segments[prefixLen] == IDPlaceholder {
+		return tmpl
+	}
+	return strings.Join(segments[:prefixLen], "/")
 }
 
 // RecordRequestDuration records the duration of a logical Stripe API request.
