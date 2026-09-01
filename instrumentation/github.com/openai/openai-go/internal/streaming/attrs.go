@@ -21,3 +21,7 @@ const (
 	genAIUsageTotalTokensKey         = attribute.Key("gen_ai.usage.total_tokens")
 	genAIResponseTimeToFirstTokenKey = attribute.Key("gen_ai.response.time_to_first_token")
 )
+
+// maxSpanAttrs is the most attributes finalize can set at once. Bump it if a
+// key is added above.
+const maxSpanAttrs = 7

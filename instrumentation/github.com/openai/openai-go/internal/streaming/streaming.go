@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -42,6 +43,9 @@ type StreamingReader struct {
 	span          trace.Span
 	op            OperationType
 	done          atomic.Bool
+	// sawUsage is true once some chunk has carried a usage object. Without it,
+	// a reported 0 and a missing usage object look identical.
+	sawUsage bool
 }
 
 func NewStreamingReader(
@@ -97,22 +101,33 @@ func (r *StreamingReader) finalize(flush bool) {
 		r.flushRemaining()
 	}
 
-	r.span.SetAttributes(
-		genAIResponseFinishReasonsKey.StringSlice(r.reasons),
-		genAIUsageInputTokensKey.Int64(r.inputTokens),
-		genAIUsageOutputTokensKey.Int64(r.outputTokens),
-		genAIUsageTotalTokensKey.Int64(r.totalTokens),
-	)
+	// One SetAttributes call, skipping anything the stream never reported.
+	attrs := make([]attribute.KeyValue, 0, maxSpanAttrs)
+	if len(r.reasons) > 0 {
+		attrs = append(attrs, genAIResponseFinishReasonsKey.StringSlice(r.reasons))
+	}
+	// OpenAI only sends usage on a streaming response when the request set
+	// stream_options.include_usage. Without this check, every stream that
+	// didn't ask for it reports 0 tokens as if that had been measured. Usage
+	// that really does say 0 is still recorded.
+	if r.sawUsage {
+		attrs = append(attrs,
+			genAIUsageInputTokensKey.Int64(r.inputTokens),
+			genAIUsageOutputTokensKey.Int64(r.outputTokens),
+			genAIUsageTotalTokensKey.Int64(r.totalTokens),
+		)
+	}
 	if r.id != "" {
-		r.span.SetAttributes(genAIResponseIDKey.String(r.id))
+		attrs = append(attrs, genAIResponseIDKey.String(r.id))
 	}
 	if r.responseModel != "" {
-		r.span.SetAttributes(genAIResponseModelKey.String(r.responseModel))
+		attrs = append(attrs, genAIResponseModelKey.String(r.responseModel))
 	}
 	if !r.first.IsZero() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
-		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
+		attrs = append(attrs, genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
 	}
+	r.span.SetAttributes(attrs...)
 
 	r.span.End()
 }
@@ -204,6 +219,22 @@ func (r *StreamingReader) processChunk(payload []byte) {
 	}
 }
 
+// recordUsage merges a chunk's usage object into the running counts. Keeping
+// the last non-zero value means a later chunk with a partial usage object
+// can't wipe out what an earlier one reported.
+func (r *StreamingReader) recordUsage(input, output, total int64) {
+	r.sawUsage = true
+	if input > 0 {
+		r.inputTokens = input
+	}
+	if output > 0 {
+		r.outputTokens = output
+	}
+	if total > 0 {
+		r.totalTokens = total
+	}
+}
+
 func (r *StreamingReader) processChatChunk(payload []byte) {
 	var chunk struct {
 		ID      string `json:"id"`
@@ -214,7 +245,8 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 				Content string `json:"content"`
 			} `json:"delta"`
 		} `json:"choices"`
-		Usage struct {
+		// Pointer so a missing usage object is distinguishable from 0 tokens.
+		Usage *struct {
 			PromptTokens     int64 `json:"prompt_tokens"`
 			CompletionTokens int64 `json:"completion_tokens"`
 			TotalTokens      int64 `json:"total_tokens"`
@@ -230,14 +262,8 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 	if chunk.Model != "" {
 		r.responseModel = chunk.Model
 	}
-	if chunk.Usage.PromptTokens > 0 {
-		r.inputTokens = chunk.Usage.PromptTokens
-	}
-	if chunk.Usage.CompletionTokens > 0 {
-		r.outputTokens = chunk.Usage.CompletionTokens
-	}
-	if chunk.Usage.TotalTokens > 0 {
-		r.totalTokens = chunk.Usage.TotalTokens
+	if chunk.Usage != nil {
+		r.recordUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens)
 	}
 	for _, c := range chunk.Choices {
 		if c.FinishReason != "" {
@@ -253,7 +279,8 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 		Choices []struct {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
-		Usage struct {
+		// Pointer so a missing usage object is distinguishable from 0 tokens.
+		Usage *struct {
 			PromptTokens     int64 `json:"prompt_tokens"`
 			CompletionTokens int64 `json:"completion_tokens"`
 			TotalTokens      int64 `json:"total_tokens"`
@@ -269,14 +296,8 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 	if chunk.Model != "" {
 		r.responseModel = chunk.Model
 	}
-	if chunk.Usage.PromptTokens > 0 {
-		r.inputTokens = chunk.Usage.PromptTokens
-	}
-	if chunk.Usage.CompletionTokens > 0 {
-		r.outputTokens = chunk.Usage.CompletionTokens
-	}
-	if chunk.Usage.TotalTokens > 0 {
-		r.totalTokens = chunk.Usage.TotalTokens
+	if chunk.Usage != nil {
+		r.recordUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens)
 	}
 	for _, c := range chunk.Choices {
 		if c.FinishReason != "" {
