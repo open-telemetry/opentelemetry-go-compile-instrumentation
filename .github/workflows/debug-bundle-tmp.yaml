@@ -1,6 +1,8 @@
 name: Debug Bundle Tmp
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - dario.castane/pr-1292-go-1-25-deps-d70919
 jobs:
   debug:
     runs-on: ubuntu-latest
