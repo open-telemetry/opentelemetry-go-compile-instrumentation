@@ -37,10 +37,11 @@ import (
 //	    otelhttp: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 type InstDeclRule struct {
 	InstBaseRule `yaml:",inline"`
-	Kind         string `json:"kind"           yaml:"kind"`
-	Identifier   string `json:"identifier"     yaml:"identifier"`
-	Replace      string `json:"replace"        yaml:"replace"`
-	Wrap         string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
+
+	Kind       string `json:"kind"           yaml:"kind"`
+	Identifier string `json:"identifier"     yaml:"identifier"`
+	Replace    string `json:"replace"        yaml:"replace"`
+	Wrap       string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
 }
 
 // NewInstDeclRule loads and validates an InstDeclRule from YAML data.

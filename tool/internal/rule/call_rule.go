@@ -34,6 +34,7 @@ import (
 // Into: tracedGet(http.Get("url"))
 type InstCallRule struct {
 	InstBaseRule `yaml:",inline"`
+
 	FunctionCall string   `json:"function_call" yaml:"function_call"`
 	ImportPath   string   `json:"import-path"   yaml:"-"` // "net/http", parsed from FunctionCall
 	FuncName     string   `json:"func-name"     yaml:"-"` // "Get", parsed from FunctionCall

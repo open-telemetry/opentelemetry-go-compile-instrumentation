@@ -17,8 +17,9 @@ import (
 // their bodies. The template supports {{.FuncName}} as a placeholder.
 type InstDirectiveRule struct {
 	InstBaseRule `yaml:",inline"`
-	Directive    string `json:"directive" yaml:"directive"`
-	Template     string `json:"template"  yaml:"template"`
+
+	Directive string `json:"directive" yaml:"directive"`
+	Template  string `json:"template"  yaml:"template"`
 }
 
 // NewInstDirectiveRule loads and validates an InstDirectiveRule from YAML data.

@@ -47,7 +47,8 @@ type FuncSignature struct {
 //	last_result: error
 //	param: context.Context
 type InstFuncRule struct {
-	InstBaseRule      `yaml:",inline"`
+	InstBaseRule `yaml:",inline"`
+
 	Func              string         `json:"func"                         yaml:"func"`
 	Recv              string         `json:"recv"                         yaml:"recv"`
 	Before            string         `json:"before"                       yaml:"before"`

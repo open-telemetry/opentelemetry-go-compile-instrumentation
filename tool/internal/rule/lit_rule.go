@@ -42,7 +42,8 @@ type InstLitField struct {
 // This transforms: &http.Transport{MaxIdleConns: 100}
 // Into: &http.Transport{Internal: true, MaxIdleConns: 100}
 type InstLitRule struct {
-	InstBaseRule  `yaml:",inline"`
+	InstBaseRule `yaml:",inline"`
+
 	StructLiteral string          `json:"struct_literal" yaml:"struct_literal"`
 	ImportPath    string          `json:"import-path"    yaml:"-"` // "net/http", parsed from StructLiteral
 	TypeName      string          `json:"type-name"      yaml:"-"` // "Transport", parsed from StructLiteral

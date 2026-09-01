@@ -27,8 +27,9 @@ type InstStructField struct {
 //	      type: string
 type InstStructRule struct {
 	InstBaseRule `yaml:",inline"`
-	Struct       string             `json:"struct"    yaml:"struct"`
-	NewField     []*InstStructField `json:"new_field" yaml:"new_field"`
+
+	Struct   string             `json:"struct"    yaml:"struct"`
+	NewField []*InstStructField `json:"new_field" yaml:"new_field"`
 }
 
 // NewInstStructRule loads and validates an InstStructRule from YAML data.

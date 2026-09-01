@@ -21,6 +21,7 @@ import (
 //		path: "github.com/foo/bar/newfile"
 type InstFileRule struct {
 	InstBaseRule `yaml:",inline"`
+
 	File         string `json:"file"          yaml:"file"`
 	Path         string `json:"path"          yaml:"path"`
 	ResolvedPath string `json:"resolved_path" yaml:"-"` // local dir Path resolves to

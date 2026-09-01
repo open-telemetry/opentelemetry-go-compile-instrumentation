@@ -27,11 +27,12 @@ import (
 //		placement: before|after
 type InstRawRule struct {
 	InstBaseRule `yaml:",inline"`
-	Func         string `json:"func"                yaml:"func"`
-	Recv         string `json:"recv"                yaml:"recv"`
-	Raw          string `json:"raw"                 yaml:"raw"`
-	Pattern      string `json:"pattern,omitempty"   yaml:"pattern,omitempty"`
-	Placement    string `json:"placement,omitempty" yaml:"placement,omitempty"`
+
+	Func      string `json:"func"                yaml:"func"`
+	Recv      string `json:"recv"                yaml:"recv"`
+	Raw       string `json:"raw"                 yaml:"raw"`
+	Pattern   string `json:"pattern,omitempty"   yaml:"pattern,omitempty"`
+	Placement string `json:"placement,omitempty" yaml:"placement,omitempty"`
 }
 
 // NewInstRawRule loads and validates an InstRawRule from YAML data.
