@@ -83,7 +83,7 @@ var flagsWithPathValues = map[string]bool{
 	"-gcflags":       true,
 	"-installsuffix": true,
 	"-ldflags":       true,
-	flagMod:          true,
+	"-mod":           true,
 	"-modfile":       true,
 	"-overlay":       true,
 	"-pgo":           true,

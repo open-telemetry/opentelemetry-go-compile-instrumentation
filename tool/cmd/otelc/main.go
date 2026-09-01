@@ -29,7 +29,13 @@ func main() {
 		Usage:       "OpenTelemetry Go Compile-Time Instrumentation Tool",
 		HideVersion: true,
 		Flags: []cli.Flag{
-			newWorkDirFlag(),
+			&cli.StringFlag{
+				Name:      flagWorkDir,
+				Aliases:   []string{"w"},
+				Usage:     "The path to a directory where working files will be written",
+				TakesFile: true,
+				Value:     util.GetOtelcWorkDir(),
+			},
 			&cli.BoolFlag{
 				Name:    "debug",
 				Aliases: []string{"d"},
@@ -109,16 +115,6 @@ func main() {
 	err := app.Run(ctx, os.Args)
 	if err != nil {
 		ex.Fatal(err)
-	}
-}
-
-func newWorkDirFlag() *cli.StringFlag {
-	return &cli.StringFlag{
-		Name:      flagWorkDir,
-		Aliases:   []string{"w"},
-		Usage:     "The path to a directory where working files will be written",
-		TakesFile: true,
-		Value:     util.GetOtelcWorkDir(),
 	}
 }
 

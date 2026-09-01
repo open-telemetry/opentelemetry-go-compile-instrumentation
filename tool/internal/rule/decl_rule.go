@@ -75,7 +75,7 @@ func NewInstDeclRule(data []byte, name string) (*InstDeclRule, error) {
 // An empty string ("") means match any kind.
 var validDeclKinds = map[string]bool{ //nolint:gochecknoglobals // private lookup table
 	"":      true, // match any
-	SelFunc: true,
+	"func":  true,
 	"var":   true,
 	"const": true,
 	"type":  true,

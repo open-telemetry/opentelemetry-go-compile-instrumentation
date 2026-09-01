@@ -21,7 +21,13 @@ func TestInitLogger(t *testing.T) {
 		ctxCh := make(chan context.Context, 1)
 		app := &cli.Command{
 			Flags: []cli.Flag{
-				newWorkDirFlag(),
+				&cli.StringFlag{
+					Name:      flagWorkDir,
+					Aliases:   []string{"w"},
+					Usage:     "The path to a directory where working files will be written",
+					TakesFile: true,
+					Value:     util.GetOtelcWorkDir(),
+				},
 				&cli.BoolFlag{Name: "debug", Sources: cli.EnvVars(util.EnvOtelcDebug)},
 			},
 			Before: initLogger,
@@ -135,7 +141,13 @@ func TestInitLoggerToolexecWorkDir(t *testing.T) {
 		t.Helper()
 		app := &cli.Command{
 			Flags: []cli.Flag{
-				newWorkDirFlag(),
+				&cli.StringFlag{
+					Name:      flagWorkDir,
+					Aliases:   []string{"w"},
+					Usage:     "The path to a directory where working files will be written",
+					TakesFile: true,
+					Value:     util.GetOtelcWorkDir(),
+				},
 			},
 			Before: initLogger,
 			Commands: []*cli.Command{{
@@ -228,7 +240,13 @@ func TestCleanupSubcommand(t *testing.T) {
 
 	app := &cli.Command{
 		Flags: []cli.Flag{
-			newWorkDirFlag(),
+			&cli.StringFlag{
+				Name:      flagWorkDir,
+				Aliases:   []string{"w"},
+				Usage:     "The path to a directory where working files will be written",
+				TakesFile: true,
+				Value:     util.GetOtelcWorkDir(),
+			},
 		},
 		Before:   initLogger,
 		Commands: []*cli.Command{&commandCleanup},
