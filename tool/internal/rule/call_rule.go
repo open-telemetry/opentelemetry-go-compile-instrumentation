@@ -35,37 +35,12 @@ import (
 type InstCallRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	// FunctionCall is the qualified function name from YAML (e.g., "net/http.Get")
-	// This field is parsed into ImportPath and FuncName during rule creation.
-	FunctionCall string `json:"function_call" yaml:"function_call"`
-
-	// ImportPath is the parsed package import path (e.g., "net/http")
-	// This field is populated during rule creation from FunctionCall.
-	ImportPath string `json:"import-path" yaml:"-"`
-
-	// FuncName is the parsed function name (e.g., "Get")
-	// This field is populated during rule creation from FunctionCall.
-	FuncName string `json:"func-name" yaml:"-"`
-
-	// Replace is the wrapper code with {{ . }} as placeholder for the original call.
-	// The replacement must be a valid Go expression. The output may be any
-	// expression type; it is not required to be a call expression.
-	//
-	// Examples:
-	//   - "wrapper({{ . }})" wraps the call with wrapper()
-	//   - "(func() { return {{ . }} })()" uses an IIFE
-	//   - "otelhttp.NewTransport({{ . }})" replaces a transport value
-	Replace string `json:"replace" yaml:"replace"`
-
-	// AppendArgs is a list of Go expression strings appended as additional
-	// arguments to the matched call. See docs/rules.md for full semantics.
-	AppendArgs []string `json:"append_args" yaml:"append_args"`
-
-	// VariadicType is the element type of the variadic parameter (e.g. "grpc.DialOption").
-	// Required only when the matched call uses an ellipsis spread (f(a, opts...)).
-	// When set and the call is ellipsis, an IIFE wrapper is generated.
-	// When unset and the call is ellipsis, the call is skipped with a warning.
-	VariadicType string `json:"variadic_type" yaml:"variadic_type"`
+	FunctionCall string   `json:"function_call" yaml:"function_call"`
+	ImportPath   string   `json:"import-path"   yaml:"-"` // "net/http", parsed from FunctionCall
+	FuncName     string   `json:"func-name"     yaml:"-"` // "Get", parsed from FunctionCall
+	Replace      string   `json:"replace"       yaml:"replace"`
+	AppendArgs   []string `json:"append_args"   yaml:"append_args"`
+	VariadicType string   `json:"variadic_type" yaml:"variadic_type"`
 }
 
 // funcNamePattern matches qualified function names like "net/http.Get".
