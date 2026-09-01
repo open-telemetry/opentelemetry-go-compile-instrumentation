@@ -17,14 +17,6 @@ import (
 
 // resolveRulePaths resolves the import paths referenced by function and file rules
 // to absolute filesystem paths.
-//
-// This must be done during the setup phase because the instrument phase no longer
-// has enough context to resolve import paths (module directories). The resolved paths
-// are embedded into the rules and consumed directly during instrumentation.
-//
-// All pending paths are collected up front and resolved together, batching
-// them into a single packages.Load call per module dir instead of issuing
-// one call per path.
 func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
 	dirs := slices.Sorted(maps.Keys(moduleDirs))
 
@@ -60,14 +52,20 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 
 		next := pending[:0]
 		for _, p := range pending {
-			pkg, err := findPackage(pkgs, p)
-			switch {
-			case err != nil:
-				lastErr = err
-			case pkg == nil:
+			var found *packages.Package
+			for _, pkg := range pkgs {
+				if pkg.PkgPath != p || len(pkg.Errors) > 0 || pkg.Dir == "" {
+					continue
+				}
+				if found != nil {
+					return ex.Newf("import path %q resolved to multiple packages", p)
+				}
+				found = pkg
+			}
+			if found == nil {
 				next = append(next, p)
-			default:
-				resolved[p] = pkg.Dir
+			} else {
+				resolved[p] = found.Dir
 			}
 		}
 		pending = next
@@ -87,23 +85,6 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 	}
 
 	return nil
-}
-
-// findPackage returns the single package in pkgs matching importPath, nil if
-// none matched (the caller should retry it in the next module dir), or an
-// error if importPath ambiguously matched more than one package.
-func findPackage(pkgs []*packages.Package, importPath string) (*packages.Package, error) {
-	var found *packages.Package
-	for _, pkg := range pkgs {
-		if pkg.PkgPath != importPath || len(pkg.Errors) > 0 || pkg.Dir == "" {
-			continue
-		}
-		if found != nil {
-			return nil, ex.Newf("import path %q resolved to multiple packages", importPath)
-		}
-		found = pkg
-	}
-	return found, nil
 }
 
 // store stores the matched rules to the file
