@@ -56,7 +56,7 @@ signals an undeclared instrumentation.
 | `go.opentelemetry.io/otel`                          | `otel-sdk.yaml`     | nothing — guards the global tracer provider                            |
 | `go.opentelemetry.io/otel/sdk/trace`                | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |
 | `go.opentelemetry.io/otel/trace`                    | `otel-sdk.yaml`     | nothing — GLS fallback for `SpanFromContext`                           |
-| `log`, `log/slog`, `github.com/sirupsen/logrus`     | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
+| `log`, `log/slog`, `github.com/rs/zerolog`, `github.com/sirupsen/logrus` | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
 | `runtime`                                           | `runtime.yaml`      | nothing — goroutine-local context propagation                          |
 
 ## Validate locally

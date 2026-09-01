@@ -77,3 +77,37 @@ func TestLogsLogrus(t *testing.T) {
 	spanMatches := spanIDPattern.FindAllString(output, -1)
 	require.NotEmpty(t, spanMatches, "Expected span_id to be injected into logrus messages")
 }
+
+func TestLogsZerolog(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "logszerolog", "go", "build", "-a")
+
+	f := testutil.NewTestFixture(t, testutil.WithoutCollector())
+	output := f.Run("logszerolog")
+
+	zerologMessages := []string{
+		"trace message",
+		"debug message",
+		"info message",
+		"warn message",
+		"error message",
+		"err with message",
+		"log message",
+		"logger print message",
+		"logger printf message",
+		"logger println message",
+		"fatal message",
+		"panic message",
+	}
+	for _, msg := range zerologMessages {
+		require.Contains(t, output, msg, "Expected zerolog message: %s", msg)
+	}
+
+	traceIDPattern := regexp.MustCompile(`"trace_id":"[a-f0-9]{32}"`)
+	matches := traceIDPattern.FindAllString(output, -1)
+	require.NotEmpty(t, matches, "Expected trace_id to be injected into zerolog messages")
+
+	spanIDPattern := regexp.MustCompile(`"span_id":"[a-f0-9]{16}"`)
+	spanMatches := spanIDPattern.FindAllString(output, -1)
+	require.NotEmpty(t, spanMatches, "Expected span_id to be injected into zerolog messages")
+}
