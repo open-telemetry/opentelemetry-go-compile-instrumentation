@@ -330,9 +330,8 @@ func setupSignalHandler() {
 func handleShutdownSignal(sigCh chan os.Signal) {
 	sig := <-sigCh
 
-	// Stop listening now so a repeated signal isn't swallowed by our buffered
-	// channel but reaches the app or the default disposition, keeping the
-	// "press again to force quit" behavior.
+	// Stop listening on otelc's channel so host application signal handlers
+	// remain active and a repeated signal reaches the default disposition.
 	signal.Stop(sigCh)
 
 	logger.Info("received signal, flushing telemetry", "signal", sig.String())

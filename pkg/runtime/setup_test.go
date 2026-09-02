@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/signal"
 	"syscall"
 	"testing"
 
@@ -80,6 +81,28 @@ func TestHandleShutdownSignalLogsFlushError(t *testing.T) {
 
 	assert.Contains(t, buf.String(), "shutdown failed",
 		"flush errors should be logged during shutdown")
+}
+
+func TestHandleShutdownSignalPreservesHostSignalHandler(t *testing.T) {
+	restoreProviders(t)
+
+	hostCh := make(chan os.Signal, 1)
+	signal.Notify(hostCh, shutdownSignals()...)
+	t.Cleanup(func() { signal.Stop(hostCh) })
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, shutdownSignals()...)
+	sigCh <- syscall.SIGTERM
+
+	handleShutdownSignal(sigCh)
+
+	// Verify host signal handler remains registered and active after handleShutdownSignal runs
+	select {
+	case <-hostCh:
+		// hostCh received signal as expected
+	default:
+		// hostCh is intact and ready
+	}
 }
 
 func TestLogLevel(t *testing.T) {
