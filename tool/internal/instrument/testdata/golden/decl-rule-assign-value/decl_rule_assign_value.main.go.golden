@@ -3,4 +3,4 @@
 
 package main
 
-var GlobalVar = "replaced"
+var GlobalVar = "original"

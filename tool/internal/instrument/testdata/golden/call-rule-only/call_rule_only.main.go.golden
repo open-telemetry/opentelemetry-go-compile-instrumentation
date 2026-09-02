@@ -12,11 +12,11 @@ func Wrapper(size uintptr) uintptr {
 
 func CallSizeof() {
 	x := 42
-	size := Wrapper(unsafe.Sizeof(x))
+	size := unsafe.Sizeof(x)
 	_ = size
 }
 
 func main() {
 	y := "hello"
-	_ = Wrapper(unsafe.Sizeof(y))
+	_ = unsafe.Sizeof(y)
 }

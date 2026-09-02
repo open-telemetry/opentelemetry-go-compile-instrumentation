@@ -4,6 +4,8 @@
 package instrument
 
 import (
+	"go/token"
+
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -198,6 +200,31 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *tJump) error {
 	return ex.Newf("can not remove After trampoline function")
 }
 
+func removeUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
+	structName := trampolineHookContextImplType + tjump.rule.Identity()
+	found := 0
+	for _, decl := range targetFile.Decls {
+		if funcDecl, ok := decl.(*dst.FuncDecl); ok && funcDecl.Recv != nil && len(funcDecl.Recv.List) > 0 {
+			if starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr); ok {
+				if ident, ok := starExpr.X.(*dst.Ident); ok && ident.Name == structName {
+					name := funcDecl.Name.Name
+					if name == trampolineGetReturnValName || name == trampolineSetReturnValName || name == trampolineGetReturnValCountName {
+						funcDecl.Body = ast.Block(ast.ExprStmt(&dst.CallExpr{
+							Fun:  ast.Ident("panic"),
+							Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"unreachable"`}},
+						}))
+						found++
+					}
+				}
+			}
+		}
+	}
+	if found != 3 {
+		return ex.Newf("can not find unused HookContext methods")
+	}
+	return nil
+}
+
 // canFlattenTJump checks if the tjump can be safely flattened based on
 // the hook function's usage of HookContext. Returns true if:
 // 1. SetSkipCall is never called (so skip is always false)
@@ -372,6 +399,10 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 				return err
 			}
 			err = removeAfterTrampolineDecl(ip.target, tjump)
+			if err != nil {
+				return err
+			}
+			err = removeUnusedHookContextMethods(ip.target, tjump)
 			if err != nil {
 				return err
 			}

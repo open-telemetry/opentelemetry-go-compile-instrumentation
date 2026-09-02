@@ -1,6 +1,8 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+
+
 //go:build !windows
 
 // Package instrument tests verify that the instrumentation process generates
@@ -154,7 +156,8 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 	require.NoError(t, err)
 
 	var rawRules map[string]map[string]any
-	yaml.Unmarshal(data, &rawRules)
+	err = yaml.Unmarshal(data, &rawRules)
+	require.NoError(t, err)
 
 	// Parse the source AST once and reuse it for every rule's where.file gating
 	// below. The gating is per-rule, but the tree is shared, so N rules do not
@@ -385,7 +388,7 @@ func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
 
 	matchedJSON, _ := json.Marshal([]*rule.InstRuleSet{ruleSet})
 	matchedFile := util.GetMatchedRuleFile()
-	os.MkdirAll(filepath.Dir(matchedFile), 0o755)
+	_ = os.MkdirAll(filepath.Dir(matchedFile), 0o755)
 	_ = os.WriteFile(matchedFile, matchedJSON, 0o644)
 }
 
