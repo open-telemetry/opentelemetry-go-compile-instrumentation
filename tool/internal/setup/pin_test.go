@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"context"
 	"fmt"
 	"go/token"
 	"io"
@@ -22,6 +21,7 @@ import (
 	"gotest.tools/v3/golden"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -449,7 +449,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
 		deps  []*Dependency
-		rules map[string][]yamlRule
+		rules manifest.Manifest
 		want  map[string]bool
 	}{
 		{
@@ -460,12 +460,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
-					VersionRange: "v1.2.3",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/foo",
+				VersionRange: "v1.2.3",
+			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
@@ -478,12 +477,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/bar": {{
-					Target:       "example.com/bar",
-					VersionRange: "v1.2.3",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/bar",
+				Target:       "example.com/bar",
+				VersionRange: "v1.2.3",
+			}},
 			want: map[string]bool{},
 		},
 		{
@@ -494,12 +492,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
-					VersionRange: "v1.2.4",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/foo",
+				VersionRange: "v1.2.4",
+			}},
 			want: map[string]bool{},
 		},
 		{
@@ -510,12 +507,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "", // replace/local path: findModVersion returns empty
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
-					VersionRange: "v1.0.0",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/foo",
+				VersionRange: "v1.0.0",
+			}},
 			want: map[string]bool{},
 		},
 		{
@@ -526,12 +522,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
-					VersionRange: "",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/foo",
+				VersionRange: "",
+			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
@@ -544,12 +539,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/*",
-					VersionRange: "v1.2.3",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/*",
+				VersionRange: "v1.2.3",
+			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
@@ -562,12 +556,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v1.2.3",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target:       "example.com/*",
-					VersionRange: "v1.2.3",
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       "example.com/*",
+				VersionRange: "v1.2.3",
+			}},
 			want: map[string]bool{},
 		},
 		{
@@ -577,11 +570,10 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					ImportPath: "example.com/foo",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
-					Target: rule.TargetRoot,
-				}},
-			},
+			rules: manifest.Manifest{{
+				ModulePath: "example.com/instrumentation/foo",
+				Target:     rule.TargetRoot,
+			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
@@ -598,19 +590,35 @@ func TestMatchInstrumentationImports(t *testing.T) {
 					Version:    "v2.0.0",
 				},
 			},
-			rules: map[string][]yamlRule{
-				"example.com/instrumentation/foo": {{
+			rules: manifest.Manifest{
+				{
+					ModulePath:   "example.com/instrumentation/foo",
 					Target:       "example.com/foo",
 					VersionRange: "v1.0.0",
-				}},
-				"example.com/instrumentation/bar": {{
+				},
+				{
+					ModulePath:   "example.com/instrumentation/bar",
 					Target:       "example.com/bar",
 					VersionRange: "v2.0.0",
-				}},
+				},
 			},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 				"example.com/instrumentation/bar": true,
+			},
+		},
+		{
+			name: "duplicate entries produce one import",
+			deps: []*Dependency{{
+				ImportPath: "example.com/foo",
+				Version:    "v1.0.0",
+			}},
+			rules: manifest.Manifest{
+				{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo"},
+				{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo"},
+			},
+			want: map[string]bool{
+				"example.com/instrumentation/foo": true,
 			},
 		},
 	} {
@@ -627,12 +635,11 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 			ImportPath: "example.com/foo",
 			Version:    "",
 		}}
-		rules := map[string][]yamlRule{
-			"example.com/instrumentation/foo": {{
-				Target:       "example.com/foo",
-				VersionRange: "v1.0.0",
-			}},
-		}
+		rules := manifest.Manifest{{
+			ModulePath:   "example.com/instrumentation/foo",
+			Target:       "example.com/foo",
+			VersionRange: "v1.0.0",
+		}}
 
 		var warned bool
 		var warnedMsg string
@@ -655,11 +662,9 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 			{ImportPath: "example.com/foo/v1", Version: ""},
 			{ImportPath: "example.com/foo/v1/sub", Version: "v1.0.0"},
 		}
-		rules := map[string][]yamlRule{
-			"example.com/instrumentation/foo": {
-				{Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
-				{Target: "example.com/foo/v1/sub", VersionRange: ""},
-			},
+		rules := manifest.Manifest{
+			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
+			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo/v1/sub"},
 		}
 
 		var warned bool
@@ -678,11 +683,9 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 			ImportPath: "example.com/foo",
 			Version:    "",
 		}}
-		rules := map[string][]yamlRule{
-			"example.com/instrumentation/foo": {
-				{Target: "example.com/foo", VersionRange: "v1.0.0"},
-				{Target: "example.com/foo", VersionRange: "v2.0.0"},
-			},
+		rules := manifest.Manifest{
+			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo", VersionRange: "v1.0.0"},
+			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo", VersionRange: "v2.0.0"},
 		}
 
 		warnCount := 0
@@ -694,168 +697,6 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 
 		require.Empty(t, got)
 		require.Equal(t, 1, warnCount)
-	})
-}
-
-func TestLoadMinimalRules_HappyPath(t *testing.T) {
-	// root directory
-	dir := t.TempDir()
-
-	// Create sub1 submodule
-	sub1 := filepath.Join(dir, "sub1")
-	require.NoError(t, os.Mkdir(sub1, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
-
-	ruleContent := `
-version: "v1.0.0"
-rule1:
-  target: example.com/target
-  version: v1.0.0
-`
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte(ruleContent), 0o644))
-
-	// Create nested submodule within sub1, which should be iterated separately
-	nested := filepath.Join(sub1, "nested")
-	require.NoError(t, os.Mkdir(nested, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(nested, "go.mod"), []byte("module example.com/sub1/nested\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(nested, "otelc.yaml"), []byte(`
-version: "v1.0.0"
-ruleNested:
-  target: example.com/nested-target
-  version: v1.0.0
-`), 0o644))
-
-	rules, err := loadMinimalRules(t.Context(), dir, util.Version)
-	require.NoError(t, err)
-
-	// make sure only 2 rules are loaded (sub1 and nested, sub1 doesn't load nested rules)
-	require.Len(t, rules, 2)
-	require.Contains(t, rules, "example.com/sub1")
-	require.Contains(t, rules, "example.com/sub1/nested")
-
-	require.Len(t, rules["example.com/sub1"], 1)
-	require.Equal(t, "example.com/target", rules["example.com/sub1"][0].Target)
-	require.Equal(t, "v1.0.0", rules["example.com/sub1"][0].VersionRange)
-
-	require.Len(t, rules["example.com/sub1/nested"], 1)
-	require.Equal(t, "example.com/nested-target", rules["example.com/sub1/nested"][0].Target)
-}
-
-func TestLoadMinimalRulesMinimumVersionMetadata(t *testing.T) {
-	dir := t.TempDir()
-	moduleDir := filepath.Join(dir, "module")
-	require.NoError(t, os.Mkdir(moduleDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"),
-		[]byte("module example.com/module\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "otelc.yaml"), []byte(`
-version: "v1.1.0"
-rule:
-  target: example.com/target
-  version: v2.0.0,v3.0.0
-`), 0o644))
-
-	rules, err := loadMinimalRules(t.Context(), dir, util.Version)
-	require.NoError(t, err)
-	require.Len(t, rules["example.com/module"], 1)
-	assert.Equal(t, "example.com/target", rules["example.com/module"][0].Target)
-	assert.Equal(t, "v2.0.0,v3.0.0", rules["example.com/module"][0].VersionRange)
-}
-
-func TestLoadMinimalRulesRejectsNewerOtelcVersion(t *testing.T) {
-	dir := t.TempDir()
-	moduleDir := filepath.Join(dir, "module")
-	require.NoError(t, os.Mkdir(moduleDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"),
-		[]byte("module example.com/module\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "otelc.yaml"), []byte(`
-version: "v1.1.0"
-rule:
-  target: example.com/target
-`), 0o644))
-
-	_, err := loadMinimalRules(t.Context(), dir, "v1.0.0")
-	require.ErrorContains(t, err, "requires otelc >= v1.1.0")
-}
-
-func TestLoadMinimalRulesWarnsForLegacyFile(t *testing.T) {
-	dir := t.TempDir()
-	moduleDir := filepath.Join(dir, "module")
-	require.NoError(t, os.Mkdir(moduleDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"),
-		[]byte("module example.com/module\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "otelc.yaml"), []byte(`
-rule:
-  target: example.com/target
-`), 0o644))
-
-	var output strings.Builder
-	logger := slog.New(slog.NewTextHandler(&output, nil))
-	ctx := util.ContextWithLogger(t.Context(), logger)
-	_, err := loadMinimalRules(ctx, dir, "v1.0.0")
-	require.NoError(t, err)
-	assert.Contains(t, output.String(), "no minimum otelc version")
-	assert.Contains(t, output.String(), "otelc.yaml")
-}
-
-func TestLoadMinimalRules_InvalidGoMod(t *testing.T) {
-	dir := t.TempDir()
-
-	sub1 := filepath.Join(dir, "sub1")
-	require.NoError(t, os.Mkdir(sub1, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("invalid"), 0o644))
-
-	_, err := loadMinimalRules(t.Context(), dir, util.Version)
-	require.Error(t, err)
-}
-
-func TestLoadMinimalRules_InvalidRuleYAML(t *testing.T) {
-	dir := t.TempDir()
-
-	sub1 := filepath.Join(dir, "sub1")
-	require.NoError(t, os.Mkdir(sub1, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte("invalid: yaml: {"), 0o644))
-
-	_, err := loadMinimalRules(t.Context(), dir, util.Version)
-	require.Error(t, err)
-}
-
-func TestValidateRuleFiles(t *testing.T) {
-	t.Run("valid", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "otelc.yaml")
-		require.NoError(t, os.WriteFile(path, []byte(`version: "v1.0.0"
-rule:
-  target: main
-  func: Example
-  raw: "_ = 1"
-`), 0o644))
-
-		require.NoError(t, validateRuleFiles(t.Context(), []string{path}))
-	})
-
-	t.Run("read error", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "missing.otelc.yaml")
-		err := validateRuleFiles(t.Context(), []string{path})
-		require.ErrorContains(t, err, "reading")
-		require.ErrorContains(t, err, path)
-	})
-
-	t.Run("invalid metadata", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "otelc.yaml")
-		require.NoError(t, os.WriteFile(path, []byte(`version: 1`), 0o644))
-
-		err := validateRuleFiles(t.Context(), []string{path})
-		require.ErrorContains(t, err, "minimum otelc version must be a string")
-	})
-
-	t.Run("invalid rule", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "otelc.yaml")
-		require.NoError(t, os.WriteFile(path, []byte(`version: "v1.0.0"
-rule: value
-`), 0o644))
-
-		err := validateRuleFiles(t.Context(), []string{path})
-		require.Error(t, err)
 	})
 }
 
@@ -1215,6 +1056,9 @@ func TestPinLocked_DiscoversModuleDirs(t *testing.T) {
 	// packages in the working directory. With no existing tool file, it falls
 	// through to generating one from the dependency graph.
 	dir := t.TempDir()
+	repositoryDir, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755)) // ensure .otelc-build exists
 	t.Chdir(dir)
@@ -1230,7 +1074,7 @@ func TestPinLocked_DiscoversModuleDirs(t *testing.T) {
 		0o644,
 	))
 
-	_, err := pinLocked(t.Context(), PinOptions{})
+	_, err = pinLocked(t.Context(), PinOptions{})
 	require.NoError(t, err)
 
 	// A tool file is generated for the discovered module.
@@ -1267,14 +1111,14 @@ func TestPin_UpdatesExistingToolFile(t *testing.T) {
 }
 
 func TestAutoPin_NoStateManager(t *testing.T) {
-	// autoPin cannot track files to restore without a stateManager in context.
+	// autoPin cannot track files to restore without a StateManager in context.
 	_, err := autoPin(t.Context(), map[string]bool{t.TempDir(): true}, subcmdBuild, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "state manager not found")
 }
 
 func TestAutoPin_TracksAndPins(t *testing.T) {
-	// With a stateManager present, autoPin backs up the mutable files, tracks
+	// With a StateManager present, autoPin backs up the mutable files, tracks
 	// them, then pins — pruning the non-instrumentation dependency along the way.
 	tmp := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, tmp)
@@ -1310,203 +1154,4 @@ func TestAutoPin_TracksAndPins(t *testing.T) {
 	data, err := os.ReadFile(toolFile)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "example.com/notinstrumentation")
-}
-
-// newModuleDir creates a minimal Go module in a fresh temp directory and
-// returns its path.
-func newModuleDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "go.mod"),
-		[]byte("module example.com/vend\n\ngo 1.25\n"),
-		0o644,
-	))
-	return dir
-}
-
-func TestPrepareVendoredBuild(t *testing.T) {
-	// With no vendored module active, prepareVendoredBuild returns the args
-	// unchanged and does not force module mode.
-	dir := newModuleDir(t)
-	t.Setenv(util.EnvOtelcWorkDir, dir)
-
-	args := []string{"build", "./..."}
-	got, err := prepareVendoredBuild(context.Background(), util.LoggerFromContext(context.Background()), args)
-	require.NoError(t, err)
-	assert.Equal(t, args, got)
-}
-
-func TestPinLocked_GetBuildPackagesError(t *testing.T) {
-	_, err := Pin(t.Context(), PinOptions{
-		Args: []string{"-o"}, // missing required flag value
-	})
-	require.Error(t, err)
-}
-
-func TestAutoPin_TrackAllError(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-	modDir := filepath.Join(tmp, "mod")
-	require.NoError(t, os.MkdirAll(modDir, 0o755))
-	mustWriteFile(t, filepath.Join(modDir, "go.mod"), "module example.com")
-
-	// Snapshot destination dir as file so TrackAll fails on all platforms (including Windows)
-	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
-	snapshotDir := util.GetBuildTemp(stateDir)
-	_ = os.RemoveAll(snapshotDir)
-	require.NoError(t, os.WriteFile(snapshotDir, []byte("file"), 0o644))
-
-	sm := newStateManager()
-	ctx := contextWithStateManager(t.Context(), sm)
-
-	_, err := autoPin(ctx, map[string]bool{modDir: true}, "build", []string{"."})
-	require.Error(t, err)
-}
-
-func TestRemoveImports_UnquoteError(t *testing.T) {
-	f := &dst.File{
-		Decls: []dst.Decl{
-			&dst.GenDecl{
-				Tok: token.IMPORT,
-				Specs: []dst.Spec{
-					&dst.ImportSpec{
-						Path: &dst.BasicLit{
-							Kind:  token.STRING,
-							Value: `unquoted"invalid`,
-						},
-					},
-				},
-			},
-		},
-	}
-	err := removeImports(f, map[string]bool{"foo": true})
-	require.Error(t, err)
-}
-
-func TestAutoPin_GetBackupFilesError(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // canceled context causes getBackupFiles to fail
-
-	sm := newStateManager()
-	ctx = contextWithStateManager(ctx, sm)
-
-	_, err := autoPin(ctx, map[string]bool{"/some/dir": true}, "build", []string{"."})
-	require.Error(t, err)
-}
-
-func TestGeneratePinnedProjects_FindDepsError(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // canceled context causes findDeps to fail
-
-	_, err := generatePinnedProjects(ctx, map[string]bool{"/some/dir": true}, PinOptions{})
-	require.Error(t, err)
-}
-
-func TestPinLocked_FindModuleDirsError(t *testing.T) {
-	// A standalone .go file outside any Go module causes FindModuleDirs in pinLocked to fail on line 651
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-	t.Setenv(util.EnvOtelcWorkDir, tmp)
-
-	mainFile := filepath.Join(tmp, "main.go")
-	mustWriteFile(t, mainFile, "package main\nfunc main() {}\n")
-
-	_, err := Pin(t.Context(), PinOptions{Args: []string{mainFile}})
-	require.Error(t, err)
-}
-
-func TestGeneratePinnedProjects_LoadMinimalRulesError(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Setenv(util.EnvOtelcWorkDir, tempDir)
-
-	// Create a corrupted go.mod in rules root to fail loadMinimalRules (pin.go:531)
-	instDir := filepath.Join(util.GetBuildTempDir(), unzippedInstDir, "badmod")
-	require.NoError(t, os.MkdirAll(instDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(instDir, "go.mod"), []byte("invalid go.mod"), 0o644))
-
-	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{})
-	require.Error(t, err)
-}
-
-func TestGeneratePinnedProjects_SyncDepsError(t *testing.T) {
-	goMod := `module example.com/test
-
-go 1.21
-
-require (
-	go.opentelemetry.io/otelc v0.0.0
-	nonexistent.invalid/pkg v1.0.0
-)
-`
-	tempDir, _, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
-	require.NoError(
-		t,
-		os.WriteFile(
-			filepath.Join(tempDir, "main.go"),
-			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
-			0o644,
-		),
-	)
-	ruleFile := filepath.Join(util.GetBuildTempDir(), unzippedInstDir, "net", "http", "client", "rules.yaml")
-	require.NoError(t, os.WriteFile(ruleFile, []byte("rule1:\n  target: net/http\n  func: Get\n"), 0o644))
-
-	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{
-		Args: []string{"."},
-	})
-	require.Error(t, err)
-}
-
-func TestGeneratePinnedProjects_EnsureOtelcRequireError(t *testing.T) {
-	goMod := `module example.com/test
-
-go 1.21
-`
-	tempDir, _, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
-	require.NoError(
-		t,
-		os.WriteFile(
-			filepath.Join(tempDir, "main.go"),
-			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
-			0o644,
-		),
-	)
-	ruleFile := filepath.Join(util.GetBuildTempDir(), unzippedInstDir, "net", "http", "client", "rules.yaml")
-	require.NoError(t, os.WriteFile(ruleFile, []byte("rule1:\n  target: net/http\n  func: Get\n"), 0o644))
-
-	// Corrupt go.mod so ensureOtelcRequire fails in generatePinnedProjects (line 563)
-	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte("invalid go.mod {"), 0o644))
-
-	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{})
-	require.Error(t, err)
-}
-
-func TestGeneratePinnedProjects_ExtractBundleError(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Setenv(util.EnvOtelcWorkDir, tempDir)
-	require.NoError(
-		t,
-		os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte("module example.com/test\n\ngo 1.21\n"), 0o644),
-	)
-	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
-
-	buildTemp := util.GetBuildTempDir()
-	require.NoError(t, os.MkdirAll(buildTemp, 0o755))
-	pkgPath := filepath.Join(buildTemp, unzippedPkgDir)
-	require.NoError(t, os.WriteFile(pkgPath, []byte("file"), 0o644))
-
-	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{
-		Args: []string{"."},
-	})
-	require.Error(t, err)
-}
-
-func TestUpdateToolFile_RemoveImportsError(t *testing.T) {
-	tempDir := t.TempDir()
-	toolFile := filepath.Join(tempDir, "otel.instrumentation.go")
-	content := "package main\n\nimport _ `pkg\nnewline`\n"
-	require.NoError(t, os.WriteFile(toolFile, []byte(content), 0o644))
-
-	err := updateToolFile(t.Context(), toolFile, map[string]bool{"foo": true}, PinOptions{})
-	require.Error(t, err)
 }
