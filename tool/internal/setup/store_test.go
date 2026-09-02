@@ -47,6 +47,19 @@ func TestSetupPhaseStoreCreateError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestStoreResolvedNames_WriteError(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetImportNamesFile(), 0o755))
+
+	sp := newTestSetupPhase()
+	sp.resolvedNames = map[string]string{"example.com/a": "a"}
+
+	err := sp.storeResolvedNames()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write import names")
+}
+
 func TestResolveRulePaths(t *testing.T) {
 	dir := t.TempDir()
 

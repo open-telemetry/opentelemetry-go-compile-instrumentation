@@ -149,7 +149,8 @@ const (
 //   - args [] returns packages for "."
 func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
-	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule |
+		packages.NeedImports | packages.NeedDeps
 
 	pkgTargets, fileTargets, err := splitBuildTargets(args)
 	if err != nil {
@@ -373,6 +374,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	sp.buildPackages = pkgs
+	sp.resolvedNames = pkgload.CollectPackageNames(pkgs)
 
 	// Find the module directories for the build packages
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, pkgs)
