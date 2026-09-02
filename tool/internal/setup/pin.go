@@ -526,7 +526,7 @@ func yamlStateManager(ctx context.Context, autoPin bool) (*stateManager, error) 
 
 func trackYAMLConfigFiles(manager *stateManager, configs []modulePinConfig) error {
 	for _, config := range configs {
-		for _, name := range []string{"go.mod", "go.sum", toolFileCanonical, toolFileAlias} {
+		for _, name := range []string{goModFileName, "go.sum", toolFileCanonical, toolFileAlias} {
 			if err := manager.Track(filepath.Join(config.moduleDir, name)); err != nil {
 				return err
 			}
