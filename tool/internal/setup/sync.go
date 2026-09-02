@@ -62,7 +62,7 @@ func isRepositorySourceRoot(root string) bool {
 		filepath.Join("instrumentation", goModFileName): util.OtelcInstRoot,
 	}
 	for path, want := range modules {
-		modFile, err := parseGoMod(filepath.Join(root, path))
+		modFile, err := parseGoMod(filepath.Dir(filepath.Join(root, path)))
 		if err != nil || modFile.Module == nil || modFile.Module.Mod.Path != want {
 			return false
 		}
@@ -76,7 +76,7 @@ func instrumentationModuleDir(instDir, modulePath string) (string, error) {
 		return "", nil
 	}
 	dir := filepath.Join(instDir, path)
-	modFile, err := parseGoMod(filepath.Join(dir, goModFileName))
+	modFile, err := parseGoMod(dir)
 	if err != nil {
 		return "", ex.Wrapf(err, "loading matched instrumentation module %s from %s", modulePath, dir)
 	}
@@ -86,7 +86,8 @@ func instrumentationModuleDir(instDir, modulePath string) (string, error) {
 	return dir, nil
 }
 
-func parseGoMod(gomod string) (*modfile.File, error) {
+func parseGoMod(dir string) (*modfile.File, error) {
+	gomod := filepath.Join(dir, goModFileName)
 	data, err := os.ReadFile(gomod)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read go.mod file")
@@ -150,10 +151,10 @@ func snapshotVersion(mf *modfile.File) versionSnapshot {
 	return snap
 }
 
-func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) error {
+func warnVersion(ctx context.Context, moduleDir string, before versionSnapshot) error {
 	logger := util.LoggerFromContext(ctx)
 
-	after, err := parseGoMod(goModPath)
+	after, err := parseGoMod(moduleDir)
 	if err != nil {
 		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
 	}
@@ -214,7 +215,7 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 			return nil
 		}
 
-		modFile, parseErr := parseGoMod(path)
+		modFile, parseErr := parseGoMod(filepath.Dir(path))
 		if parseErr != nil {
 			return ex.Wrapf(parseErr, "loading %s", path)
 		}
@@ -248,7 +249,7 @@ func syncDepsFromSource(ctx context.Context, modPaths map[string]bool, moduleDir
 	logger := util.LoggerFromContext(ctx)
 
 	goModFile := filepath.Join(moduleDir, goModFileName)
-	modfile, err := parseGoMod(goModFile)
+	modfile, err := parseGoMod(moduleDir)
 	if err != nil {
 		return err
 	}
@@ -339,7 +340,7 @@ func syncDepsFromSource(ctx context.Context, modPaths map[string]bool, moduleDir
 	}
 
 	// Compare after tidy because MVS may raise existing consumer versions.
-	if err = warnVersion(ctx, goModFile, before); err != nil {
+	if err = warnVersion(ctx, moduleDir, before); err != nil {
 		return err
 	}
 

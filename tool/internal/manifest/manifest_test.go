@@ -23,6 +23,11 @@ func TestLoad(t *testing.T) {
 	require.Len(t, slices.Compact(slices.Clone(got)), len(got))
 }
 
+func TestLoadInvalidJSON(t *testing.T) {
+	_, err := load([]byte("{"))
+	require.ErrorContains(t, err, "loading embedded instrumentation manifest")
+}
+
 func compareEntries(a, b Entry) int {
 	if cmp := strings.Compare(a.ModulePath, b.ModulePath); cmp != 0 {
 		return cmp

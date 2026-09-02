@@ -94,7 +94,7 @@ require (
 			err := os.WriteFile(gomodPath, []byte(tt.content), 0o644)
 			require.NoError(t, err)
 
-			mf, err := parseGoMod(gomodPath)
+			mf, err := parseGoMod(tempDir)
 			if tt.expectError {
 				assert.Error(t, err)
 				return
@@ -110,7 +110,7 @@ require (
 }
 
 func TestParseGoMod_MissingFile(t *testing.T) {
-	_, err := parseGoMod("/nonexistent/go.mod")
+	_, err := parseGoMod("/nonexistent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read go.mod file")
 }
@@ -251,7 +251,7 @@ require go.opentelemetry.io/otelc/instrumentation/example.com/lib v0.0.0
 		moduleDir,
 	))
 
-	modFile, err := parseGoMod(filepath.Join(moduleDir, "go.mod"))
+	modFile, err := parseGoMod(moduleDir)
 	require.NoError(t, err)
 	require.Condition(t, func() bool {
 		for _, replace := range modFile.Replace {
@@ -676,7 +676,7 @@ require (
 				},
 			}
 
-			require.NoError(t, warnVersion(ctx, gomodPath, before))
+			require.NoError(t, warnVersion(ctx, filepath.Dir(gomodPath), before))
 
 			logged := buf.String()
 			assert.Contains(t, logged, "bumped go version")
@@ -707,7 +707,7 @@ require (
 		},
 	}
 
-	require.NoError(t, warnVersion(ctx, gomodPath, before))
+	require.NoError(t, warnVersion(ctx, filepath.Dir(gomodPath), before))
 
 	logged := buf.String()
 	assert.Contains(t, logged, "bumped dependency")
@@ -737,14 +737,14 @@ require (
 		},
 	}
 
-	require.NoError(t, warnVersion(ctx, gomodPath, before))
+	require.NoError(t, warnVersion(ctx, filepath.Dir(gomodPath), before))
 
 	assert.Empty(t, buf.String())
 }
 
 func TestWarnVersion_MissingFile(t *testing.T) {
 	before := versionSnapshot{goVersion: "1.22.0", deps: map[string]string{}}
-	err := warnVersion(t.Context(), "/nonexistent/go.mod", before)
+	err := warnVersion(t.Context(), "/nonexistent", before)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unable to check for version bumps")
@@ -765,7 +765,7 @@ go 1.25.0
 		deps:      map[string]string{},
 	}
 
-	require.NoError(t, warnVersion(ctx, gomodPath, before))
+	require.NoError(t, warnVersion(ctx, filepath.Dir(gomodPath), before))
 
 	assert.Empty(t, buf.String())
 }

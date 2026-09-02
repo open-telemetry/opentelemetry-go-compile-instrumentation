@@ -338,6 +338,90 @@ func TestLoadOtelYAMLImports(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, imports)
 	}
+
+	for _, tt := range []struct {
+		name     string
+		contents string
+		want     string
+	}{
+		{name: "malformed", contents: "instrumentations: [", want: "parsing"},
+		{name: "multiple documents", contents: "instrumentations: []\n---\ninstrumentations: []\n", want: "multiple YAML documents"},
+		{name: "malformed second document", contents: "instrumentations: []\n---\n[", want: "parsing"},
+		{name: "empty import", contents: "instrumentations:\n  - '  '\n", want: "must not contain empty import paths"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, os.WriteFile(path, []byte(tt.contents), 0o644))
+			_, loadErr := loadOtelYAMLImports(path)
+			require.ErrorContains(t, loadErr, tt.want)
+		})
+	}
+
+	_, err = loadOtelYAMLImports(filepath.Join(t.TempDir(), "missing.yml"))
+	require.ErrorContains(t, err, "reading")
+}
+
+func TestWriteOtelYAMLImports(t *testing.T) {
+	path := filepath.Join(t.TempDir(), instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(path, nil, 0o640))
+	require.NoError(t, writeOtelYAMLImports(path, map[string]bool{
+		"example.com/z": true,
+		"example.com/a": true,
+	}))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "instrumentations:\n    - example.com/a\n    - example.com/z\n", string(data))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+
+	err = writeOtelYAMLImports(filepath.Join(t.TempDir(), "missing", "config.yml"), nil)
+	require.ErrorContains(t, err, "stating")
+}
+
+func TestYAMLStateManager(t *testing.T) {
+	manager, err := yamlStateManager(t.Context(), false)
+	require.NoError(t, err)
+	require.NotNil(t, manager)
+
+	_, err = yamlStateManager(t.Context(), true)
+	require.ErrorContains(t, err, "state manager not found")
+
+	want := newStateManager()
+	manager, err = yamlStateManager(contextWithStateManager(t.Context(), want), true)
+	require.NoError(t, err)
+	require.Same(t, want, manager)
+}
+
+func TestLoadYAMLStatesError(t *testing.T) {
+	_, err := loadYAMLStates([]modulePinConfig{{yamlFile: filepath.Join(t.TempDir(), "missing.yml")}})
+	require.Error(t, err)
+}
+
+func TestProcessYAMLConfigsRequiresStateManagerForAutoPin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(path, []byte("instrumentations: []\n"), 0o644))
+	err := processYAMLConfigs(t.Context(), []modulePinConfig{{yamlFile: path}}, PinOptions{AutoPin: true})
+	require.ErrorContains(t, err, "state manager not found")
+}
+
+func TestMaterializeYAMLConfigsInvalidGoMod(t *testing.T) {
+	dir := t.TempDir()
+	yamlFile := filepath.Join(dir, instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(yamlFile, []byte("instrumentations: []\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, goModFileName), []byte("invalid"), 0o644))
+
+	_, err := materializeYAMLConfigs(t.Context(), []modulePinConfig{{moduleDir: dir, yamlFile: yamlFile}}, PinOptions{})
+	require.ErrorContains(t, err, "ensuring otelc require")
+}
+
+func TestProcessConfiguredModulesError(t *testing.T) {
+	dir := t.TempDir()
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	require.NoError(t, os.WriteFile(toolFile, []byte("not go"), 0o644))
+
+	err := processConfiguredModules(t.Context(), []modulePinConfig{{moduleDir: dir, toolFile: toolFile}}, PinOptions{})
+	require.Error(t, err)
 }
 
 func TestDiscoverPinConfigsKeepsUnconfiguredModules(t *testing.T) {
