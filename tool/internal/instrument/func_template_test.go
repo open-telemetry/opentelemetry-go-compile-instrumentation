@@ -196,6 +196,55 @@ func TestFuncTemplateData_DirectiveArgs(t *testing.T) {
 	assert.Empty(t, data.DirectiveArg("missing"))
 }
 
+func TestFuncTemplateData_Receiver(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Foo(x int) {}")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	v, err := data.Receiver()
+	require.NoError(t, err)
+	assert.Equal(t, "t", v)
+}
+
+func TestFuncTemplateData_ReceiverBlankName(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\ntype T struct{}\nfunc (_ T) Foo(x int) {}")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	v, err := data.Receiver()
+	require.NoError(t, err)
+	assert.Equal(t, "_ignoredParam_h1_0", v)
+}
+
+func TestFuncTemplateData_ReceiverUnnamed(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\ntype T struct{}\nfunc (T) Foo(x int) {}")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	v, err := data.Receiver()
+	require.NoError(t, err)
+	assert.Equal(t, "_ignoredParam_h1_0", v)
+}
+
+func TestFuncTemplateData_ReceiverNoReceiver(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\nfunc Foo(x int) {}")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	_, err := data.Receiver()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no receiver")
+}
+
+func TestFuncTemplateData_ReceiverThenFuncArgumentStillExcludesReceiver(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Foo(x int) {}")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	recv, err := data.Receiver()
+	require.NoError(t, err)
+	assert.Equal(t, "t", recv)
+
+	v, err := data.FuncArgument(0)
+	require.NoError(t, err)
+	assert.Equal(t, "x", v)
+}
+
 func TestFuncTemplateData_DirectiveArgsEmpty(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 	data := newFuncTemplateData(funcDecl, nil, nil, "h1")

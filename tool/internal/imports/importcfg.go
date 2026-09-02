@@ -29,7 +29,7 @@ type ImportConfig struct {
 func ParseImportCfg(filename string) (ImportConfig, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return ImportConfig{}, err
+		return ImportConfig{}, ex.Wrapf(err, "opening importcfg file %s", filename)
 	}
 	defer file.Close()
 

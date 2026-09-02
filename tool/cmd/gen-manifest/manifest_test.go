@@ -1,18 +1,21 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package manifest
+package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/data"
 )
 
 func TestGenerate(t *testing.T) {
@@ -40,6 +43,10 @@ ranged:
   target: example.com/ranged
   version: v1.0.0,v2.0.0
 `)
+	writeRuleFile(t, root, "parent/nonmodule/worker.otelc.yaml", `
+worker:
+  target: example.com/worker
+`)
 	writeRuleFile(t, root, "parent/ignored.yaml", `
 ignored:
   target: example.com/ignored
@@ -60,6 +67,7 @@ server:
 		{ModulePath: "example.com/parent", Target: "example.com/ranged", VersionRange: "v1.0.0,v2.0.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v1.0.0"},
 		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v2.0.0"},
+		{ModulePath: "example.com/parent", Target: "example.com/worker"},
 	}, got)
 }
 
@@ -144,6 +152,126 @@ a-invalid:
 	}
 }
 
+func TestGenerateValidatesTargets(t *testing.T) {
+	t.Run("accepts valid targets", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			target string
+		}{
+			{name: "exact", target: "example.com/target"},
+			{name: "glob", target: "example.com/service/**"},
+			{name: "root", target: "$root"},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				root := t.TempDir()
+				writeModule(t, root, "module", "example.com/test")
+				writeRuleFile(
+					t,
+					root,
+					"module/otelc.yaml",
+					fmt.Sprintf("valid:\n  target: %s\n  version: v1.0.0\n", test.target),
+				)
+
+				got, err := Generate(root)
+				require.NoError(t, err)
+				require.Equal(t, Manifest{
+					{ModulePath: "example.com/test", Target: test.target, VersionRange: "v1.0.0"},
+				}, got)
+			})
+		}
+	})
+
+	t.Run("omits empty target", func(t *testing.T) {
+		root := t.TempDir()
+		writeModule(t, root, "module", "example.com/test")
+		writeRuleFile(t, root, "module/otelc.yaml", `
+empty:
+  target: ""
+  version: v1.0.0
+`)
+
+		got, err := Generate(root)
+		require.NoError(t, err)
+		require.Empty(t, got)
+	})
+
+	t.Run("rejects invalid targets", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			target  string
+			wantErr string
+		}{
+			{
+				name:    "malformed glob",
+				target:  "example.com/[svc",
+				wantErr: `target "example.com/[svc" is not a valid glob pattern`,
+			},
+			{
+				name:    "root target with suffix",
+				target:  "$root/**",
+				wantErr: `target "$root/**" must be exactly "$root"`,
+			},
+			{
+				name:    "root target as substring",
+				target:  "example.com/$root/service",
+				wantErr: `target "example.com/$root/service" must be exactly "$root"`,
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				root := t.TempDir()
+				writeModule(t, root, "module", "example.com/test")
+				writeRuleFile(
+					t,
+					root,
+					"module/otelc.yaml",
+					fmt.Sprintf("invalid:\n  target: %s\n  version: v1.0.0\n", test.target),
+				)
+
+				_, err := Generate(root)
+				require.ErrorContains(t, err, test.wantErr)
+				require.ErrorContains(t, err, `validating target for rule "invalid" in file otelc.yaml`)
+				require.ErrorContains(t, err, "loading rules for module example.com/test")
+				require.ErrorContains(t, err, "generating manifest from")
+			})
+		}
+	})
+}
+
+func TestGenerateReportsInvalidTargetsDeterministically(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "module", "example.com/test")
+	writeRuleFile(t, root, "module/otelc.yaml", `
+z-invalid:
+  target: example.com/[z
+a-invalid:
+  target: example.com/[a
+`)
+
+	for range 10 {
+		_, err := Generate(root)
+		require.ErrorContains(t, err, `validating target for rule "a-invalid" in file otelc.yaml`)
+		require.ErrorContains(t, err, `target "example.com/[a" is not a valid glob pattern`)
+	}
+}
+
+func TestGenerateReportsInvalidVersionBeforeTarget(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "module", "example.com/test")
+	writeRuleFile(t, root, "module/otelc.yaml", `
+invalid:
+  target: example.com/[svc
+  version: v1.0.0,
+`)
+
+	_, err := Generate(root)
+	require.ErrorContains(t, err, `validating version for rule "invalid" in file otelc.yaml`)
+	require.ErrorContains(t, err, `version "v1.0.0," must use non-empty start and end bounds`)
+}
+
 func TestGenerateErrors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -200,6 +328,30 @@ func TestLoadModuleEntriesMissingDirectory(t *testing.T) {
 	require.ErrorContains(t, err, "opening module root")
 }
 
+func TestLoadModuleEntriesReturnsNestedModuleStatErrors(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod permissions are not enforced consistently on Windows")
+	}
+
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "module")
+	blockedDir := filepath.Join(moduleDir, "blocked")
+	require.NoError(t, os.MkdirAll(blockedDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(moduleDir, "go.mod"),
+		[]byte("module example.com/module\n"),
+		0o644,
+	))
+
+	require.NoError(t, os.Chmod(blockedDir, 0))
+	t.Cleanup(func() {
+		_ = os.Chmod(blockedDir, 0o755)
+	})
+
+	_, err := loadModuleEntries(moduleDir, "example.com/module")
+	require.Error(t, err)
+}
+
 func TestLoadModuleEntriesRejectsEscapingRuleSymlink(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "module")
@@ -214,9 +366,12 @@ func TestLoadModuleEntriesRejectsEscapingRuleSymlink(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoad(t *testing.T) {
-	got, err := load()
-	require.NoError(t, err)
+// TestEmbeddedManifestMatchesGeneratorContract guards the checked-in artifact
+// this generator produces: it must unmarshal, describe complete entries, and
+// stay sorted and deduplicated the way Generate leaves it.
+func TestEmbeddedManifestMatchesGeneratorContract(t *testing.T) {
+	var got Manifest
+	require.NoError(t, json.Unmarshal(data.GetManifestJSON(), &got))
 	require.NotEmpty(t, got)
 
 	for _, entry := range got {

@@ -49,16 +49,12 @@ type FuncSignature struct {
 type InstFuncRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Func   string `json:"func"   yaml:"func"`   // The name of the target func to be instrumented
-	Recv   string `json:"recv"   yaml:"recv"`   // The name of the receiver type
-	Before string `json:"before" yaml:"before"` // The function we inject at the target function entry
-	After  string `json:"after"  yaml:"after"`  // The function we inject at the target function exit
-	Path   string `json:"path"   yaml:"path"`   // The import path where hook code is located
-
-	ResolvedPath string `json:"resolved_path" yaml:"-"` // The local path of the package directory resolved from import path
-
-	// Optional signature sub-filters (all non-empty filters must match; combined
-	// with AND logic so any combination is allowed).
+	Func              string         `json:"func"                         yaml:"func"`
+	Recv              string         `json:"recv"                         yaml:"recv"`
+	Before            string         `json:"before"                       yaml:"before"`
+	After             string         `json:"after"                        yaml:"after"`
+	Path              string         `json:"path"                         yaml:"path"`
+	ResolvedPath      string         `json:"resolved_path"                yaml:"-"` // local dir Path resolves to
 	Signature         *FuncSignature `json:"signature,omitempty"          yaml:"signature"`
 	SignatureContains *FuncSignature `json:"signature_contains,omitempty" yaml:"signature_contains"`
 	Result            string         `json:"result,omitempty"             yaml:"result"`
