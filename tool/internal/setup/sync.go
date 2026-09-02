@@ -21,6 +21,71 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
+const (
+	envOtelcSourceRoot = "OTELC_SOURCE_ROOT"
+	goModFileName      = "go.mod"
+)
+
+func repositorySourceRoot() (string, error) {
+	root := os.Getenv(envOtelcSourceRoot)
+	if root == "" {
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			return "", ex.Wrapf(err, "getting otelc source checkout directory")
+		}
+	}
+
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", ex.Wrapf(err, "resolving otelc source checkout directory")
+	}
+	for {
+		if isRepositorySourceRoot(root) {
+			return root, nil
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			break
+		}
+		root = parent
+	}
+	return "", ex.New("otelc source checkout not found; set OTELC_SOURCE_ROOT " +
+		"or run from inside a full opentelemetry-go-compile-instrumentation " +
+		"checkout (temporary requirement, see #983)")
+}
+
+func isRepositorySourceRoot(root string) bool {
+	modules := map[string]string{
+		goModFileName:                                   util.OtelcRoot,
+		filepath.Join("pkg", goModFileName):             util.OtelcPkgRoot,
+		filepath.Join("instrumentation", goModFileName): util.OtelcInstRoot,
+	}
+	for path, want := range modules {
+		modFile, err := parseGoMod(filepath.Join(root, path))
+		if err != nil || modFile.Module == nil || modFile.Module.Mod.Path != want {
+			return false
+		}
+	}
+	return true
+}
+
+func instrumentationModuleDir(instDir, modulePath string) (string, error) {
+	path, ok := strings.CutPrefix(modulePath, util.OtelcInstRoot+"/")
+	if !ok {
+		return "", nil
+	}
+	dir := filepath.Join(instDir, path)
+	modFile, err := parseGoMod(filepath.Join(dir, goModFileName))
+	if err != nil {
+		return "", ex.Wrapf(err, "loading matched instrumentation module %s from %s", modulePath, dir)
+	}
+	if modFile.Module == nil || modFile.Module.Mod.Path != modulePath {
+		return "", ex.Newf("matched instrumentation module %s not found at %s", modulePath, dir)
+	}
+	return dir, nil
+}
+
 func parseGoMod(gomod string) (*modfile.File, error) {
 	data, err := os.ReadFile(gomod)
 	if err != nil {
@@ -140,7 +205,7 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if name == "testdata" || name == vendorDirName || strings.HasPrefix(name, ".") {
+			if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -168,6 +233,17 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	if len(modPaths) == 0 {
 		return nil
 	}
+	sourceRoot, err := repositorySourceRoot()
+	if err != nil {
+		return err
+	}
+	return syncDepsFromSource(ctx, modPaths, moduleDir, sourceRoot)
+}
+
+func syncDepsFromSource(ctx context.Context, modPaths map[string]bool, moduleDir, sourceRoot string) error {
+	if len(modPaths) == 0 {
+		return nil
+	}
 
 	logger := util.LoggerFromContext(ctx)
 
@@ -178,12 +254,18 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	}
 
 	before := snapshotVersion(modfile)
+	pkgDir := filepath.Join(sourceRoot, "pkg")
+	instDir := filepath.Join(sourceRoot, "instrumentation")
 
 	// Add replace directives for modules imported to otel.instrumentation.go
 	replaces := make(map[string]string, len(modPaths))
 	for m := range modPaths {
-		if path, isEmbedded := strings.CutPrefix(m, util.OtelcInstRoot+"/"); isEmbedded {
-			replaces[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
+		dir, dirErr := instrumentationModuleDir(instDir, m)
+		if dirErr != nil {
+			return dirErr
+		}
+		if dir != "" {
+			replaces[m] = dir
 		}
 	}
 
@@ -205,7 +287,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		walkDirs[dir] = true
 		walkDirs[filepath.Dir(dir)] = true
 	}
-	for dir := range walkDirs {
+	for _, dir := range slices.Sorted(maps.Keys(walkDirs)) {
 		nested, nestedErr := discoverNestedModuleReplaces(dir)
 		if nestedErr != nil {
 			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
@@ -213,17 +295,20 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		maps.Copy(replaces, nested)
 	}
 
+	// Add replace directive for special pkg module
+	// TODO: Since we haven't published the instrumentation packages yet,
+	// we need to add the replace directive to the local path.
+	// Once the instrumentation packages are published, we can remove this.
+	replaces[util.OtelcPkgRoot] = pkgDir
+
 	// Add replace directive for special runtime module
 	// runtime module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
-	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
-
-	// Add replace directive for special netutil module
-	replaces[util.OtelcPkgRoot+"/netutil"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "netutil")
+	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(pkgDir, "runtime")
 
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
-	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
+	replaces[util.OtelcInstRoot] = instDir
 
 	// Okay, now add all the replace directives to go.mod in deterministic sorted order
 	changed := false
@@ -259,7 +344,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	}
 
 	// Keep the file for debugging
-	keepForDebug(ctx, goModFile, "")
+	keepForDebug(ctx, goModFile)
 
 	return nil
 }
