@@ -21,12 +21,21 @@ import (
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) (bool, error) {
 	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
-	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
+	// The target file can already import a rule path under an alias the
+	// rule does not expect. aliasOverrides holds the file's alias for
+	// each such path, derived from importAliases.
+	existingAliases := make(map[string]string, len(importAliases))
+	for alias, path := range importAliases {
+		existingAliases[path] = alias
+	}
+	aliasOverrides := resolveAliasOverrides(r.Imports, existingAliases)
+
+	appendModified := ip.applyCallAppendArgs(r, root, importAliases, aliasOverrides)
 
 	replaceModified := false
 	if r.Replace != "" {
 		var err error
-		replaceModified, err = ip.applyCallReplace(r, root, importAliases)
+		replaceModified, err = ip.applyCallReplace(r, root, importAliases, aliasOverrides)
 		if err != nil {
 			return false, err
 		}
@@ -111,6 +120,7 @@ func (*instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
+	aliasOverrides map[string]string,
 ) (bool, error) {
 	tmpl, err := newCallTemplate(r.Replace)
 	if err != nil {
@@ -130,6 +140,7 @@ func (*instrumentPhase) applyCallReplace(
 			wrapError = wrapErr
 			return false
 		}
+		replaceQualifierAliases(wrapped, aliasOverrides)
 		replacements[call] = util.AssertType[dst.Expr](dst.Clone(wrapped))
 		return true
 	})
@@ -163,6 +174,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
+	aliasOverrides map[string]string,
 ) bool {
 	if len(r.AppendArgs) == 0 {
 		return false
@@ -181,7 +193,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 	})
 	modified := false
 	for _, call := range matchingCalls {
-		ok, err := appendCallArgs(call, r)
+		ok, err := appendCallArgs(call, r, aliasOverrides)
 		if err != nil {
 			ip.Warn("Failed to append args to call", "error", err)
 			continue
@@ -195,7 +207,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
 // For ellipsis calls, an IIFE wrapper is generated using r.VariadicType.
 // Returns (true, nil) if the call was modified, (false, nil) if AppendArgs is empty.
-func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
+func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule, aliasOverrides map[string]string) (bool, error) {
 	if len(r.AppendArgs) == 0 {
 		return false, nil
 	}
@@ -207,6 +219,7 @@ func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
 		if err != nil {
 			return false, ex.Wrapf(err, "failed to parse append_args entry %q", argStr)
 		}
+		replaceQualifierAliases(argExpr, aliasOverrides)
 		newArgs = append(newArgs, argExpr)
 	}
 
@@ -230,6 +243,7 @@ func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
 	if err != nil {
 		return false, ex.Wrapf(err, "failed to parse variadic_type %q", r.VariadicType)
 	}
+	replaceQualifierAliases(varTypeExpr, aliasOverrides)
 
 	// Replace the spread arg with an IIFE that appends the new args before spreading.
 	// call.Ellipsis remains true — the outer call is still a spread call.
@@ -281,6 +295,59 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 
 	resolvedPath, ok := importAliases[ident.Name]
 	return ok && resolvedPath == importPath
+}
+
+// resolveAliasOverrides reports the alias to substitute for each rule
+// import already present in the target file under a different alias.
+// Substituting the file's alias into generated code, instead of the
+// rule's alias, avoids a build failure.
+//
+// existingAliases must resolve an unaliased import to its real name,
+// not a guess. A guessed name can be illegal as a Go identifier.
+//
+// The dot alias and the blank alias are exempt from substitution.
+func resolveAliasOverrides(ruleImports, existingAliases map[string]string) map[string]string {
+	var overrides map[string]string
+	for ruleAlias, importPath := range ruleImports {
+		if ruleAlias == "." || ruleAlias == "_" {
+			continue
+		}
+		existingAlias, ok := existingAliases[importPath]
+		if !ok || existingAlias == ruleAlias || existingAlias == "." || existingAlias == "_" {
+			continue
+		}
+		if overrides == nil {
+			overrides = make(map[string]string, len(ruleImports))
+		}
+		overrides[ruleAlias] = existingAlias
+	}
+	return overrides
+}
+
+// replaceQualifierAliases rewrites a freshly generated expression to
+// use the file's alias for an import, instead of the rule's alias.
+// overrides maps each rule alias to the file's alias.
+//
+// replaceQualifierAliases only touches the node passed in. The rewrite
+// cannot reach unrelated code that shares an identifier name.
+func replaceQualifierAliases(node dst.Node, overrides map[string]string) {
+	if len(overrides) == 0 {
+		return
+	}
+	dst.Inspect(node, func(n dst.Node) bool {
+		sel, ok := n.(*dst.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*dst.Ident)
+		if !ok {
+			return true
+		}
+		if existingAlias, override := overrides[ident.Name]; override {
+			ident.Name = existingAlias
+		}
+		return true
+	})
 }
 
 // buildEllipsisIIFE constructs the IIFE that appends new args to a spread argument:
