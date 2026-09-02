@@ -129,6 +129,13 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		return nil, err
 	}
 
+	// Load the import name table, if one exists. A missing table is
+	// not fatal.
+	ip.importNames, err = loadImportNames()
+	if err != nil {
+		return nil, err
+	}
+
 	// Check if the current compile command matches the rules.
 	matched := ip.match(allSet, args)
 	if !matched.IsEmpty() {
