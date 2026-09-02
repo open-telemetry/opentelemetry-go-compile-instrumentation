@@ -3,7 +3,7 @@
 
 package main
 
-func GenericFunc[T any](p1 []T, p2 int) ([]T, error) {
+func GenericFunc[T any](p1 []T, p2 ...T) ([]T, error) {
 	return p1, nil
 }
 
