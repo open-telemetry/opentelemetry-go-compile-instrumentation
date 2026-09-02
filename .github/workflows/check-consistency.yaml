@@ -39,7 +39,6 @@ jobs:
               - 'instrumentation/**/otelc.yaml'
               - 'instrumentation/**/*.otelc.yml'
               - 'instrumentation/**/*.otelc.yaml'
-              - 'tool/internal/manifest/**'
               - 'tool/cmd/gen-manifest/**'
               - 'tool/cmd/check-test-names/**'
               - 'tool/data/instrumentation-manifest.json'

@@ -38,22 +38,10 @@ import (
 type InstDeclRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	// Kind optionally constrains the kind of declaration to match.
-	// Valid values: "func", "var", "const", "type", or "" (match any).
-	Kind string `json:"kind" yaml:"kind"` // empty = matches any kind
-
-	// Identifier is the name of the top-level declaration to match.
-	Identifier string `json:"identifier" yaml:"identifier"`
-
-	// Replace is a Go expression to assign as the value of the matched var or
-	// const declaration. Mutually exclusive with Wrap.
-	Replace string `json:"replace" yaml:"replace"`
-
-	// Wrap wraps the existing initializer of the matched var or const
-	// declaration using a template. {{ . }} is substituted with the original
-	// expression. Mutually exclusive with Replace. An error is returned at
-	// instrumentation time if the declaration has no initializer.
-	Wrap string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
+	Kind       string `json:"kind"           yaml:"kind"`
+	Identifier string `json:"identifier"     yaml:"identifier"`
+	Replace    string `json:"replace"        yaml:"replace"`
+	Wrap       string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
 }
 
 // NewInstDeclRule loads and validates an InstDeclRule from YAML data.

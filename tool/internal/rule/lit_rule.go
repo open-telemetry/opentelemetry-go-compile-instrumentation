@@ -18,17 +18,9 @@ import (
 // exclusive replace/wrap, both may be set together, because whether a field is
 // present varies from one literal to the next.
 type InstLitField struct {
-	// Name is the field name to set.
-	Name string `json:"name" yaml:"name"`
-
-	// Value is a Go expression assigned to the field. When Wrap is also set,
-	// it applies only to literals that omit the field.
+	Name  string `json:"name"            yaml:"name"`
 	Value string `json:"value,omitempty" yaml:"value,omitempty"`
-
-	// Wrap is a Go expression template applied to the value the literal already
-	// assigns to this field. {{ . }} is substituted with that expression. It has
-	// no effect on a literal that omits the field; set Value for that case.
-	Wrap string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
+	Wrap  string `json:"wrap,omitempty"  yaml:"wrap,omitempty"`
 }
 
 // InstLitRule represents a rule that sets fields on composite literals of a
@@ -52,21 +44,10 @@ type InstLitField struct {
 type InstLitRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	// StructLiteral is the qualified type name from YAML (e.g. "net/http.Transport").
-	// This field is parsed into ImportPath and TypeName during rule creation.
-	StructLiteral string `json:"struct_literal" yaml:"struct_literal"`
-
-	// ImportPath is the parsed package import path (e.g. "net/http").
-	// This field is populated during rule creation from StructLiteral.
-	ImportPath string `json:"import-path" yaml:"-"`
-
-	// TypeName is the parsed type name (e.g. "Transport").
-	// This field is populated during rule creation from StructLiteral.
-	TypeName string `json:"type-name" yaml:"-"`
-
-	// Field lists the fields to set on each matched literal. A field already
-	// present in the literal is overridden; the remaining elements are kept.
-	Field []*InstLitField `json:"field" yaml:"field"`
+	StructLiteral string          `json:"struct_literal" yaml:"struct_literal"`
+	ImportPath    string          `json:"import-path"    yaml:"-"` // "net/http", parsed from StructLiteral
+	TypeName      string          `json:"type-name"      yaml:"-"` // "Transport", parsed from StructLiteral
+	Field         []*InstLitField `json:"field"          yaml:"field"`
 }
 
 // typeNamePattern matches qualified type names like "net/http.Transport",
