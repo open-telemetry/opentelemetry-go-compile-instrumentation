@@ -4,10 +4,13 @@
 package util
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsCompileCommand(t *testing.T) {
@@ -638,6 +641,113 @@ func TestSplitCompileCmds(t *testing.T) {
 			actual := SplitCompileCmds(tt.input)
 			if !reflect.DeepEqual(actual, tt.expected) {
 				t.Errorf("Expected: %#v, got: %#v", tt.expected, actual)
+			}
+		})
+	}
+}
+
+func TestQuoteGoflagsToken(t *testing.T) {
+	tests := []struct {
+		name    string
+		token   string
+		want    string
+		wantErr bool
+	}{
+		{name: "plain token unquoted", token: "-race", want: "-race"},
+		{name: "token with space uses single quotes", token: "foo bar", want: "'foo bar'"},
+		{name: "token with tab uses single quotes", token: "foo\tbar", want: "'foo\tbar'"},
+		{name: "token with single quote uses double quotes", token: "it's", want: `"it's"`},
+		{name: "token with double quote uses single quotes", token: `say "hi"`, want: `'say "hi"'`},
+		{name: "token with both quotes errors", token: `a ' " b`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := QuoteGoflagsToken(tt.token)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNewFileScanner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lines.txt")
+	require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644))
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	// Advance the offset first; NewFileScanner must seek back to the start.
+	_, err = f.Seek(3, 0)
+	require.NoError(t, err)
+
+	scanner, err := NewFileScanner(f, 4096)
+	require.NoError(t, err)
+
+	var lines []string
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	require.NoError(t, scanner.Err())
+	assert.Equal(t, []string{"line1", "line2", "line3"}, lines)
+}
+
+func TestStripToolexecFromGoflags(t *testing.T) {
+	tests := []struct {
+		name     string
+		goflags  string
+		expected string
+	}{
+		{
+			name:     "empty",
+			goflags:  "",
+			expected: "",
+		},
+		{
+			name:     "no toolexec flag",
+			goflags:  "-mod=mod -race",
+			expected: "-mod=mod -race",
+		},
+		{
+			name:     "bare toolexec flag",
+			goflags:  "-toolexec=otelc",
+			expected: "",
+		},
+		{
+			name:     "single-quoted toolexec flag with space",
+			goflags:  "'-toolexec=otelc toolexec'",
+			expected: "",
+		},
+		{
+			name:     "double-quoted toolexec flag with space",
+			goflags:  `"-toolexec=otelc toolexec"`,
+			expected: "",
+		},
+		{
+			name:     "toolexec flag between other flags",
+			goflags:  "-mod=mod '-toolexec=otelc toolexec' -race",
+			expected: "-mod=mod -race",
+		},
+		{
+			name:     "other quoted flags are preserved verbatim",
+			goflags:  "'-tags=a b' -toolexec=otelc",
+			expected: "'-tags=a b'",
+		},
+		{
+			name:     "extra whitespace between flags",
+			goflags:  "  -mod=mod   -toolexec=otelc  ",
+			expected: "-mod=mod",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StripToolexecFromGoflags(tt.goflags); got != tt.expected {
+				t.Errorf("StripToolexecFromGoflags(%q) = %q, want %q", tt.goflags, got, tt.expected)
 			}
 		})
 	}

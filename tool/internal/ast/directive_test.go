@@ -82,18 +82,18 @@ func TestMatchDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := MatchDirective(tt.dec, tt.directive)
-			assert.Equal(t, tt.expected, result)
+			_, ok := matchDirective(tt.dec, tt.directive)
+			assert.Equal(t, tt.expected, ok)
 		})
 	}
 }
 
 func TestScanArgs(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected []DirectiveArg
-		hasError bool
+		name        string
+		input       string
+		expected    []DirectiveArg
+		errContains string // non-empty pins the error to the expected branch
 	}{
 		{
 			name:     "simple key:value",
@@ -116,14 +116,14 @@ func TestScanArgs(t *testing.T) {
 			},
 		},
 		{
-			name:     "single quotes rejected",
-			input:    "key:'single'",
-			hasError: true,
+			name:        "single quotes rejected",
+			input:       "key:'single'",
+			errContains: "single-quoted values are not supported",
 		},
 		{
-			name:     "unclosed quote",
-			input:    `key:"unclosed`,
-			hasError: true,
+			name:        "unclosed quote",
+			input:       `key:"unclosed`,
+			errContains: "unclosed double quote",
 		},
 		{
 			name:     "empty input",
@@ -139,9 +139,9 @@ func TestScanArgs(t *testing.T) {
 			},
 		},
 		{
-			name:     "missing colon",
-			input:    "nocolon",
-			hasError: true,
+			name:        "missing colon",
+			input:       "nocolon",
+			errContains: "has no unquoted colon separator",
 		},
 		{
 			name:  "empty value",
@@ -150,13 +150,71 @@ func TestScanArgs(t *testing.T) {
 				{Key: "key", Value: ""},
 			},
 		},
+		{
+			name:        "empty key rejected",
+			input:       ":value",
+			errContains: "has an empty key",
+		},
+		{
+			name:        "bare colon rejected",
+			input:       ":",
+			errContains: "has an empty key",
+		},
+		{
+			name:        "fully quoted token has no unquoted colon separator",
+			input:       `"key:value"`,
+			errContains: "has no unquoted colon separator",
+		},
+		{
+			name:        "quoted key rejected",
+			input:       `"k":v`,
+			errContains: "has a quoted or malformed key",
+		},
+		{
+			name:        "escaped quote inside quoted key does not end the quote early",
+			input:       `"a\"b":value`,
+			errContains: "has a quoted or malformed key",
+		},
+		{
+			name:  "quoted value containing colon",
+			input: `url:"https://example.com/path"`,
+			expected: []DirectiveArg{
+				{Key: "url", Value: "https://example.com/path"},
+			},
+		},
+		{
+			name:  "bare value containing colon splits at first colon only",
+			input: "key:a:b:c",
+			expected: []DirectiveArg{
+				{Key: "key", Value: "a:b:c"},
+			},
+		},
+		{
+			name:  "multiple args one with quoted colon value",
+			input: `op:"http:post" tag:foo`,
+			expected: []DirectiveArg{
+				{Key: "op", Value: "http:post"},
+				{Key: "tag", Value: "foo"},
+			},
+		},
+		{
+			// Backslash outside a quoted region is not an escape in either
+			// tokenize or cutUnquoted. This is a characterization test: it
+			// records today's behaviour so the change is visible if someone
+			// later adds bare-backslash escaping.
+			name:  "backslash in a bare key is not an escape",
+			input: `k\:v`,
+			expected: []DirectiveArg{
+				{Key: `k\`, Value: "v"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := scanArgs(tt.input)
-			if tt.hasError {
-				require.Error(t, err)
+			if tt.errContains != "" {
+				require.ErrorContains(t, err, tt.errContains)
 				return
 			}
 			require.NoError(t, err)
@@ -198,7 +256,7 @@ func TestParseDirectiveArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseDirectiveArgs(tt.dec, tt.directive)
+			result, err := parseDirectiveArgs(tt.dec, tt.directive)
 			if tt.hasError {
 				require.Error(t, err)
 				return
@@ -207,6 +265,94 @@ func TestParseDirectiveArgs(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestFindFuncsByDirective(t *testing.T) {
+	src := `package p
+//otelc:span span.name:"custom-op" tag:foo
+func Foo() {}
+
+//otelc:span
+func Bar() {}
+
+func Baz() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 2)
+
+	assert.Equal(t, "Foo", matches[0].Func.Name.Name)
+	assert.Equal(t, []DirectiveArg{{Key: "span.name", Value: "custom-op"}, {Key: "tag", Value: "foo"}}, matches[0].Args)
+
+	assert.Equal(t, "Bar", matches[1].Func.Name.Name)
+	assert.Empty(t, matches[1].Args)
+}
+
+func TestFindFuncsByDirective_NoMatches(t *testing.T) {
+	src := `package p
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+}
+
+func TestFindFuncsByDirective_SkipsNonFuncDecls(t *testing.T) {
+	src := `package p
+//otelc:span
+type T struct{}
+
+//otelc:span
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "Foo", matches[0].Func.Name.Name)
+}
+
+func TestFindFuncsByDirective_ParseArgsError(t *testing.T) {
+	src := `package p
+//otelc:span nocolon
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Foo")
+	assert.Nil(t, matches)
+}
+
+func TestFindFuncsByDirective_FirstMatchingDecorationWins(t *testing.T) {
+	src := `package p
+// a regular doc comment
+//otelc:span tag:first
+//otelc:span tag:second
+func Foo() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "first"}}, matches[0].Args)
 }
 
 func writeGoTempFile(t *testing.T, src string) string {

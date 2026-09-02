@@ -68,6 +68,31 @@ func TestInitProfiling(t *testing.T) {
 		assert.Contains(t, err.Error(), "build temp")
 	})
 
+	t.Run("profile-path equal to build temp errors", func(t *testing.T) {
+		activeSession = nil
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		buildTemp := util.GetBuildTempDir()
+		err := runInitProfiling(t, "--profile", "cpu", "--profile-path", buildTemp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "build temp")
+	})
+
+	t.Run("profile-path sharing prefix with build temp is allowed", func(t *testing.T) {
+		activeSession = nil
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv(profile.EnvProfilePath, "")
+		t.Setenv(profile.EnvEnabledProfiles, "")
+		sibling := util.GetBuildTempDir() + "-profiles"
+
+		require.NoError(t, runInitProfiling(t, "--profile", "cpu", "--profile-path", sibling))
+		require.NotNil(t, activeSession)
+
+		require.NoError(t, activeSession.Stop())
+		activeSession = nil
+	})
+
 	t.Run("valid profile starts a session and sets env", func(t *testing.T) {
 		activeSession = nil
 		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
@@ -123,4 +148,70 @@ func TestStopProfiling(t *testing.T) {
 		require.NoError(t, app.Run(context.Background(), []string{"otelc", "--profile-summary"}))
 		assert.Nil(t, activeSession)
 	})
+}
+
+func TestIsSubPath(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "path", "to", ".otelc-build")
+
+	tests := []struct {
+		name     string
+		target   string
+		base     string
+		expected bool
+	}{
+		{
+			name:     "exact base path",
+			target:   base,
+			base:     base,
+			expected: true,
+		},
+		{
+			name:     "child path inside base",
+			target:   filepath.Join(base, "sub", "dir"),
+			base:     base,
+			expected: true,
+		},
+		{
+			name:     "sibling path with shared prefix",
+			target:   base + "-profiles",
+			base:     base,
+			expected: false,
+		},
+		{
+			name:     "nested path under sibling with shared prefix",
+			target:   filepath.Join(base+"-profiles", "sub", "dir"),
+			base:     base,
+			expected: false,
+		},
+		{
+			name:     "target with trailing separator equal to base",
+			target:   base + string(filepath.Separator),
+			base:     base,
+			expected: true,
+		},
+		{
+			name:     "parent directory",
+			target:   filepath.Dir(base),
+			base:     base,
+			expected: false,
+		},
+		{
+			name:     "completely different path",
+			target:   filepath.Join(string(filepath.Separator), "other", "dir"),
+			base:     base,
+			expected: false,
+		},
+		{
+			name:     "incompatible relative path error path",
+			target:   "relative/path",
+			base:     base,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isSubPath(tt.target, tt.base))
+		})
+	}
 }

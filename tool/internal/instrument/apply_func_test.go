@@ -11,6 +11,9 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -271,9 +274,7 @@ func TestSyntheticNamesDoNotShadowBareStyleGlobal(t *testing.T) {
 // function declaration it contains.
 func parseFileFunc(t *testing.T, source string) (*dst.File, *dst.FuncDecl) {
 	t.Helper()
-	parser := ast.NewAstParser()
-	file, err := parser.ParseSource(source)
-	require.NoError(t, err)
+	file := parseFile(t, source)
 	for _, decl := range file.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
 			return file, funcDecl
@@ -300,4 +301,161 @@ func requireTypeChecks(t *testing.T, src string) {
 	conf := types.Config{Importer: importer.Default()}
 	_, err = conf.Check("main", fset, []*goast.File{parsed}, nil)
 	require.NoErrorf(t, err, "generated code does not type-check:\n%s", src)
+}
+
+// newTrampolineJump builds an if statement shaped like the one buildTJump
+// produces: a labelled if whose else block holds the deferred after-call. The
+// label is what findJumpPoint keys on, so a jump without it is just an
+// ordinary if as far as this function is concerned.
+func newTrampolineJump(labelled bool) *dst.IfStmt {
+	// Mirrors buildTJump: the init defines the hook context and skip flag from
+	// the before-call, and the else block defers the after-call.
+	init := ast.DefineStmts(
+		ast.Exprs(ast.Ident("hookCtx"), ast.Ident("skip")),
+		ast.Exprs(ast.CallTo("beforeCall", nil, nil)),
+	)
+	elseBlock := ast.Block(ast.DeferStmt(ast.CallTo("afterCall", nil, nil)))
+
+	jump := ast.IfStmt(init, ast.Ident("skip"), ast.Block(ast.EmptyStmt()), elseBlock)
+	if labelled {
+		jump.Decs.If.Append(tJumpLabel)
+	}
+	return jump
+}
+
+// chainJump nests inner inside outer's else block the way insertToFunc does,
+// separating the existing statement from the new jump with an empty statement.
+// That leaves the else block with more than one statement, which is the
+// condition findJumpPoint recurses on.
+func chainJump(t *testing.T, outer, inner *dst.IfStmt) {
+	t.Helper()
+
+	elseBlock, ok := outer.Else.(*dst.BlockStmt)
+	require.True(t, ok, "a trampoline jump should always carry a block else")
+	elseBlock.List = append(elseBlock.List, ast.EmptyStmt(), inner)
+}
+
+func TestFindJumpPointIgnoresUnlabelledIf(t *testing.T) {
+	// Without the trampoline label this is an ordinary if statement that
+	// happened to be first in the function body. Returning a block here would
+	// splice a trampoline into unrelated user code.
+	jump := newTrampolineJump(false)
+
+	assert.Nil(t, findJumpPoint(jump))
+}
+
+func TestFindJumpPointReturnsElseBlockOfLoneJump(t *testing.T) {
+	jump := newTrampolineJump(true)
+
+	point := findJumpPoint(jump)
+
+	require.NotNil(t, point)
+	assert.Equal(t, jump.Else, point, "the only jump present is the insertion point")
+}
+
+func TestFindJumpPointDescendsToLastJumpInChain(t *testing.T) {
+	// Two rules already applied to the same function, so the second jump lives
+	// inside the first one's else block. A third has to land inside the second,
+	// not the first, or the rules stop nesting in the order they were applied.
+	first := newTrampolineJump(true)
+	second := newTrampolineJump(true)
+	chainJump(t, first, second)
+
+	point := findJumpPoint(first)
+
+	require.NotNil(t, point)
+	assert.Equal(t, second.Else, point, "insertion belongs in the innermost jump")
+	assert.NotEqual(t, first.Else, point)
+}
+
+func TestFindJumpPointDescendsThroughSeveralJumps(t *testing.T) {
+	// The descent is recursive, so a longer chain must still reach the end
+	// rather than stopping one level in.
+	first := newTrampolineJump(true)
+	second := newTrampolineJump(true)
+	third := newTrampolineJump(true)
+	chainJump(t, first, second)
+	chainJump(t, second, third)
+
+	point := findJumpPoint(first)
+
+	require.NotNil(t, point)
+	assert.Equal(t, third.Else, point, "insertion belongs at the end of the chain")
+}
+
+func TestFindJumpPointStopsAtUnlabelledTail(t *testing.T) {
+	// A chain whose last statement is not a labelled jump has no further
+	// insertion point beneath it, so the descent reports nothing rather than
+	// guessing at a block.
+	first := newTrampolineJump(true)
+	tail := newTrampolineJump(false)
+	chainJump(t, first, tail)
+
+	assert.Nil(t, findJumpPoint(first))
+}
+
+// context.go is the source of truth that api.tmpl mirrors; it lives in the
+// sibling pkg/ module, so the path is relative to this package dir.
+const hookContextSource = "../../../pkg/hook/context.go"
+
+// TestAPITemplateMatchesHookContext keeps api.tmpl byte-identical to
+// pkg/hook/context.go (issue #899). api.tmpl is embedded and parsed for its
+// HookContext decls, so any drift silently desyncs the generated interface.
+// We compare the embedded templateAPI, i.e. the exact bytes the tool builds in.
+func TestAPITemplateMatchesHookContext(t *testing.T) {
+	source, err := os.ReadFile(hookContextSource)
+	require.NoError(t, err)
+
+	require.Equal(t, string(source), templateAPI,
+		"%s and api.tmpl have drifted; re-sync with `make build` "+
+			"(or `cp %s tool/internal/instrument/api.tmpl`)",
+		hookContextSource, hookContextSource)
+}
+
+func TestParseFileMissingFile(t *testing.T) {
+	ip := &instrumentPhase{}
+	_, err := ip.parseFile("/nonexistent/path/source.go")
+	require.Error(t, err)
+}
+
+func TestInstrumentParseFileError(t *testing.T) {
+	ip := &instrumentPhase{}
+
+	rset := rule.NewInstRuleSet("example.com/pkg")
+	rset.FuncRules["/nonexistent/does-not-exist.go"] = []*rule.InstFuncRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Func:         "Foo",
+			Before:       "BeforeFoo",
+			Path:         "example.com/hook",
+		},
+	}
+
+	err := ip.instrument(context.Background(), rset)
+	require.Error(t, err)
+}
+
+func TestInstrument_WriteInstrumentedError(t *testing.T) {
+	// A valid source file whose path does not match compileArgs causes writeInstrumented to fail.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "source.go")
+	require.NoError(t, os.WriteFile(src, []byte("package main\nvar X = 1\n"), 0o644))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     tmp,
+		compileArgs: []string{"other.go"}, // doesn't match src, causing writeInstrumented to error
+	}
+
+	rset := rule.NewInstRuleSet("main")
+	rset.DeclRules[src] = []*rule.InstDeclRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Identifier:   "X",
+			Replace:      "2",
+		},
+	}
+
+	err := ip.instrument(context.Background(), rset)
+	require.Error(t, err)
 }

@@ -25,6 +25,18 @@ There are two main areas:
 - **Tool tests** (`tool/`). Cover the compile-time instrumentation pipeline: AST rewriting, import resolution, trampoline generation, package loading, and setup logic. Golden-file tests in `tool/internal/instrument/` snapshot expected output and can be updated with `make test-unit/update-golden`.
 - **Package tests** (`pkg/`). Cover the runtime instrumentation hooks and semantic convention helpers. Each hook package has tests that verify span creation, context propagation, error recording, and the enable/disable mechanism via `OTEL_GO_ENABLED_INSTRUMENTATIONS` / `OTEL_GO_DISABLED_INSTRUMENTATIONS`.
 
+### Field-injected packages
+
+Some instrumentations (`database/sql`, `runtime`) inject fields into stdlib types via `add_struct_fields`. The root package of those modules does not type-check against an uninstrumented stdlib, so `go test ./...` on the module fails.
+
+For `database/sql`, `make test-unit` / `make test-unit/instrumentation` still run the packages that do not touch injected fields:
+
+```bash
+go test ./dsnparse/... ./semconv/...
+```
+
+Keep new unit tests for DSN parsing, semconv helpers, and other pure logic in those subpackages. Hook paths that require injected fields stay covered by integration tests under `test/integration/`.
+
 ### Golden-test helper packages
 
 A golden testcase directory under `tool/internal/instrument/testdata/golden/<name>/` may contain a `helpers/` subdirectory with one or more Go packages. The test harness automatically discovers each subdirectory, compiles it into a `.a` archive, and registers it in the `importcfg` so the instrumented source can import it at compile time.
@@ -154,7 +166,7 @@ The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 1. Runs `make test-unit/coverage` to generate `coverage-tool.txt` and `coverage-pkg.txt`.
 2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
 
-Codecov evaluates each flag against the target defined in `codecov.yml` and posts the result as an
+Codecov evaluates each flag against the target defined in `.github/codecov.yml` and posts the result as an
 **enforcing** status check (`informational: false`): a coverage shortfall below the target fails
 the check and blocks the PR.
 

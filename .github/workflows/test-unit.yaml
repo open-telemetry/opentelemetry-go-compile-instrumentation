@@ -60,7 +60,7 @@ jobs:
       # coverage-instrumentation.txt in the workspace. "files" only *adds* to the
       # files the action discovers on its own, so without disable_search each
       # upload below would carry all three profiles under its own flag, and the
-      # flag-scoped statuses in codecov.yml would measure the whole repo.
+      # flag-scoped statuses in .github/codecov.yml would measure the whole repo.
       - name: Upload tool coverage report
         if: needs.changes.outputs.tool == 'true'
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5

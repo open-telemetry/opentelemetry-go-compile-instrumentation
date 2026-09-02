@@ -22,10 +22,9 @@ import (
 type InstFileRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	File string `json:"file" yaml:"file"` // The name of the file to be added to the target package
-	Path string `json:"path" yaml:"path"` // The import path where the file is located
-
-	ResolvedPath string `json:"resolved_path" yaml:"-"` // The local path of the package directory resolved from import path
+	File         string `json:"file"          yaml:"file"`
+	Path         string `json:"path"          yaml:"path"`
+	ResolvedPath string `json:"resolved_path" yaml:"-"` // local dir Path resolves to
 }
 
 // NewInstFileRule loads and validates an InstFileRule from YAML data.
