@@ -22,8 +22,12 @@ type Manifest []Entry
 
 // Load decodes the embedded instrumentation manifest.
 func Load() (Manifest, error) {
+	return load(data.GetManifestJSON())
+}
+
+func load(content []byte) (Manifest, error) {
 	var manifest Manifest
-	if err := json.Unmarshal(data.GetManifestJSON(), &manifest); err != nil {
+	if err := json.Unmarshal(content, &manifest); err != nil {
 		return nil, ex.Wrapf(err, "loading embedded instrumentation manifest")
 	}
 	return manifest, nil
