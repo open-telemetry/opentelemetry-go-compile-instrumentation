@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package manifest
+package main
 
 import (
 	"encoding/json"
@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/data"
 )
 
 func TestGenerate(t *testing.T) {
@@ -364,9 +366,12 @@ func TestLoadModuleEntriesRejectsEscapingRuleSymlink(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoad(t *testing.T) {
-	got, err := load()
-	require.NoError(t, err)
+// TestEmbeddedManifestMatchesGeneratorContract guards the checked-in artifact
+// this generator produces: it must unmarshal, describe complete entries, and
+// stay sorted and deduplicated the way Generate leaves it.
+func TestEmbeddedManifestMatchesGeneratorContract(t *testing.T) {
+	var got Manifest
+	require.NoError(t, json.Unmarshal(data.GetManifestJSON(), &got))
 	require.NotEmpty(t, got)
 
 	for _, entry := range got {
