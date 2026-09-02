@@ -333,7 +333,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 	}
 	switch {
 	case def.HasFunc != "":
-		_, ok, _ := ast.FindFuncDecl(tree, def)
+		_, ok, _ := ast.FindFuncDecl(tree, def, nil)
 		return ok
 	case def.HasStruct != "":
 		return ast.FindStructType(tree, def.HasStruct) != nil

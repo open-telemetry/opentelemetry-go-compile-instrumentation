@@ -390,7 +390,7 @@ func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 }
 
 func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
-	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
+	funcDecl, ok, err := ast.FindFuncDecl(root, rule, ip.importNames)
 	if err != nil {
 		return err
 	}

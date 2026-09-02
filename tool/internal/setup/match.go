@@ -292,9 +292,10 @@ func (sp *setupPhase) preciseMatching(
 		// evaluated against that file. All fields are constant for a given
 		// source file, so no updates are needed inside the inner loop.
 		mctx := matchContext{
-			IsTest:     isTest,
-			SourceFile: source,
-			AST:        tree,
+			IsTest:        isTest,
+			SourceFile:    source,
+			AST:           tree,
+			ResolvedNames: sp.resolvedNames,
 		}
 
 		for _, rf := range ruleFilters {
@@ -347,7 +348,7 @@ func (sp *setupPhase) matchOneRule(
 ) error {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		_, ok, err := ast.FindFuncDecl(tree, rt)
+		_, ok, err := ast.FindFuncDecl(tree, rt, sp.resolvedNames)
 		if err != nil {
 			return err
 		}
@@ -362,7 +363,7 @@ func (sp *setupPhase) matchOneRule(
 			sp.Info("Match struct rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstRawRule:
-		_, ok, err := ast.FindFuncDecl(tree, rt)
+		_, ok, err := ast.FindFuncDecl(tree, rt, sp.resolvedNames)
 		if err != nil {
 			return err
 		}

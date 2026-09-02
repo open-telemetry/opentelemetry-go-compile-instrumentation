@@ -18,7 +18,7 @@ import (
 // applyCallRule transforms function calls at call sites by wrapping them with
 // instrumentation code according to the provided replacement template.
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
-	importAliases := ast.ImportAliasMap(root)
+	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
 	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
 

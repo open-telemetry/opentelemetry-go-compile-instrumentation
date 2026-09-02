@@ -62,6 +62,11 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// importNames maps an import path to a package name, resolved
+	// during setup instead of guessed from the import path. importNames
+	// has no entries when the table is unavailable, such as after an
+	// older setup run.
+	importNames map[string]string
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }

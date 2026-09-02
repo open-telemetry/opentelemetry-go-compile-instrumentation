@@ -120,6 +120,9 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 // FindFuncDecl finds the function declaration targeted by r, including
 // name, receiver, and optional signature-filter matching.
 //
+// resolvedNames maps an import path to a package name. Pass nil when
+// none is available.
+//
 // The returned bool reports whether a matching declaration was found. It is
 // false both when no declaration matches r's function name and receiver, and
 // when a declaration is found but does not satisfy r's signature filters. When
@@ -127,6 +130,7 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	root *dst.File,
 	r *R,
+	resolvedNames map[string]string,
 ) (*dst.FuncDecl, bool, error) {
 	var (
 		funcName       string
@@ -159,7 +163,7 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	if !ok {
 		return nil, false, ex.Newf("unexpected %T value", r)
 	}
-	ok, err := funcDeclMatchesFilters(funcDecl, rr, root)
+	ok, err := funcDeclMatchesFilters(funcDecl, rr, root, resolvedNames)
 	if err != nil {
 		return nil, false, err
 	}
@@ -351,11 +355,16 @@ func AddStructField(st *dst.StructType, name, t string) {
 // Qualified type names are resolved against imports, which maps the local
 // identifier used at a use site to its real import path (see ImportAliasMap).
 // Matching is therefore relative to the enclosing file's import declarations.
-func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, root *dst.File) (bool, error) {
+func funcDeclMatchesFilters(
+	funcDecl *dst.FuncDecl,
+	r *rule.InstFuncRule,
+	root *dst.File,
+	resolvedNames map[string]string,
+) (bool, error) {
 	if r.Signature == nil && r.SignatureContains == nil && r.Result == "" && r.LastResult == "" && r.Param == "" {
 		return true, nil
 	}
-	imports := ImportAliasMap(root)
+	imports := ImportAliasMap(root, resolvedNames)
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
