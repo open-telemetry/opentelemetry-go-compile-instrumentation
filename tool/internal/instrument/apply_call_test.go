@@ -775,7 +775,7 @@ func TestMatchesCallRule_ImportAliasFromVersionSuffix(t *testing.T) {
 		},
 	}
 
-	importAliases := ast.ImportAliasMap(file)
+	importAliases := ast.ImportAliasMap(file, nil)
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
@@ -995,7 +995,7 @@ func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 		},
 	}
 
-	importAliases := ast.ImportAliasMap(file)
+	importAliases := ast.ImportAliasMap(file, nil)
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
@@ -1044,7 +1044,7 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 	}
 
 	ip := newTestPhase()
-	importAliases := ast.ImportAliasMap(file)
+	importAliases := ast.ImportAliasMap(file, nil)
 	result := ip.applyCallAppendArgs(r, file, importAliases)
 
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")

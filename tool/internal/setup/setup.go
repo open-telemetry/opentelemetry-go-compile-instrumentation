@@ -30,6 +30,9 @@ type setupPhase struct {
 	buildPackages   []*packages.Package
 	buildFlags      []string
 	rootModulePaths []string
+	// resolvedNames maps an import path to a package name, built from
+	// buildPackages' dependency graph.
+	resolvedNames map[string]string
 }
 
 func (sp *setupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }

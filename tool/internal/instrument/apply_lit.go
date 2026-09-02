@@ -18,7 +18,7 @@ import (
 // applyLitRule sets fields on every composite literal of the rule's type found
 // in the target file. It reports whether it changed root.
 func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) (bool, error) {
-	importAliases := ast.ImportAliasMap(root)
+	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
 	setters, err := newLitFieldSetters(r)
 	if err != nil {

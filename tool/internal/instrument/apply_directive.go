@@ -40,7 +40,7 @@ func (ip *instrumentPhase) applyDirectiveRule(
 	if importErr := ip.addRuleImports(ctx, root, r.Imports, r.Name); importErr != nil {
 		return false, importErr
 	}
-	imports := ast.ImportAliasMap(root)
+	imports := ast.ImportAliasMap(root, ip.importNames)
 	for _, match := range matches {
 		funcDecl := match.Func
 		util.Assert(funcDecl.Body != nil, "function must have a body")

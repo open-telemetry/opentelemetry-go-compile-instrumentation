@@ -19,7 +19,7 @@ import (
 // instrumentation code according to the provided replacement template. It
 // reports whether it changed root.
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) (bool, error) {
-	importAliases := ast.ImportAliasMap(root)
+	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
 	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
 
