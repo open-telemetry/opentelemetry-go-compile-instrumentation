@@ -231,11 +231,16 @@ func (s *Session) writeHeapProfile() error {
 	if err != nil {
 		return ex.Wrapf(err, "create heap profile %q", path)
 	}
-	defer f.Close()
 
 	if writeErr := pprof.WriteHeapProfile(f); writeErr != nil {
+		_ = f.Close()
 		_ = os.Remove(path)
 		return ex.Wrapf(writeErr, "write heap profile: %q", path)
+	}
+
+	if closeErr := f.Close(); closeErr != nil {
+		_ = os.Remove(path)
+		return ex.Wrapf(closeErr, "close heap profile %q", path)
 	}
 	return nil
 }
