@@ -56,6 +56,16 @@
     "versionRange": "v1.4.2"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v81",
+    "target": "github.com/stripe/stripe-go/v81",
+    "versionRange": "v81.0.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v82",
+    "target": "github.com/stripe/stripe-go/v82",
+    "versionRange": "v82.0.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/mongo",
     "target": "go.mongodb.org/mongo-driver/mongo"
   },
