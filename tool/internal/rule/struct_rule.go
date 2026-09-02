@@ -12,8 +12,8 @@ import (
 
 // InstStructField represents a single field to be added to a struct.
 type InstStructField struct {
-	Name string `json:"name" yaml:"name"` // The name of the field to be added
-	Type string `json:"type" yaml:"type"` // The type of the field to be added
+	Name string `json:"name" yaml:"name"`
+	Type string `json:"type" yaml:"type"`
 }
 
 // InstStructRule represents a rule that adds new fields to a target struct.
@@ -28,8 +28,8 @@ type InstStructField struct {
 type InstStructRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Struct   string             `json:"struct"    yaml:"struct"`    // The type name of the struct to be instrumented
-	NewField []*InstStructField `json:"new_field" yaml:"new_field"` // The new fields to be added
+	Struct   string             `json:"struct"    yaml:"struct"`
+	NewField []*InstStructField `json:"new_field" yaml:"new_field"`
 }
 
 // NewInstStructRule loads and validates an InstStructRule from YAML data.

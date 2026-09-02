@@ -57,6 +57,11 @@ func (t *callTemplate) String() string {
 
 type callTemplateData struct {
 	enclosing *funcTemplateData
+
+	// isCall and callArgs describe the wrapped expression when it is a
+	// function call (e.g. wrap_call's matched call site)
+	isCall   bool
+	callArgs []dst.Expr
 }
 
 // String implements fmt.Stringer so "{{ . }}" renders as placeholderIdent.
@@ -113,6 +118,53 @@ func (d *callTemplateData) FuncReturnCount() (int, error) {
 	return d.enclosing.FuncReturnCount(), nil
 }
 
+// Receiver returns the identifier of the enclosing method's receiver, or an
+// error if there is no enclosing function or the enclosing function has no
+// receiver. Template usage: {{.Receiver}}
+func (d *callTemplateData) Receiver() (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.Receiver()
+}
+
+// FuncArgumentOfType returns the identifier of the first parameter of the
+// enclosing function (excluding the receiver) whose type matches typeStr
+// or "" if none match. Template usage: {{.FuncArgumentOfType "context.Context"}}
+func (d *callTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.FuncArgumentOfType(typeStr)
+}
+
+func notACallErr() error {
+	return ex.Newf("requires the wrapped expression to be a function call")
+}
+
+// CallArgumentCount returns the number of arguments in the wrapped call
+// expression. Only available when the wrapped expression is itself
+// a function call. Template usage: {{.CallArgumentCount}}
+func (d *callTemplateData) CallArgumentCount() (int, error) {
+	if !d.isCall {
+		return 0, notACallErr()
+	}
+	return len(d.callArgs), nil
+}
+
+// CallArgument returns the source text of the idx-th (0-indexed) argument of
+// the wrapped call expression. Only available when the wrapped expression is
+// itself a function call. Template usage: {{.CallArgument N}}
+func (d *callTemplateData) CallArgument(idx int) (string, error) {
+	if !d.isCall {
+		return "", notACallErr()
+	}
+	if idx < 0 || idx >= len(d.callArgs) {
+		return "", ex.Newf("CallArgument index %d out of range [0, %d)", idx, len(d.callArgs))
+	}
+	return toolast.RenderExpr(d.callArgs[idx])
+}
+
 // compileExpression executes the template with the given expression node as
 // the placeholder value, parses the result, and returns the transformed expression.
 // enclosing is the function declaration that contains node, or
@@ -131,12 +183,18 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 	if enclosing != nil {
 		data.enclosing = newFuncTemplateData(enclosing, nil, nil, "")
 	}
+	if call, ok := unwrap(node).(*dst.CallExpr); ok {
+		data.isCall = true
+		data.callArgs = call.Args
+	}
 
 	var sb strings.Builder
 	if err := t.template.Execute(&sb, data); err != nil {
 		return nil, ex.Wrapf(err, "failed to execute template")
 	}
 	userResult := sb.String()
+
+	placeholderRendered := strings.Contains(userResult, placeholderIdent)
 
 	// Wrap the result in a minimal function so we can parse it as Go code.
 	wrapped := "package _\nfunc _() {\n\t" + userResult + "\n}\n"
@@ -179,10 +237,11 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 		return nil, ex.Newf("expected expression statement, got %T", funcDecl.Body.List[0])
 	}
 
-	// Replace placeholder with the actual node
 	result, replaced := replacePlaceholder(exprStmt.X, node)
-	if !replaced {
-		return nil, ex.New("template output did not contain placeholder expression")
+	if placeholderRendered && !replaced {
+		return nil, ex.New(
+			"template output did not contain expected placeholder expression for {{ . }}",
+		)
 	}
 
 	resultExpr, ok := result.(dst.Expr)
@@ -191,6 +250,17 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 	}
 
 	return resultExpr, nil
+}
+
+// unwrap strips any enclosing parentheses from expr, e.g. (foo()) -> foo().
+func unwrap(expr dst.Expr) dst.Expr {
+	for {
+		paren, ok := expr.(*dst.ParenExpr)
+		if !ok {
+			return expr
+		}
+		expr = paren.X
+	}
 }
 
 // parseGoExpression parses a Go expression string into a dst.Expr.

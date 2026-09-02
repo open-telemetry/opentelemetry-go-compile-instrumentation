@@ -2,7 +2,7 @@
 
 This file provides guidelines for AI-assisted contributions to
 `opentelemetry-go-compile-instrumentation`. For the project's AI usage policy, see
-[AI_POLICY.md](AI_POLICY.md).
+[docs/AI_POLICY.md](docs/AI_POLICY.md).
 
 ## General Rules and Guidelines
 

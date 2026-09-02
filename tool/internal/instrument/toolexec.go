@@ -113,7 +113,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	if importCfgPath != "" {
 		imports, err := imports.ParseImportCfg(importCfgPath)
 		if err != nil {
-			return nil, ex.Wrapf(err, "parsing importcfg")
+			return nil, err
 		}
 		ip.importConfig = imports
 	}
@@ -188,7 +188,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	}
 
 	if err := ip.importConfig.WriteFile(ip.importConfigPath); err != nil {
-		return ex.Wrapf(err, "writing importcfg")
+		return err
 	}
 
 	ip.Info("Updated importcfg", "path", ip.importConfigPath)
@@ -319,7 +319,7 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	// Parse the link importcfg
 	linkConfig, err := imports.ParseImportCfg(importCfgPath)
 	if err != nil {
-		return nil, ex.Wrapf(err, "parsing link importcfg")
+		return nil, err
 	}
 
 	if linkConfig.PackageFile == nil {
@@ -341,7 +341,7 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	}
 
 	if err = linkConfig.WriteFile(importCfgPath); err != nil {
-		return nil, ex.Wrapf(err, "writing link importcfg")
+		return nil, err
 	}
 
 	logger.InfoContext(ctx, "Updated link importcfg", "path", importCfgPath, "added", len(addedImports))

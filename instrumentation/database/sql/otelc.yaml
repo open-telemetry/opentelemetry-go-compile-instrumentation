@@ -70,6 +70,16 @@ hook_open:
         after: afterOpenInstrumentation
         path: "go.opentelemetry.io/otelc/instrumentation/database/sql"
 
+hook_opendb:
+  target: database/sql
+  where:
+    func: OpenDB
+  do:
+    - inject_hooks:
+        before: beforeOpenDBInstrumentation
+        after: afterOpenDBInstrumentation
+        path: "go.opentelemetry.io/otelc/instrumentation/database/sql"
+
 hook_db_ping_context:
   target: database/sql
   where:

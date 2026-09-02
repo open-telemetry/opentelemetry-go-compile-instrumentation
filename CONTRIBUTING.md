@@ -83,22 +83,22 @@ make help
 - `make format` - Format all code (Go + YAML + License Headers)
   - `make format/go` - Format Go code only using golangci-lint
   - `make format/yaml` - Format YAML files only using yamlfmt
-  - `make format/license` - Apply license headers to Go files
 - `make lint` - Run all linters (Go, YAML, GitHub Actions, Makefile)
   - `make lint/go` - Run golangci-lint on Go code
   - `make lint/yaml` - Lint YAML formatting
   - `make lint/action` - Lint GitHub Actions workflows
   - `make lint/makefile` - Lint Makefile
-  - `make lint/license` - Check license headers (has dedicated CI workflow)
+  - `make lint/license-header` - Check license headers (has dedicated CI workflow)
+  - `make lint/license-header/fix` - Apply license headers to Go and shell files
 
 #### License Headers
 
-All Go files must include the proper license header. The license header configuration is defined in `license.yml` which handles exclusions for vendor directories, temporary files, and generated code.
+All Go and shell files must include the proper license header. The required headers and path exclusions are managed in `.github/scripts/license-check.sh`.
 
 To check and fix license headers:
 
-- **Check license headers**: `make lint/license`
-- **Apply license headers**: `make format/license`
+- **Check license headers**: `make lint/license-header`
+- **Apply license headers**: `make lint/license-header/fix`
 
 The license header checker has a dedicated CI workflow (`check-license-headers.yaml`) that runs automatically on pull requests and pushes when Go files or the license configuration change.
 
@@ -121,7 +121,7 @@ Test results are saved to `gotest-unit.log` and `gotest-integration.log` for rev
 
 - `make weaver-install` - Install OTel Weaver if not present
 - `make lint/semantic-conventions` - Validate semantic convention registry
-- `make registry-diff` - Generate diff between two versions of semantic convention registry
+- `make semantic-conventions/diff` - Generate diff between two versions of semantic convention registry
 - `make semantic-conventions/resolve` - Resolve semantic convention registry schema
 
 For detailed information on managing semantic conventions, see [docs/semantic-conventions.md](docs/semantic-conventions.md).
@@ -227,7 +227,7 @@ make adr-list
 
 ## AI Usage
 
-This project welcomes the use of AI tools. Please read the [AI Usage Policy](AI_POLICY.md) before
+This project welcomes the use of AI tools. Please read the [AI Usage Policy](docs/AI_POLICY.md) before
 contributing. The critical rule is: **you must understand every line of code you submit.**
 Contributors using AI tools are held to the same quality standards as any other contribution.
 
@@ -324,20 +324,18 @@ Enter the newly created directory and add your fork as a new remote:
 git remote add <YOUR_FORK> git@github.com:<YOUR_GITHUB_USERNAME>/opentelemetry-go-compile-instrumentation
 ```
 
-Check out a new branch, make modifications, run linters and tests, update
-`CHANGELOG.md`, and push the branch to your fork:
+Check out a new branch, make modifications, run linters and tests, and push
+the branch to your fork:
 
 ```sh
 git checkout -b <YOUR_BRANCH_NAME>
 # edit files
-# update changelog
 git add -p
 git commit
 git push <YOUR_FORK> <YOUR_BRANCH_NAME>
 ```
 
 Open a pull request against the main `opentelemetry-go-compile-instrumentation` repo.
-Be sure to add the pull request ID to the entry you added to `CHANGELOG.md`.
 
 Avoid rebasing and force-pushing to your branch to facilitate reviewing the pull request.
 Rewriting Git history makes it difficult to keep track of iterations during code review.
@@ -407,5 +405,5 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 
 ## Release Process
 
-See [RELEASE.md](RELEASE.md) for the full release process, including release
+See [docs/RELEASE.md](docs/RELEASE.md) for the full release process, including release
 cadence, tagging conventions, cross-compilation targets, and hotfix guidance.
