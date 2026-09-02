@@ -1197,8 +1197,14 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	return false
 }
 
-// replaceTypeParamsWithAny replaces type parameters with interface{} for use in
-// non-generic contexts like HookContextImpl methods
+// replaceTypeParamsWithAny widens any type expression containing type parameters to interface{}.
+//
+// Widening is intentionally all-or-nothing: composite types containing type parameters
+// (such as []T, map[K]V, or chan T) must not be structurally rewritten into corresponding
+// interface-containing composite types (e.g. []interface{}), because in Go a concrete
+// parameterized type like []T is not assignable to []interface{}. Instead, the entire parameter
+// type is widened to interface{} to preserve assignability at the hook boundary so the
+// trampoline can pass concrete argument values directly to the hook function.
 func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 	if containsTypeParameter(t, typeParams) {
 		return ast.InterfaceType()
