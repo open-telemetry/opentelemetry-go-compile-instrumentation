@@ -24,8 +24,10 @@ import (
 
 const (
 	// Allowed names for the instrumentation config file.
-	toolFileCanonical = "otel.instrumentation.go"
-	toolFileAlias     = "otelc.tool.go"
+	toolFileCanonical            = "otel.instrumentation.go"
+	toolFileAlias                = "otelc.tool.go"
+	instrumentationYAMLCanonical = "otel.instrumentation.yml"
+	instrumentationYAMLAlias     = "otel.instrumentation.yaml"
 )
 
 type instrumentationConfig struct {
@@ -35,22 +37,17 @@ type instrumentationConfig struct {
 	Error      error
 }
 
-//nolint:forbidigo // sentinel error; must not carry mutable stack state
-var errNotInstrumentation = errors.New("not an instrumentation package")
+func findOneOf(moduleDir, canonicalName, aliasName, label string) (string, error) {
+	canonical := filepath.Join(moduleDir, canonicalName)
+	alias := filepath.Join(moduleDir, aliasName)
 
-func findToolFile(moduleDir string) (string, error) {
-	canonical := filepath.Join(moduleDir, toolFileCanonical)
-	alias := filepath.Join(moduleDir, toolFileAlias)
-
-	canonicalExists := util.PathExists(canonical)
-	aliasExists := util.PathExists(alias)
-
-	switch {
+	switch canonicalExists, aliasExists := util.PathExists(canonical), util.PathExists(alias); {
 	case canonicalExists && aliasExists:
 		return "", ex.Newf(
-			"both %q and %q exist; only one instrumentation config file is allowed",
-			toolFileCanonical,
-			toolFileAlias,
+			"both %q and %q exist; only one %s file is allowed",
+			canonicalName,
+			aliasName,
+			label,
 		)
 	case canonicalExists:
 		return canonical, nil
@@ -59,6 +56,22 @@ func findToolFile(moduleDir string) (string, error) {
 	default:
 		return "", nil
 	}
+}
+
+func findInstrumentationYAMLFile(moduleDir string) (string, error) {
+	return findOneOf(
+		moduleDir,
+		instrumentationYAMLCanonical,
+		instrumentationYAMLAlias,
+		"instrumentation YAML",
+	)
+}
+
+//nolint:forbidigo // sentinel error; must not carry mutable stack state
+var errNotInstrumentation = errors.New("not an instrumentation package")
+
+func findToolFile(moduleDir string) (string, error) {
+	return findOneOf(moduleDir, toolFileCanonical, toolFileAlias, "instrumentation config")
 }
 
 func findToolFiles(moduleDirs map[string]bool) ([]string, error) {

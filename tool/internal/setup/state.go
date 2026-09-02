@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -112,14 +111,7 @@ func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, 
 			files = append(files, goModFile)
 			files = append(files, goSumFile)
 
-			// If otelc.tool.go exists, use it (it may get modified)
-			// Otherwise, use the canonical path (it may get generated or modified)
-			toolFile := canonical
-			if !util.PathExists(canonical) && util.PathExists(alias) {
-				toolFile = alias
-			}
-
-			files = append(files, toolFile)
+			files = append(files, canonical, alias)
 		}
 	}
 
@@ -202,20 +194,16 @@ func (s *stateManager) Commit() error {
 		return nil
 	}
 
-	entries := make([]string, 0, len(s.files))
-
+	entries := make(map[string]bool, len(s.files))
 	for path, exists := range s.files {
 		if exists {
-			entries = append(entries, path)
+			entries[path] = true
 		} else {
-			entries = append(entries, "-"+path)
+			entries["-"+path] = true
 		}
 	}
 
-	// Sort the entries for deterministic behavior
-	sort.Strings(entries)
-
-	bs, err := json.Marshal(entries)
+	bs, err := json.Marshal(slices.Sorted(maps.Keys(entries)))
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal state to JSON")
 	}
