@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/tools/go/packages"
 
@@ -23,34 +24,30 @@ import (
 
 const (
 	// Allowed names for the instrumentation config file.
-	toolFileCanonical = "otel.instrumentation.go"
-	toolFileAlias     = "otelc.tool.go"
+	toolFileCanonical            = "otel.instrumentation.go"
+	toolFileAlias                = "otelc.tool.go"
+	instrumentationYAMLCanonical = "otel.instrumentation.yml"
+	instrumentationYAMLAlias     = "otel.instrumentation.yaml"
 )
 
 type instrumentationConfig struct {
 	ImportPath string
-	ModuleDir  string
 	ToolFile   string
 	RuleFiles  []string
 	Error      error
 }
 
-//nolint:forbidigo // sentinel error; must not carry mutable stack state
-var errNotInstrumentation = errors.New("not an instrumentation package")
+func findOneOf(moduleDir, canonicalName, aliasName, label string) (string, error) {
+	canonical := filepath.Join(moduleDir, canonicalName)
+	alias := filepath.Join(moduleDir, aliasName)
 
-func findToolFile(moduleDir string) (string, error) {
-	canonical := filepath.Join(moduleDir, toolFileCanonical)
-	alias := filepath.Join(moduleDir, toolFileAlias)
-
-	canonicalExists := util.PathExists(canonical)
-	aliasExists := util.PathExists(alias)
-
-	switch {
+	switch canonicalExists, aliasExists := util.PathExists(canonical), util.PathExists(alias); {
 	case canonicalExists && aliasExists:
 		return "", ex.Newf(
-			"both %q and %q exist; only one instrumentation config file is allowed",
-			toolFileCanonical,
-			toolFileAlias,
+			"both %q and %q exist; only one %s file is allowed",
+			canonicalName,
+			aliasName,
+			label,
 		)
 	case canonicalExists:
 		return canonical, nil
@@ -61,9 +58,25 @@ func findToolFile(moduleDir string) (string, error) {
 	}
 }
 
-func findToolFiles(moduleDirs []string) ([]string, error) {
+func findInstrumentationYAMLFile(moduleDir string) (string, error) {
+	return findOneOf(
+		moduleDir,
+		instrumentationYAMLCanonical,
+		instrumentationYAMLAlias,
+		"instrumentation YAML",
+	)
+}
+
+//nolint:forbidigo // sentinel error; must not carry mutable stack state
+var errNotInstrumentation = errors.New("not an instrumentation package")
+
+func findToolFile(moduleDir string) (string, error) {
+	return findOneOf(moduleDir, toolFileCanonical, toolFileAlias, "instrumentation config")
+}
+
+func findToolFiles(moduleDirs map[string]bool) ([]string, error) {
 	toolFiles := make([]string, 0, len(moduleDirs))
-	for _, dir := range moduleDirs {
+	for dir := range moduleDirs {
 		toolFile, err := findToolFile(dir)
 		if err != nil {
 			return nil, err
@@ -77,6 +90,8 @@ func findToolFiles(moduleDirs []string) ([]string, error) {
 	return toolFiles, nil
 }
 
+const packagesLoadTimeout = 30 * time.Second
+
 // resolveInstrumentationConfigs resolves instrumentation configs for the given import paths.
 //
 //nolint:nilnil // nil, nil when no imports are specified
@@ -88,6 +103,9 @@ func resolveInstrumentationConfigs(
 	if len(importPaths) == 0 {
 		return nil, nil
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
+	defer cancel()
 
 	pkgs, loadErr := packages.Load(&packages.Config{
 		Mode:    packages.NeedFiles | packages.NeedModule | packages.NeedName,
@@ -115,13 +133,12 @@ func resolveInstrumentationConfigs(
 		}
 
 		modDir := pkg.Module.Dir
-		cfgs[importPath].ModuleDir = modDir
-		// A tools-only instrumentation package (its only .go file carries
-		// //go:build tools) has no buildable Go files, so packages.Load reports
-		// "build constraints exclude all Go files" and PackageDir returns the
-		// directory from go list. If that is empty too, derive the dir from the
-		// module path + import-path suffix (correct even under replace
-		// directives). The walk only needs the directory, not a compilable package.
+		// Prefer the directory of a real Go file. A tools-only instrumentation
+		// package (its only .go file carries //go:build tools) has no buildable Go
+		// files, so packages.Load reports "build constraints exclude all Go files"
+		// and GoFiles is empty; fall back to deriving the dir from the module path +
+		// import-path suffix (correct even under replace directives). The walk only
+		// needs the directory, not a compilable package.
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
 			pkgDir = filepath.Join(modDir, filepath.FromSlash(strings.TrimPrefix(importPath, pkg.Module.Path)))
