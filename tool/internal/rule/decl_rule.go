@@ -9,7 +9,7 @@ import (
 
 	"github.com/valyala/fasttemplate"
 	"go.opentelemetry.io/otelc/tool/ex"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // InstDeclRule represents a rule that matches a named top-level declaration
