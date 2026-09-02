@@ -952,3 +952,71 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse generated code")
 }
+
+// TestApplyCallRule_UnaliasedImportWithDivergentNameMatches covers a
+// package whose declared name differs from the name guessed from its
+// import path, for example "redis" for "github.com/redis/go-redis/v9".
+// With ip.importNames holding the real name, matching must use that
+// name instead of the guess.
+func TestApplyCallRule_UnaliasedImportWithDivergentNameMatches(t *testing.T) {
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {
+	redis.NewClient()
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_new_client"},
+		ImportPath:   importPath,
+		FuncName:     "NewClient",
+		Replace:      "traced({{ . }})",
+	}
+
+	ip := newTestPhase()
+	ip.importNames = map[string]string{importPath: "redis"}
+
+	err := ip.applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	fn, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "traced", fn.Name, "rule must have matched and wrapped the call")
+}
+
+func TestApplyCallRule_UnaliasedImportWithDivergentNameMissesWithoutTable(t *testing.T) {
+	// This test uses the same fixture, without ip.importNames. Matching
+	// reverts to the guess "go-redis" and must silently miss the call.
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {
+	redis.NewClient()
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_new_client"},
+		ImportPath:   importPath,
+		FuncName:     "NewClient",
+		Replace:      "traced({{ . }})",
+	}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	_, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok)
+	sel, ok := stmt.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "call must be left unwrapped (still redis.NewClient()), got %T", stmt.X.(*dst.CallExpr).Fun)
+	assert.Equal(t, "NewClient", sel.Sel.Name)
+}
