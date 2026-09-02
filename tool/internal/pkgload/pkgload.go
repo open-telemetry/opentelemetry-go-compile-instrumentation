@@ -177,6 +177,37 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 	return result, nil
 }
 
+// CollectPackageNames walks pkgs and their transitive imports, mapping
+// each import path to its declared package name. Load pkgs with
+// packages.NeedImports and packages.NeedDeps, or the walk finds no
+// imports to collect.
+func CollectPackageNames(pkgs []*packages.Package) map[string]string {
+	result := make(map[string]string)
+	visited := make(map[string]bool)
+
+	var walk func(pkg *packages.Package)
+	walk = func(pkg *packages.Package) {
+		if visited[pkg.PkgPath] {
+			return
+		}
+		visited[pkg.PkgPath] = true
+
+		if pkg.Name != "" {
+			result[pkg.PkgPath] = pkg.Name
+		}
+
+		for _, dep := range pkg.Imports {
+			walk(dep)
+		}
+	}
+
+	for _, pkg := range pkgs {
+		walk(pkg)
+	}
+
+	return result
+}
+
 func PackageDir(pkg *packages.Package) string {
 	if len(pkg.GoFiles) > 0 {
 		return filepath.Dir(pkg.GoFiles[0])
