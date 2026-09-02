@@ -1,0 +1,20 @@
+name: First time contributor
+
+on:
+  pull_request_target:  # zizmor: ignore[dangerous-triggers] runs only the trusted shared workflow; never checks out PR code
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  welcome:
+    permissions:
+      pull-requests: write # required by the shared workflow to post the welcome comment
+    uses: open-telemetry/shared-workflows/.github/workflows/first-time-pr.yml@dde3047a8f219c296772c17936b9d02bb7447af5  # v0.12.0
+    with:
+      custom_message: |
+        - Build and test locally before pushing: `make build`, then `make test`. `make all` runs build, format, lint and test in sequence.
+        - Your **PR title** must follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and is CI-enforced. Allowed types: `chore`, `doc`/`docs`, `feat`, `fix`, `release`, `refactor`, `test`.
+        - Run `make setup-git` once per clone. `tool/data/otelc-bundle.tgz` is a binary archive that cannot be merged by git and otherwise conflicts on nearly every rebase.
+        - On Windows or WSL, set `git config --global core.autocrlf false` **before** cloning, or generated-code tests will fail against the LF golden files.
+        - Repo-specific questions belong in [#otel-go-compt-instr-sig](https://cloud-native.slack.com/archives/C088D8GSSSF).
