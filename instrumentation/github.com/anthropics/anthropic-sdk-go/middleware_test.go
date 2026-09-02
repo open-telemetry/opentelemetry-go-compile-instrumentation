@@ -370,6 +370,69 @@ func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
 	assert.Empty(t, sr.Ended())
 }
 
+// TestOtelMiddleware_InvalidRequestJSON verifies that a request body which
+// fails to parse (e.g. truncated by maxRequestBodySize) is passed through
+// uninstrumented rather than producing a span with an empty
+// gen_ai.request.model.
+func TestOtelMiddleware_InvalidRequestJSON(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte("not json"))),
+	)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, called)
+	assert.Empty(t, sr.Ended(), "no span should be created for an unparsable request body")
+}
+
+// TestOtelMiddleware_MissingModel verifies that a well-formed request body
+// which simply omits the model field is passed through uninstrumented rather
+// than producing a span named "chat " with an empty gen_ai.request.model.
+func TestOtelMiddleware_MissingModel(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"max_tokens":10}`))),
+	)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, called)
+	assert.Empty(t, sr.Ended(), "no span should be created when the request omits a model")
+}
+
 // TestOtelMiddleware_StreamingRequestPassThrough verifies that streaming
 // requests are not instrumented until event accumulation lands, and that the
 // SDK still receives the complete request body.
