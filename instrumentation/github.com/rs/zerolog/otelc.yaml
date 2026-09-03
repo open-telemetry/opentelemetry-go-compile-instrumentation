@@ -1,0 +1,26 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Instrumentation for github.com/rs/zerolog to inject trace context into log events
+
+add_zerolog_instrumentation_once:
+  target: github.com/rs/zerolog
+  where:
+    struct: Logger
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: OtelcInitOnce
+            type: "sync.Once"
+  imports:
+    sync: "sync"
+
+hook_zerolog_new_event:
+  target: github.com/rs/zerolog
+  where:
+    func: newEvent
+    recv: "*Logger"
+  do:
+    - inject_hooks:
+        before: BeforeZerologNewEvent
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rs/zerolog"

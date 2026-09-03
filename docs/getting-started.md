@@ -117,22 +117,22 @@ This approach provides dynamic instrumentation without runtime overhead or invas
 
 The following libraries are automatically instrumented:
 
-| Library | Semantic Conventions |
-| --- | --- |
-| `net/http` (client & server) | HTTP spans |
-| `google.golang.org/grpc` (client & server) | gRPC/RPC spans |
-| `database/sql` | DB client spans |
-| `github.com/gin-gonic/gin` | HTTP server spans |
-| `github.com/redis/go-redis/v9` | Redis DB spans |
-| `go.mongodb.org/mongo-driver` | MongoDB DB spans |
-| `k8s.io/client-go` | K8s resource spans |
-| `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
-| `github.com/anthropics/anthropic-sdk-go` | GenAI spans |
-| `github.com/segmentio/kafka-go` | Kafka messaging spans |
-| `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
-| `github.com/linode/linodego/v2` | HTTP client spans and metrics |
-| `log`, `log/slog`, `github.com/sirupsen/logrus` | Trace/span ID log correlation |
-| `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
+| Library                                                                  | Semantic Conventions          |
+| ------------------------------------------------------------------------ | ----------------------------- |
+| `net/http` (client & server)                                             | HTTP spans                    |
+| `google.golang.org/grpc` (client & server)                               | gRPC/RPC spans                |
+| `database/sql`                                                           | DB client spans               |
+| `github.com/gin-gonic/gin`                                               | HTTP server spans             |
+| `github.com/redis/go-redis/v9`                                           | Redis DB spans                |
+| `go.mongodb.org/mongo-driver`                                            | MongoDB DB spans              |
+| `k8s.io/client-go`                                                       | K8s resource spans            |
+| `github.com/openai/openai-go` (v1/v2/v3)                                 | GenAI spans                   |
+| `github.com/anthropics/anthropic-sdk-go`                                 | GenAI spans                   |
+| `github.com/segmentio/kafka-go`                                          | Kafka messaging spans         |
+| `github.com/aws/aws-sdk-go-v2`                                           | AWS SDK client spans          |
+| `github.com/linode/linodego/v2`                                          | HTTP client spans and metrics |
+| `log`, `log/slog`, `github.com/rs/zerolog`, `github.com/sirupsen/logrus` | Trace/span ID log correlation |
+| `github.com/apache/cassandra-gocql-driver/v2`                            | Cassandra DB spans            |
 
 ## Learn More
 

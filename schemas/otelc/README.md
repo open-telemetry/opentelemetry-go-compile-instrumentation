@@ -40,27 +40,27 @@ X". Modules that emit no telemetry of their own still get a file, with
 `groups: []` and a comment saying why; a missing row, not an empty one, is what
 signals an undeclared instrumentation.
 
-| Instrumentation module                              | Contract file       | Emits                                                                  |
-| --------------------------------------------------- | ------------------- | ---------------------------------------------------------------------- |
-| `net/http/client`, `net/http/server`                | `http.yaml`         | HTTP client + server metrics                                           |
-| `google.golang.org/grpc/{client,server}`            | `grpc.yaml`         | RPC client + server metrics and spans                                  |
-| `github.com/aws/aws-sdk-go-v2`                      | `aws.yaml`          | AWS SDK client spans (trace-only)                                      |
-| `database/sql`                                      | `database-sql.yaml` | DB client spans                                                        |
-| `github.com/redis/go-redis/v9`                      | `redis.yaml`        | DB client spans                                                        |
-| `github.com/segmentio/kafka-go/{producer,consumer}` | `kafka.yaml`        | Messaging producer + consumer spans                                    |
-| `k8s.io/client-go`                                  | `k8s.yaml`          | Informer spans                                                         |
-| `github.com/openai/openai-go` (v1/v2/v3)            | `openai.yaml`       | GenAI client spans                                                     |
-| `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |
-| `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
-| `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
-| `github.com/gin-gonic/gin`                          | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
-| `github.com/linode/linodego/v2`                     | `linodego.yaml`     | HTTP client spans + operation-duration metric                          |
-| `go.opentelemetry.io/otel/init`                     | `otel-sdk.yaml`     | Go runtime metrics (`go.*`)                                            |
-| `go.opentelemetry.io/otel`                          | `otel-sdk.yaml`     | nothing — guards the global tracer provider                            |
-| `go.opentelemetry.io/otel/sdk/trace`                | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |
-| `go.opentelemetry.io/otel/trace`                    | `otel-sdk.yaml`     | nothing — GLS fallback for `SpanFromContext`                           |
-| `log`, `log/slog`, `github.com/sirupsen/logrus`     | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
-| `runtime`                                           | `runtime.yaml`      | nothing — goroutine-local context propagation                          |
+| Instrumentation module                                                   | Contract file       | Emits                                                                  |
+| ------------------------------------------------------------------------ | ------------------- | ---------------------------------------------------------------------- |
+| `net/http/client`, `net/http/server`                                     | `http.yaml`         | HTTP client + server metrics                                           |
+| `google.golang.org/grpc/{client,server}`                                 | `grpc.yaml`         | RPC client + server metrics and spans                                  |
+| `github.com/aws/aws-sdk-go-v2`                                           | `aws.yaml`          | AWS SDK client spans (trace-only)                                      |
+| `database/sql`                                                           | `database-sql.yaml` | DB client spans                                                        |
+| `github.com/redis/go-redis/v9`                                           | `redis.yaml`        | DB client spans                                                        |
+| `github.com/segmentio/kafka-go/{producer,consumer}`                      | `kafka.yaml`        | Messaging producer + consumer spans                                    |
+| `k8s.io/client-go`                                                       | `k8s.yaml`          | Informer spans                                                         |
+| `github.com/openai/openai-go` (v1/v2/v3)                                 | `openai.yaml`       | GenAI client spans                                                     |
+| `github.com/anthropics/anthropic-sdk-go`                                 | `anthropic.yaml`    | GenAI client spans                                                     |
+| `go.mongodb.org/mongo-driver/mongo`                                      | `mongo.yaml`        | DB client spans                                                        |
+| `go.mongodb.org/mongo-driver/v2/mongo`                                   | `mongo.yaml`        | DB client spans                                                        |
+| `github.com/gin-gonic/gin`                                               | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
+| `github.com/linode/linodego/v2`                                          | `linodego.yaml`     | HTTP client spans + operation-duration metric                          |
+| `go.opentelemetry.io/otel/init`                                          | `otel-sdk.yaml`     | Go runtime metrics (`go.*`)                                            |
+| `go.opentelemetry.io/otel`                                               | `otel-sdk.yaml`     | nothing — guards the global tracer provider                            |
+| `go.opentelemetry.io/otel/sdk/trace`                                     | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |
+| `go.opentelemetry.io/otel/trace`                                         | `otel-sdk.yaml`     | nothing — GLS fallback for `SpanFromContext`                           |
+| `log`, `log/slog`, `github.com/rs/zerolog`, `github.com/sirupsen/logrus` | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
+| `runtime`                                                                | `runtime.yaml`      | nothing — goroutine-local context propagation                          |
 
 ## Validate locally
 

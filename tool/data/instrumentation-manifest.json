@@ -48,6 +48,10 @@
     "target": "github.com/redis/go-redis/v9"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/rs/zerolog",
+    "target": "github.com/rs/zerolog"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/consumer",
     "target": "github.com/segmentio/kafka-go"
   },

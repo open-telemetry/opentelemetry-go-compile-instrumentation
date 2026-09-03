@@ -10,6 +10,8 @@ replace go.opentelemetry.io/otelc/test/apps/logslog => ./apps/logslog
 
 replace go.opentelemetry.io/otelc/test/apps/logslogrus => ./apps/logslogrus
 
+replace go.opentelemetry.io/otelc/test/apps/logszerolog => ./apps/logszerolog
+
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/stretchr/testify v1.12.1
