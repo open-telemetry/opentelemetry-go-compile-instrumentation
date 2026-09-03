@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // InstLitField represents a single field to set on a matched composite literal.

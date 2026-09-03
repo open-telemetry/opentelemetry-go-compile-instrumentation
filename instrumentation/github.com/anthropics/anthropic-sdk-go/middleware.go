@@ -103,6 +103,15 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		model, isStream, spanAttrs := parseMessagesRequest(bodyBytes)
 
+		// An empty model means the body was not valid JSON (e.g. truncated by
+		// maxRequestBodySize) or omitted the field entirely. Either way there
+		// is nothing meaningful to attach to a span, so pass the request
+		// through rather than emit a "chat " span with an empty
+		// gen_ai.request.model.
+		if model == "" {
+			return next(req)
+		}
+
 		// Streaming responses need event accumulation before their spans carry
 		// usage data; until that lands (#679, follow-up PR), pass streaming
 		// requests through uninstrumented rather than emit incomplete spans.
