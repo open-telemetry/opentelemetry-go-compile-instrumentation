@@ -48,6 +48,9 @@ func NewInstStructRule(data []byte, name string) (*InstStructRule, error) {
 }
 
 func (r *InstStructRule) validate() error {
+	if err := r.validateBase(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(r.Struct) == "" {
 		return ex.Newf("struct cannot be empty")
 	}

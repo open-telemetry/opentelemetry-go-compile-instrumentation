@@ -51,6 +51,9 @@ func NewInstRawRule(data []byte, name string) (*InstRawRule, error) {
 }
 
 func (r *InstRawRule) validate() error {
+	if err := r.validateBase(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(r.Raw) == "" {
 		return ex.Newf("raw cannot be empty")
 	}

@@ -85,6 +85,26 @@ target: main
 			ruleName:    "prefix-directive",
 			expectError: true,
 		},
+		{
+			name: "empty target",
+			yamlContent: `
+directive: "otelc:span"
+target: ""
+template: "_ = 0"
+`,
+			ruleName:    "empty-target",
+			expectError: true,
+		},
+		{
+			name: "whitespace-only target",
+			yamlContent: `
+directive: "otelc:span"
+target: "   "
+template: "_ = 0"
+`,
+			ruleName:    "whitespace-target",
+			expectError: true,
+		},
 	}
 
 	for _, tt := range tests {

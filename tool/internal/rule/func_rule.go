@@ -78,6 +78,9 @@ func NewInstFuncRule(data []byte, name string) (*InstFuncRule, error) {
 }
 
 func (r *InstFuncRule) validate() error {
+	if err := r.validateBase(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(r.Func) == "" {
 		return ex.Newf("func cannot be empty")
 	}

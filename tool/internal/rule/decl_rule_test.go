@@ -305,6 +305,28 @@ wrap: "(func(t *http.Transport) *http.Transport { return t })({{ . }})"
 			ruleName: "bad_rule",
 			wantErr:  true,
 		},
+		{
+			name: "empty target",
+			yaml: `
+target: ""
+identifier: SomeDecl
+replace: "42"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "target cannot be empty",
+		},
+		{
+			name: "whitespace-only target",
+			yaml: `
+target: "   "
+identifier: SomeDecl
+replace: "42"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "target cannot be empty",
+		},
 	}
 
 	for _, tt := range tests {
