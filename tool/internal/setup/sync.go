@@ -24,6 +24,7 @@ import (
 const (
 	envOtelcSourceRoot = "OTELC_SOURCE_ROOT"
 	goModFileName      = "go.mod"
+	goSumFileName      = "go.sum"
 )
 
 func repositorySourceRoot() (string, error) {
