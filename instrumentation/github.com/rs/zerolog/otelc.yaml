@@ -3,12 +3,24 @@
 
 # Instrumentation for github.com/rs/zerolog to inject trace context into log events
 
-hook_zerolog_new:
+add_zerolog_instrumentation_once:
   target: github.com/rs/zerolog
-  version: "v1.0.0"
   where:
-    func: New
+    struct: Logger
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: OtelcInitOnce
+            type: "sync.Once"
+  imports:
+    sync: "sync"
+
+hook_zerolog_new_event:
+  target: github.com/rs/zerolog
+  where:
+    func: newEvent
+    recv: "*Logger"
   do:
     - inject_hooks:
-        after: AfterZerologNew
+        before: BeforeZerologNewEvent
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/rs/zerolog"
