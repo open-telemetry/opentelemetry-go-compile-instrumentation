@@ -8,8 +8,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -510,6 +512,110 @@ func TestOtelMiddleware_StreamingResponse(t *testing.T) {
 	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 5)
 	assertInt64Attribute(t, attrs, "gen_ai.usage.output_tokens", 2)
 	assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 7)
+}
+
+// TestOtelMiddleware_ResponseBodyTruncated covers Issue #1309: a response
+// larger than maxResponseBodySize (e.g. a large batch embeddings call) must
+// not produce a span that silently looks fully successful. The span should
+// still carry request-side attributes, the caller must still see the
+// complete, untruncated body, and the drop should be logged rather than
+// silent.
+func TestOtelMiddleware_ResponseBodyTruncated(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	var logBuf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	middleware := OtelMiddleware()
+
+	reqBody := `{"model":"gpt-4"}`
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
+
+	// A response whose JSON would otherwise be valid, but padded past
+	// maxResponseBodySize the way a large batch response would be.
+	padding := strings.Repeat("x", maxResponseBodySize)
+	oversized := `{"id":"chatcmpl-big","model":"gpt-4","choices":[{"finish_reason":"stop"}],` +
+		`"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"padding":"` + padding + `"}`
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(oversized)),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// The full, untruncated body must still reach the caller - only the
+	// telemetry parse is bounded, not what the SDK receives.
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, oversized, string(body))
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "gen_ai.request.model", "gpt-4")
+	assertNoAttribute(t, attrs, "gen_ai.response.model")
+	assertNoAttribute(t, attrs, "gen_ai.response.id")
+	assertNoAttribute(t, attrs, "gen_ai.usage.total_tokens")
+
+	assert.Contains(t, logBuf.String(), "response body exceeded size cap",
+		"a truncated response must be logged instead of silently dropped")
+}
+
+// TestOtelMiddleware_RequestBodyTruncated covers Issue #1314: a request
+// larger than maxRequestBodySize must not silently vanish from telemetry
+// without at least a log line, and the SDK must still receive the complete
+// body.
+func TestOtelMiddleware_RequestBodyTruncated(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	var logBuf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	middleware := OtelMiddleware()
+
+	padding := strings.Repeat("x", maxRequestBodySize)
+	oversized := `{"model":"gpt-4","padding":"` + padding + `"}`
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(strings.NewReader(oversized)),
+	)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Equal(t, oversized, string(body), "the SDK must still see the full, untruncated request body")
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{}`))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, called)
+
+	assert.Empty(t, sr.Ended(), "an oversized request should pass through uninstrumented, like any other unparsable body")
+	assert.Contains(t, logBuf.String(), "request body exceeded size cap",
+		"a truncated request must be logged instead of silently dropped")
 }
 
 func TestOtelMiddleware_AzurePath(t *testing.T) {
