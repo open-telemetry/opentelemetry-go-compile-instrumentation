@@ -134,9 +134,16 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 }
 
 func parseRuleEntries(content []byte, path, modulePath string) (Manifest, error) {
+	return parseRuleEntriesForVersion(content, path, modulePath, util.Version)
+}
+
+func parseRuleEntriesForVersion(content []byte, path, modulePath, currentVersion string) (Manifest, error) {
 	doc, err := rule.ParseFile(content)
 	if err != nil {
 		return nil, ex.Wrapf(err, "parsing rule file %s", path)
+	}
+	if err = rule.CheckVersion(currentVersion, doc.MinimumVersion); err != nil {
+		return nil, ex.Wrapf(err, "validating minimum otelc version in rule file %s", path)
 	}
 
 	entries := make(Manifest, 0, len(doc.Entries))

@@ -145,6 +145,14 @@ func TestGenerateRejectsInvalidRuleValue(t *testing.T) {
 	require.ErrorContains(t, err, `parsing rule "invalid" in otelc.yaml`)
 }
 
+func TestParseRuleEntriesRejectsNewerOtelcVersion(t *testing.T) {
+	_, err := parseRuleEntriesForVersion(
+		[]byte(`version: "v99.0.0"`), "otelc.yaml", "example.com/test", "v1.0.0",
+	)
+	require.ErrorContains(t, err, "requires otelc >= v99.0.0")
+	require.ErrorContains(t, err, "validating minimum otelc version in rule file otelc.yaml")
+}
+
 func TestGenerateReportsInvalidRulesDeterministically(t *testing.T) {
 	root := t.TempDir()
 	writeModule(t, root, "module", "example.com/test")

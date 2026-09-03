@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -726,7 +725,7 @@ ruleNested:
   version: v1.0.0
 `), 0o644))
 
-	rules, err := loadMinimalRules(dir, util.Version, nil)
+	rules, err := loadMinimalRules(t.Context(), dir, util.Version)
 	require.NoError(t, err)
 
 	// make sure only 2 rules are loaded (sub1 and nested, sub1 doesn't load nested rules)
@@ -755,7 +754,7 @@ rule:
   version: v2.0.0,v3.0.0
 `), 0o644))
 
-	rules, err := loadMinimalRules(dir, util.Version, nil)
+	rules, err := loadMinimalRules(t.Context(), dir, util.Version)
 	require.NoError(t, err)
 	require.Len(t, rules["example.com/module"], 1)
 	assert.Equal(t, "example.com/target", rules["example.com/module"][0].Target)
@@ -774,7 +773,7 @@ rule:
   target: example.com/target
 `), 0o644))
 
-	_, err := loadMinimalRules(dir, "v1.0.0", nil)
+	_, err := loadMinimalRules(t.Context(), dir, "v1.0.0")
 	require.ErrorContains(t, err, "requires otelc >= v1.1.0")
 }
 
@@ -789,15 +788,13 @@ rule:
   target: example.com/target
 `), 0o644))
 
-	warned := false
-	_, err := loadMinimalRules(dir, "v1.0.0", func(msg string, args ...any) {
-		warned = strings.Contains(msg, "no minimum otelc version") && slices.ContainsFunc(args, func(arg any) bool {
-			path, ok := arg.(string)
-			return ok && filepath.Base(path) == "otelc.yaml"
-		})
-	})
+	var output strings.Builder
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	ctx := util.ContextWithLogger(t.Context(), logger)
+	_, err := loadMinimalRules(ctx, dir, "v1.0.0")
 	require.NoError(t, err)
-	assert.True(t, warned)
+	assert.Contains(t, output.String(), "no minimum otelc version")
+	assert.Contains(t, output.String(), "otelc.yaml")
 }
 
 func TestLoadMinimalRules_InvalidGoMod(t *testing.T) {
@@ -807,7 +804,7 @@ func TestLoadMinimalRules_InvalidGoMod(t *testing.T) {
 	require.NoError(t, os.Mkdir(sub1, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("invalid"), 0o644))
 
-	_, err := loadMinimalRules(dir, util.Version, nil)
+	_, err := loadMinimalRules(t.Context(), dir, util.Version)
 	require.Error(t, err)
 }
 
@@ -819,7 +816,7 @@ func TestLoadMinimalRules_InvalidRuleYAML(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte("invalid: yaml: {"), 0o644))
 
-	_, err := loadMinimalRules(dir, util.Version, nil)
+	_, err := loadMinimalRules(t.Context(), dir, util.Version)
 	require.Error(t, err)
 }
 

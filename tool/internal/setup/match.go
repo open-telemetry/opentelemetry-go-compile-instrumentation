@@ -32,9 +32,10 @@ const (
 	matchDepsConcurrencyMultiplier = 2
 )
 
-func checkRuleFileVersion(path string, doc rule.File, current string, warn func(string, ...any)) error {
-	if doc.Legacy && warn != nil {
-		warn("rule file has no minimum otelc version; assuming legacy version", "file", path,
+func checkRuleFileVersion(ctx context.Context, path string, doc rule.File, current string) error {
+	if doc.Legacy {
+		util.LoggerFromContext(ctx).WarnContext(ctx,
+			"rule file has no minimum otelc version; assuming legacy version", "file", path,
 			"version", rule.LegacyVersion)
 	}
 	if err := rule.CheckVersion(current, doc.MinimumVersion); err != nil {
@@ -368,7 +369,7 @@ func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 	return filesToProcess, nil
 }
 
-func loadCustomRules(ruleConfig string, warn func(string, ...any)) ([]rule.InstRule, error) {
+func loadCustomRules(ctx context.Context, ruleConfig string) ([]rule.InstRule, error) {
 	// Deduplicate by YAML-entry name. A single entry can expand into several
 	// rules (e.g. a do: sequence with multiple modifiers), all sharing that
 	// name, so each name maps to the full slice of rules it produced. Re-reading
@@ -404,7 +405,7 @@ func loadCustomRules(ruleConfig string, warn func(string, ...any)) ([]rule.InstR
 			if parseErr != nil {
 				return nil, ex.Wrapf(parseErr, "parsing rule file %s", file)
 			}
-			if err = checkRuleFileVersion(file, doc, util.Version, warn); err != nil {
+			if err = checkRuleFileVersion(ctx, file, doc, util.Version); err != nil {
 				return nil, err
 			}
 
@@ -438,7 +439,6 @@ func loadCustomRules(ruleConfig string, warn func(string, ...any)) ([]rule.InstR
 func loadRulesFromToolFiles(
 	ctx context.Context,
 	toolFiles []string,
-	warn func(string, ...any),
 ) ([]rule.InstRule, error) {
 	ruleSet := make([]rule.InstRule, 0)
 	walkErr := walkInstrumentation(ctx, toolFiles, func(v *instrumentationVisit) (bool, error) {
@@ -455,7 +455,7 @@ func loadRulesFromToolFiles(
 			if parseErr != nil {
 				return false, ex.Wrapf(parseErr, "parsing rule file %s", file)
 			}
-			if versionErr := checkRuleFileVersion(file, doc, util.Version, warn); versionErr != nil {
+			if versionErr := checkRuleFileVersion(ctx, file, doc, util.Version); versionErr != nil {
 				return false, versionErr
 			}
 
@@ -481,13 +481,13 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool)
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
 		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
-		return loadCustomRules(rulePath, sp.Warn)
+		return loadCustomRules(ctx, rulePath)
 	}
 
 	// Load custom rule(s) from config file if specified
 	if sp.ruleConfig != "" {
 		sp.Debug("rules source: ruleConfig (%s)", sp.ruleConfig)
-		return loadCustomRules(sp.ruleConfig, sp.Warn)
+		return loadCustomRules(ctx, sp.ruleConfig)
 	}
 
 	// Load rules from tool files if available
@@ -497,7 +497,7 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool)
 	}
 	if len(toolFiles) > 0 {
 		sp.Debug("rules source: tool files", "toolFiles", toolFiles)
-		return loadRulesFromToolFiles(ctx, toolFiles, sp.Warn)
+		return loadRulesFromToolFiles(ctx, toolFiles)
 	}
 
 	// No tool files generated? Currently this part is un-reachable because

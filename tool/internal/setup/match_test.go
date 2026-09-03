@@ -614,7 +614,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		})
 		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, nil)
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -631,7 +631,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		})
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, nil)
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -649,7 +649,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, nil)
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
 		require.NoError(t, err)
 		require.Len(t, rules, 2)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -667,7 +667,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "notinstrumentation"), "example.com/notinstrumentation",
 			false, nil)
 
-		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, nil)
+		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
 		require.ErrorIs(t, err, errNotInstrumentation)
 	})
 }
@@ -1196,14 +1196,14 @@ func TestCheckRuleFileVersion(t *testing.T) {
 	t.Run("accepts supported requirement", func(t *testing.T) {
 		doc, parseErr := rule.ParseFile([]byte(`version: "v1.0.0"`))
 		require.NoError(t, parseErr)
-		err := checkRuleFileVersion("otelc.yaml", doc, "v1.1.0", nil)
+		err := checkRuleFileVersion(t.Context(), "otelc.yaml", doc, "v1.1.0")
 		require.NoError(t, err)
 	})
 
 	t.Run("rejects newer requirement", func(t *testing.T) {
 		doc, parseErr := rule.ParseFile([]byte(`version: "v1.1.0"`))
 		require.NoError(t, parseErr)
-		err := checkRuleFileVersion("client.otelc.yaml", doc, "v1.0.0", nil)
+		err := checkRuleFileVersion(t.Context(), "client.otelc.yaml", doc, "v1.0.0")
 		require.ErrorContains(t, err, "client.otelc.yaml")
 		require.ErrorContains(t, err, "requires otelc >= v1.1.0")
 	})
@@ -1214,18 +1214,16 @@ func TestCheckRuleFileVersion(t *testing.T) {
 	})
 
 	t.Run("warns for legacy file", func(t *testing.T) {
-		var message string
-		var args []any
+		var output bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&output, nil))
+		ctx := util.ContextWithLogger(t.Context(), logger)
 		doc, parseErr := rule.ParseFile([]byte("rule: {}"))
 		require.NoError(t, parseErr)
-		err := checkRuleFileVersion("otelc.yaml", doc, util.Version, func(msg string, values ...any) {
-			message = msg
-			args = values
-		})
+		err := checkRuleFileVersion(ctx, "otelc.yaml", doc, util.Version)
 		require.NoError(t, err)
-		assert.Contains(t, message, "no minimum otelc version")
-		assert.Contains(t, args, "otelc.yaml")
-		assert.Contains(t, args, "v1.0.0")
+		assert.Contains(t, output.String(), "no minimum otelc version")
+		assert.Contains(t, output.String(), "otelc.yaml")
+		assert.Contains(t, output.String(), "v1.0.0")
 	})
 }
 
@@ -1245,7 +1243,7 @@ mangle:
 
 	p := writeCustomRules(t, "order.yaml", content)
 
-	rules, err := loadCustomRules(p, nil)
+	rules, err := loadCustomRules(t.Context(), p)
 	require.NoError(t, err)
 	require.Len(t, rules, 3)
 
@@ -1941,7 +1939,7 @@ func TestRulesFromDirWalkError(t *testing.T) {
 
 func TestLoadCustomRulesStatError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
-	_, err := loadCustomRules(filepath.Join(t.TempDir(), "nope.yaml"), nil)
+	_, err := loadCustomRules(t.Context(), filepath.Join(t.TempDir(), "nope.yaml"))
 	require.Error(t, err)
 }
 

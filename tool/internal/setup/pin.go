@@ -175,9 +175,9 @@ type yamlRule struct {
 const goModFile = "go.mod"
 
 func loadModuleRules(
+	ctx context.Context,
 	moduleDir, module, currentVersion string,
 	loaded map[string][]yamlRule,
-	warn func(string, ...any),
 ) error {
 	return filepath.WalkDir(moduleDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -205,12 +205,8 @@ func loadModuleRules(
 		if parseErr != nil {
 			return ex.Wrapf(parseErr, "parsing rule file %s", path)
 		}
-		if doc.Legacy && warn != nil {
-			warn("rule file has no minimum otelc version; assuming legacy version", "file", path,
-				"version", rule.LegacyVersion)
-		}
-		if versionErr := rule.CheckVersion(currentVersion, doc.MinimumVersion); versionErr != nil {
-			return ex.Wrapf(versionErr, "rule file %s", path)
+		if versionErr := checkRuleFileVersion(ctx, path, doc, currentVersion); versionErr != nil {
+			return versionErr
 		}
 
 		for _, entry := range doc.Entries {
@@ -228,8 +224,8 @@ func loadModuleRules(
 }
 
 func loadMinimalRules(
+	ctx context.Context,
 	rulesRoot, currentVersion string,
-	warn func(string, ...any),
 ) (map[string][]yamlRule, error) {
 	loaded := make(map[string][]yamlRule)
 
@@ -249,7 +245,7 @@ func loadMinimalRules(
 			return ex.Wrapf(err, "loading %s", path)
 		}
 
-		return loadModuleRules(filepath.Dir(path), modFile.Module.Mod.Path, currentVersion, loaded, warn)
+		return loadModuleRules(ctx, filepath.Dir(path), modFile.Module.Mod.Path, currentVersion, loaded)
 	})
 	if err != nil {
 		return nil, err
@@ -464,9 +460,7 @@ func validateRuleFiles(ctx context.Context, logger *slog.Logger, ruleFiles []str
 		if err != nil {
 			return ex.Wrapf(err, "parsing rule file %s", ruleFile)
 		}
-		if err = checkRuleFileVersion(ruleFile, doc, util.Version, func(msg string, args ...any) {
-			logger.WarnContext(ctx, msg, args...)
-		}); err != nil {
+		if err = checkRuleFileVersion(ctx, ruleFile, doc, util.Version); err != nil {
 			return err
 		}
 		if _, err = doc.Rules(); err != nil {
@@ -562,9 +556,9 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	}
 
 	ruleset, err := loadMinimalRules(
+		ctx,
 		filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
 		util.Version,
-		func(msg string, args ...any) { logger.WarnContext(ctx, msg, args...) },
 	)
 	if err != nil {
 		return nil, err
