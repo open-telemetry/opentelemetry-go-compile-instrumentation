@@ -87,7 +87,7 @@ func instrumentationModuleDir(instDir, modulePath string) (string, error) {
 }
 
 func parseGoMod(gomod string) (*modfile.File, error) {
-	data, err := os.ReadFile(gomod)
+	data, err := os.ReadFile(filepath.Clean(gomod))
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read go.mod file")
 	}
