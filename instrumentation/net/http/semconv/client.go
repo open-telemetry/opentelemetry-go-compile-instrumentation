@@ -15,72 +15,57 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	"go.opentelemetry.io/otel/semconv/v1.37.0/httpconv"
 )
 
 // HTTPClient provides HTTP semantic convention attributes and metrics for client requests.
 type HTTPClient struct {
-	requestBodySize    metric.Int64Histogram
-	responseBodySize   metric.Int64Histogram
-	requestDuration    metric.Float64Histogram
-	activeRequests     metric.Int64UpDownCounter
-	openConnections    metric.Int64UpDownCounter
-	connectionDuration metric.Float64Histogram
+	requestBodySize    httpconv.ClientRequestBodySize
+	responseBodySize   httpconv.ClientResponseBodySize
+	requestDuration    httpconv.ClientRequestDuration
+	activeRequests     httpconv.ClientActiveRequests
+	openConnections    httpconv.ClientOpenConnections
+	connectionDuration httpconv.ClientConnectionDuration
 }
 
 // NewHTTPClient creates a new HTTPClient instance with metrics.
-// If meter is nil, returns a client without metrics support.
+// If meter is nil, the client uses no-op metrics.
 func NewHTTPClient(meter metric.Meter) HTTPClient {
-	client := HTTPClient{}
-
-	if meter == nil {
-		return client
-	}
-
 	var err error
-	client.requestBodySize, err = meter.Int64Histogram(
-		"http.client.request.body.size",
-		metric.WithDescription("Size of HTTP client request bodies."),
-		metric.WithUnit("By"),
+	client := HTTPClient{}
+	client.requestBodySize, err = httpconv.NewClientRequestBodySize(meter)
+	HandleErr(err)
+
+	client.responseBodySize, err = httpconv.NewClientResponseBodySize(meter)
+	HandleErr(err)
+
+	client.requestDuration, err = httpconv.NewClientRequestDuration(
+		meter,
+		metric.WithExplicitBucketBoundaries(requestDurationBucketBoundaries...),
 	)
 	HandleErr(err)
 
-	client.responseBodySize, err = meter.Int64Histogram(
-		"http.client.response.body.size",
-		metric.WithDescription("Size of HTTP client response bodies."),
-		metric.WithUnit("By"),
-	)
+	client.activeRequests, err = httpconv.NewClientActiveRequests(meter)
 	HandleErr(err)
 
-	client.requestDuration, err = meter.Float64Histogram(
-		"http.client.request.duration",
-		metric.WithDescription("Duration of HTTP client requests."),
-		metric.WithUnit("s"),
-		metric.WithExplicitBucketBoundaries(0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10),
-	)
+	client.openConnections, err = httpconv.NewClientOpenConnections(meter)
 	HandleErr(err)
 
-	client.activeRequests, err = meter.Int64UpDownCounter(
-		"http.client.active_requests",
-		metric.WithDescription("Number of active HTTP requests."),
-		metric.WithUnit("{request}"),
-	)
-	HandleErr(err)
-
-	client.openConnections, err = meter.Int64UpDownCounter(
-		"http.client.open_connections",
-		metric.WithDescription("Number of outbound HTTP connections that are currently active or idle on the client."),
-		metric.WithUnit("{connection}"),
-	)
-	HandleErr(err)
-
-	client.connectionDuration, err = meter.Float64Histogram(
-		"http.client.connection.duration",
-		metric.WithDescription("The duration of the successfully established outbound HTTP connections."),
-		metric.WithUnit("s"),
-	)
+	client.connectionDuration, err = httpconv.NewClientConnectionDuration(meter)
 	HandleErr(err)
 
 	return client
+}
+
+func (n HTTPClient) metricNames() []string {
+	return []string{
+		n.requestBodySize.Name(),
+		n.responseBodySize.Name(),
+		n.requestDuration.Name(),
+		n.activeRequests.Name(),
+		n.openConnections.Name(),
+		n.connectionDuration.Name(),
+	}
 }
 
 // Status returns the span status code based on HTTP response status code.
@@ -241,6 +226,15 @@ func (n HTTPClient) MetricAttributes(
 	statusCode int,
 	additionalAttributes []attribute.KeyValue,
 ) []attribute.KeyValue {
+	return n.metricAttributes(req, statusCode, req.Proto, additionalAttributes)
+}
+
+func (n HTTPClient) metricAttributes(
+	req *http.Request,
+	statusCode int,
+	networkProtocol string,
+	additionalAttributes []attribute.KeyValue,
+) []attribute.KeyValue {
 	num := len(additionalAttributes) + 3 // method, server.address, url.scheme
 	var h string
 	if req.URL != nil {
@@ -260,7 +254,10 @@ func (n HTTPClient) MetricAttributes(
 		num++
 	}
 
-	protoName, protoVersion := NetProtocol(req.Proto)
+	if networkProtocol == "" {
+		networkProtocol = req.Proto
+	}
+	protoName, protoVersion := NetProtocol(networkProtocol)
 	if protoName != "" {
 		num++
 	}
@@ -296,6 +293,27 @@ func (n HTTPClient) MetricAttributes(
 	return attributes
 }
 
+// ActiveRequestMetricAttributes returns attributes for the active request metric.
+func (n HTTPClient) ActiveRequestMetricAttributes(
+	req *http.Request,
+	additionalAttributes []attribute.KeyValue,
+) []attribute.KeyValue {
+	attributes := n.MetricAttributes(req, 0, additionalAttributes)
+	result := attributes[:0]
+	for _, attr := range attributes {
+		if attr.Key == semconv.NetworkProtocolNameKey || attr.Key == semconv.NetworkProtocolVersionKey {
+			continue
+		}
+		result = append(result, attr)
+	}
+	return result
+}
+
+// AddActiveRequests adds incr to the number of active HTTP client requests.
+func (n HTTPClient) AddActiveRequests(ctx context.Context, incr int64, set attribute.Set) {
+	n.activeRequests.AddSet(ctx, incr, set)
+}
+
 // scheme returns the URL scheme attribute for metrics.
 func (HTTPClient) scheme(req *http.Request) attribute.KeyValue {
 	if req.URL != nil && req.URL.Scheme != "" {
@@ -328,30 +346,25 @@ func (n HTTPClient) RecordMetrics(
 	ctx context.Context,
 	req *http.Request,
 	statusCode int,
+	networkProtocol string,
 	requestSize int64,
 	responseSize int64,
 	elapsedTime float64,
 	additionalAttributes []attribute.KeyValue,
 ) {
-	if n.requestBodySize == nil && n.responseBodySize == nil && n.requestDuration == nil {
-		return
+	attributes := n.metricAttributes(req, statusCode, networkProtocol, additionalAttributes)
+	set := attribute.NewSet(attributes...)
+
+	if requestSize > 0 {
+		n.requestBodySize.RecordSet(ctx, requestSize, set)
 	}
 
-	attributes := n.MetricAttributes(req, statusCode, additionalAttributes)
-	opts := metric.WithAttributeSet(attribute.NewSet(attributes...))
-
-	if n.requestBodySize != nil && requestSize > 0 {
-		n.requestBodySize.Record(ctx, requestSize, opts)
+	if responseSize > 0 {
+		n.responseBodySize.RecordSet(ctx, responseSize, set)
 	}
 
-	if n.responseBodySize != nil && responseSize > 0 {
-		n.responseBodySize.Record(ctx, responseSize, opts)
-	}
-
-	if n.requestDuration != nil {
-		// elapsedTime should be in seconds
-		n.requestDuration.Record(ctx, elapsedTime, opts)
-	}
+	// elapsedTime should be in seconds
+	n.requestDuration.RecordSet(ctx, elapsedTime, set)
 }
 
 // Package-level convenience functions for direct use in hooks.

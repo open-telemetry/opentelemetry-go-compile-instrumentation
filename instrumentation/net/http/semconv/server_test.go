@@ -230,11 +230,12 @@ func TestHTTPServerMetrics(t *testing.T) {
 	meter := noop.NewMeterProvider().Meter("test")
 	server := NewHTTPServer(meter)
 
-	// Verify metrics are initialized
-	assert.NotNil(t, server.requestBodySize)
-	assert.NotNil(t, server.responseBodySize)
-	assert.NotNil(t, server.requestDuration)
-	assert.NotNil(t, server.activeRequests)
+	assert.ElementsMatch(t, []string{
+		"http.server.request.body.size",
+		"http.server.response.body.size",
+		"http.server.request.duration",
+		"http.server.active_requests",
+	}, server.metricNames())
 }
 
 func TestHTTPServerRecordMetrics(t *testing.T) {
