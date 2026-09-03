@@ -92,3 +92,5 @@ replace (
 	go.opentelemetry.io/otelc/pkg => ../../../../pkg
 	go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime
 )
+
+replace go.opentelemetry.io/otelc/instrumentation => ../../..
