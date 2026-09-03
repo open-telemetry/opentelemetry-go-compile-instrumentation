@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Redis client with OpenTelemetry compile-time instrumentation
 # Stage 1: Build the otelc tool
-FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS otelc-builder
+FROM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS otelc-builder
 
 WORKDIR /build
 
@@ -15,7 +15,7 @@ COPY . .
 RUN go build -o /otelc ./tool/cmd/otelc
 
 # Stage 2: Build the Redis client with instrumentation
-FROM golang:1.25-alpine@sha256:26111811bc967321e7b6f852e914d14bede324cd1accb7f81811929a6a57fea9 AS app-builder
+FROM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS app-builder
 
 WORKDIR /app
 

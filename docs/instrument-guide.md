@@ -154,7 +154,24 @@ When implementing hooks, we must adhere to certain limitations:
 
    Importing other third-party libraries is not allowed.
 
-2. **Generic Functions**: If the target function is generic, we cannot use `HookContext` APIs to modify parameters or return values (e.g., `SetParam`, `SetReturnVal`).
+2. **Generic Functions**: If the target function or method receiver is generic, we cannot use the `HookContext` parameter and return value APIs.
+
+   `GetParam`, `SetParam`, `GetReturnVal`, and `SetReturnVal` are each replaced with a body
+   that panics, so reading panics just as writing does. Instead, we read the values from the
+   hook's own parameters, which already receive them positionally:
+
+   ```go
+   // Target: func GenericFunc[T any](p1 T, p2 int) (T, error)
+
+   // We read p1 and p2 from the hook's parameters, never through ictx.GetParam.
+   func GenericFuncBefore(ictx hook.HookContext, p1 interface{}, p2 int) {}
+
+   // The after hook likewise reads the return values from its own parameters.
+   func GenericFuncAfter(ictx hook.HookContext, r1 interface{}, r2 error) {}
+   ```
+
+   Nothing catches this at build time: a hook that calls one of these four methods on a
+   generic target compiles cleanly, and only panics once the instrumented function runs.
 
 ### GLS Operation for OTel SDK Instrumentation
 

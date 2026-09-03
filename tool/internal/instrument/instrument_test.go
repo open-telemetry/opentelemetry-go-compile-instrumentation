@@ -34,7 +34,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 	"gotest.tools/v3/golden"
 )
 
@@ -173,6 +173,7 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),
 		CallRules:      make(map[string][]*rule.InstCallRule),
+		LitRules:       make(map[string][]*rule.InstLitRule),
 		DirectiveRules: make(map[string][]*rule.InstDirectiveRule),
 		DeclRules:      make(map[string][]*rule.InstDeclRule),
 		FileRules:      make([]*rule.InstFileRule, 0),
@@ -228,6 +229,11 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 				r, _ := rule.NewInstCallRule(ruleData, name)
 				for _, file := range p.packageFiles {
 					ruleSet.CallRules[file] = append(ruleSet.CallRules[file], r)
+				}
+			case props["struct_literal"] != nil:
+				r, _ := rule.NewInstLitRule(ruleData, name)
+				for _, file := range p.packageFiles {
+					ruleSet.LitRules[file] = append(ruleSet.LitRules[file], r)
 				}
 			case props["identifier"] != nil:
 				r, _ := rule.NewInstDeclRule(ruleData, name)
@@ -419,7 +425,7 @@ func createImportCfg(path string, helpers []helperPkg) {
 	}
 
 	// Resolve common standard library packages that might be needed
-	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io"}
+	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io", "context"}
 	for _, pkg := range commonPkgs {
 		cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkg)
 		output, err := cmd.Output()
@@ -698,11 +704,29 @@ func TestGroupRules(t *testing.T) {
 			},
 			expectedFiles: []string{"file1.go"},
 		},
+		{
+			// Insertion order (both in the map literal below and, more
+			// importantly, in Go's own randomized map iteration at runtime)
+			// deliberately does not match sorted order, so this only passes
+			// if groupRules actually sorts rather than happening to agree.
+			name: "returned files are sorted, not insertion order",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				DeclRules: map[string][]*rule.InstDeclRule{
+					"zzz.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_zzz"}, Identifier: "X"}},
+					"aaa.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_aaa"}, Identifier: "X"}},
+					"mmm.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_mmm"}, Identifier: "X"}},
+				},
+			},
+			expectedFiles: []string{"aaa.go", "mmm.go", "zzz.go"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			grouped := groupRules("", tt.ruleSet)
+			grouped, files := groupRules("", tt.ruleSet)
 
 			// Check expected files are present
 			for _, file := range tt.expectedFiles {
@@ -712,6 +736,17 @@ func TestGroupRules(t *testing.T) {
 
 			// Check no unexpected files
 			assert.Len(t, grouped, len(tt.expectedFiles))
+
+			// The second return value must be expectedFiles in sorted order.
+			// expectedFiles is written in sorted order in every case above,
+			// but sort a clone rather than relying on that by convention.
+			wantFiles := slices.Clone(tt.expectedFiles)
+			slices.Sort(wantFiles)
+			if len(wantFiles) == 0 {
+				assert.Empty(t, files)
+			} else {
+				assert.Equal(t, wantFiles, files)
+			}
 
 			if tt.validate != nil {
 				tt.validate(t, grouped)

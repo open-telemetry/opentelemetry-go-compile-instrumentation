@@ -58,21 +58,21 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 			errorMsg:    "import alias mismatch",
 		},
 		{
-			name: "gopkg.in style path - no mismatch for implicit alias",
+			name: "versioned path - no mismatch for implicit alias",
 			root: &dst.File{
 				Decls: []dst.Decl{
 					&dst.GenDecl{
 						Tok: token.IMPORT,
 						Specs: []dst.Spec{
 							&dst.ImportSpec{
-								// gopkg.in/yaml.v3 declares "package yaml" - resolvePackageName correctly returns "yaml"
-								Path: &dst.BasicLit{Value: `"gopkg.in/yaml.v3"`},
+								// go.yaml.in/yaml/v3 declares "package yaml" - resolvePackageName correctly returns "yaml"
+								Path: &dst.BasicLit{Value: `"go.yaml.in/yaml/v3"`},
 							},
 						},
 					},
 				},
 			},
-			imports:     map[string]string{"yaml": "gopkg.in/yaml.v3"},
+			imports:     map[string]string{"yaml": "go.yaml.in/yaml/v3"},
 			expectError: false, // No error - implicit alias matches inferred package name
 		},
 		{
@@ -210,8 +210,8 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a mock InstrumentPhase with no importcfg (to avoid actual file operations)
-			ip := &InstrumentPhase{}
+			// Create a mock instrumentPhase with no importcfg (to avoid actual file operations)
+			ip := &instrumentPhase{}
 
 			err := ip.addRuleImports(t.Context(), tt.root, tt.imports, "test-rule")
 			if tt.expectError {
@@ -229,7 +229,7 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 
 func TestUpdateImportConfigForFile(t *testing.T) {
 	t.Run("empty file has no imports to update", func(t *testing.T) {
-		ip := &InstrumentPhase{}
+		ip := &instrumentPhase{}
 		root := &dst.File{}
 
 		// Should not error - no imports to process
@@ -238,7 +238,7 @@ func TestUpdateImportConfigForFile(t *testing.T) {
 	})
 
 	t.Run("file with imports attempts update", func(t *testing.T) {
-		ip := &InstrumentPhase{
+		ip := &instrumentPhase{
 			// No importcfg path, so updateImportConfig will return early
 			importConfigPath: "",
 		}

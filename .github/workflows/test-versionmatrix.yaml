@@ -14,13 +14,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - name: Install Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.mod"
       - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # ratchet:arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run VersionMatrix tests
@@ -37,6 +39,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - name: Open or update failure issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

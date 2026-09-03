@@ -13,9 +13,15 @@ import (
 	"io"
 )
 
+// mysqlDriver is the exact instance registered under "mysql" (as opposed to a
+// fresh &testDriver{}), so a driver.Connector wrapping it can be resolved
+// back to "mysql" by identity, the way a real connector-based driver like
+// go-sql-driver/mysql or pgx/v5/stdlib would be.
+var mysqlDriver = &testDriver{}
+
 func init() {
 	sql.Register("testdb", &testDriver{})
-	sql.Register("mysql", &testDriver{})
+	sql.Register("mysql", mysqlDriver)
 	sql.Register("postgres", &testDriver{})
 	sql.Register("postgresql", &testDriver{})
 	sql.Register("sqlserver", &testDriver{})
@@ -28,6 +34,33 @@ type testDriver struct{}
 
 func (d *testDriver) Open(name string) (driver.Conn, error) {
 	return &testConn{}, nil
+}
+
+// Connector is a driver.Connector wrapping the registered "mysql" test
+// driver and exposing DSN(), for exercising the sql.OpenDB / driver.Connector
+// instrumentation path the way a connector-based driver (e.g.
+// mysql.NewConnector, pgx/v5/stdlib) is used in practice, as opposed to
+// sql.Open's driver-name-string path.
+type Connector struct {
+	dsn string
+}
+
+// NewConnector returns a driver.Connector for sql.OpenDB, backed by the
+// registered "mysql" test driver and carrying dsn for DSN().
+func NewConnector(dsn string) *Connector {
+	return &Connector{dsn: dsn}
+}
+
+func (c *Connector) Connect(context.Context) (driver.Conn, error) {
+	return mysqlDriver.Open(c.dsn)
+}
+
+func (c *Connector) Driver() driver.Driver {
+	return mysqlDriver
+}
+
+func (c *Connector) DSN() string {
+	return c.dsn
 }
 
 // failTxDriver is a driver whose connections always fail Begin().

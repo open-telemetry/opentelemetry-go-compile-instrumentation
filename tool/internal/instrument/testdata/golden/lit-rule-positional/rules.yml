@@ -1,0 +1,9 @@
+cap_limited_readers:
+  target: main
+  where:
+    struct_literal: io.LimitedReader
+  do:
+    - set_fields:
+        field:
+          - name: N
+            value: "50"
