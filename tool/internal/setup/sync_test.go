@@ -94,7 +94,7 @@ require (
 			err := os.WriteFile(gomodPath, []byte(tt.content), 0o644)
 			require.NoError(t, err)
 
-			mf, err := parseGoMod(tempDir)
+			mf, err := parseGoMod(gomodPath)
 			if tt.expectError {
 				assert.Error(t, err)
 				return
@@ -110,7 +110,7 @@ require (
 }
 
 func TestParseGoMod_MissingFile(t *testing.T) {
-	_, err := parseGoMod("/nonexistent")
+	_, err := parseGoMod("/nonexistent/go.mod")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read go.mod file")
 }
@@ -251,7 +251,7 @@ require go.opentelemetry.io/otelc/instrumentation/example.com/lib v0.0.0
 		moduleDir,
 	))
 
-	modFile, err := parseGoMod(moduleDir)
+	modFile, err := parseGoMod(filepath.Join(moduleDir, goModFileName))
 	require.NoError(t, err)
 	require.Condition(t, func() bool {
 		for _, replace := range modFile.Replace {

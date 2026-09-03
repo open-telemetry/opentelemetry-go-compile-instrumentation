@@ -62,7 +62,7 @@ func isRepositorySourceRoot(root string) bool {
 		filepath.Join("instrumentation", goModFileName): util.OtelcInstRoot,
 	}
 	for path, want := range modules {
-		modFile, err := parseGoMod(filepath.Dir(filepath.Join(root, path)))
+		modFile, err := parseGoMod(filepath.Join(root, path))
 		if err != nil || modFile.Module == nil || modFile.Module.Mod.Path != want {
 			return false
 		}
@@ -76,7 +76,7 @@ func instrumentationModuleDir(instDir, modulePath string) (string, error) {
 		return "", nil
 	}
 	dir := filepath.Join(instDir, path)
-	modFile, err := parseGoMod(dir)
+	modFile, err := parseGoMod(filepath.Join(dir, goModFileName))
 	if err != nil {
 		return "", ex.Wrapf(err, "loading matched instrumentation module %s from %s", modulePath, dir)
 	}
@@ -86,11 +86,7 @@ func instrumentationModuleDir(instDir, modulePath string) (string, error) {
 	return dir, nil
 }
 
-func parseGoMod(dir string) (*modfile.File, error) {
-	gomod, err := filepath.Abs(filepath.Join(dir, goModFileName))
-	if err != nil {
-		return nil, ex.Wrapf(err, "resolving go.mod file")
-	}
+func parseGoMod(gomod string) (*modfile.File, error) {
 	data, err := os.ReadFile(gomod)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read go.mod file")
@@ -157,7 +153,7 @@ func snapshotVersion(mf *modfile.File) versionSnapshot {
 func warnVersion(ctx context.Context, moduleDir string, before versionSnapshot) error {
 	logger := util.LoggerFromContext(ctx)
 
-	after, err := parseGoMod(moduleDir)
+	after, err := parseGoMod(filepath.Join(moduleDir, goModFileName))
 	if err != nil {
 		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
 	}
@@ -218,7 +214,7 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 			return nil
 		}
 
-		modFile, parseErr := parseGoMod(filepath.Dir(path))
+		modFile, parseErr := parseGoMod(path)
 		if parseErr != nil {
 			return ex.Wrapf(parseErr, "loading %s", path)
 		}
@@ -252,7 +248,7 @@ func syncDepsFromSource(ctx context.Context, modPaths map[string]bool, moduleDir
 	logger := util.LoggerFromContext(ctx)
 
 	goModFile := filepath.Join(moduleDir, goModFileName)
-	modfile, err := parseGoMod(moduleDir)
+	modfile, err := parseGoMod(goModFile)
 	if err != nil {
 		return err
 	}
