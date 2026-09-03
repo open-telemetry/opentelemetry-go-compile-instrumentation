@@ -131,10 +131,10 @@ func buildConfigCache(sdkDisabled, enabledList, disabledList string) *configCach
 		isSdkDisabled: strings.EqualFold(sdkDisabled, "true"),
 	}
 
-	if enabledList != "" {
+	if parsed := parseInstrumentationList(enabledList); len(parsed) > 0 {
 		c.hasEnabled = true
 		c.enabledMap = make(map[string]struct{})
-		for _, item := range parseInstrumentationList(enabledList) {
+		for _, item := range parsed {
 			c.enabledMap[item] = struct{}{}
 		}
 	}

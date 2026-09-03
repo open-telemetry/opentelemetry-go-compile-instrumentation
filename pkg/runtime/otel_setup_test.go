@@ -76,16 +76,26 @@ func TestInstrumented(t *testing.T) {
 			instrumentationName: "nethttp",
 			expected:            true,
 		},
+		{
+			name:                "whitespace-only enabled list behaves like unset",
+			enabledList:         "   ",
+			disabledList:        "",
+			instrumentationName: "nethttp",
+			expected:            true,
+		},
+		{
+			name:                "commas-only enabled list behaves like unset",
+			enabledList:         ",, ,",
+			disabledList:        "",
+			instrumentationName: "nethttp",
+			expected:            true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.enabledList != "" {
-				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", tt.enabledList)
-			}
-			if tt.disabledList != "" {
-				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", tt.disabledList)
-			}
+			t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", tt.enabledList)
+			t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", tt.disabledList)
 
 			result := Instrumented(tt.instrumentationName)
 			assert.Equal(t, tt.expected, result)

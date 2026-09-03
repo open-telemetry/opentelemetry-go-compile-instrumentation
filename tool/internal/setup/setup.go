@@ -150,7 +150,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 
 	pkgTargets, fileTargets, err := splitBuildTargets(args)
 	if err != nil {
-		return nil, ex.Wrapf(err, "splitting build targets")
+		return nil, err
 	}
 	buildFlags := extractBuildFlags(args)
 
@@ -162,7 +162,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	case len(fileTargets) > 0:
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, fileTargets...)
 		if loadErr != nil {
-			return nil, ex.Wrapf(loadErr, "failed to load packages for files %v", fileTargets)
+			return nil, loadErr
 		}
 
 		if len(pkgs) > 1 {
@@ -171,12 +171,12 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	case len(pkgTargets) > 0:
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, pkgTargets...)
 		if loadErr != nil {
-			return nil, ex.Wrapf(loadErr, "failed to load packages for patterns %v", pkgTargets)
+			return nil, loadErr
 		}
 	default:
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, ".")
 		if loadErr != nil {
-			return nil, ex.Wrapf(loadErr, "failed to load packages for pattern .")
+			return nil, loadErr
 		}
 	}
 
@@ -219,6 +219,9 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 
 		if strings.HasPrefix(arg, "-") {
 			if !strings.Contains(arg, "=") && (flagsWithPathValues[arg] || testFlagsWithValues[arg]) {
+				if i+1 >= len(args) {
+					return nil, nil, ex.Newf("flag %q requires a value", arg)
+				}
 				i++ // skip this flag's separate value
 			}
 			continue
@@ -271,7 +274,7 @@ func rootModulePaths(ctx context.Context, pkgs []*packages.Package) ([]string, e
 		}
 		mod, err := pkgload.ResolveModule(ctx, pkgDir)
 		if err != nil {
-			return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
+			return nil, err
 		}
 		if mod.Path != "" {
 			roots[mod.Path] = true
@@ -371,7 +374,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Find the module directories for the build packages
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, pkgs)
 	if findModErr != nil {
-		return ex.Wrapf(findModErr, "finding module directories for build packages")
+		return findModErr
 	}
 
 	// Ensure a state manager is available in the context
@@ -386,7 +389,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
 		pinResult, pinErr := autoPin(ctx, moduleDirs, subcommand, args)
 		if pinErr != nil {
-			return ex.Wrapf(pinErr, "auto-pinning dependencies")
+			return pinErr
 		}
 		deps = pinResult.AllDeps
 	}
@@ -395,7 +398,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		// Find all dependencies of the project being build
 		deps, err = findDeps(ctx, subcommand, args)
 		if err != nil {
-			return ex.Wrapf(err, "finding dependencies")
+			return err
 		}
 	}
 

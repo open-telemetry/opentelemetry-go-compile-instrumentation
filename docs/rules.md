@@ -621,15 +621,16 @@ Top-level `imports` (map[string]string, optional): A map of imports to inject in
 
 **Template Placeholders:**
 
-| Placeholder              | Replaced with                                                            |
-| ------------------------ | ------------------------------------------------------------------------ |
-| `{{.FuncName}}`          | The name of the target function                                          |
-| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver |
-| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                      |
-| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                         |
-| `{{.FuncReturnCount}}`   | The number of return values                                              |
+| Placeholder              | Replaced with                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `{{.FuncName}}`          | The name of the target function                                                      |
+| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver             |
+| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                                  |
+| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                                     |
+| `{{.FuncReturnCount}}`   | The number of return values                                                          |
+| `{{.Receiver}}`          | The identifier of the target method's receiver; errors if the target has no receiver |
 
-Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values, and blank (`_`) names, are assigned a synthetic name the first time a template references them. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with a descriptive error. Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are also available.
+Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values, and blank (`_`) names, are assigned a synthetic name the first time a template references them. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index, or `{{.Receiver}}` on a function with no receiver) fails the build with a descriptive error. Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are also available.
 
 **Example with function template variables:**
 
@@ -645,6 +646,22 @@ raw_args:
 ```
 
 Given `func divide(a int, b int) (int, error) { ... }`, the injected code becomes `println("enter divide, arg0=a")`.
+
+**Example with `{{.Receiver}}`:**
+
+```yaml
+raw_receiver:
+  target: main
+  where:
+    func: Divide
+    recv: "*Calculator"
+  do:
+    - inject_code:
+        raw: |-
+          println("enter {{ .FuncName }}, recv={{ .Receiver }}")
+```
+
+Given `func (c *Calculator) Divide(a int, b int) (int, error) { ... }`, the injected code becomes `println("enter Divide, recv=c")`.
 
 **Example:**
 
@@ -756,11 +773,27 @@ Currently supported replace string features:
 - IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
 - Complex expressions with multiple statements using IIFE
 
-**Function Template Variables:**
+**Template Placeholders:**
 
-In addition to `{{ . }}`, `replace` supports the shared function template variables, referenced as fields on the template's `.` — `{{.FuncName}}`, `{{.FuncArgument N}}`, `{{.FuncReturn N}}`, `{{.FuncArgumentCount}}`, and `{{.FuncReturnCount}}`. These resolve against the **enclosing function**: the named top-level function whose body contains the matched call site (not the matched call's own arguments). Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent.
+| Placeholder                    | Replaced with                                                                                          |
+| ------------------------------ | -----------------------------------------------------------------------------------------------------  |
+| `{{.FuncName}}`                | The name of the annotated function                                                                     |
+| `{{.FuncArgument N}}`          | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver     |
+| `{{.FuncReturn N}}`            | The identifier of the N-th (0-indexed) return value of the enclosing function                          |
+| `{{.FuncArgumentCount}}`       | The number of parameters of the enclosing function, excluding the receiver                             |
+| `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                  |
+| `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                      |
+| `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type         |
+| `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                 |
+| `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                          |
 
-A call site with no enclosing function has none of these available, so using one there fails the build with a descriptive error. Unnamed parameters and return values and blank (`_`) names, are assigned a synthetic name the first time a template references them.
+These resolve against two different things: `Func*`/`Receiver` placeholders describe the **enclosing function** (the named top-level function whose body contains the matched call site), while `Call*` placeholders describe **the matched call expression itself** — e.g. for `fmt.Println("hello", name)`, `{{.CallArgument 0}}` is the literal `"hello"`, not one of the enclosing function's parameters.
+
+A call site with no enclosing function (e.g. a package-level variable initializer) has none of the `Func*`/`Receiver` placeholders available, so using one there fails the build with a descriptive error. `{{.Receiver}}` additionally fails the build if the enclosing function is not a method (has no receiver). `Call*` placeholders don't need an enclosing function, but only work when the wrapped expression is itself a function call — using one on a non-call expression (e.g. a decl rule's `wrap` applied to `var x = 5`) also fails the build with a descriptive error.
+
+Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values and blank (`_`) names, are assigned a synthetic name the first time a template references them.
+
+**Example: `FuncArgument`**
 
 ```yaml
 wrap_println:
@@ -791,6 +824,76 @@ func Handler(name string) {
     (func() (int, error) {
         println("handler arg:", name)
         return fmt.Println("hello")
+    })()
+}
+```
+
+**Example: `Receiver`**
+
+```yaml
+wrap_println_recv:
+  target: main
+  where:
+    function_call: fmt.Println
+  do:
+    - wrap_call:
+        replace: |-
+          (func() (int, error) {
+            println("handler recv:", {{ .Receiver }})
+            return {{ . }}
+          })()
+```
+
+Given:
+
+```go
+func (h Handler) Serve(name string) {
+    fmt.Println("hello")
+}
+```
+
+`{{ .Receiver }}` resolves to `h`:
+
+```go
+func (h Handler) Serve(name string) {
+    (func() (int, error) {
+        println("handler recv:", h)
+        return fmt.Println("hello")
+    })()
+}
+```
+
+**Example: `CallArgument` and `FuncArgumentOfType`**
+
+```yaml
+wrap_println:
+  target: main
+  where:
+    function_call: fmt.Println
+  do:
+    - wrap_call:
+        replace: |-
+          (func() (int, error) {
+            println("call arg0:", {{ .CallArgument 0 }}, "nargs:", {{ .CallArgumentCount }}, "reader ok:", {{ .FuncArgumentOfType "io.Reader" }} != nil)
+            return {{ . }}
+          })()
+```
+
+Given:
+
+```go
+func Handler(r io.Reader, name string) {
+    fmt.Println("hello", name)
+}
+```
+
+`{{ .CallArgument 0 }}` resolves to the call's own first argument (`"hello"`, a literal - not one of `Handler`'s parameters), `{{ .CallArgumentCount }}` resolves to `2`, and `{{ .FuncArgumentOfType "io.Reader" }}` resolves to `r` (the enclosing function's parameter):
+
+```go
+func Handler(r io.Reader, name string) {
+    (func() (int, error) {
+        println("call arg0:", "hello", "nargs:", 2, "reader ok:", r != nil)
+        return fmt.Println("hello", name)
     })()
 }
 ```
@@ -1119,7 +1222,7 @@ func divide(ctx context.Context, a int, b int) (_unnamedRetVal0 int, _unnamedRet
 - The `directive` field must not include the leading `//`.
 - Functions without the directive comment are not affected.
 - Multiple functions in the same file can carry the directive; each gets the template applied independently with its own placeholder values.
-- `FuncArgumentOfType` and `FuncReturnOfType` match on syntactic type name only (e.g. `context.Context`, `*http.Request`, `error`).
+- `FuncArgumentOfType` and `FuncReturnOfType` match on syntactic type name only (e.g. `context.Context`, `*http.Request`, `error`); they do not perform interface-satisfaction checks, so a custom type that merely implements `context.Context` is not matched.
 
 ### 6. File Addition Rule
 
