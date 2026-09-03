@@ -194,7 +194,7 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 
 	stmts, err := toolast.NewAstParser().ParseSnippet(userResult)
 	if err != nil {
-		return nil, err
+		return nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", userResult)
 	}
 	if len(stmts) != 1 {
 		return nil, ex.Newf("expected single expression statement, got %d statements", len(stmts))
