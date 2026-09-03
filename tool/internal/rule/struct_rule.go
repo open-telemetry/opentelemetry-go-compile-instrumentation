@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // InstStructField represents a single field to be added to a struct.
