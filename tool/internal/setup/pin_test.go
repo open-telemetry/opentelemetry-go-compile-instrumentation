@@ -821,8 +821,6 @@ func TestLoadMinimalRules_InvalidRuleYAML(t *testing.T) {
 }
 
 func TestValidateRuleFiles(t *testing.T) {
-	logger := discardLogger()
-
 	t.Run("valid", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "otelc.yaml")
 		require.NoError(t, os.WriteFile(path, []byte(`version: "v1.0.0"
@@ -832,12 +830,12 @@ rule:
   raw: "_ = 1"
 `), 0o644))
 
-		require.NoError(t, validateRuleFiles(t.Context(), logger, []string{path}))
+		require.NoError(t, validateRuleFiles(t.Context(), []string{path}))
 	})
 
 	t.Run("read error", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing.otelc.yaml")
-		err := validateRuleFiles(t.Context(), logger, []string{path})
+		err := validateRuleFiles(t.Context(), []string{path})
 		require.ErrorContains(t, err, "reading")
 		require.ErrorContains(t, err, path)
 	})
@@ -846,7 +844,7 @@ rule:
 		path := filepath.Join(t.TempDir(), "otelc.yaml")
 		require.NoError(t, os.WriteFile(path, []byte(`version: 1`), 0o644))
 
-		err := validateRuleFiles(t.Context(), logger, []string{path})
+		err := validateRuleFiles(t.Context(), []string{path})
 		require.ErrorContains(t, err, "minimum otelc version must be a string")
 	})
 
@@ -856,7 +854,7 @@ rule:
 rule: value
 `), 0o644))
 
-		err := validateRuleFiles(t.Context(), logger, []string{path})
+		err := validateRuleFiles(t.Context(), []string{path})
 		require.Error(t, err)
 	})
 }

@@ -450,7 +450,7 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 	return runModTidy(ctx, filepath.Dir(toolFile))
 }
 
-func validateRuleFiles(ctx context.Context, logger *slog.Logger, ruleFiles []string) error {
+func validateRuleFiles(ctx context.Context, ruleFiles []string) error {
 	for _, ruleFile := range ruleFiles {
 		content, err := os.ReadFile(ruleFile)
 		if err != nil {
@@ -514,7 +514,7 @@ func updatePinnedProjects(
 
 			// Also validate that all rule files in the import are valid.
 			if opts.Validate {
-				if validateErr := validateRuleFiles(ctx, logger, v.Config.RuleFiles); validateErr != nil {
+				if validateErr := validateRuleFiles(ctx, v.Config.RuleFiles); validateErr != nil {
 					pruneImport(validateErr)
 					return false, nil
 				}
