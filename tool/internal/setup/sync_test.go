@@ -672,3 +672,14 @@ go 1.21
 		replacedPaths,
 	)
 }
+
+func TestSyncDeps_ModTidyFails(t *testing.T) {
+	// A go.mod with an invalid go toolchain/version causes runModTidy to fail in syncDeps.
+	goMod := `module example.com/test
+
+go 999.0.0
+`
+	tempDir, _, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir)
+	require.Error(t, err)
+}

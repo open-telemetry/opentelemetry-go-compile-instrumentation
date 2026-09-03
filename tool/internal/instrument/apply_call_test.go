@@ -170,7 +170,7 @@ func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 	err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rule has no compiled replacement template")
+	assert.Contains(t, err.Error(), "failed to parse template")
 }
 
 func TestApplyCallRule_AppendArgs(t *testing.T) {
@@ -950,5 +950,5 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 	err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to wrap")
+	assert.Contains(t, err.Error(), "failed to parse generated code")
 }
