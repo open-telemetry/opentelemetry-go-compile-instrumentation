@@ -107,7 +107,7 @@ func TestLogsZerolog(t *testing.T) {
 		TraceID string `json:"trace_id"`
 		SpanID  string `json:"span_id"`
 	}
-	
+
 	entries := make(map[string]zerologEntry)
 	for line := range strings.Lines(output) {
 		var entry zerologEntry
