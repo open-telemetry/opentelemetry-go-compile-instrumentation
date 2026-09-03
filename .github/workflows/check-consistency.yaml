@@ -7,7 +7,8 @@ on:
   pull_request:
 
 # Declare default permissions as read only.
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   # This is a required workflow, so it must always run and report a status.
@@ -23,6 +24,8 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
         id: filter
         with:
@@ -34,6 +37,15 @@ jobs:
               - 'pkg/hook/context.go'
               - 'tool/internal/instrument/api.tmpl'
               - 'tool/internal/instrument/testdata/**'
+              - 'instrumentation/**/go.mod'
+              - 'instrumentation/**/otelc.yml'
+              - 'instrumentation/**/otelc.yaml'
+              - 'instrumentation/**/*.otelc.yml'
+              - 'instrumentation/**/*.otelc.yaml'
+              - 'tool/cmd/gen-manifest/**'
+              - 'tool/cmd/check-test-names/**'
+              - 'tool/data/instrumentation-manifest.json'
+              - 'Makefile'
               - '.github/workflows/check-consistency.yaml'
 
   check-api-sync:
@@ -44,6 +56,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - name: Verify api.tmpl matches pkg/hook/context.go
         run: make check-api-sync
 
@@ -55,6 +69,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - name: Install Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
@@ -62,6 +78,24 @@ jobs:
           cache-dependency-path: "**/go.mod"
       - name: Check golden files are up to date
         run: make check-golden-files
+
+  check-test-file-naming:
+    name: Check Test File Naming
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Check test file naming conventions
+        run: make check-test-file-naming
 
   check-mod-tidy:
     name: Check go.mod/go.sum Tidy
@@ -71,6 +105,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - name: Install Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
@@ -81,26 +117,67 @@ jobs:
       - name: Check for uncommitted go.mod/go.sum changes
         run: git diff --exit-code -- '**/go.mod' '**/go.sum'
 
+  verify-manifest:
+    name: Verify Instrumentation Manifest
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.mod"
+      - name: Verify instrumentation manifest
+        run: make verify-manifest
+
   done:
     name: Done (Check Consistency)
     runs-on: ubuntu-latest
-    needs: [changes, check-api-sync, check-golden-files, check-mod-tidy]
+    needs: [changes, check-api-sync, check-golden-files, check-mod-tidy, verify-manifest, check-test-file-naming]
     if: always()
     steps:
       - name: Check result
         run: |
+          changes_result="${{ needs.changes.result }}"
+          code_changed="${NEEDS_CHANGES_OUTPUTS_CODE}"
           api_result="${{ needs.check-api-sync.result }}"
           golden_result="${{ needs.check-golden-files.result }}"
           mod_tidy_result="${{ needs.check-mod-tidy.result }}"
+          manifest_result="${{ needs.verify-manifest.result }}"
+          test_naming_result="${{ needs.check-test-file-naming.result }}"
+          echo "Changes result: $changes_result"
+          echo "Code changed: $code_changed"
           echo "api-sync result: $api_result"
           echo "golden-files result: $golden_result"
           echo "mod-tidy result: $mod_tidy_result"
-          if [[ ("$api_result" == "success" || "$api_result" == "skipped") && \
-                ("$golden_result" == "success" || "$golden_result" == "skipped") && \
-                ("$mod_tidy_result" == "success" || "$mod_tidy_result" == "skipped") ]]; then
-            echo "✅ Consistency checks passed or were skipped"
-            exit 0
-          else
-            echo "❌ Consistency checks failed"
+          echo "manifest result: $manifest_result"
+          echo "test-file-naming result: $test_naming_result"
+          if [[ "$changes_result" != "success" ]]; then
+            echo "❌ Change detection failed"
             exit 1
           fi
+          if [[ "$code_changed" == "false" ]]; then
+            echo "✅ No relevant code changes; consistency checks skipped"
+            exit 0
+          fi
+          if [[ "$code_changed" != "true" ]]; then
+            echo "❌ Unexpected change detection output: $code_changed"
+            exit 1
+          fi
+          if [[ "$api_result" == "success" && \
+                "$golden_result" == "success" && \
+                "$mod_tidy_result" == "success" && \
+                "$manifest_result" == "success" && \
+                "$test_naming_result" == "success" ]]; then
+            echo "✅ Consistency checks passed"
+            exit 0
+          fi
+          echo "❌ Consistency checks failed"
+          exit 1
+        env:
+          NEEDS_CHANGES_OUTPUTS_CODE: ${{ needs.changes.outputs.code }}

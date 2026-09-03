@@ -14,7 +14,7 @@ It modifies the Go build process to inject OpenTelemetry code into the applicati
 
 Highlights:
 
-- **Zero Runtime Overhead** - Instrumentation is baked into your binary at compile time
+- **Zero Runtime Overhead[^1]** - Instrumentation is baked into your binary at compile time
 - **Zero Code Changes** - Automatically instrument entire applications and dependencies
 - **Third-Party Library Support** - Instrument libraries you don't control
 - **Complete Decoupling** - Keep your codebase free from instrumentation concerns
@@ -82,7 +82,7 @@ make test
 We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [development docs](./docs/).
 
 This project follows the [OpenTelemetry Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md).
-Please also review our [AI usage policy](AI_POLICY.md) if you use AI tools in your workflow.
+Please also review our [AI usage policy](docs/AI_POLICY.md) if you use AI tools in your workflow.
 
 Here is a list of community roles with current and previous members:
 
@@ -119,3 +119,5 @@ For more information about the emeritus role, see the
 <a href="https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/graphs/contributors">
   <img alt="Repo contributors" src="https://contrib.rocks/image?repo=open-telemetry/opentelemetry-go-compile-instrumentation" />
 </a>
+
+[^1]: No additional overhead from the instrumentation tool itself, on top of the overhead incurred by the injected [OpenTelemetry SDK](https://github.com/open-telemetry/opentelemetry-go/tree/736a14fcdca28b8cf5237e6b9b166ec6ed832bf7/sdk) code.

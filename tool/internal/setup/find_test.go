@@ -543,3 +543,80 @@ echo nothing useful
 		})
 	}
 }
+
+func TestFindModVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "module cache path",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.3/pkg/foo.go",
+			want: "v1.2.3",
+		},
+		{
+			name: "module cache path with pre-release",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.3-rc.1/pkg/foo.go",
+			want: "v1.2.3-rc.1",
+		},
+		{
+			name: "module cache path with incompatible suffix",
+			path: "/go/pkg/mod/github.com/evanphx/json-patch@v5.9.11+incompatible/pkg/foo.go",
+			want: "v5.9.11+incompatible",
+		},
+		{
+			name: "module cache path with incompatible suffix and custom host",
+			path: "/go/pkg/mod/gotest.tools@v2.2.0+incompatible/pkg/foo.go",
+			want: "v2.2.0+incompatible",
+		},
+		{
+			name: "windows-style module cache path",
+			// Use /-separated form so this exercises the same path shape
+			// filepath.ToSlash produces on Windows, without depending on GOOS
+			// (filepath.ToSlash is a no-op when the host separator is already /).
+			path: "C:/go/pkg/mod/github.com/foo/bar@v9.0.0/client.go",
+			want: "v9.0.0",
+		},
+		{
+			name: "local path has no version",
+			path: "/home/user/projects/bar/pkg/foo.go",
+			want: "",
+		},
+		{
+			name: "vendor path has no version",
+			path: "/tmp/myapp/vendor/github.com/foo/bar/pkg/foo.go",
+			want: "",
+		},
+		{
+			name: "empty path",
+			path: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, findModVersion(tt.path))
+		})
+	}
+}
+
+func TestFindGoSources(t *testing.T) {
+	dir := t.TempDir()
+	srcA := filepath.Join(dir, "a.go")
+	srcB := filepath.Join(dir, "b.go")
+	require.NoError(t, os.WriteFile(srcA, []byte("package p\n"), 0o644))
+	require.NoError(t, os.WriteFile(srcB, []byte("package p\n"), 0o644))
+
+	args := []string{"-p", "example.com/p", srcA, srcB}
+	dep, err := findGoSources(context.Background(), args, map[string]string{})
+	require.NoError(t, err)
+	require.NotNil(t, dep)
+
+	assert.Equal(t, "example.com/p", dep.ImportPath)
+	require.Len(t, dep.Sources, 2)
+	for _, s := range dep.Sources {
+		assert.True(t, filepath.IsAbs(s), "source path must be absolute: %s", s)
+	}
+}

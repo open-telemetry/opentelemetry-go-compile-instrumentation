@@ -8,9 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -21,32 +23,33 @@ import (
 const (
 	stateDir      = "state"
 	stateFileName = "state.json"
+	goWorkOff     = "off"
 )
 
-// StateManager tracks the original state of files so they can later be restored.
+// stateManager tracks the original state of files so they can later be restored.
 //
 // Files that exist when tracked are snapshotted into the build state directory.
 // Files that do not exist when tracked are recorded and removed during Revert if
 // they are later created.
 //
-// StateManager is not safe for concurrent use.
-type StateManager struct {
+// stateManager is not safe for concurrent use.
+type stateManager struct {
 	files map[string]bool // true = existed when tracked
 }
 
-// NewStateManager returns an empty StateManager.
-func NewStateManager() *StateManager {
-	return &StateManager{
+// newStateManager returns an empty stateManager.
+func newStateManager() *stateManager {
+	return &stateManager{
 		files: make(map[string]bool),
 	}
 }
 
-// LoadStateManager loads a previously committed StateManager from disk.
+// loadStateManager loads a previously committed stateManager from disk.
 //
 // If no state has been committed, it returns (nil, nil).
 //
 //nolint:nilnil // nil is returned when the state file does not exist
-func LoadStateManager() (*StateManager, error) {
+func loadStateManager() (*stateManager, error) {
 	f := util.GetBuildTemp(stateFileName)
 	if !util.PathExists(f) {
 		return nil, nil
@@ -63,7 +66,7 @@ func LoadStateManager() (*StateManager, error) {
 		return nil, ex.Wrapf(err, "failed to decode state JSON from file %s", f)
 	}
 
-	s := NewStateManager()
+	s := newStateManager()
 	for _, entry := range entries {
 		if e, ok := strings.CutPrefix(entry, "-"); ok {
 			s.files[e] = false
@@ -77,19 +80,19 @@ func LoadStateManager() (*StateManager, error) {
 
 type stateManagerKey struct{}
 
-// ContextWithStateManager returns a copy of ctx containing s.
-func ContextWithStateManager(ctx context.Context, s *StateManager) context.Context {
+// contextWithStateManager returns a copy of ctx containing s.
+func contextWithStateManager(ctx context.Context, s *stateManager) context.Context {
 	return context.WithValue(ctx, stateManagerKey{}, s)
 }
 
-// StateManagerFromContext returns the StateManager stored in ctx.
+// stateManagerFromContext returns the stateManager stored in ctx.
 //
-// If ctx does not contain a StateManager, a new empty StateManager is returned
+// If ctx does not contain a stateManager, a new empty stateManager is returned
 // along with false.
-func StateManagerFromContext(ctx context.Context) (*StateManager, bool) {
-	s, ok := ctx.Value(stateManagerKey{}).(*StateManager)
+func stateManagerFromContext(ctx context.Context) (*stateManager, bool) {
+	s, ok := ctx.Value(stateManagerKey{}).(*stateManager)
 	if !ok {
-		return NewStateManager(), false
+		return newStateManager(), false
 	}
 	return s, true
 }
@@ -97,12 +100,13 @@ func StateManagerFromContext(ctx context.Context) (*StateManager, bool) {
 func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, error) {
 	var files []string
 
+	dirs := slices.Sorted(maps.Keys(moduleDirs))
 	// Find all go.mod, go.sum, and tool files
-	for moduleDir := range moduleDirs {
+	for _, moduleDir := range dirs {
 		goModFile := filepath.Join(moduleDir, "go.mod")
 		goSumFile := filepath.Join(moduleDir, "go.sum")
-		toolFileCanonical := filepath.Join(moduleDir, ToolFileCanonical)
-		toolFileAlias := filepath.Join(moduleDir, ToolFileAlias)
+		canonical := filepath.Join(moduleDir, toolFileCanonical)
+		alias := filepath.Join(moduleDir, toolFileAlias)
 
 		if util.PathExists(goModFile) {
 			files = append(files, goModFile)
@@ -110,9 +114,9 @@ func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, 
 
 			// If otelc.tool.go exists, use it (it may get modified)
 			// Otherwise, use the canonical path (it may get generated or modified)
-			toolFile := toolFileCanonical
-			if !util.PathExists(toolFileCanonical) && util.PathExists(toolFileAlias) {
-				toolFile = toolFileAlias
+			toolFile := canonical
+			if !util.PathExists(canonical) && util.PathExists(alias) {
+				toolFile = alias
 			}
 
 			files = append(files, toolFile)
@@ -126,7 +130,7 @@ func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, 
 		return nil, ex.Wrapf(err, "failed to get GOWORK environment variable")
 	}
 	goWorkPath := strings.TrimSpace(string(goWorkOutput))
-	if goWorkPath != "" {
+	if goWorkPath != "" && goWorkPath != goWorkOff {
 		goWorkSumPath := filepath.Join(filepath.Dir(goWorkPath), "go.work.sum")
 		files = append(files, goWorkSumPath)
 	}
@@ -141,7 +145,7 @@ func stateSnapshotPath(path string) string {
 }
 
 // TrackAll calls Track for each path.
-func (s *StateManager) TrackAll(paths ...string) error {
+func (s *stateManager) TrackAll(paths ...string) error {
 	var err error
 	for _, path := range paths {
 		err = ex.Join(err, s.Track(path))
@@ -160,7 +164,7 @@ func (s *StateManager) TrackAll(paths ...string) error {
 // manifest from which `otelc cleanup` or the next build can restore the tree.
 //
 // Duplicate calls for the same path are ignored.
-func (s *StateManager) Track(path string) error {
+func (s *stateManager) Track(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return ex.Wrapf(err, "failed to get absolute path for %s", path)
@@ -180,7 +184,7 @@ func (s *StateManager) Track(path string) error {
 	// If the file exists, snapshot it
 	dst := filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(abs))
 	if err = util.CopyFile(abs, dst); err != nil {
-		return ex.Wrapf(err, "failed to snapshot %s", abs)
+		return err
 	}
 
 	s.files[abs] = true
@@ -193,7 +197,7 @@ func (s *StateManager) Track(path string) error {
 //
 // Track calls Commit automatically; calling it directly is only needed to
 // re-persist after external changes.
-func (s *StateManager) Commit() error {
+func (s *stateManager) Commit() error {
 	if len(s.files) == 0 {
 		return nil
 	}
@@ -221,17 +225,13 @@ func (s *StateManager) Commit() error {
 		return ex.Wrapf(err, "failed to create build temp directory")
 	}
 
-	if err = util.WriteFileAtomic(f, bs); err != nil {
-		return ex.Wrapf(err, "failed to write state file %s", f)
-	}
-
-	return nil
+	return util.WriteFileAtomic(f, bs)
 }
 
 // Discard removes the persisted manifest and snapshots. Call it only after a
 // successful Revert: the state is consumed, and leaving it behind would let a
 // later `otelc cleanup` re-apply snapshots from a finished build.
-func (s *StateManager) Discard() error {
+func (s *stateManager) Discard() error {
 	if len(s.files) == 0 {
 		return nil
 	}
@@ -250,7 +250,7 @@ func (s *StateManager) Discard() error {
 //
 // Files that originally existed are restored from their snapshots. Files that
 // did not exist when tracked are removed if they exist.
-func (s *StateManager) Revert() error {
+func (s *stateManager) Revert() error {
 	if len(s.files) == 0 {
 		return nil
 	}

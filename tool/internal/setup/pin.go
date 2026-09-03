@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,10 +19,10 @@ import (
 	"strings"
 
 	"github.com/dave/dst"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -174,7 +175,7 @@ type yamlRule struct {
 func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) error {
 	return filepath.WalkDir(moduleDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 
 		if d.IsDir() {
@@ -185,7 +186,7 @@ func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) err
 			return nil
 		}
 
-		if !isRuleFile(d.Name()) {
+		if !util.IsRuleFile(d.Name()) {
 			return nil
 		}
 
@@ -214,7 +215,7 @@ func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
 
 	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 		// rulesRoot is instrumentation/
 		// We want to load rules for submodules within instrumentation/
@@ -254,7 +255,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 	}
 
 	if err := f.AddRequire(util.OtelcRoot, version); err != nil {
-		return false, err
+		return false, ex.Wrap(err)
 	}
 
 	return true, nil
@@ -264,12 +265,12 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	goModPath := filepath.Join(moduleDir, "go.mod")
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
-		return false, err
+		return false, ex.Wrap(err)
 	}
 
 	f, err := modfile.Parse(goModPath, data, nil)
 	if err != nil {
-		return false, err
+		return false, ex.Wrap(err)
 	}
 
 	modified := false
@@ -284,7 +285,7 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 
 	if !hasTool {
 		if addErr := f.AddTool(util.OtelcToolCmdRoot); addErr != nil {
-			return false, addErr
+			return false, ex.Wrap(addErr)
 		}
 		modified = true
 	}
@@ -306,28 +307,34 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	return true, nil
 }
 
-func matchInstrumentationImports(deps []*Dependency, ruleset map[string][]yamlRule) map[string]bool {
+func matchInstrumentationImports(
+	deps []*Dependency,
+	ruleset map[string][]yamlRule,
+	warn func(msg string, args ...any),
+) map[string]bool {
 	imports := make(map[string]bool)
+
+	// Record the first unresolved-version skip per instrumentation module.
+	// Warnings are emitted after matching so we only complain when the module
+	// was not imported by any other rule/dep (avoids false positives).
+	skipped := make(map[string]unresolvedSkip)
 
 	// Match only on target + version.
 	for _, dep := range deps {
 		for modPath, rules := range ruleset {
 			for _, r := range rules {
-				switch {
-				case rule.IsRootTarget(r.Target):
-					// always add root targets
-					// they will be further matched in setup phase
+				tm := instrumentationRuleMatchesDep(dep, r)
+				if tm.isRoot {
+					// always add root targets; they are further matched in setup
 					imports[modPath] = true
 					continue
-				case rule.IsGlobTarget(r.Target):
-					if !rule.MatchGlobTarget(r.Target, dep.ImportPath) {
-						continue
-					}
-				case r.Target != dep.ImportPath:
+				}
+				if !tm.matched {
 					continue
 				}
 
 				if !util.VersionInRange(dep.Version, r.VersionRange) {
+					recordUnresolvedSkip(skipped, modPath, dep, r.VersionRange)
 					continue
 				}
 
@@ -336,7 +343,67 @@ func matchInstrumentationImports(deps []*Dependency, ruleset map[string][]yamlRu
 		}
 	}
 
+	emitUnresolvedSkipWarnings(warn, imports, skipped)
 	return imports
+}
+
+type unresolvedSkip struct {
+	dep          string
+	versionRange string
+}
+
+type instrumentationTargetMatch struct {
+	matched bool
+	isRoot  bool
+}
+
+// instrumentationRuleMatchesDep reports whether r's target matches dep.
+// Root targets always pin the instrumentation module.
+func instrumentationRuleMatchesDep(dep *Dependency, r yamlRule) instrumentationTargetMatch {
+	switch {
+	case rule.IsRootTarget(r.Target):
+		return instrumentationTargetMatch{matched: true, isRoot: true}
+	case rule.IsGlobTarget(r.Target):
+		return instrumentationTargetMatch{matched: rule.MatchGlobTarget(r.Target, dep.ImportPath)}
+	default:
+		return instrumentationTargetMatch{matched: r.Target == dep.ImportPath}
+	}
+}
+
+func recordUnresolvedSkip(
+	skipped map[string]unresolvedSkip,
+	modPath string,
+	dep *Dependency,
+	versionRange string,
+) {
+	if !unresolvedVersionSkip(dep.Version, versionRange) {
+		return
+	}
+	if _, ok := skipped[modPath]; ok {
+		return
+	}
+	skipped[modPath] = unresolvedSkip{
+		dep:          dep.ImportPath,
+		versionRange: versionRange,
+	}
+}
+
+func emitUnresolvedSkipWarnings(
+	warn func(msg string, args ...any),
+	imports map[string]bool,
+	skipped map[string]unresolvedSkip,
+) {
+	if warn == nil {
+		return
+	}
+	for modPath, s := range skipped {
+		if imports[modPath] {
+			continue
+		}
+		warnUnresolvedVersionSkip(warn, s.dep, s.versionRange,
+			"instrumentation", modPath,
+		)
+	}
 }
 
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
@@ -344,12 +411,12 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	f, parseErr := p.Parse(toolFile, parser.ParseComments)
 	if parseErr != nil {
-		return ex.Wrapf(parseErr, "parsing tool file %s", toolFile)
+		return parseErr
 	}
 
 	if len(prunedImports) > 0 {
 		if removeErr := removeImports(f, prunedImports); removeErr != nil {
-			return ex.Wrapf(removeErr, "removing imports from %s", toolFile)
+			return removeErr
 		}
 	}
 
@@ -361,14 +428,10 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	_, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
 	if ensureErr != nil {
-		return ex.Wrapf(ensureErr, "ensuring otelc require in go.mod in %s", filepath.Dir(toolFile))
+		return ensureErr
 	}
 
-	if tidyErr := runModTidy(ctx, filepath.Dir(toolFile)); tidyErr != nil {
-		return ex.Wrapf(tidyErr, "running go mod tidy in %s", filepath.Dir(toolFile))
-	}
-
-	return nil
+	return runModTidy(ctx, filepath.Dir(toolFile))
 }
 
 func updatePinnedProjects(
@@ -380,7 +443,7 @@ func updatePinnedProjects(
 	prunedImports := make(map[string]map[string]bool, len(toolFiles))
 
 	walkErr := walkInstrumentation(ctx, toolFiles,
-		func(v *InstrumentationVisit) (bool, error) {
+		func(v *instrumentationVisit) (bool, error) {
 			pruneImport := func(reason error) {
 				logger.WarnContext(ctx, "invalid instrumentation import",
 					"importPath", v.Config.ImportPath,
@@ -404,7 +467,7 @@ func updatePinnedProjects(
 			}
 
 			if v.Config.Error != nil {
-				if errors.Is(v.Config.Error, ErrNotInstrumentation) {
+				if errors.Is(v.Config.Error, errNotInstrumentation) {
 					pruneImport(v.Config.Error)
 					return false, nil
 				}
@@ -455,21 +518,23 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	// No tool file found? Try generating one.
 	deps, findDepsErr := findDeps(ctx, subcommand, opts.Args)
 	if findDepsErr != nil {
-		return nil, ex.Wrapf(findDepsErr, "finding dependencies")
+		return nil, findDepsErr
 	}
 
 	extractErr := extractOtelcBundle()
 	if extractErr != nil {
-		return nil, ex.Wrapf(extractErr, "extracting otelc package")
+		return nil, extractErr
 	}
 
 	ruleset, err := loadMinimalRules(filepath.Join(util.GetBuildTempDir(), unzippedInstDir))
 	if err != nil {
-		return nil, ex.Wrapf(err, "loading instrumentation rules")
+		return nil, err
 	}
 
 	// We expect every built-in instrumentation module to be importable
-	imports := matchInstrumentationImports(deps, ruleset)
+	imports := matchInstrumentationImports(deps, ruleset, func(msg string, args ...any) {
+		logger.WarnContext(ctx, msg, args...)
+	})
 
 	// Nothing to instrument? Warn and skip generating tool file.
 	if len(imports) == 0 {
@@ -477,7 +542,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 			os.Stderr,
 			"Warning: no instrumentations matched, checked %d dependencies. Skipping generating %s file.\n",
 			len(deps),
-			ToolFileCanonical,
+			toolFileCanonical,
 		)
 		logger.WarnContext(ctx, "no instrumentations matched, skipping generating tool file")
 
@@ -487,18 +552,19 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
 	f := generateOtelInstrumentationGo(imports, opts)
-	for moduleDir := range moduleDirs {
-		path := filepath.Join(moduleDir, ToolFileCanonical)
+	dirs := slices.Sorted(maps.Keys(moduleDirs))
+	for _, moduleDir := range dirs {
+		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
 		}
 
 		if _, ensureErr := ensureOtelcRequire(moduleDir, util.Version); ensureErr != nil {
-			return nil, ex.Wrapf(ensureErr, "ensuring otelc require in go.mod in %s", moduleDir)
+			return nil, ensureErr
 		}
 
 		if syncErr := syncDeps(ctx, imports, moduleDir); syncErr != nil {
-			return nil, ex.Wrapf(syncErr, "syncing dependencies in %s", moduleDir)
+			return nil, syncErr
 		}
 
 		keepForDebug(ctx, path)
@@ -570,19 +636,19 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 		// forcing module mode and rewriting vendor/ paths to module mode.
 		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
 		if err != nil {
-			return nil, ex.Wrapf(err, "preparing vendored build")
+			return nil, err
 		}
 		opts.Args = args
 
 		// Use opts.Args to find module directories
 		pkgs, getErr := getBuildPackages(ctx, opts.Args)
 		if getErr != nil {
-			return nil, ex.Wrapf(getErr, "getting build packages")
+			return nil, getErr
 		}
 
 		moduleDirs, err = pkgload.FindModuleDirs(ctx, pkgs)
 		if err != nil {
-			return nil, ex.Wrapf(err, "finding module directories")
+			return nil, err
 		}
 	}
 
@@ -602,20 +668,20 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	return generatePinnedProjects(ctx, moduleDirs, opts)
 }
 
-// AutoPin is a convenience function that automatically tracks generated/modified files before calling Pin
+// autoPin is a convenience function that automatically tracks generated/modified files before calling Pin
 // in order to restore them after the build completes.
-func AutoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
-	stateManager, found := StateManagerFromContext(ctx)
+func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
+	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		return nil, ex.New("state manager not found in context")
 	}
 
 	backupFiles, getBackupErr := getBackupFiles(ctx, moduleDirs)
 	if getBackupErr != nil {
-		return nil, ex.Wrapf(getBackupErr, "getting backup files")
+		return nil, getBackupErr
 	}
 	if trackErr := stateManager.TrackAll(backupFiles...); trackErr != nil {
-		return nil, ex.Wrapf(trackErr, "tracking backup files")
+		return nil, trackErr
 	}
 
 	pinResult, pinErr := Pin(ctx, PinOptions{

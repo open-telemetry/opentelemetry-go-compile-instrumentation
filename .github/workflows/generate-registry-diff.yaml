@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
           go-version-file: 'go.mod'
@@ -39,7 +41,9 @@ jobs:
         run: |
           mkdir -p tmp
           echo "${{ github.event.pull_request.number }}" > tmp/pr-number.txt
-          echo "${{ steps.read-version.outputs.current_version }}" > tmp/semconv-version.txt
+          echo "${STEPS_READ_VERSION_OUTPUTS_CURRENT_VERSION}" > tmp/semconv-version.txt
+        env:
+          STEPS_READ_VERSION_OUTPUTS_CURRENT_VERSION: ${{ steps.read-version.outputs.current_version }}
 
       - name: Upload diff report and PR metadata
         if: always()

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"go.opentelemetry.io/otelc/test/testutil"
@@ -31,6 +32,26 @@ func TestDBClient(t *testing.T) {
 			"unknown", 0,
 			"testdb",
 		)
+	})
+
+	t.Run("OpenDB", func(t *testing.T) {
+		// Exercises sql.OpenDB's driver.Connector path (hook_opendb):
+		// beforeOpenDBInstrumentation must resolve the connector's driver
+		// back to the registered "mysql" name so the DSN is parsed with the
+		// MySQL parser instead of falling to "unknown"/other_sql.
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=opendb")
+
+		span := f.RequireSingleSpan()
+		require.Equal(t, "PING", span.Name())
+		testutil.RequireDBClientSemconv(t, span,
+			"PING",
+			"ping",
+			"127.0.0.1", 3306,
+			"testdb",
+		)
+		testutil.RequireAttribute(t, span, "db.system.name", "mysql")
 	})
 
 	t.Run("Exec", func(t *testing.T) {
@@ -103,6 +124,23 @@ func TestDBClient(t *testing.T) {
 			testutil.HasAttribute("db.operation.name", "COMMIT"),
 		)
 		require.Equal(t, "COMMIT", commitSpan.Name())
+	})
+
+	t.Run("TransactionFailure", func(t *testing.T) {
+		// Verifies fix for issue #835: when db.BeginTx returns an error,
+		// afterTxInstrumentation must still call instrumentEnd so the span
+		// is correctly ended with an error status (no span leak).
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-fail")
+
+		// Exactly one span: the failed START TRANSACTION span.
+		span := f.RequireSingleSpan()
+		require.Equal(t, "START", span.Name())
+
+		// The span status must be Error to reflect the failed BeginTx.
+		require.Equal(t, ptrace.StatusCodeError, span.Status().Code(),
+			"failed BeginTx span must have Error status")
 	})
 
 	t.Run("All", func(t *testing.T) {

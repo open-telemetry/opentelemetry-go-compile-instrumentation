@@ -5,10 +5,13 @@ package ast
 
 import (
 	"fmt"
+	"go/format"
 	"go/token"
 	"strconv"
+	"strings"
 
 	"github.com/dave/dst"
+	"github.com/dave/dst/decorator"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -16,7 +19,7 @@ import (
 )
 
 func findFuncDecls(root *dst.File, lambda func(*dst.FuncDecl) bool) []*dst.FuncDecl {
-	funcDecls := ListFuncDecls(root)
+	funcDecls := listFuncDecls(root)
 
 	// The function with receiver and the function without receiver may have
 	// the same name, so they need to be classified into the same name
@@ -166,7 +169,7 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	return funcDecl, true, nil
 }
 
-func ListFuncDecls(root *dst.File) []*dst.FuncDecl {
+func listFuncDecls(root *dst.File) []*dst.FuncDecl {
 	funcDecls := make([]*dst.FuncDecl, 0)
 	for _, decl := range root.Decls {
 		funcDecl, ok := decl.(*dst.FuncDecl)
@@ -178,15 +181,15 @@ func ListFuncDecls(root *dst.File) []*dst.FuncDecl {
 	return funcDecls
 }
 
-// FindVarDecl finds a package-level variable declaration by name.
+// findVarDecl finds a package-level variable declaration by name.
 // Returns the enclosing GenDecl and the matching ValueSpec, or nil if not found.
-func FindVarDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
+func findVarDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
 	return findValueDecl(root, name, token.VAR)
 }
 
-// FindConstDecl finds a package-level constant declaration by name.
+// findConstDecl finds a package-level constant declaration by name.
 // Returns the enclosing GenDecl and the matching ValueSpec, or nil if not found.
-func FindConstDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
+func findConstDecl(root *dst.File, name string) (*dst.GenDecl, *dst.ValueSpec) {
 	return findValueDecl(root, name, token.CONST)
 }
 
@@ -211,8 +214,8 @@ func findValueDecl(root *dst.File, name string, tok token.Token) (*dst.GenDecl, 
 	return nil, nil
 }
 
-// FindTypeDecl finds a package-level type declaration by name (any kind: struct, interface, alias, etc).
-func FindTypeDecl(root *dst.File, name string) *dst.GenDecl {
+// findTypeDecl finds a package-level type declaration by name (any kind: struct, interface, alias, etc).
+func findTypeDecl(root *dst.File, name string) *dst.GenDecl {
 	for _, decl := range root.Decls {
 		genDecl, ok := decl.(*dst.GenDecl)
 		if !ok || genDecl.Tok != token.TYPE {
@@ -238,15 +241,15 @@ func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 			return n
 		}
 	case "var":
-		if _, spec := FindVarDecl(root, name); spec != nil {
+		if _, spec := findVarDecl(root, name); spec != nil {
 			return spec
 		}
 	case "const":
-		if _, spec := FindConstDecl(root, name); spec != nil {
+		if _, spec := findConstDecl(root, name); spec != nil {
 			return spec
 		}
 	case "type":
-		if n := FindTypeDecl(root, name); n != nil {
+		if n := findTypeDecl(root, name); n != nil {
 			return n
 		}
 	default:
@@ -254,13 +257,13 @@ func FindNamedDecl(root *dst.File, name, kind string) dst.Node {
 		if fn := FindFuncDeclWithoutRecv(root, name); fn != nil {
 			return fn
 		}
-		if _, spec := FindVarDecl(root, name); spec != nil {
+		if _, spec := findVarDecl(root, name); spec != nil {
 			return spec
 		}
-		if _, spec := FindConstDecl(root, name); spec != nil {
+		if _, spec := findConstDecl(root, name); spec != nil {
 			return spec
 		}
-		if n := FindTypeDecl(root, name); n != nil {
+		if n := findTypeDecl(root, name); n != nil {
 			return n
 		}
 	}
@@ -280,7 +283,7 @@ func IsUnusedIdent(ident *dst.Ident) bool {
 	return ident.Name == IdentIgnore
 }
 
-func IsStringLit(expr dst.Expr, val string) bool {
+func isStringLit(expr dst.Expr, val string) bool {
 	lit, ok := expr.(*dst.BasicLit)
 	if !ok {
 		return false
@@ -308,10 +311,10 @@ func IsEllipsis(t dst.Expr) bool {
 
 // FindStructType returns the *dst.StructType declared under name, or nil if there
 // is no such top-level type or the named type is not a struct (e.g. an interface,
-// alias, or named non-struct type). Unlike FindTypeDecl it resolves the specific
+// alias, or named non-struct type). Unlike findTypeDecl it resolves the specific
 // spec by name, so it is correct for grouped `type ( ... )` blocks.
 func FindStructType(root *dst.File, name string) *dst.StructType {
-	gen := FindTypeDecl(root, name)
+	gen := findTypeDecl(root, name)
 	if gen == nil {
 		return nil
 	}
@@ -346,13 +349,13 @@ func AddStructField(st *dst.StructType, name, t string) {
 // full interface-satisfaction checking.
 //
 // Qualified type names are resolved against imports, which maps the local
-// identifier used at a use site to its real import path (see importAliasMap).
+// identifier used at a use site to its real import path (see ImportAliasMap).
 // Matching is therefore relative to the enclosing file's import declarations.
 func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, root *dst.File) (bool, error) {
 	if r.Signature == nil && r.SignatureContains == nil && r.Result == "" && r.LastResult == "" && r.Param == "" {
 		return true, nil
 	}
-	imports := importAliasMap(root)
+	imports := ImportAliasMap(root)
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
@@ -517,4 +520,39 @@ func SplitMultiNameFields(fieldList *dst.FieldList) *dst.FieldList {
 		}
 	}
 	return result
+}
+
+// RenderExpr renders expr back into Go source text.
+func RenderExpr(expr dst.Expr) (string, error) {
+	cloned := util.AssertType[dst.Expr](dst.Clone(expr))
+	synthetic := &dst.File{
+		Name: Ident("_"),
+		Decls: []dst.Decl{
+			&dst.FuncDecl{
+				Name: Ident("_"),
+				Type: &dst.FuncType{Params: &dst.FieldList{}},
+				Body: &dst.BlockStmt{List: []dst.Stmt{&dst.ExprStmt{X: cloned}}},
+			},
+		},
+	}
+
+	restorer := decorator.NewRestorer()
+	if _, err := restorer.RestoreFile(synthetic); err != nil {
+		return "", ex.Wrapf(err, "failed to restore expression to source")
+	}
+	return RenderNode(restorer, cloned)
+}
+
+// RenderNode looks up node's restored counterpart in restorer and renders it
+// back to Go source text.
+func RenderNode(restorer *decorator.Restorer, node dst.Node) (string, error) {
+	astNode, ok := restorer.Ast.Nodes[node]
+	if !ok {
+		return "", ex.New("failed to locate restored node")
+	}
+	var buf strings.Builder
+	if err := format.Node(&buf, restorer.Fset, astNode); err != nil {
+		return "", ex.Wrapf(err, "failed to format node")
+	}
+	return buf.String(), nil
 }
