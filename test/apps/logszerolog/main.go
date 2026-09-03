@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -15,6 +16,14 @@ import (
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
+type ErrWriter struct {
+	w io.Writer
+}
+
+func (e *ErrWriter) Write(p []byte) (n int, err error) {
+	return e.w.Write(p)
+}
 
 func main() {
 	exporter, err := stdouttrace.New(stdouttrace.WithWriter(os.Stdout))
@@ -30,22 +39,29 @@ func main() {
 	tracer := otel.GetTracerProvider().Tracer("test")
 	_, span := tracer.Start(context.Background(), "test-span")
 
-	emitEvents(&zerologlog.Logger)
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	errWriter := &ErrWriter{w: os.Stderr}
+	zerologlog.Logger = zerologlog.Logger.Output(errWriter).Level(zerolog.TraceLevel)
+	instantiated := zerolog.Logger{}.Output(errWriter).Level(zerolog.TraceLevel)
+
+	emitEvents(&zerologlog.Logger, "loggerFromNew")
+	emitEvents(&instantiated, "loggerFromInstantiated")
 
 	span.End()
 }
 
-func emitEvents(logger *zerolog.Logger) {
-	logger.Trace().Msg("trace message")
-	logger.Debug().Msg("debug message")
-	logger.Info().Msg("info message")
-	logger.Warn().Msg("warn message")
-	logger.Error().Msg("error message")
-	logger.Err(errors.New("test error")).Msg("err with message")
-	logger.Log().Msg("log message")
-	logger.Print("logger print message")
-	logger.Printf("logger printf message")
-	logger.Println("logger println message")
+func emitEvents(logger *zerolog.Logger, appended string) {
+	logger.Trace().Msgf("trace message %s", appended)
+	logger.Debug().Msgf("debug message %s", appended)
+	logger.Info().Msgf("info message %s", appended)
+	logger.Warn().Msgf("warn message %s", appended)
+	logger.Error().Msgf("error message %s", appended)
+	logger.Err(errors.New("test error")).Msgf("err with message %s", appended)
+	logger.Log().Msgf("log message %s", appended)
+	logger.Print(fmt.Sprintf("logger print message %s", appended))
+	logger.Printf("logger printf message %s", appended)
+	logger.Println(fmt.Sprintf("logger println message %s", appended))
 
 	previousFatalExitFunc := zerolog.FatalExitFunc
 	zerolog.FatalExitFunc = func() {}
@@ -56,7 +72,7 @@ func emitEvents(logger *zerolog.Logger) {
 		defer func() {
 			_ = recover()
 		}()
-		logger.Panic().Msg("panic message")
+		logger.Panic().Msgf("panic message %s", appended)
 	}()
-	logger.Fatal().Msg("fatal message")
+	logger.Fatal().Msgf("fatal message %s", appended)
 }
