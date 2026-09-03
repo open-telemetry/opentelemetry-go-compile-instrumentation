@@ -65,7 +65,7 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 		// tests with no backing *dst.File): compare against importPath's last
 		// segment. Note this cannot rescue a miskeyed map — a tail match here
 		// would imply ident.Name is a key, so the lookup above would have hit.
-		return DefaultImportAlias(t.importPath) == ident.Name && t.name == n.Sel.Name
+		return defaultImportAlias(t.importPath) == ident.Name && t.name == n.Sel.Name
 
 	case *dst.StarExpr:
 		inner := parsedTypeName{importPath: t.importPath, name: t.name}
@@ -85,7 +85,7 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 
 	default:
 		// Unsupported AST node types (chan, func, map, slice, array, interface
-		// literals) cannot be matched by type-name filters.
+		// literals) can never satisfy a plain type-name filter.
 		return false
 	}
 }
@@ -109,7 +109,20 @@ func fieldListContainsType(fields *dst.FieldList, typeStr string, imports map[st
 	return false, nil
 }
 
-// ImportAliasMap builds a map from the local identifier used to reference an
+// MatchesTypeName reports whether node's type matches the type-name string
+// typeStr. imports resolves the local identifier used at node's use site to
+// its real import path; see ImportAliasMap. Pass nil when no import context
+// is available
+// Returns an error when typeStr cannot be parsed.
+func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (bool, error) {
+	tn, err := parseTypeName(typeStr)
+	if err != nil {
+		return false, err
+	}
+	return tn.matches(node, imports), nil
+}
+
+// importAliasMap builds a map from the local identifier used to reference an
 // imported package within file (its explicit alias, or its default package
 // name when unaliased) to that package's real import path. It correctly disambiguates:
 //   - aliased imports (e.g. `import althttp "net/http"`)
@@ -120,7 +133,7 @@ func fieldListContainsType(fields *dst.FieldList, typeStr string, imports map[st
 // it: that resolves unaliased imports with pkgload.ResolvePackageName (a
 // go/packages load that ex.Fatalf's on failure), which is too costly and too fatal
 // for the setup/match path, where this runs for every compiled package in the build.
-// The cost is that the default name here is a syntactic guess; see DefaultImportAlias.
+// The cost is that the default name here is a syntactic guess; see defaultImportAlias.
 //
 // Returns nil when file is nil.
 func ImportAliasMap(file *dst.File) map[string]string {
@@ -153,7 +166,7 @@ func ImportAliasMap(file *dst.File) map[string]string {
 		if err != nil {
 			continue
 		}
-		alias := DefaultImportAlias(path)
+		alias := defaultImportAlias(path)
 		if imp.Name != nil {
 			alias = imp.Name.Name
 		}
@@ -167,7 +180,7 @@ func ImportAliasMap(file *dst.File) map[string]string {
 	return aliases
 }
 
-// DefaultImportAlias (also aliased as ImportPathTail) returns the local identifier
+// defaultImportAlias (also aliased as ImportPathTail) returns the local identifier
 // conventionally used to reference an import path: its last segment, ignoring a
 // Go module major-version suffix ("/v2".."/vN", or gopkg.in's ".vN"), which is
 // part of the module path but not of the package name, e.g. "net/http" -> "http",
@@ -176,7 +189,7 @@ func ImportAliasMap(file *dst.File) map[string]string {
 // This is a convention, not a guarantee: a package may declare a name unrelated
 // to its path (e.g. "github.com/redis/go-redis/v9" declares "redis"). Such
 // packages are matched only when the importing file aliases them explicitly.
-func DefaultImportAlias(path string) string {
+func defaultImportAlias(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" || path == "." || path == "/" {
 		return ""

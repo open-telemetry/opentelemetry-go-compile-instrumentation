@@ -26,18 +26,18 @@ func TestCleanup(t *testing.T) {
 			setup: func(t *testing.T, dir string) context.Context {
 				t.Helper()
 				// track otelc.runtime.go in the state manager so it is removed when Cleanup is called
-				stateManager := NewStateManager()
-				otelcRuntimeGoPath := filepath.Join(dir, OtelcRuntimeFile)
+				stateManager := newStateManager()
+				otelcRuntimeGoPath := filepath.Join(dir, otelcRuntimeFile)
 				require.NoError(t, stateManager.Track(otelcRuntimeGoPath))
 				mustWriteFile(t, otelcRuntimeGoPath, "package main \n\n// dummy runtime file")
 				// The instrumentation package is extracted inside .otelc-build/pkg/,
 				// not at the project root. It is removed as part of .otelc-build/ cleanup.
 				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, unzippedPkgDir, "a.go"), "dummy")
 				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, "matched.json"), "{}")
-				return ContextWithStateManager(t.Context(), stateManager)
+				return contextWithStateManager(t.Context(), stateManager)
 			},
 			expectRemoved: []string{
-				OtelcRuntimeFile,
+				otelcRuntimeFile,
 				util.BuildTempDir,
 			},
 		},
@@ -45,7 +45,7 @@ func TestCleanup(t *testing.T) {
 			name:  "idempotent when no artifacts exist",
 			setup: func(_ *testing.T, _ string) context.Context { return t.Context() },
 			expectRemoved: []string{
-				OtelcRuntimeFile,
+				otelcRuntimeFile,
 				util.BuildTempDir,
 			},
 		},
@@ -53,14 +53,14 @@ func TestCleanup(t *testing.T) {
 			name: "partial cleanup when only runtime file exists",
 			setup: func(t *testing.T, dir string) context.Context {
 				t.Helper()
-				stateManager := NewStateManager()
-				otelcRuntimeGoPath := filepath.Join(dir, OtelcRuntimeFile)
+				stateManager := newStateManager()
+				otelcRuntimeGoPath := filepath.Join(dir, otelcRuntimeFile)
 				require.NoError(t, stateManager.Track(otelcRuntimeGoPath))
 				mustWriteFile(t, otelcRuntimeGoPath, "package main\n\n// dummy runtime file")
-				return ContextWithStateManager(t.Context(), stateManager)
+				return contextWithStateManager(t.Context(), stateManager)
 			},
 			expectRemoved: []string{
-				OtelcRuntimeFile,
+				otelcRuntimeFile,
 				util.BuildTempDir,
 			},
 		},
@@ -72,7 +72,7 @@ func TestCleanup(t *testing.T) {
 				return t.Context()
 			},
 			expectRemoved: []string{
-				OtelcRuntimeFile,
+				otelcRuntimeFile,
 				util.BuildTempDir,
 			},
 		},
@@ -108,7 +108,7 @@ func TestCleanupRestoresState(t *testing.T) {
 	const modifiedContent = "module modified.com\n\ngo 1.24.0\n"
 
 	goModPath := filepath.Join(tmpDir, "go.mod")
-	otelcRuntimeGoPath := filepath.Join(tmpDir, OtelcRuntimeFile)
+	otelcRuntimeGoPath := filepath.Join(tmpDir, otelcRuntimeFile)
 	stateJSONContent, err := json.Marshal([]string{goModPath, "-" + otelcRuntimeGoPath})
 	if err != nil {
 		t.Fatalf("failed to marshal state to JSON: %v", err)
@@ -171,7 +171,7 @@ func TestCleanupRestoresMultiModState(t *testing.T) {
 			modified: "module modified.pkga.com\n\ngo 1.24.0\n",
 		},
 		{
-			path:     filepath.Join(tmpDir, "pkgA", OtelcRuntimeFile),
+			path:     filepath.Join(tmpDir, "pkgA", otelcRuntimeFile),
 			original: "",
 			modified: "package main\n",
 		},
@@ -181,7 +181,7 @@ func TestCleanupRestoresMultiModState(t *testing.T) {
 			modified: "module modified.pkgb.com\n\ngo 1.24.0\n",
 		},
 		{
-			path:     filepath.Join(tmpDir, "pkgB", OtelcRuntimeFile),
+			path:     filepath.Join(tmpDir, "pkgB", otelcRuntimeFile),
 			original: "",
 			modified: "package main\n",
 		},
@@ -238,7 +238,7 @@ func TestCleanupKeepsBuildDir(t *testing.T) {
 	const modifiedContent = "module modified.com\n\ngo 1.24.0\n"
 
 	goModPath := filepath.Join(tmpDir, "go.mod")
-	otelcRuntimeGoPath := filepath.Join(tmpDir, OtelcRuntimeFile)
+	otelcRuntimeGoPath := filepath.Join(tmpDir, otelcRuntimeFile)
 	stateJSONContent, err := json.Marshal([]string{goModPath, "-" + otelcRuntimeGoPath})
 	if err != nil {
 		t.Fatalf("failed to marshal backup state to JSON: %v", err)
@@ -270,7 +270,7 @@ func TestCleanupKeepsBuildDir(t *testing.T) {
 	}
 
 	// otelc.runtime.go should be removed.
-	if util.PathExists(filepath.Join(tmpDir, OtelcRuntimeFile)) {
+	if util.PathExists(filepath.Join(tmpDir, otelcRuntimeFile)) {
 		t.Error("expected otelc.runtime.go to be removed after Cleanup(cleanAll=false)")
 	}
 
@@ -298,7 +298,7 @@ func TestCleanup_RecoversAfterCrash(t *testing.T) {
 	goMod := filepath.Join(tmp, "go.mod")
 	mustWriteFile(t, goMod, "module example.com/app\n")
 
-	dying := NewStateManager()
+	dying := newStateManager()
 	require.NoError(t, dying.Track(goMod))
 	mustWriteFile(t, goMod, "module example.com/app\n\nreplace x => ./.otelc-build/x\n")
 
@@ -322,7 +322,7 @@ func TestCleanup_KeepsSnapshotsWhenRevertFails(t *testing.T) {
 	mustWriteFile(t, goMod, "module example.com/app\n")
 	mustWriteFile(t, otherFile, "keep me\n")
 
-	dying := NewStateManager()
+	dying := newStateManager()
 	require.NoError(t, dying.Track(goMod))
 	require.NoError(t, dying.Track(otherFile))
 

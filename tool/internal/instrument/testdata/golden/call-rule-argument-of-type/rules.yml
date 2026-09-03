@@ -1,0 +1,11 @@
+wrap_println:
+  target: main
+  where:
+    function_call: fmt.Println
+  do:
+    - wrap_call:
+        replace: |-
+          (func() (int, error) {
+            println("call arg0:", {{ .CallArgument 0 }}, "nargs:", {{ .CallArgumentCount }}, "reader ok:", {{ .FuncArgumentOfType "io.Reader" }} != nil)
+            return {{ . }}
+          })()

@@ -7,14 +7,14 @@ SHELL := /bin/bash
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package manifest verify-manifest clean setup-git \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
-        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files \
+        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files check-test-file-naming \
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
-        registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
+        weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
-        benchmark/codspeed benchmark/threshold
+        benchmark/codspeed benchmark/threshold govulncheck govulncheck/instrumentation
 
 # Constant variables
 BINARY_NAME := otelc
@@ -30,6 +30,22 @@ GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
 TOOL_COVERAGE_THRESHOLD ?= 68
 PKG_COVERAGE_THRESHOLD ?= 70
+
+# Modules/apps scanned by govulncheck for known Go CVEs (tool version pinned in
+# .tools/go.mod, Renovate-managed like every other .tools binary).
+# Core modules: root module (covers tool/) plus every pkg/ module.
+# Instrumentation is scanned separately via instrumented integration-test binaries
+# (see govulncheck/instrumentation): source scans skip //go:build ignore files and
+# cannot typecheck modules that need compile-time field injection (e.g. database/sql).
+# Known gap: that makes instrumentation coverage only as good as the test apps.
+# An instrumentation module that no app under test/apps builds against is scanned
+# by neither job, so adding a module without an app leaves it uncovered (currently
+# instrumentation/github.com/openai/openai-go/v3).
+# Demos are intentionally excluded (pinned example deps).
+GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
+# Top-level integration apps only (skip nested modules such as
+# test/apps/gincustom/instrumentation).
+GOVULNCHECK_TEST_APPS := $(shell find test/apps -mindepth 1 -maxdepth 1 -type d | sort)
 
 # OTel Weaver execution for the local semantic-convention registry under
 # schemas/otelc/. Weaver runs from an OCI image (no host install required);
@@ -78,6 +94,9 @@ $(EMBEDMD): PACKAGE=github.com/campoy/embedmd
 
 CHECKMAKE = $(TOOLS)/checkmake
 $(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
+
+GOVULNCHECK = $(TOOLS)/govulncheck
+$(GOVULNCHECK): PACKAGE=golang.org/x/vuln/cmd/govulncheck
 
 # Phony targets to build tools from .tools module (no go install; binaries in .bin/)
 gotestfmt: $(GOTESTFMT) ## Build gotestfmt from .tools
@@ -427,6 +446,53 @@ check-golden-files: package
 	git status --porcelain -- tool/internal/instrument/testdata/golden/ | grep -q . && (echo "Golden files have untracked changes"; exit 1) || true
 	echo "Golden files are up to date"
 
+check-test-file-naming: ## Verify unit test files follow naming conventions
+	@echo "Checking test file naming conventions..."
+	@go run ./tool/cmd/check-test-names
+
+##@ Security
+
+.ONESHELL:
+govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulnerabilities
+	@echo "Running govulncheck across $(words $(GOVULNCHECK_CORE_MODULES)) core modules..."
+	@set -uo pipefail
+	@status=0
+	@for moddir in $(GOVULNCHECK_CORE_MODULES); do \
+		echo "==> govulncheck $$moddir"; \
+		(cd "$$moddir" && "$(GOVULNCHECK)" ./...) || status=1; \
+	done; \
+	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found"; exit 1; fi; \
+	echo "govulncheck: no reachable vulnerabilities found"
+
+# Build each integration test app with otelc, then scan the resulting binary.
+# Binary mode sees injected instrumentation (including //go:build ignore sources
+# and field-injection modules like database/sql) that source mode cannot analyze.
+.ONESHELL:
+govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps (binary mode) for known Go vulnerabilities
+	@echo "Running govulncheck -mode=binary across $(words $(GOVULNCHECK_TEST_APPS)) instrumented test apps..."
+	@set -uo pipefail
+	@status=0
+	@app_bin=app$(EXT)
+	@otelc="$(CURDIR)/$(BINARY_NAME)$(EXT)"
+	@for appdir in $(GOVULNCHECK_TEST_APPS); do \
+		app=$$(basename "$$appdir"); \
+		echo "==> otelc go build $$app"; \
+		if ! (cd "$$appdir" && "$$otelc" go build -a -o "$$app_bin" .); then \
+			echo "govulncheck/instrumentation: failed to build $$app"; \
+			status=1; \
+			(cd "$$appdir" && "$$otelc" cleanup) || true; \
+			continue; \
+		fi; \
+		echo "==> govulncheck -mode=binary $$app"; \
+		if ! "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin"; then \
+			status=1; \
+		fi; \
+		rm -f "$$appdir/$$app_bin"; \
+		(cd "$$appdir" && "$$otelc" cleanup) || true; \
+	done; \
+	if [ "$$status" -ne 0 ]; then echo "govulncheck: vulnerabilities found or build failed"; exit 1; fi; \
+	echo "govulncheck: no reachable vulnerabilities found"
+
 ##@ Benchmarking
 
 BENCH_DIR := test/bench
@@ -490,7 +556,9 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	done
 
 # Notes on test-unit/instrumentation implementation:
-# - Excludes "runtime" and "database/sql" modules (have build errors because of compile-time field injection).
+# - Excludes "runtime" entirely (compile-time field injection; no testable subpackages).
+# - "database/sql" root package also needs field injection, so ./... cannot type-check
+#   client.go. Safe subpackages (dsnparse, semconv) are tested explicitly afterwards.
 # - Skips modules without test files to avoid empty test output.
 # - Uses go test -C to run tests without changing directories (cleaner, more reliable).
 # - Does NOT use gotestfmt because v2.5.0 has a bug that causes panics when go test
@@ -511,6 +579,11 @@ test-unit/instrumentation: package ## Run unit tests for instrumentation modules
 		(cd "$$moddir" && go mod tidy); \
 		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
+	# database/sql: root package references otelc-injected fields on database/sql
+	# types and cannot be built uninstrumented. dsnparse/semconv do not.
+	echo "Testing instrumentation/database/sql (dsnparse, semconv)..."
+	(cd instrumentation/database/sql && go mod tidy)
+	go test -C instrumentation/database/sql -v -shuffle=on -timeout=5m -count=1 ./dsnparse/... ./semconv/... 2>&1 | tee -a ./gotest-unit-instrumentation.log
 
 .ONESHELL:
 test-unit/helper: ## Run unit tests for test helper packages
@@ -581,6 +654,10 @@ test-unit/instrumentation/coverage: package ## Run unit tests with coverage for 
 		(cd "$$moddir" && go mod tidy); \
 		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
+	# See test-unit/instrumentation: only packages that type-check without field injection.
+	echo "Testing instrumentation/database/sql (dsnparse, semconv) with coverage..."
+	(cd instrumentation/database/sql && go mod tidy)
+	go test -C instrumentation/database/sql -v -shuffle=on -timeout=5m -count=1 ./dsnparse/... ./semconv/... -coverprofile=coverage.txt -covermode=atomic 2>&1 | tee -a ./gotest-unit-instrumentation.log
 	@echo "Merging coverage files into coverage-instrumentation.txt..."
 	@echo "mode: atomic" > coverage-instrumentation.txt
 	@find instrumentation -name "coverage.txt" -exec grep -h -v "^mode:" {} \; >> coverage-instrumentation.txt 2>/dev/null || true

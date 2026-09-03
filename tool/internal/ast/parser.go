@@ -84,17 +84,13 @@ func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
 }
 
 // FindPosition finds the source position of a node in the AST.
+// It returns a zero-value token.Position{} when the node is unmapped.
 func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	astNode := ap.dec.Ast.Nodes[node]
 	if astNode == nil {
-		return token.Position{Filename: "", Line: -1, Column: -1} // Invalid
+		return token.Position{}
 	}
 	return ap.fset.Position(astNode.Pos())
-}
-
-type writeCloser interface {
-	io.Writer
-	io.Closer
 }
 
 // WriteFile writes the AST to a file.
@@ -106,7 +102,7 @@ func WriteFile(filePath string, root *dst.File) error {
 	return writeFile(file, filePath, root)
 }
 
-func writeFile(w writeCloser, filePath string, root *dst.File) error {
+func writeFile(w io.WriteCloser, filePath string, root *dst.File) error {
 	r := decorator.NewRestorer()
 	if err := r.Fprint(w, root); err != nil {
 		_ = w.Close()

@@ -84,9 +84,8 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 	attrs := semconv.HTTPClientRequestTraceAttrs(req)
 
 	// Start span
-	spanName := req.Method
 	ctx, span := tracer.Start(ctx,
-		spanName,
+		semconv.HTTPClientSpanName(req.Method),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
@@ -108,11 +107,6 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 }
 
 func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
-	if !clientEnabler.Enable() {
-		logger.Debug("HTTP client instrumentation disabled")
-		return
-	}
-
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterRoundTrip: no span from before hook")

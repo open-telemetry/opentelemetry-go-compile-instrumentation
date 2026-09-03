@@ -34,6 +34,26 @@ func TestDBClient(t *testing.T) {
 		)
 	})
 
+	t.Run("OpenDB", func(t *testing.T) {
+		// Exercises sql.OpenDB's driver.Connector path (hook_opendb):
+		// beforeOpenDBInstrumentation must resolve the connector's driver
+		// back to the registered "mysql" name so the DSN is parsed with the
+		// MySQL parser instead of falling to "unknown"/other_sql.
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=opendb")
+
+		span := f.RequireSingleSpan()
+		require.Equal(t, "PING", span.Name())
+		testutil.RequireDBClientSemconv(t, span,
+			"PING",
+			"ping",
+			"127.0.0.1", 3306,
+			"testdb",
+		)
+		testutil.RequireAttribute(t, span, "db.system.name", "mysql")
+	})
+
 	t.Run("Exec", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 

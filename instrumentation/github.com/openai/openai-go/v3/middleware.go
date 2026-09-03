@@ -10,12 +10,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
@@ -169,12 +171,31 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 		req = req.WithContext(ctx)
 
+		// Record the operation duration on every exit path below.
+		// For streaming responses, the duration metric is recorded when the stream
+		// finishes (mirroring the span lifetime) via newStreamingReader.
+		// errorAttrs carries error.type on error paths and is empty on success.
+		var errorAttrs []attribute.KeyValue
+		isStreaming := false
+		defer func() {
+			if isStreaming {
+				return
+			}
+			if operationDuration != nil {
+				attrs := slices.Concat(baseAttrs, errorAttrs)
+				operationDuration.Record(ctx, time.Since(start).Seconds(),
+					metric.WithAttributes(attrs...))
+			}
+		}()
+
 		resp, err := next(req)
 		if err != nil {
+			errorTypeAttr := otelsemconv.ErrorType(err)
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
-			span.SetAttributes(otelsemconv.ErrorType(err))
+			span.SetAttributes(errorTypeAttr)
 			span.End()
+			errorAttrs = []attribute.KeyValue{errorTypeAttr}
 			return resp, err
 		}
 
@@ -183,15 +204,22 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			span.SetStatus(codes.Error, resp.Status)
 			span.SetAttributes(otelsemconv.ErrorTypeKey.String(strconv.Itoa(resp.StatusCode)))
 			span.End()
+			errorAttrs = []attribute.KeyValue{otelsemconv.ErrorTypeKey.String(strconv.Itoa(resp.StatusCode))}
 			return resp, nil
 		}
 
 		contentType := resp.Header.Get("Content-Type")
-		isStreaming := strings.HasPrefix(contentType, "text/event-stream")
+		isStreaming = strings.HasPrefix(contentType, "text/event-stream")
 
 		if isStreaming {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
-			resp.Body = newStreamingReader(resp.Body, span, start, op)
+			resp.Body = newStreamingReader(resp.Body, span, start, op, func() {
+				if operationDuration != nil {
+					attrs := slices.Concat(baseAttrs, errorAttrs)
+					operationDuration.Record(ctx, time.Since(start).Seconds(),
+						metric.WithAttributes(attrs...))
+				}
+			})
 		} else {
 			handleNonStreamingResponse(ctx, resp, span, start, op)
 		}
@@ -269,10 +297,12 @@ func parseChatRequest(body []byte) (string, []attribute.KeyValue) {
 
 func parseCompletionRequest(body []byte) (string, []attribute.KeyValue) {
 	var req struct {
-		Model       string   `json:"model"`
-		MaxTokens   *int64   `json:"max_tokens,omitempty"`
-		Temperature *float64 `json:"temperature,omitempty"`
-		TopP        *float64 `json:"top_p,omitempty"`
+		Model            string   `json:"model"`
+		MaxTokens        *int64   `json:"max_tokens,omitempty"`
+		Temperature      *float64 `json:"temperature,omitempty"`
+		TopP             *float64 `json:"top_p,omitempty"`
+		FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
+		PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		return "", nil
@@ -287,6 +317,12 @@ func parseCompletionRequest(body []byte) (string, []attribute.KeyValue) {
 	}
 	if req.TopP != nil {
 		attrs = append(attrs, semconv.GenAIRequestTopP(*req.TopP))
+	}
+	if req.FrequencyPenalty != nil {
+		attrs = append(attrs, semconv.GenAIRequestFrequencyPenalty(*req.FrequencyPenalty))
+	}
+	if req.PresencePenalty != nil {
+		attrs = append(attrs, semconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
 	}
 	return req.Model, attrs
 }
