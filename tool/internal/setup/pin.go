@@ -22,7 +22,6 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -526,7 +525,7 @@ func yamlStateManager(ctx context.Context, autoPin bool) (*stateManager, error) 
 
 func trackYAMLConfigFiles(manager *stateManager, configs []modulePinConfig) error {
 	for _, config := range configs {
-		for _, name := range []string{goModFileName, "go.sum", toolFileCanonical, toolFileAlias} {
+		for _, name := range []string{goModFileName, goSumFileName, toolFileCanonical, toolFileAlias} {
 			if err := manager.Track(filepath.Join(config.moduleDir, name)); err != nil {
 				return err
 			}
