@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"

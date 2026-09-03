@@ -34,7 +34,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
-	"go.yaml.in/yaml/v3"
 	"gotest.tools/v3/golden"
 )
 

@@ -19,7 +19,6 @@ import (
 	"strings"
 
 	"github.com/dave/dst"
-	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"

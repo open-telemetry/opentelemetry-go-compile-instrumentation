@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 
 	"go.opentelemetry.io/otelc/tool/ex"

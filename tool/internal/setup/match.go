@@ -16,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/dave/dst"
-	"go.yaml.in/yaml/v3"
 	"golang.org/x/sync/errgroup"
 
 	"go.opentelemetry.io/otelc/tool/ex"
