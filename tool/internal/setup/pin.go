@@ -175,7 +175,7 @@ type yamlRule struct {
 func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) error {
 	return filepath.WalkDir(moduleDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 
 		if d.IsDir() {
@@ -215,7 +215,7 @@ func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
 
 	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 		// rulesRoot is instrumentation/
 		// We want to load rules for submodules within instrumentation/
@@ -255,7 +255,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 	}
 
 	if err := f.AddRequire(util.OtelcRoot, version); err != nil {
-		return false, err
+		return false, ex.Wrap(err)
 	}
 
 	return true, nil
@@ -265,12 +265,12 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	goModPath := filepath.Join(moduleDir, "go.mod")
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
-		return false, err
+		return false, ex.Wrap(err)
 	}
 
 	f, err := modfile.Parse(goModPath, data, nil)
 	if err != nil {
-		return false, err
+		return false, ex.Wrap(err)
 	}
 
 	modified := false
@@ -285,7 +285,7 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 
 	if !hasTool {
 		if addErr := f.AddTool(util.OtelcToolCmdRoot); addErr != nil {
-			return false, addErr
+			return false, ex.Wrap(addErr)
 		}
 		modified = true
 	}

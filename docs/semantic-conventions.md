@@ -116,7 +116,7 @@ This command:
 Compare the current version against the latest to see available updates:
 
 ```bash
-make registry-diff
+make semantic-conventions/diff
 ```
 
 This command automatically:
@@ -240,7 +240,7 @@ Fix any errors or warnings reported by the validator.
 Generate a diff report to document your changes:
 
 ```bash
-make registry-diff
+make semantic-conventions/diff
 ```
 
 Review the diff to ensure only expected changes are present.
@@ -313,7 +313,7 @@ This job ensures the registry and code stay consistent with the pinned version:
 
 This job shows what's new in the latest semantic conventions:
 
-1. **Generate Diff**: Runs `make registry-diff` to compare current version vs latest
+1. **Generate Diff**: Runs `make semantic-conventions/diff` to compare current version vs latest
 2. **Upload Report**: Uploads the diff report as an artifact
 3. **PR Comment**: Posts an informational comment showing:
    - What new semantic conventions are available
