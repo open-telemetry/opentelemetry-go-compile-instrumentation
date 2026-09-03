@@ -12,8 +12,8 @@ import (
 	"slices"
 	"strings"
 
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
-	"gopkg.in/yaml.v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
