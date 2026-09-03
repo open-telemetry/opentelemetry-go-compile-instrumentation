@@ -10,9 +10,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -21,9 +23,14 @@ import (
 	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/internal/streaming"
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v2/semconv"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
+
+var captureContentEnabled = sync.OnceValue(func() bool {
+	return os.Getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT") == "true"
+})
 
 const (
 	maxRequestBodySize  = 1 << 20 // 1 MB
@@ -111,6 +118,12 @@ func operationName(op operationType) string {
 // OtelMiddleware returns an HTTP middleware that creates spans for OpenAI API
 // calls following GenAI semantic conventions.
 func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	return otelMiddleware(captureContentEnabled)
+}
+
+func otelMiddleware(
+	isContentCaptureEnabled func() bool,
+) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
 	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
 		if req.Body == nil {
 			return next(req)
@@ -140,12 +153,14 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		var model string
 		var spanAttrs []attribute.KeyValue
+		captureContent := isContentCaptureEnabled()
+		var prompts []string
 
 		switch op {
 		case opChat:
-			model, spanAttrs = parseChatRequest(bodyBytes)
+			model, spanAttrs, prompts = parseChatRequest(bodyBytes, captureContent)
 		case opCompletion:
-			model, spanAttrs = parseCompletionRequest(bodyBytes)
+			model, spanAttrs, prompts = parseCompletionRequest(bodyBytes, captureContent)
 		case opEmbedding:
 			model, spanAttrs = parseEmbeddingRequest(bodyBytes)
 		}
@@ -168,6 +183,10 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(spanAttrs...),
 		)
+
+		if captureContent {
+			recordContentEvents(span, "gen_ai.content.prompt", "gen_ai.prompt", prompts)
+		}
 		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 		req = req.WithContext(ctx)
 
@@ -213,7 +232,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		if isStreaming {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
-			resp.Body = newStreamingReader(resp.Body, span, start, op, func() {
+			resp.Body = newStreamingReader(resp.Body, span, start, op, captureContent, func() {
 				if operationDuration != nil {
 					attrs := slices.Concat(baseAttrs, errorAttrs)
 					operationDuration.Record(ctx, time.Since(start).Seconds(),
@@ -221,7 +240,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 				}
 			})
 		} else {
-			handleNonStreamingResponse(ctx, resp, span, start, op)
+			handleNonStreamingResponse(ctx, resp, span, start, op, captureContent)
 		}
 
 		return resp, nil
@@ -234,6 +253,7 @@ func handleNonStreamingResponse(
 	span trace.Span,
 	_ time.Time,
 	op operationType,
+	captureContent bool,
 ) {
 	defer span.End()
 
@@ -252,15 +272,15 @@ func handleNonStreamingResponse(
 
 	switch op {
 	case opChat:
-		parseChatResponse(bodyBytes, span)
+		parseChatResponse(bodyBytes, span, captureContent)
 	case opCompletion:
-		parseCompletionResponse(bodyBytes, span)
+		parseCompletionResponse(bodyBytes, span, captureContent)
 	case opEmbedding:
 		parseEmbeddingResponse(bodyBytes, span)
 	}
 }
 
-func parseChatRequest(body []byte) (string, []attribute.KeyValue) {
+func parseChatRequest(body []byte, captureContent bool) (string, []attribute.KeyValue, []string) {
 	var req struct {
 		Model            string   `json:"model"`
 		MaxTokens        *int64   `json:"max_tokens,omitempty"`
@@ -270,7 +290,7 @@ func parseChatRequest(body []byte) (string, []attribute.KeyValue) {
 		PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		return "", nil
+		return "", nil, nil
 	}
 
 	var attrs []attribute.KeyValue
@@ -289,10 +309,13 @@ func parseChatRequest(body []byte) (string, []attribute.KeyValue) {
 	if req.PresencePenalty != nil {
 		attrs = append(attrs, semconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
 	}
-	return req.Model, attrs
+	if !captureContent {
+		return req.Model, attrs, nil
+	}
+	return req.Model, attrs, parseChatPrompts(body)
 }
 
-func parseCompletionRequest(body []byte) (string, []attribute.KeyValue) {
+func parseCompletionRequest(body []byte, captureContent bool) (string, []attribute.KeyValue, []string) {
 	var req struct {
 		Model            string   `json:"model"`
 		MaxTokens        *int64   `json:"max_tokens,omitempty"`
@@ -302,7 +325,7 @@ func parseCompletionRequest(body []byte) (string, []attribute.KeyValue) {
 		PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		return "", nil
+		return "", nil, nil
 	}
 
 	var attrs []attribute.KeyValue
@@ -321,7 +344,76 @@ func parseCompletionRequest(body []byte) (string, []attribute.KeyValue) {
 	if req.PresencePenalty != nil {
 		attrs = append(attrs, semconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
 	}
-	return req.Model, attrs
+	if !captureContent {
+		return req.Model, attrs, nil
+	}
+	return req.Model, attrs, parseCompletionPrompts(body)
+}
+
+func parseChatPrompts(body []byte) []string {
+	var req struct {
+		Messages []map[string]json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+
+	prompts := make([]string, 0, len(req.Messages))
+	for _, message := range req.Messages {
+		if content := contentFromJSON(message["content"]); content != "" {
+			prompts = append(prompts, content)
+		}
+	}
+	return prompts
+}
+
+func parseCompletionPrompts(body []byte) []string {
+	var req struct {
+		Prompt json.RawMessage `json:"prompt"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || len(req.Prompt) == 0 {
+		return nil
+	}
+
+	var prompt string
+	if err := json.Unmarshal(req.Prompt, &prompt); err == nil {
+		return []string{prompt}
+	}
+
+	var prompts []string
+	if err := json.Unmarshal(req.Prompt, &prompts); err != nil {
+		return nil
+	}
+	return prompts
+}
+
+func contentFromJSON(content json.RawMessage) string {
+	content = bytes.TrimSpace(content)
+	if len(content) == 0 || bytes.Equal(content, []byte("null")) {
+		return ""
+	}
+
+	var text string
+	if err := json.Unmarshal(content, &text); err == nil {
+		return text
+	}
+
+	marshaled, err := json.Marshal(content)
+	if err != nil {
+		return ""
+	}
+	return string(marshaled)
+}
+
+func recordContentEvents(span trace.Span, name, key string, contents []string) {
+	for _, content := range contents {
+		if content == "" {
+			continue
+		}
+		span.AddEvent(name, trace.WithAttributes(
+			attribute.String(key, streaming.TruncateContent(content)),
+		))
+	}
 }
 
 func parseEmbeddingRequest(body []byte) (string, []attribute.KeyValue) {
@@ -334,7 +426,7 @@ func parseEmbeddingRequest(body []byte) (string, []attribute.KeyValue) {
 	return req.Model, nil
 }
 
-func parseChatResponse(body []byte, span trace.Span) {
+func parseChatResponse(body []byte, span trace.Span, captureContent bool) {
 	var resp struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
@@ -356,6 +448,9 @@ func parseChatResponse(body []byte, span trace.Span) {
 		if c.FinishReason != "" {
 			reasons = append(reasons, c.FinishReason)
 		}
+	}
+	if captureContent {
+		recordContentEvents(span, "gen_ai.content.completion", "gen_ai.completion", parseChatCompletions(body))
 	}
 
 	span.SetAttributes(
@@ -368,7 +463,7 @@ func parseChatResponse(body []byte, span trace.Span) {
 	)
 }
 
-func parseCompletionResponse(body []byte, span trace.Span) {
+func parseCompletionResponse(body []byte, span trace.Span, captureContent bool) {
 	var resp struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
@@ -391,6 +486,9 @@ func parseCompletionResponse(body []byte, span trace.Span) {
 			reasons = append(reasons, c.FinishReason)
 		}
 	}
+	if captureContent {
+		recordContentEvents(span, "gen_ai.content.completion", "gen_ai.completion", parseCompletionContents(body))
+	}
 
 	span.SetAttributes(
 		semconv.GenAIResponseID(resp.ID),
@@ -400,6 +498,44 @@ func parseCompletionResponse(body []byte, span trace.Span) {
 		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
 		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
 	)
+}
+
+func parseChatCompletions(body []byte) []string {
+	var resp struct {
+		Choices []struct {
+			Message map[string]json.RawMessage `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil
+	}
+
+	completions := make([]string, 0, len(resp.Choices))
+	for _, choice := range resp.Choices {
+		if content := contentFromJSON(choice.Message["content"]); content != "" {
+			completions = append(completions, content)
+		}
+	}
+	return completions
+}
+
+func parseCompletionContents(body []byte) []string {
+	var resp struct {
+		Choices []struct {
+			Text string `json:"text"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil
+	}
+
+	completions := make([]string, 0, len(resp.Choices))
+	for _, choice := range resp.Choices {
+		if choice.Text != "" {
+			completions = append(completions, choice.Text)
+		}
+	}
+	return completions
 }
 
 func parseEmbeddingResponse(body []byte, span trace.Span) {

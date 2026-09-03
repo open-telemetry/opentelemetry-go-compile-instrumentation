@@ -11,12 +11,92 @@ package streaming
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
+	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
+
+const (
+	// ContentCaptureLimit bounds every recorded prompt or completion event. The
+	// bound is deliberately well below common OTLP exporter message limits.
+	ContentCaptureLimit = 16 * 1024
+
+	truncatedContentSuffix = "... [truncated]"
+)
+
+const streamAbortedMessage = "stream aborted before completion"
+
+// TruncateContent returns content safe to attach to a span event. The result
+// is always valid UTF-8 and no larger than ContentCaptureLimit bytes.
+func TruncateContent(content string) string {
+	return truncateContent(content, ContentCaptureLimit)
+}
+
+func truncateContent(content string, limit int) string {
+	var capturedContent contentAccumulator
+	capturedContent.limit = contentLimit(limit)
+	capturedContent.Append(content)
+	return capturedContent.String()
+}
+
+func contentLimit(limit int) int {
+	if limit <= 0 || limit > ContentCaptureLimit {
+		return ContentCaptureLimit
+	}
+	if limit < len(truncatedContentSuffix) {
+		return len(truncatedContentSuffix)
+	}
+	return limit
+}
+
+// contentAccumulator retains only the content that can be exported. Once the
+// limit is reached it does not retain later chunks, keeping streaming capture
+// memory bounded independently of the response size.
+type contentAccumulator struct {
+	content   strings.Builder
+	limit     int
+	truncated bool
+}
+
+func (c *contentAccumulator) Append(content string) {
+	if content == "" || c.truncated {
+		return
+	}
+
+	contentLimit := c.limit - len(truncatedContentSuffix)
+	remaining := contentLimit - c.content.Len()
+	if remaining >= len(content) {
+		c.content.WriteString(content)
+		return
+	}
+
+	if remaining > 0 {
+		c.content.WriteString(truncateToUTF8Boundary(content, remaining))
+	}
+	c.content.WriteString(truncatedContentSuffix)
+	c.truncated = true
+}
+
+func (c *contentAccumulator) String() string {
+	return c.content.String()
+}
+
+func truncateToUTF8Boundary(content string, limit int) string {
+	if len(content) <= limit {
+		return content
+	}
+	for limit > 0 && content[limit]&0xc0 == 0x80 {
+		limit--
+	}
+	return content[:limit]
+}
 
 // OperationType identifies which OpenAI API shape a stream's chunks follow.
 type OperationType int
@@ -27,22 +107,26 @@ const (
 )
 
 type StreamingReader struct {
-	reader        io.ReadCloser
-	teeReader     io.Reader
-	logBuffer     *bytes.Buffer
-	lineBuffer    *bytes.Buffer
-	start         time.Time
-	first         time.Time
-	inputTokens   int64
-	outputTokens  int64
-	totalTokens   int64
-	id            string
-	responseModel string
-	reasons       []string
-	span          trace.Span
-	op            OperationType
-	onDone        func()
-	done          atomic.Bool
+	reader          io.ReadCloser
+	teeReader       io.Reader
+	logBuffer       *bytes.Buffer
+	lineBuffer      *bytes.Buffer
+	start           time.Time
+	first           time.Time
+	inputTokens     int64
+	outputTokens    int64
+	totalTokens     int64
+	id              string
+	responseModel   string
+	reasons         []string
+	span            trace.Span
+	op              OperationType
+	captureContent  bool
+	maxBodySize     int
+	done            atomic.Bool
+	streamComplete  bool
+	capturedStreams map[int]*contentAccumulator
+	onDone          func()
 }
 
 func NewStreamingReader(
@@ -50,6 +134,8 @@ func NewStreamingReader(
 	span trace.Span,
 	start time.Time,
 	op OperationType,
+	captureContent bool,
+	maxBodySize int,
 	onDone ...func(),
 ) *StreamingReader {
 	var cb func()
@@ -57,11 +143,13 @@ func NewStreamingReader(
 		cb = onDone[0]
 	}
 	return &StreamingReader{
-		reader: body,
-		start:  start,
-		span:   span,
-		op:     op,
-		onDone: cb,
+		reader:         body,
+		start:          start,
+		span:           span,
+		op:             op,
+		captureContent: captureContent,
+		maxBodySize:    contentLimit(maxBodySize),
+		onDone:         cb,
 	}
 }
 
@@ -83,7 +171,7 @@ func (r *StreamingReader) Read(p []byte) (n int, err error) {
 		// final line. On any other read error the buffered bytes may be a
 		// truncated mid-chunk fragment, so leave them unparsed rather than
 		// attaching stale attributes to a span that ended in failure.
-		r.finalize(err == io.EOF)
+		r.finalize(err == io.EOF, streamError(err))
 	}
 
 	return n, err
@@ -91,7 +179,7 @@ func (r *StreamingReader) Read(p []byte) (n int, err error) {
 
 func (r *StreamingReader) Close() error {
 	if r.done.CompareAndSwap(false, true) {
-		r.finalize(true)
+		r.finalize(true, nil)
 	}
 	if r.reader != nil {
 		return r.reader.Close()
@@ -99,9 +187,19 @@ func (r *StreamingReader) Close() error {
 	return nil
 }
 
-func (r *StreamingReader) finalize(flush bool) {
+func (r *StreamingReader) finalize(flush bool, streamErr error) {
 	if flush {
 		r.flushRemaining()
+	}
+	if streamErr == nil && !r.streamComplete {
+		streamErr = errors.New(streamAbortedMessage)
+	}
+	if streamErr != nil {
+		r.span.RecordError(streamErr)
+		r.span.SetStatus(codes.Error, streamErr.Error())
+		if len(r.reasons) == 0 {
+			r.reasons = append(r.reasons, "error")
+		}
 	}
 
 	r.span.SetAttributes(
@@ -121,9 +219,39 @@ func (r *StreamingReader) finalize(flush bool) {
 		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
 	}
 
+	r.recordCapturedContent()
+
 	r.span.End()
 	if r.onDone != nil {
 		r.onDone()
+	}
+}
+
+func streamError(err error) error {
+	if err == io.EOF {
+		return nil
+	}
+	return err
+}
+
+func (r *StreamingReader) recordCapturedContent() {
+	if !r.captureContent || len(r.capturedStreams) == 0 {
+		return
+	}
+
+	indices := make([]int, 0, len(r.capturedStreams))
+	for index := range r.capturedStreams {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	for _, index := range indices {
+		content := r.capturedStreams[index].String()
+		if content == "" {
+			continue
+		}
+		r.span.AddEvent("gen_ai.content.completion", trace.WithAttributes(
+			attribute.String("gen_ai.completion", content),
+		))
 	}
 }
 
@@ -143,7 +271,11 @@ func (r *StreamingReader) flushRemaining() {
 	}
 
 	payload, done := parseSSELine(line)
-	if done || payload == nil {
+	if done {
+		r.streamComplete = true
+		return
+	}
+	if payload == nil {
 		return
 	}
 	r.processChunk(payload)
@@ -177,6 +309,7 @@ func (r *StreamingReader) processSSELines() {
 
 		payload, done := parseSSELine(line)
 		if done {
+			r.streamComplete = true
 			continue
 		}
 		if payload != nil {
@@ -219,6 +352,7 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
+			Index        *int   `json:"index"`
 			FinishReason string `json:"finish_reason"`
 			Delta        struct {
 				Content string `json:"content"`
@@ -249,9 +383,12 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 	if chunk.Usage.TotalTokens > 0 {
 		r.totalTokens = chunk.Usage.TotalTokens
 	}
-	for _, c := range chunk.Choices {
+	for choicePosition, c := range chunk.Choices {
 		if c.FinishReason != "" {
 			r.reasons = append(r.reasons, c.FinishReason)
+		}
+		if r.captureContent && c.Delta.Content != "" {
+			r.captureChunkContent(choiceIndex(c.Index, choicePosition), c.Delta.Content)
 		}
 	}
 }
@@ -261,7 +398,9 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
 		Choices []struct {
+			Index        *int   `json:"index"`
 			FinishReason string `json:"finish_reason"`
+			Text         string `json:"text"`
 		} `json:"choices"`
 		Usage struct {
 			PromptTokens     int64 `json:"prompt_tokens"`
@@ -288,9 +427,29 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 	if chunk.Usage.TotalTokens > 0 {
 		r.totalTokens = chunk.Usage.TotalTokens
 	}
-	for _, c := range chunk.Choices {
+	for choicePosition, c := range chunk.Choices {
 		if c.FinishReason != "" {
 			r.reasons = append(r.reasons, c.FinishReason)
 		}
+		if r.captureContent && c.Text != "" {
+			r.captureChunkContent(choiceIndex(c.Index, choicePosition), c.Text)
+		}
 	}
+}
+
+func choiceIndex(index *int, position int) int {
+	if index != nil {
+		return *index
+	}
+	return position
+}
+
+func (r *StreamingReader) captureChunkContent(index int, content string) {
+	if r.capturedStreams == nil {
+		r.capturedStreams = make(map[int]*contentAccumulator)
+	}
+	if r.capturedStreams[index] == nil {
+		r.capturedStreams[index] = &contentAccumulator{limit: r.maxBodySize}
+	}
+	r.capturedStreams[index].Append(content)
 }

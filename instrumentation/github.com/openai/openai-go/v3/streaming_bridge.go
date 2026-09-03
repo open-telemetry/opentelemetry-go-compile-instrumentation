@@ -22,6 +22,7 @@ func newStreamingReader(
 	span trace.Span,
 	start time.Time,
 	op operationType,
+	captureContent bool,
 	onDone func(),
 ) io.ReadCloser {
 	var streamingOp streaming.OperationType
@@ -31,5 +32,5 @@ func newStreamingReader(
 	case opCompletion:
 		streamingOp = streaming.OpCompletion
 	}
-	return streaming.NewStreamingReader(body, span, start, streamingOp, onDone)
+	return streaming.NewStreamingReader(body, span, start, streamingOp, captureContent, streaming.ContentCaptureLimit, onDone)
 }

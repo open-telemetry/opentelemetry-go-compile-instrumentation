@@ -22,6 +22,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	semconv "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v2/semconv"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // setupTestMeter wires the package-level operationDuration histogram to a
@@ -258,23 +261,55 @@ func TestOperationName(t *testing.T) {
 
 func TestParseChatRequest(t *testing.T) {
 	body := []byte(`{"model":"gpt-4","max_tokens":100,"temperature":0.7}`)
-	model, attrs := parseChatRequest(body)
+	model, attrs, _ := parseChatRequest(body, false)
 	assert.Equal(t, "gpt-4", model)
 	assert.NotEmpty(t, attrs)
 }
 
+func TestParseChatRequest_ContentCapture(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
+	_, _, prompts := parseChatRequest(body, true)
+	assert.Equal(t, []string{"hello"}, prompts)
+}
+
+func TestParseChatRequest_MultimodalContentCapture(t *testing.T) {
+	body := []byte(`{"model":"gpt-4-vision-preview","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`)
+	model, _, prompts := parseChatRequest(body, true)
+
+	assert.Equal(t, "gpt-4-vision-preview", model)
+	assert.Equal(t, []string{`[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]`}, prompts)
+}
+
 func TestParseChatRequest_Invalid(t *testing.T) {
 	body := []byte(`invalid json`)
-	model, attrs := parseChatRequest(body)
+	model, attrs, _ := parseChatRequest(body, false)
 	assert.Equal(t, "", model)
 	assert.Nil(t, attrs)
 }
 
 func TestParseCompletionRequest(t *testing.T) {
-	body := []byte(`{"model":"gpt-3.5-turbo-instruct","max_tokens":50}`)
-	model, attrs := parseCompletionRequest(body)
+	body := []byte(`{"model":"gpt-3.5-turbo-instruct","max_tokens":50,"top_p":0.9}`)
+	model, attrs, _ := parseCompletionRequest(body, false)
 	assert.Equal(t, "gpt-3.5-turbo-instruct", model)
 	assert.NotEmpty(t, attrs)
+}
+
+func TestParseCompletionRequest_ContentCapture(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     []byte
+		expected []string
+	}{
+		{"string", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":"hello"}`), []string{"hello"}},
+		{"array", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":["first","second"]}`), []string{"first", "second"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model, _, prompts := parseCompletionRequest(tt.body, true)
+			assert.Equal(t, "gpt-3.5-turbo-instruct", model)
+			assert.Equal(t, tt.expected, prompts)
+		})
+	}
 }
 
 func TestParseEmbeddingRequest(t *testing.T) {
@@ -315,10 +350,6 @@ func TestParseChatResponse_Valid(t *testing.T) {
 
 // TestParseCompletionRequest_Penalties covers frequency_penalty and
 // presence_penalty on the legacy completions endpoint.
-//
-// CompletionNewParams carries both, and parseChatRequest already records them,
-// so previously a completions span silently lost two sampling parameters that
-// the chat path reported for an otherwise identical request.
 func TestParseCompletionRequest_Penalties(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-3.5-turbo-instruct",
@@ -327,7 +358,7 @@ func TestParseCompletionRequest_Penalties(t *testing.T) {
 		"presence_penalty":-0.25
 	}`)
 
-	model, attrs := parseCompletionRequest(body)
+	model, attrs, _ := parseCompletionRequest(body, false)
 	assert.Equal(t, "gpt-3.5-turbo-instruct", model)
 
 	got := map[attribute.Key]attribute.Value{}
@@ -347,9 +378,200 @@ func TestParseCompletionRequest_Penalties(t *testing.T) {
 func TestParseCompletionRequest_PenaltiesOmitted(t *testing.T) {
 	body := []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":"hello"}`)
 
-	_, attrs := parseCompletionRequest(body)
+	_, attrs, _ := parseCompletionRequest(body, false)
 	for _, a := range attrs {
 		assert.NotEqual(t, semconv.GenAIRequestFrequencyPenaltyKey, a.Key)
 		assert.NotEqual(t, semconv.GenAIRequestPresencePenaltyKey, a.Key)
+	}
+}
+
+func TestParseChatResponse_ContentCapture(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-content")
+
+	body := []byte(`{
+		"id":"chatcmpl-123",
+		"model":"gpt-4",
+		"choices":[{"message":{"content":"hello world"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}
+	}`)
+	parseChatResponse(body, span, true)
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	hasCompletion := false
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			hasCompletion = true
+			require.Len(t, event.Attributes, 1)
+			assert.Equal(t, "gen_ai.completion", string(event.Attributes[0].Key))
+			assert.Equal(t, "hello world", event.Attributes[0].Value.AsString())
+		}
+	}
+	assert.True(t, hasCompletion, "missing completion event")
+}
+
+func TestParseChatResponse_ContentCapture_Disabled(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-content")
+
+	body := []byte(`{
+		"id":"chatcmpl-123",
+		"model":"gpt-4",
+		"choices":[{"message":{"content":"hello world"},"finish_reason":"stop"}]
+	}`)
+	parseChatResponse(body, span, false)
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			t.Errorf("expected no completion event, but got one")
+		}
+	}
+}
+
+func TestParseCompletionResponse_ContentCapture(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "completion-content")
+
+	parseCompletionResponse([]byte(`{"choices":[{"text":"first","finish_reason":"stop"},{"text":"second","finish_reason":"stop"}]}`), span, true)
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Len(t, spans[0].Events(), 2)
+	assert.Equal(t, "first", spans[0].Events()[0].Attributes[0].Value.AsString())
+	assert.Equal(t, "second", spans[0].Events()[1].Attributes[0].Value.AsString())
+}
+
+func TestContentEventsTruncateValues(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "truncated-content")
+
+	recordContentEvents(span, "gen_ai.content.prompt", "gen_ai.prompt", []string{strings.Repeat("x", 16*1024+1)})
+	span.End()
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Len(t, spans[0].Events(), 1)
+	captured := spans[0].Events()[0].Attributes[0].Value.AsString()
+	assert.Len(t, captured, 16*1024)
+	assert.True(t, strings.HasSuffix(captured, "... [truncated]"))
+}
+
+func TestParseCompletionRequest_Invalid(t *testing.T) {
+	body := []byte(`invalid json`)
+	model, attrs, _ := parseCompletionRequest(body, false)
+	assert.Equal(t, "", model)
+	assert.Nil(t, attrs)
+}
+
+func TestParseEmbeddingRequest_Invalid(t *testing.T) {
+	body := []byte(`invalid json`)
+	model, _ := parseEmbeddingRequest(body)
+	assert.Equal(t, "", model)
+}
+
+func TestParseChatResponse_Invalid(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "test")
+	body := []byte(`invalid json`)
+	parseChatResponse(body, span, false)
+}
+
+func TestParseCompletionResponse_Invalid(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "test")
+	body := []byte(`invalid json`)
+	parseCompletionResponse(body, span, false)
+}
+
+func TestParseEmbeddingResponse_Invalid(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "test")
+	body := []byte(`invalid json`)
+	parseEmbeddingResponse(body, span)
+}
+
+func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
+	reqBody := `{"messages":[{"role":"user","content":"hello"}]}`
+	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(reqBody))
+	require.NoError(t, err)
+
+	resp := &http.Response{
+		StatusCode: 200, Header: make(http.Header),
+		Body: io.NopCloser(bytes.NewBufferString(`{}`)),
+	}
+
+	next := func(req *http.Request) (*http.Response, error) {
+		return resp, nil
+	}
+
+	middleware := otelMiddleware(func() bool { return true })
+	_, _ = middleware(req, next)
+}
+
+func TestOtelMiddleware_ErrorResponse(t *testing.T) {
+	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(`{}`))
+	require.NoError(t, err)
+
+	resp := &http.Response{
+		StatusCode: 400,
+		Status:     "400 Bad Request",
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewBufferString(`{}`)),
+	}
+
+	next := func(req *http.Request) (*http.Response, error) {
+		return resp, nil
+	}
+
+	middleware := OtelMiddleware()
+	_, _ = middleware(req, next)
+}
+
+func TestParseChatResponse_ContentExtraction(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "test-json-extract")
+
+	body := []byte(`{
+        "id": "chatcmpl-123",
+        "model": "gpt-4",
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {
+                "content": "This is extracted content",
+                "role": "assistant"
+            }
+        }]
+    }`)
+	parseChatResponse(body, span, true)
+
+	spans := sr.Ended()
+	if len(spans) > 0 {
+		for _, event := range spans[0].Events() {
+			if event.Name == "gen_ai.content.completion" {
+				for _, attr := range event.Attributes {
+					if attr.Key == "gen_ai.completion" {
+						assert.Equal(t, "This is extracted content", attr.Value.AsString())
+					}
+				}
+			}
+		}
 	}
 }
