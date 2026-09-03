@@ -270,6 +270,32 @@ func TestParseChatRequest_Invalid(t *testing.T) {
 	assert.Nil(t, attrs)
 }
 
+func TestParseChatRequest_MaxCompletionTokens(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantMax int64
+	}{
+		{"max_completion_tokens preferred over max_tokens", `{"model":"gpt-4.1","max_tokens":100,"max_completion_tokens":200}`, 200},
+		{"max_completion_tokens only", `{"model":"gpt-4.1","max_completion_tokens":200}`, 200},
+		{"max_tokens fallback", `{"model":"gpt-4","max_tokens":100}`, 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, attrs := parseChatRequest([]byte(tt.body))
+			found := false
+			for _, a := range attrs {
+				if a.Key == "gen_ai.request.max_tokens" {
+					assert.Equal(t, tt.wantMax, a.Value.AsInt64())
+					found = true
+				}
+			}
+			assert.True(t, found, "expected gen_ai.request.max_tokens attribute")
+		})
+	}
+}
+
 func TestParseCompletionRequest(t *testing.T) {
 	body := []byte(`{"model":"gpt-3.5-turbo-instruct","max_tokens":50}`)
 	model, attrs := parseCompletionRequest(body)

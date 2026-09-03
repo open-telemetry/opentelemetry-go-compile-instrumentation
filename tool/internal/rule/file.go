@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
-	"go.yaml.in/yaml/v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"

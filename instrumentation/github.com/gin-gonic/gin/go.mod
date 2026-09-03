@@ -8,6 +8,7 @@ require (
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0
 	go.opentelemetry.io/otel/trace v1.46.0
+	go.opentelemetry.io/otelc/instrumentation v0.0.0-20260903091335-1ff9e49ff4a9
 	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
 )
@@ -91,3 +92,5 @@ replace (
 	go.opentelemetry.io/otelc/pkg => ../../../../pkg
 	go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime
 )
+
+replace go.opentelemetry.io/otelc/instrumentation => ../../..
