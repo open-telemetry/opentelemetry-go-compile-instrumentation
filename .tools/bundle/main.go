@@ -227,15 +227,13 @@ func normalizeHeader(hdr *tar.Header) {
 	hdr.Uname = ""
 	hdr.Gname = ""
 
-	// normalize permissions to 0644/0755, similar to what git does
+	// Use stable source-archive defaults. Host execute bits are ignored for
+	// regular files because filesystems like WSL DrvFS can report ordinary
+	// source files as executable.
 	if hdr.Typeflag == tar.TypeDir {
 		hdr.Mode = 0o755
 	} else {
-		if hdr.Mode&0o111 != 0 {
-			hdr.Mode = 0o755
-		} else {
-			hdr.Mode = 0o644
-		}
+		hdr.Mode = 0o644
 	}
 
 	hdr.Format = tar.FormatPAX
