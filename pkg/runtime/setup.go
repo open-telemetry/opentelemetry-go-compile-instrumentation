@@ -170,14 +170,7 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 		return nil
 	}
 
-	spanProcessor := sdktrace.NewBatchSpanProcessor(traceExporter,
-		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
-		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
-	)
-	if useSimpleSpanProcessor() {
-		spanProcessor = sdktrace.NewSimpleSpanProcessor(traceExporter)
-		logger.Debug("using SimpleSpanProcessor for immediate span export")
-	}
+	spanProcessor := newSpanProcessor(traceExporter)
 
 	tracerProvider = sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
@@ -189,6 +182,18 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 
 	logger.Info("trace provider initialized with auto-export")
 	return nil
+}
+
+func newSpanProcessor(traceExporter sdktrace.SpanExporter) sdktrace.SpanProcessor {
+	if useSimpleSpanProcessor() {
+		logger.Debug("using SimpleSpanProcessor for immediate span export")
+		return sdktrace.NewSimpleSpanProcessor(traceExporter)
+	}
+
+	return sdktrace.NewBatchSpanProcessor(traceExporter,
+		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
+		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
+	)
 }
 
 func useSimpleSpanProcessor() bool {

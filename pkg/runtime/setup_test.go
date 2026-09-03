@@ -19,6 +19,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestShutdownSignals(t *testing.T) {
@@ -347,6 +348,18 @@ func TestUseSimpleSpanProcessor(t *testing.T) {
 			assert.Equal(t, tt.want, useSimpleSpanProcessor())
 		})
 	}
+}
+
+func TestNewSpanProcessorUsesSimpleSpanProcessor(t *testing.T) {
+	t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "TRUE")
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(newSpanProcessor(exporter)))
+	t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+
+	_, span := provider.Tracer("test").Start(context.Background(), "test")
+	span.End()
+
+	assert.Len(t, exporter.GetSpans(), 1, "simple processor should export completed spans immediately")
 }
 
 func TestSetupMeterProviderNoneExporter(t *testing.T) {
