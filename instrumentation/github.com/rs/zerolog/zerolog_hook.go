@@ -41,10 +41,12 @@ func (traceHook) Run(event *zerolog.Event, level zerolog.Level, message string) 
 	}
 }
 
-func AfterZerologNew(ictx hook.HookContext, logger zerolog.Logger) {
-	if !enabler.Enable() {
+func BeforeZerologNewEvent(_ hook.HookContext, logger *zerolog.Logger, _ zerolog.Level, _ func(string)) {
+	if !enabler.Enable() || logger == nil {
 		return
 	}
 
-	ictx.SetReturnVal(0, logger.Hook(traceHook{}))
+	logger.OtelcInitOnce.Do(func() {
+		*logger = logger.Hook(traceHook{})
+	})
 }
