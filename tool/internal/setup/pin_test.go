@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -371,9 +372,11 @@ func TestWriteOtelYAMLImports(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, "instrumentations:\n    - example.com/a\n    - example.com/z\n", string(data))
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(path)
+		require.NoError(t, statErr)
+		require.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+	}
 
 	err = writeOtelYAMLImports(filepath.Join(t.TempDir(), "missing", "config.yml"), nil)
 	require.ErrorContains(t, err, "stating")
