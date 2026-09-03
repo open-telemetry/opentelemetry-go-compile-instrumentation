@@ -94,11 +94,6 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	return ap.fset.Position(astNode.Pos())
 }
 
-type writeCloser interface {
-	io.Writer
-	io.Closer
-}
-
 // WriteFile writes the AST to a file.
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
@@ -108,7 +103,7 @@ func WriteFile(filePath string, root *dst.File) error {
 	return writeFile(file, filePath, root)
 }
 
-func writeFile(w writeCloser, filePath string, root *dst.File) error {
+func writeFile(w io.WriteCloser, filePath string, root *dst.File) error {
 	r := decorator.NewRestorer()
 	if err := r.Fprint(w, root); err != nil {
 		_ = w.Close()

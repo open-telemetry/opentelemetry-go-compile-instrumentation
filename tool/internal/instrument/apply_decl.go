@@ -115,7 +115,7 @@ func wrapDeclValue(spec *dst.ValueSpec, templateStr string, nameIdx int) error {
 
 	tmpl, err := newCallTemplate(templateStr)
 	if err != nil {
-		return ex.Wrapf(err, "failed to compile wrap template")
+		return err
 	}
 
 	// Package-level var/const initializers have no enclosing function.

@@ -184,7 +184,7 @@ func (s *stateManager) Track(path string) error {
 	// If the file exists, snapshot it
 	dst := filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(abs))
 	if err = util.CopyFile(abs, dst); err != nil {
-		return ex.Wrapf(err, "failed to snapshot %s", abs)
+		return err
 	}
 
 	s.files[abs] = true
@@ -225,11 +225,7 @@ func (s *stateManager) Commit() error {
 		return ex.Wrapf(err, "failed to create build temp directory")
 	}
 
-	if err = util.WriteFileAtomic(f, bs); err != nil {
-		return ex.Wrapf(err, "failed to write state file %s", f)
-	}
-
-	return nil
+	return util.WriteFileAtomic(f, bs)
 }
 
 // Discard removes the persisted manifest and snapshots. Call it only after a
