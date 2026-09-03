@@ -134,6 +134,14 @@ func BenchmarkInstrumented(b *testing.B) {
 		}
 	})
 
+	b.Run("disabled-list", func(b *testing.B) {
+		b.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc,gin")
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = Instrumented("nethttp")
+		}
+	})
+
 	b.Run("configured-list", func(b *testing.B) {
 		b.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp,grpc,gin,redis,mongodb,kafka")
 		b.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "grpc,gin")

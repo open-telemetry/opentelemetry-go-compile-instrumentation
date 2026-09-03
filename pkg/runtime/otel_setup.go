@@ -75,7 +75,7 @@ func SetupOTelSDK() {
 // Instrumented checks if instrumentation is enabled via environment variables.
 //
 // Environment variables (following OTel JS pattern):
-//   - OTEL_SDK_DISABLED: If set to "true", all instrumentations are disabled
+//   - OTEL_SDK_DISABLED: If set to the case-insensitive string "true", all instrumentations are disabled
 //   - OTEL_GO_ENABLED_INSTRUMENTATIONS: comma-separated list of enabled instrumentations (e.g., "nethttp,grpc")
 //   - OTEL_GO_DISABLED_INSTRUMENTATIONS: comma-separated list of disabled instrumentations (e.g., "nethttp")
 //
@@ -93,8 +93,6 @@ func SetupOTelSDK() {
 // vars haven't changed. See BenchmarkInstrumented for the unset vs.
 // configured-list allocation counts this caching actually buys.
 func Instrumented(instrumentationName string) bool {
-	name := strings.ToLower(instrumentationName)
-
 	sdkDisabled := os.Getenv("OTEL_SDK_DISABLED")
 	enabledList := os.Getenv("OTEL_GO_ENABLED_INSTRUMENTATIONS")
 	disabledList := os.Getenv("OTEL_GO_DISABLED_INSTRUMENTATIONS")
@@ -109,6 +107,8 @@ func Instrumented(instrumentationName string) bool {
 	if cached.isSdkDisabled {
 		return false
 	}
+
+	name := strings.ToLower(instrumentationName)
 
 	if cached.hasEnabled {
 		if _, ok := cached.enabledMap[name]; !ok {
