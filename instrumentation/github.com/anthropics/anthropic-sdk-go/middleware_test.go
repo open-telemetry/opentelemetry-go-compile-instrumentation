@@ -273,8 +273,9 @@ func TestOtelMiddleware_Messages(t *testing.T) {
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			// A distinct media type with the SSE prefix must remain non-streaming.
+			Header: http.Header{"Content-Type": []string{"text/event-streaming"}},
+			Body:   io.NopCloser(bytes.NewReader([]byte(respBody))),
 		}, nil
 	}
 
@@ -486,7 +487,7 @@ func TestOtelMiddleware_SSEResponseFallback(t *testing.T) {
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Header:     http.Header{"Content-Type": []string{"TEXT/EVENT-STREAM; charset=utf-8"}},
 			Body:       io.NopCloser(strings.NewReader(sse)),
 		}, nil
 	}

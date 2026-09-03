@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"slices"
 	"strconv"
@@ -174,8 +175,8 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		// Streaming requests were already passed through above; if the server
 		// still answers with SSE, end the span without response attributes
 		// rather than hold it open on a body we do not accumulate yet.
-		contentType := resp.Header.Get("Content-Type")
-		if strings.HasPrefix(contentType, "text/event-stream") {
+		mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		if err == nil && mediaType == "text/event-stream" {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
 			span.End()
 			return resp, nil

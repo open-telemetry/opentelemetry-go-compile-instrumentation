@@ -76,7 +76,8 @@ func TestOtelMiddleware_RecordsDuration(t *testing.T) {
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			// A distinct media type with the SSE prefix must remain non-streaming.
+			Header: http.Header{"Content-Type": []string{"text/event-streaming"}},
 			Body: io.NopCloser(strings.NewReader(
 				`{"id":"chatcmpl-1","model":"gpt-4","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}`,
 			)),
@@ -169,7 +170,7 @@ func TestOtelMiddleware_RecordsDurationOnStreaming(t *testing.T) {
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Header:     http.Header{"Content-Type": []string{"TEXT/EVENT-STREAM; charset=utf-8"}},
 			Body:       io.NopCloser(strings.NewReader(streamData)),
 		}, nil
 	}
