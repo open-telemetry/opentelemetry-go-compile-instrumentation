@@ -64,8 +64,6 @@ func cleanupLocked(ctx context.Context, cleanAll bool) error {
 			return nil
 		}
 		// Remove the entire .otelc-build/ temp directory last.
-		// The extracted instrumentation package lives inside .otelc-build/pkg/,
-		// so this also covers removing it.
 		if err := os.RemoveAll(util.GetBuildTempDir()); err != nil {
 			logger.WarnContext(ctx, "failed to remove build temp dir", "error", err)
 		}
