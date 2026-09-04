@@ -210,7 +210,10 @@ func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
 	assert.False(t, fileImportsPath(file, "example.com/traced"))
 }
 
-func TestApplyCallRule_ImportAliasMismatch(t *testing.T) {
+func TestApplyCallRule_ImportAliasMismatchUsesFileExistingAlias(t *testing.T) {
+	// The rule is written against the alias "traced" for "fmt". The
+	// file already imports "fmt" under its own alias "f". The injected
+	// code must use "f", not fail the build.
 	root := parseFile(t, `package main
 
 import (
@@ -227,8 +230,17 @@ func Run() {
 
 	err := newTestPhase().applyCallRule(context.Background(), r, root)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "import alias mismatch")
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "Call", sel.Sel.Name)
 }
 
 func TestApplyCallRule_FuncArgumentUsesEnclosingFunction(t *testing.T) {
@@ -401,115 +413,6 @@ func fileImportsPath(root *dst.File, path string) bool {
 	return false
 }
 
-func TestUsedRuleImports_BlankAndDotAliasesAlwaysKept(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {}
-`)
-	ruleImports := map[string]string{
-		"_": "example.com/sideeffect",
-		".": "example.com/dotimport",
-	}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, ruleImports, used)
-}
-
-func TestUsedRuleImports_OnlyReferencedAliasesKept(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-}
-`)
-	ruleImports := map[string]string{
-		"traced":    "fmt",
-		"unrelated": "example.com/unrelated",
-	}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
-}
-
-func TestUsedRuleImports_EmptyRuleImports(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {}
-`)
-
-	used := usedRuleImports(root, nil)
-
-	assert.Nil(t, used)
-}
-
-func TestUsedRuleImports_PlainIdentifierWithoutSelector(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	use(traced)
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Empty(t, used)
-}
-
-func TestUsedRuleImports_ChainedSelector(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	pkg.traced.Call()
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Empty(t, used)
-}
-
-func TestUsedRuleImports_MultipleReferencesCountedOnce(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-	traced.Call()
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
-}
-
-func TestUsedRuleImports_MixedAliasKinds(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-}
-`)
-	ruleImports := map[string]string{
-		"traced": "fmt",
-		"unused": "example.com/unused",
-		"_":      "example.com/sideeffect",
-		".":      "example.com/dotimport",
-	}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, map[string]string{
-		"traced": "fmt",
-		"_":      "example.com/sideeffect",
-		".":      "example.com/dotimport",
-	}, used)
-}
-
 func TestApplyCallRule_FuncTagWithoutEnclosingFunctionErrors(t *testing.T) {
 	root := parseFile(t, `package main
 
@@ -669,7 +572,7 @@ func TestMatchesCallRule_ImportAliasFromVersionSuffix(t *testing.T) {
 		},
 	}
 
-	importAliases := ast.ImportAliasMap(file)
+	importAliases := ast.ImportAliasMap(file, nil)
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
@@ -679,7 +582,7 @@ func TestAppendCallArgs_Empty(t *testing.T) {
 	r := &rule.InstCallRule{}
 	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.NoError(t, err)
 	assert.False(t, modified)
@@ -695,7 +598,7 @@ func TestAppendCallArgs_SimpleAppend(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}},
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -712,7 +615,7 @@ func TestAppendCallArgs_EllipsisNoVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "variadic_type")
@@ -730,7 +633,7 @@ func TestAppendCallArgs_EllipsisWithVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -756,7 +659,7 @@ func TestAppendCallArgs_EllipsisNoArgs(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no arguments")
@@ -774,7 +677,7 @@ func TestAppendCallArgs_InvalidVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse variadic_type")
@@ -787,7 +690,7 @@ func TestAppendCallArgs_InvalidExpr(t *testing.T) {
 	}
 	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.Error(t, err)
 	assert.False(t, modified)
@@ -888,7 +791,7 @@ func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 		},
 	}
 
-	importAliases := ast.ImportAliasMap(file)
+	importAliases := ast.ImportAliasMap(file, nil)
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
@@ -936,10 +839,24 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 	}
 
 	ip := newTestPhase()
-	importAliases := ast.ImportAliasMap(file)
-	result := ip.applyCallAppendArgs(r, file, importAliases)
+	importAliases := ast.ImportAliasMap(file, nil)
+	result := ip.applyCallAppendArgs(r, file, importAliases, nil)
 
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
+}
+
+func TestApplyCallAppendArgs_ParseErrorIsWarnedNotFatal(t *testing.T) {
+	call := httpGetCall()
+	file := makeCallFile(call)
+	r := httpGetRule("")
+	r.AppendArgs = []string{"func {{{"}
+
+	ip := newTestPhase()
+	importAliases := ast.ImportAliasMap(file, nil)
+	result := ip.applyCallAppendArgs(r, file, importAliases, nil)
+
+	assert.True(t, result, "a matching call was found even though the append failed")
+	assert.Len(t, call.Args, 1, "call must be left unmodified when append_args fails to parse")
 }
 
 func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
@@ -951,4 +868,140 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse generated code")
+}
+
+// TestApplyCallRule_UnaliasedImportWithDivergentNameMatches covers a
+// package whose declared name differs from the name guessed from its
+// import path, for example "redis" for "github.com/redis/go-redis/v9".
+// With ip.importNames holding the real name, matching must use that
+// name instead of the guess.
+func TestApplyCallRule_UnaliasedImportWithDivergentNameMatches(t *testing.T) {
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {
+	redis.NewClient()
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_new_client"},
+		ImportPath:   importPath,
+		FuncName:     "NewClient",
+		Replace:      "traced({{ . }})",
+	}
+
+	ip := newTestPhase()
+	ip.importNames = map[string]string{importPath: "redis"}
+
+	err := ip.applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	fn, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "traced", fn.Name, "rule must have matched and wrapped the call")
+}
+
+func TestApplyCallRule_UnaliasedImportWithDivergentNameMissesWithoutTable(t *testing.T) {
+	// This test uses the same fixture, without ip.importNames. Matching
+	// reverts to the guess "go-redis" and must silently miss the call.
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {
+	redis.NewClient()
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_new_client"},
+		ImportPath:   importPath,
+		FuncName:     "NewClient",
+		Replace:      "traced({{ . }})",
+	}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	_, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok)
+	sel, ok := stmt.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "call must be left unwrapped (still redis.NewClient()), got %T", stmt.X.(*dst.CallExpr).Fun)
+	assert.Equal(t, "NewClient", sel.Sel.Name)
+}
+
+func TestApplyCallRule_AliasOverrideDoesNotResolvePackages(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "example.com/does/not/exist"
+	"net/http"
+)
+
+func Run() {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "example.com/does/not/exist"}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "override must use the file's existing alias without a live package lookup")
+}
+
+func TestApplyCallRule_AliasOverrideUsesResolvedName(t *testing.T) {
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {
+	redis.NewClient()
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "wrap_new_client",
+			Imports: map[string]string{"traced": importPath},
+		},
+		ImportPath: importPath,
+		FuncName:   "NewClient",
+		Replace:    "traced.Wrap({{ . }})",
+	}
+
+	ip := newTestPhase()
+	ip.importNames = map[string]string{importPath: "redis"}
+
+	err := ip.applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "Wrap", sel.Sel.Name)
+	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
 }

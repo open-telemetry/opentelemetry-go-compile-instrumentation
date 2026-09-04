@@ -214,6 +214,7 @@ func TestGetBuildTempPaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir), GetBuildTempDir())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "foo.txt"), GetBuildTemp("foo.txt"))
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "matched.json"), GetMatchedRuleFile())
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "import_names.json"), GetImportNamesFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "added_imports.*.json"), GetAddedImportsPattern())
 
 	// The per-process import file embeds the current PID.

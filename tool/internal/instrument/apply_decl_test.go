@@ -52,7 +52,7 @@ func TestWrapDeclValue_Success(t *testing.T) {
 		},
 	}
 
-	err := wrapDeclValue(spec, "wrapper({{ . }})", 0)
+	err := wrapDeclValue(spec, "wrapper({{ . }})", 0, nil)
 
 	require.NoError(t, err)
 	require.Len(t, spec.Values, 1)
@@ -78,7 +78,7 @@ func TestWrapDeclValue_MultipleValues(t *testing.T) {
 		},
 	}
 
-	err := wrapDeclValue(spec, "inc({{ . }})", 1)
+	err := wrapDeclValue(spec, "inc({{ . }})", 1, nil)
 
 	require.NoError(t, err)
 	require.Len(t, spec.Values, 2)
@@ -99,7 +99,7 @@ func TestWrapDeclValue_NoInitializer(t *testing.T) {
 		Values: nil,
 	}
 
-	err := wrapDeclValue(spec, "wrapper({{ . }})", 0)
+	err := wrapDeclValue(spec, "wrapper({{ . }})", 0, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "wrap requires an existing initializer")
@@ -111,7 +111,7 @@ func TestWrapDeclValue_InvalidTemplate(t *testing.T) {
 		Values: []dst.Expr{&dst.Ident{Name: "x"}},
 	}
 
-	err := wrapDeclValue(spec, "func {{ . }}", 0)
+	err := wrapDeclValue(spec, "func {{ . }}", 0, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to wrap expression")
@@ -123,7 +123,7 @@ func TestWrapDeclValue_MalformedTemplateSyntax(t *testing.T) {
 		Values: []dst.Expr{&dst.Ident{Name: "x"}},
 	}
 
-	err := wrapDeclValue(spec, "{{ unclosed", 0)
+	err := wrapDeclValue(spec, "{{ unclosed", 0, nil)
 
 	require.Error(t, err)
 }
@@ -225,6 +225,8 @@ func TestApplyDeclRule_WrapExpression_InvalidTemplateSkipsImports(t *testing.T) 
 }
 
 func TestApplyDeclRule_ReplaceSuccess_AddsImports(t *testing.T) {
+	// The replacement expression must reference the declared alias, since
+	// addRuleImports now adds only the aliases the rewrite actually uses.
 	file := makeVarFile("X", &dst.BasicLit{Kind: token.INT, Value: "1"})
 	r := &rule.InstDeclRule{
 		InstBaseRule: rule.InstBaseRule{
@@ -233,7 +235,7 @@ func TestApplyDeclRule_ReplaceSuccess_AddsImports(t *testing.T) {
 		},
 		Kind:       "var",
 		Identifier: "X",
-		Replace:    "99",
+		Replace:    `fmt.Sprint(99)`,
 	}
 
 	err := newTestPhase().applyDeclRule(context.Background(), r, file)
@@ -394,6 +396,113 @@ func TestDeclRuleReplaceHandlesConstIotaImplicitRepeat(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, renderFile(t, file), "B = 99")
+}
+
+func TestApplyDeclRule_ReplaceAliasMismatchUsesFileExistingAlias(t *testing.T) {
+	// The rule's replacement value is written against the alias "traced" for
+	// "fmt". The file already imports "fmt" under its own alias "f". The
+	// injected value must use "f", not fail the build.
+	file := parseTestFile(t, `package main
+
+import f "fmt"
+
+var X = 1
+`)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "replace_x",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Kind:       "var",
+		Identifier: "X",
+		Replace:    `traced.Sprint(99)`,
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.Contains(t, renderFile(t, file), "var X = f.Sprint(99)")
+	assert.Equal(t, 1, countImportSpecs(file), "must not add a redundant import for an alias the rewrite eliminated")
+}
+
+func TestApplyDeclRule_WrapAliasMismatchUsesFileExistingAlias(t *testing.T) {
+	// Same mismatch as above, exercised through wrap instead of replace,
+	// since the two are rewritten at different points.
+	file := parseTestFile(t, `package main
+
+import f "fmt"
+
+var X = 1
+`)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "wrap_x",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Kind:       "var",
+		Identifier: "X",
+		Wrap:       `traced.Sprint({{ . }})`,
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.Contains(t, renderFile(t, file), "var X = f.Sprint(1)")
+	assert.Equal(t, 1, countImportSpecs(file), "must not add a redundant import for an alias the rewrite eliminated")
+}
+
+func TestApplyDeclRule_AliasOverrideUsesResolvedName(t *testing.T) {
+	// The target file imports a divergent-name dependency unaliased, so the
+	// override must use ip.importNames' resolved real name, not a guess
+	// derived from the import path.
+	const importPath = "github.com/redis/go-redis/v9"
+	file := parseTestFile(t, `package main
+
+import "`+importPath+`"
+
+var X = 1
+`)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "replace_x",
+			Imports: map[string]string{"traced": importPath},
+		},
+		Kind:       "var",
+		Identifier: "X",
+		Replace:    "traced.NewClient()",
+	}
+
+	ip := newTestPhase()
+	ip.importNames = map[string]string{importPath: "redis"}
+
+	err := ip.applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.Contains(t, renderFile(t, file), "var X = redis.NewClient()")
+	assert.Equal(t, 1, countImportSpecs(file), "must not add a redundant import for an alias the rewrite eliminated")
+}
+
+func TestApplyDeclRule_DotImportConflictSurfacesAsAnError(t *testing.T) {
+	file := parseTestFile(t, `package main
+
+import rt "runtime"
+
+var X = 1
+`)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "replace_x",
+			Imports: map[string]string{".": "runtime"},
+		},
+		Kind:       "var",
+		Identifier: "X",
+		Replace:    "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
 func TestParseValueExpr(t *testing.T) {

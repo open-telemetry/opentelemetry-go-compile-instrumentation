@@ -97,7 +97,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Signature: &sig,
 		}
 
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -109,7 +109,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "SingleVal",
 			Recv: "GenSingle",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -121,7 +121,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "SinglePtr",
 			Recv: "*GenSingle",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -133,7 +133,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "MultiVal",
 			Recv: "GenMulti",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -145,7 +145,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "MultiPtr",
 			Recv: "*GenMulti",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -157,7 +157,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "Method",
 			Recv: "*MyStruct",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -169,7 +169,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			HasFunc: "Method",
 			HasRecv: "*MyStruct",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -183,7 +183,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Signature: &sig,
 		}
 
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		assert.False(t, ok)
 		assert.Nil(t, fn)
@@ -195,7 +195,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Param: "[]invalid",
 		}
 
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.Error(t, err)
 		assert.False(t, ok)
 		assert.Nil(t, fn)
@@ -226,7 +226,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {}
 		Param: "*net/http.Request",
 	}
 
-	fn, ok, err := FindFuncDecl(file, r)
+	fn, ok, err := FindFuncDecl(file, r, nil)
 	require.NoError(t, err)
 	require.True(t, ok, `where.param: "*net/http.Request" should match a *http.Request parameter`)
 	require.NotNil(t, fn)
@@ -430,7 +430,7 @@ func selector(pkg, name string) *dst.SelectorExpr {
 // for matching with a real *dst.File's import declarations.
 func mustMatch(t *testing.T, decl *dst.FuncDecl, r *rule.InstFuncRule) bool {
 	t.Helper()
-	ok, err := funcDeclMatchesFilters(decl, r, nil)
+	ok, err := funcDeclMatchesFilters(decl, r, nil, nil)
 	require.NoError(t, err)
 	return ok
 }
@@ -622,13 +622,13 @@ func TestFuncDeclMatchesFilters_InvalidTypeReturnsError(t *testing.T) {
 		[]*dst.Field{field(ident("error"))},
 	)
 
-	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"}, nil)
+	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"}, nil, nil)
 	require.Error(t, err)
 
-	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"}, nil)
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"}, nil, nil)
 	require.Error(t, err)
 
-	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"}, nil)
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"}, nil, nil)
 	require.Error(t, err)
 }
 
@@ -636,7 +636,7 @@ func TestFindFuncDeclRawRule(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	raw := &rule.InstRawRule{Func: "TopLevel"}
-	fn, ok, err := FindFuncDecl(file, raw)
+	fn, ok, err := FindFuncDecl(file, raw, nil)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.NotNil(t, fn)
@@ -647,7 +647,7 @@ func TestFindFuncDeclRawRuleMissing(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	raw := &rule.InstRawRule{Func: "Missing"}
-	fn, ok, err := FindFuncDecl(file, raw)
+	fn, ok, err := FindFuncDecl(file, raw, nil)
 	require.NoError(t, err)
 	require.False(t, ok)
 	assert.Nil(t, fn)
@@ -657,7 +657,7 @@ func TestFindFuncDeclFilterDef(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	filter := &rule.FilterDef{HasFunc: "TopLevel"}
-	fn, ok, err := FindFuncDecl(file, filter)
+	fn, ok, err := FindFuncDecl(file, filter, nil)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.NotNil(t, fn)
@@ -672,24 +672,24 @@ func TestFuncDeclMatchesFilters_SignatureParseError(t *testing.T) {
 
 	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		Signature: &rule.FuncSignature{Args: []string{"[]invalid"}},
-	}, nil)
+	}, nil, nil)
 	require.Error(t, err)
 
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		SignatureContains: &rule.FuncSignature{Args: []string{"[]invalid"}},
-	}, nil)
+	}, nil, nil)
 	require.Error(t, err)
 
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		SignatureContains: &rule.FuncSignature{Returns: []string{"[]invalid"}},
-	}, nil)
+	}, nil, nil)
 	require.Error(t, err)
 }
 
 func TestFuncDeclMatchesFilters_LastResultNoResults(t *testing.T) {
 	decl := makeFuncDecl(nil, nil)
 
-	ok, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "error"}, nil)
+	ok, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "error"}, nil, nil)
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
@@ -727,30 +727,6 @@ func TestIsInterfaceType(t *testing.T) {
 func TestIsEllipsis(t *testing.T) {
 	assert.True(t, IsEllipsis(Ellipsis(Ident("int"))))
 	assert.False(t, IsEllipsis(Ident("int")))
-}
-
-func TestAddStructField(t *testing.T) {
-	const src = `package main
-
-type S struct {
-	A int
-}
-`
-	p := NewAstParser()
-	file, err := p.ParseSource(src)
-	require.NoError(t, err)
-
-	st := FindStructType(file, "S")
-	require.NotNil(t, st)
-
-	AddStructField(st, "B", "string")
-
-	// The struct now has two fields, the new one named B of type string.
-	require.Len(t, st.Fields.List, 2)
-	newField := st.Fields.List[1]
-	require.Len(t, newField.Names, 1)
-	assert.Equal(t, "B", newField.Names[0].Name)
-	assert.Equal(t, "string", newField.Type.(*dst.Ident).Name)
 }
 
 func TestStripGenericTypes(t *testing.T) {

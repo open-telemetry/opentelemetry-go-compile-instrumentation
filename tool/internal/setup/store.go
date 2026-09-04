@@ -103,5 +103,23 @@ func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, mo
 		return ex.Wrapf(err, "failed to write matched rules to file %s", f)
 	}
 	sp.Info("Stored matched sets", "path", f)
+
+	return sp.storeResolvedNames()
+}
+
+// storeResolvedNames persists the import name table built during
+// setup, so later toolexec processes need not guess a package name
+// from its import path.
+func (sp *setupPhase) storeResolvedNames() error {
+	bs, err := json.Marshal(sp.resolvedNames)
+	if err != nil {
+		return ex.Wrapf(err, "failed to marshal import names to JSON")
+	}
+
+	f := util.GetImportNamesFile()
+	if writeErr := util.WriteFileAtomic(f, bs); writeErr != nil {
+		return ex.Wrapf(writeErr, "failed to write import names to file %s", f)
+	}
+	sp.Info("Stored resolved import names", "path", f, "count", len(sp.resolvedNames))
 	return nil
 }

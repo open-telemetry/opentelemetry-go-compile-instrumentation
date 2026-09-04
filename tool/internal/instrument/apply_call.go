@@ -10,7 +10,6 @@ import (
 	"github.com/dave/dst/dstutil"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -18,14 +17,14 @@ import (
 // applyCallRule transforms function calls at call sites by wrapping them with
 // instrumentation code according to the provided replacement template.
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
-	importAliases := ast.ImportAliasMap(root)
+	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
-	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
+	appendModified := ip.applyCallAppendArgs(r, root, importAliases, aliasOverrides)
 
 	replaceModified := false
 	if r.Replace != "" {
 		var err error
-		replaceModified, err = ip.applyCallReplace(r, root, importAliases)
+		replaceModified, err = ip.applyCallReplace(r, root, importAliases, aliasOverrides)
 		if err != nil {
 			return err
 		}
@@ -41,41 +40,6 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 	ip.Info("Apply call rule", "rule", r)
 
 	return nil
-}
-
-// usedRuleImports returns the subset of ruleImports whose alias is actually
-// referenced somewhere in root. It must be called after the rule's append_args/replace
-// modifications have already been applied to root.
-//
-// Blank ("_") and dot (".") aliases are always kept.
-func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]string {
-	if len(ruleImports) == 0 {
-		return nil
-	}
-
-	used := make(map[string]string, len(ruleImports))
-	for alias, path := range ruleImports {
-		if alias == "_" || alias == "." {
-			used[alias] = path
-		}
-	}
-
-	dst.Inspect(root, func(node dst.Node) bool {
-		sel, ok := node.(*dst.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, identOk := sel.X.(*dst.Ident)
-		if !identOk {
-			return true
-		}
-		if path, importOk := ruleImports[ident.Name]; importOk {
-			used[ident.Name] = path
-		}
-		return true
-	})
-
-	return used
 }
 
 // walkCallsWithEnclosingFunc visits every *dst.CallExpr in root and invokes fn
@@ -110,6 +74,7 @@ func (*instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
+	aliasOverrides map[string]string,
 ) (bool, error) {
 	tmpl, err := newCallTemplate(r.Replace)
 	if err != nil {
@@ -129,6 +94,7 @@ func (*instrumentPhase) applyCallReplace(
 			wrapError = wrapErr
 			return false
 		}
+		replaceQualifierAliases(wrapped, aliasOverrides)
 		replacements[call] = util.AssertType[dst.Expr](dst.Clone(wrapped))
 		return true
 	})
@@ -162,6 +128,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
+	aliasOverrides map[string]string,
 ) bool {
 	if len(r.AppendArgs) == 0 {
 		return false
@@ -179,7 +146,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		return true
 	})
 	for _, call := range matchingCalls {
-		if _, err := appendCallArgs(call, r); err != nil {
+		if _, err := appendCallArgs(call, r, aliasOverrides); err != nil {
 			ip.Warn("Failed to append args to call", "error", err)
 		}
 	}
@@ -190,7 +157,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
 // For ellipsis calls, an IIFE wrapper is generated using r.VariadicType.
 // Returns (true, nil) if the call was modified, (false, nil) if AppendArgs is empty.
-func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
+func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule, aliasOverrides map[string]string) (bool, error) {
 	if len(r.AppendArgs) == 0 {
 		return false, nil
 	}
@@ -202,6 +169,7 @@ func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
 		if err != nil {
 			return false, ex.Wrapf(err, "failed to parse append_args entry %q", argStr)
 		}
+		replaceQualifierAliases(argExpr, aliasOverrides)
 		newArgs = append(newArgs, argExpr)
 	}
 
@@ -225,6 +193,7 @@ func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
 	if err != nil {
 		return false, ex.Wrapf(err, "failed to parse variadic_type %q", r.VariadicType)
 	}
+	replaceQualifierAliases(varTypeExpr, aliasOverrides)
 
 	// Replace the spread arg with an IIFE that appends the new args before spreading.
 	// call.Ellipsis remains true — the outer call is still a spread call.

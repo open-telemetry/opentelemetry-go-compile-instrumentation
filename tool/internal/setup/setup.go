@@ -29,6 +29,9 @@ type setupPhase struct {
 	ruleConfig      string
 	buildPackages   []*packages.Package
 	rootModulePaths []string
+	// resolvedNames maps an import path to a package name, built from
+	// buildPackages' dependency graph.
+	resolvedNames map[string]string
 }
 
 func (sp *setupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
@@ -146,7 +149,8 @@ const (
 //   - args [] returns packages for "."
 func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
-	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule |
+		packages.NeedImports | packages.NeedDeps
 
 	pkgTargets, fileTargets, err := splitBuildTargets(args)
 	if err != nil {
@@ -370,6 +374,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	sp.buildPackages = pkgs
+	sp.resolvedNames = pkgload.CollectPackageNames(pkgs)
 
 	// Find the module directories for the build packages
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, pkgs)
