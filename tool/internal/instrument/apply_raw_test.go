@@ -59,8 +59,8 @@ raw: "log({{ .FuncArgument 0 }})"
 	// applied to the same parsed root/decl in sequence, not to independent
 	// copies (see groupRules/instrument in instrument.go).
 	funcDecl := parseFunc(t, "package main\nfunc Foo(int) {}")
-	require.NoError(t, insertRaw(ctx, ruleA, funcDecl, nil, nil))
-	require.NoError(t, insertRaw(ctx, ruleB, funcDecl, nil, nil))
+	require.NoError(t, insertRaw(ctx, ruleA, funcDecl, nil, rawAliasContext{}))
+	require.NoError(t, insertRaw(ctx, ruleB, funcDecl, nil, rawAliasContext{}))
 
 	require.Len(t, funcDecl.Body.List, 2)
 	argOf := func(stmt dst.Stmt) (string, string) {
@@ -355,7 +355,7 @@ func TestInsertRawInvalidRegexPattern(t *testing.T) {
 		Pattern:      `[unclosed-bracket`,
 	}
 
-	err = insertRaw(ctx, rawRule, fn, dstFile, nil)
+	err = insertRaw(ctx, rawRule, fn, dstFile, rawAliasContext{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid raw rule pattern")
 }
@@ -568,4 +568,177 @@ func TestRenderRawCode_NonIntegerArgumentIndex(t *testing.T) {
 	_, err := renderRawCode("{{.FuncArgument abc}}", funcDecl, nil, "h1")
 
 	require.Error(t, err)
+}
+
+// --- import alias override tests ---
+
+func TestApplyRawRule_ImportAliasMismatchUsesFileExistingAlias(t *testing.T) {
+	// The rule's raw code is written against the alias "traced" for "fmt".
+	// The file already imports "fmt" under its own alias "f". The injected
+	// code must use "f", not fail the build.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+)
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func: "Run",
+		Raw:  `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	require.Len(t, fn.Body.List, 1)
+	stmt, ok := fn.Body.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", fn.Body.List[0])
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "Println", sel.Sel.Name)
+}
+
+func TestApplyRawRule_AliasOverrideUsesResolvedName(t *testing.T) {
+	// The target file imports a divergent-name dependency unaliased, so the
+	// override must use ip.importNames' resolved real name, not a guess
+	// derived from the import path.
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "use_client",
+			Imports: map[string]string{"traced": importPath},
+		},
+		Func: "Run",
+		Raw:  "traced.Ping()",
+	}
+
+	ip := newTestPhase()
+	ip.importNames = map[string]string{importPath: "redis"}
+
+	err := ip.applyRawRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	require.Len(t, fn.Body.List, 1)
+	stmt, ok := fn.Body.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", fn.Body.List[0])
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "Ping", sel.Sel.Name)
+	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+}
+
+func TestApplyRawRule_RenderTemplateErrorWraps(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad_template"},
+		Func:         "Run",
+		Raw:          "use({{ .FuncArgument 0 }})",
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "out of range")
+}
+
+func TestApplyRawRule_ParseSnippetErrorPropagates(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "invalid_raw"},
+		Func:         "Run",
+		Raw:          "not valid go code +++",
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+}
+
+func TestApplyRawRule_FuncNotFound(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "missing_func"},
+		Func:         "Missing",
+		Raw:          `println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "can not find function Missing")
+}
+
+func TestApplyRawRule_InsertRawErrorPropagates(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	println("x")
+}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "no_match"},
+		Func:         "Run",
+		Raw:          `println("hi")`,
+		Pattern:      `^println\("nope"\)$`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no statement matches the pattern")
+}
+
+func TestApplyRawRule_DotImportConflictSurfacesAsAnError(t *testing.T) {
+	root := parseFile(t, `package main
+
+import rt "runtime"
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_raw",
+			Imports: map[string]string{".": "runtime"},
+		},
+		Func: "Run",
+		Raw:  `println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dot-import conflict")
 }

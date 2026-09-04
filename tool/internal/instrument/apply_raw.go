@@ -125,12 +125,20 @@ func insertRawAtPattern(
 	return inserted
 }
 
+// rawAliasContext bundles the file's import aliases and the rule-import
+// overrides insertRaw needs, keeping insertRaw's parameter count within the
+// linter's limit.
+type rawAliasContext struct {
+	imports   map[string]string
+	overrides map[string]string
+}
+
 func insertRaw(
 	ctx context.Context,
 	r *rule.InstRawRule,
 	decl *dst.FuncDecl,
 	root *dst.File,
-	importAliases map[string]string,
+	aliases rawAliasContext,
 ) error {
 	util.Assert(decl.Name.Name == r.Func, "sanity check")
 	util.Assert(decl.Body != nil, "function must have a body")
@@ -138,7 +146,7 @@ func insertRaw(
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
 
-	raw, err := renderRawCode(r.Raw, decl, importAliases, r.Identity())
+	raw, err := renderRawCode(r.Raw, decl, aliases.imports, r.Identity())
 	if err != nil {
 		return ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
 	}
@@ -148,6 +156,10 @@ func insertRaw(
 	stmts, err := p.ParseSnippet(raw)
 	if err != nil {
 		return err
+	}
+
+	for _, stmt := range stmts {
+		replaceQualifierAliases(stmt, aliases.overrides)
 	}
 
 	// if specified, insert raw code at the position matched by the regex
@@ -191,14 +203,15 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
-	// Handle imports if specified in the rule
-	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+	importAliases, aliasOverrides := ip.resolveImportOverrides(root, rule.Imports)
+
+	aliases := rawAliasContext{imports: importAliases, overrides: aliasOverrides}
+	if err = insertRaw(ctx, rule, funcDecl, root, aliases); err != nil {
 		return err
 	}
 
-	// Insert the raw code into the target function
-	err = insertRaw(ctx, rule, funcDecl, root, ast.ImportAliasMap(root, ip.importNames))
-	if err != nil {
+	// Handle imports if specified in the rule.
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
 		return err
 	}
 	ip.Info("Apply raw rule", "rule", rule)
