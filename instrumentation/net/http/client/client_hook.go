@@ -59,6 +59,15 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 		return
 	}
 
+	// A manually built http.Request (not http.NewRequest) is legal input to
+	// RoundTrip and may arrive here with a nil Header, or, if the caller
+	// skipped validation entirely, a nil req. Neither should crash the
+	// caller's program just because instrumentation is compiled in.
+	if req == nil {
+		logger.Debug("BeforeRoundTrip: nil request, skipping instrumentation")
+		return
+	}
+
 	if runtime.IsHTTPClientInstrumentationSuppressed(req.Context()) {
 		return
 	}
@@ -73,9 +82,13 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 
 	initInstrumentation()
 
+	var urlStr string
+	if req.URL != nil {
+		urlStr = req.URL.String()
+	}
 	logger.Debug("BeforeRoundTrip called",
 		"method", req.Method,
-		"url", req.URL.String(),
+		"url", urlStr,
 		"host", req.Host)
 
 	ctx := req.Context()
@@ -89,6 +102,12 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
+
+	// HeaderCarrier.Set writes into the map, so a nil Header (legal on a
+	// manually built http.Request) must be initialized before injection.
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
 
 	// Inject trace context into request headers
 	propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))

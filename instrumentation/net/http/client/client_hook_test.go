@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -429,4 +430,66 @@ func TestAfterRoundTrip_DisabledAfterStart_Regression(t *testing.T) {
 	ended = sr.Ended()
 	require.Len(t, ended, 1, "span created by BeforeRoundTrip must be ended by AfterRoundTrip")
 	assert.Equal(t, "GET", ended[0].Name())
+}
+
+// TestBeforeRoundTrip_NilInputs_Regression reproduces
+// https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1202:
+// a manually built *http.Request (skipping http.NewRequest) can legally reach
+// RoundTrip with a nil Header or nil URL, and a nil req is possible if the
+// caller skips validation entirely. None of that should panic.
+func TestBeforeRoundTrip_NilInputs_Regression(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+
+	t.Run("nil request", func(t *testing.T) {
+		initOnce = *new(sync.Once)
+		sr, _ := setupTestTracer(t)
+
+		mockCtx := hooktest.NewMockHookContext()
+		transport := &http.Transport{}
+
+		assert.NotPanics(t, func() {
+			BeforeRoundTrip(mockCtx, transport, nil)
+		})
+		assert.Empty(t, sr.Ended())
+		assert.Nil(t, mockCtx.GetData(), "no data should be stored for a nil request")
+	})
+
+	t.Run("nil header", func(t *testing.T) {
+		initOnce = *new(sync.Once)
+		sr, _ := setupTestTracer(t)
+
+		u, err := url.Parse("http://example.com/path")
+		require.NoError(t, err)
+		req := &http.Request{Method: http.MethodGet, URL: u}
+		require.Nil(t, req.Header)
+
+		mockCtx := hooktest.NewMockHookContext()
+		transport := &http.Transport{}
+
+		assert.NotPanics(t, func() {
+			BeforeRoundTrip(mockCtx, transport, req)
+		})
+
+		assert.Empty(t, sr.Ended(), "span should not be ended in Before hook")
+
+		newReq, ok := mockCtx.GetParam(1).(*http.Request)
+		require.True(t, ok, "param 1 should be request")
+		assert.NotEmpty(t, newReq.Header.Get("traceparent"), "trace context should still be injected")
+	})
+
+	t.Run("nil URL", func(t *testing.T) {
+		initOnce = *new(sync.Once)
+		sr, _ := setupTestTracer(t)
+
+		req := &http.Request{Method: http.MethodGet, Header: http.Header{}}
+		require.Nil(t, req.URL)
+
+		mockCtx := hooktest.NewMockHookContext()
+		transport := &http.Transport{}
+
+		assert.NotPanics(t, func() {
+			BeforeRoundTrip(mockCtx, transport, req)
+		})
+		assert.Empty(t, sr.Ended(), "span should not be ended in Before hook")
+	})
 }
