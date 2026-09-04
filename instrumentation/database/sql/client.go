@@ -304,6 +304,14 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	tx.DriverName = dbRequest.DriverName
 	tx.DSN = dbRequest.Dsn
 	tx.DbName = dbRequest.DbName
+
+	// Carry the caller's context onto the transaction so commit and rollback
+	// spans, created long after this hook returns, can still be linked into
+	// the trace that started the transaction instead of falling back to
+	// context.Background().
+	if ctx, ok := callData["ctx"].(context.Context); ok {
+		tx.OtelCtx = ctx
+	}
 }
 
 func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Context) {
@@ -601,7 +609,7 @@ func beforeTxCommitInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	instrumentStart(ictx, txContext(tx), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 func afterTxCommitInstrumentation(ictx hook.HookContext, err error) {
@@ -618,7 +626,18 @@ func beforeTxRollbackInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	instrumentStart(ictx, txContext(tx), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+}
+
+// txContext returns the context BeginTx was originally called with, so that
+// commit and rollback spans land in the same trace as the transaction they
+// belong to. It falls back to context.Background() for a Tx that predates
+// this field, e.g. one built directly by a driver in a test.
+func txContext(tx *sql.Tx) context.Context {
+	if tx.OtelCtx != nil {
+		return tx.OtelCtx
+	}
+	return context.Background()
 }
 
 func afterTxRollbackInstrumentation(ictx hook.HookContext, err error) {
