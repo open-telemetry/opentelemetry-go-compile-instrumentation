@@ -9,6 +9,7 @@ import (
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 )
 
@@ -97,4 +98,111 @@ func (ip *instrumentPhase) addRuleImports(
 	}
 
 	return nil
+}
+
+// resolveImportOverrides computes root's current import aliases and the
+// per-rule-alias overrides a rule needs when the file already imports one of
+// ruleImports' paths under a different alias.
+//
+//nolint:revive // needed to balance confusing-results and nonamedreturns linters
+func (ip *instrumentPhase) resolveImportOverrides(
+	root *dst.File,
+	ruleImports map[string]string,
+) (map[string]string, map[string]string) {
+	importAliases := ast.ImportAliasMap(root, ip.importNames)
+
+	existingAliases := make(map[string]string, len(importAliases))
+	for alias, path := range importAliases {
+		existingAliases[path] = alias
+	}
+	aliasOverrides := resolveAliasOverrides(ruleImports, existingAliases)
+	return importAliases, aliasOverrides
+}
+
+// resolveAliasOverrides reports the alias to substitute for each rule
+// import already present in the target file under a different alias.
+// Substituting the file's alias into generated code, instead of the
+// rule's alias, avoids a build failure.
+//
+// existingAliases must resolve an unaliased import to its real name,
+// not a guess. A guessed name can be illegal as a Go identifier.
+//
+// The dot alias and the blank alias are exempt from substitution.
+func resolveAliasOverrides(ruleImports, existingAliases map[string]string) map[string]string {
+	var overrides map[string]string
+	for ruleAlias, importPath := range ruleImports {
+		if ruleAlias == "." || ruleAlias == "_" {
+			continue
+		}
+		existingAlias, ok := existingAliases[importPath]
+		if !ok || existingAlias == ruleAlias || existingAlias == "." || existingAlias == "_" {
+			continue
+		}
+		if overrides == nil {
+			overrides = make(map[string]string, len(ruleImports))
+		}
+		overrides[ruleAlias] = existingAlias
+	}
+	return overrides
+}
+
+// replaceQualifierAliases rewrites a freshly generated expression to
+// use the file's alias for an import, instead of the rule's alias.
+// overrides maps each rule alias to the file's alias.
+//
+// replaceQualifierAliases only touches the node passed in. The rewrite
+// cannot reach unrelated code that shares an identifier name.
+func replaceQualifierAliases(node dst.Node, overrides map[string]string) {
+	if len(overrides) == 0 {
+		return
+	}
+	dst.Inspect(node, func(n dst.Node) bool {
+		sel, ok := n.(*dst.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*dst.Ident)
+		if !ok {
+			return true
+		}
+		if existingAlias, override := overrides[ident.Name]; override {
+			ident.Name = existingAlias
+		}
+		return true
+	})
+}
+
+// usedRuleImports returns the subset of ruleImports whose alias is actually
+// referenced somewhere in root. It must be called after the rule's generated
+// code has already been spliced into root.
+//
+// Blank ("_") and dot (".") aliases are always kept.
+func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]string {
+	if len(ruleImports) == 0 {
+		return nil
+	}
+
+	used := make(map[string]string, len(ruleImports))
+	for alias, path := range ruleImports {
+		if alias == "_" || alias == "." {
+			used[alias] = path
+		}
+	}
+
+	dst.Inspect(root, func(node dst.Node) bool {
+		sel, ok := node.(*dst.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, identOk := sel.X.(*dst.Ident)
+		if !identOk {
+			return true
+		}
+		if path, importOk := ruleImports[ident.Name]; importOk {
+			used[ident.Name] = path
+		}
+		return true
+	})
+
+	return used
 }
