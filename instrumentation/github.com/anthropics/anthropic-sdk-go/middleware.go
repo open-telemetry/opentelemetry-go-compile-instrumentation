@@ -9,6 +9,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,6 +103,15 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		model, isStream, spanAttrs := parseMessagesRequest(bodyBytes)
 
+		// An empty model means the body was not valid JSON (e.g. truncated by
+		// maxRequestBodySize) or omitted the field entirely. Either way there
+		// is nothing meaningful to attach to a span, so pass the request
+		// through rather than emit a "chat " span with an empty
+		// gen_ai.request.model.
+		if model == "" {
+			return next(req)
+		}
+
 		// Streaming responses need event accumulation before their spans carry
 		// usage data; until that lands (#679, follow-up PR), pass streaming
 		// requests through uninstrumented rather than emit incomplete spans.
@@ -128,29 +139,35 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		// Record the operation duration on every exit path below (success,
 		// transport error, HTTP error, or SSE fallback). Registered here so it
 		// only fires once a span exists, never for the pass-through returns
-		// above. error.type is not yet a dimension; that follows once the
-		// metric grows an error attribute (#679 follow-up).
+		// above. errorAttrs holds the error.type attribute on error paths and
+		// is empty on success.
+		var errorAttrs []attribute.KeyValue
 		defer func() {
 			if operationDuration != nil {
+				attrs := slices.Concat(baseAttrs, errorAttrs)
 				operationDuration.Record(ctx, time.Since(start).Seconds(),
-					metric.WithAttributes(baseAttrs...))
+					metric.WithAttributes(attrs...))
 			}
 		}()
 
 		resp, err := next(req)
 		if err != nil {
+			errorTypeAttr := otelsemconv.ErrorType(err)
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
-			span.SetAttributes(otelsemconv.ErrorType(err))
+			span.SetAttributes(errorTypeAttr)
 			span.End()
+			errorAttrs = []attribute.KeyValue{errorTypeAttr}
 			return resp, err
 		}
 
 		if resp.StatusCode >= 400 {
+			errorTypeAttr := otelsemconv.ErrorTypeKey.String(strconv.Itoa(resp.StatusCode))
 			span.RecordError(errors.New(resp.Status))
 			span.SetStatus(codes.Error, resp.Status)
-			span.SetAttributes(attribute.String("error.type", resp.Status))
+			span.SetAttributes(errorTypeAttr)
 			span.End()
+			errorAttrs = []attribute.KeyValue{errorTypeAttr}
 			return resp, nil
 		}
 

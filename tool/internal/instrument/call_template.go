@@ -4,14 +4,10 @@
 package instrument
 
 import (
-	"go/format"
-	"go/parser"
-	"go/token"
 	"strings"
 	"text/template"
 
 	"github.com/dave/dst"
-	"github.com/dave/dst/decorator"
 	"github.com/dave/dst/dstutil"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -118,6 +114,16 @@ func (d *callTemplateData) FuncReturnCount() (int, error) {
 	return d.enclosing.FuncReturnCount(), nil
 }
 
+// Receiver returns the identifier of the enclosing method's receiver, or an
+// error if there is no enclosing function or the enclosing function has no
+// receiver. Template usage: {{.Receiver}}
+func (d *callTemplateData) Receiver() (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.Receiver()
+}
+
 // FuncArgumentOfType returns the identifier of the first parameter of the
 // enclosing function (excluding the receiver) whose type matches typeStr
 // or "" if none match. Template usage: {{.FuncArgumentOfType "context.Context"}}
@@ -165,8 +171,8 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 //
 // The process:
 // 1. Execute the template with a fixed placeholder string (_.PLACEHOLDER_0)
-// 2. Wrap the result in a minimal function and parse it
-// 3. Extract the expression from the parsed function
+// 2. Parse the result as a Go statement snippet
+// 3. Extract the expression from the parsed statement
 // 4. Replace the placeholder with the actual AST node
 func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl) (dst.Expr, error) {
 	data := &callTemplateData{}
@@ -186,45 +192,17 @@ func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl)
 
 	placeholderRendered := strings.Contains(userResult, placeholderIdent)
 
-	// Wrap the result in a minimal function so we can parse it as Go code.
-	wrapped := "package _\nfunc _() {\n\t" + userResult + "\n}\n"
-
-	// Parse the wrapped code
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "", []byte(wrapped), parser.ParseComments)
+	stmts, err := toolast.NewAstParser().ParseSnippet(userResult)
 	if err != nil {
-		// Format the error with the generated code for debugging
-		formatted, _ := format.Source([]byte(wrapped))
-		return nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", formatted)
+		return nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", userResult)
+	}
+	if len(stmts) != 1 {
+		return nil, ex.Newf("expected single expression statement, got %d statements", len(stmts))
 	}
 
-	// Convert ast.File to dst.File
-	dec := decorator.NewDecorator(fset)
-	dstFile, err := dec.DecorateFile(file)
-	if err != nil {
-		return nil, ex.Newf("failed to decorate AST")
-	}
-
-	// Extract the expression from the function body
-	if len(dstFile.Decls) == 0 {
-		return nil, ex.New("no declarations found in generated code")
-	}
-
-	funcDecl, ok := dstFile.Decls[0].(*dst.FuncDecl)
+	exprStmt, ok := stmts[0].(*dst.ExprStmt)
 	if !ok {
-		return nil, ex.Newf("expected function declaration, got %T", dstFile.Decls[0])
-	}
-
-	if funcDecl.Body == nil || len(funcDecl.Body.List) == 0 {
-		return nil, ex.New("function body is empty")
-	}
-	if len(funcDecl.Body.List) != 1 {
-		return nil, ex.Newf("expected single expression statement, got %d statements", len(funcDecl.Body.List))
-	}
-
-	exprStmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
-	if !ok {
-		return nil, ex.Newf("expected expression statement, got %T", funcDecl.Body.List[0])
+		return nil, ex.Newf("expected expression statement, got %T", stmts[0])
 	}
 
 	result, replaced := replacePlaceholder(exprStmt.X, node)
@@ -255,30 +233,36 @@ func unwrap(expr dst.Expr) dst.Expr {
 
 // parseGoExpression parses a Go expression string into a dst.Expr.
 func parseGoExpression(expr string) (dst.Expr, error) {
-	funcDecl, err := parseSnippetFuncDecl("package _\nfunc _() {\n\t"+expr+"\n}\n", expr)
+	stmts, err := toolast.NewAstParser().ParseSnippet(expr)
 	if err != nil {
 		return nil, err
 	}
-	exprStmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
+	if len(stmts) != 1 {
+		return nil, ex.Newf("expression %q did not parse as a single statement (got %d)", expr, len(stmts))
+	}
+	exprStmt, ok := stmts[0].(*dst.ExprStmt)
 	if !ok {
 		return nil, ex.Newf(
 			"expression %q did not parse as an expression statement (got %T)",
-			expr, funcDecl.Body.List[0])
+			expr, stmts[0])
 	}
 	return exprStmt.X, nil
 }
 
 // parseGoTypeExpression parses a Go type string (e.g. "grpc.DialOption") into a dst.Expr.
 func parseGoTypeExpression(typeStr string) (dst.Expr, error) {
-	funcDecl, err := parseSnippetFuncDecl("package _\nfunc _() {\n\tvar _ "+typeStr+"\n}\n", typeStr)
+	stmts, err := toolast.NewAstParser().ParseSnippet("var _ " + typeStr)
 	if err != nil {
 		return nil, err
 	}
-	declStmt, ok := funcDecl.Body.List[0].(*dst.DeclStmt)
+	if len(stmts) != 1 {
+		return nil, ex.Newf("type %q did not parse as a single statement (got %d)", typeStr, len(stmts))
+	}
+	declStmt, ok := stmts[0].(*dst.DeclStmt)
 	if !ok {
 		return nil, ex.Newf(
 			"type %q did not parse as a declaration statement (got %T)",
-			typeStr, funcDecl.Body.List[0])
+			typeStr, stmts[0])
 	}
 	genDecl, ok := declStmt.Decl.(*dst.GenDecl)
 	if !ok || len(genDecl.Specs) == 0 {
@@ -289,30 +273,6 @@ func parseGoTypeExpression(typeStr string) (dst.Expr, error) {
 		return nil, ex.Newf("unexpected spec shape for type %q", typeStr)
 	}
 	return valueSpec.Type, nil
-}
-
-// parseSnippetFuncDecl parses a minimal Go source snippet of the form
-// "package _\nfunc _() { <body> }\n" and returns the function declaration.
-// label is used in error messages to identify the original snippet.
-func parseSnippetFuncDecl(src, label string) (*dst.FuncDecl, error) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "", []byte(src), parser.ParseComments)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to parse %q", label)
-	}
-	dec := decorator.NewDecorator(fset)
-	dstFile, err := dec.DecorateFile(file)
-	if err != nil {
-		return nil, ex.Wrapf(err, "failed to decorate AST for %q", label)
-	}
-	if len(dstFile.Decls) == 0 {
-		return nil, ex.Newf("no declarations found for %q", label)
-	}
-	funcDecl, ok := dstFile.Decls[0].(*dst.FuncDecl)
-	if !ok || funcDecl.Body == nil || len(funcDecl.Body.List) == 0 {
-		return nil, ex.Newf("unexpected AST shape for %q", label)
-	}
-	return funcDecl, nil
 }
 
 // replacePlaceholder replaces all occurrences of _.PLACEHOLDER_0 in the AST

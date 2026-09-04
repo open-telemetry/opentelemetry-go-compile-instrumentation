@@ -100,6 +100,18 @@
       ],
       enabled: false,
     },
+    {
+      // golangci-lint/v2 v2.13.0 raised its own go directive to 1.26.0,
+      // which forces the same bump onto .tools/go.mod when Renovate
+      // regenerates it. Ignore updates until the toolchain moves to 1.26+.
+      matchManagers: [
+        'gomod',
+      ],
+      matchPackageNames: [
+        'github.com/golangci/golangci-lint/v2',
+      ],
+      enabled: false,
+    },
   ],
   labels: [
     'dependencies',
