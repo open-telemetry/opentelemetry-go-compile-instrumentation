@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"mime"
 	"net/http"
 	"slices"
 	"strconv"
@@ -209,8 +208,8 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			return resp, nil
 		}
 
-		mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-		isStreaming = err == nil && mediaType == "text/event-stream"
+		contentType := strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0])
+		isStreaming = strings.EqualFold(contentType, "text/event-stream")
 
 		if isStreaming {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))

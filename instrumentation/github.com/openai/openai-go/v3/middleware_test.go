@@ -76,8 +76,7 @@ func TestOtelMiddleware_RecordsDuration(t *testing.T) {
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			// A distinct media type with the SSE prefix must remain non-streaming.
-			Header: http.Header{"Content-Type": []string{"text/event-streaming"}},
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
 			Body: io.NopCloser(strings.NewReader(
 				`{"id":"chatcmpl-1","model":"gpt-4","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}`,
 			)),
@@ -92,6 +91,33 @@ func TestOtelMiddleware_RecordsDuration(t *testing.T) {
 	assert.Equal(t, uint64(1), dps[0].Count)
 	_, ok := dps[0].Attributes.Value(attribute.Key("error.type"))
 	assert.False(t, ok, "error.type must not be present on success")
+}
+
+func TestOtelMiddleware_NonStreamingContentTypeWithSSEPrefix(t *testing.T) {
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-streaming"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":"chatcmpl-1","model":"gpt-4","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}`,
+			)),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1, "duration should be recorded for a non-SSE response")
 }
 
 // TestOtelMiddleware_RecordsDurationOnHTTPError verifies the duration is
@@ -170,7 +196,7 @@ func TestOtelMiddleware_RecordsDurationOnStreaming(t *testing.T) {
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"TEXT/EVENT-STREAM; charset=utf-8"}},
+			Header:     http.Header{"Content-Type": []string{"Text/Event-Stream; badparam"}},
 			Body:       io.NopCloser(strings.NewReader(streamData)),
 		}, nil
 	}
