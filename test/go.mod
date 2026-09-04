@@ -17,6 +17,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/cassandra v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/k3s v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.41.0
+	github.com/testcontainers/testcontainers-go/modules/mongodb v0.41.0
 	go.mongodb.org/mongo-driver v1.15.0
 	go.opentelemetry.io/collector/pdata v1.48.0
 	go.opentelemetry.io/otel v1.43.0
