@@ -505,6 +505,39 @@ func TestOtelMiddleware_SSEResponseFallback(t *testing.T) {
 	assert.Equal(t, sse, string(got))
 }
 
+func TestOtelMiddleware_SSEResponseFallbackMixedCaseContentType(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+
+	sse := "event: message_start\ndata: {\"type\":\"message_start\"}\n\n"
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"Text/Event-Stream"}},
+			Body:       io.NopCloser(strings.NewReader(sse)),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assertBoolAttribute(t, spans[0].Attributes(), "gen_ai.request.is_stream", true)
+
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, sse, string(got))
+}
+
 // TestOtelMiddleware_RequestBodyReadError verifies that a failing request body
 // read still passes a reassembled body to the SDK instead of a truncated one.
 func TestOtelMiddleware_RequestBodyReadError(t *testing.T) {
