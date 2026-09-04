@@ -332,11 +332,6 @@ func FindStructType(root *dst.File, name string) *dst.StructType {
 	return nil
 }
 
-// AddStructField appends a field named name of type t to the given struct.
-func AddStructField(st *dst.StructType, name, t string) {
-	st.Fields.List = append(st.Fields.List, Field(name, Ident(t)))
-}
-
 // funcDeclMatchesFilters reports whether funcDecl satisfies all signature
 // sub-filters in r.  Returns true when no sub-filters are set.
 //
