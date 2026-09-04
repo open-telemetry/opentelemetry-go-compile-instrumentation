@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/dave/dst"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
@@ -609,15 +610,8 @@ func invalidInstrumentationImports(
 			}
 			reason = v.Config.Error
 		} else if validate {
-			for _, ruleFile := range v.Config.RuleFiles {
-				content, readErr := os.ReadFile(ruleFile)
-				if readErr != nil {
-					return false, ex.Wrapf(readErr, "reading %s", ruleFile)
-				}
-				if _, parseErr := parseRuleFromYaml(content); parseErr != nil {
-					reason = parseErr
-					break
-				}
+			if validateErr := validateRuleFiles(ctx, v.Config.RuleFiles); validateErr != nil {
+				reason = validateErr
 			}
 		}
 		if reason == nil {
