@@ -132,6 +132,7 @@ The following libraries are automatically instrumented:
 | `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
 | `github.com/linode/linodego/v2` | HTTP client spans and metrics |
 | `log`, `log/slog`, `github.com/sirupsen/logrus` | Trace/span ID log correlation |
+| `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
 
 ## Learn More
 

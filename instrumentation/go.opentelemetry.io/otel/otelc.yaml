@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 # Function hook for go.opentelemetry.io/otel
 hook_set_tracer_provider:
   target: go.opentelemetry.io/otel
