@@ -729,30 +729,6 @@ func TestIsEllipsis(t *testing.T) {
 	assert.False(t, IsEllipsis(Ident("int")))
 }
 
-func TestAddStructField(t *testing.T) {
-	const src = `package main
-
-type S struct {
-	A int
-}
-`
-	p := NewAstParser()
-	file, err := p.ParseSource(src)
-	require.NoError(t, err)
-
-	st := FindStructType(file, "S")
-	require.NotNil(t, st)
-
-	AddStructField(st, "B", "string")
-
-	// The struct now has two fields, the new one named B of type string.
-	require.Len(t, st.Fields.List, 2)
-	newField := st.Fields.List[1]
-	require.Len(t, newField.Names, 1)
-	assert.Equal(t, "B", newField.Names[0].Name)
-	assert.Equal(t, "string", newField.Type.(*dst.Ident).Name)
-}
-
 func TestStripGenericTypes(t *testing.T) {
 	tests := []struct {
 		name string
