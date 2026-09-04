@@ -25,6 +25,7 @@ dist
 
 test/apps/*/app
 test/apps/*/app.exe
+test/apps/*/*.exe
 
 test/.otelc-gocache/
 test/bench/scenarios/*/app

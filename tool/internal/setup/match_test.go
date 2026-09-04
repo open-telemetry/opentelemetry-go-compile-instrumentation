@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -17,8 +18,8 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/tools/go/packages"
-	"gopkg.in/yaml.v3"
 )
 
 func TestNormalizeRule(t *testing.T) {
@@ -414,7 +415,14 @@ func testCreateRuleFromFieldsCase(t *testing.T, tt struct {
 		return // Expected YAML parsing to fail
 	}
 
-	createdRule, err := createRuleFromFields([]byte(tt.yamlContent), tt.ruleName, fields)
+	doc, err := rule.ParseFile([]byte(tt.ruleName + ":\n" + strings.ReplaceAll(tt.yamlContent, "\n", "\n  ")))
+	if err == nil {
+		var rules []rule.InstRule
+		rules, err = doc.Rules()
+		if len(rules) > 0 {
+			validateCreatedRule(t, rules[0], tt.ruleName, fields)
+		}
+	}
 
 	if tt.expectError {
 		if err == nil {
@@ -427,12 +435,6 @@ func testCreateRuleFromFieldsCase(t *testing.T, tt struct {
 		t.Errorf("unexpected error: %v", err)
 		return
 	}
-
-	if createdRule == nil {
-		return
-	}
-
-	validateCreatedRule(t, createdRule, tt.ruleName, fields)
 }
 
 func validateCreatedRule(t *testing.T, createdRule rule.InstRule, ruleName string, fields map[string]any) {
@@ -1162,7 +1164,9 @@ mangle:
   raw: "_ = 1"
 `)
 
-	rules, err := parseRuleFromYaml(yamlContent)
+	doc, err := rule.ParseFile(yamlContent)
+	require.NoError(t, err)
+	rules, err := doc.Rules()
 	require.NoError(t, err)
 	require.Len(t, rules, 3)
 
@@ -1171,6 +1175,55 @@ mangle:
 		names[i] = r.GetName()
 	}
 	require.Equal(t, []string{"alpha", "mangle", "zebra"}, names)
+}
+
+func TestParseRuleFromYamlMinimumVersion(t *testing.T) {
+	doc, err := rule.ParseFile([]byte(`version: "v1.0.0"
+hook:
+  target: main
+  func: Example
+  raw: "_ = 1"
+`))
+	require.NoError(t, err)
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	assert.Equal(t, "hook", rules[0].GetName())
+}
+
+func TestCheckRuleFileVersion(t *testing.T) {
+	t.Run("accepts supported requirement", func(t *testing.T) {
+		doc, parseErr := rule.ParseFile([]byte(`version: "v1.0.0"`))
+		require.NoError(t, parseErr)
+		err := checkRuleFileVersion(t.Context(), "otelc.yaml", doc, "v1.1.0")
+		require.NoError(t, err)
+	})
+
+	t.Run("rejects newer requirement", func(t *testing.T) {
+		doc, parseErr := rule.ParseFile([]byte(`version: "v1.1.0"`))
+		require.NoError(t, parseErr)
+		err := checkRuleFileVersion(t.Context(), "client.otelc.yaml", doc, "v1.0.0")
+		require.ErrorContains(t, err, "client.otelc.yaml")
+		require.ErrorContains(t, err, "requires otelc >= v1.1.0")
+	})
+
+	t.Run("rejects malformed metadata", func(t *testing.T) {
+		_, err := rule.ParseFile([]byte(`version: 1`))
+		require.ErrorContains(t, err, "minimum otelc version must be a string")
+	})
+
+	t.Run("warns for legacy file", func(t *testing.T) {
+		var output bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&output, nil))
+		ctx := util.ContextWithLogger(t.Context(), logger)
+		doc, parseErr := rule.ParseFile([]byte("rule: {}"))
+		require.NoError(t, parseErr)
+		err := checkRuleFileVersion(ctx, "otelc.yaml", doc, util.Version)
+		require.NoError(t, err)
+		assert.Contains(t, output.String(), "no minimum otelc version")
+		assert.Contains(t, output.String(), "otelc.yaml")
+		assert.Contains(t, output.String(), "v1.0.0")
+	})
 }
 
 func TestLoadCustomRulesDeterministicOrder(t *testing.T) {
@@ -1189,7 +1242,7 @@ mangle:
 
 	p := writeCustomRules(t, "order.yaml", content)
 
-	rules, err := loadCustomRules(p)
+	rules, err := loadCustomRules(t.Context(), p)
 	require.NoError(t, err)
 	require.Len(t, rules, 3)
 
@@ -1752,21 +1805,19 @@ func TestMatchOneRule(t *testing.T) {
 }
 
 func TestCreateRuleFromFields_CallRule(t *testing.T) {
-	raw := []byte("target: example.com/x\nfunction_call: net/http.Get\nreplace: tracedGet({{ . }})\n")
-	fields := map[string]any{
-		"target":             "example.com/x",
-		rule.SelFunctionCall: "net/http.Get",
-		"replace":            "tracedGet({{ . }})",
-	}
-
-	r, err := createRuleFromFields(raw, "call-rule", fields)
+	doc, err := rule.ParseFile(
+		[]byte("call-rule:\n  target: example.com/x\n  function_call: net/http.Get\n  replace: tracedGet({{ . }})\n"),
+	)
 	require.NoError(t, err)
-	require.IsType(t, &rule.InstCallRule{}, r)
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.IsType(t, &rule.InstCallRule{}, rules[0])
 }
 
 func TestCreateRuleFromFields_UnrecognizedSelector(t *testing.T) {
-	fields := map[string]any{"target": "example.com/x"}
-	_, err := createRuleFromFields(nil, "bad-rule", fields)
+	doc, err := rule.ParseFile([]byte("bad-rule:\n  target: example.com/x\n"))
+	require.NoError(t, err)
+	_, err = doc.Rules()
 	require.Error(t, err)
 	require.ErrorContains(t, err, "no recognised selector")
 }
@@ -1782,7 +1833,9 @@ func TestParseRuleFromYaml_NormalizeError(t *testing.T) {
         before: BeforeOpen
         path: example.com/hooks
 `)
-	_, err := parseRuleFromYaml(content)
+	doc, err := rule.ParseFile(content)
+	require.NoError(t, err)
+	_, err = doc.Rules()
 	require.Error(t, err)
 	require.ErrorContains(t, err, "target must be top-level")
 }
@@ -1885,7 +1938,7 @@ func TestRulesFromDirWalkError(t *testing.T) {
 
 func TestLoadCustomRulesStatError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
-	_, err := loadCustomRules(filepath.Join(t.TempDir(), "nope.yaml"))
+	_, err := loadCustomRules(t.Context(), filepath.Join(t.TempDir(), "nope.yaml"))
 	require.Error(t, err)
 }
 
