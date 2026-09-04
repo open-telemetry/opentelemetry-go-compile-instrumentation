@@ -310,7 +310,20 @@ func parseMySQLDSN(dsn string) DSNInfo {
 	} else {
 		// Non-standard: no parentheses around the address.
 		// Locate the '/' that separates the address from the database name.
-		if sl := strings.IndexByte(rest, '/'); sl >= 0 {
+		// A unix-socket address is itself an absolute filesystem path and so
+		// contains '/' before the database name does, meaning the first '/'
+		// belongs to the address, not the separator. Every other form here
+		// (tcp, bare host, bare port) has no '/' in the address at all, so
+		// using the last '/' there gives the same split as the first.
+		sep := strings.IndexByte
+		searchIn := rest
+		if isMySQLUnixAddr(rest) {
+			sep = strings.LastIndexByte
+			if q := strings.IndexByte(rest, '?'); q >= 0 {
+				searchIn = rest[:q]
+			}
+		}
+		if sl := sep(searchIn, '/'); sl >= 0 {
 			addrStr = rest[:sl]
 			dbPart = rest[sl:]
 		} else {
@@ -322,6 +335,14 @@ func parseMySQLDSN(dsn string) DSNInfo {
 	host, port := mysqlSplitAddr(addrStr)
 	dbName := mysqlDBName(dbPart)
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
+}
+
+// isMySQLUnixAddr reports whether a non-parenthesized MySQL address begins
+// with the "unix:" protocol keyword, meaning what follows the colon is a
+// filesystem path rather than a host[:port].
+func isMySQLUnixAddr(addr string) bool {
+	colon := strings.IndexByte(addr, ':')
+	return colon >= 0 && addr[:colon] == "unix"
 }
 
 // mysqlKnownProtocols lists the transport keywords used by go-sql-driver/mysql.
