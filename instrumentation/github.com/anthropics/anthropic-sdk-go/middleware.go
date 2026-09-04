@@ -174,8 +174,8 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		// Streaming requests were already passed through above; if the server
 		// still answers with SSE, end the span without response attributes
 		// rather than hold it open on a body we do not accumulate yet.
-		contentType := resp.Header.Get("Content-Type")
-		if strings.HasPrefix(contentType, "text/event-stream") {
+		contentType := strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0])
+		if strings.EqualFold(contentType, "text/event-stream") {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
 			span.End()
 			return resp, nil
