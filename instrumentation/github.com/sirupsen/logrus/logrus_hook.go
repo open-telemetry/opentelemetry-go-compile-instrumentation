@@ -25,11 +25,20 @@ func (l logEnabler) Enable() bool {
 
 var enabler = logEnabler{}
 
+// hookInitMap and fieldInitMap start nil rather than being initialized here.
+// AfterLogrusNew and AfterLogrusWithField are wired via //go:linkname, which
+// doesn't create a normal Go import edge, so this package's own var
+// initializers are not guaranteed to have run by the time a hook fires (for
+// example when logrus's own "var std = New()" triggers AfterLogrusNew during
+// logrus's package init). Assigning through make() here would race that
+// init and could leave the hook writing into a nil map. Each hook lazily
+// initializes its map under hookInitMu instead, which is safe regardless of
+// init order.
 var (
 	hookInitMu    sync.Mutex
-	hookInitMap   = make(map[*logrus.Logger]bool)
-	fieldInitMap  = make(map[*logrus.Logger]bool)
-	formatterInit = false
+	hookInitMap   map[*logrus.Logger]bool
+	fieldInitMap  map[*logrus.Logger]bool
+	formatterInit bool
 )
 
 type traceHook struct{}
@@ -61,6 +70,9 @@ func AfterLogrusNew(ictx hook.HookContext, logger *logrus.Logger) {
 	hookInitMu.Lock()
 	defer hookInitMu.Unlock()
 
+	if hookInitMap == nil {
+		hookInitMap = make(map[*logrus.Logger]bool)
+	}
 	if hookInitMap[logger] {
 		return
 	}
@@ -77,6 +89,9 @@ func AfterLogrusWithField(ictx hook.HookContext, entry *logrus.Entry) {
 	hookInitMu.Lock()
 	defer hookInitMu.Unlock()
 
+	if fieldInitMap == nil {
+		fieldInitMap = make(map[*logrus.Logger]bool)
+	}
 	if fieldInitMap[entry.Logger] {
 		return
 	}
