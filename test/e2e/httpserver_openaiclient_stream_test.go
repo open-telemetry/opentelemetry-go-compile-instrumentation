@@ -6,7 +6,6 @@
 package test
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,8 +17,8 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
-func TestHTTPServerOpenAIClient(t *testing.T) {
-	server := startMockOpenAIServer(t)
+func TestHTTPServerOpenAIClientStreaming(t *testing.T) {
+	server := startMockOpenAIStreamingServer(t)
 
 	f := testutil.NewTestFixture(t)
 
@@ -30,6 +29,7 @@ func TestHTTPServerOpenAIClient(t *testing.T) {
 		"httpserveropenaiclient",
 		fmt.Sprintf("-front-port=%d", frontPort),
 		fmt.Sprintf("-addr=%s/v1", server.URL),
+		"-stream",
 	)
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", frontPort))
 
@@ -40,7 +40,7 @@ func TestHTTPServerOpenAIClient(t *testing.T) {
 	f.WaitForSpans(3)
 
 	// One distributed trace with three spans:
-	// HTTP client -> HTTP server -> OpenAI client
+	// HTTP client -> HTTP server -> streaming OpenAI client
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(3)
 
@@ -56,6 +56,7 @@ func TestHTTPServerOpenAIClient(t *testing.T) {
 	genAISpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsClient,
 		testutil.HasAttribute("gen_ai.system", "openai"),
+		testutil.HasAttribute("gen_ai.request.is_stream", true),
 	)
 
 	require.Equal(t, httpClientSpan.TraceID(), httpServerSpan.TraceID(), "HTTP client and server must share a trace ID")
@@ -70,59 +71,26 @@ func TestHTTPServerOpenAIClient(t *testing.T) {
 	require.True(t, httpClientSpan.ParentSpanID().IsEmpty(), "HTTP client span must be the trace root")
 }
 
-type openAIChatCompletionRequest struct {
-	Model  string `json:"model"`
-	Stream bool   `json:"stream"`
-}
-
-func startMockOpenAIChatCompletionsServer(
-	t *testing.T,
-	handle func(w http.ResponseWriter, req openAIChatCompletionRequest),
-) *httptest.Server {
-	t.Helper()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		var reqBody openAIChatCompletionRequest
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		handle(w, reqBody)
-	})
-
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
-}
-
-func startMockOpenAIServer(t *testing.T) *httptest.Server {
+func startMockOpenAIStreamingServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	return startMockOpenAIChatCompletionsServer(t, func(w http.ResponseWriter, req openAIChatCompletionRequest) {
-		w.Header().Set("Content-Type", "application/json")
-		resp := map[string]any{
-			"id":     "chatcmpl-test-123",
-			"object": "chat.completion",
-			"model":  req.Model,
-			"choices": []map[string]any{
-				{
-					"index": 0,
-					"message": map[string]any{
-						"role":    "assistant",
-						"content": "Hello!",
-					},
-					"finish_reason": "stop",
-				},
-			},
-			"usage": map[string]any{
-				"prompt_tokens":     10,
-				"completion_tokens": 20,
-				"total_tokens":      30,
-			},
+		if !req.Stream {
+			http.Error(w, "expected stream=true", http.StatusBadRequest)
+			return
 		}
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Errorf("failed to encode response: %v", err)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		// Shape matches instrumentation/github.com/openai/openai-go middleware streaming tests.
+		streamData := fmt.Sprintf(
+			"data: {\"id\":\"chatcmpl-stream\",\"model\":%q,\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n"+
+				"data: {\"id\":\"chatcmpl-stream\",\"model\":%q,\"choices\":[{\"delta\":{\"content\":\"!\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n"+
+				"data: [DONE]\n\n",
+			req.Model,
+			req.Model,
+		)
+		if _, err := w.Write([]byte(streamData)); err != nil {
+			t.Errorf("failed to write stream response: %v", err)
 		}
 	})
 }
