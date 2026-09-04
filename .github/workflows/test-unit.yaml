@@ -5,7 +5,8 @@ on:
       - main
   pull_request:
 # Declare default permissions as read only.
-permissions: read-all
+permissions:
+  contents: read
 jobs:
   # This is a required workflow, so it must always run and report a status.
   # We use dorny/paths-filter at the job level instead of workflow-level path filters
@@ -22,6 +23,8 @@ jobs:
       pkg: ${{ steps.filter.outputs.pkg }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
         id: filter
         with:
@@ -50,6 +53,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - name: Install Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
@@ -97,6 +102,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
       - name: Install Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
@@ -116,7 +123,7 @@ jobs:
       - name: Check result
         run: |
           changes_result="${{ needs.changes.result }}"
-          code_changed="${{ needs.changes.outputs.code }}"
+          code_changed="${NEEDS_CHANGES_OUTPUTS_CODE}"
           coverage_result="${{ needs.test-unit-coverage.result }}"
           unit_result="${{ needs.test-unit.result }}"
           echo "Changes result: $changes_result"
@@ -141,3 +148,5 @@ jobs:
           fi
           echo "❌ Tests failed"
           exit 1
+        env:
+          NEEDS_CHANGES_OUTPUTS_CODE: ${{ needs.changes.outputs.code }}
