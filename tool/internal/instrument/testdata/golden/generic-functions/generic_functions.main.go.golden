@@ -5,7 +5,7 @@ package main
 
 import _ "unsafe"
 
-func GenericFunc[T any](p1 T, p2 int) (_unnamedRetVal_1523734358_0 T, _unnamedRetVal_1523734358_1 error) {
+func GenericFunc[T any](p1 []T, p2 ...T) (_unnamedRetVal_1523734358_0 []T, _unnamedRetVal_1523734358_1 error) {
 	//line <generated>:1
 	if hookContext1523734358, _ := OtelBeforeTrampoline_GenericFunc1523734358[T](&p1, &p2); false {
 	} else {
@@ -88,7 +88,7 @@ func (c *HookContextImpl1523734358) GetFuncName() string    { return c.funcName 
 func (c *HookContextImpl1523734358) GetPackageName() string { return c.packageName }
 
 // Trampoline Template
-func OtelBeforeTrampoline_GenericFunc1523734358[T any](param0 *T, param1 *int) (hookContext *HookContextImpl1523734358, skipCall bool) {
+func OtelBeforeTrampoline_GenericFunc1523734358[T any](param0 *[]T, param1 *[]T) (hookContext *HookContextImpl1523734358, skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "GenericFuncBefore")
@@ -111,7 +111,7 @@ func OtelBeforeTrampoline_GenericFunc1523734358[T any](param0 *T, param1 *int) (
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, arg0 *T, arg1 *error) {
+func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, arg0 *[]T, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "GenericFuncAfter")
@@ -131,7 +131,7 @@ func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, a
 }
 
 //go:linkname GenericFuncBefore testdata/golden/generic-functions.GenericFuncBefore
-func GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 int)
+func GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 interface{})
 
 //go:linkname GenericFuncAfter testdata/golden/generic-functions.GenericFuncAfter
 func GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)

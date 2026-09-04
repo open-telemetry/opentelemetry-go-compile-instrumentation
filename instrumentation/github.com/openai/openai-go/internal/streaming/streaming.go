@@ -41,6 +41,7 @@ type StreamingReader struct {
 	reasons       []string
 	span          trace.Span
 	op            OperationType
+	onDone        func()
 	done          atomic.Bool
 }
 
@@ -49,12 +50,18 @@ func NewStreamingReader(
 	span trace.Span,
 	start time.Time,
 	op OperationType,
+	onDone ...func(),
 ) *StreamingReader {
+	var cb func()
+	if len(onDone) > 0 {
+		cb = onDone[0]
+	}
 	return &StreamingReader{
 		reader: body,
 		start:  start,
 		span:   span,
 		op:     op,
+		onDone: cb,
 	}
 }
 
@@ -115,6 +122,9 @@ func (r *StreamingReader) finalize(flush bool) {
 	}
 
 	r.span.End()
+	if r.onDone != nil {
+		r.onDone()
+	}
 }
 
 // flushRemaining parses whatever is left in lineBuffer as a final line. The
