@@ -133,15 +133,15 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	resolvedNames map[string]string,
 ) (*dst.FuncDecl, bool, error) {
 	var (
-		funcName       string
-		recv           string
-		matchSignature bool
+		funcName string
+		recv     string
+		funcRule *rule.InstFuncRule
 	)
 	switch rr := any(r).(type) {
 	case *rule.InstFuncRule:
 		funcName = rr.Func
 		recv = rr.Recv
-		matchSignature = true
+		funcRule = rr
 	case *rule.InstRawRule:
 		funcName = rr.Func
 		recv = rr.Recv
@@ -155,15 +155,11 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 		return nil, false, nil
 	}
 
-	if !matchSignature {
+	if funcRule == nil {
 		return funcDecl, true, nil
 	}
 
-	rr, ok := any(r).(*rule.InstFuncRule)
-	if !ok {
-		return nil, false, ex.Newf("unexpected %T value", r)
-	}
-	ok, err := funcDeclMatchesFilters(funcDecl, rr, root, resolvedNames)
+	ok, err := funcDeclMatchesFilters(funcDecl, funcRule, root, resolvedNames)
 	if err != nil {
 		return nil, false, err
 	}

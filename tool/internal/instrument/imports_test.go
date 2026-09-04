@@ -259,3 +259,230 @@ func TestUpdateImportConfigForFile(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// --- resolveImportOverrides tests ---
+
+func TestResolveImportOverrides_NoRuleImportsProducesNoOverrides(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {}
+`)
+
+	ip := newTestPhase()
+	importAliases, overrides := ip.resolveImportOverrides(root, nil)
+
+	assert.Empty(t, importAliases)
+	assert.Empty(t, overrides)
+}
+
+func TestResolveImportOverrides_ReturnsBothFileAliasesAndOverrides(t *testing.T) {
+	root := parseFile(t, `package main
+
+import f "fmt"
+
+func run() {}
+`)
+
+	ip := newTestPhase()
+	importAliases, overrides := ip.resolveImportOverrides(root, map[string]string{"traced": "fmt"})
+
+	require.Equal(t, "fmt", importAliases["f"])
+	assert.Equal(t, map[string]string{"traced": "f"}, overrides)
+}
+
+// --- resolveAliasOverrides tests ---
+
+func TestResolveAliasOverrides_MismatchProducesOverride(t *testing.T) {
+	ruleImports := map[string]string{"traced": "fmt"}
+	existingAliases := map[string]string{"fmt": "f"}
+
+	overrides := resolveAliasOverrides(ruleImports, existingAliases)
+
+	assert.Equal(t, map[string]string{"traced": "f"}, overrides)
+}
+
+func TestResolveAliasOverrides_MatchingAliasProducesNoOverride(t *testing.T) {
+	ruleImports := map[string]string{"redis": "github.com/redis/go-redis/v9"}
+	existingAliases := map[string]string{"github.com/redis/go-redis/v9": "redis"}
+
+	overrides := resolveAliasOverrides(ruleImports, existingAliases)
+
+	assert.Empty(t, overrides)
+}
+
+func TestResolveAliasOverrides_PathNotYetImportedProducesNoOverride(t *testing.T) {
+	ruleImports := map[string]string{"redis": "github.com/redis/go-redis/v9"}
+	existingAliases := map[string]string{} // path not present in the file yet
+
+	overrides := resolveAliasOverrides(ruleImports, existingAliases)
+
+	assert.Empty(t, overrides)
+}
+
+func TestResolveAliasOverrides_DotAndBlankAliasesAreExempt(t *testing.T) {
+	ruleImports := map[string]string{".": "fmt", "_": "net/http"}
+	existingAliases := map[string]string{"fmt": "f", "net/http": "h"}
+
+	overrides := resolveAliasOverrides(ruleImports, existingAliases)
+
+	assert.Empty(t, overrides, "'.' and '_' aliases must never be substituted")
+}
+
+// --- replaceQualifierAliases tests ---
+
+func TestReplaceQualifierAliases_RewritesMatchingQualifiers(t *testing.T) {
+	expr := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "traced"},
+			Sel: &dst.Ident{Name: "Call"},
+		},
+		Args: []dst.Expr{
+			&dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "Option"}},
+			&dst.Ident{Name: "unrelated"},
+		},
+	}
+
+	replaceQualifierAliases(expr, map[string]string{"traced": "f"})
+
+	sel := expr.Fun.(*dst.SelectorExpr)
+	assert.Equal(t, "f", sel.X.(*dst.Ident).Name)
+	argSel := expr.Args[0].(*dst.SelectorExpr)
+	assert.Equal(t, "f", argSel.X.(*dst.Ident).Name)
+	assert.Equal(t, "unrelated", expr.Args[1].(*dst.Ident).Name)
+}
+
+func TestReplaceQualifierAliases_NoOverridesLeavesExprUntouched(t *testing.T) {
+	expr := &dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "Call"}}
+
+	replaceQualifierAliases(expr, nil)
+
+	assert.Equal(t, "traced", expr.X.(*dst.Ident).Name)
+}
+
+func TestReplaceQualifierAliases_NonIdentQualifier(t *testing.T) {
+	expr := &dst.SelectorExpr{
+		X: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "traced"},
+			Sel: &dst.Ident{Name: "Sub"},
+		},
+		Sel: &dst.Ident{Name: "Call"},
+	}
+
+	replaceQualifierAliases(expr, map[string]string{"traced": "f"})
+
+	inner := expr.X.(*dst.SelectorExpr)
+	assert.Equal(t, "f", inner.X.(*dst.Ident).Name, "the nested identifier must still be rewritten")
+	assert.Equal(t, "Sub", inner.Sel.Name)
+	assert.Equal(t, "Call", expr.Sel.Name)
+}
+
+// --- usedRuleImports tests ---
+
+func TestUsedRuleImports_BlankAndDotAliasesAlwaysKept(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {}
+`)
+	ruleImports := map[string]string{
+		"_": "example.com/sideeffect",
+		".": "example.com/dotimport",
+	}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Equal(t, ruleImports, used)
+}
+
+func TestUsedRuleImports_OnlyReferencedAliasesKept(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	traced.Call()
+}
+`)
+	ruleImports := map[string]string{
+		"traced":    "fmt",
+		"unrelated": "example.com/unrelated",
+	}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
+}
+
+func TestUsedRuleImports_EmptyRuleImports(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {}
+`)
+
+	used := usedRuleImports(root, nil)
+
+	assert.Nil(t, used)
+}
+
+func TestUsedRuleImports_PlainIdentifierWithoutSelector(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	use(traced)
+}
+`)
+	ruleImports := map[string]string{"traced": "fmt"}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Empty(t, used)
+}
+
+func TestUsedRuleImports_ChainedSelector(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	pkg.traced.Call()
+}
+`)
+	ruleImports := map[string]string{"traced": "fmt"}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Empty(t, used)
+}
+
+func TestUsedRuleImports_MultipleReferencesCountedOnce(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	traced.Call()
+	traced.Call()
+}
+`)
+	ruleImports := map[string]string{"traced": "fmt"}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
+}
+
+func TestUsedRuleImports_MixedAliasKinds(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	traced.Call()
+}
+`)
+	ruleImports := map[string]string{
+		"traced": "fmt",
+		"unused": "example.com/unused",
+		"_":      "example.com/sideeffect",
+		".":      "example.com/dotimport",
+	}
+
+	used := usedRuleImports(root, ruleImports)
+
+	assert.Equal(t, map[string]string{
+		"traced": "fmt",
+		"_":      "example.com/sideeffect",
+		".":      "example.com/dotimport",
+	}, used)
+}

@@ -10,7 +10,6 @@ import (
 	"github.com/dave/dst/dstutil"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -18,16 +17,7 @@ import (
 // applyCallRule transforms function calls at call sites by wrapping them with
 // instrumentation code according to the provided replacement template.
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
-	importAliases := ast.ImportAliasMap(root, ip.importNames)
-
-	// The target file can already import a rule path under an alias the
-	// rule does not expect. aliasOverrides holds the file's alias for
-	// each such path, derived from importAliases.
-	existingAliases := make(map[string]string, len(importAliases))
-	for alias, path := range importAliases {
-		existingAliases[path] = alias
-	}
-	aliasOverrides := resolveAliasOverrides(r.Imports, existingAliases)
+	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
 	appendModified := ip.applyCallAppendArgs(r, root, importAliases, aliasOverrides)
 
@@ -50,41 +40,6 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 	ip.Info("Apply call rule", "rule", r)
 
 	return nil
-}
-
-// usedRuleImports returns the subset of ruleImports whose alias is actually
-// referenced somewhere in root. It must be called after the rule's append_args/replace
-// modifications have already been applied to root.
-//
-// Blank ("_") and dot (".") aliases are always kept.
-func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]string {
-	if len(ruleImports) == 0 {
-		return nil
-	}
-
-	used := make(map[string]string, len(ruleImports))
-	for alias, path := range ruleImports {
-		if alias == "_" || alias == "." {
-			used[alias] = path
-		}
-	}
-
-	dst.Inspect(root, func(node dst.Node) bool {
-		sel, ok := node.(*dst.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, identOk := sel.X.(*dst.Ident)
-		if !identOk {
-			return true
-		}
-		if path, importOk := ruleImports[ident.Name]; importOk {
-			used[ident.Name] = path
-		}
-		return true
-	})
-
-	return used
 }
 
 // walkCallsWithEnclosingFunc visits every *dst.CallExpr in root and invokes fn
@@ -290,59 +245,6 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 
 	resolvedPath, ok := importAliases[ident.Name]
 	return ok && resolvedPath == importPath
-}
-
-// resolveAliasOverrides reports the alias to substitute for each rule
-// import already present in the target file under a different alias.
-// Substituting the file's alias into generated code, instead of the
-// rule's alias, avoids a build failure.
-//
-// existingAliases must resolve an unaliased import to its real name,
-// not a guess. A guessed name can be illegal as a Go identifier.
-//
-// The dot alias and the blank alias are exempt from substitution.
-func resolveAliasOverrides(ruleImports, existingAliases map[string]string) map[string]string {
-	var overrides map[string]string
-	for ruleAlias, importPath := range ruleImports {
-		if ruleAlias == "." || ruleAlias == "_" {
-			continue
-		}
-		existingAlias, ok := existingAliases[importPath]
-		if !ok || existingAlias == ruleAlias || existingAlias == "." || existingAlias == "_" {
-			continue
-		}
-		if overrides == nil {
-			overrides = make(map[string]string, len(ruleImports))
-		}
-		overrides[ruleAlias] = existingAlias
-	}
-	return overrides
-}
-
-// replaceQualifierAliases rewrites a freshly generated expression to
-// use the file's alias for an import, instead of the rule's alias.
-// overrides maps each rule alias to the file's alias.
-//
-// replaceQualifierAliases only touches the node passed in. The rewrite
-// cannot reach unrelated code that shares an identifier name.
-func replaceQualifierAliases(node dst.Node, overrides map[string]string) {
-	if len(overrides) == 0 {
-		return
-	}
-	dst.Inspect(node, func(n dst.Node) bool {
-		sel, ok := n.(*dst.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, ok := sel.X.(*dst.Ident)
-		if !ok {
-			return true
-		}
-		if existingAlias, override := overrides[ident.Name]; override {
-			ident.Name = existingAlias
-		}
-		return true
-	})
 }
 
 // buildEllipsisIIFE constructs the IIFE that appends new args to a spread argument:
