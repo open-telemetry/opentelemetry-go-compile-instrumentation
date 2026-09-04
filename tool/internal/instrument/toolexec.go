@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"maps"
 	"os"
@@ -538,6 +537,35 @@ func interceptToolCommand(ctx context.Context, args []string) ([]string, error) 
 	return args, nil
 }
 
+// nestedToolexecGoflagsToken builds the GOFLAGS-safe -toolexec token for
+// execPath. Split out from EnableNestedToolexec so the error paths (only
+// reachable when execPath itself contains quote characters) are testable
+// without depending on os.Executable.
+func nestedToolexecGoflagsToken(execPath string) (string, error) {
+	// Quoted twice on purpose: the inner quote keeps a spaced path intact when
+	// cmd/go splits the -toolexec value, the outer one keeps the whole flag a
+	// single token when cmd/go splits GOFLAGS.
+	innerFlag, err := util.BuildToolexecFlag(execPath)
+	if err != nil {
+		// BuildToolexecFlag's own error is already stackful and already names
+		// execPath, so there is nothing to add here; see #1231.
+		return "", err
+	}
+	toolexecFlag, err := util.QuoteGoflagsToken(innerFlag)
+	if err != nil {
+		// Reachable whenever the finished flag holds both quote characters:
+		// the inner quoting supplies one kind to keep a spaced path together,
+		// and a quote already in execPath supplies the other. GOFLAGS is split
+		// by cmd/internal/quoted.Split, which has no escape syntax, so such a
+		// token simply cannot be represented there.
+		return "", ex.Wrapf(err, "otelc's own path %q cannot be passed to nested "+
+			"go commands through GOFLAGS, because quoting it there would need "+
+			"both quote characters and GOFLAGS has no way to escape either; "+
+			"reinstall otelc under a path without quote characters", execPath)
+	}
+	return toolexecFlag, nil
+}
+
 // EnableNestedToolexec points GOFLAGS at this executable in nested mode, so go
 // commands this process spawns (e.g. `go list -export`) run through a
 // version-only otelc toolexec and share this build's cache keys. Any existing
@@ -548,9 +576,9 @@ func EnableNestedToolexec() error {
 	if err != nil {
 		return ex.Wrapf(err, "resolving otelc executable path")
 	}
-	toolexecFlag, err := util.QuoteGoflagsToken(fmt.Sprintf("-toolexec=%s toolexec", execPath))
+	toolexecFlag, err := nestedToolexecGoflagsToken(execPath)
 	if err != nil {
-		return ex.Wrapf(err, "quoting nested toolexec GOFLAGS entry")
+		return err
 	}
 	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + " " + toolexecFlag)
 	if err = os.Setenv("GOFLAGS", goflags); err != nil {
