@@ -66,3 +66,13 @@ func assertSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, 
 	}
 	t.Errorf("attribute %q not found", key)
 }
+
+func assertNoAttribute(t *testing.T, attrs []attribute.KeyValue, key string) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			t.Errorf("attribute %q should not be present, got %v", key, attr.Value.Emit())
+			return
+		}
+	}
+}
