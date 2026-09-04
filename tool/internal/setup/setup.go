@@ -132,6 +132,10 @@ const (
 	subcmdBuild   = "build"
 	subcmdInstall = "install"
 	subcmdTest    = "test"
+
+	goModFileName = "go.mod"
+	vendorDirName = "vendor"
+	flagMod       = "-mod"
 )
 
 // GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
@@ -444,7 +448,7 @@ var buildContextFlagsWithValue = map[string]bool{
 	"-C":       true, // Change directory before running the command
 	"-overlay": true, // JSON overlay file used by go list/build
 	"-tags":    true, // build tags
-	"-mod":     true, // Module mode (vendor, mod, readonly)
+	flagMod:    true, // Module mode (vendor, mod, readonly)
 	"-modfile": true, // Custom go.mod file
 }
 

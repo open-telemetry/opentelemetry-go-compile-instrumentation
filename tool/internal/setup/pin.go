@@ -171,8 +171,6 @@ type yamlRule struct {
 	VersionRange string `yaml:"version"`
 }
 
-const goModFile = "go.mod"
-
 func loadModuleRules(
 	ctx context.Context,
 	moduleDir, module, currentVersion string,
@@ -185,7 +183,7 @@ func loadModuleRules(
 
 		if d.IsDir() {
 			// Skip any submodules
-			if path != moduleDir && util.PathExists(filepath.Join(path, goModFile)) {
+			if path != moduleDir && util.PathExists(filepath.Join(path, goModFileName)) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -235,7 +233,7 @@ func loadMinimalRules(
 		// rulesRoot is instrumentation/
 		// We want to load rules for submodules within instrumentation/
 		// Look for go.mod nested within instrumentation/
-		if d.IsDir() || d.Name() != goModFile || filepath.Dir(path) == rulesRoot {
+		if d.IsDir() || d.Name() != goModFileName || filepath.Dir(path) == rulesRoot {
 			return nil
 		}
 
@@ -277,7 +275,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 }
 
 func ensureOtelcRequire(moduleDir, version string) (bool, error) {
-	goModPath := filepath.Join(moduleDir, goModFile)
+	goModPath := filepath.Join(moduleDir, goModFileName)
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return false, ex.Wrap(err)
