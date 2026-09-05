@@ -91,6 +91,10 @@ func TestForceModMod(t *testing.T) {
 		// following -mod flag is still recognized and not clobbered.
 		{"spaced quoted flag before quoted mod", "-tags='foo bar' '-mod=readonly'", "-tags='foo bar' '-mod=readonly'"},
 		{"spaced quoted flag no mod appends once", "-tags='foo bar'", "-tags='foo bar' -mod=mod"},
+		// The go command strips only a surrounding quote pair, so -mod='vendor' keeps
+		// its quoted value and is not a -mod=vendor token. It stays as written and go
+		// rejects the value later.
+		{"value-quoted vendor preserved; go rejects it later", "-mod='vendor'", "-mod='vendor'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
