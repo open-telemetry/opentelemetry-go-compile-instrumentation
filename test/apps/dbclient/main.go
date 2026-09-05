@@ -19,7 +19,7 @@ import (
 var (
 	driverName = flag.String("driver", "testdb", "The database driver name")
 	dsn        = flag.String("dsn", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", "The data source name")
-	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-fail, prepare, opendb, all")
+	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, opendb, all")
 )
 
 func main() {
@@ -54,6 +54,8 @@ func main() {
 		doQuery(ctx, db)
 	case "tx":
 		doTx(ctx, db)
+	case "tx-rollback":
+		doTxRollback(ctx, db)
 	case "tx-fail":
 		// Use a dedicated db connection with the fail-tx driver.
 		// The outer 'db' uses the default driver, so we open a new one here.
@@ -143,6 +145,22 @@ func doTx(ctx context.Context, db *sql.DB) {
 		log.Fatalf("failed to commit: %v", err)
 	}
 	slog.Info("transaction committed")
+}
+
+// doTxRollback exercises a deliberate rollback (not one taken on an ExecContext
+// error, as doTx's is), to isolate the ROLLBACK span for issue #1187 assertions.
+func doTxRollback(ctx context.Context, db *sql.DB) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Fatalf("failed to begin tx: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO orders (user_id, amount) VALUES (?, ?)", 1, 99.99); err != nil {
+		log.Fatalf("failed to exec in tx: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		log.Fatalf("failed to rollback: %v", err)
+	}
+	slog.Info("transaction rolled back")
 }
 
 func doTxFail(ctx context.Context, db *sql.DB) {
