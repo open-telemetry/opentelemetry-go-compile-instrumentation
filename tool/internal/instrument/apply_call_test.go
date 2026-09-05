@@ -255,6 +255,68 @@ func Handler(name string) {
 	assert.Equal(t, "name", nameArg.Name)
 }
 
+func TestApplyCallRule_TypeHelpersUseFileImports(t *testing.T) {
+	t.Run("aliased import", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import althttp "net/http"
+
+func Handler(r *althttp.Request) (resp *althttp.Request, err error) {
+	althttp.Get("url")
+	return r, nil
+}
+`)
+		r := httpGetRule(`traced({{ .FuncArgumentOfType "*net/http.Request" }}, {{ .FuncReturnOfType "*net/http.Request" }}, {{ . }})`)
+
+		err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+		require.NoError(t, err)
+		handler := findFuncDeclInFile(t, root, "Handler")
+		outerCall, ok := handler.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
+		require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", handler.Body.List[0].(*dst.ExprStmt).X)
+		require.Len(t, outerCall.Args, 3)
+		assert.Equal(t, "r", outerCall.Args[0].(*dst.Ident).Name)
+		assert.Equal(t, "resp", outerCall.Args[1].(*dst.Ident).Name)
+	})
+
+	t.Run("disambiguates shared default package name", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import (
+	"fmt"
+	htmltemplate "html/template"
+	"text/template"
+)
+
+func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
+	fmt.Println("x")
+	return nil, nil
+}
+`)
+		r := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "wrap_println"},
+			FunctionCall: "fmt.Println",
+			ImportPath:   "fmt",
+			FuncName:     "Println",
+			Replace:      `traced({{ .FuncArgumentOfType "*text/template.Template" }}, "{{ .FuncArgumentOfType "*html/template.Template" }}", {{ .FuncReturnOfType "*html/template.Template" }}, "{{ .FuncReturnOfType "*text/template.Template" }}", {{ . }})`,
+		}
+
+		err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+		require.NoError(t, err)
+		handler := findFuncDeclInFile(t, root, "Handler")
+		outerCall, ok := handler.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
+		require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", handler.Body.List[0].(*dst.ExprStmt).X)
+		require.Len(t, outerCall.Args, 5)
+		assert.Equal(t, "t", outerCall.Args[0].(*dst.Ident).Name)
+		assert.Equal(t, `""`, outerCall.Args[1].(*dst.BasicLit).Value,
+			"text/template.Template must not match *html/template.Template")
+		assert.Equal(t, "page", outerCall.Args[2].(*dst.Ident).Name)
+		assert.Equal(t, `""`, outerCall.Args[3].(*dst.BasicLit).Value,
+			"html/template.Template must not match *text/template.Template")
+	})
+}
+
 func TestApplyCallRule_ConditionalReplace(t *testing.T) {
 	replace := `{{- $ctx := .FuncArgumentOfType "context.Context" -}}
 {{- if $ctx -}}
