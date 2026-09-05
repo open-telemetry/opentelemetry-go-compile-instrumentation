@@ -934,6 +934,51 @@ func TestExtractReceiverTypeParamsConstraint_MultipleParams(t *testing.T) {
 	}
 }
 
+// TestExtractReceiverTypeParamsConstraint_NameCollision covers a declaration
+// whose type parameter shares its name with the selector of a qualified
+// constraint. Remapping to the receiver's names must rewrite only genuine type
+// parameter references, so fmt.Stringer keeps its selector instead of becoming
+// the nonexistent fmt.A.
+func TestExtractReceiverTypeParamsConstraint_NameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, `import "fmt"`,
+		"type GenStruct[Stringer any, V fmt.Stringer] struct{}",
+		"GenStruct[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 2)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+
+	sel, ok := params.List[1].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected the constraint to be a package-qualified selector")
+	pkgIdent, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "fmt", pkgIdent.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name,
+		"the selector names fmt.Stringer and must not be renamed to the receiver's parameter")
+}
+
+// TestExtractReceiverTypeParamsConstraint_MethodNameCollision covers the same
+// hazard for a name a constraint declares rather than references: an interface
+// method whose name matches a type parameter must keep its own name.
+func TestExtractReceiverTypeParamsConstraint_MethodNameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type GenStruct[T any, V interface{ T() string }] struct{}",
+		"GenStruct[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 2)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+
+	iface, ok := params.List[1].Type.(*dst.InterfaceType)
+	require.True(t, ok, "expected the constraint to be an interface")
+	require.Len(t, iface.Methods.List, 1)
+	require.Len(t, iface.Methods.List[0].Names, 1)
+	assert.Equal(t, "T", iface.Methods.List[0].Names[0].Name,
+		"the interface declares the method name and must not be renamed")
+}
+
 // TestReceiverBaseTypeName_NonIdent covers the defensive fallback directly: a
 // non-identifier base expression, which no valid Go receiver form actually
 // produces, returns "" rather than panicking.
@@ -984,4 +1029,50 @@ func TestExtractReceiverTypeParamsNestedPointer(t *testing.T) {
 
 	require.NotNil(t, params)
 	assert.Equal(t, []string{"T"}, typeParamNames(t, params))
+}
+
+// TestExtractReceiverTypeParamsConstraint_RenamedInterParam covers a receiver
+// that renames the type parameters while a constraint refers to a sibling
+// parameter. type M[K any, V ~[]K] used as func (m M[A, B]) must recover V's
+// constraint as ~[]A, following the receiver's names, not the declaration's ~[]K.
+// A verbatim ~[]K would refer to a name the trampoline never declares and would
+// not compile.
+func TestExtractReceiverTypeParamsConstraint_RenamedInterParam(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type M[K any, V ~[]K] struct{ k K; v V }", "M[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+	require.Len(t, params.List, 2)
+
+	// The second parameter's constraint is ~[]A: a ~ over a slice of the first
+	// receiver parameter, re-scoped from the declaration's ~[]K.
+	tilde, ok := params.List[1].Type.(*dst.UnaryExpr)
+	require.True(t, ok, "constraint should be a ~ expression")
+	slice, ok := tilde.X.(*dst.ArrayType)
+	require.True(t, ok, "constraint should be ~[]T")
+	elem, ok := slice.Elt.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "A", elem.Name,
+		"inter-parameter constraint must use the receiver name A, not the declaration name K")
+}
+
+// TestTypeParamDeclNames covers the positional flattening directly: a nil list
+// yields no names, a grouped field (type M[K, V any] declares K then V under
+// one field) contributes each name in order, and a field with no names, which
+// valid Go does not produce, still advances by one empty slot rather than being
+// dropped.
+func TestTypeParamDeclNames(t *testing.T) {
+	assert.Nil(t, typeParamDeclNames(nil))
+
+	params := &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{ast.Ident("K"), ast.Ident("V")}, Type: ast.Ident("any")},
+			{Names: nil, Type: ast.Ident("comparable")},
+			{Names: []*dst.Ident{ast.Ident("T")}, Type: ast.Ident("any")},
+		},
+	}
+
+	assert.Equal(t, []string{"K", "V", "", "T"}, typeParamDeclNames(params))
 }
