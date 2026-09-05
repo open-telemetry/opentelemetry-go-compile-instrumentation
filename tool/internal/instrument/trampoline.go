@@ -1003,11 +1003,40 @@ func remapConstraintNames(constraint dst.Expr, nameMap map[string]string) dst.Ex
 	if len(nameMap) == 0 {
 		return constraint
 	}
+	// Not every identifier inside a constraint references a type parameter.
+	// A qualified type names a package and a symbol (the fmt and Stringer in
+	// fmt.Stringer), and an interface method or struct field declares its own
+	// name. Those positions belong to unrelated symbols that may happen to
+	// match a declaration parameter's name, so renaming them would rewrite the
+	// wrong thing: with type M[Stringer any, V fmt.Stringer] and receiver
+	// M[A, B], a blanket rename turns fmt.Stringer into the nonexistent fmt.A.
+	// Collect them first, then rename only what is left.
+	named := make(map[*dst.Ident]struct{})
 	dst.Inspect(constraint, func(node dst.Node) bool {
-		if ident, ok := node.(*dst.Ident); ok {
-			if renamed, found := nameMap[ident.Name]; found {
-				ident.Name = renamed
+		switch n := node.(type) {
+		case *dst.SelectorExpr:
+			named[n.Sel] = struct{}{}
+			if pkg, ok := n.X.(*dst.Ident); ok {
+				named[pkg] = struct{}{}
 			}
+		case *dst.Field:
+			for _, name := range n.Names {
+				named[name] = struct{}{}
+			}
+		}
+		return true
+	})
+
+	dst.Inspect(constraint, func(node dst.Node) bool {
+		ident, ok := node.(*dst.Ident)
+		if !ok {
+			return true
+		}
+		if _, isName := named[ident]; isName {
+			return true
+		}
+		if renamed, found := nameMap[ident.Name]; found {
+			ident.Name = renamed
 		}
 		return true
 	})
