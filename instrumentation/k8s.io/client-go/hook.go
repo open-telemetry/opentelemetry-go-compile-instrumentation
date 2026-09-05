@@ -78,11 +78,6 @@ func beforeProcessDeltas(
 }
 
 func afterProcessDeltas(ictx hook.HookContext, err error) {
-	if !k8SEnabler.Enable() {
-		logger.Debug("K8S client-go instrumentation disabled")
-		return
-	}
-
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("afterProcessDeltas: no span from before hook")
@@ -127,11 +122,6 @@ func beforeProcessDeltasInBatch(
 }
 
 func afterProcessDeltasInBatch(ictx hook.HookContext, err error) {
-	if !k8SEnabler.Enable() {
-		logger.Debug("K8S client-go instrumentation disabled")
-		return
-	}
-
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("afterProcessDeltasInBatch: no span from before hook")
