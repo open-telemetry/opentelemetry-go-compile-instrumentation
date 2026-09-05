@@ -134,6 +134,29 @@ func TestDBClient(t *testing.T) {
 			"commit span must share the transaction's trace, not start a new one")
 	})
 
+	t.Run("TransactionRollback", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-rollback")
+
+		beginSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "START"),
+		)
+
+		rollbackSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "ROLLBACK"),
+		)
+		require.Equal(t, "ROLLBACK", rollbackSpan.Name())
+
+		// Regression for #1187: same fix as Commit, via the same txContext
+		// helper, but exercised independently so a change that fixes one and
+		// breaks the other doesn't slip through untested.
+		require.Equal(t, beginSpan.TraceID(), rollbackSpan.TraceID(),
+			"rollback span must share the transaction's trace, not start a new one")
+	})
+
 	t.Run("TransactionFailure", func(t *testing.T) {
 		// Verifies fix for issue #835: when db.BeginTx returns an error,
 		// afterTxInstrumentation must still call instrumentEnd so the span

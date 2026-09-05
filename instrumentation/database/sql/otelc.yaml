@@ -47,6 +47,8 @@ add_new_field_tx:
             type: string
           - name: OtelCtx
             type: context.Context
+  imports:
+    context: "context"
 
 add_new_field_conn:
   target: database/sql
