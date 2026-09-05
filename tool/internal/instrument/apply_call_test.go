@@ -266,7 +266,12 @@ func Handler(r *althttp.Request) (resp *althttp.Request, err error) {
 	return r, nil
 }
 `)
-		r := httpGetRule(`traced({{ .FuncArgumentOfType "*net/http.Request" }}, {{ .FuncReturnOfType "*net/http.Request" }}, {{ . }})`)
+		r := httpGetRule(
+			"traced(" +
+				`{{ .FuncArgumentOfType "*net/http.Request" }}, ` +
+				`{{ .FuncReturnOfType "*net/http.Request" }}, ` +
+				"{{ . }})",
+		)
 
 		err := newTestPhase().applyCallRule(context.Background(), r, root)
 
@@ -293,12 +298,18 @@ func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
 	return nil, nil
 }
 `)
+		replace := "traced(" +
+			`{{ .FuncArgumentOfType "*text/template.Template" }}, ` +
+			`"{{ .FuncArgumentOfType "*html/template.Template" }}", ` +
+			`{{ .FuncReturnOfType "*html/template.Template" }}, ` +
+			`"{{ .FuncReturnOfType "*text/template.Template" }}", ` +
+			"{{ . }})"
 		r := &rule.InstCallRule{
 			InstBaseRule: rule.InstBaseRule{Name: "wrap_println"},
 			FunctionCall: "fmt.Println",
 			ImportPath:   "fmt",
 			FuncName:     "Println",
-			Replace:      `traced({{ .FuncArgumentOfType "*text/template.Template" }}, "{{ .FuncArgumentOfType "*html/template.Template" }}", {{ .FuncReturnOfType "*html/template.Template" }}, "{{ .FuncReturnOfType "*text/template.Template" }}", {{ . }})`,
+			Replace:      replace,
 		}
 
 		err := newTestPhase().applyCallRule(context.Background(), r, root)

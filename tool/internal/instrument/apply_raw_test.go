@@ -126,11 +126,14 @@ func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
 	return nil, nil
 }
 `)
-		rawRule, err := rule.NewInstRawRule([]byte(`
-target: main
-func: Handler
-raw: 'use({{ .FuncArgumentOfType "*text/template.Template" }}, "{{ .FuncArgumentOfType "*html/template.Template" }}", {{ .FuncReturnOfType "*html/template.Template" }}, "{{ .FuncReturnOfType "*text/template.Template" }}")'
-`), "typed")
+		raw := "use(" +
+			`{{ .FuncArgumentOfType "*text/template.Template" }}, ` +
+			`"{{ .FuncArgumentOfType "*html/template.Template" }}", ` +
+			`{{ .FuncReturnOfType "*html/template.Template" }}, ` +
+			`"{{ .FuncReturnOfType "*text/template.Template" }}")`
+		rawRule, err := rule.NewInstRawRule([]byte(
+			"target: main\nfunc: Handler\nraw: '"+raw+"'\n",
+		), "typed")
 		require.NoError(t, err)
 
 		funcDecl := findFuncDeclInFile(t, root, "Handler")

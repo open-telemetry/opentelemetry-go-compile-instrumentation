@@ -188,7 +188,9 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 // 2. Parse the result as a Go statement snippet
 // 3. Extract the expression from the parsed statement
 // 4. Replace the placeholder with the actual AST node
-func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl, imports map[string]string) (dst.Expr, error) {
+func (t *callTemplate) compileExpression(
+	node dst.Expr, enclosing *dst.FuncDecl, imports map[string]string,
+) (dst.Expr, error) {
 	data := &callTemplateData{}
 	if enclosing != nil {
 		data.enclosing = newFuncTemplateData(enclosing, nil, imports, "")
