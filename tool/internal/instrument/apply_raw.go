@@ -50,8 +50,10 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 // FuncArgument N, FuncReturn N, ...) in raw code injected by a raw rule. Raw
 // code that does not contain "{{" is returned unchanged. hash salts synthetic
 // argument/return names the same way InstRawRule.Identity salts other rules'
-// trampoline/template names.
-func renderRawCode(raw string, decl *dst.FuncDecl, hash string) (string, error) {
+// trampoline/template names. imports is the target file's import alias map
+// (see ast.ImportAliasMap); FuncArgumentOfType / FuncReturnOfType need it to
+// resolve aliased imports and packages that share a default name.
+func renderRawCode(raw string, decl *dst.FuncDecl, hash string, imports map[string]string) (string, error) {
 	if !strings.Contains(raw, "{{") {
 		return raw, nil
 	}
@@ -59,7 +61,7 @@ func renderRawCode(raw string, decl *dst.FuncDecl, hash string) (string, error) 
 	if err != nil {
 		return "", ex.Wrap(err)
 	}
-	return tmpl.Execute(newFuncTemplateData(decl, nil, nil, hash))
+	return tmpl.Execute(newFuncTemplateData(decl, nil, imports, hash))
 }
 
 type insertPos struct {
@@ -127,7 +129,7 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
 
-	raw, err := renderRawCode(r.Raw, decl, r.Identity())
+	raw, err := renderRawCode(r.Raw, decl, r.Identity(), ast.ImportAliasMap(root))
 	if err != nil {
 		return ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
 	}
