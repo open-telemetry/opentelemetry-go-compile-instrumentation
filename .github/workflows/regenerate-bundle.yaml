@@ -49,6 +49,8 @@ jobs:
 
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
+          # zizmor: ignore[artipacked]: credentials are required by the git push later in this job
+          persist-credentials: true
           ref: ${{ steps.pr.outputs.head_ref }}
           repository: ${{ steps.pr.outputs.head_repo_full }}
           token: ${{ secrets.GITHUB_TOKEN }}

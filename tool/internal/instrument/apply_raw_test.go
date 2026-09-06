@@ -410,6 +410,24 @@ func TestRenderRawCode(t *testing.T) {
 			expected: "use(a)",
 		},
 		{
+			name:     "Receiver",
+			src:      "package main\ntype T struct{}\nfunc (t T) Foo(a int) {}",
+			raw:      "use({{ .Receiver }}, {{ .FuncArgument 0 }})",
+			expected: "use(t, a)",
+		},
+		{
+			name:     "blank receiver gets a synthetic name",
+			src:      "package main\ntype T struct{}\nfunc (_ T) Foo(a int) {}",
+			raw:      "use({{ .Receiver }})",
+			expected: "use(_ignoredParam_h1_0)",
+		},
+		{
+			name:     "unnamed receiver gets a synthetic name",
+			src:      "package main\ntype T struct{}\nfunc (T) Foo(a int) {}",
+			raw:      "use({{ .Receiver }})",
+			expected: "use(_ignoredParam_h1_0)",
+		},
+		{
 			name:     "unnamed parameter gets a synthetic name",
 			raw:      "use({{ .FuncArgument 0 }})",
 			src:      "package main\nfunc Foo(int) {}",
@@ -525,6 +543,15 @@ func TestRenderRawCode_NegativeReturnIndex(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
+}
+
+func TestRenderRawCode_ReceiverOnFunctionWithoutReceiver(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
+
+	_, err := renderRawCode("{{.Receiver}}", funcDecl, "h1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no receiver")
 }
 
 func TestRenderRawCode_InvalidTemplateSyntax(t *testing.T) {

@@ -8,8 +8,10 @@ package semconv
 import (
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -102,7 +104,12 @@ func NetProtocol(proto string) (name, version string) {
 	return name, version
 }
 
-// MethodLookup maps HTTP methods to their semconv attribute values.
+// HTTPMethodOther is the semconv fallback value for unknown HTTP methods.
+const HTTPMethodOther = "_OTHER"
+
+// MethodLookup maps the default known HTTP methods to their semconv attribute
+// values (RFC 9110 methods plus PATCH from RFC 5789).
+// OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS may fully replace this set.
 var MethodLookup = map[string]attribute.KeyValue{
 	http.MethodConnect: upstream.HTTPRequestMethodConnect,
 	http.MethodDelete:  upstream.HTTPRequestMethodDelete,
@@ -113,7 +120,47 @@ var MethodLookup = map[string]attribute.KeyValue{
 	http.MethodPost:    upstream.HTTPRequestMethodPost,
 	http.MethodPut:     upstream.HTTPRequestMethodPut,
 	http.MethodTrace:   upstream.HTTPRequestMethodTrace,
-	"QUERY":            upstream.HTTPRequestMethodKey.String("QUERY"),
+}
+
+// HTTPKnownMethodsEnv is the environment variable that fully overrides the
+// default known HTTP methods (comma-separated, case-sensitive).
+const HTTPKnownMethodsEnv = "OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS"
+
+var (
+	knownMethodsOnce sync.Once
+	knownMethodsMap  map[string]attribute.KeyValue
+)
+
+// knownMethods returns the active known-method set: either MethodLookup, or a
+// full replacement parsed from HTTPKnownMethodsEnv on first use.
+func knownMethods() map[string]attribute.KeyValue {
+	knownMethodsOnce.Do(func() {
+		if env := os.Getenv(HTTPKnownMethodsEnv); env != "" {
+			knownMethodsMap = parseKnownMethods(env)
+			return
+		}
+		knownMethodsMap = MethodLookup
+	})
+	return knownMethodsMap
+}
+
+// parseKnownMethods parses a comma-separated, case-sensitive override list.
+// Whitespace around each method is trimmed; empty entries are skipped.
+func parseKnownMethods(env string) map[string]attribute.KeyValue {
+	parts := strings.Split(env, ",")
+	out := make(map[string]attribute.KeyValue, len(parts))
+	for _, part := range parts {
+		method := strings.TrimSpace(part)
+		if method == "" {
+			continue
+		}
+		if attr, ok := MethodLookup[method]; ok {
+			out[method] = attr
+			continue
+		}
+		out[method] = upstream.HTTPRequestMethodKey.String(method)
+	}
+	return out
 }
 
 // HandleErr reports errors to the OTel error handler.
@@ -123,15 +170,50 @@ func HandleErr(err error) {
 	}
 }
 
-// StandardizeHTTPMethod normalizes HTTP method strings.
-// Returns "_OTHER" for non-standard methods.
+// StandardizeHTTPMethod normalizes HTTP method strings for metrics.
+// Returns HTTPMethodOther for methods not in the known-method set.
 func StandardizeHTTPMethod(method string) string {
-	method = strings.ToUpper(method)
-	switch method {
-	case http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead,
-		http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace, "QUERY":
-	default:
-		method = "_OTHER"
+	lookup := knownMethods()
+	if _, ok := lookup[method]; ok {
+		return method
 	}
-	return method
+	upper := strings.ToUpper(method)
+	if _, ok := lookup[upper]; ok {
+		return upper
+	}
+	return HTTPMethodOther
+}
+
+// requestMethodAttrs returns http.request.method and, when needed,
+// http.request.method_original. Unknown and empty methods use _OTHER.
+// method_original is omitted when it would equal http.request.method.
+func requestMethodAttrs(method string) (attribute.KeyValue, attribute.KeyValue) {
+	if method == "" {
+		return upstream.HTTPRequestMethodOther, attribute.KeyValue{}
+	}
+
+	lookup := knownMethods()
+	if attr, ok := lookup[method]; ok {
+		return attr, attribute.KeyValue{}
+	}
+
+	if attr, ok := lookup[strings.ToUpper(method)]; ok {
+		return attr, upstream.HTTPRequestMethodOriginal(method)
+	}
+
+	// Literal _OTHER is already the fallback value — don't set method_original.
+	if method == HTTPMethodOther {
+		return upstream.HTTPRequestMethodOther, attribute.KeyValue{}
+	}
+	return upstream.HTTPRequestMethodOther, upstream.HTTPRequestMethodOriginal(method)
+}
+
+// SpanMethod returns the method token used in HTTP span names.
+// Unknown methods become "HTTP" per the semantic conventions.
+func SpanMethod(method string) string {
+	standardized := StandardizeHTTPMethod(method)
+	if standardized == HTTPMethodOther {
+		return "HTTP"
+	}
+	return standardized
 }

@@ -9,7 +9,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // InstDirectiveRule represents a rule that instruments functions annotated with
@@ -18,8 +18,8 @@ import (
 type InstDirectiveRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Directive string `json:"directive" yaml:"directive"` // The directive name to match (without //)
-	Template  string `json:"template"  yaml:"template"`  // Go text/template rendered into code prepended to matching functions
+	Directive string `json:"directive" yaml:"directive"`
+	Template  string `json:"template"  yaml:"template"`
 }
 
 // NewInstDirectiveRule loads and validates an InstDirectiveRule from YAML data.
