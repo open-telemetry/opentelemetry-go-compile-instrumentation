@@ -208,8 +208,8 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			return resp, nil
 		}
 
-		contentType := resp.Header.Get("Content-Type")
-		isStreaming = strings.HasPrefix(contentType, "text/event-stream")
+		contentType := strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0])
+		isStreaming = strings.EqualFold(contentType, "text/event-stream")
 
 		if isStreaming {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))

@@ -486,7 +486,7 @@ func TestOtelMiddleware_SSEResponseFallback(t *testing.T) {
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Header:     http.Header{"Content-Type": []string{"Text/Event-Stream; badparam"}},
 			Body:       io.NopCloser(strings.NewReader(sse)),
 		}, nil
 	}
@@ -503,6 +503,34 @@ func TestOtelMiddleware_SSEResponseFallback(t *testing.T) {
 	got, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.Equal(t, sse, string(got))
+}
+
+func TestOtelMiddleware_NonStreamingContentTypeWithSSEPrefix(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-streaming"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":"msg_test_123","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`,
+			)),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assertAttribute(t, spans[0].Attributes(), "gen_ai.response.id", "msg_test_123")
 }
 
 // TestOtelMiddleware_RequestBodyReadError verifies that a failing request body
