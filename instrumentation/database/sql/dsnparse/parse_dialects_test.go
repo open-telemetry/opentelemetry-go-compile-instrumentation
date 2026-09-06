@@ -259,6 +259,88 @@ func TestParseDSN_MySQLProtocolStripping(t *testing.T) {
 	}
 }
 
+// TestParseDSN_MySQLUnixSocketNonParenthesized covers the "unix:" form without
+// parentheses. The address itself is an absolute path and contains '/', so the
+// database separator has to be the last '/' in the DSN, not the first.
+func TestParseDSN_MySQLUnixSocketNonParenthesized(t *testing.T) {
+	tests := []struct {
+		name     string
+		dsn      string
+		wantHost string
+		wantPort string
+		wantDB   string
+	}{
+		{
+			name:     "unix socket with dbname",
+			dsn:      "unix:/tmp/mysql.sock/db",
+			wantHost: "/tmp/mysql.sock",
+			wantPort: "",
+			wantDB:   "db",
+		},
+		{
+			name:     "unix socket with credentials and dbname",
+			dsn:      "user:pass@unix:/tmp/mysql.sock/mydb",
+			wantHost: "/tmp/mysql.sock",
+			wantPort: "",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "unix socket with trailing slash and no dbname",
+			dsn:      "unix:/tmp/mysql.sock/",
+			wantHost: "/tmp/mysql.sock",
+			wantPort: "",
+			wantDB:   "",
+		},
+		{
+			name:     "unix socket nested under multiple directories",
+			dsn:      "unix:/var/run/mysqld/mysqld.sock/prod",
+			wantHost: "/var/run/mysqld/mysqld.sock",
+			wantPort: "",
+			wantDB:   "prod",
+		},
+		{
+			// Parenthesized form is unaffected by the non-parenthesized fix; kept
+			// here as a same-file regression check alongside the cases above.
+			name:     "parenthesized form unaffected",
+			dsn:      "unix(/tmp/mysql.sock)/db",
+			wantHost: "/tmp/mysql.sock",
+			wantPort: "",
+			wantDB:   "db",
+		},
+		{
+			// A protocol keyword that merely starts with "unix" is not the unix
+			// transport; only an exact "unix:" prefix switches the separator.
+			name:     "protocol name starting with unix but not exact",
+			dsn:      "unixish:3306/db",
+			wantHost: "unixish",
+			wantPort: "3306",
+			wantDB:   "db",
+		},
+		{
+			name:     "tcp form unaffected by unix handling",
+			dsn:      "user:pass@tcp:3306/mydb",
+			wantHost: "localhost",
+			wantPort: "3306",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "bare host form unaffected by unix handling",
+			dsn:      "user:pass@host:3306/mydb",
+			wantHost: "host",
+			wantPort: "3306",
+			wantDB:   "mydb",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseDSN("mysql", tt.dsn)
+			assert.Equal(t, tt.wantHost, got.Host, "Host")
+			assert.Equal(t, tt.wantPort, got.Port, "Port")
+			assert.Equal(t, tt.wantDB, got.DBName, "DBName")
+		})
+	}
+}
+
 // TestLegacyParseDSN documents the (addr, error) compatibility shim used by the
 // db package's beforeOpenInstrumentation. It returns the host:port address when
 // one can be derived, otherwise it falls back to the driver name. It never

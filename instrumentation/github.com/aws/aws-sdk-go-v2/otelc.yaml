@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 aws_sdk_v2_hook_loaddefaultconfig:
   target: github.com/aws/aws-sdk-go-v2/config
   where:

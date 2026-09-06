@@ -14,7 +14,8 @@ on:
   workflow_dispatch:
 
 # Declare default permissions as read only.
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   # Core modules (root, pkg). Soft on pull requests: a newly-disclosed stdlib/dep

@@ -34,6 +34,26 @@ func TestDBClient(t *testing.T) {
 		)
 	})
 
+	t.Run("OpenDB", func(t *testing.T) {
+		// Exercises sql.OpenDB's driver.Connector path (hook_opendb):
+		// beforeOpenDBInstrumentation must resolve the connector's driver
+		// back to the registered "mysql" name so the DSN is parsed with the
+		// MySQL parser instead of falling to "unknown"/other_sql.
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=opendb")
+
+		span := f.RequireSingleSpan()
+		require.Equal(t, "PING", span.Name())
+		testutil.RequireDBClientSemconv(t, span,
+			"PING",
+			"ping",
+			"127.0.0.1", 3306,
+			"testdb",
+		)
+		testutil.RequireAttribute(t, span, "db.system.name", "mysql")
+	})
+
 	t.Run("Exec", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 
@@ -243,6 +263,20 @@ func TestDBClient(t *testing.T) {
 				wantAddr:   "localhost",
 				wantPort:   1433,
 				wantDb:     "master",
+			},
+			{
+				// Regression test for #1131: the address/database separator
+				// for a non-parenthesized "unix:" DSN is the last '/', not
+				// the first, because the socket path owns every '/' before
+				// it. Asserted end-to-end here so the parsed DSNInfo is
+				// verified to reach the span attributes, not just the
+				// parser output in isolation.
+				name:       "MySQL non-parenthesized unix socket",
+				driverName: "mysql",
+				dsn:        "user:pass@unix:/tmp/mysql.sock/inventory",
+				wantAddr:   "/tmp/mysql.sock",
+				wantPort:   0,
+				wantDb:     "inventory",
 			},
 			{
 				name:       "SQLite3 local file",
