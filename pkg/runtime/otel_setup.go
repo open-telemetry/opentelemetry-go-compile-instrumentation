@@ -76,9 +76,8 @@ func Instrumented(instrumentationName string) bool {
 	name := strings.ToLower(instrumentationName)
 
 	// Check if specific instrumentations are enabled
-	enabledList := os.Getenv("OTEL_GO_ENABLED_INSTRUMENTATIONS")
-	if enabledList != "" {
-		enabled := parseInstrumentationList(enabledList)
+	enabled := parseInstrumentationList(os.Getenv("OTEL_GO_ENABLED_INSTRUMENTATIONS"))
+	if len(enabled) > 0 {
 		if !slices.Contains(enabled, name) {
 			return false
 		}

@@ -22,6 +22,7 @@ func newStreamingReader(
 	span trace.Span,
 	start time.Time,
 	op operationType,
+	onDone func(),
 ) io.ReadCloser {
 	var streamingOp streaming.OperationType
 	switch op {
@@ -30,5 +31,5 @@ func newStreamingReader(
 	case opCompletion:
 		streamingOp = streaming.OpCompletion
 	}
-	return streaming.NewStreamingReader(body, span, start, streamingOp)
+	return streaming.NewStreamingReader(body, span, start, streamingOp, onDone)
 }

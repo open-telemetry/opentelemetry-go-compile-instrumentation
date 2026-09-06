@@ -29,7 +29,7 @@ type ImportConfig struct {
 func ParseImportCfg(filename string) (ImportConfig, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return ImportConfig{}, err
+		return ImportConfig{}, ex.Wrapf(err, "opening importcfg file %s", filename)
 	}
 	defer file.Close()
 
@@ -102,11 +102,6 @@ func parse(r io.Reader) (ImportConfig, error) {
 	return reg, nil
 }
 
-type writeCloser interface {
-	io.Writer
-	io.Closer
-}
-
 // WriteFile writes the content of the ImportConfig to the provided file,
 // in the format expected by the Go toolchain commands.
 func (r *ImportConfig) WriteFile(filename string) error {
@@ -117,7 +112,7 @@ func (r *ImportConfig) WriteFile(filename string) error {
 	return r.writeFile(file, filename)
 }
 
-func (r *ImportConfig) writeFile(w writeCloser, filename string) error {
+func (r *ImportConfig) writeFile(w io.WriteCloser, filename string) error {
 	if err := r.write(w); err != nil {
 		_ = w.Close()
 		return ex.Wrapf(err, "failed to write to file %s", filename)

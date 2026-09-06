@@ -1,0 +1,9 @@
+raw_receiver:
+  target: main
+  where:
+    func: Divide
+    recv: "*Calculator"
+  do:
+    - inject_code:
+        raw: |-
+          println("enter {{ .FuncName }} recv={{ .Receiver }} arg0={{ .FuncArgument 0 }}")

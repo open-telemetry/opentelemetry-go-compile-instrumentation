@@ -311,3 +311,26 @@ func TestExtractGZip_SkipsZipSlip(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractGZip_InvalidGzip(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	corrupted := bytes.NewReader([]byte("not gzip data"))
+
+	err := extractGZip(corrupted, tmpDir)
+	require.Error(t, err)
+}
+
+func TestExtractGZip_MkdirAllError(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "file")
+	err := os.WriteFile(filePath, []byte("content"), 0o644)
+	require.NoError(t, err)
+
+	// Passing an existing file path as targetDir causes os.MkdirAll to fail
+	err = extractGZip(bytes.NewReader(nil), filePath)
+	require.Error(t, err)
+}

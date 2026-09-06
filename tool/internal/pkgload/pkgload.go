@@ -239,7 +239,7 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) (map[string]b
 		} else {
 			modDir, err := resolveModuleDir(ctx, pkgDir)
 			if err != nil {
-				return nil, ex.Wrapf(err, "finding module dir for package %s", pkg.PkgPath)
+				return nil, err
 			}
 
 			moduleDir = modDir

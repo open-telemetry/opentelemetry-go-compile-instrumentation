@@ -58,21 +58,21 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 			errorMsg:    "import alias mismatch",
 		},
 		{
-			name: "gopkg.in style path - no mismatch for implicit alias",
+			name: "versioned path - no mismatch for implicit alias",
 			root: &dst.File{
 				Decls: []dst.Decl{
 					&dst.GenDecl{
 						Tok: token.IMPORT,
 						Specs: []dst.Spec{
 							&dst.ImportSpec{
-								// gopkg.in/yaml.v3 declares "package yaml" - resolvePackageName correctly returns "yaml"
-								Path: &dst.BasicLit{Value: `"gopkg.in/yaml.v3"`},
+								// go.yaml.in/yaml/v3 declares "package yaml" - resolvePackageName correctly returns "yaml"
+								Path: &dst.BasicLit{Value: `"go.yaml.in/yaml/v3"`},
 							},
 						},
 					},
 				},
 			},
-			imports:     map[string]string{"yaml": "gopkg.in/yaml.v3"},
+			imports:     map[string]string{"yaml": "go.yaml.in/yaml/v3"},
 			expectError: false, // No error - implicit alias matches inferred package name
 		},
 		{

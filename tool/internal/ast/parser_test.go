@@ -33,6 +33,12 @@ func TestParseSnippet(t *testing.T) {
 		_, err := p.ParseSnippet("this is not go")
 		require.Error(t, err)
 	})
+
+	t.Run("parses snippet ending in a line comment", func(t *testing.T) {
+		stmts, err := p.ParseSnippet("x := 1 // trailing comment")
+		require.NoError(t, err)
+		assert.Len(t, stmts, 1)
+	})
 }
 
 func TestFindPosition(t *testing.T) {

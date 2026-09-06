@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 anthropic_v1_new_client:
   target: github.com/anthropics/anthropic-sdk-go
   version: v1.0.0

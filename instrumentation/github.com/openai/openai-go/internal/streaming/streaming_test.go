@@ -46,6 +46,29 @@ func TestStreamingReader_ChatChunks(t *testing.T) {
 	assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 11)
 }
 
+func TestStreamingReader_OnDone(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tr := tp.Tracer("test")
+	_, span := tr.Start(t.Context(), "test-stream")
+
+	streamData := "data: {\"id\":\"chatcmpl-abc\",\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: [DONE]\n\n"
+	body := io.NopCloser(bytes.NewReader([]byte(streamData)))
+
+	called := false
+	reader := NewStreamingReader(body, span, time.Now(), OpChat, func() {
+		called = true
+	})
+
+	assert.False(t, called, "onDone must not be called before reading finishes")
+
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	_ = reader.Close()
+
+	assert.True(t, called, "onDone must be called on stream finalization")
+}
+
 func TestStreamingReader_CompletionChunks(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))

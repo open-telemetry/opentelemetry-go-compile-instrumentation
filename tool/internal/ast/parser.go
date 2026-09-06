@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
@@ -59,13 +60,13 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 
 // ParseSnippet parses the AST from incomplete source code snippet.
 func (ap *AstParser) ParseSnippet(source string) ([]dst.Stmt, error) {
-	if source == "" {
+	if strings.TrimSpace(source) == "" {
 		return nil, ex.New("empty source")
 	}
-	snippet := "package main; func _() {" + source + "}"
+	snippet := "package main; func _() {" + source + "\n}"
 	file, err := decorator.ParseFile(ap.fset, "", snippet, 0)
 	if err != nil {
-		return nil, ex.Wrap(err)
+		return nil, ex.Wrapf(err, "can not parse snippet %s", source)
 	}
 	funcDecl := util.AssertType[*dst.FuncDecl](file.Decls[0])
 	return funcDecl.Body.List, nil
@@ -93,11 +94,6 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	return ap.fset.Position(astNode.Pos())
 }
 
-type writeCloser interface {
-	io.Writer
-	io.Closer
-}
-
 // WriteFile writes the AST to a file.
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
@@ -107,7 +103,7 @@ func WriteFile(filePath string, root *dst.File) error {
 	return writeFile(file, filePath, root)
 }
 
-func writeFile(w writeCloser, filePath string, root *dst.File) error {
+func writeFile(w io.WriteCloser, filePath string, root *dst.File) error {
 	r := decorator.NewRestorer()
 	if err := r.Fprint(w, root); err != nil {
 		_ = w.Close()

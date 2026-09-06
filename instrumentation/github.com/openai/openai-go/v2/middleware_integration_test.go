@@ -92,6 +92,36 @@ func TestOtelMiddleware_ChatCompletion(t *testing.T) {
 	assertFloat64Attribute(t, attrs, "gen_ai.request.presence_penalty", 0.3)
 }
 
+func TestOtelMiddleware_ChatCompletion_MaxCompletionTokens(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	reqBody := `{"model":"gpt-4.1","max_completion_tokens":200}`
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
+
+	respBody := `{"id":"chatcmpl-123","model":"gpt-4.1","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assertInt64Attribute(t, spans[0].Attributes(), "gen_ai.request.max_tokens", 200)
+}
+
 func TestOtelMiddleware_Completion(t *testing.T) {
 	sr := setupTestTracer(t)
 

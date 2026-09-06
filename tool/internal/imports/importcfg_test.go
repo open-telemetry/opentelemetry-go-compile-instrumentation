@@ -34,6 +34,12 @@ modinfo "abc123"
 	assert.Equal(t, []string{`modinfo "abc123"`}, cfg.Extras)
 }
 
+func TestParseImportCfg_MissingFile(t *testing.T) {
+	_, err := ParseImportCfg(filepath.Join(t.TempDir(), "does-not-exist"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "opening importcfg file")
+}
+
 func TestParseFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	filename := filepath.Join(tmpDir, "importcfg")

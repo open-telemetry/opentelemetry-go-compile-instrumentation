@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 add_new_field_db:
   target: database/sql
   where:
@@ -68,6 +70,16 @@ hook_open:
     - inject_hooks:
         before: beforeOpenInstrumentation
         after: afterOpenInstrumentation
+        path: "go.opentelemetry.io/otelc/instrumentation/database/sql"
+
+hook_opendb:
+  target: database/sql
+  where:
+    func: OpenDB
+  do:
+    - inject_hooks:
+        before: beforeOpenDBInstrumentation
+        after: afterOpenDBInstrumentation
         path: "go.opentelemetry.io/otelc/instrumentation/database/sql"
 
 hook_db_ping_context:

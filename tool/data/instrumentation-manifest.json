@@ -9,6 +9,11 @@
     "versionRange": "v1.0.0"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/apache/cassandra-gocql-driver/v2",
+    "target": "github.com/apache/cassandra-gocql-driver/v2",
+    "versionRange": "v2.0.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/aws/aws-sdk-go-v2",
     "target": "github.com/aws/aws-sdk-go-v2/config"
   },
