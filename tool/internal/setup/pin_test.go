@@ -899,6 +899,44 @@ go 1.25
 	require.FileExists(t, goSumPath, "go mod tidy should have restored go.sum")
 }
 
+func TestUpdateToolFile_PruneAfterSteadyStateRunsTidy(t *testing.T) {
+	trueValue := true
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte(`module example.com/test
+
+go 1.25
+`),
+		0o644,
+	))
+
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	// First run reaches the steady state.
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+
+	var logs bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), debugLogger)
+
+	// A prune must flip toolFileChanged and force the tidy.
+	require.NoError(t, updateToolFile(ctx, toolFile, map[string]bool{"fmt": true}, opts))
+	require.NotContains(t, logs.String(), "skipping go mod tidy")
+
+	toolFileAfter, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.NotContains(t, string(toolFileAfter), `"fmt"`)
+}
+
 func TestUpdateToolFile_ParseError(t *testing.T) {
 	err := updateToolFile(t.Context(),
 		filepath.Join(t.TempDir(), "does-not-exist.go"),
