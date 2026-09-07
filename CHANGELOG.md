@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Anthropic: instrument `POST /v1/messages/count_tokens` with a GenAI client
   span for the request model and `gen_ai.usage.input_tokens`.
+  ([#1330](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1330))
 - `net/http`: support overriding known HTTP methods via
   `OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS` (comma-separated, case-sensitive full
   override of the default set). ([#1012](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1012))
