@@ -220,8 +220,6 @@ func TestHTTPClientMetrics(t *testing.T) {
 		"http.client.response.body.size",
 		"http.client.request.duration",
 		"http.client.active_requests",
-		"http.client.open_connections",
-		"http.client.connection.duration",
 	}, client.metricNames())
 }
 

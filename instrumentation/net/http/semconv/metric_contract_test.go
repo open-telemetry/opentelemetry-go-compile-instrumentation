@@ -4,12 +4,12 @@
 package semconv
 
 import (
-	"bufio"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestHTTPMetricNamesMatchRegistry(t *testing.T) {
@@ -22,22 +22,20 @@ func TestHTTPMetricNamesMatchRegistry(t *testing.T) {
 func declaredHTTPMetricNames(t *testing.T) []string {
 	t.Helper()
 
-	file, err := os.Open("../../../../schemas/otelc/groups/http.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
+	data, err := os.ReadFile("../../../../schemas/otelc/groups/http.yaml")
+	require.NoError(t, err)
 
-	var names []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if name, ok := strings.CutPrefix(line, "metric_name:"); ok {
-			names = append(names, strings.TrimSpace(name))
-		}
+	var registry struct {
+		Groups []struct {
+			MetricName string `yaml:"metric_name"`
+		} `yaml:"groups"`
 	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
+	require.NoError(t, yaml.Unmarshal(data, &registry))
+
+	names := make([]string, 0, len(registry.Groups))
+	for i, group := range registry.Groups {
+		require.NotEmpty(t, group.MetricName, "group %d has no metric_name", i)
+		names = append(names, group.MetricName)
 	}
 	return names
 }

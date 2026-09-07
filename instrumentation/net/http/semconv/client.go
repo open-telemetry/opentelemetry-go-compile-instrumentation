@@ -19,12 +19,10 @@ import (
 
 // HTTPClient provides HTTP semantic convention attributes and metrics for client requests.
 type HTTPClient struct {
-	requestBodySize    httpconv.ClientRequestBodySize
-	responseBodySize   httpconv.ClientResponseBodySize
-	requestDuration    httpconv.ClientRequestDuration
-	activeRequests     httpconv.ClientActiveRequests
-	openConnections    httpconv.ClientOpenConnections
-	connectionDuration httpconv.ClientConnectionDuration
+	requestBodySize  httpconv.ClientRequestBodySize
+	responseBodySize httpconv.ClientResponseBodySize
+	requestDuration  httpconv.ClientRequestDuration
+	activeRequests   httpconv.ClientActiveRequests
 }
 
 // NewHTTPClient creates a new HTTPClient instance with metrics.
@@ -47,12 +45,6 @@ func NewHTTPClient(meter metric.Meter) HTTPClient {
 	client.activeRequests, err = httpconv.NewClientActiveRequests(meter)
 	HandleErr(err)
 
-	client.openConnections, err = httpconv.NewClientOpenConnections(meter)
-	HandleErr(err)
-
-	client.connectionDuration, err = httpconv.NewClientConnectionDuration(meter)
-	HandleErr(err)
-
 	return client
 }
 
@@ -62,8 +54,6 @@ func (n HTTPClient) metricNames() []string {
 		n.responseBodySize.Name(),
 		n.requestDuration.Name(),
 		n.activeRequests.Name(),
-		n.openConnections.Name(),
-		n.connectionDuration.Name(),
 	}
 }
 
