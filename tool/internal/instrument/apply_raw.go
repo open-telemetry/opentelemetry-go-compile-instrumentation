@@ -47,19 +47,14 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 }
 
 // renderRawCode renders the shared function template variables (FuncName,
-// FuncArgument N, FuncReturn N, ...) in raw code injected by a raw rule. Raw
-// code that does not contain "{{" is returned unchanged. hash salts synthetic
-// argument/return names the same way InstRawRule.Identity salts other rules'
-// trampoline/template names. imports is the target file's import alias map
-// (see ast.ImportAliasMap); FuncArgumentOfType / FuncReturnOfType need it to
-// resolve aliased imports and packages that share a default name.
+// FuncArgument N, FuncReturn N, ...) in raw code injected by a raw rule.
 func renderRawCode(raw string, decl *dst.FuncDecl, hash string, imports map[string]string) (string, error) {
 	if !strings.Contains(raw, "{{") {
 		return raw, nil
 	}
 	tmpl, err := rule.ParseFuncTemplate(raw)
 	if err != nil {
-		return "", ex.Wrap(err)
+		return "", err
 	}
 	return tmpl.Execute(newFuncTemplateData(decl, nil, imports, hash))
 }
