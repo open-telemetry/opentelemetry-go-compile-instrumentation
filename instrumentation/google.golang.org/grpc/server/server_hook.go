@@ -176,25 +176,28 @@ func (h *serverStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo)
 
 // HandleRPC processes RPC stats events
 func (h *serverStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
-	span := trace.SpanFromContext(ctx)
+	// gctx is set only when TagRPC instrumented this RPC. A nil gctx means TagRPC
+	// opted out (e.g. OTLP export path). Returning early prevents us from touching
+	// whatever span happens to be on the caller's context.
 	gctx, _ := ctx.Value(gRPCContextKey{}).(*gRPCContext)
+	if gctx == nil {
+		return
+	}
+
+	span := trace.SpanFromContext(ctx)
 
 	switch rs := rs.(type) {
 	case *stats.Begin:
 		// RPC started
 	case *stats.InPayload:
-		if gctx != nil {
-			atomic.AddInt64(&gctx.inMessages, 1)
-			if serverRequestSize != nil {
-				serverRequestSize.RecordSet(ctx, int64(rs.Length), gctx.metricAttrSet)
-			}
+		atomic.AddInt64(&gctx.inMessages, 1)
+		if serverRequestSize != nil {
+			serverRequestSize.RecordSet(ctx, int64(rs.Length), gctx.metricAttrSet)
 		}
 	case *stats.OutPayload:
-		if gctx != nil {
-			atomic.AddInt64(&gctx.outMessages, 1)
-			if serverResponseSize != nil {
-				serverResponseSize.RecordSet(ctx, int64(rs.Length), gctx.metricAttrSet)
-			}
+		atomic.AddInt64(&gctx.outMessages, 1)
+		if serverResponseSize != nil {
+			serverResponseSize.RecordSet(ctx, int64(rs.Length), gctx.metricAttrSet)
 		}
 	case *stats.OutHeader:
 		// Add peer address attributes
@@ -228,24 +231,22 @@ func (h *serverStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 		}
 
 		// Record metrics
-		if gctx != nil {
-			metricAttrs := make([]attribute.KeyValue, 0, len(gctx.metricAttrs)+1)
-			metricAttrs = append(metricAttrs, gctx.metricAttrs...)
-			metricAttrs = append(metricAttrs, statusAttr)
-			recordOpts := []metric.RecordOption{metric.WithAttributeSet(attribute.NewSet(metricAttrs...))}
+		metricAttrs := make([]attribute.KeyValue, 0, len(gctx.metricAttrs)+1)
+		metricAttrs = append(metricAttrs, gctx.metricAttrs...)
+		metricAttrs = append(metricAttrs, statusAttr)
+		recordOpts := []metric.RecordOption{metric.WithAttributeSet(attribute.NewSet(metricAttrs...))}
 
-			// Use floating point division for higher precision (instead of Milliseconds method)
-			duration := float64(rs.EndTime.Sub(rs.BeginTime)) / float64(time.Millisecond)
+		// Use floating point division for higher precision (instead of Milliseconds method)
+		duration := float64(rs.EndTime.Sub(rs.BeginTime)) / float64(time.Millisecond)
 
-			if serverDuration.Inst() != nil {
-				serverDuration.Inst().Record(ctx, duration, recordOpts...)
-			}
-			if serverRequestsPerRPC.Inst() != nil {
-				serverRequestsPerRPC.Inst().Record(ctx, atomic.LoadInt64(&gctx.inMessages), recordOpts...)
-			}
-			if serverResponsesPerRPC.Inst() != nil {
-				serverResponsesPerRPC.Inst().Record(ctx, atomic.LoadInt64(&gctx.outMessages), recordOpts...)
-			}
+		if serverDuration.Inst() != nil {
+			serverDuration.Inst().Record(ctx, duration, recordOpts...)
+		}
+		if serverRequestsPerRPC.Inst() != nil {
+			serverRequestsPerRPC.Inst().Record(ctx, atomic.LoadInt64(&gctx.inMessages), recordOpts...)
+		}
+		if serverResponsesPerRPC.Inst() != nil {
+			serverResponsesPerRPC.Inst().Record(ctx, atomic.LoadInt64(&gctx.outMessages), recordOpts...)
 		}
 	}
 }

@@ -37,7 +37,7 @@ func IsGlobTarget(target string) bool {
 // setup phase. Pattern syntax is bmatcuk/doublestar's; see
 // https://github.com/bmatcuk/doublestar#patterns for the full grammar.
 //
-// An empty target is rejected upstream by the rule loader (parseRuleFromYaml)
+// An empty target is rejected upstream by File.Rules
 // before it reaches ValidateTarget; a non-glob target is a literal import path
 // and is always valid.
 func ValidateTarget(target string) error {

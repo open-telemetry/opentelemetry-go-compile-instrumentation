@@ -11,7 +11,9 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -408,4 +410,52 @@ func TestAPITemplateMatchesHookContext(t *testing.T) {
 		"%s and api.tmpl have drifted; re-sync with `make build` "+
 			"(or `cp %s tool/internal/instrument/api.tmpl`)",
 		hookContextSource, hookContextSource)
+}
+
+func TestParseFileMissingFile(t *testing.T) {
+	ip := &instrumentPhase{}
+	_, err := ip.parseFile("/nonexistent/path/source.go")
+	require.Error(t, err)
+}
+
+func TestInstrumentParseFileError(t *testing.T) {
+	ip := &instrumentPhase{}
+
+	rset := rule.NewInstRuleSet("example.com/pkg")
+	rset.FuncRules["/nonexistent/does-not-exist.go"] = []*rule.InstFuncRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Func:         "Foo",
+			Before:       "BeforeFoo",
+			Path:         "example.com/hook",
+		},
+	}
+
+	err := ip.instrument(context.Background(), rset)
+	require.Error(t, err)
+}
+
+func TestInstrument_WriteInstrumentedError(t *testing.T) {
+	// A valid source file whose path does not match compileArgs causes writeInstrumented to fail.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "source.go")
+	require.NoError(t, os.WriteFile(src, []byte("package main\nvar X = 1\n"), 0o644))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     tmp,
+		compileArgs: []string{"other.go"}, // doesn't match src, causing writeInstrumented to error
+	}
+
+	rset := rule.NewInstRuleSet("main")
+	rset.DeclRules[src] = []*rule.InstDeclRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Identifier:   "X",
+			Replace:      "2",
+		},
+	}
+
+	err := ip.instrument(context.Background(), rset)
+	require.Error(t, err)
 }
