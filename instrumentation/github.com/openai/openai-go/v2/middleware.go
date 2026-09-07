@@ -28,8 +28,15 @@ import (
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
+// contentCaptureFromEnv reports whether the given environment-variable value
+// enables content capture. It is a standalone function so that the comparison
+// can be tested without touching the process-wide sync.OnceValue cache.
+func contentCaptureFromEnv(value string) bool {
+	return value == "true"
+}
+
 var captureContentEnabled = sync.OnceValue(func() bool {
-	return os.Getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT") == "true"
+	return contentCaptureFromEnv(os.Getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"))
 })
 
 const (
@@ -401,6 +408,22 @@ func contentFromJSON(content json.RawMessage) string {
 		return text
 	}
 
+	// Array content (e.g. multimodal parts): join the text parts so the event
+	// stays readable instead of embedding base64 payloads in raw JSON.
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(content, &parts); err == nil {
+		texts := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if part.Text != "" {
+				texts = append(texts, part.Text)
+			}
+		}
+		return strings.Join(texts, "\n")
+	}
+
+	// Last resort for other non-string content: compacted raw JSON.
 	marshaled, err := json.Marshal(content)
 	if err != nil {
 		return ""

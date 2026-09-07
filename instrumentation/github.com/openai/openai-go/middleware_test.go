@@ -305,7 +305,9 @@ func TestParseChatRequest_MultimodalContentCapture(t *testing.T) {
 	model, _, prompts := parseChatRequest(body, true)
 
 	assert.Equal(t, "gpt-4-vision-preview", model)
-	assert.Equal(t, []string{`[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]`}, prompts)
+	// Multimodal content: only text parts are joined; image_url parts are omitted
+	// to avoid embedding large base64 payloads in span events.
+	assert.Equal(t, []string{"describe this"}, prompts)
 }
 
 func TestParseChatRequest_Invalid(t *testing.T) {
@@ -562,7 +564,9 @@ func TestParseEmbeddingResponse_Invalid(t *testing.T) {
 }
 
 func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
-	reqBody := `{"messages":[{"role":"user","content":"hello"}]}`
+	sr := setupTestTracer(t)
+
+	reqBody := `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`
 	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(reqBody))
 	require.NoError(t, err)
 
@@ -576,7 +580,14 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 	}
 
 	middleware := otelMiddleware(func() bool { return true })
-	_, _ = middleware(req, next)
+	_, err = middleware(req, next)
+	require.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Len(t, spans[0].Events(), 1)
+	assert.Equal(t, "gen_ai.content.prompt", spans[0].Events()[0].Name)
+	assert.Equal(t, "hello", spans[0].Events()[0].Attributes[0].Value.AsString())
 }
 
 func TestOtelMiddleware_ErrorResponse(t *testing.T) {
@@ -615,17 +626,74 @@ func TestParseChatResponse_ContentExtraction(t *testing.T) {
         }]
     }`)
 	parseChatResponse(body, span, true)
+	span.End() // parseChatResponse only adds events; end the span so sr.Ended() sees it.
 
 	spans := sr.Ended()
-	if len(spans) > 0 {
-		for _, event := range spans[0].Events() {
-			if event.Name == "gen_ai.content.completion" {
-				for _, attr := range event.Attributes {
-					if attr.Key == "gen_ai.completion" {
-						assert.Equal(t, "This is extracted content", attr.Value.AsString())
-					}
+	require.Len(t, spans, 1)
+
+	var found bool
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			found = true
+			for _, attr := range event.Attributes {
+				if attr.Key == "gen_ai.completion" {
+					assert.Equal(t, "This is extracted content", attr.Value.AsString())
 				}
 			}
 		}
 	}
+	require.True(t, found, "expected a gen_ai.content.completion event")
+}
+
+// TestOtelMiddleware_StreamingContentCapture drives otelMiddleware end-to-end
+// with a text/event-stream response and captureContent=true, verifying that
+// (a) the prompt event is recorded before the request is forwarded, and
+// (b) the completion events are emitted when the stream is fully consumed.
+func TestOtelMiddleware_StreamingContentCapture(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	reqBody := `{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`
+	req, err := http.NewRequestWithContext(context.Background(), "POST",
+		"https://api.openai.com/v1/chat/completions", bytes.NewBufferString(reqBody))
+	require.NoError(t, err)
+
+	streamData := "data: {\"id\":\"chatcmpl-1\",\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello world\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+	next := func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(streamData)),
+		}, nil
+	}
+
+	middleware := otelMiddleware(func() bool { return true })
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+
+	// No span should be ended yet — streaming defers finalization to body close.
+	require.Empty(t, sr.Ended())
+
+	// Consume the body — this triggers finalize.
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	span := spans[0]
+
+	// Prompt event recorded before request forwarding.
+	var promptFound, completionFound bool
+	for _, event := range span.Events() {
+		switch event.Name {
+		case "gen_ai.content.prompt":
+			promptFound = true
+			assert.Equal(t, "hi", event.Attributes[0].Value.AsString())
+		case "gen_ai.content.completion":
+			completionFound = true
+			assert.Equal(t, "hello world", event.Attributes[0].Value.AsString())
+		}
+	}
+	assert.True(t, promptFound, "expected gen_ai.content.prompt event")
+	assert.True(t, completionFound, "expected gen_ai.content.completion event")
 }

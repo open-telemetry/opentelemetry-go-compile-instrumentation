@@ -41,12 +41,14 @@ func TruncateContent(content string) string {
 
 func truncateContent(content string, limit int) string {
 	var capturedContent contentAccumulator
-	capturedContent.limit = contentLimit(limit)
+	capturedContent.limit = clampContentLimit(limit)
 	capturedContent.Append(content)
 	return capturedContent.String()
 }
 
-func contentLimit(limit int) int {
+// clampContentLimit normalises a caller-supplied limit into the valid range
+// [len(truncatedContentSuffix), ContentCaptureLimit].
+func clampContentLimit(limit int) int {
 	if limit <= 0 || limit > ContentCaptureLimit {
 		return ContentCaptureLimit
 	}
@@ -122,7 +124,7 @@ type StreamingReader struct {
 	span            trace.Span
 	op              OperationType
 	captureContent  bool
-	maxBodySize     int
+	contentLimit    int
 	done            atomic.Bool
 	completed       atomic.Bool
 	capturedStreams map[int]*contentAccumulator
@@ -134,13 +136,17 @@ type StreamingReader struct {
 // marker was received.
 var errStreamAborted = errors.New("stream aborted")
 
+// NewStreamingReader wraps body and returns a StreamingReader that parses
+// SSE chunks as they are read. contentLimit bounds the number of bytes
+// retained per choice for content capture; values larger than
+// ContentCaptureLimit are clamped down to that constant.
 func NewStreamingReader(
 	body io.ReadCloser,
 	span trace.Span,
 	start time.Time,
 	op OperationType,
 	captureContent bool,
-	maxBodySize int,
+	contentLimit int,
 	onDone ...func(),
 ) *StreamingReader {
 	var cb func()
@@ -153,7 +159,7 @@ func NewStreamingReader(
 		span:           span,
 		op:             op,
 		captureContent: captureContent,
-		maxBodySize:    contentLimit(maxBodySize),
+		contentLimit:   clampContentLimit(contentLimit),
 		onDone:         cb,
 	}
 }
@@ -469,7 +475,12 @@ func (r *StreamingReader) captureChunkContent(index int, content string) {
 		r.capturedStreams = make(map[int]*contentAccumulator)
 	}
 	if r.capturedStreams[index] == nil {
-		r.capturedStreams[index] = &contentAccumulator{limit: r.maxBodySize}
+		// The server controls the index values. Cap the map so that a stream
+		// with many distinct indexes cannot grow memory without bound.
+		if len(r.capturedStreams) >= 16 {
+			return
+		}
+		r.capturedStreams[index] = &contentAccumulator{limit: r.contentLimit}
 	}
 	r.capturedStreams[index].Append(content)
 }

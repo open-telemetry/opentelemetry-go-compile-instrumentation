@@ -690,3 +690,28 @@ func TestStreamingReader_AbortedStreamRecordsError(t *testing.T) {
 	assert.Equal(t, codes.Error, spans[0].Status().Code)
 	assertSliceAttribute(t, spans[0].Attributes(), "gen_ai.response.finish_reasons", []string{"error"})
 }
+
+func TestStreamingReader_AbortedStreamRecordsContent(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "aborted-stream-content")
+
+	streamData := "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, true, ContentCaptureLimit)
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+
+	var found bool
+	for _, event := range spans[0].Events() {
+		if event.Name == "gen_ai.content.completion" {
+			found = true
+			assertAttribute(t, event.Attributes, "gen_ai.completion", "partial")
+		}
+	}
+	require.True(t, found, "expected the partial content event on an aborted stream")
+}
