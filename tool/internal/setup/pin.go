@@ -461,8 +461,7 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 	//
 	// Manual user edits to go.mod or the tool file are deliberately out of
 	// scope here: tidying those up is the user's responsibility, the same as
-	// in an uninstrumented project. That split was settled during the #655
-	// review, where this conditional shape was first proposed.
+	// in an uninstrumented project.
 	goSumPath := filepath.Join(filepath.Dir(toolFile), "go.sum")
 	if !toolFileChanged && !goModChanged && util.PathExists(goSumPath) {
 		util.LoggerFromContext(ctx).DebugContext(ctx,
