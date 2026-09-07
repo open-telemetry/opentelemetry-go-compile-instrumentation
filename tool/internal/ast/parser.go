@@ -135,7 +135,7 @@ func PrintFile(root *dst.File) ([]byte, error) {
 func WriteFileAtomic(filePath string, root *dst.File) error {
 	data, err := PrintFile(root)
 	if err != nil {
-		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
+		return ex.Wrapf(err, "for file %s", filePath)
 	}
 
 	return util.WriteFileAtomic(filePath, data)
