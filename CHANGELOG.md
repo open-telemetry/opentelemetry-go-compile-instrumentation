@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other non-RFC methods) by setting a full override, for example
   `OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS=CONNECT,DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT,TRACE,QUERY`.
   ([#1012](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1012))
+- Reduce per-request allocations in the `net/http` client and server hooks:
+  hook state is passed between the before and after hooks via a typed struct
+  instead of a `map[string]interface{}`, and debug log arguments are no longer
+  built when debug logging is off.
+  ([#1137](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1137))
 
 ### Deprecated
 
