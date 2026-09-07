@@ -67,17 +67,14 @@ func classifyOperation(path string) operationType {
 }
 
 func operationName(op operationType) string {
-	switch op {
-	case opMessages:
+	if op == opMessages {
 		return "chat"
-	case opCountTokens:
+	}
+	if op == opCountTokens {
 		// GenAI semconv has no standard name for token counting yet.
 		return "count_tokens"
-	case opUnknown:
-		return ""
-	default:
-		return ""
 	}
+	return ""
 }
 
 // OtelMiddleware returns an HTTP middleware that creates spans for Anthropic
