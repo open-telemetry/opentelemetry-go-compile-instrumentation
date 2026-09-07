@@ -15,6 +15,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -32,6 +34,62 @@ func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerPro
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	return sr, tp
+}
+
+func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	return reader
+}
+
+func TestServeHTTPRecordsMetrics(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/path", nil)
+	req.ContentLength = 12
+	ctx := hooktest.NewMockHookContext()
+	BeforeServeHTTP(ctx, nil, httptest.NewRecorder(), req)
+	w, ok := ctx.GetParam(responseWriterIndex).(http.ResponseWriter)
+	require.True(t, ok)
+	w.WriteHeader(http.StatusCreated)
+	_, err := w.Write([]byte("response"))
+	require.NoError(t, err)
+	AfterServeHTTP(ctx)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	metrics := make(map[string]metricdata.Metrics)
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			metrics[metric.Name] = metric
+		}
+	}
+
+	requestSize, ok := metrics["http.server.request.body.size"].Data.(metricdata.Histogram[int64])
+	require.True(t, ok)
+	require.Len(t, requestSize.DataPoints, 1)
+	assert.Equal(t, int64(12), requestSize.DataPoints[0].Sum)
+
+	responseSize, ok := metrics["http.server.response.body.size"].Data.(metricdata.Histogram[int64])
+	require.True(t, ok)
+	require.Len(t, responseSize.DataPoints, 1)
+	assert.Equal(t, int64(len("response")), responseSize.DataPoints[0].Sum)
+
+	duration, ok := metrics["http.server.request.duration"].Data.(metricdata.Histogram[float64])
+	require.True(t, ok)
+	require.Len(t, duration.DataPoints, 1)
+	assert.Equal(t, uint64(1), duration.DataPoints[0].Count)
+
+	active, ok := metrics["http.server.active_requests"].Data.(metricdata.Sum[int64])
+	require.True(t, ok)
+	require.Len(t, active.DataPoints, 1)
+	assert.Equal(t, int64(0), active.DataPoints[0].Value)
 }
 
 func TestBeforeServeHTTP(t *testing.T) {
