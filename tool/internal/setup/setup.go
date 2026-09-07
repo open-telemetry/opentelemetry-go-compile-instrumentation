@@ -448,7 +448,7 @@ var buildContextFlagsWithValue = map[string]bool{
 	"-C":       true, // Change directory before running the command
 	"-overlay": true, // JSON overlay file used by go list/build
 	"-tags":    true, // build tags
-	"-mod":    true, // Module mode (vendor, mod, readonly)
+	"-mod":     true, // Module mode (vendor, mod, readonly)
 	"-modfile": true, // Custom go.mod file
 }
 
