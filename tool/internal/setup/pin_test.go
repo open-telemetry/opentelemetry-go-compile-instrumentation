@@ -899,6 +899,52 @@ go 1.25
 	require.FileExists(t, goSumPath, "go mod tidy should have restored go.sum")
 }
 
+func TestUpdateToolFile_SkippedTidyKeepsManualRequire(t *testing.T) {
+	trueValue := true
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte(`module example.com/test
+
+go 1.25
+`),
+		0o644,
+	))
+
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	// First run reaches the steady state.
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+
+	goModPath := filepath.Join(dir, "go.mod")
+	goModAfterFirst, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+
+	// The user adds a manual require. otelc owns only the lines it
+	// writes, so the manual require must survive the skipped tidy.
+	goModManual := string(goModAfterFirst) + "\nrequire example.com/manual v1.2.3\n"
+	require.NoError(t, os.WriteFile(goModPath, []byte(goModManual), 0o644))
+
+	var logs bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), debugLogger)
+
+	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
+	require.Contains(t, logs.String(), "skipping go mod tidy")
+
+	goModAfterSecond, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+	require.Equal(t, goModManual, string(goModAfterSecond))
+}
+
 func TestUpdateToolFile_PruneAfterSteadyStateRunsTidy(t *testing.T) {
 	trueValue := true
 
