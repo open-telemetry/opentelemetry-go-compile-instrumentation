@@ -24,27 +24,32 @@ const (
 	instrumentedSource = "package main\n\nfunc main() { println(\"hi\") }\n"
 )
 
+type sourceFiles struct {
+	oldFile string
+	newFile string
+}
+
 // sourcePair writes an original and an instrumented copy of the same file
 // name into sibling directories, mirroring how the instrument phase leaves
 // the original in place and writes its rewrite into the work directory.
-func sourcePair(t *testing.T, instrumented string) (oldFile, newFile string) {
+func sourcePair(t *testing.T, instrumented string) sourceFiles {
 	t.Helper()
 	oldDir, newDir := t.TempDir(), t.TempDir()
-	oldFile = filepath.Join(oldDir, "source.go")
-	newFile = filepath.Join(newDir, "source.go")
+	oldFile := filepath.Join(oldDir, "source.go")
+	newFile := filepath.Join(newDir, "source.go")
 	require.NoError(t, os.WriteFile(oldFile, []byte(originalSource), 0o644))
 	require.NoError(t, os.WriteFile(newFile, []byte(instrumented), 0o644))
-	return oldFile, newFile
+	return sourceFiles{oldFile: oldFile, newFile: newFile}
 }
 
 func TestWriteDiffForDebugWritesDiffUnderPackageDir(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	t.Setenv(util.EnvOtelcDebug, "1")
-	oldFile, newFile := sourcePair(t, instrumentedSource)
+	files := sourcePair(t, instrumentedSource)
 
 	ip := newTestPhase()
 	ip.compileArgs = []string{"-p", "github.com/redis/go-redis/v9"}
-	ip.writeDiffForDebug(oldFile, newFile, nil)
+	ip.writeDiffForDebug(files.oldFile, files.newFile, nil)
 
 	dest := util.GetBuildTemp(filepath.Join("debug", "github_com_redis_go-redis_v9", "source.go.diff"))
 	content, err := os.ReadFile(dest)
@@ -59,13 +64,13 @@ func TestWriteDiffForDebugWritesDiffUnderPackageDir(t *testing.T) {
 func TestWriteDiffForDebugIncludesPerRuleSections(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	t.Setenv(util.EnvOtelcDebug, "1")
-	oldFile, newFile := sourcePair(t, instrumentedSource)
+	files := sourcePair(t, instrumentedSource)
 	changes := []ruleChange{
 		{name: "add-hook-before", before: []byte("a\n"), after: []byte("a\nb\n")},
 		{name: "add-hook-after", before: []byte("a\nb\n"), after: []byte("a\nb\nc\n")},
 	}
 
-	newTestPhase().writeDiffForDebug(oldFile, newFile, changes)
+	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, changes)
 
 	dest := util.GetBuildTemp(filepath.Join("debug", "source.go.diff"))
 	content, err := os.ReadFile(dest)
@@ -99,9 +104,9 @@ func TestWriteDiffForDebugSkips(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 			t.Setenv(util.EnvOtelcDebug, test.debug)
-			oldFile, newFile := sourcePair(t, test.instrumented)
+			files := sourcePair(t, test.instrumented)
 
-			newTestPhase().writeDiffForDebug(oldFile, newFile, nil)
+			newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, nil)
 
 			_, err := os.Stat(util.GetBuildTemp(filepath.Join("debug", "source.go.diff")))
 			assert.True(t, os.IsNotExist(err), "expected no diff file, stat returned %v", err)
@@ -113,7 +118,7 @@ func TestWriteDiffForDebugSkips(t *testing.T) {
 // 2) so a test can apply one rule per variable and check each rule's
 // contribution is captured independently.
 func wrapVarDeclFile() *dst.File {
-	decl := func(name string, value string) dst.Decl {
+	decl := func(name, value string) dst.Decl {
 		return &dst.GenDecl{
 			Tok: token.VAR,
 			Specs: []dst.Spec{&dst.ValueSpec{
@@ -187,4 +192,33 @@ func TestApplyRulesCapturingDiffsSkipsCaptureWhenDebugOff(t *testing.T) {
 	fn, ok := call.Fun.(*dst.Ident)
 	require.True(t, ok)
 	assert.Equal(t, "double", fn.Name)
+}
+
+func TestWriteDiffForDebugMissingFiles(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// Missing oldFile
+	newTestPhase().writeDiffForDebug("/non/existent/old.go", "/non/existent/new.go", nil)
+
+	// Missing newFile
+	files := sourcePair(t, instrumentedSource)
+	newTestPhase().writeDiffForDebug(files.oldFile, "/non/existent/new.go", nil)
+
+	_, err := os.Stat(util.GetBuildTemp(filepath.Join("debug", "source.go.diff")))
+	assert.True(t, os.IsNotExist(err), "expected no diff file, stat returned %v", err)
+}
+
+func TestApplyRulesCapturingDiffsRuleError(t *testing.T) {
+	t.Setenv(util.EnvOtelcDebug, "1")
+	failingRule := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad_rule"},
+		Kind:         "var",
+		Identifier:   "X",
+		Wrap:         "{{ invalid template",
+	}
+
+	_, _, err := newTestPhase().applyRulesCapturingDiffs(
+		context.Background(), []rule.InstRule{failingRule}, wrapVarDeclFile())
+	require.Error(t, err)
 }

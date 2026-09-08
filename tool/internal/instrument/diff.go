@@ -21,6 +21,8 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
+const diffContextLines = 3
+
 // diffDebugEnabled parses OTELC_DEBUG the same way the --debug flag does
 // (urfave/cli's EnvVars source), so OTELC_DEBUG=0 disables the diff output
 // the same as an absent variable, rather than only an empty string doing so.
@@ -46,16 +48,21 @@ func (ip *instrumentPhase) applyRulesCapturingDiffs(
 	ctx context.Context,
 	rules []rule.InstRule,
 	root *dst.File,
-) (hasFuncRule bool, changes []ruleChange, err error) {
+) (bool, []ruleChange, error) {
 	debug := diffDebugEnabled()
 	var prev []byte
 	if debug {
+		var err error
 		if prev, err = ast.RenderFile(root); err != nil {
 			ip.Warn("failed to render source before rule application", "error", err)
 			debug = false
 		}
 	}
 
+	var (
+		hasFuncRule bool
+		changes     []ruleChange
+	)
 	for _, r := range rules {
 		funcRule, err1 := ip.applyOneRule(ctx, r, root)
 		if err1 != nil {
@@ -122,7 +129,7 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 		if text == "" {
 			continue
 		}
-		fmt.Fprintf(&report, "=== rule %d/%d: %s ===\n%s\n", i+1, len(changes), c.name, text)
+		_, _ = fmt.Fprintf(&report, "=== rule %d/%d: %s ===\n%s\n", i+1, len(changes), c.name, text)
 	}
 
 	fullText, err := unifiedDiff(oldContent, newContent, oldFile, newFile)
@@ -131,9 +138,9 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 		return
 	}
 	if report.Len() > 0 {
-		fmt.Fprintf(&report, "=== full diff: %s -> %s ===\n%s", oldFile, newFile, fullText)
+		_, _ = fmt.Fprintf(&report, "=== full diff: %s -> %s ===\n%s", oldFile, newFile, fullText)
 	} else {
-		report.WriteString(fullText)
+		_, _ = report.WriteString(fullText)
 	}
 
 	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(oldFile)+".diff")
@@ -141,7 +148,7 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 		ip.Warn("failed to create directory for instrumentation diff", "dest", dest, "error", err)
 		return
 	}
-	if err = os.WriteFile(dest, []byte(report.String()), 0o644); err != nil {
+	if err = os.WriteFile(dest, []byte(report.String()), 0o600); err != nil {
 		ip.Warn("failed to write instrumentation diff", "dest", dest, "error", err)
 		return
 	}
@@ -154,6 +161,6 @@ func unifiedDiff(a, b []byte, fromFile, toFile string) (string, error) {
 		B:        difflib.SplitLines(string(b)),
 		FromFile: fromFile,
 		ToFile:   toFile,
-		Context:  3,
+		Context:  diffContextLines,
 	})
 }
