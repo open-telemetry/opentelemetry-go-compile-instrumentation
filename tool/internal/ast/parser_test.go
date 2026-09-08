@@ -218,3 +218,13 @@ func TestWriteFile_PanicSafety(t *testing.T) {
 	require.Panics(t, func() { _ = writeFile(mock, "out.go", f) })
 	assert.True(t, mock.closed, "the file must be closed even when writing panics")
 }
+
+func TestRenderFile(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Bar() {}\n")
+	require.NoError(t, err)
+
+	buf, err := RenderFile(file)
+	require.NoError(t, err)
+	assert.Contains(t, string(buf), "func Bar()")
+}

@@ -222,3 +222,54 @@ func TestApplyRulesCapturingDiffsRuleError(t *testing.T) {
 		context.Background(), []rule.InstRule{failingRule}, wrapVarDeclFile())
 	require.Error(t, err)
 }
+
+func TestWriteDiffForDebugWriteFailure(t *testing.T) {
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// MkdirAll failure: work dir has a regular file at ".otelc-build"
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, util.BuildTempDir), []byte("not a dir"), 0o600))
+
+	files := sourcePair(t, instrumentedSource)
+	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, nil)
+
+	// WriteFile failure: destination is an existing directory
+	workDir2 := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir2)
+	dest := filepath.Join(workDir2, util.BuildTempDir, "debug", filepath.Base(files.oldFile)+".diff")
+	require.NoError(t, os.MkdirAll(dest, 0o755))
+	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, nil)
+}
+
+func TestWriteDiffForDebugEmptyRuleDiffSkipped(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	files := sourcePair(t, instrumentedSource)
+	changes := []ruleChange{
+		{name: "empty_diff", before: []byte("same\n"), after: []byte("same\n")},
+	}
+	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, changes)
+
+	dest := util.GetBuildTemp(filepath.Join("debug", "source.go.diff"))
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.NotContains(t, string(content), "=== rule 1/1: empty_diff ===")
+}
+
+func TestWriteDiffForDebugUnchangedOverallWithRuleChanges(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	files := sourcePair(t, originalSource) // both are originalSource
+	changes := []ruleChange{
+		{name: "temporary-edit", before: []byte("a\n"), after: []byte("b\n")},
+	}
+	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, changes)
+
+	dest := util.GetBuildTemp(filepath.Join("debug", "source.go.diff"))
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "=== rule 1/1: temporary-edit ===")
+}
