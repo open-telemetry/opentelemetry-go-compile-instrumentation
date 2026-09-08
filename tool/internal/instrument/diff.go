@@ -4,8 +4,10 @@
 package instrument
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/pmezard/go-difflib/difflib"
 
@@ -13,13 +15,14 @@ import (
 )
 
 // writeDiffForDebug writes a unified diff between oldFile (the original
-// source) and newFile (the instrumented output) to .otelc-build/debug, so
-// what otelc wove into a file is visible without hand-reconstructing it from
-// the raw copies keepForDebug already saves. Only runs under --debug: unlike
-// keepForDebug's raw copy, computing a diff isn't free, and the .diff file is
-// purely a debugging aid.
+// source) and newFile (the instrumented output) next to the copies
+// keepForDebug already saves, so what otelc wove in is readable without
+// diffing those copies by hand. Gated on --debug because, unlike a raw copy,
+// the diff has to be computed.
 func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string) {
-	if os.Getenv(util.EnvOtelcDebug) == "" {
+	// Parsed rather than tested for emptiness so OTELC_DEBUG=0 means the same
+	// here as it does to the --debug flag that reads the same variable.
+	if debug, err := strconv.ParseBool(os.Getenv(util.EnvOtelcDebug)); err != nil || !debug {
 		return
 	}
 
@@ -33,7 +36,7 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string) {
 		ip.Warn("failed to read instrumented file for diff", "path", newFile, "error", err)
 		return
 	}
-	if string(oldContent) == string(newContent) {
+	if bytes.Equal(oldContent, newContent) {
 		return
 	}
 
@@ -49,7 +52,7 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string) {
 		return
 	}
 
-	dest := util.GetBuildTemp(filepath.Join(ip.debugArtifactDir(), filepath.Base(oldFile)+".diff"))
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(oldFile)+".diff")
 	if err = os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		ip.Warn("failed to create directory for instrumentation diff", "dest", dest, "error", err)
 		return

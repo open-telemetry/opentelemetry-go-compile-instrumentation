@@ -14,50 +14,61 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-func writeTempFile(t *testing.T, dir, name, content string) string {
+const (
+	originalSource     = "package main\n\nfunc main() {}\n"
+	instrumentedSource = "package main\n\nfunc main() { println(\"hi\") }\n"
+)
+
+// sourcePair writes an original and an instrumented copy of the same file
+// name into sibling directories, mirroring how the instrument phase leaves
+// the original in place and writes its rewrite into the work directory.
+func sourcePair(t *testing.T, instrumented string) (oldFile, newFile string) {
 	t.Helper()
-	path := filepath.Join(dir, name)
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
-	return path
+	oldDir, newDir := t.TempDir(), t.TempDir()
+	oldFile = filepath.Join(oldDir, "source.go")
+	newFile = filepath.Join(newDir, "source.go")
+	require.NoError(t, os.WriteFile(oldFile, []byte(originalSource), 0o644))
+	require.NoError(t, os.WriteFile(newFile, []byte(instrumented), 0o644))
+	return oldFile, newFile
 }
 
-func TestWriteDiffForDebug(t *testing.T) {
-	dir := t.TempDir()
-	oldFile := writeTempFile(t, dir, "source.go", "package main\n\nfunc main() {}\n")
-	newFile := writeTempFile(t, dir, "source.go.new", "package main\n\nfunc main() { println(\"hi\") }\n")
+func TestWriteDiffForDebugWritesDiffUnderPackageDir(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcDebug, "1")
+	oldFile, newFile := sourcePair(t, instrumentedSource)
 
-	t.Run("writes a diff when debug is on and content differs", func(t *testing.T) {
-		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-		t.Setenv(util.EnvOtelcDebug, "1")
+	ip := newTestPhase()
+	ip.compileArgs = []string{"-p", "github.com/redis/go-redis/v9"}
+	ip.writeDiffForDebug(oldFile, newFile)
 
-		newTestPhase().writeDiffForDebug(oldFile, newFile)
+	dest := util.GetBuildTemp(filepath.Join("debug", "github_com_redis_go-redis_v9", "source.go.diff"))
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "-func main() {}")
+	assert.Contains(t, string(content), "+func main() { println(\"hi\") }")
+}
 
-		dest := util.GetBuildTemp(filepath.Join("debug", filepath.Base(oldFile)+".diff"))
-		content, err := os.ReadFile(dest)
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "-func main() {}")
-		assert.Contains(t, string(content), "+func main() { println(\"hi\") }")
-	})
+func TestWriteDiffForDebugSkips(t *testing.T) {
+	tests := []struct {
+		name         string
+		debug        string
+		instrumented string
+	}{
+		{name: "debug unset", debug: "", instrumented: instrumentedSource},
+		{name: "debug explicitly off", debug: "0", instrumented: instrumentedSource},
+		{name: "content unchanged", debug: "1", instrumented: originalSource},
+	}
 
-	t.Run("does nothing when debug is off", func(t *testing.T) {
-		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-		t.Setenv(util.EnvOtelcDebug, "")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+			t.Setenv(util.EnvOtelcDebug, test.debug)
+			oldFile, newFile := sourcePair(t, test.instrumented)
 
-		newTestPhase().writeDiffForDebug(oldFile, newFile)
+			newTestPhase().writeDiffForDebug(oldFile, newFile)
 
-		dest := util.GetBuildTemp(filepath.Join("debug", filepath.Base(oldFile)+".diff"))
-		_, err := os.Stat(dest)
-		assert.True(t, os.IsNotExist(err))
-	})
-
-	t.Run("does nothing when content is identical", func(t *testing.T) {
-		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-		t.Setenv(util.EnvOtelcDebug, "1")
-
-		newTestPhase().writeDiffForDebug(oldFile, oldFile)
-
-		dest := util.GetBuildTemp(filepath.Join("debug", filepath.Base(oldFile)+".diff"))
-		_, err := os.Stat(dest)
-		assert.True(t, os.IsNotExist(err))
-	})
+			_, err := os.Stat(util.GetBuildTemp(filepath.Join("debug", "source.go.diff")))
+			assert.True(t, os.IsNotExist(err), "expected no diff file, stat returned %v", err)
+		})
+	}
 }

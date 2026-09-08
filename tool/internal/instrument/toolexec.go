@@ -81,17 +81,17 @@ func escapeModPath(s string) string {
 	return strings.ReplaceAll(s, ".", "_")
 }
 
-// debugArtifactDir returns this package's debug artifact directory under
-// .otelc-build, matching the layout keepForDebug writes into.
+// debugArtifactDir returns the directory under .otelc-build holding this
+// package's debug artifacts.
 func (ip *instrumentPhase) debugArtifactDir() string {
 	modPath := util.FindFlagValue(ip.compileArgs, "-p")
-	return filepath.Join("debug", escapeModPath(modPath))
+	return util.GetBuildTemp(filepath.Join("debug", escapeModPath(modPath)))
 }
 
 // keepForDebug keeps the the file to .otelc-build directory for debugging
 func (ip *instrumentPhase) keepForDebug(name string) {
 	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(name))
-	err := util.CopyFile(name, util.GetBuildTemp(dest))
+	err := util.CopyFile(name, dest)
 	if err != nil { // error is tolerable here as this is only for debugging
 		ip.Warn("failed to save modified file", "dest", dest, "error", err)
 	}
