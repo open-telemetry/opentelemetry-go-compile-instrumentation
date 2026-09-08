@@ -95,13 +95,11 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		}
 
 		// Apply the rules to the target file
-		for _, r := range rules {
-			funcRule, err1 := ip.applyOneRule(ctx, r, root)
-			if err1 != nil {
-				return ex.Wrapf(err1, "applying rule %s", r.GetName())
-			}
-			hasFuncRule = hasFuncRule || funcRule
+		funcRuleApplied, changes, err1 := ip.applyRulesCapturingDiffs(ctx, rules, root)
+		if err1 != nil {
+			return err1
 		}
+		hasFuncRule = hasFuncRule || funcRuleApplied
 		// Since trampoline-jump-if is performance-critical, perform AST level
 		// optimization for them before writing to file
 		if err = ip.optimizeTJumps(); err != nil {
@@ -109,7 +107,7 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		}
 		// Once all func rules targeting this file are applied, write instrumented
 		// AST to new file and replace the original file in the compile command
-		if err = ip.writeInstrumented(root, file); err != nil {
+		if err = ip.writeInstrumented(root, file, changes); err != nil {
 			return ex.Wrapf(err, "writing instrumented file %s", file)
 		}
 	}

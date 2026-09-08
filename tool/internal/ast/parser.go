@@ -121,14 +121,24 @@ func writeFile(w io.WriteCloser, filePath string, root *dst.File) (retErr error)
 
 // WriteFileAtomic writes the AST to a file atomically.
 func WriteFileAtomic(filePath string, root *dst.File) error {
-	var buf bytes.Buffer
-
-	r := decorator.NewRestorer()
-	if err := r.Fprint(&buf, root); err != nil {
+	buf, err := RenderFile(root)
+	if err != nil {
 		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
 	}
 
-	return util.WriteFileAtomic(filePath, buf.Bytes())
+	return util.WriteFileAtomic(filePath, buf)
+}
+
+// RenderFile restores root's AST back into Go source text, without writing
+// it anywhere. Safe to call repeatedly against the same *dst.File as it is
+// mutated, e.g. to snapshot it between successive rule applications.
+func RenderFile(root *dst.File) ([]byte, error) {
+	var buf bytes.Buffer
+	r := decorator.NewRestorer()
+	if err := r.Fprint(&buf, root); err != nil {
+		return nil, ex.Wrap(err)
+	}
+	return buf.Bytes(), nil
 }
 
 // ParsePackageName parses only the package name from a file, skipping
