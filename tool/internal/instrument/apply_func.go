@@ -352,6 +352,7 @@ func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) err
 		return ex.Wrapf(err, "writing instrumented file %s", newFile)
 	}
 	ip.keepForDebug(newFile)
+	ip.writeDiffForDebug(oldFile, newFile)
 
 	// Replace the original file with the new file in the compile command
 	replace := false
