@@ -81,12 +81,12 @@ func (ip *instrumentPhase) applyRulesCapturingDiffs(
 }
 
 // writeDiffForDebug writes a report of what otelc wove into oldFile next to
-// the copies keepForDebug already saves: a unified diff for each rule in
-// changes, in application order, followed by the full old-file-to-new-file
-// diff as a summary. Per-rule sections make kakkoyun's troubleshooting ask
-// concrete (which file, which rule, in what order); the full diff stays
-// authoritative for the actual compiled output, since post-processing (e.g.
-// optimizeTJumps) can still touch the file after the last rule runs.
+// the copies keepForDebug already saves: a unified diff per rule, in
+// application order, so an injected change can be traced back to the rule
+// that caused it, followed by the full old-to-new diff. That full diff is
+// the authoritative one for what the compiler actually sees, because
+// post-processing (optimizeTJumps) can still alter the file after the last
+// rule has run, so the per-rule sections need not sum to it.
 func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []ruleChange) {
 	if !diffDebugEnabled() {
 		return
@@ -108,7 +108,13 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 
 	var report strings.Builder
 	for i, c := range changes {
-		text, diffErr := unifiedDiff(c.before, c.after, oldFile, oldFile)
+		// Both sides are the same file at different points in the rule
+		// sequence. The suffix keeps the two header lines distinguishable
+		// while leaving the path itself the first whitespace-delimited
+		// token, which is what patch(1) reads as the filename.
+		text, diffErr := unifiedDiff(c.before, c.after,
+			fmt.Sprintf("%s (before %s)", oldFile, c.name),
+			fmt.Sprintf("%s (after %s)", oldFile, c.name))
 		if diffErr != nil {
 			ip.Warn("failed to compute per-rule diff", "rule", c.name, "error", diffErr)
 			continue
