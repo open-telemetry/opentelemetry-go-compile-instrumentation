@@ -233,6 +233,34 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {}
 	assert.Equal(t, "handleRoot", fn.Name.Name)
 }
 
+// TestFindFuncDeclForRule_QualifiedPointerReceiver is an end-to-end regression
+// test for the bug where a recv filter (e.g. "*Writer") crashed instead of
+// matching or returning no match against a qualified pointer receiver like
+// *bufio.Writer. stripGenericTypes only handled *dst.Ident and generic
+// index expressions under a StarExpr, not *dst.SelectorExpr, so it fell
+// through to util.Unimplemented/ex.Fatalf.
+func TestFindFuncDeclForRule_QualifiedPointerReceiver(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource(`package main
+
+import "bufio"
+
+func (*bufio.Writer) Write(p []byte) (n int, err error) { return }
+`)
+	require.NoError(t, err)
+
+	r := &rule.InstFuncRule{
+		Func: "Write",
+		Recv: "*Writer",
+	}
+
+	fn, ok, err := FindFuncDecl(file, r)
+	require.NoError(t, err)
+	require.True(t, ok, `recv: "*Writer" should match a *bufio.Writer receiver`)
+	require.NotNil(t, fn)
+	assert.Equal(t, "Write", fn.Name.Name)
+}
+
 func TestFindVarDecl(t *testing.T) {
 	file := parseSharedFixture(t)
 
@@ -790,6 +818,11 @@ func TestStripGenericTypes(t *testing.T) {
 				X: &dst.IndexListExpr{X: Ident("GenStruct"), Indices: []dst.Expr{Ident("T"), Ident("U")}},
 			},
 			want: "*GenStruct",
+		},
+		{
+			name: "qualified pointer receiver",
+			expr: &dst.StarExpr{X: &dst.SelectorExpr{X: Ident("bufio"), Sel: Ident("Writer")}},
+			want: "*Writer",
 		},
 		{
 			name: "unrecognized expression yields empty",

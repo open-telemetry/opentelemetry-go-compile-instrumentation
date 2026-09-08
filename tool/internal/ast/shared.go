@@ -50,6 +50,7 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 // - MyStruct -> MyStruct
 // - *GenStruct[T] -> *GenStruct
 // - GenStruct[T] -> GenStruct
+// - *pkg.Type -> *Type
 func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	switch expr := recvTypeExpr.(type) {
 	case *dst.StarExpr: // func (*Recv)T or func (*Recv[T])T
@@ -68,6 +69,9 @@ func stripGenericTypes(recvTypeExpr dst.Expr) string {
 			if baseIdent, ok := x.X.(*dst.Ident); ok {
 				return "*" + baseIdent.Name
 			}
+		case *dst.SelectorExpr:
+			// Qualified pointer receiver: *pkg.Type
+			return "*" + x.Sel.Name
 		}
 	case *dst.Ident: // func (Recv)T
 		return expr.Name
