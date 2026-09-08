@@ -52,11 +52,7 @@ func (ip *instrumentPhase) applyRulesCapturingDiffs(
 	debug := diffDebugEnabled()
 	var prev []byte
 	if debug {
-		var err error
-		if prev, err = ast.RenderFile(root); err != nil {
-			ip.Warn("failed to render source before rule application", "error", err)
-			debug = false
-		}
+		prev, _ = ast.RenderFile(root)
 	}
 
 	var (
@@ -73,12 +69,7 @@ func (ip *instrumentPhase) applyRulesCapturingDiffs(
 			continue
 		}
 
-		after, err1 := ast.RenderFile(root)
-		if err1 != nil {
-			// Non-fatal: this only degrades the debug diff, not the build.
-			ip.Warn("failed to render source after rule application", "rule", r.GetName(), "error", err1)
-			continue
-		}
+		after, _ := ast.RenderFile(root)
 		if !bytes.Equal(prev, after) {
 			changes = append(changes, ruleChange{name: r.GetName(), before: prev, after: after})
 		}
@@ -119,24 +110,16 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 		// sequence. The suffix keeps the two header lines distinguishable
 		// while leaving the path itself the first whitespace-delimited
 		// token, which is what patch(1) reads as the filename.
-		text, diffErr := unifiedDiff(c.before, c.after,
+		text := unifiedDiff(c.before, c.after,
 			fmt.Sprintf("%s (before %s)", oldFile, c.name),
 			fmt.Sprintf("%s (after %s)", oldFile, c.name))
-		if diffErr != nil {
-			ip.Warn("failed to compute per-rule diff", "rule", c.name, "error", diffErr)
-			continue
-		}
 		if text == "" {
 			continue
 		}
 		_, _ = fmt.Fprintf(&report, "=== rule %d/%d: %s ===\n%s\n", i+1, len(changes), c.name, text)
 	}
 
-	fullText, err := unifiedDiff(oldContent, newContent, oldFile, newFile)
-	if err != nil {
-		ip.Warn("failed to compute instrumentation diff", "old", oldFile, "new", newFile, "error", err)
-		return
-	}
+	fullText := unifiedDiff(oldContent, newContent, oldFile, newFile)
 	if report.Len() > 0 {
 		_, _ = fmt.Fprintf(&report, "=== full diff: %s -> %s ===\n%s", oldFile, newFile, fullText)
 	} else {
@@ -155,12 +138,13 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 	ip.Info("Wrote instrumentation diff", "path", dest, "rules", len(changes))
 }
 
-func unifiedDiff(a, b []byte, fromFile, toFile string) (string, error) {
-	return difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+func unifiedDiff(a, b []byte, fromFile, toFile string) string {
+	diff, _ := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
 		A:        difflib.SplitLines(string(a)),
 		B:        difflib.SplitLines(string(b)),
 		FromFile: fromFile,
 		ToFile:   toFile,
 		Context:  diffContextLines,
 	})
+	return diff
 }

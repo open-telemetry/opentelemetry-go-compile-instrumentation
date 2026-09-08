@@ -98,6 +98,15 @@ func TestWriteFileAtomic(t *testing.T) {
 	assert.Contains(t, string(data), "func Bar()")
 }
 
+func TestWriteFileAtomic_Error(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Bar() {}\n")
+	require.NoError(t, err)
+
+	badPath := filepath.Join(t.TempDir(), "missing-dir", "atomic.go")
+	require.Error(t, WriteFileAtomic(badPath, file))
+}
+
 func TestParseAst(t *testing.T) {
 	_, err := ParseFile("parser_test.go")
 	require.NoError(t, err)
