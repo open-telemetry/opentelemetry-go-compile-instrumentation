@@ -205,6 +205,28 @@ func TestBeforeDoRequest_Disabled(t *testing.T) {
 	assert.Nil(t, ictx.GetKeyData(keySpan))
 }
 
+// TestAfterDoRequest_DisabledAfterStart_Regression covers a span created while
+// instrumentation was enabled and then disabled before the after hook runs. The
+// span must still be ended, otherwise it leaks.
+func TestAfterDoRequest_DisabledAfterStart_Regression(t *testing.T) {
+	sr, _ := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(nil, parent, "GET", "linode/instances/1", nil, nil)
+	BeforeDoRequest(ictx, nil, parent, "GET", "linode/instances/1", nil, nil)
+
+	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
+	require.True(t, ok, "before hook should have created a span while enabled")
+	require.NotNil(t, span)
+
+	// Disable mid-operation, then run the after hook.
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "linodego")
+	AfterDoRequest(ictx, nil)
+
+	require.Len(t, sr.Ended(), 1, "span created by the before hook must be ended even after a mid-operation disable")
+}
+
 func TestPublicMethodHooks_Success(t *testing.T) {
 	sr, reader := setupTestProviders(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
@@ -263,6 +285,28 @@ func TestPublicMethodHooks_Disabled(t *testing.T) {
 	BeforeAPICall1(ictx, nil, context.Background())
 	AfterAPICall2(ictx, nil, nil)
 	assert.Empty(t, sr.Ended())
+}
+
+// TestPublicMethodHooks_DisabledAfterStart_Regression covers the public-method
+// path: a span created while enabled must still be ended when instrumentation is
+// disabled before the after hook runs.
+func TestPublicMethodHooks_DisabledAfterStart_Regression(t *testing.T) {
+	sr, _ := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(nil, parent, 123)
+	ictx.FuncName = "GetInstance"
+	BeforeAPICall2(ictx, nil, parent, 123)
+
+	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
+	require.True(t, ok, "before hook should have created a span while enabled")
+	require.NotNil(t, span)
+
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "linodego")
+	AfterAPICall2(ictx, nil, nil)
+
+	require.Len(t, sr.Ended(), 1, "span created by the before hook must be ended even after a mid-operation disable")
 }
 
 func attrMap(attrs []attribute.KeyValue) map[string]interface{} {

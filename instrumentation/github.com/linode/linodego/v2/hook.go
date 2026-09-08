@@ -123,10 +123,6 @@ func BeforeDoRequest(
 
 // AfterDoRequest runs after (*Client).doRequest and ends the span.
 func AfterDoRequest(ictx hook.HookContext, err error) {
-	if !enabler.Enable() {
-		return
-	}
-
 	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterDoRequest: no span from before hook")

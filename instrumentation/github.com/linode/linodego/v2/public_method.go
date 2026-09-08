@@ -57,10 +57,6 @@ func beforeAPICall(ictx hook.HookContext, params ...interface{}) {
 }
 
 func afterAPICall(ictx hook.HookContext, err error) {
-	if !enabler.Enable() {
-		return
-	}
-
 	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterAPICall: no span from before hook")
