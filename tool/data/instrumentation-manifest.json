@@ -32,6 +32,11 @@
     "versionRange": "v2.4.1"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/olivere/elastic/v7",
+    "target": "github.com/olivere/elastic/v7",
+    "versionRange": "v7.0.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go",
     "target": "github.com/openai/openai-go"
   },

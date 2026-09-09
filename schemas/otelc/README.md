@@ -19,6 +19,7 @@ schemas/otelc/
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
+│   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
 │   ├── linodego.yaml        # linode/linodego (v2) client spans + operation-duration metric
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
@@ -53,6 +54,7 @@ signals an undeclared instrumentation.
 | `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |
 | `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
 | `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
+| `github.com/olivere/elastic/v7`                     | `elasticsearch.yaml` | DB client spans                                                        |
 | `github.com/gin-gonic/gin`                          | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
 | `github.com/linode/linodego/v2`                     | `linodego.yaml`     | HTTP client spans + operation-duration metric                          |
 | `go.opentelemetry.io/otel/init`                     | `otel-sdk.yaml`     | Go runtime metrics (`go.*`)                                            |

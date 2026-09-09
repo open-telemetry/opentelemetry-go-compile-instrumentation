@@ -133,6 +133,7 @@ The following libraries are automatically instrumented:
 | `github.com/linode/linodego/v2` | HTTP client spans and metrics |
 | `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | Trace/span ID log correlation |
 | `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
+| `github.com/olivere/elastic/v7` | Elasticsearch DB spans |
 
 ## Learn More
 
