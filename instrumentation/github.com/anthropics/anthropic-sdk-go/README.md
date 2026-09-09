@@ -26,7 +26,7 @@ at compile-time. Zero code changes required!
 |-----------|----------|--------|
 | Messages (non-streaming) | `POST /v1/messages` | Supported |
 | Messages (streaming) | `POST /v1/messages` | Pass-through (see [Limitations](#limitations)) |
-| Count tokens | `POST /v1/messages/count_tokens` | Not instrumented |
+| Count tokens | `POST /v1/messages/count_tokens` | Supported |
 | Message batches | `POST /v1/messages/batches` | Not instrumented |
 
 ## How It Works
@@ -68,14 +68,14 @@ This instrumentation emits spans following the
 
 ### Span Name
 
-`chat <model>` (e.g., `chat claude-sonnet-4-5`)
+`chat <model>` (e.g., `chat claude-sonnet-4-5`) or `count_tokens <model>`
 
 ### Attributes
 
 | Attribute | Description | Example |
 |-----------|-------------|---------|
 | `gen_ai.system` | AI system provider | `"anthropic"` |
-| `gen_ai.operation.name` | Operation type | `"chat"` |
+| `gen_ai.operation.name` | Operation type | `"chat"` or `"count_tokens"` (token counting has no GenAI semconv value yet) |
 | `gen_ai.request.model` | Model used | `"claude-sonnet-4-5"` |
 | `gen_ai.response.model` | Response model | `"claude-sonnet-4-5"` |
 | `gen_ai.response.id` | Response ID | `"msg_01XFDUDYJgAACzvnptvVoYEL"` |
@@ -121,8 +121,7 @@ reassembled so the SDK always receives the full payload.
 - **Streaming is not yet instrumented.** When `"stream": true` is set in the
   request, the middleware passes the request through without creating a span.
   Streaming support is planned as a follow-up.
-- Only the Messages API (`POST /v1/messages`) is instrumented. Other endpoints
-  (count_tokens, batches) are passed through.
+- Message batches (`POST /v1/messages/batches`) are passed through.
 
 ## Example
 
