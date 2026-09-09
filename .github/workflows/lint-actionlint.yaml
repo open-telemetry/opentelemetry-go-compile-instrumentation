@@ -7,6 +7,8 @@ on:
       - ".github/workflows/*.yaml"
       - ".github/actions/**/action.yml"
       - ".github/actions/**/action.yaml"
+      - ".tools/go.mod"
+      - ".tools/go.sum"
   push:
     branches: [main]
     paths:
@@ -14,6 +16,8 @@ on:
       - ".github/workflows/*.yaml"
       - ".github/actions/**/action.yml"
       - ".github/actions/**/action.yaml"
+      - ".tools/go.mod"
+      - ".tools/go.sum"
 
 permissions:
   contents: read
