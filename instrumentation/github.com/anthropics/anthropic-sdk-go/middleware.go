@@ -50,13 +50,16 @@ type operationType int
 
 const (
 	opMessages operationType = iota
+	opCountTokens
 	opUnknown
 )
 
-// classifyOperation maps a request path to an operation. Only the Messages API
-// (POST /v1/messages) is instrumented; the suffix match excludes
-// /v1/messages/count_tokens and /v1/messages/batches.
+// classifyOperation maps a request path to an operation.
+// /v1/messages/batches stays uninstrumented.
 func classifyOperation(path string) operationType {
+	if strings.HasSuffix(path, "/messages/count_tokens") {
+		return opCountTokens
+	}
 	if strings.HasSuffix(path, "/messages") {
 		return opMessages
 	}
@@ -66,6 +69,10 @@ func classifyOperation(path string) operationType {
 func operationName(op operationType) string {
 	if op == opMessages {
 		return "chat"
+	}
+	if op == opCountTokens {
+		// GenAI semconv has no standard name for token counting yet.
+		return "count_tokens"
 	}
 	return ""
 }
@@ -181,13 +188,13 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			return resp, nil
 		}
 
-		handleNonStreamingResponse(resp, span)
+		handleNonStreamingResponse(resp, span, op)
 
 		return resp, nil
 	}
 }
 
-func handleNonStreamingResponse(resp *http.Response, span trace.Span) {
+func handleNonStreamingResponse(resp *http.Response, span trace.Span, op operationType) {
 	defer span.End()
 
 	if resp.Body == nil {
@@ -207,7 +214,21 @@ func handleNonStreamingResponse(resp *http.Response, span trace.Span) {
 		return
 	}
 
+	if op == opCountTokens {
+		parseCountTokensResponse(bodyBytes, span)
+		return
+	}
 	parseMessagesResponse(bodyBytes, span)
+}
+
+func parseCountTokensResponse(body []byte, span trace.Span) {
+	var resp struct {
+		InputTokens int64 `json:"input_tokens"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return
+	}
+	span.SetAttributes(semconv.GenAIUsageInputTokens(resp.InputTokens))
 }
 
 func parseMessagesRequest(body []byte) (string, bool, []attribute.KeyValue) {
