@@ -93,7 +93,7 @@ func TestParseElasticPath(t *testing.T) {
 		{"POST", "/orders,logs/_search", "search", "orders,logs"},
 		{"POST", "/orders%2Clogs/_search", "search", "orders,logs"},
 		{"POST", "/orders*/_search", "search", "orders*"},
-		{"POST", "/caf%C3%A9/_search", "search", "café"},
+		{"POST", "/m%C3%BCnchen/_search", "search", "münchen"},
 		{"POST", "/orders/_doc/_search", "search", "orders"},
 		{"GET", "/_cluster/health", "cluster.health", ""},
 		{"GET", "/_nodes/http", "nodes.http", ""},
