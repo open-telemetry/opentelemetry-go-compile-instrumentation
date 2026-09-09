@@ -28,6 +28,30 @@ func TestValidateExcludeTargets(t *testing.T) {
 	assert.Contains(t, err.Error(), "exclude_targets[0]")
 }
 
+func TestExpandExcludeTargets(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, rule.ExpandExcludeTargets(nil, []string{"example.com/app"}))
+	assert.Equal(t,
+		[]string{"example.com/other"},
+		rule.ExpandExcludeTargets([]string{"example.com/other"}, []string{"example.com/app"}),
+	)
+	assert.Equal(t,
+		[]string{"example.com/app/**", "example.com/app/plugin/**"},
+		rule.ExpandExcludeTargets(
+			[]string{rule.TargetRoot},
+			[]string{"example.com/app", "example.com/app/plugin"},
+		),
+	)
+	assert.Equal(t,
+		[]string{"example.com/app/**", "example.com/other"},
+		rule.ExpandExcludeTargets(
+			[]string{rule.TargetRoot, "example.com/other"},
+			[]string{"example.com/app"},
+		),
+	)
+}
+
 func TestMatchesExcludeTargets(t *testing.T) {
 	t.Parallel()
 

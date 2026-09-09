@@ -22,6 +22,26 @@ func ValidateExcludeTargets(excludes []string) error {
 	return nil
 }
 
+// ExpandExcludeTargets resolves $root entries to root-module globs. Each $root
+// becomes rootModule + "/**" for every module in rootModules. Non-$root patterns
+// are copied unchanged.
+func ExpandExcludeTargets(excludes []string, rootModules []string) []string {
+	if len(excludes) == 0 {
+		return excludes
+	}
+	expanded := make([]string, 0, len(excludes))
+	for _, pattern := range excludes {
+		if IsRootTarget(pattern) {
+			for _, root := range rootModules {
+				expanded = append(expanded, root+"/**")
+			}
+			continue
+		}
+		expanded = append(expanded, pattern)
+	}
+	return expanded
+}
+
 // MatchesExcludeTargets reports whether importPath matches any exclude_targets
 // entry. Exact paths and glob patterns use the same semantics as target.
 func MatchesExcludeTargets(importPath string, excludes []string) bool {
