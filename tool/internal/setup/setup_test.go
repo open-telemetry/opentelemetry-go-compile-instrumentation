@@ -47,10 +47,11 @@ func TestToolexecInsertArg(t *testing.T) {
 		assert.Equal(t, "-toolexec=/usr/local/bin/otelc toolexec", insert)
 	})
 
-	t.Run("wraps the error with the offending path when it can't be quoted", func(t *testing.T) {
+	t.Run("propagates the error naming the offending path when it can't be quoted", func(t *testing.T) {
 		path := `/home/it's "me"/otelc`
 		_, err := toolexecInsertArg(path)
 		require.Error(t, err)
+		assert.Contains(t, err.Error(), "quoting otelc executable path for -toolexec")
 		assert.Contains(t, err.Error(), fmt.Sprintf("%q", path))
 	})
 }

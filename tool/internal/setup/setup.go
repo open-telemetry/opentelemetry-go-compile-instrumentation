@@ -530,14 +530,17 @@ func extractBuildFlags(args []string) []string {
 	return append(valueFlags, enabledBoolFlags...)
 }
 
-// toolexecInsertArg builds the -toolexec=... argument for execPath, wrapping
-// any error with the execPath that caused it. Split out from
-// buildWithToolexec so the error path (reachable only when execPath contains
-// both quote characters) is testable without depending on os.Executable.
+// toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
+// from buildWithToolexec so the error path (reachable only when execPath
+// contains both quote characters) is testable without depending on
+// os.Executable.
 func toolexecInsertArg(execPath string) (string, error) {
 	insert, err := util.BuildToolexecFlag(execPath)
 	if err != nil {
-		return "", ex.Wrapf(err, "building -toolexec flag for %q", execPath)
+		// BuildToolexecFlag's own error already names execPath, so there
+		// is nothing to add here, matching nestedToolexecGoflagsToken
+		// and the #1231 convention.
+		return "", err
 	}
 	return insert, nil
 }
