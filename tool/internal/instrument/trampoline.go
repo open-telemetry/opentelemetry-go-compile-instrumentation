@@ -199,7 +199,7 @@ func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
 	if root, ok := ip.parsedHookFiles[file]; ok {
 		return root, nil
 	}
-	root, err := ast.ParseFile(file)
+	root, err := ast.ParseFileFast(file)
 	if err != nil {
 		return nil, err
 	}
