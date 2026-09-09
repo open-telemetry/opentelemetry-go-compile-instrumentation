@@ -22,7 +22,7 @@ schemas/otelc/
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
 │   ├── linodego.yaml        # linode/linodego (v2) client spans + operation-duration metric
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
-│   ├── logs.yaml            # log, log/slog, logrus — no telemetry (correlation only)
+│   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 │   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
@@ -59,7 +59,7 @@ signals an undeclared instrumentation.
 | `go.opentelemetry.io/otel`                          | `otel-sdk.yaml`     | nothing — guards the global tracer provider                            |
 | `go.opentelemetry.io/otel/sdk/trace`                | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |
 | `go.opentelemetry.io/otel/trace`                    | `otel-sdk.yaml`     | nothing — GLS fallback for `SpanFromContext`                           |
-| `log`, `log/slog`, `github.com/sirupsen/logrus`     | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
+| `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
 | `runtime`                                           | `runtime.yaml`      | nothing — goroutine-local context propagation                          |
 
 ## Validate locally

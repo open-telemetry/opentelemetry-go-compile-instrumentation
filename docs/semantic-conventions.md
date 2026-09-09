@@ -54,7 +54,7 @@ schemas/otelc/
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
-│   ├── logs.yaml            # log, log/slog, logrus — no telemetry (correlation only)
+│   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 │   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
