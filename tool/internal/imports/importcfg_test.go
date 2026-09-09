@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -102,7 +103,70 @@ func TestWriteFile_CreateError(t *testing.T) {
 	cfg := ImportConfig{}
 	err := cfg.WriteFile(filepath.Join(t.TempDir(), "nonexistent", "importcfg"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create file")
+	assert.Contains(t, err.Error(), "failed to create temporary file")
+}
+
+// TestWriteFile_UnwritableDirFailsWithoutTouchingTarget documents a deliberate
+// behaviour change from the atomic write. The temporary file needs a writable
+// directory, whereas os.Create only needed a writable target, so a read-only
+// directory now fails instead of rewriting the file in place. The importcfg
+// always lives in the toolchain's $WORK tree, which is writable by the same
+// user, so this does not affect real builds. What matters is the guarantee it
+// buys: when the write cannot be completed, the existing file is left exactly
+// as it was rather than truncated.
+func TestWriteFile_UnwritableDirFailsWithoutTouchingTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions do not gate file creation the same way on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses the directory permission bits this test relies on")
+	}
+
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "importcfg")
+	original := "packagefile fmt=/original/fmt.a\n"
+	require.NoError(t, os.WriteFile(filename, []byte(original), 0o644))
+
+	require.NoError(t, os.Chmod(dir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	cfg := ImportConfig{PackageFile: map[string]string{"fmt": "/replacement/fmt.a"}}
+	require.Error(t, cfg.WriteFile(filename))
+
+	content, err := os.ReadFile(filename)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(content), "target must be untouched when the write cannot proceed")
+}
+
+func TestWriteFile_PreservesPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not preserved on Windows")
+	}
+
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "importcfg")
+	require.NoError(t, os.WriteFile(filename, []byte("packagefile fmt=/old.a\n"), 0o640))
+
+	cfg := ImportConfig{PackageFile: map[string]string{"fmt": "/new.a"}}
+	require.NoError(t, cfg.WriteFile(filename))
+
+	info, err := os.Stat(filename)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+}
+
+// The atomic write goes through a temporary file; none may survive the call.
+func TestWriteFile_LeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "importcfg")
+
+	cfg := ImportConfig{PackageFile: map[string]string{"fmt": "/path/to/fmt.a"}}
+	require.NoError(t, cfg.WriteFile(filename))
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "importcfg", entries[0].Name())
 }
 
 type mockWriteCloser struct {
