@@ -109,6 +109,8 @@ func (ip *instrumentPhase) materializeTemplate() error {
 	// declarations based on that
 	proto, err := parsedTemplateImpl()
 	if err != nil {
+		// Defensive: templateImpl is an embedded constant, so this error branch
+		// is unreachable in practice unless the binary was built broken.
 		return err
 	}
 	astRoot := util.AssertType[*dst.File](dst.Clone(proto))
