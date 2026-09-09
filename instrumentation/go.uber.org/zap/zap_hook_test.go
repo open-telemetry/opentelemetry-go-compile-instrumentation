@@ -146,6 +146,33 @@ func TestBeforeCheckedEntryWrite_PreservesExistingFields(t *testing.T) {
 	assert.Equal(t, stringField(spanIDKey, "def456spanId"), got[2])
 }
 
+func TestBeforeCheckedEntryWrite_DoesNotAliasCallerSlice(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+		return "abc123traceId", "def456spanId"
+	})
+	t.Cleanup(func() {
+		runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+			return "", ""
+		})
+	})
+
+	caller := make([]zapcore.Field, 1, 4)
+	caller[0] = stringField("key", "value")
+
+	ictx := hooktest.NewMockHookContext()
+	BeforeCheckedEntryWrite(ictx, &zapcore.CheckedEntry{}, caller...)
+
+	require.Equal(t, []zapcore.Field{stringField("key", "value")}, caller)
+	assert.Equal(t, zapcore.Field{}, caller[:cap(caller)][1])
+	assert.Equal(t, zapcore.Field{}, caller[:cap(caller)][2])
+
+	got := requireFields(t, ictx)
+	require.Len(t, got, 3)
+	assert.Equal(t, stringField("key", "value"), got[0])
+	assert.Equal(t, stringField(traceIDKey, "abc123traceId"), got[1])
+	assert.Equal(t, stringField(spanIDKey, "def456spanId"), got[2])
+}
+
 func requireFields(t *testing.T, ictx *hooktest.MockHookContext) []zapcore.Field {
 	t.Helper()
 	raw := ictx.GetParam(fieldsParamIndex)

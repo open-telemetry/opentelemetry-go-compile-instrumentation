@@ -39,9 +39,12 @@ func BeforeCheckedEntryWrite(ictx hook.HookContext, ce *zapcore.CheckedEntry, fi
 		return
 	}
 
-	fields = append(fields, stringField(traceIDKey, traceID))
+	// Copy so append cannot write into spare capacity on a reused caller slice.
+	out := make([]zapcore.Field, len(fields), len(fields)+2)
+	copy(out, fields)
+	out = append(out, stringField(traceIDKey, traceID))
 	if spanID != "" {
-		fields = append(fields, stringField(spanIDKey, spanID))
+		out = append(out, stringField(spanIDKey, spanID))
 	}
-	ictx.SetParam(fieldsParamIndex, fields)
+	ictx.SetParam(fieldsParamIndex, out)
 }
