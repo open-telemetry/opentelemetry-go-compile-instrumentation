@@ -13,16 +13,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Set up Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
         with:
           go-version-file: 'go.mod'
+          cache: false
       - name: Build binary
         run: make build-all
-      - name: Create Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
-        with:
-          files: |
-            dist/otelc-*
-          generate_release_notes: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/otelc-* --generate-notes

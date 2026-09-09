@@ -1,0 +1,8 @@
+generic_func_before_only_rule:
+  target: main
+  where:
+    func: GenericFuncBeforeOnly
+  do:
+    - inject_hooks:
+        before: GenericFuncBeforeOnlyBefore
+        path: testdata/golden/generic-before-only

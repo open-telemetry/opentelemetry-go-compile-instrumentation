@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 
-	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -24,7 +23,7 @@ func main() {
 // run expects the repository root as its working directory. The manifest
 // source and output paths are both relative to it, as guaranteed by make.
 func run() error {
-	generated, err := manifest.Generate("instrumentation")
+	generated, err := Generate("instrumentation")
 	if err != nil {
 		return fmt.Errorf("generate instrumentation manifest: %w", err)
 	}
