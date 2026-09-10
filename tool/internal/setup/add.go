@@ -21,6 +21,15 @@ const (
 	otelcRuntimeFile = "otelc.runtime.go"
 )
 
+// runtimePackage describes the package that receives a generated
+// otelc.runtime.go: where it sits on disk, how it is imported, and the package
+// name the generated file must declare.
+type runtimePackage struct {
+	dir        string
+	importPath string
+	name       string
+}
+
 //nolint:gochecknoglobals // This is a constant
 var requiredImports = map[string]string{
 	"runtime/debug": "_otel_debug", // The getstack function depends on runtime/debug
@@ -113,12 +122,24 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
-func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, packagePath, packageName string) error {
+//
+// Rules that keep their hook code in pkg itself are dropped, since a generated
+// file cannot import the package it belongs to. `otelc go test ./...` selects
+// such a package when the hooks live in the application module.
+func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkg runtimePackage) error {
 	funcRules := []*rule.InstFuncRule{}
 	fileRules := []*rule.InstFileRule{}
 	for _, m := range matched {
-		funcRules = append(funcRules, m.AllFuncRules()...)
-		fileRules = append(fileRules, m.FileRules...)
+		for _, funcRule := range m.AllFuncRules() {
+			if funcRule.Path != pkg.importPath {
+				funcRules = append(funcRules, funcRule)
+			}
+		}
+		for _, fileRule := range m.FileRules {
+			if fileRule.Path != pkg.importPath {
+				fileRules = append(fileRules, fileRule)
+			}
+		}
 	}
 	if len(funcRules) == 0 && len(fileRules) == 0 {
 		return nil
@@ -129,8 +150,8 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	// Generate the variable declarations that used by otel runtime
 	varDecls := genVarDecl(funcRules)
 	// build the ast
-	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), packageName)
-	otelcRuntimeFilePath := filepath.Join(packagePath, otelcRuntimeFile)
+	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), pkg.name)
+	otelcRuntimeFilePath := filepath.Join(pkg.dir, otelcRuntimeFile)
 	// Track file in state manager
 	if stateManager, found := stateManagerFromContext(ctx); found {
 		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
