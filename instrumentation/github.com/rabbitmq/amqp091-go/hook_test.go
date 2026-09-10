@@ -158,7 +158,7 @@ func TestWrapDeliveries_ProcessEndsOnAck(t *testing.T) {
 	sr := setupTest(t)
 
 	in := make(chan amqp.Delivery, 1)
-	out := wrapDeliveries("orders", false, in)
+	out := wrapDeliveries(nil, "orders", false, in)
 	in <- amqp.Delivery{
 		Acknowledger: stubAck{},
 		DeliveryTag:  1,
@@ -187,7 +187,7 @@ func TestWrapDeliveries_AutoAckEndsImmediately(t *testing.T) {
 	sr := setupTest(t)
 
 	in := make(chan amqp.Delivery, 1)
-	out := wrapDeliveries("orders", true, in)
+	out := wrapDeliveries(nil, "orders", true, in)
 	in <- amqp.Delivery{Acknowledger: stubAck{}, Body: []byte("hi")}
 	close(in)
 	<-out
@@ -200,11 +200,11 @@ func TestWrapDeliveries_AutoAckEndsImmediately(t *testing.T) {
 	require.Equal(t, "receive", spanAttrs(spans[0])["messaging.operation.type"])
 }
 
-func TestWrapDeliveries_NackSetsError(t *testing.T) {
+func TestWrapDeliveries_NackEndsUnset(t *testing.T) {
 	sr := setupTest(t)
 
 	in := make(chan amqp.Delivery, 1)
-	out := wrapDeliveries("orders", false, in)
+	out := wrapDeliveries(nil, "orders", false, in)
 	in <- amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}
 	d := <-out
 	require.NoError(t, d.Nack(false, false))
@@ -213,15 +213,14 @@ func TestWrapDeliveries_NackSetsError(t *testing.T) {
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
-	require.Equal(t, codes.Error, spans[0].Status().Code)
-	require.Equal(t, "nack", spans[0].Status().Description)
+	require.Equal(t, codes.Unset, spans[0].Status().Code)
 }
 
 func TestWrapDeliveries_ClosedChannelEndsLeftover(t *testing.T) {
 	sr := setupTest(t)
 
 	in := make(chan amqp.Delivery, 1)
-	out := wrapDeliveries("orders", false, in)
+	out := wrapDeliveries(nil, "orders", false, in)
 	in <- amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}
 	close(in)
 	<-out
@@ -290,11 +289,11 @@ func TestBeforeConsumeWithContext_StoresQueue(t *testing.T) {
 	require.False(t, data.autoAck)
 }
 
-func TestWrapDeliveries_RejectSetsError(t *testing.T) {
+func TestWrapDeliveries_RejectEndsUnset(t *testing.T) {
 	sr := setupTest(t)
 
 	in := make(chan amqp.Delivery, 1)
-	out := wrapDeliveries("orders", false, in)
+	out := wrapDeliveries(nil, "orders", false, in)
 	in <- amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}
 	d := <-out
 	require.NoError(t, d.Reject(false))
@@ -303,8 +302,7 @@ func TestWrapDeliveries_RejectSetsError(t *testing.T) {
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
-	require.Equal(t, codes.Error, spans[0].Status().Code)
-	require.Equal(t, "reject", spans[0].Status().Description)
+	require.Equal(t, codes.Unset, spans[0].Status().Code)
 }
 
 func TestAfterPublish_NoBeforeIsNoop(t *testing.T) {
@@ -323,7 +321,7 @@ func TestPublishLinksToConsumeViaHeaders(t *testing.T) {
 	AfterPublishWithDeferredConfirm(pub, nil, nil)
 
 	in := make(chan amqp.Delivery, 1)
-	out := wrapDeliveries("orders", true, in)
+	out := wrapDeliveries(nil, "orders", true, in)
 	in <- amqp.Delivery{Headers: injected.Headers, Body: msg.Body}
 	close(in)
 	<-out
@@ -334,4 +332,110 @@ func TestPublishLinksToConsumeViaHeaders(t *testing.T) {
 	require.Len(t, spans, 2)
 	require.Equal(t, spans[0].SpanContext().TraceID(), spans[1].SpanContext().TraceID())
 	require.Equal(t, spans[0].SpanContext().SpanID(), spans[1].Parent().SpanID())
+}
+
+func TestPublish_DoesNotMutateCallerHeaders(t *testing.T) {
+	setupTest(t)
+
+	orig := amqp.Table{"x-custom": "1"}
+	msg := amqp.Publishing{Headers: orig, Body: []byte("hello")}
+	ictx := hooktest.NewMockHookContext((*amqp.Channel)(nil), "ex", "rk", false, false, msg)
+	BeforePublishWithDeferredConfirm(ictx, nil, "ex", "rk", false, false, msg)
+
+	_, hasTrace := orig["traceparent"]
+	require.False(t, hasTrace, "caller Headers must stay unchanged")
+	require.Equal(t, "1", orig["x-custom"])
+
+	written, ok := ictx.GetParam(publishMsgIndex).(amqp.Publishing)
+	require.True(t, ok)
+	require.NotEmpty(t, amqprop.NewTableCarrier(&written.Headers).Get("traceparent"))
+	require.Equal(t, "1", written.Headers["x-custom"])
+}
+
+func TestPublishWithContext_UsesAPIParent(t *testing.T) {
+	sr := setupTest(t)
+
+	ctx, parent := tracer.Start(context.Background(), "handler")
+	ch := &amqp.Channel{}
+	msg := amqp.Publishing{Body: []byte("hello")}
+	BeforePublishWithContext(hooktest.NewMockHookContext(), ch, ctx, "ex", "rk", false, false, msg)
+
+	pub := hooktest.NewMockHookContext(ch, "ex", "rk", false, false, msg)
+	BeforePublishWithDeferredConfirm(pub, ch, "ex", "rk", false, false, msg)
+	AfterPublishWithDeferredConfirm(pub, nil, nil)
+	parent.End()
+
+	var send sdktrace.ReadOnlySpan
+	for _, s := range sr.Ended() {
+		if s.Name() == "ex send" {
+			send = s
+			break
+		}
+	}
+	require.NotNil(t, send)
+	require.Equal(t, parent.SpanContext().SpanID(), send.Parent().SpanID())
+}
+
+func TestChannelAck_EndsProcessSpan(t *testing.T) {
+	sr := setupTest(t)
+
+	ch := &amqp.Channel{}
+	ictx := hooktest.NewMockHookContext()
+	ictx.SetData(&consumeData{ch: ch, queue: "orders", autoAck: false})
+	AfterGet(ictx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 7, Body: []byte("hi")}, true, nil)
+	require.Empty(t, sr.Ended(), "process span must stay open until Channel.Ack")
+
+	ack := hooktest.NewMockHookContext()
+	BeforeAck(ack, ch, 7, false)
+	AfterAck(ack, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Equal(t, "orders process", spans[0].Name())
+	require.Equal(t, codes.Unset, spans[0].Status().Code)
+}
+
+func TestChannelAck_MultipleEndsOlderTags(t *testing.T) {
+	sr := setupTest(t)
+
+	ch := &amqp.Channel{}
+	for _, tag := range []uint64{1, 2} {
+		ictx := hooktest.NewMockHookContext()
+		ictx.SetData(&consumeData{ch: ch, queue: "orders", autoAck: false})
+		AfterGet(ictx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: tag}, true, nil)
+	}
+	require.Empty(t, sr.Ended())
+
+	ack := hooktest.NewMockHookContext()
+	BeforeAck(ack, ch, 2, true)
+	AfterAck(ack, nil)
+	require.Len(t, sr.Ended(), 2)
+}
+
+func TestWrapDeliveries_NackErrorSetsStatus(t *testing.T) {
+	sr := setupTest(t)
+
+	in := make(chan amqp.Delivery, 1)
+	out := wrapDeliveries(nil, "orders", false, in)
+	in <- amqp.Delivery{Acknowledger: stubAck{ackErr: errors.New("channel closed")}, DeliveryTag: 1}
+	d := <-out
+	require.Error(t, d.Nack(false, false))
+	close(in)
+	<-out
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	require.Equal(t, codes.Error, spans[0].Status().Code)
+}
+
+func TestBeforeGet_StoresChannel(t *testing.T) {
+	setupTest(t)
+
+	ch := &amqp.Channel{}
+	ictx := hooktest.NewMockHookContext()
+	BeforeGet(ictx, ch, "orders", false)
+	data, ok := ictx.GetData().(*consumeData)
+	require.True(t, ok)
+	require.Equal(t, ch, data.ch)
+	require.Equal(t, "orders", data.queue)
 }

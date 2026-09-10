@@ -7,7 +7,8 @@ groups:
   #   instrumentation/github.com/rabbitmq/amqp091-go/semconv/client.go
   #
   # Trace-only. One producer span per PublishWithDeferredConfirm. One consumer
-  # span per Delivery (process until Ack/Nack/Reject, or receive when auto-ack).
+  # span per Delivery (process until Delivery or Channel Ack/Nack/Reject,
+  # including multiple=true, or receive when auto-ack).
   # server.address is omitted because (*Channel).connection is unexported.
   # ---------------------------------------------------------------------------
 
