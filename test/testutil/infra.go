@@ -9,11 +9,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/util"
+)
+
+var (
+	// buildMu serializes all go build operations across tests to act as a resource throttle,
+	// preventing CPU/memory exhaustion on CI runners (since individual go builds already
+	// parallelize package compilation internally).
+	buildMu   sync.Mutex
+	sandboxMu sync.Mutex
+	sandboxes = make(map[string]bool)
 )
 
 const (
@@ -70,27 +81,59 @@ func appsPath() (string, error) {
 	return filepath.Join(pwd, "..", "apps"), nil
 }
 
+func SandboxPath(t *testing.T) (string, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	tName := t.Name()
+	if idx := strings.Index(tName, "/"); idx != -1 {
+		tName = tName[:idx]
+	}
+	return filepath.Join(pwd, "..", ".tmp_"+tName), nil
+}
+
+func initSandbox(t *testing.T, sandboxDir string) {
+	sandboxMu.Lock()
+	defer sandboxMu.Unlock()
+
+	if sandboxes[sandboxDir] {
+		return
+	}
+
+	t.Cleanup(func() {
+		_ = os.RemoveAll(sandboxDir)
+		sandboxMu.Lock()
+		delete(sandboxes, sandboxDir)
+		sandboxMu.Unlock()
+	})
+	sandboxes[sandboxDir] = true
+}
+
 // Build builds the application with the instrumentation tool. The built binary
 // is registered for cleanup via t.Cleanup. Standard test apps use
-// OTELC_TEST_GOCACHE/<app> as GOCACHE when OTELC_TEST_GOCACHE is set, and drop
-// -a so warm builds can reuse that per-app cache. Custom appsDir builds keep
-// the caller's arguments and environment unchanged.
+// OTELC_TEST_GOCACHE as a shared GOCACHE when OTELC_TEST_GOCACHE is set, and
+// drop -a so warm builds can reuse that shared cache. Custom appsDir builds
+// keep the caller's arguments and environment unchanged.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
+	buildMu.Lock()
+	defer buildMu.Unlock()
+
 	otelc, err := OtelcPath()
 	require.NoError(t, err)
 
 	standardAppsDir := appsDir == ""
-	var env []string
+	env := os.Environ()
+	env = setEnv(env, "GOWORK", "off")
 	if standardAppsDir {
+
 		cacheRoot := os.Getenv("OTELC_TEST_GOCACHE")
 		if cacheRoot != "" {
-			cacheDir := filepath.Join(cacheRoot, app)
-			require.NoError(t, os.MkdirAll(cacheDir, 0o755))
-			env = append(os.Environ(), "GOCACHE="+cacheDir)
+			require.NoError(t, os.MkdirAll(cacheRoot, 0o755))
+			env = setEnv(env, "GOCACHE", cacheRoot)
 
-			// Dropping -a lets warm builds reuse this app-local cache without sharing
-			// compiled objects across different instrumentation configs.
+			// Dropping -a lets warm builds reuse this shared build cache.
 			filteredArgs := make([]string, 0, len(args))
 			for _, arg := range args {
 				if arg != "-a" {
@@ -105,12 +148,25 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 	args = append(args, "-o", output)
 	args = append([]string{otelc}, args...)
 
+	var appDir string
 	if standardAppsDir {
-		var err error
+		sandboxDir, err := SandboxPath(t)
+		require.NoError(t, err)
+		initSandbox(t, sandboxDir)
+
 		appsDir, err = appsPath()
 		require.NoError(t, err)
+
+		srcDir := filepath.Join(appsDir, app)
+		dstDir := filepath.Join(sandboxDir, app)
+
+		if _, err := os.Stat(dstDir); os.IsNotExist(err) {
+			require.NoError(t, copyDir(srcDir, dstDir))
+		}
+		appDir = dstDir
+	} else {
+		appDir = filepath.Join(appsDir, app)
 	}
-	appDir := filepath.Join(appsDir, app)
 
 	cmd := newCmd(t.Context(), appDir, env, args...)
 	out, err := cmd.CombinedOutput()
@@ -132,12 +188,17 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 	if util.IsWindows() {
 		appName += ".exe"
 	}
+	var appDir string
 	if appsDir == "" {
-		var err error
-		appsDir, err = appsPath()
+		sandboxDir, err := SandboxPath(t)
 		require.NoError(t, err)
+		appDir = filepath.Join(sandboxDir, app)
+		if _, err := os.Stat(appDir); os.IsNotExist(err) {
+			t.Fatalf("sandbox directory %s does not exist; Build must be called before Run", appDir)
+		}
+	} else {
+		appDir = filepath.Join(appsDir, app)
 	}
-	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
@@ -153,12 +214,17 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 	if util.IsWindows() {
 		appName += ".exe"
 	}
+	var appDir string
 	if appsDir == "" {
-		var err error
-		appsDir, err = appsPath()
+		sandboxDir, err := SandboxPath(t)
 		require.NoError(t, err)
+		appDir = filepath.Join(sandboxDir, app)
+		if _, err := os.Stat(appDir); os.IsNotExist(err) {
+			t.Fatalf("sandbox directory %s does not exist; Build must be called before Start", appDir)
+		}
+	} else {
+		appDir = filepath.Join(appsDir, app)
 	}
-	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 
 	var buf bytes.Buffer
@@ -177,4 +243,51 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 	})
 
 	return cmd
+}
+
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == ".otelc-build" || name == "app" || name == "app.exe" || name == ".otelc-build.lock" {
+			continue
+		}
+		srcPath := filepath.Join(src, name)
+		dstPath := filepath.Join(dst, name)
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dstPath, data, info.Mode()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func setEnv(env []string, key, val string) []string {
+	prefix := strings.ToLower(key) + "="
+	for i, entry := range env {
+		if strings.HasPrefix(strings.ToLower(entry), prefix) {
+			env[i] = key + "=" + val
+			return env
+		}
+	}
+	return append(env, key+"="+val)
 }

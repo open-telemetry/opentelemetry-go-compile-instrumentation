@@ -25,9 +25,9 @@ func TestExplicitInstrumentationSelection(t *testing.T) {
 
 	testutil.Build(t, "", "gincustom", "go", "build", "-a")
 
-	// Verify .otelc-build/matched.json only contains net/http, custom gin instrumentation
-	// but not the built-in gin instrumentation:
-	matched := filepath.Join("../", "apps", "gincustom", ".otelc-build", "matched.json")
+	sandboxDir, err := testutil.SandboxPath(t)
+	require.NoError(t, err)
+	matched := filepath.Join(sandboxDir, "gincustom", ".otelc-build", "matched.json")
 	require.FileExists(t, matched)
 
 	matchedData, readErr := os.ReadFile(matched)
