@@ -646,6 +646,27 @@ func TestSplitCompileCmds(t *testing.T) {
 	}
 }
 
+func TestUnquoteGoflagsToken(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{name: "unquoted token unchanged", token: "-mod=mod", want: "-mod=mod"},
+		{name: "single-quoted token stripped", token: "'-mod=readonly'", want: "-mod=readonly"},
+		{name: "double-quoted token stripped", token: `"-mod=readonly"`, want: "-mod=readonly"},
+		{name: "mismatched pair unchanged", token: `'-mod=readonly"`, want: `'-mod=readonly"`},
+		{name: "double layer strips one layer", token: `"'-mod=readonly'"`, want: "'-mod=readonly'"},
+		{name: "one-character token unchanged", token: "'", want: "'"},
+		{name: "empty token unchanged", token: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, UnquoteGoflagsToken(tt.token))
+		})
+	}
+}
+
 func TestQuoteGoflagsToken(t *testing.T) {
 	tests := []struct {
 		name    string
