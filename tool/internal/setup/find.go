@@ -75,6 +75,61 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 	return commands, nil
 }
 
+// planIrrelevantFlags names flags that change how the go command formats its
+// own output without changing the build plan. listBuildPlan reads the plan from
+// the go command's stderr, and -json moves it to stdout as a stream of JSON
+// build-output events instead, so the plan parses empty and no dependency is
+// found. The real build keeps the flag; only the dry run drops it.
+//
+//nolint:gochecknoglobals // private lookup table
+var planIrrelevantFlags = map[string]bool{
+	flagJSON: true,
+}
+
+// flagName returns the flag name of arg in single-dash form, without a joined
+// value. The go command accepts -flag and --flag interchangeably.
+func flagName(arg string) string {
+	name, _, _ := strings.Cut(arg, "=")
+	if strings.HasPrefix(name, "--") {
+		return name[1:]
+	}
+	return name
+}
+
+// dropPlanIrrelevantFlags returns cmdArgs without the flags listed in
+// planIrrelevantFlags. Arguments after -args go to the test binary rather than
+// the go command, so they pass through untouched, and a value that follows a
+// flag in separated form travels with its flag so it is never read as one.
+func dropPlanIrrelevantFlags(cmdArgs []string) []string {
+	kept := make([]string, 0, len(cmdArgs))
+	for i := 0; i < len(cmdArgs); i++ {
+		arg := cmdArgs[i]
+
+		// Everything after -args is passed to the test binary, so it can
+		// contain neither go flags nor packages.
+		if arg == flagArgs {
+			kept = append(kept, cmdArgs[i:]...)
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			kept = append(kept, arg)
+			continue
+		}
+
+		name := flagName(arg)
+		end := i + 1
+		if !strings.Contains(arg, "=") && (flagsWithPathValues[name] || testFlagsWithValues[name]) &&
+			end < len(cmdArgs) {
+			end++ // the flag's value is the next argument
+		}
+		if !planIrrelevantFlags[name] {
+			kept = append(kept, cmdArgs[i:end]...)
+		}
+		i = end - 1
+	}
+	return kept
+}
+
 // listBuildPlan lists the build plan by running `go build -a -x -n`
 // and then filtering the commands (cd, cgo, compile) from the build plan log.
 func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]string, error) {
@@ -97,10 +152,11 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 		planVerb = subcmdTest
 	}
 	// The full command is: "go build/test -a -x -n {...}"
+	planArgs := dropPlanIrrelevantFlags(cmdArgs)
 	prefix := []string{planVerb, "-a", "-x", "-n"}
-	args := make([]string, 0, len(prefix)+len(cmdArgs))
+	args := make([]string, 0, len(prefix)+len(planArgs))
 	args = append(args, prefix...)
-	args = append(args, cmdArgs...) // args from original build/install or setup command
+	args = append(args, planArgs...) // args from original build/install or setup command
 	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
