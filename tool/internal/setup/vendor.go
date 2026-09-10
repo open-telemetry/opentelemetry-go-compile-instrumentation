@@ -33,7 +33,7 @@ func vendoringActive(ctx context.Context, workDir string) bool {
 	if root == "" {
 		return false
 	}
-	return util.PathExists(filepath.Join(root, "vendor", "modules.txt"))
+	return util.PathExists(filepath.Join(root, vendorDirName, "modules.txt"))
 }
 
 // modMod forces module mode, so the build ignores the vendor directory.
@@ -43,7 +43,7 @@ const modMod = "-mod=mod"
 // treats the double-dash form the same as the single-dash one. The value, if
 // any, is the next argument.
 func isModFlag(tok string) bool {
-	return tok == "-mod" || tok == "--mod"
+	return tok == flagMod || tok == "--mod"
 }
 
 // isModVendorToken reports whether tok is a joined -mod=vendor/--mod=vendor
@@ -96,7 +96,7 @@ func rewriteModVendor(args []string) []string {
 		switch {
 		case isModVendorToken(out[i]):
 			out[i] = modMod
-		case isModFlag(out[i]) && i+1 < len(out) && out[i+1] == "vendor":
+		case isModFlag(out[i]) && i+1 < len(out) && out[i+1] == vendorDirName:
 			out[i+1] = "mod"
 			i++
 		}

@@ -132,6 +132,10 @@ const (
 	subcmdBuild   = "build"
 	subcmdInstall = "install"
 	subcmdTest    = "test"
+
+	goModFileName = "go.mod"
+	vendorDirName = "vendor"
+	flagMod       = "-mod"
 )
 
 // Go command flags that the argument scanners treat specially.

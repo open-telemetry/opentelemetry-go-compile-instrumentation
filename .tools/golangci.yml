@@ -245,6 +245,15 @@ linters:
       # Default: 30 (but we recommend 10-20)
       min-complexity: 30
 
+    goconst:
+      # golangci-lint v2.12+ counts string literals in tests toward the
+      # occurrence threshold. Restore the previous default so repeated CLI
+      # flags and fixture strings in _test.go files are not treated as
+      # production duplication. The path exclusion for _test.go only
+      # suppresses issues reported in those files; it does not stop goconst
+      # from counting them.
+      ignore-tests: true
+
     gocritic:
       # Settings passed to gocritic.
       # The settings key is the name of a supported gocritic checker.

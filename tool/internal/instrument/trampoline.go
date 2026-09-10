@@ -35,6 +35,7 @@ const (
 	trampolineAfterName             = "OtelAfterTrampoline"
 	trampolineHookContextName       = "hookContext"
 	trampolineHookContextType       = "HookContext"
+	trampolineAnyName               = "any"
 	trampolineInterfaceType         = "interface{}"
 	trampolineEmptyStructType       = "struct{}"
 	trampolineSkipName              = "skip"
@@ -328,7 +329,7 @@ func interfaceTypeName(t *dst.InterfaceType) string {
 func baseTypeName(expr dst.Expr) string {
 	switch t := expr.(type) {
 	case *dst.Ident:
-		if t.Name == "any" {
+		if t.Name == trampolineAnyName {
 			return trampolineInterfaceType
 		}
 		return t.Name
@@ -371,7 +372,7 @@ func indexListType(x dst.Expr, indices []dst.Expr) string {
 
 // isAnyOrInterface reports whether the type string represents an empty interface (any / interface{}).
 func isAnyOrInterface(s string) bool {
-	return s == "any" || s == trampolineInterfaceType
+	return s == trampolineAnyName || s == trampolineInterfaceType
 }
 
 // sliceOrEllipsisElt returns the element type and true if s is a slice or ellipsis type.
@@ -1008,7 +1009,7 @@ func receiverConstraintAt(original *dst.FieldList, idx int) dst.Expr {
 			pos += n
 		}
 	}
-	return ast.Ident("any") // Type constraint for the parameter
+	return ast.Ident(trampolineAnyName) // Type constraint for the parameter
 }
 
 // desugarType desugars parameter type to its original type, if parameter
