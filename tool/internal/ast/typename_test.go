@@ -261,6 +261,7 @@ func TestTypeNameMatches_ImportAliasResolution(t *testing.T) {
 
 func TestImportAliasMap(t *testing.T) {
 	t.Run("nil file returns nil", func(t *testing.T) {
+		assert.Nil(t, collectImportSpecs(nil))
 		assert.Nil(t, ImportAliasMap(nil))
 	})
 
@@ -521,4 +522,111 @@ func TestMatchesTypeName_UnsupportedNodeDoesNotMatch(t *testing.T) {
 	matched, err := MatchesTypeName(sliceType, "context.Context", nil)
 	require.NoError(t, err)
 	assert.False(t, matched)
+}
+
+func TestImportAliasMap_CollidingDefaultAliases(t *testing.T) {
+	t.Run("unaliased colliding default aliases are excluded", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"example.com/m/bar"
+	"example.com/m/other/bar"
+	"net/http"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "net/http", imports["http"])
+		assert.NotContains(t, imports, "bar")
+	})
+
+	t.Run("explicit alias overrides colliding default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"example.com/m/bar"
+	otherbar "example.com/m/other/bar"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "example.com/m/bar", imports["bar"])
+		assert.Equal(t, "example.com/m/other/bar", imports["otherbar"])
+	})
+
+	t.Run("explicit alias wins over subsequent default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	bar "example.com/m/bar"
+	"example.com/m/other/bar"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "example.com/m/bar", imports["bar"])
+	})
+
+	t.Run("colliding explicit aliases are excluded", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	tpl "example.com/m/bar"
+	tpl "example.com/m/other/bar"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.NotContains(t, imports, "tpl")
+	})
+
+	t.Run("duplicate identical import path is preserved", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"net/http"
+	"net/http"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "net/http", imports["http"])
+	})
+}
+
+func TestTypeNameMatches_StrictImportContext(t *testing.T) {
+	node := &dst.SelectorExpr{
+		X:   &dst.Ident{Name: "req"},
+		Sel: &dst.Ident{Name: "Header"},
+	}
+
+	tn, err := parseTypeName("foo/req.Header")
+	require.NoError(t, err)
+
+	// When imports is provided, an unimported selector "req" must not fall back to path-tail match.
+	imports := map[string]string{"http": "net/http"}
+	assert.False(t, tn.matches(node, imports))
+
+	// Without import context (imports == nil), path-tail matching still works for test AST nodes.
+	assert.True(t, tn.matches(node, nil))
 }
