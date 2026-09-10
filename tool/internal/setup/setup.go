@@ -546,20 +546,31 @@ func extractBuildFlags(args []string) []string {
 	return append(valueFlags, enabledBoolFlags...)
 }
 
-// buildWithToolexec builds the project with the toolexec mode. vendored is
-// passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
-// -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
-// args and forwarded flags below.
-func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
-	args := cmd.Args().Slice()
-	logger := util.LoggerFromContext(ctx)
-
-	// Add -toolexec=otelc to the original build command and run it
-	execPath, err := os.Executable()
+// toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
+// from buildWithToolexec so the error path (reachable only when execPath
+// contains both quote characters) is testable without depending on
+// os.Executable.
+func toolexecInsertArg(execPath string) (string, error) {
+	insert, err := util.BuildToolexecFlag(execPath)
 	if err != nil {
-		return ex.Wrapf(err, "failed to get executable path")
+		// BuildToolexecFlag's own error already names execPath, so there
+		// is nothing to add here, matching nestedToolexecGoflagsToken
+		// and the #1231 convention.
+		return "", err
 	}
-	insert := "-toolexec=" + execPath + " toolexec"
+	return insert, nil
+}
+
+// toolexecBuildArgs assembles the argv for the instrumented build: the
+// original go subcommand, -work, the -toolexec flag pointing at execPath, and
+// the caller's remaining arguments. Kept free of side effects so it can be
+// tested directly; buildWithToolexec cannot be, since it would spawn a go
+// build whose -toolexec target is the test binary itself.
+func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string, error) {
+	insert, err := toolexecInsertArg(execPath)
+	if err != nil {
+		return nil, err
+	}
 	const additionalCount = 2
 	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
 	// Add "go build"
@@ -582,7 +593,40 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 			restArgs = append(restArgs, otelcRuntimePath)
 		}
 	}
-	newArgs = append(newArgs, restArgs...)
+	return append(newArgs, restArgs...), nil
+}
+
+// runBuildCmd runs the assembled go build. It is a variable so tests can
+// replace it: the -toolexec target is os.Executable(), which under `go test`
+// is the test binary, so really running the command would make the test
+// binary its own toolexec target and re-invoke itself without bound.
+//
+//nolint:gochecknoglobals // test seam
+var runBuildCmd = util.RunCmdWithEnv
+
+// executablePath resolves the path to the current executable. It is a variable
+// so tests can simulate paths that trigger quoting errors.
+//
+//nolint:gochecknoglobals // test seam
+var executablePath = os.Executable
+
+// buildWithToolexec builds the project with the toolexec mode. vendored is
+// passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
+// -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
+// args and forwarded flags below.
+func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
+	args := cmd.Args().Slice()
+	logger := util.LoggerFromContext(ctx)
+
+	// Add -toolexec=otelc to the original build command and run it
+	execPath, err := executablePath()
+	if err != nil {
+		return ex.Wrapf(err, "failed to get executable path")
+	}
+	newArgs, err := toolexecBuildArgs(args, execPath, vendored)
+	if err != nil {
+		return err
+	}
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
@@ -609,7 +653,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		return ex.Wrapf(err, "configuring go cache")
 	}
 
-	return util.RunCmdWithEnv(ctx, env, newArgs...)
+	return runBuildCmd(ctx, env, newArgs...)
 }
 
 func GoBuild(ctx context.Context, cmd *cli.Command) error {
