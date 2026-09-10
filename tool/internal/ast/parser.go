@@ -41,7 +41,9 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to open file %s", filePath)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 	astFile, err := parser.ParseFile(ap.fset, name, file, mode)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)

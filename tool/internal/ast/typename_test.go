@@ -324,6 +324,110 @@ func f(x *foo.T, y *bar.T) {}
 		assert.Equal(t, "github.com/b/bar/v2", imports["bar"])
 	})
 
+	t.Run("unaliased colliding default aliases are removed as ambiguous", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"html/template"
+	"text/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.NotContains(t, imports, "template")
+	})
+
+	t.Run("three-way unaliased colliding default aliases remain ambiguous", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"example.com/foo/util"
+	"example.com/bar/util"
+	"example.com/baz/util"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.NotContains(t, imports, "util")
+	})
+
+	t.Run("explicit alias overrides colliding default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"html/template"
+	txttemplate "text/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "html/template", imports["template"])
+		assert.Equal(t, "text/template", imports["txttemplate"])
+	})
+
+	t.Run("explicit alias overrides existing default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"html/template"
+	template "text/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "text/template", imports["template"])
+	})
+
+	t.Run("explicit alias takes precedence over subsequent default alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	template "text/template"
+	"html/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "text/template", imports["template"])
+	})
+
+	t.Run("duplicate identical import path is preserved", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"html/template"
+	"html/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "html/template", imports["template"])
+	})
+
 	t.Run("package name unrelated to import path is not resolved by convention", func(t *testing.T) {
 		// github.com/redis/go-redis/v9 declares package "redis", not "go-redis".
 		p := NewAstParser()
