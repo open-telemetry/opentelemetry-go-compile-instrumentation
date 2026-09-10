@@ -106,18 +106,6 @@ func parse(r io.Reader) (ImportConfig, error) {
 
 // WriteFile writes the content of the ImportConfig to the provided file,
 // in the format expected by the Go toolchain commands.
-//
-// The content is rendered in full before any file is touched, then written to a
-// temporary file and renamed over the target, so a failure leaves the existing
-// file untouched instead of truncating it. The callers pass the Go toolchain's
-// own -importcfg path, and the parsed copy that could restore it does not
-// outlive the process.
-//
-// Whether the replacement itself is atomic is left to util.WriteFileAtomic,
-// which documents it as atomic on Unix-like systems for same-filesystem
-// renames and unspecified elsewhere. This function does not depend on that
-// stronger guarantee: what it needs is that the target is never left
-// half-written, which holds on every supported platform.
 func (r *ImportConfig) WriteFile(filename string) error {
 	var buf bytes.Buffer
 	if err := r.write(&buf); err != nil {
