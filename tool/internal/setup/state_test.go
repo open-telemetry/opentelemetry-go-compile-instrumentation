@@ -218,8 +218,8 @@ func TestGetBackupFiles(t *testing.T) {
 
 			moduleDir := tt.setup(t, tmp)
 
-			files, err := getBackupFiles(t.Context(), map[string]bool{
-				moduleDir: true,
+			files, err := getBackupFiles(t.Context(), []string{
+				moduleDir,
 			})
 
 			require.NoError(t, err)
@@ -472,11 +472,13 @@ func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
 	mustWriteFile(t, filepath.Join(modB, "go.mod"), "module dirB")
 	mustWriteFile(t, filepath.Join(modC, "go.mod"), "module dirC")
 
-	moduleDirs := map[string]bool{
-		modC: true,
-		modA: true,
-		modB: true,
+	moduleDirs := []string{
+		modC,
+		modA,
+		modB,
+		modA, // duplicate to verify deduplication
 	}
+	callerOrig := append([]string(nil), moduleDirs...)
 
 	var firstResult []string
 	for range 20 {
@@ -485,10 +487,17 @@ func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
 
 		if firstResult == nil {
 			firstResult = files
+			// Assert that files contains no duplicates
+			seenFiles := make(map[string]bool)
+			for _, f := range files {
+				assert.False(t, seenFiles[f], "duplicate backup file: %s", f)
+				seenFiles[f] = true
+			}
 		} else {
 			assert.Equal(t, firstResult, files, "getBackupFiles output must be deterministic across multiple calls")
 		}
 	}
+	assert.Equal(t, callerOrig, moduleDirs, "caller slice must not be mutated")
 }
 
 func TestStateManagerDiscard(t *testing.T) {

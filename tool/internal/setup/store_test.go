@@ -25,7 +25,7 @@ func TestSetupPhaseStore(t *testing.T) {
 
 	// An empty rule set resolves no paths and writes an empty JSON array to the
 	// matched-rule file.
-	err := sp.store(context.Background(), []*rule.InstRuleSet{}, map[string]bool{})
+	err := sp.store(context.Background(), []*rule.InstRuleSet{}, []string{})
 	require.NoError(t, err)
 
 	matchedFile := util.GetMatchedRuleFile()
@@ -43,7 +43,7 @@ func TestSetupPhaseStoreCreateError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
 	sp := newTestSetupPhase()
-	err := sp.store(context.Background(), []*rule.InstRuleSet{}, map[string]bool{})
+	err := sp.store(context.Background(), []*rule.InstRuleSet{}, []string{})
 	require.Error(t, err)
 }
 
@@ -78,7 +78,7 @@ func TestResolveRulePaths(t *testing.T) {
 	err := resolveRulePaths(
 		t.Context(),
 		[]*rule.InstRuleSet{rs},
-		map[string]bool{dir: true},
+		[]string{dir},
 	)
 	require.NoError(t, err)
 
@@ -115,7 +115,7 @@ func TestResolveRulePaths_MultipleDistinctPaths(t *testing.T) {
 	err := resolveRulePaths(
 		t.Context(),
 		[]*rule.InstRuleSet{rs},
-		map[string]bool{dir: true},
+		[]string{dir},
 	)
 	require.NoError(t, err)
 
@@ -143,7 +143,7 @@ func TestResolveRulePaths_LoadError(t *testing.T) {
 	err := resolveRulePaths(
 		t.Context(),
 		[]*rule.InstRuleSet{rs},
-		map[string]bool{missingDir: true},
+		[]string{missingDir},
 	)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to resolve import path")
@@ -169,9 +169,47 @@ func TestResolveRulePaths_NotFound(t *testing.T) {
 	err := resolveRulePaths(
 		t.Context(),
 		[]*rule.InstRuleSet{rs},
-		map[string]bool{dir: true},
+		[]string{dir},
 	)
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "failed to resolve import path")
+}
+
+func TestResolveRulePaths_DuplicateAndUnsortedModuleDirs(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte("module example.com/test\n\ngo 1.25\n"),
+		0o644,
+	))
+
+	hooksDir := filepath.Join(dir, "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(hooksDir, "hook.go"),
+		[]byte("package hooks\n"),
+		0o644,
+	))
+
+	rs := &rule.InstRuleSet{
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"foo": {{
+				Path: "example.com/test/hooks",
+			}},
+		},
+	}
+
+	callerDirs := []string{dir, dir}
+	callerOrig := append([]string(nil), callerDirs...)
+
+	err := resolveRulePaths(
+		t.Context(),
+		[]*rule.InstRuleSet{rs},
+		callerDirs,
+	)
+	require.NoError(t, err)
+	require.Equal(t, hooksDir, rs.AllFuncRules()[0].ResolvedPath)
+	assert.Equal(t, callerOrig, callerDirs, "caller slice must not be mutated")
 }
