@@ -86,6 +86,70 @@ raw: "log({{ .FuncArgument 0 }})"
 		"the parameter must be salted with the first rule's Identity, since ruleA runs first")
 }
 
+func TestInsertRaw_TypeHelpersUseFileImports(t *testing.T) {
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
+
+	t.Run("aliased import", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import althttp "net/http"
+
+func Handler(r *althttp.Request) (resp *althttp.Request, err error) {
+	return r, nil
+}
+`)
+		rawRule, err := rule.NewInstRawRule([]byte(`
+target: main
+func: Handler
+raw: 'use({{ .FuncArgumentOfType "*net/http.Request" }}, {{ .FuncReturnOfType "*net/http.Request" }})'
+`), "typed")
+		require.NoError(t, err)
+
+		funcDecl := findFuncDeclInFile(t, root, "Handler")
+		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root))
+
+		call := funcDecl.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
+		require.Len(t, call.Args, 2)
+		assert.Equal(t, "r", call.Args[0].(*dst.Ident).Name)
+		assert.Equal(t, "resp", call.Args[1].(*dst.Ident).Name)
+	})
+
+	t.Run("disambiguates shared default package name", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import (
+	htmltemplate "html/template"
+	"text/template"
+)
+
+func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
+	return nil, nil
+}
+`)
+		raw := "use(" +
+			`{{ .FuncArgumentOfType "*text/template.Template" }}, ` +
+			`"{{ .FuncArgumentOfType "*html/template.Template" }}", ` +
+			`{{ .FuncReturnOfType "*html/template.Template" }}, ` +
+			`"{{ .FuncReturnOfType "*text/template.Template" }}")`
+		rawRule, err := rule.NewInstRawRule([]byte(
+			"target: main\nfunc: Handler\nraw: '"+raw+"'\n",
+		), "typed")
+		require.NoError(t, err)
+
+		funcDecl := findFuncDeclInFile(t, root, "Handler")
+		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root))
+
+		call := funcDecl.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
+		require.Len(t, call.Args, 4)
+		assert.Equal(t, "t", call.Args[0].(*dst.Ident).Name)
+		assert.Equal(t, `""`, call.Args[1].(*dst.BasicLit).Value,
+			"text/template.Template must not match *html/template.Template")
+		assert.Equal(t, "page", call.Args[2].(*dst.Ident).Name)
+		assert.Equal(t, `""`, call.Args[3].(*dst.BasicLit).Value,
+			"html/template.Template must not match *text/template.Template")
+	})
+}
+
 func TestInsertRawAtPattern(t *testing.T) {
 	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 
@@ -463,7 +527,7 @@ func TestRenderRawCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			funcDecl := parseFunc(t, tt.src)
 
-			result, err := renderRawCode(tt.raw, funcDecl, "h1")
+			result, err := renderRawCode(tt.raw, funcDecl, "h1", nil)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
@@ -476,10 +540,10 @@ func TestRenderRawCode_HashSaltsSyntheticNames(t *testing.T) {
 	src := "package main\nfunc Foo(int) {}"
 	raw := "use({{ .FuncArgument 0 }})"
 
-	result1, err := renderRawCode(raw, parseFunc(t, src), "h1")
+	result1, err := renderRawCode(raw, parseFunc(t, src), "h1", nil)
 	require.NoError(t, err)
 
-	result2, err := renderRawCode(raw, parseFunc(t, src), "h2")
+	result2, err := renderRawCode(raw, parseFunc(t, src), "h2", nil)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, result1, result2, "different hashes must salt the synthetic name differently")
@@ -490,7 +554,7 @@ func TestRenderRawCode_HashSaltsSyntheticNames(t *testing.T) {
 func TestRenderRawCode_UnknownTagFails(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{Foo}}", funcDecl, "h1")
+	_, err := renderRawCode("{{Foo}}", funcDecl, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not defined")
@@ -504,7 +568,7 @@ func TestRenderRawCode_CompositeLiteralFails(t *testing.T) {
 	// escaping).
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode(`attrs := []Point{{X: 1, Y: 2}}; call({{.FuncName}})`, funcDecl, "h1")
+	_, err := renderRawCode(`attrs := []Point{{X: 1, Y: 2}}; call({{.FuncName}})`, funcDecl, "h1", nil)
 
 	require.Error(t, err)
 }
@@ -512,7 +576,7 @@ func TestRenderRawCode_CompositeLiteralFails(t *testing.T) {
 func TestRenderRawCode_OutOfRangeArgument(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncArgument 0}}", funcDecl, "h1")
+	_, err := renderRawCode("{{.FuncArgument 0}}", funcDecl, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -521,7 +585,7 @@ func TestRenderRawCode_OutOfRangeArgument(t *testing.T) {
 func TestRenderRawCode_NegativeArgumentIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
 
-	_, err := renderRawCode("{{.FuncArgument -1}}", funcDecl, "h1")
+	_, err := renderRawCode("{{.FuncArgument -1}}", funcDecl, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -530,7 +594,7 @@ func TestRenderRawCode_NegativeArgumentIndex(t *testing.T) {
 func TestRenderRawCode_OutOfRangeReturn(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncReturn 0}}", funcDecl, "h1")
+	_, err := renderRawCode("{{.FuncReturn 0}}", funcDecl, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -539,7 +603,7 @@ func TestRenderRawCode_OutOfRangeReturn(t *testing.T) {
 func TestRenderRawCode_NegativeReturnIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() (int, error) { return 0, nil }")
 
-	_, err := renderRawCode("{{.FuncReturn -1}}", funcDecl, "h1")
+	_, err := renderRawCode("{{.FuncReturn -1}}", funcDecl, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -548,7 +612,7 @@ func TestRenderRawCode_NegativeReturnIndex(t *testing.T) {
 func TestRenderRawCode_ReceiverOnFunctionWithoutReceiver(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.Receiver}}", funcDecl, "h1")
+	_, err := renderRawCode("{{.Receiver}}", funcDecl, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no receiver")
@@ -557,7 +621,7 @@ func TestRenderRawCode_ReceiverOnFunctionWithoutReceiver(t *testing.T) {
 func TestRenderRawCode_InvalidTemplateSyntax(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncName", funcDecl, "h1")
+	_, err := renderRawCode("{{.FuncName", funcDecl, "h1", nil)
 
 	require.Error(t, err)
 }
@@ -565,7 +629,7 @@ func TestRenderRawCode_InvalidTemplateSyntax(t *testing.T) {
 func TestRenderRawCode_NonIntegerArgumentIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
 
-	_, err := renderRawCode("{{.FuncArgument abc}}", funcDecl, "h1")
+	_, err := renderRawCode("{{.FuncArgument abc}}", funcDecl, "h1", nil)
 
 	require.Error(t, err)
 }
