@@ -62,6 +62,11 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// Hook files already parsed via parseHookFileCached, keyed by absolute
+	// file path. A hook package directory is typically shared by many func
+	// rules (one file implementing dozens of before/after pairs), so caching
+	// by file avoids re-parsing it once per rule.
+	parsedHookFiles map[string]*dst.File
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }

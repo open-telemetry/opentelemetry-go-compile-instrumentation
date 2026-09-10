@@ -76,6 +76,10 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 		return
 	}
 
+	if req == nil {
+		return
+	}
+
 	if runtime.IsHTTPClientInstrumentationSuppressed(req.Context()) {
 		return
 	}
@@ -93,9 +97,13 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 	initInstrumentation()
 
 	if debugEnabled() {
+		var urlStr string
+		if req.URL != nil {
+			urlStr = req.URL.String()
+		}
 		logger.Debug("BeforeRoundTrip called",
 			"method", req.Method,
-			"url", req.URL.String(),
+			"url", urlStr,
 			"host", req.Host)
 	}
 
@@ -110,6 +118,11 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
+
+	// Ensure headers map is initialized before injecting trace context
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
 
 	// Inject trace context into request headers
 	propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))

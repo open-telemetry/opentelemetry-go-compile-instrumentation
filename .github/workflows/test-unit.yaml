@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           persist-credentials: false
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: filter
         with:
           filters: |
@@ -56,9 +56,19 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
+      # setup-go registers the default "go" problem matcher, whose regexp is
+      # meant for `go build`/`go vet` output. Our tests intentionally log
+      # error strings (e.g. invalid rule files, missing instrumentation) as
+      # part of `go test -json` output, and lines ending in "...go: <text>"
+      # get misdetected as compiler errors, producing false failure
+      # annotations even though the job passes. Remove the matcher before
+      # running tests; it isn't needed here since we don't build with `go
+      # build`/`go vet` in this step.
+      - name: Disable Go problem matcher
+        run: echo "::remove-matcher owner=go::"
       - name: Run unit test coverage
         run: make test-unit/coverage
       # make test-unit/coverage leaves coverage-tool.txt, coverage-pkg.txt and
@@ -105,10 +115,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.mod"
+      # See the comment on the "Disable Go problem matcher" step in the
+      # test-unit-coverage job above: `go test -json` output here triggers
+      # false failure annotations from the default "go" problem matcher.
+      - name: Disable Go problem matcher
+        run: echo "::remove-matcher owner=go::"
       - name: Build and test
         env:
           GOARCH: ${{ matrix.platform.arch }}
