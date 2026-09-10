@@ -169,11 +169,16 @@ func TestWriteFile_CreateError(t *testing.T) {
 }
 
 type mockWriteCloser struct {
-	writeErr error
-	closeErr error
+	writeErr     error
+	closeErr     error
+	panicOnWrite bool
+	closed       bool
 }
 
 func (m *mockWriteCloser) Write(p []byte) (int, error) {
+	if m.panicOnWrite {
+		panic("simulated write panic")
+	}
 	if m.writeErr != nil {
 		return 0, m.writeErr
 	}
@@ -181,6 +186,7 @@ func (m *mockWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (m *mockWriteCloser) Close() error {
+	m.closed = true
 	return m.closeErr
 }
 
@@ -202,4 +208,13 @@ func TestWriteFile_CloseError(t *testing.T) {
 	err = writeFile(mock, "out.go", f)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to close file")
+}
+
+func TestWriteFile_PanicSafety(t *testing.T) {
+	f, err := ParseFile("parser_test.go")
+	require.NoError(t, err)
+
+	mock := &mockWriteCloser{panicOnWrite: true}
+	require.Panics(t, func() { _ = writeFile(mock, "out.go", f) })
+	assert.True(t, mock.closed, "the file must be closed even when writing panics")
 }
