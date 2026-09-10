@@ -136,7 +136,7 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 		if d.IsDir() {
 			name := d.Name()

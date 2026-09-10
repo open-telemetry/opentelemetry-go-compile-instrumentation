@@ -19,9 +19,11 @@ schemas/otelc/
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
+│   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
+│   ├── linodego.yaml        # linode/linodego (v2) client spans + operation-duration metric
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
-│   ├── logs.yaml            # log, log/slog, logrus — no telemetry (correlation only)
+│   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 │   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
@@ -43,6 +45,7 @@ signals an undeclared instrumentation.
 | --------------------------------------------------- | ------------------- | ---------------------------------------------------------------------- |
 | `net/http/client`, `net/http/server`                | `http.yaml`         | HTTP client + server metrics                                           |
 | `google.golang.org/grpc/{client,server}`            | `grpc.yaml`         | RPC client + server metrics and spans                                  |
+| `github.com/aws/aws-sdk-go-v2`                      | `aws.yaml`          | AWS SDK client spans (trace-only)                                      |
 | `database/sql`                                      | `database-sql.yaml` | DB client spans                                                        |
 | `github.com/redis/go-redis/v9`                      | `redis.yaml`        | DB client spans                                                        |
 | `github.com/segmentio/kafka-go/{producer,consumer}` | `kafka.yaml`        | Messaging producer + consumer spans                                    |
@@ -51,12 +54,14 @@ signals an undeclared instrumentation.
 | `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |
 | `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
 | `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
+| `github.com/olivere/elastic/v7`                     | `elasticsearch.yaml` | DB client spans                                                        |
 | `github.com/gin-gonic/gin`                          | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
+| `github.com/linode/linodego/v2`                     | `linodego.yaml`     | HTTP client spans + operation-duration metric                          |
 | `go.opentelemetry.io/otel/init`                     | `otel-sdk.yaml`     | Go runtime metrics (`go.*`)                                            |
 | `go.opentelemetry.io/otel`                          | `otel-sdk.yaml`     | nothing — guards the global tracer provider                            |
 | `go.opentelemetry.io/otel/sdk/trace`                | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |
 | `go.opentelemetry.io/otel/trace`                    | `otel-sdk.yaml`     | nothing — GLS fallback for `SpanFromContext`                           |
-| `log`, `log/slog`, `github.com/sirupsen/logrus`     | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
+| `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
 | `runtime`                                           | `runtime.yaml`      | nothing — goroutine-local context propagation                          |
 
 ## Validate locally

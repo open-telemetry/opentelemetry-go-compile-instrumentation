@@ -47,19 +47,16 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 }
 
 // renderRawCode renders the shared function template variables (FuncName,
-// FuncArgument N, FuncReturn N, ...) in raw code injected by a raw rule. Raw
-// code that does not contain "{{" is returned unchanged. hash salts synthetic
-// argument/return names the same way InstRawRule.Identity salts other rules'
-// trampoline/template names.
-func renderRawCode(raw string, decl *dst.FuncDecl, hash string) (string, error) {
+// FuncArgument N, FuncReturn N, ...) in raw code injected by a raw rule.
+func renderRawCode(raw string, decl *dst.FuncDecl, hash string, imports map[string]string) (string, error) {
 	if !strings.Contains(raw, "{{") {
 		return raw, nil
 	}
 	tmpl, err := rule.ParseFuncTemplate(raw)
 	if err != nil {
-		return "", ex.Wrap(err)
+		return "", err
 	}
-	return tmpl.Execute(newFuncTemplateData(decl, nil, nil, hash))
+	return tmpl.Execute(newFuncTemplateData(decl, nil, imports, hash))
 }
 
 type insertPos struct {
@@ -127,7 +124,7 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
 
-	raw, err := renderRawCode(r.Raw, decl, r.Identity())
+	raw, err := renderRawCode(r.Raw, decl, r.Identity(), ast.ImportAliasMap(root))
 	if err != nil {
 		return ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
 	}
