@@ -670,8 +670,12 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 		}
 		opts.Args = args
 
+		subcommand := opts.Subcommand
+		if subcommand == "" {
+			subcommand = subcmdBuild
+		}
 		// Use opts.Args to find module directories
-		pkgs, getErr := getBuildPackages(ctx, opts.Args)
+		pkgs, getErr := getBuildPackages(ctx, subcommand, opts.Args)
 		if getErr != nil {
 			return nil, getErr
 		}
