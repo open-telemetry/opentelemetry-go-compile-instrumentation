@@ -78,6 +78,23 @@ func TestForceModMod(t *testing.T) {
 		{"double-dash mod left unchanged, no append", "--mod=mod", "--mod=mod"},
 		{"double-dash readonly left unchanged, no append", "--mod=readonly", "--mod=readonly"},
 		{"bare double-dash mod left as is, no append", "--mod", "--mod"},
+		// The go command accepts quoted GOFLAGS tokens. A quoted -mod flag is
+		// still a -mod flag, so it must be recognized and not have -mod=mod
+		// appended after it, which would win by last-value.
+		{"single-quoted readonly left unchanged", "'-mod=readonly'", "'-mod=readonly'"},
+		{"double-quoted readonly left unchanged", `"-mod=readonly"`, `"-mod=readonly"`},
+		{"quoted readonly among flags left unchanged", "-trimpath '-mod=readonly'", "-trimpath '-mod=readonly'"},
+		{"quoted vendor overridden", "'-mod=vendor'", "-mod=mod"},
+		{"quoted double-dash readonly left unchanged", "'--mod=readonly'", "'--mod=readonly'"},
+		{"quoted double-dash vendor overridden", "'--mod=vendor'", "-mod=mod"},
+		// A quoted flag whose value contains a space stays one token, so the
+		// following -mod flag is still recognized and not clobbered.
+		{"spaced quoted flag before quoted mod", "-tags='foo bar' '-mod=readonly'", "-tags='foo bar' '-mod=readonly'"},
+		{"spaced quoted flag no mod appends once", "-tags='foo bar'", "-tags='foo bar' -mod=mod"},
+		// The go command strips only a surrounding quote pair, so -mod='vendor' keeps
+		// its quoted value and is not a -mod=vendor token. It stays as written and go
+		// rejects the value later.
+		{"value-quoted vendor preserved; go rejects it later", "-mod='vendor'", "-mod='vendor'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
