@@ -106,6 +106,33 @@ func TestWriteFile_CreateError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to create temporary file")
 }
 
+// TestWriteFile_ReplacesExistingFile covers the case the callers actually hit:
+// the importcfg already exists and is being rewritten. This runs on every
+// platform in the unit matrix, Windows included, since replacing an existing
+// file through a rename is the part that differs most across platforms.
+func TestWriteFile_ReplacesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "importcfg")
+	require.NoError(t, os.WriteFile(filename, []byte("packagefile fmt=/old/fmt.a\n"), 0o644))
+
+	cfg := ImportConfig{PackageFile: map[string]string{
+		"fmt":     "/new/fmt.a",
+		"strings": "/new/strings.a",
+	}}
+	require.NoError(t, cfg.WriteFile(filename))
+
+	content, err := os.ReadFile(filename)
+	require.NoError(t, err)
+	assert.Equal(t,
+		"packagefile fmt=/new/fmt.a\npackagefile strings=/new/strings.a\n",
+		string(content))
+
+	// The rewritten file must still parse back into the same config.
+	reparsed, err := ParseImportCfg(filename)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.PackageFile, reparsed.PackageFile)
+}
+
 // TestWriteFile_UnwritableDirFailsWithoutTouchingTarget documents a deliberate
 // behaviour change from the atomic write. The temporary file needs a writable
 // directory, whereas os.Create only needed a writable target, so a read-only

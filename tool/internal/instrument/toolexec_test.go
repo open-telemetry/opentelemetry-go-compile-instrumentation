@@ -682,6 +682,10 @@ func TestInterceptLinkAllImportsPresent(t *testing.T) {
 }
 
 func TestInterceptLinkWriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod permissions are not enforced consistently on Windows")
+	}
+
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
