@@ -47,6 +47,97 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
 
+func excludeTargetsNeedRootExpansion(excludes []string) bool {
+	for _, pattern := range excludes {
+		if rule.IsRootTarget(pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func (sp *setupPhase) buildExpandedExcludeTargets(
+	ctx context.Context,
+	rules []rule.InstRule,
+) (map[rule.InstRule][]string, error) {
+	needsRoot := false
+	for _, r := range rules {
+		if excludeTargetsNeedRootExpansion(r.GetExcludeTargets()) {
+			needsRoot = true
+			break
+		}
+	}
+	if !needsRoot {
+		return nil, nil
+	}
+
+	if err := sp.ensureRootModulePaths(ctx); err != nil {
+		return nil, err
+	}
+	if len(sp.rootModulePaths) == 0 {
+		for _, r := range rules {
+			if excludeTargetsNeedRootExpansion(r.GetExcludeTargets()) {
+				return nil, ex.Newf(
+					"rule %q uses exclude_targets %q, but no root module was found",
+					r.GetName(),
+					rule.TargetRoot,
+				)
+			}
+		}
+	}
+
+	expanded := make(map[rule.InstRule][]string)
+	for _, r := range rules {
+		excludes := r.GetExcludeTargets()
+		if excludeTargetsNeedRootExpansion(excludes) {
+			expanded[r] = rule.ExpandExcludeTargets(excludes, sp.rootModulePaths)
+		}
+	}
+	return expanded, nil
+}
+
+func (sp *setupPhase) ensureRootModulePaths(ctx context.Context) error {
+	if len(sp.rootModulePaths) > 0 || len(sp.buildPackages) == 0 {
+		return nil
+	}
+	var err error
+	sp.rootModulePaths, err = rootModulePaths(ctx, sp.buildPackages)
+	return err
+}
+
+func filterExcludedTargets(
+	importPath string,
+	rules []rule.InstRule,
+	expandedExcludes map[rule.InstRule][]string,
+) []rule.InstRule {
+	if len(rules) == 0 {
+		return rules
+	}
+	var filtered []rule.InstRule
+	for i, r := range rules {
+		excludes := r.GetExcludeTargets()
+		if expandedExcludes != nil {
+			if expanded, ok := expandedExcludes[r]; ok {
+				excludes = expanded
+			}
+		}
+		if rule.MatchesExcludeTargets(importPath, excludes) {
+			if filtered == nil {
+				filtered = make([]rule.InstRule, 0, len(rules))
+				filtered = append(filtered, rules[:i]...)
+			}
+			continue
+		}
+		if filtered != nil {
+			filtered = append(filtered, r)
+		}
+	}
+	if filtered == nil {
+		return rules
+	}
+	return filtered
+}
+
 type targetRule struct {
 	target string
 	rule   rule.InstRule
@@ -97,6 +188,7 @@ func (sp *setupPhase) runMatch(
 	dep *Dependency,
 	exactRules map[string][]rule.InstRule,
 	globRules []targetRule,
+	expandedExcludes map[rule.InstRule][]string,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
 
@@ -117,6 +209,7 @@ func (sp *setupPhase) runMatch(
 		relevantRules = sp.matchGlobRules(dep, relevantRules, globRules)
 	}
 
+	relevantRules = filterExcludedTargets(dep.ImportPath, relevantRules, expandedExcludes)
 	if len(relevantRules) == 0 {
 		return set, nil
 	}
@@ -525,14 +618,16 @@ func (sp *setupPhase) matchDeps(
 	// kept in a flat slice and evaluated against every dependency's import path.
 	exactRules := make(map[string][]rule.InstRule)
 	globRules := make([]targetRule, 0)
+	expandedExcludes, err := sp.buildExpandedExcludeTargets(ctx, allRules)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, r := range allRules {
 		target := r.GetTarget()
 		if rule.IsRootTarget(target) {
-			if len(sp.rootModulePaths) == 0 && len(sp.buildPackages) > 0 {
-				sp.rootModulePaths, err = rootModulePaths(ctx, sp.buildPackages)
-				if err != nil {
-					return nil, err
-				}
+			if err = sp.ensureRootModulePaths(ctx); err != nil {
+				return nil, err
 			}
 			if len(sp.rootModulePaths) == 0 {
 				return nil, ex.Newf("rule %q uses target %q, but no root module was found", r.GetName(), target)
@@ -557,7 +652,7 @@ func (sp *setupPhase) matchDeps(
 
 	for _, dep := range deps {
 		g.Go(func() error {
-			m, err1 := sp.runMatch(gCtx, dep, exactRules, globRules)
+			m, err1 := sp.runMatch(gCtx, dep, exactRules, globRules, expandedExcludes)
 			if err1 != nil {
 				return err1
 			}

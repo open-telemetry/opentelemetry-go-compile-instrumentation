@@ -1097,7 +1097,7 @@ path: example.com/mypkg
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
@@ -1140,7 +1140,7 @@ func Target(value string) error { return nil }
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
@@ -1262,7 +1262,7 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
@@ -1295,7 +1295,7 @@ path: example.com/mypkg
 	}
 
 	sp := newTestSetupPhase()
-	_, err = sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	_, err = sp.runMatch(context.Background(), dep, rulesByTarget, nil, nil)
 	assert.Error(t, err, "should fail when source file cannot be parsed")
 }
 
@@ -1321,7 +1321,7 @@ path: example.com/mypkg
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 
@@ -1360,6 +1360,7 @@ func TestRunMatch_GlobTargetMatches(t *testing.T) {
 		dep,
 		map[string][]rule.InstRule{},
 		[]targetRule{{target: globRule.Target, rule: globRule}},
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, set.FuncRules, 1, "glob target should match the descendant package")
@@ -1383,6 +1384,7 @@ func TestRunMatch_GlobTargetNoMatch(t *testing.T) {
 		dep,
 		map[string][]rule.InstRule{},
 		[]targetRule{{target: globRule.Target, rule: globRule}},
+		nil,
 	)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty(), "glob target must not match an unrelated package")
@@ -1405,6 +1407,7 @@ func TestRunMatch_SingleSegmentGlobDoesNotCrossBoundary(t *testing.T) {
 		dep,
 		map[string][]rule.InstRule{},
 		[]targetRule{{target: globRule.Target, rule: globRule}},
+		nil,
 	)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty(), "single-segment glob must not cross a path boundary")
@@ -1432,6 +1435,7 @@ func TestRunMatch_ExactAndGlobCoexist(t *testing.T) {
 		dep,
 		exactRules,
 		[]targetRule{{target: globRule.Target, rule: globRule}},
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, set.FuncRules[srcFile], 2, "both exact and glob rules should match")
@@ -1474,6 +1478,137 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 	require.True(t, matchedPaths["example.com/svc/users"], "users package should match the glob target")
 	require.True(t, matchedPaths["example.com/svc/orders"], "orders package should match the glob target")
 	require.False(t, matchedPaths["example.com/other"], "unrelated package must not match")
+}
+
+func TestFilterExcludedTargets(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		assert.Nil(t, filterExcludedTargets("example.com/pkg", nil, nil))
+		assert.Empty(t, filterExcludedTargets("example.com/pkg", []rule.InstRule{}, nil))
+	})
+
+	t.Run("does not mutate shared slice", func(t *testing.T) {
+		keepRule := globFuncRule("keep", "example.com/svc/users")
+		excludeRule := globFuncRule("exclude", "example.com/svc/users")
+		excludeRule.ExcludeTargets = []string{"example.com/svc/users"}
+
+		shared := []rule.InstRule{keepRule, excludeRule}
+		original := append([]rule.InstRule(nil), shared...)
+
+		filtered := filterExcludedTargets("example.com/svc/users", shared, nil)
+		require.Len(t, filtered, 1)
+		assert.Equal(t, keepRule, filtered[0])
+		assert.Equal(t, original, shared, "shared exactRules slice must not be mutated in place")
+
+		noExclude := globFuncRule("no-exclude", "example.com/svc/users")
+		sharedNoExclude := []rule.InstRule{noExclude}
+		filteredNoExclude := filterExcludedTargets("example.com/svc/users", sharedNoExclude, nil)
+		assert.Same(
+			t,
+			&sharedNoExclude[0],
+			&filteredNoExclude[0],
+			"zero-allocation path must return the original slice",
+		)
+	})
+
+	t.Run("exclusion at start appends later rules", func(t *testing.T) {
+		excluded := globFuncRule("excluded", "example.com/svc/users")
+		excluded.ExcludeTargets = []string{"example.com/svc/users"}
+		keep := globFuncRule("keep", "example.com/svc/users")
+
+		filtered := filterExcludedTargets(
+			"example.com/svc/users",
+			[]rule.InstRule{excluded, keep},
+			nil,
+		)
+		require.Len(t, filtered, 1)
+		assert.Equal(t, keep, filtered[0])
+	})
+
+	t.Run("all excluded", func(t *testing.T) {
+		excluded := globFuncRule("excluded", "example.com/svc/users")
+		excluded.ExcludeTargets = []string{"example.com/svc/users"}
+
+		filtered := filterExcludedTargets("example.com/svc/users", []rule.InstRule{excluded}, nil)
+		assert.Empty(t, filtered)
+	})
+}
+
+func TestRunMatch_ExcludeTargetsGlob(t *testing.T) {
+	usersFile := writeGoSource(t, "users.go", "package users\n\nfunc Handler() {}\n")
+	otelFile := writeGoSource(
+		t,
+		"otelgrpc.go",
+		"package otelgrpc\n\nfunc Handler() {}\n",
+	)
+
+	globRule := globFuncRule("glob-rule", "**")
+	globRule.ExcludeTargets = []string{
+		"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+	}
+	globRules := []targetRule{{target: globRule.Target, rule: globRule}}
+
+	sp := newTestSetupPhase()
+
+	usersDep := &Dependency{
+		ImportPath: "example.com/svc/users",
+		Sources:    []string{usersFile},
+		CgoFiles:   make(map[string]string),
+	}
+	usersSet, err := sp.runMatch(context.Background(), usersDep, map[string][]rule.InstRule{}, globRules, nil)
+	require.NoError(t, err)
+	require.Len(t, usersSet.FuncRules, 1, "non-excluded package should match the glob rule")
+
+	otelDep := &Dependency{
+		ImportPath: "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+		Sources:    []string{otelFile},
+		CgoFiles:   make(map[string]string),
+	}
+	otelSet, err := sp.runMatch(context.Background(), otelDep, map[string][]rule.InstRule{}, globRules, nil)
+	require.NoError(t, err)
+	require.True(t, otelSet.IsEmpty(), "excluded import path must not receive the rule")
+}
+
+func TestParseRuleFromYaml_ExcludeTargets(t *testing.T) {
+	content := []byte(`hook:
+  target: example.com/svc/**
+  exclude_targets:
+    - go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: BeforeHandler
+        path: example.com/hooks
+`)
+	doc, err := rule.ParseFile(content)
+	require.NoError(t, err)
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	assert.Equal(
+		t,
+		[]string{"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"},
+		rules[0].GetExcludeTargets(),
+	)
+}
+
+func TestParseRuleFromYaml_InvalidExcludeTarget(t *testing.T) {
+	content := []byte(`hook:
+  target: example.com/svc
+  exclude_targets:
+    - "example.com/svc/["
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: BeforeHandler
+        path: example.com/hooks
+`)
+	doc, err := rule.ParseFile(content)
+	require.NoError(t, err)
+	_, err = doc.Rules()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "exclude_targets[0]")
 }
 
 func TestMatchDeps_RootTargetExpandsToRootModuleGlob(t *testing.T) {
@@ -1546,6 +1681,70 @@ func TestMatchDeps_RootTargetRequiresRootModule(t *testing.T) {
 	}, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, `target "$root"`)
+}
+
+func TestMatchDeps_ExcludeRootTargetExpandsAtSetup(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "exclude-root.yaml")
+	err := os.WriteFile(ruleFile, []byte(`broad_hook:
+  target: "**"
+  exclude_targets:
+    - $root
+  func: Handler
+  before: BeforeHandler
+  path: "example.com/hooks"
+`), 0o644)
+	require.NoError(t, err)
+
+	rootSrc := writeGoSource(t, "root.go", "package app\n\nfunc Handler() {}\n")
+	childSrc := writeGoSource(t, "child.go", "package child\n\nfunc Handler() {}\n")
+	externalSrc := writeGoSource(t, "external.go", "package external\n\nfunc Handler() {}\n")
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+	sp.buildPackages = []*packages.Package{
+		{Module: &packages.Module{Path: "example.com/app"}},
+	}
+
+	deps := []*Dependency{
+		{ImportPath: "example.com/app", Sources: []string{rootSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/app/internal/child", Sources: []string{childSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/other", Sources: []string{externalSrc}, CgoFiles: map[string]string{}},
+	}
+
+	matched, err := sp.matchDeps(context.Background(), deps, nil)
+	require.NoError(t, err)
+
+	matchedPaths := make(map[string]bool)
+	for _, m := range matched {
+		matchedPaths[m.ModulePath] = true
+	}
+	require.False(t, matchedPaths["example.com/app"], "root package must be excluded")
+	require.False(t, matchedPaths["example.com/app/internal/child"], "root sub-package must be excluded")
+	require.True(t, matchedPaths["example.com/other"], "unrelated dependency should still match")
+}
+
+func TestMatchDeps_ExcludeRootTargetRequiresRootModule(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "exclude-root.yaml")
+	err := os.WriteFile(ruleFile, []byte(`broad_hook:
+  target: "**"
+  exclude_targets:
+    - $root
+  func: Handler
+  before: BeforeHandler
+  path: "example.com/hooks"
+`), 0o644)
+	require.NoError(t, err)
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	_, err = sp.matchDeps(context.Background(), []*Dependency{
+		{ImportPath: "example.com/other", Sources: []string{}, CgoFiles: map[string]string{}},
+	}, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, `exclude_targets "$root"`)
 }
 
 func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
@@ -1666,7 +1865,7 @@ func TestRunMatch_WarnsOnUnresolvedVersion(t *testing.T) {
 		},
 	}
 
-	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil)
+	set, err := sp.runMatch(context.Background(), dep, rulesByTarget, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
@@ -1848,7 +2047,7 @@ func TestRunMatch_CgoFiles(t *testing.T) {
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, nil, nil)
+	set, err := sp.runMatch(context.Background(), dep, nil, nil, nil)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty())
 }
@@ -1873,7 +2072,7 @@ func TestRunMatch_VersionFilteredOut(t *testing.T) {
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{"example.com/v": {funcRule}}, nil)
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{"example.com/v": {funcRule}}, nil, nil)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty())
 }
