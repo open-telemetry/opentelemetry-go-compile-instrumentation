@@ -943,10 +943,18 @@ func (r (*T)) Pointer() {}
 // than ending the build. A qualified receiver does not compile and so never
 // reaches the tool from real source, but the guard must still not abort.
 func TestFindFuncDeclUnrecognizedReceiverNoMatch(t *testing.T) {
-	file := parseSharedFixture(t)
+	// The receiver has to be a shape stripGenericTypes does not recognise, so a
+	// qualified receiver is parsed rather than taken from the fixture: the
+	// fixture's receivers all strip cleanly and would never reach the guard.
+	file, err := NewAstParser().ParseSource(`package main
 
-	// Drive the guard directly with a synthetic qualified receiver, the shape
-	// that used to trigger util.Unimplemented.
-	fnDecl := findFuncDecl(file, "Method", "pkg.MyStruct")
-	assert.Nil(t, fnDecl, "an unrecognized receiver should be a no match, not a build abort")
+func (r pkg.T) Method() error { return nil }
+`)
+	require.NoError(t, err)
+
+	// Both the function name and the receiver base name are the ones this
+	// declaration would match on if the shape were recognised, so returning nil
+	// can only come from the guard rather than from a name mismatch.
+	assert.Nil(t, findFuncDecl(file, "Method", "T"),
+		"an unrecognized receiver should be a no match, not a build abort")
 }
