@@ -39,6 +39,175 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 	}
 }
 
+func TestToolexecBuildArgs(t *testing.T) {
+	t.Run("inserts -work and the -toolexec ahead of the caller's args", func(t *testing.T) {
+		got := toolexecBuildArgs([]string{"build", "-o", "app", "./cmd"}, "/opt/my tools/otelc", false)
+		assert.Equal(t, []string{
+			"go", "build", "-work",
+			"-toolexec=/opt/my tools/otelc toolexec",
+			"-o", "app", "./cmd",
+		}, got)
+	})
+
+	t.Run("neutralizes -mod=vendor when vendored", func(t *testing.T) {
+		got := toolexecBuildArgs([]string{"build", "-mod=vendor", "."}, "/usr/bin/otelc", true)
+		assert.NotContains(t, got, "-mod=vendor")
+	})
+
+	t.Run("adds the generated runtime file for file targets", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		got := toolexecBuildArgs([]string{"build", "main.go"}, "/usr/bin/otelc", false)
+		assert.Contains(t, got, otelcRuntimeFile)
+	})
+
+	t.Run("go test inserts runtime file before -- delimiter", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "main_test.go"), []byte("package main\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		got := toolexecBuildArgs(
+			[]string{"test", "main.go", "main_test.go", "--", "custom.go"},
+			"/usr/bin/otelc",
+			false,
+		)
+		delimIdx := slices.Index(got, "--")
+		require.Positive(t, delimIdx)
+		runtimeIdx := slices.Index(got, otelcRuntimeFile)
+		require.Positive(t, runtimeIdx)
+		assert.Equal(t, delimIdx-1, runtimeIdx, "runtime file must appear immediately before --")
+	})
+
+	t.Run("go test inserts runtime file before -args delimiter", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		got := toolexecBuildArgs([]string{"test", "main.go", "-args", "custom.go"}, "/usr/bin/otelc", false)
+		delimIdx := slices.Index(got, "-args")
+		require.Positive(t, delimIdx)
+		runtimeIdx := slices.Index(got, otelcRuntimeFile)
+		require.Positive(t, runtimeIdx)
+		assert.Equal(t, delimIdx-1, runtimeIdx, "runtime file must appear immediately before -args")
+	})
+
+	t.Run("go test inserts runtime file before --args delimiter", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		got := toolexecBuildArgs([]string{"test", "main.go", "--args", "custom.go"}, "/usr/bin/otelc", false)
+		delimIdx := slices.Index(got, "--args")
+		require.Positive(t, delimIdx)
+		runtimeIdx := slices.Index(got, otelcRuntimeFile)
+		require.Positive(t, runtimeIdx)
+		assert.Equal(t, delimIdx-1, runtimeIdx, "runtime file must appear immediately before --args")
+	})
+
+	t.Run("go test does not inject runtime file for .go files after delimiters", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "custom.go"), []byte("package main\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		for _, delim := range []string{"--", "-args", "--args"} {
+			got := toolexecBuildArgs([]string{"test", delim, "custom.go"}, "/usr/bin/otelc", false)
+			assert.NotContains(
+				t,
+				got,
+				otelcRuntimeFile,
+				"no runtime file should be injected when .go file is after %s",
+				delim,
+			)
+		}
+	})
+
+	t.Run("go build preserves existing delimiter and appends runtime file at end", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		got := toolexecBuildArgs([]string{"build", "--", "main.go"}, "/usr/bin/otelc", false)
+		delimIdx := slices.Index(got, "--")
+		require.Positive(t, delimIdx)
+		runtimeIdx := slices.Index(got, otelcRuntimeFile)
+		require.Positive(t, runtimeIdx)
+		assert.Greater(t, runtimeIdx, delimIdx, "runtime file should be appended at end for go build --")
+	})
+
+	t.Run("go test preserves delimiter-like flag values", func(t *testing.T) {
+		for _, val := range []string{"--", "-args", "--args"} {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			require.NoError(t, os.WriteFile(
+				filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(dir, "main_test.go"), []byte("package main\n"), 0o644))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+			got := toolexecBuildArgs(
+				[]string{"test", "main.go", "main_test.go", "-test.run", val},
+				"/usr/bin/otelc",
+				false,
+			)
+			runIdx := slices.Index(got, "-test.run")
+			require.Positive(t, runIdx)
+			require.Equal(t, val, got[runIdx+1], "flag value must immediately follow flag")
+
+			gotWithDelim := toolexecBuildArgs(
+				[]string{"test", "main.go", "main_test.go", "-test.run", val, "--", "custom.go"},
+				"/usr/bin/otelc",
+				false,
+			)
+			runIdx = slices.Index(gotWithDelim, "-test.run")
+			require.Positive(t, runIdx)
+			require.Equal(t, val, gotWithDelim[runIdx+1], "flag value must immediately follow flag")
+			realDelimIdx := slices.Index(gotWithDelim[runIdx+2:], "--") + runIdx + 2
+			runtimeIdx := slices.Index(gotWithDelim, otelcRuntimeFile)
+			require.Positive(t, runtimeIdx)
+			assert.Equal(t, realDelimIdx-1, runtimeIdx, "runtime file must appear before the real delimiter")
+		}
+	})
+}
+
+func TestFindTestDelimiter(t *testing.T) {
+	assert.Equal(t, -1, findTestDelimiter(subcmdBuild, []string{"--", "main.go"}))
+	assert.Equal(t, 1, findTestDelimiter(subcmdTest, []string{"./pkg", "--", "custom"}))
+	assert.Equal(t, 1, findTestDelimiter(subcmdTest, []string{"./pkg", "-args", "custom"}))
+	assert.Equal(t, 1, findTestDelimiter(subcmdTest, []string{"./pkg", "--args", "custom"}))
+
+	for _, delim := range []string{"--", "-args", "--args"} {
+		assert.Equal(t, -1, findTestDelimiter(subcmdTest, []string{"-test.run", delim, "./pkg"}))
+		assert.Equal(t, -1, findTestDelimiter(subcmdTest, []string{"--test.run", delim, "./pkg"}))
+		assert.Equal(t, -1, findTestDelimiter(subcmdTest, []string{"-run", delim, "./pkg"}))
+		assert.Equal(t, 2, findTestDelimiter(subcmdTest, []string{"-test.run", delim, "--", "./pkg"}))
+		assert.Equal(t, 2, findTestDelimiter(subcmdTest, []string{"-test.run", delim, "-args", "./pkg"}))
+		assert.Equal(t, 2, findTestDelimiter(subcmdTest, []string{"-test.run", delim, "--args", "./pkg"}))
+	}
+}
+
 func TestGetPackages(t *testing.T) {
 	setupTestModule(t, []string{"cmd", "foo/demo"})
 
@@ -109,7 +278,7 @@ func TestGetPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgs, err := getBuildPackages(t.Context(), tt.args)
+			pkgs, err := getBuildPackages(t.Context(), subcmdBuild, tt.args)
 			if tt.expectError {
 				require.Error(t, err)
 			} else {
@@ -141,7 +310,7 @@ func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
 	))
 	t.Chdir(tmpDir)
 
-	pkgs, err := getBuildPackages(t.Context(), []string{"-C", "app", "."})
+	pkgs, err := getBuildPackages(t.Context(), subcmdBuild, []string{"-C", "app", "."})
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	require.NotNil(t, pkgs[0].Module)
@@ -150,16 +319,17 @@ func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
 
 func TestSplitBuildTargets(t *testing.T) {
 	tests := []struct {
-		name          string
-		targets       []string
-		pkgTargets    []string
-		fileTargets   []string
-		notPkgTargets []string // must NOT be parsed as packages (e.g. flag values)
-		expectError   bool
-		wantErr       string
+		name        string
+		subcommand  string
+		targets     []string
+		pkgTargets  []string
+		fileTargets []string
+		expectError bool
+		wantErr     string
 	}{
 		{
 			name:        "all package targets",
+			subcommand:  subcmdBuild,
 			targets:     []string{"./cmd", "./foo/demo"},
 			pkgTargets:  []string{"./cmd", "./foo/demo"},
 			fileTargets: nil,
@@ -167,110 +337,73 @@ func TestSplitBuildTargets(t *testing.T) {
 		},
 		{
 			name:        "all file targets",
+			subcommand:  subcmdBuild,
 			targets:     []string{"./cmd/main.go", "./cmd/util.go"},
 			pkgTargets:  nil,
 			fileTargets: []string{"./cmd/main.go", "./cmd/util.go"},
 			expectError: false,
 		},
 		{
-			name:        "all file targets from different packages",
+			name:        "all file targets from different directories fails",
+			subcommand:  subcmdBuild,
 			targets:     []string{"./cmd/main.go", "./util/util.go"},
-			pkgTargets:  nil,
-			fileTargets: nil,
 			expectError: true,
+			wantErr:     "named files must all be in one directory",
 		},
 		{
-			name:        "mixed package and file targets with valid package",
+			name:        "mixed package and file targets fails",
+			subcommand:  subcmdBuild,
 			targets:     []string{"./cmd/main.go", "./foo/demo"},
-			pkgTargets:  nil,
-			fileTargets: nil,
 			expectError: true,
+			wantErr:     "cannot mix .go files and packages",
 		},
 		{
-			name:          "go test -run value is not a package",
-			targets:       []string{"-run", "TestX", "./pkg"},
-			pkgTargets:    []string{"./pkg"},
-			notPkgTargets: []string{"TestX"},
-			expectError:   false,
+			name:        "go build -o flag requires a value",
+			subcommand:  subcmdBuild,
+			targets:     []string{"./pkg", "-o"},
+			expectError: true,
+			wantErr:     `flag "-o" requires a value`,
 		},
 		{
-			name:        "go test joined -count=1 leaves package",
-			targets:     []string{"-count=1", "./pkg"},
+			name:        "go build -- does not stop file scanning",
+			subcommand:  subcmdBuild,
+			targets:     []string{"--", "main.go"},
+			fileTargets: []string{"main.go"},
+			expectError: false,
+		},
+		{
+			name:        "go build -- does not stop package scanning",
+			subcommand:  subcmdBuild,
+			targets:     []string{"--", "./pkg"},
 			pkgTargets:  []string{"./pkg"},
 			expectError: false,
 		},
 		{
-			name:          "go test -run value with no package target",
-			targets:       []string{"-run", "TestX"},
-			pkgTargets:    nil,
-			notPkgTargets: []string{"TestX"},
-			expectError:   false,
+			name:        "go build -o out -- ./pkg preserves package",
+			subcommand:  subcmdBuild,
+			targets:     []string{"-o", "out", "--", "./pkg"},
+			pkgTargets:  []string{"./pkg"},
+			expectError: false,
 		},
 		{
-			name:          "go test package before -run flag",
-			targets:       []string{"./pkg", "-run", "TestX"},
-			pkgTargets:    []string{"./pkg"},
-			notPkgTargets: []string{"TestX"},
-			expectError:   false,
+			name:        "go build main.go -- other.go scans both files",
+			subcommand:  subcmdBuild,
+			targets:     []string{"main.go", "--", "other.go"},
+			fileTargets: []string{"main.go", "other.go"},
+			expectError: false,
 		},
 		{
-			name:          "go test package before joined -count",
-			targets:       []string{"./...", "-count=1"},
-			pkgTargets:    []string{"./..."},
-			notPkgTargets: []string{"-count=1"},
-			expectError:   false,
-		},
-		{
-			name:          "go test -args tail is not a package",
-			targets:       []string{"./pkg", "-args", "serverarg"},
-			pkgTargets:    []string{"./pkg"},
-			notPkgTargets: []string{"serverarg"},
-			expectError:   false,
-		},
-		{
-			name:          "go test -vet value is not a package",
-			targets:       []string{"-vet", "off", "./pkg"},
-			pkgTargets:    []string{"./pkg"},
-			notPkgTargets: []string{"off"},
-			expectError:   false,
-		},
-		{
-			name:          "go test -exec value is not a package",
-			targets:       []string{"-exec", "sudo", "./pkg"},
-			pkgTargets:    []string{"./pkg"},
-			notPkgTargets: []string{"sudo"},
-			expectError:   false,
-		},
-		{
-			name:          "go test package before -exec flag",
-			targets:       []string{"./pkg", "-exec", "sudo"},
-			pkgTargets:    []string{"./pkg"},
-			notPkgTargets: []string{"sudo"},
-			expectError:   false,
-		},
-		{
-			name:        "go test -run flag requires a value",
-			targets:     []string{"-run"},
+			name:        "go build -- cannot mix package and file",
+			subcommand:  subcmdBuild,
+			targets:     []string{"./pkg", "--", "main.go"},
 			expectError: true,
-			wantErr:     `flag "-run" requires a value`,
-		},
-		{
-			name:        "go test -exec flag requires a value",
-			targets:     []string{"./pkg", "-exec"},
-			expectError: true,
-			wantErr:     `flag "-exec" requires a value`,
-		},
-		{
-			name:        "go build -o flag requires a value",
-			targets:     []string{"./pkg", "-o"},
-			expectError: true,
-			wantErr:     `flag "-o" requires a value`,
+			wantErr:     "cannot mix .go files and packages",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgTargets, fileTargets, err := splitBuildTargets(tt.targets)
+			pkgTargets, fileTargets, err := splitBuildTargets(tt.subcommand, tt.targets)
 			if tt.expectError {
 				require.Error(t, err)
 				if tt.wantErr != "" {
@@ -279,20 +412,148 @@ func TestSplitBuildTargets(t *testing.T) {
 				assert.Nil(t, pkgTargets)
 				assert.Nil(t, fileTargets)
 			} else {
-				assert.NoError(t, err)
-				for _, exp := range tt.pkgTargets {
-					assert.Contains(t, pkgTargets, exp, "Expected package target %q not found in %v", exp, pkgTargets)
-				}
-				for _, exp := range tt.fileTargets {
-					assert.Contains(t, fileTargets, exp, "Expected file target %q not found in %v", exp, fileTargets)
-				}
-				for _, notExp := range tt.notPkgTargets {
-					assert.NotContains(t, pkgTargets, notExp,
-						"Flag value %q must not be parsed as a package (got %v)", notExp, pkgTargets)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.pkgTargets, pkgTargets)
+				assert.Equal(t, tt.fileTargets, fileTargets)
 			}
 		})
 	}
+
+	t.Run("flags requiring values fail when value is missing", func(t *testing.T) {
+		for _, flag := range []string{
+			"-run", "-exec", "-test.run", "--test.run",
+			"-test.timeout", "-test.bench", "-test.count",
+		} {
+			_, _, err := splitBuildTargets(subcmdTest, []string{flag})
+			require.ErrorContains(t, err, "requires a value")
+		}
+	})
+
+	t.Run("supported test flags do not consume packages", func(t *testing.T) {
+		flags := []string{
+			"-run", "--run", "-test.run", "--test.run",
+			"-test.bench", "-test.timeout", "-test.count",
+			"-test.cpu", "-test.benchtime", "-vet", "-exec",
+		}
+		for _, flag := range flags {
+			// separated flag value before package
+			pkgs, files, err := splitBuildTargets(subcmdTest, []string{flag, "val", "./pkg"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+
+			// joined flag value before package
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{flag + "=val", "./pkg"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+
+			// package before separated flag
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{"./pkg", flag, "val"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+		}
+	})
+
+	t.Run("boolean and unknown test flags do not consume following argument", func(t *testing.T) {
+		for _, flag := range []string{"-test.v", "--test.v", "-test.short", "-test.unknown"} {
+			pkgs, files, err := splitBuildTargets(subcmdTest, []string{flag, "./pkg"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+		}
+		pkgs, files, err := splitBuildTargets(subcmdTest, []string{"-test.v=true", "./pkg"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"./pkg"}, pkgs)
+		assert.Empty(t, files)
+	})
+
+	t.Run("test delimiters stop target scanning", func(t *testing.T) {
+		delims := []string{"--", "-args", "--args"}
+		for _, delim := range delims {
+			// package before delimiter, test-binary args after
+			pkgs, files, err := splitBuildTargets(subcmdTest, []string{
+				"./pkg", delim, "other", "./other/pkg", "foo.go", "-test.run", "val",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+
+			// no explicit package before delimiter
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{delim, "custom", "foo.go"})
+			require.NoError(t, err)
+			assert.Empty(t, pkgs)
+			assert.Empty(t, files)
+
+			// empty delimiter alone
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{delim})
+			require.NoError(t, err)
+			assert.Empty(t, pkgs)
+			assert.Empty(t, files)
+
+			// files before delimiter, extra after
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{
+				"./cmd/main.go", "./cmd/util.go", delim, "extra.go",
+			})
+			require.NoError(t, err)
+			assert.Empty(t, pkgs)
+			assert.Equal(t, []string{"./cmd/main.go", "./cmd/util.go"}, files)
+
+			// package before, file after succeeds (not mixed)
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{"./pkg", delim, "main.go"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+
+			// file before, package after succeeds (not mixed)
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{"./cmd/main.go", delim, "./pkg"})
+			require.NoError(t, err)
+			assert.Empty(t, pkgs)
+			assert.Equal(t, []string{"./cmd/main.go"}, files)
+
+			// file before, file in different directory after succeeds
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{
+				"./cmd/main.go", delim, "./util/util.go",
+			})
+			require.NoError(t, err)
+			assert.Empty(t, pkgs)
+			assert.Equal(t, []string{"./cmd/main.go"}, files)
+		}
+
+		// mixed package and file before delimiter still fails
+		_, _, err := splitBuildTargets(subcmdTest, []string{
+			"./cmd/main.go", "./pkg", "--", "custom",
+		})
+		require.ErrorContains(t, err, "cannot mix .go files and packages")
+
+		// multiple file targets in different dirs before delimiter still fails
+		_, _, err = splitBuildTargets(subcmdTest, []string{
+			"./cmd/main.go", "./util/util.go", "--", "custom",
+		})
+		require.ErrorContains(t, err, "named files must all be in one directory")
+	})
+
+	t.Run("repeated delimiters and delimiter flag values", func(t *testing.T) {
+		for _, delim1 := range []string{"--", "-args", "--args"} {
+			for _, delim2 := range []string{"--", "-args", "--args"} {
+				pkgs, files, err := splitBuildTargets(subcmdTest, []string{
+					"./pkg", delim1, delim2, "custom",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, []string{"./pkg"}, pkgs)
+				assert.Empty(t, files)
+			}
+		}
+
+		// delimiter used as flag value does not stop scanning
+		for _, val := range []string{"--", "-args", "--args"} {
+			pkgs, files, err := splitBuildTargets(subcmdTest, []string{"-test.run", val, "./pkg"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+		}
+	})
 }
 
 func extractPackageIDs(pkgs []*packages.Package) []string {
@@ -628,15 +889,15 @@ func TestGetBuildPackages_LoadErrors(t *testing.T) {
 	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
 
 	// File targets with non-existent -C flag
-	_, err := getBuildPackages(ctx, []string{"-C", nonExistentDir, "main.go"})
+	_, err := getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "main.go"})
 	require.Error(t, err)
 
 	// Package targets with non-existent -C flag
-	_, err = getBuildPackages(ctx, []string{"-C", nonExistentDir, "./pkg"})
+	_, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "./pkg"})
 	require.Error(t, err)
 
 	// Default targets with non-existent -C flag
-	_, err = getBuildPackages(ctx, []string{"-C", nonExistentDir})
+	_, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir})
 	require.Error(t, err)
 }
 

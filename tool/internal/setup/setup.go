@@ -142,26 +142,81 @@ const (
 const (
 	// flagArgs separates the go command's own arguments from the ones it
 	// passes through to the test binary.
-	flagArgs = "-args"
+	flagArgs          = "-args"
+	flagArgsDashDash  = "--args"
+	delimiterDashDash = "--"
 	// flagJSON makes the go command report its output as JSON events.
 	flagJSON = "-json"
 )
 
-// GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
+func isTestDelimiter(arg string) bool {
+	return arg == delimiterDashDash || arg == flagArgs || arg == flagArgsDashDash
+}
+
+func findTestDelimiter(subcommand string, args []string) int {
+	if subcommand != subcmdTest {
+		return -1
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if isTestDelimiter(arg) {
+			return i
+		}
+		if strings.HasPrefix(arg, "-") {
+			flag := parseFlag(arg, true)
+			if !flag.hasValue && flag.takesValue {
+				i++ // skip separated value
+			}
+		}
+	}
+	return -1
+}
+
+// flagName returns the flag name of arg in single-dash form, without a joined
+// value. The go command accepts -flag and --flag interchangeably.
+func flagName(arg string) string {
+	name, _, _ := strings.Cut(arg, "=")
+	if strings.HasPrefix(name, "--") {
+		return name[1:]
+	}
+	return name
+}
+
+type parsedFlag struct {
+	name       string
+	hasValue   bool
+	takesValue bool
+}
+
+func parseFlag(arg string, isTest bool) parsedFlag {
+	rawName, _, hasValue := strings.Cut(arg, "=")
+	name := flagName(rawName)
+	if flagsWithPathValues[name] {
+		return parsedFlag{name: name, hasValue: hasValue, takesValue: true}
+	}
+	if !isTest {
+		return parsedFlag{name: name, hasValue: hasValue, takesValue: false}
+	}
+	if testFlagsWithValues[name] {
+		return parsedFlag{name: name, hasValue: hasValue, takesValue: true}
+	}
+	if suffix, ok := strings.CutPrefix(name, "-test."); ok {
+		if testFlagsWithValues["-"+suffix] {
+			return parsedFlag{name: name, hasValue: hasValue, takesValue: true}
+		}
+	}
+	return parsedFlag{name: name, hasValue: hasValue, takesValue: false}
+}
+
+// getBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
 // Returns a list of loaded packages. If no package patterns are found in args,
 // defaults to loading the current directory package.
-// The args parameter should be the go build/install command arguments (e.g., ["-a", "./cmd"]).
 // Returns an error if package loading fails or if invalid patterns are provided.
-// For example:
-//   - args ["-a", "./cmd"] returns packages for "./cmd"
-//   - args ["-a", "cmd"] returns packages for the "cmd" package in the module
-//   - args ["-a", ".", "./cmd"] returns packages for both "." and "./cmd"
-//   - args [] returns packages for "."
-func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
+func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
 
-	pkgTargets, fileTargets, err := splitBuildTargets(args)
+	pkgTargets, fileTargets, err := splitBuildTargets(subcommand, args)
 	if err != nil {
 		return nil, err
 	}
@@ -212,26 +267,20 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
-func splitBuildTargets(args []string) ([]string, []string, error) {
+func splitBuildTargets(subcommand string, args []string) ([]string, []string, error) {
 	var pkgs, files []string
+	isTest := subcommand == subcmdTest
 
-	// Scan forward and classify each argument. Packages and flags may interleave:
-	// `go build` conventionally puts flags first, but `go test` is commonly
-	// invoked as `go test ./pkg -run TestX`, so a position-based scan would miss
-	// the package. A flag in separated form consumes the next argument as its
-	// value (e.g. "-o out", "-run TestX"); skipping it keeps the value from being
-	// mistaken for a package. Joined form ("-tags=x") carries its own value.
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// Everything after `-args` is passed to the test binary, not the go
-		// command, so it can contain neither packages nor go flags.
-		if arg == flagArgs {
+		if isTest && isTestDelimiter(arg) {
 			break
 		}
 
 		if strings.HasPrefix(arg, "-") {
-			if !strings.Contains(arg, "=") && (flagsWithPathValues[arg] || testFlagsWithValues[arg]) {
+			flag := parseFlag(arg, isTest)
+			if !flag.hasValue && flag.takesValue {
 				if i+1 >= len(args) {
 					return nil, nil, ex.Newf("flag %q requires a value", arg)
 				}
@@ -378,7 +427,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
-	pkgs, err := getBuildPackages(ctx, args)
+	pkgs, err := getBuildPackages(ctx, subcommand, args)
 	if err != nil {
 		return err
 	}
@@ -546,6 +595,38 @@ func extractBuildFlags(args []string) []string {
 	return append(valueFlags, enabledBoolFlags...)
 }
 
+func toolexecBuildArgs(args []string, execPath string, vendored bool) []string {
+	insert := "-toolexec=" + execPath + " toolexec"
+	const additionalCount = 2
+	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
+	// Add "go build"
+	newArgs = append(newArgs, "go")
+	newArgs = append(newArgs, args[:1]...)
+	// Add "-work" to give us a chance to debug instrumented code if needed
+	newArgs = append(newArgs, "-work")
+	// Add "-toolexec=..."
+	newArgs = append(newArgs, insert)
+	// Add the rest
+	subcommand := args[0]
+	restArgs := args[1:]
+	if vendored {
+		restArgs = rewriteModVendor(restArgs)
+	}
+	if _, fileTargets, err2 := splitBuildTargets(subcommand, restArgs); err2 == nil && len(fileTargets) > 0 {
+		// add otelc.runtime.go manually to command line for file targets
+		dir := filepath.Dir(fileTargets[0])
+		otelcRuntimePath := filepath.Join(dir, otelcRuntimeFile)
+		if util.PathExists(otelcRuntimePath) {
+			if delimIdx := findTestDelimiter(subcommand, restArgs); delimIdx >= 0 {
+				restArgs = slices.Insert(restArgs, delimIdx, otelcRuntimePath)
+			} else {
+				restArgs = append(restArgs, otelcRuntimePath)
+			}
+		}
+	}
+	return append(newArgs, restArgs...)
+}
+
 // buildWithToolexec builds the project with the toolexec mode. vendored is
 // passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
 // -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
@@ -559,30 +640,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
-	insert := "-toolexec=" + execPath + " toolexec"
-	const additionalCount = 2
-	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
-	// Add "go build"
-	newArgs = append(newArgs, "go")
-	newArgs = append(newArgs, args[:1]...)
-	// Add "-work" to give us a chance to debug instrumented code if needed
-	newArgs = append(newArgs, "-work")
-	// Add "-toolexec=..."
-	newArgs = append(newArgs, insert)
-	// Add the rest
-	restArgs := args[1:]
-	if vendored {
-		restArgs = rewriteModVendor(restArgs)
-	}
-	if _, fileTargets, err2 := splitBuildTargets(restArgs); err2 == nil && len(fileTargets) > 0 {
-		// add otelc.runtime.go manually to command line for file targets
-		dir := filepath.Dir(fileTargets[0])
-		otelcRuntimePath := filepath.Join(dir, otelcRuntimeFile)
-		if util.PathExists(otelcRuntimePath) {
-			restArgs = append(restArgs, otelcRuntimePath)
-		}
-	}
-	newArgs = append(newArgs, restArgs...)
+	newArgs := toolexecBuildArgs(args, execPath, vendored)
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
