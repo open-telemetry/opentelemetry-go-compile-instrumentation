@@ -926,6 +926,30 @@ func TestExtractReceiverTypeParamsConstraint_MethodNameCollision(t *testing.T) {
 		"the interface declares the method name and must not be renamed")
 }
 
+// TestExtractReceiverTypeParamsConstraint_SingleParamNameCollision covers the
+// single type parameter path, which builds its field list separately from the
+// multi-parameter one. A one parameter receiver cannot carry an inter-parameter
+// constraint, having no sibling to reference, but it can still collide with the
+// selector of its own qualified constraint.
+func TestExtractReceiverTypeParamsConstraint_SingleParamNameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, `import "fmt"`,
+		"type GenStruct[Stringer fmt.Stringer] struct{}",
+		"GenStruct[A]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 1)
+	assert.Equal(t, []string{"A"}, typeParamNames(t, params))
+
+	sel, ok := params.List[0].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected the constraint to be a package-qualified selector")
+	pkgIdent, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "fmt", pkgIdent.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name,
+		"the selector names fmt.Stringer and must not be renamed to the receiver's parameter")
+}
+
 // TestReceiverBaseTypeName_NonIdent covers the defensive fallback directly: a
 // non-identifier base expression, which no valid Go receiver form actually
 // produces, returns "" rather than panicking.
