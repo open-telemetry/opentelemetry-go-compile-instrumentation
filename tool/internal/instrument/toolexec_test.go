@@ -479,7 +479,7 @@ func TestInterceptCompileImportCfgParseError(t *testing.T) {
 	}
 	_, err := interceptCompile(ctx, args)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parsing importcfg")
+	assert.Contains(t, err.Error(), "importcfg")
 }
 
 func TestUpdateImportConfigAddsResolvedImport(t *testing.T) {
@@ -539,7 +539,7 @@ func TestUpdateImportConfigWriteError(t *testing.T) {
 	}
 	err := ip.updateImportConfig(t.Context(), map[string]string{"fmt": "fmt"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "writing importcfg")
+	assert.Contains(t, err.Error(), "failed to create file")
 }
 
 func TestUpdateImportConfigTrackError(t *testing.T) {
@@ -638,7 +638,7 @@ func TestInterceptLinkParseError(t *testing.T) {
 	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", filepath.Join(workDir, "missing.link")}
 	_, err := interceptLink(ctx, args)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parsing link importcfg")
+	assert.Contains(t, err.Error(), "importcfg")
 }
 
 func TestInterceptLinkUpdatesConfig(t *testing.T) {
@@ -697,7 +697,7 @@ func TestInterceptLinkWriteError(t *testing.T) {
 	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", linkCfg}
 	_, err := interceptLink(ctx, args)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "writing link importcfg")
+	assert.Contains(t, err.Error(), "failed to create file")
 }
 
 func TestInterceptToolVersionWriteError(t *testing.T) {

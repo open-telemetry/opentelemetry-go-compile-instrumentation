@@ -39,11 +39,7 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 		return ex.Wrapf(err, "failed to format go.mod file")
 	}
 	const perm = 0o644
-	err = util.WriteFileAtomic(gomod, data, perm)
-	if err != nil {
-		return ex.Wrapf(err, "failed to write go.mod file")
-	}
-	return nil
+	return util.WriteFileAtomic(gomod, data, perm)
 }
 
 func runModTidy(ctx context.Context, moduleDir string) error {
@@ -136,20 +132,20 @@ func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) 
 // replace directive for a module that isn't in the build list.
 func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 	nested := make(map[string]string)
-	topGoMod := filepath.Join(dir, "go.mod")
+	topGoMod := filepath.Join(dir, goModFileName)
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return ex.Wrap(err)
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") {
+			if name == "testdata" || name == vendorDirName || strings.HasPrefix(name, ".") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if d.Name() != "go.mod" || filepath.Clean(path) == filepath.Clean(topGoMod) {
+		if d.Name() != goModFileName || filepath.Clean(path) == filepath.Clean(topGoMod) {
 			return nil
 		}
 
@@ -175,7 +171,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 
 	logger := util.LoggerFromContext(ctx)
 
-	goModFile := filepath.Join(moduleDir, "go.mod")
+	goModFile := filepath.Join(moduleDir, goModFileName)
 	modfile, err := parseGoMod(goModFile)
 	if err != nil {
 		return err

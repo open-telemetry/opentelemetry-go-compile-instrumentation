@@ -11,7 +11,7 @@ SHELL := /bin/bash
         test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
-        registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
+        weaver-install tidy/test-apps \
         fetch-upstream-semconv lint-schema \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold govulncheck govulncheck/instrumentation

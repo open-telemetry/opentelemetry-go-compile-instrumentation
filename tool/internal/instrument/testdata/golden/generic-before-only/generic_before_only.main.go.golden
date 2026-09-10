@@ -1,0 +1,100 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import _ "unsafe"
+
+func GenericFuncBeforeOnly[T any](p1 T, p2 int) (_unnamedRetVal_3330034316_0 T, _unnamedRetVal_3330034316_1 error) {
+	//line <generated>:1
+	if OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T](&p1, &p2); false {
+	} else {
+	}
+	//line main.go:7:2
+	return p1, nil
+}
+
+//line <generated>:1
+type HookContextImpl3330034316 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl3330034316) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl3330034316) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl3330034316) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl3330034316) GetData() interface{}     { return c.data }
+func (c *HookContextImpl3330034316) GetKeyData(key string) interface{} {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
+	}
+	return nil
+}
+
+func (c *HookContextImpl3330034316) SetKeyData(key string, val interface{}) {
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
+	}
+	m[key] = val
+}
+
+func (c *HookContextImpl3330034316) HasKeyData(key string) bool {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
+	}
+	return false
+}
+
+func (c *HookContextImpl3330034316) GetParam(idx int) interface{} {
+	panic("GetParam is unsupported for generic functions")
+}
+
+func (c *HookContextImpl3330034316) SetParam(idx int, val interface{}) {
+	panic("SetParam is unsupported for generic functions")
+}
+
+func (c *HookContextImpl3330034316) GetReturnVal(idx int) interface{} {
+	panic("GetReturnVal is unsupported for generic functions")
+}
+
+func (c *HookContextImpl3330034316) SetReturnVal(idx int, val interface{}) {
+	panic("SetReturnVal is unsupported for generic functions")
+}
+func (c *HookContextImpl3330034316) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl3330034316) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl3330034316) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl3330034316) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T any](param0 *T, param1 *int) (hookContext *HookContextImpl3330034316, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "GenericFuncBeforeOnlyBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl3330034316{}
+	hookContext.params = []interface{}{param0, param1}
+	hookContext.funcName = "GenericFuncBeforeOnly"
+	hookContext.packageName = "main"
+	if GenericFuncBeforeOnlyBefore != nil {
+		GenericFuncBeforeOnlyBefore(hookContext, *param0, *param1)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+//go:linkname GenericFuncBeforeOnlyBefore testdata/golden/generic-before-only.GenericFuncBeforeOnlyBefore
+func GenericFuncBeforeOnlyBefore(hookContext HookContext, param0 interface{}, param1 int)

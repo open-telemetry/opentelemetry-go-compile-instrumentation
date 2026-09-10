@@ -52,7 +52,7 @@ remediation steps.
 
 | Control | Status | Notes |
 | --- | --- | --- |
-| Repo-level `SECURITY.md` | ✅ Added | `SECURITY.md` at repository root (this PR) |
+| Repo-level `SECURITY.md` | ✅ Added | `docs/SECURITY.md` |
 | Security contacts listed | ✅ Added | Maintainers via `CODEOWNERS`; TC via mailing list |
 | Vulnerability reporting process | ✅ Added | GitHub private advisory + mailing list |
 | Embargo / coordinated disclosure policy | ✅ Added | 90-day default; see `SECURITY.md` |

@@ -6,7 +6,6 @@ package instrument
 import (
 	"context"
 	"go/token"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -22,7 +21,7 @@ import (
 // do not exercise import injection or compilation (logger discards all output).
 func newTestPhase() *instrumentPhase {
 	return &instrumentPhase{
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger: slog.New(slog.DiscardHandler),
 	}
 }
 
@@ -115,6 +114,17 @@ func TestWrapDeclValue_InvalidTemplate(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to wrap expression")
+}
+
+func TestWrapDeclValue_MalformedTemplateSyntax(t *testing.T) {
+	spec := &dst.ValueSpec{
+		Names:  []*dst.Ident{{Name: "X"}},
+		Values: []dst.Expr{&dst.Ident{Name: "x"}},
+	}
+
+	err := wrapDeclValue(spec, "{{ unclosed", 0)
+
+	require.Error(t, err)
 }
 
 // --- applyDeclRule integration tests ---
