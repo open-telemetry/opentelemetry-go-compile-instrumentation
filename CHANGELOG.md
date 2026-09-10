@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of a `map[string]interface{}`, and debug log arguments are no longer
   built when debug logging is off.
   ([#1137](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1137))
+- `otelc go build` no longer rewrites the tool file or runs `go mod tidy`
+  during a re-pin when neither the tool file nor `go.mod` changed and `go.sum`
+  is present.
+  ([#1136](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pull/1136))
 
 ### Deprecated
 
