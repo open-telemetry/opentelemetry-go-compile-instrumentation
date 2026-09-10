@@ -48,6 +48,7 @@ schemas/otelc/
 │   ├── database-sql.yaml    # database/sql client spans
 │   ├── redis.yaml           # redis/go-redis (v9) client spans
 │   ├── kafka.yaml           # segmentio/kafka-go producer & consumer spans
+│   ├── rabbitmq.yaml        # rabbitmq/amqp091-go producer & consumer spans
 │   ├── k8s.yaml             # k8s.io/client-go informer spans
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans

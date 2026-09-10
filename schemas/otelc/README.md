@@ -15,6 +15,7 @@ schemas/otelc/
 │   ├── database-sql.yaml    # database/sql client spans
 │   ├── redis.yaml           # redis/go-redis (v9) client spans
 │   ├── kafka.yaml           # segmentio/kafka-go producer & consumer spans
+│   ├── rabbitmq.yaml        # rabbitmq/amqp091-go producer & consumer spans
 │   ├── k8s.yaml             # k8s.io/client-go informer spans
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
@@ -49,6 +50,7 @@ signals an undeclared instrumentation.
 | `database/sql`                                      | `database-sql.yaml` | DB client spans                                                        |
 | `github.com/redis/go-redis/v9`                      | `redis.yaml`        | DB client spans                                                        |
 | `github.com/segmentio/kafka-go/{producer,consumer}` | `kafka.yaml`        | Messaging producer + consumer spans                                    |
+| `github.com/rabbitmq/amqp091-go`                    | `rabbitmq.yaml`     | Messaging producer + consumer spans                                    |
 | `k8s.io/client-go`                                  | `k8s.yaml`          | Informer spans                                                         |
 | `github.com/openai/openai-go` (v1/v2/v3)            | `openai.yaml`       | GenAI client spans                                                     |
 | `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |

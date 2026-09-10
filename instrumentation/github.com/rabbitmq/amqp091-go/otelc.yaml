@@ -1,0 +1,111 @@
+version: "v1.0.0"
+
+# Publish, PublishWithContext, and PublishWithDeferredConfirmWithContext all
+# call PublishWithDeferredConfirm. Hook that one path so a publish is one span.
+amqp_hook_publish:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: PublishWithDeferredConfirm
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforePublishWithDeferredConfirm
+        after: AfterPublishWithDeferredConfirm
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+amqp_hook_consume:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: Consume
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforeConsume
+        after: AfterConsume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+amqp_hook_consume_with_context:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: ConsumeWithContext
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforeConsumeWithContext
+        after: AfterConsume
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+amqp_hook_get:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: Get
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforeGet
+        after: AfterGet
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+# The library drops this context before PublishWithDeferredConfirm. Stash it
+# so the send span parents from the API context, not only GLS.
+amqp_hook_publish_with_context:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: PublishWithContext
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforePublishWithContext
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+amqp_hook_publish_with_deferred_confirm_with_context:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: PublishWithDeferredConfirmWithContext
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforePublishWithDeferredConfirmWithContext
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+amqp_hook_ack:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: Ack
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforeAck
+        after: AfterAck
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+amqp_hook_nack:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: Nack
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforeNack
+        after: AfterNack
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+amqp_hook_reject:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.10.0
+  where:
+    func: Reject
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforeReject
+        after: AfterReject
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"

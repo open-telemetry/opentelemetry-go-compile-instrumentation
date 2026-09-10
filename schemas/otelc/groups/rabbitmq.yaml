@@ -1,0 +1,40 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # rabbitmq/amqp091-go instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/rabbitmq/amqp091-go/hook.go
+  #   instrumentation/github.com/rabbitmq/amqp091-go/semconv/client.go
+  #
+  # Trace-only. One producer span per PublishWithDeferredConfirm. One consumer
+  # span per Delivery (process until Delivery or Channel Ack/Nack/Reject,
+  # including multiple=true, or receive when auto-ack).
+  # server.address is omitted because (*Channel).connection is unexported.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.messaging.rabbitmq.producer
+    type: span
+    span_kind: producer
+    stability: development
+    brief: RabbitMQ producer span, one per published message.
+    attributes:
+      - ref: messaging.system
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: messaging.destination.name
+      - ref: messaging.rabbitmq.destination.routing_key
+      - ref: messaging.message.body.size
+
+  - id: span.otelc.messaging.rabbitmq.consumer
+    type: span
+    span_kind: consumer
+    stability: development
+    brief: RabbitMQ consumer span, one per delivered message.
+    attributes:
+      - ref: messaging.system
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: messaging.destination.name
+      - ref: messaging.destination.subscription.name
+      - ref: messaging.rabbitmq.destination.routing_key
+      - ref: messaging.message.body.size
