@@ -842,6 +842,17 @@ func TestEnableNestedToolexec(t *testing.T) {
 
 		assert.Equal(t, []string{quoted, "toolexec"}, parseToolexecFromGoflags(t, token))
 	})
+
+	t.Run("returns error when executable path cannot be quoted in GOFLAGS", func(t *testing.T) {
+		originalExe := executablePath
+		t.Cleanup(func() { executablePath = originalExe })
+		executablePath = func() (string, error) {
+			return `/home/it's "here"/otelc`, nil
+		}
+
+		enableErr := EnableNestedToolexec()
+		require.Error(t, enableErr)
+	})
 }
 
 // splitQuoted mirrors cmd/internal/quoted.Split, which is what cmd/go uses for

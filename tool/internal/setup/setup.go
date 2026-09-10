@@ -604,6 +604,12 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string,
 //nolint:gochecknoglobals // test seam
 var runBuildCmd = util.RunCmdWithEnv
 
+// executablePath resolves the path to the current executable. It is a variable
+// so tests can simulate paths that trigger quoting errors.
+//
+//nolint:gochecknoglobals // test seam
+var executablePath = os.Executable
+
 // buildWithToolexec builds the project with the toolexec mode. vendored is
 // passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
 // -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
@@ -613,7 +619,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	logger := util.LoggerFromContext(ctx)
 
 	// Add -toolexec=otelc to the original build command and run it
-	execPath, err := os.Executable()
+	execPath, err := executablePath()
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
 	}

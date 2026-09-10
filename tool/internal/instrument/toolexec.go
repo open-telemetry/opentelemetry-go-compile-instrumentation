@@ -571,13 +571,19 @@ func nestedToolexecGoflagsToken(execPath string) (string, error) {
 	return toolexecFlag, nil
 }
 
+// executablePath resolves the path to the current executable. It is a variable
+// so tests can simulate paths that trigger quoting errors.
+//
+//nolint:gochecknoglobals // test seam
+var executablePath = os.Executable
+
 // EnableNestedToolexec points GOFLAGS at this executable in nested mode, so go
 // commands this process spawns (e.g. `go list -export`) run through a
 // version-only otelc toolexec and share this build's cache keys. Any existing
 // -toolexec was stripped at startup. Must only be called from the real otelc
 // binary, since os.Executable is what nested go commands will run.
 func EnableNestedToolexec() error {
-	execPath, err := os.Executable()
+	execPath, err := executablePath()
 	if err != nil {
 		return ex.Wrapf(err, "resolving otelc executable path")
 	}

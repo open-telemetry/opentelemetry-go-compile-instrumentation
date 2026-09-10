@@ -179,6 +179,34 @@ func TestBuildWithToolexec(t *testing.T) {
 		assert.Contains(t, err.Error(), "go cache")
 		assert.False(t, ran, "the build must not start when the cache is unusable")
 	})
+
+	t.Run("returns error when executable path cannot be quoted", func(t *testing.T) {
+		ran := false
+		originalCmd := runBuildCmd
+		t.Cleanup(func() { runBuildCmd = originalCmd })
+		runBuildCmd = func(context.Context, []string, ...string) error {
+			ran = true
+			return nil
+		}
+
+		originalExe := executablePath
+		t.Cleanup(func() { executablePath = originalExe })
+		executablePath = func() (string, error) {
+			return `/home/it's "me"/otelc`, nil
+		}
+
+		cmd := &cli.Command{
+			Name:            "go",
+			SkipFlagParsing: true,
+			Action: func(ctx context.Context, c *cli.Command) error {
+				return buildWithToolexec(ctx, c, false)
+			},
+		}
+		err := cmd.Run(t.Context(), []string{"go", "build", "."})
+
+		require.Error(t, err)
+		assert.False(t, ran, "the build must not start when the executable path cannot be quoted")
+	})
 }
 
 func TestGetPackages(t *testing.T) {
