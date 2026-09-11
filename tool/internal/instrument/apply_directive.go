@@ -37,10 +37,9 @@ func (ip *instrumentPhase) applyDirectiveRule(
 	if err != nil {
 		return false, ex.Wrap(err)
 	}
-	if importErr := ip.addRuleImports(ctx, root, r.Imports, r.Name); importErr != nil {
-		return false, importErr
-	}
-	imports := ast.ImportAliasMap(root)
+
+	imports, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
+
 	for _, match := range matches {
 		funcDecl := match.Func
 		util.Assert(funcDecl.Body != nil, "function must have a body")
@@ -57,9 +56,19 @@ func (ip *instrumentPhase) applyDirectiveRule(
 		if err != nil {
 			return false, ex.Wrapf(err, "parsing rendered template for func %s", funcDecl.Name.Name)
 		}
+		for _, stmt := range stmts {
+			replaceQualifierAliases(stmt, aliasOverrides)
+		}
 		funcDecl.Body.List = append(stmts, funcDecl.Body.List...)
 		ip.Info("Apply directive rule", "rule", r, "func", funcDecl.Name.Name)
 	}
+
+	// Runs after injection so that an import the rewrite above eliminated (by
+	// reusing the file's existing alias) is not added back as a duplicate.
+	if importErr := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); importErr != nil {
+		return false, importErr
+	}
+
 	return true, nil
 }
 

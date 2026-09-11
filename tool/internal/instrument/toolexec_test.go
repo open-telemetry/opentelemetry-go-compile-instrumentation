@@ -482,6 +482,23 @@ func TestInterceptCompileImportCfgParseError(t *testing.T) {
 	assert.Contains(t, err.Error(), "importcfg")
 }
 
+func TestInterceptCompileImportNamesLoadError(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[]`), 0o644))
+	require.NoError(t, os.WriteFile(util.GetImportNamesFile(), []byte("not json"), 0o644))
+
+	ctx := util.ContextWithLogger(t.Context(), slog.Default())
+	args := []string{
+		"compile",
+		"-o", filepath.Join(t.TempDir(), "out.a"),
+		"-p", "main",
+	}
+	_, err := interceptCompile(ctx, args)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmarshal")
+}
+
 func TestUpdateImportConfigAddsResolvedImport(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)

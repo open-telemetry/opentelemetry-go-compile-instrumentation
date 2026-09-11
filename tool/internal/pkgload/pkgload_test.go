@@ -13,6 +13,40 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+func TestCollectPackageNames(t *testing.T) {
+	// Package b is shared by a and c, a diamond dependency. The walk
+	// must visit b once and not repeat work.
+	b := &packages.Package{PkgPath: "example.com/b", Name: "bpkg"}
+	c := &packages.Package{PkgPath: "example.com/c", Name: "cpkg", Imports: map[string]*packages.Package{"b": b}}
+	a := &packages.Package{
+		PkgPath: "example.com/a",
+		Name:    "apkg",
+		Imports: map[string]*packages.Package{"b": b, "c": c},
+	}
+
+	names := CollectPackageNames([]*packages.Package{a})
+
+	assert.Equal(t, map[string]string{
+		"example.com/a": "apkg",
+		"example.com/b": "bpkg",
+		"example.com/c": "cpkg",
+	}, names)
+}
+
+func TestCollectPackageNames_SkipsEmptyName(t *testing.T) {
+	pkg := &packages.Package{PkgPath: "example.com/broken", Name: ""}
+
+	names := CollectPackageNames([]*packages.Package{pkg})
+
+	assert.Empty(t, names)
+}
+
+func TestCollectPackageNames_EmptyInput(t *testing.T) {
+	names := CollectPackageNames(nil)
+
+	assert.Empty(t, names)
+}
+
 func TestLoadPackages(t *testing.T) {
 	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, "fmt")
 	require.NoError(t, err)

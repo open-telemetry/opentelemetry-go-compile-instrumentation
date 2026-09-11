@@ -129,14 +129,12 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 //   - distinct import paths that happen to share a last path segment (e.g.
 //     "text/template" vs "html/template", both conventionally "template")
 //
-// This deliberately duplicates tool/internal/imports.parseFile rather than reusing
-// it: that resolves unaliased imports with pkgload.ResolvePackageName (a
-// go/packages load that ex.Fatalf's on failure), which is too costly and too fatal
-// for the setup/match path, where this runs for every compiled package in the build.
-// The cost is that the default name here is a syntactic guess; see defaultImportAlias.
+// resolvedNames maps an import path to a package name. Pass nil, or
+// leave a path out, to use a guess instead. A live package lookup here
+// would be too costly.
 //
 // Returns nil when file is nil.
-func ImportAliasMap(file *dst.File) map[string]string {
+func ImportAliasMap(file *dst.File, resolvedNames map[string]string) map[string]string {
 	if file == nil {
 		return nil
 	}
@@ -167,6 +165,9 @@ func ImportAliasMap(file *dst.File) map[string]string {
 			continue
 		}
 		alias := defaultImportAlias(path)
+		if name, ok := resolvedNames[path]; ok && name != "" {
+			alias = name
+		}
 		if imp.Name != nil {
 			alias = imp.Name.Name
 		}
