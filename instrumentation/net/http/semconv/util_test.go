@@ -274,3 +274,35 @@ func TestServerClientIP(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactQuery(t *testing.T) {
+	tests := []struct {
+		name     string
+		rawQuery string
+		want     string
+	}{
+		{"empty", "", ""},
+		{"no sensitive keys unchanged", "color=blue&size=large", "color=blue&size=large"},
+		{"sig redacted, key preserved", "color=blue&sig=abc123", "color=blue&sig=REDACTED"},
+		{"aws signature redacted", "X-Amz-Signature=deadbeef", "X-Amz-Signature=REDACTED"},
+		{"aws credential redacted", "X-Amz-Credential=AKIA/secret", "X-Amz-Credential=REDACTED"},
+		{"aws security token redacted", "X-Amz-Security-Token=tok", "X-Amz-Security-Token=REDACTED"},
+		{"google signature redacted", "X-Goog-Signature=sigval", "X-Goog-Signature=REDACTED"},
+		{
+			"order and non-sensitive preserved",
+			"a=1&sig=secret&b=2&X-Amz-Signature=k&c=3",
+			"a=1&sig=REDACTED&b=2&X-Amz-Signature=REDACTED&c=3",
+		},
+		{"matching is case-sensitive", "SIG=secret&Sig=secret2", "SIG=secret&Sig=secret2"},
+		{"wrong-case aws key not redacted", "x-amz-signature=secret", "x-amz-signature=secret"},
+		{"bare key without value unchanged", "sig&color=blue", "sig&color=blue"},
+		{"empty sensitive value still redacted", "sig=", "sig=REDACTED"},
+		{"repeated sensitive key both redacted", "sig=a&sig=b", "sig=REDACTED&sig=REDACTED"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, redactQuery(tt.rawQuery))
+		})
+	}
+}

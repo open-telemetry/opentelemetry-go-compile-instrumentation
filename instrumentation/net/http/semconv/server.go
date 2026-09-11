@@ -209,7 +209,7 @@ func (n HTTPServer) RequestTraceAttrs(
 	}
 
 	if req.URL != nil && req.URL.RawQuery != "" {
-		attrs = append(attrs, semconv.URLQuery(req.URL.RawQuery))
+		attrs = append(attrs, semconv.URLQuery(redactQuery(req.URL.RawQuery)))
 	}
 
 	if protoName != "" && protoName != "http" {
