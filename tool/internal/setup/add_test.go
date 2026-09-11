@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 	"gotest.tools/v3/golden"
 )
 
@@ -143,4 +144,156 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 
 	err := sp.addDeps(t.Context(), matched, invalidPath, "main")
 	assert.Error(t, err)
+}
+
+func TestAddDeps_RuntimeDiffUnderDebug(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	packageDir := filepath.Join(workDir, "my_package")
+	require.NoError(t, os.MkdirAll(packageDir, 0o755))
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "rule_func_http",
+			Target: "example.com/target",
+		},
+		Path: "example.com/target",
+		Func: "Handle",
+	}
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "rule_file_helper",
+			Target: "example.com/target",
+		},
+		Path: "example.com/target",
+		File: "helper.go",
+	}
+
+	rs := rule.NewInstRuleSet("example.com/target")
+	fakeFile := filepath.Join(t.TempDir(), "main.go")
+	rs.AddFuncRule(fakeFile, funcRule)
+	rs.AddFileRule(fileRule)
+
+	sp := newTestSetupPhase()
+	err := sp.addDeps(t.Context(), []*rule.InstRuleSet{rs}, packageDir, "main")
+	require.NoError(t, err)
+
+	runtimeFilePath := filepath.Join(packageDir, otelcRuntimeFile)
+
+	// Verify retained runtime source exists
+	retainedPath := filepath.Join(setupDebugDir(runtimeFilePath), otelcRuntimeFile)
+	assert.FileExists(t, retainedPath)
+
+	// Verify otelc.runtime.go.diff exists next to the retained runtime source
+	diffPath := filepath.Join(setupDebugDir(runtimeFilePath), otelcRuntimeFile+".diff")
+	require.FileExists(t, diffPath)
+
+	content, err := os.ReadFile(diffPath)
+	require.NoError(t, err)
+	diffText := string(content)
+
+	// Verify header
+	assert.Contains(t, diffText, "=== generated instrumentation file: otelc.runtime.go ===")
+	assert.Contains(t, diffText, "rules:")
+	assert.Contains(t, diffText, "  - rule_func_http")
+	assert.Contains(t, diffText, "  - rule_file_helper")
+
+	// Verify unified diff lines against /dev/null
+	assert.Contains(t, diffText, "--- /dev/null")
+	assert.Contains(t, diffText, "+++ "+filepath.Join(packageDir, otelcRuntimeFile))
+	assert.Contains(t, diffText, "+package main")
+	assert.Contains(t, diffText, "+import _otel_log \"log\"")
+	assert.Contains(t, diffText, "+import _otel_debug \"runtime/debug\"")
+}
+
+func TestAddDeps_RuntimeContributorsAttribution(t *testing.T) {
+	funcRuleA := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "rule_a",
+			Target: "example.com/a",
+		},
+		Path: "example.com/a",
+		Func: "FuncA",
+	}
+	funcRuleB := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "rule_b",
+			Target: "example.com/b",
+		},
+		Path: "example.com/b",
+		Func: "FuncB",
+	}
+	funcRuleADistinct := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "rule_a",
+			Target: "example.com/a_distinct",
+		},
+		Path: "example.com/a_distinct",
+		Func: "FuncDistinct",
+	}
+	fileRuleC := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "rule_c",
+			Target: "example.com/c",
+		},
+		Path: "example.com/c",
+		File: "file_c.go",
+	}
+	fileRuleCDup := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "rule_c",
+			Target: "example.com/c",
+		},
+		Path: "example.com/c",
+		File: "file_c.go",
+	}
+
+	funcRules := []*rule.InstFuncRule{funcRuleA, funcRuleA, funcRuleB, funcRuleADistinct}
+	fileRules := []*rule.InstFileRule{fileRuleC, fileRuleCDup}
+
+	contributors := runtimeContributors(funcRules, fileRules)
+	expected := []string{"rule_a", "rule_b", "rule_a", "rule_c"}
+	assert.Equal(t, expected, contributors)
+}
+
+func TestAddDeps_RuntimeDiffDebugOff(t *testing.T) {
+	for _, debugVal := range []string{"", "0"} {
+		t.Run("debug="+debugVal, func(t *testing.T) {
+			workDir := t.TempDir()
+			t.Setenv(util.EnvOtelcWorkDir, workDir)
+			t.Setenv(util.EnvOtelcDebug, debugVal)
+
+			packageDir := filepath.Join(workDir, "pkg")
+			require.NoError(t, os.MkdirAll(packageDir, 0o755))
+
+			funcRule := &rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:   "my_rule",
+					Target: "example.com/target",
+				},
+				Path: "example.com/target",
+				Func: "Do",
+			}
+			rs := rule.NewInstRuleSet("example.com/target")
+			rs.AddFuncRule(filepath.Join(t.TempDir(), "f.go"), funcRule)
+
+			sp := newTestSetupPhase()
+			err := sp.addDeps(t.Context(), []*rule.InstRuleSet{rs}, packageDir, "main")
+			require.NoError(t, err)
+
+			// Runtime file is generated
+			runtimePath := filepath.Join(packageDir, otelcRuntimeFile)
+			assert.FileExists(t, runtimePath)
+
+			// Retained file exists via keepForDebug
+			retainedPath := filepath.Join(setupDebugDir(runtimePath), otelcRuntimeFile)
+			assert.FileExists(t, retainedPath)
+
+			// No .diff file is generated
+			diffPath := filepath.Join(setupDebugDir(runtimePath), otelcRuntimeFile+".diff")
+			assert.NoFileExists(t, diffPath)
+		})
+	}
 }

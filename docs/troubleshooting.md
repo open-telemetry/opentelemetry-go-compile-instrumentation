@@ -111,6 +111,9 @@ showing all source modifications and source additions introduced into the Go com
     responsible rule (`=== rule: <name> ===`).
   - `otelc.globals.go.diff`: Added file generated for trampoline and hook context globals,
     listing the contributing rules responsible for requiring the globals file.
+  - `otelc.runtime.go.diff`: Added file generated during setup to hold runtime imports,
+    linkage, and helper declarations required by matched instrumentation rules, listing the
+    contributing rules responsible for requiring the runtime file.
 - **Stale diff management**: At the start of a `--debug` build, `otelc` resets the
   `.otelc-build/debug` directory at the parent build lifecycle boundary so stale artifacts
   from earlier builds cannot masquerade as output from the current build.

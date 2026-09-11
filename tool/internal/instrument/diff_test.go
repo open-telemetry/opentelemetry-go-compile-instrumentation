@@ -4,9 +4,11 @@
 package instrument
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"go/token"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -557,4 +559,52 @@ func TestApplyRulesCapturingDiffsTracksGlobalsContributors(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, needsGlobals2)
 	assert.Nil(t, ip2.globalsContributors)
+}
+
+func TestRemoveStaleDiff(t *testing.T) {
+	t.Run("missing destination causes no warning or error", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		dest := filepath.Join(t.TempDir(), "nonexistent.diff")
+
+		RemoveStaleDiff(dest, logger)
+		assert.Empty(t, logs.String())
+	})
+
+	t.Run("successful stale diff removal", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		dest := filepath.Join(t.TempDir(), "stale.diff")
+		require.NoError(t, os.WriteFile(dest, []byte("old diff"), 0o600))
+
+		RemoveStaleDiff(dest, logger)
+		assert.NoFileExists(t, dest)
+		assert.Empty(t, logs.String())
+	})
+
+	t.Run("removal failure logs warning without build failure", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		dest := filepath.Join(t.TempDir(), "not-a-file.diff")
+		// Create non-empty directory at dest so os.Remove fails portably.
+		require.NoError(t, os.MkdirAll(filepath.Join(dest, "child"), 0o755))
+
+		RemoveStaleDiff(dest, logger)
+		assert.DirExists(t, dest)
+		assert.Contains(t, logs.String(), "failed to remove stale instrumentation diff")
+		assert.Contains(t, logs.String(), dest)
+	})
+
+	t.Run("instrumentPhase removeStaleDiff delegates to logger", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		ip := &instrumentPhase{logger: logger}
+		dest := filepath.Join(t.TempDir(), "not-a-file.diff")
+		require.NoError(t, os.MkdirAll(filepath.Join(dest, "child"), 0o755))
+
+		ip.removeStaleDiff(dest)
+		assert.DirExists(t, dest)
+		assert.Contains(t, logs.String(), "failed to remove stale instrumentation diff")
+		assert.Contains(t, logs.String(), dest)
+	})
 }

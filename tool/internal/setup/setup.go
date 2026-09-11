@@ -36,11 +36,7 @@ func (sp *setupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args
 func (sp *setupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *setupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
-// keepForDebug copies the file to the build temp directory for debugging.
-// Error is tolerated as it's not critical.
-func keepForDebug(ctx context.Context, srcPath string) {
-	logger := util.LoggerFromContext(ctx)
-
+func setupDebugDir(srcPath string) string {
 	escape := func(s string) string {
 		s = strings.ReplaceAll(s, "/", "_")
 		s = strings.ReplaceAll(s, ".", "_")
@@ -54,7 +50,14 @@ func keepForDebug(ctx context.Context, srcPath string) {
 		name = escape(filepath.Base(filepath.Dir(srcPath)))
 	}
 
-	dstPath := filepath.Join(util.GetBuildTemp("debug"), name, filepath.Base(srcPath))
+	return filepath.Join(util.GetBuildTemp("debug"), name)
+}
+
+// keepForDebug copies the file to the build temp directory for debugging.
+// Error is tolerated as it's not critical.
+func keepForDebug(ctx context.Context, srcPath string) {
+	logger := util.LoggerFromContext(ctx)
+	dstPath := filepath.Join(setupDebugDir(srcPath), filepath.Base(srcPath))
 	if err := util.CopyFile(srcPath, dstPath); err != nil {
 		logger.WarnContext(ctx, "failed to record added file", "path", srcPath, "error", err)
 	}

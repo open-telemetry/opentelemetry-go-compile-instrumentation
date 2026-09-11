@@ -14,6 +14,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -111,6 +112,60 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 	}
 }
 
+// runtimeContributors returns a deterministic, deduplicated list of rule names
+// that contributed to the generation of otelc.runtime.go. Deduplication is based
+// on stable rule identity rather than display name alone so distinct rules with
+// identical display names are not merged.
+func runtimeContributors(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []string {
+	var contributors []string
+	seen := make(map[string]struct{})
+
+	for _, r := range funcRules {
+		name := r.GetName()
+		if name == "" {
+			name = r.Func
+		}
+		if name == "" {
+			name = r.Path
+		}
+		// Distinct func rules are identified by their name and content identity.
+		id := fmt.Sprintf("func:%s:%s", r.GetName(), r.Identity())
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		contributors = append(contributors, name)
+	}
+
+	for _, r := range fileRules {
+		name := r.GetName()
+		if name == "" {
+			name = r.File
+		}
+		if name == "" {
+			name = r.Path
+		}
+		// Distinct file rules are identified by their name, path, and file.
+		id := fmt.Sprintf("file:%s:%s:%s", r.GetName(), r.Path, r.File)
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		contributors = append(contributors, name)
+	}
+
+	return contributors
+}
+
+func (sp *setupPhase) writeRuntimeDiffForDebug(srcPath string, contributors []string) {
+	if !instrument.DiffDebugEnabled() {
+		return
+	}
+	dest := filepath.Join(setupDebugDir(srcPath), filepath.Base(srcPath)+".diff")
+	header := instrument.FormatGeneratedFileHeader(otelcRuntimeFile, contributors)
+	instrument.WriteAddedSourceDiff(dest, srcPath, header, sp.logger)
+}
+
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
 func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, packagePath, packageName string) error {
@@ -142,6 +197,7 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
 	keepForDebug(ctx, otelcRuntimeFilePath)
+	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, runtimeContributors(funcRules, fileRules))
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
 }
