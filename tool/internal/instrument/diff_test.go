@@ -688,7 +688,7 @@ func TestDebugLifecycle_ConcurrentChildren(t *testing.T) {
 				return
 			}
 			diffPath := filepath.Join(pkgDir, fmt.Sprintf("file_%d.go.diff", idx))
-			if err := os.WriteFile(diffPath, []byte(fmt.Sprintf("diff %d", idx)), 0o644); err != nil {
+			if err := os.WriteFile(diffPath, fmt.Appendf(nil, "diff %d", idx), 0o644); err != nil {
 				errCh <- err
 				return
 			}
