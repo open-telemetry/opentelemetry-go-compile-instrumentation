@@ -53,6 +53,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make test-e2e/coverage
+        env:
+          OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache
       - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5
         with:
           fail_ci_if_error: true
