@@ -5,6 +5,7 @@
 
 hook_zerolog_event_msg:
   target: github.com/rs/zerolog
+  version: "v1.27.0"
   where:
     func: Msg
     recv: "*Event"
@@ -15,6 +16,7 @@ hook_zerolog_event_msg:
 
 hook_zerolog_event_msgf:
   target: github.com/rs/zerolog
+  version: "v1.27.0"
   where:
     func: Msgf
     recv: "*Event"
@@ -25,6 +27,7 @@ hook_zerolog_event_msgf:
 
 hook_zerolog_event_msg_func:
   target: github.com/rs/zerolog
+  version: "v1.27.0"
   where:
     func: MsgFunc
     recv: "*Event"
@@ -35,6 +38,7 @@ hook_zerolog_event_msg_func:
 
 hook_zerolog_event_send:
   target: github.com/rs/zerolog
+  version: "v1.27.0"
   where:
     func: Send
     recv: "*Event"
