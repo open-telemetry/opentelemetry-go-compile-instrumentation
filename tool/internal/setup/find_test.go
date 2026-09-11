@@ -718,10 +718,32 @@ func TestDropPlanIrrelevantFlags(t *testing.T) {
 			expected:   []string{"./pkg", "--", "--", "-json"},
 		},
 		{
-			name:       "go build -- does not stop filtering -json",
+			name:       "go build -- closes flag parsing and preserves positional -json",
 			subcommand: subcmdBuild,
 			args:       []string{"-json", "./pkg", "--", "-json", "main.go"},
-			expected:   []string{"./pkg", "--", "main.go"},
+			expected:   []string{"./pkg", "--", "-json", "main.go"},
+		},
+		{
+			name:       "go test preserves -json after positional test-argv boundary",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "-run", "TestX", "positional", "-json"},
+			expected:   []string{"./pkg", "-run", "TestX", "positional", "-json"},
+		},
+		{
+			name:       "go test preserves full tail untouched after positional test-argv boundary",
+			subcommand: subcmdTest,
+			args: []string{
+				"-json",
+				"./pkg",
+				"-run",
+				"TestX",
+				"positional",
+				"-race",
+				"-mod=vendor",
+				"-tags=x",
+				"./other",
+			},
+			expected: []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
 		},
 	}
 

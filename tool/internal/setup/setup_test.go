@@ -399,6 +399,20 @@ func TestSplitBuildTargets(t *testing.T) {
 			expectError: true,
 			wantErr:     "cannot mix .go files and packages",
 		},
+		{
+			name:        "go build -- treats dash-prefixed argument as positional target",
+			subcommand:  subcmdBuild,
+			targets:     []string{"--", "-weird-target"},
+			pkgTargets:  []string{"-weird-target"},
+			expectError: false,
+		},
+		{
+			name:        "go install -- treats dash-prefixed argument as positional target",
+			subcommand:  subcmdInstall,
+			targets:     []string{"--", "-weird-target"},
+			pkgTargets:  []string{"-weird-target"},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -456,8 +470,8 @@ func TestSplitBuildTargets(t *testing.T) {
 		}
 	})
 
-	t.Run("boolean and unknown test flags do not consume following argument", func(t *testing.T) {
-		for _, flag := range []string{"-test.v", "--test.v", "-test.short", "-test.unknown"} {
+	t.Run("boolean test flags do not consume following argument", func(t *testing.T) {
+		for _, flag := range []string{"-test.v", "--test.v", "-test.short"} {
 			pkgs, files, err := splitBuildTargets(subcmdTest, []string{flag, "./pkg"})
 			require.NoError(t, err)
 			assert.Equal(t, []string{"./pkg"}, pkgs)
@@ -467,6 +481,46 @@ func TestSplitBuildTargets(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"./pkg"}, pkgs)
 		assert.Empty(t, files)
+	})
+
+	t.Run("unknown test flags terminate package discovery", func(t *testing.T) {
+		// package before unknown flag is captured; following value is not a package
+		pkgs, files, err := splitBuildTargets(subcmdTest, []string{"./pkg", "-custom", "value"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"./pkg"}, pkgs)
+		assert.Empty(t, files)
+
+		// package before unknown joined flag is captured
+		pkgs, files, err = splitBuildTargets(subcmdTest, []string{"./pkg", "-custom=value"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"./pkg"}, pkgs)
+		assert.Empty(t, files)
+
+		// unknown flag before package closes package discovery: ./pkg is treated as test binary arg
+		pkgs, files, err = splitBuildTargets(subcmdTest, []string{"-custom", "value", "./pkg"})
+		require.NoError(t, err)
+		assert.Empty(t, pkgs)
+		assert.Empty(t, files)
+
+		// unknown joined flag before package closes package discovery
+		pkgs, files, err = splitBuildTargets(subcmdTest, []string{"-custom=value", "./pkg"})
+		require.NoError(t, err)
+		assert.Empty(t, pkgs)
+		assert.Empty(t, files)
+
+		// unknown flag followed by delimiter
+		pkgs, files, err = splitBuildTargets(subcmdTest, []string{"./pkg", "-custom", "--", "./other"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"./pkg"}, pkgs)
+		assert.Empty(t, files)
+
+		// unsupported -test.* aliases are unknown flags and close package discovery
+		for _, flag := range []string{"-test.exec", "-test.vet", "-test.unknown"} {
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{flag, "val", "./pkg"})
+			require.NoError(t, err)
+			assert.Empty(t, pkgs)
+			assert.Empty(t, files)
+		}
 	})
 
 	t.Run("test delimiters stop target scanning", func(t *testing.T) {
@@ -554,6 +608,23 @@ func TestSplitBuildTargets(t *testing.T) {
 			assert.Empty(t, files)
 		}
 	})
+
+	t.Run(
+		"known flag after package terminates package list and trailing positional becomes test argv",
+		func(t *testing.T) {
+			pkgs, files, err := splitBuildTargets(subcmdTest, []string{"./pkg", "-run", "TestX", "./other"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{
+				"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Empty(t, files)
+		},
+	)
 }
 
 func extractPackageIDs(pkgs []*packages.Package) []string {
@@ -680,9 +751,10 @@ func TestSetupGoCache(t *testing.T) {
 
 func TestExtractBuildFlags(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		expected []string
+		name       string
+		subcommand string
+		args       []string
+		expected   []string
 	}{
 		{
 			name:     "no build flags",
@@ -845,13 +917,91 @@ func TestExtractBuildFlags(t *testing.T) {
 			args:     []string{"build", "-cover=false", "-tags=foo", "-cover", "./..."},
 			expected: []string{"-tags=foo", "-cover"}, // value flags first, then bool
 		},
+		// go test tail preservation tests
+		{
+			name:       "test delimiter dash-dash ignores tags in tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "--", "-tags=integration"},
+			expected:   nil,
+		},
+		{
+			name:       "test delimiter dash-dash ignores race in tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "--", "-race"},
+			expected:   nil,
+		},
+		{
+			name:       "test delimiter -args ignores tags in tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-args", "-tags=integration"},
+			expected:   nil,
+		},
+		{
+			name:       "test delimiter --args ignores tags in tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "--args", "-tags=integration"},
+			expected:   nil,
+		},
+		// go test flag values resembling build flags
+		{
+			name:       "test flag value -test.run does not extract tags",
+			subcommand: subcmdTest,
+			args:       []string{"-test.run", "-tags=integration", "./pkg"},
+			expected:   nil,
+		},
+		{
+			name:       "test flag value -run does not extract tags",
+			subcommand: subcmdTest,
+			args:       []string{"-run", "-tags=integration", "./pkg"},
+			expected:   nil,
+		},
+		{
+			name:       "genuine build flags in go test are extracted",
+			subcommand: subcmdTest,
+			args:       []string{"-tags=integration", "./pkg"},
+			expected:   []string{"-tags=integration"},
+		},
+		{
+			name:       "genuine separated build flags in go test are extracted",
+			subcommand: subcmdTest,
+			args:       []string{"-tags", "integration", "./pkg"},
+			expected:   []string{"-tags", "integration"},
+		},
+		{
+			name:       "genuine bool build flag in go test is extracted",
+			subcommand: subcmdTest,
+			args:       []string{"-race", "./pkg"},
+			expected:   []string{"-race"},
+		},
+		{
+			name:       "test-binary positional tail ignores subsequent build-looking flags",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-run", "TestX", "positional", "-tags=integration"},
+			expected:   nil,
+		},
+		{
+			name:       "test-binary positional tail ignores build and boolean flags",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+			expected:   nil,
+		},
+		{
+			name:       "joined unknown flag followed by positional ignores build flags",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-custom=x", "positional", "-mod=vendor"},
+			expected:   nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractBuildFlags(tt.args)
+			subcmd := tt.subcommand
+			if subcmd == "" {
+				subcmd = subcmdBuild
+			}
+			result := extractBuildFlags(subcmd, tt.args)
 			if !slices.Equal(result, tt.expected) {
-				t.Errorf("extractBuildFlags(%v) = %v, expected %v", tt.args, result, tt.expected)
+				t.Errorf("extractBuildFlags(%q, %v) = %v, expected %v", subcmd, tt.args, result, tt.expected)
 			}
 		})
 	}
