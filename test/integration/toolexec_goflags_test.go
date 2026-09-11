@@ -124,12 +124,39 @@ func TestGOFLAGSPreparedBuild(t *testing.T) {
 		build.runAndRequireHTTPSpan()
 		require.FileExists(t, runtimeDiff)
 
-		// Build 2: run again where packages are served from cache
+		latestFile := filepath.Join(debugDir, "sessions", "latest")
+		require.FileExists(t, latestFile)
+		session1Bytes, err := os.ReadFile(latestFile)
+		require.NoError(t, err)
+		session1 := strings.TrimSpace(string(session1Bytes))
+		require.NotEmpty(t, session1)
+
+		// Build 1 session must contain both setup runtime diff and compiler-generated diff
+		session1RuntimeDiff := filepath.Join(debugDir, "sessions", session1, "example_com_otelc-prepared", "otelc.runtime.go.diff")
+		session1CompilerDiff := filepath.Join(debugDir, "sessions", session1, "net_http", "roundtrip.go.diff")
+		require.FileExists(t, session1RuntimeDiff)
+		require.FileExists(t, session1CompilerDiff)
+
+		// Build 2: run again where packages are served from cache (no compilation)
 		build.directBuild(build.moduleDir, false)
 		build.runAndRequireHTTPSpan()
 
 		// Runtime diff from setup must remain preserved across direct cached builds
 		require.FileExists(t, runtimeDiff)
+
+		session2Bytes, err := os.ReadFile(latestFile)
+		require.NoError(t, err)
+		session2 := strings.TrimSpace(string(session2Bytes))
+		require.NotEmpty(t, session2)
+		require.NotEqual(t, session1, session2, "cached build must run under a new build session")
+
+		// Build 2 session must contain the setup runtime diff...
+		session2RuntimeDiff := filepath.Join(debugDir, "sessions", session2, "example_com_otelc-prepared", "otelc.runtime.go.diff")
+		require.FileExists(t, session2RuntimeDiff)
+
+		// ...but must NOT contain the stale compiler-generated diff from Build 1
+		session2CompilerDiff := filepath.Join(debugDir, "sessions", session2, "net_http", "roundtrip.go.diff")
+		require.NoFileExists(t, session2CompilerDiff, "stale compiler diff from build 1 must be absent in build 2 session")
 	})
 }
 

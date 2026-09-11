@@ -264,7 +264,7 @@ func Helper() string {
 	require.FileExists(t, outPath)
 	assert.Contains(t, ip.compileArgs, outPath)
 
-	diffPath := util.GetBuildTemp(filepath.Join("debug", "example_com_mypkg", "otelc.helper.go.diff"))
+	diffPath := filepath.Join(ip.debugArtifactDir(), "otelc.helper.go.diff")
 	require.FileExists(t, diffPath)
 	diffBytes, err := os.ReadFile(diffPath)
 	require.NoError(t, err)

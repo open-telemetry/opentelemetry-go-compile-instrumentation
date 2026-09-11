@@ -57,7 +57,8 @@ func TestWriteDiffForDebugWritesDiffUnderPackageDir(t *testing.T) {
 	ip.compileArgs = []string{"-p", "github.com/redis/go-redis/v9"}
 	ip.writeDiffForDebug(files.oldFile, files.newFile, nil)
 
-	dest := util.GetBuildTemp(filepath.Join("debug", "github_com_redis_go-redis_v9", "source.go.diff"))
+	dest := filepath.Join(ip.debugArtifactDir(), "source.go.diff")
+	assert.Contains(t, dest, "github_com_redis_go-redis_v9")
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "-func main() {}")
@@ -76,9 +77,10 @@ func TestWriteDiffForDebugIncludesPerRuleSections(t *testing.T) {
 		{name: "add-hook-after", before: []byte("a\nb\n"), after: []byte("a\nb\nc\n")},
 	}
 
-	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, changes)
+	ip := newTestPhase()
+	ip.writeDiffForDebug(files.oldFile, files.newFile, changes)
 
-	dest := util.GetBuildTemp(filepath.Join("debug", "source.go.diff"))
+	dest := filepath.Join(ip.debugArtifactDir(), "source.go.diff")
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	text := string(content)
@@ -112,9 +114,10 @@ func TestWriteDiffForDebugSkips(t *testing.T) {
 			t.Setenv(util.EnvOtelcDebug, test.debug)
 			files := sourcePair(t, test.instrumented)
 
-			newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, nil)
+			ip := newTestPhase()
+			ip.writeDiffForDebug(files.oldFile, files.newFile, nil)
 
-			_, err := os.Stat(util.GetBuildTemp(filepath.Join("debug", "source.go.diff")))
+			_, err := os.Stat(filepath.Join(ip.debugArtifactDir(), "source.go.diff"))
 			assert.True(t, os.IsNotExist(err), "expected no diff file, stat returned %v", err)
 		})
 	}
@@ -256,9 +259,10 @@ func TestWriteDiffForDebugEmptyRuleDiffSkipped(t *testing.T) {
 	changes := []ruleChange{
 		{name: "empty_diff", before: []byte("same\n"), after: []byte("same\n")},
 	}
-	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, changes)
+	ip := newTestPhase()
+	ip.writeDiffForDebug(files.oldFile, files.newFile, changes)
 
-	dest := util.GetBuildTemp(filepath.Join("debug", "source.go.diff"))
+	dest := filepath.Join(ip.debugArtifactDir(), "source.go.diff")
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.NotContains(t, string(content), "=== rule 1/1: empty_diff ===")
@@ -272,9 +276,10 @@ func TestWriteDiffForDebugUnchangedOverallWithRuleChanges(t *testing.T) {
 	changes := []ruleChange{
 		{name: "temporary-edit", before: []byte("a\n"), after: []byte("b\n")},
 	}
-	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, changes)
+	ip := newTestPhase()
+	ip.writeDiffForDebug(files.oldFile, files.newFile, changes)
 
-	dest := util.GetBuildTemp(filepath.Join("debug", "source.go.diff"))
+	dest := filepath.Join(ip.debugArtifactDir(), "source.go.diff")
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "=== rule 1/1: temporary-edit ===")
@@ -383,7 +388,7 @@ func TestWriteFileRuleDiffForDebug(t *testing.T) {
 	ip.compileArgs = []string{"-p", "example.com/mypkg"}
 	ip.writeFileRuleDiffForDebug(filePath, "inject_helper")
 
-	dest := util.GetBuildTemp(filepath.Join("debug", "example_com_mypkg", "otelc.helper.go.diff"))
+	dest := filepath.Join(ip.debugArtifactDir(), "otelc.helper.go.diff")
 	diffBytes, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	diffText := string(diffBytes)
@@ -408,7 +413,7 @@ func TestWriteGlobalsDiffForDebug(t *testing.T) {
 	ip.compileArgs = []string{"-p", "example.com/mypkg"}
 	ip.writeGlobalsDiffForDebug(filePath, []string{"rule_one", "rule_two"})
 
-	dest := util.GetBuildTemp(filepath.Join("debug", "example_com_mypkg", "otelc.globals.go.diff"))
+	dest := filepath.Join(ip.debugArtifactDir(), "otelc.globals.go.diff")
 	diffBytes, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	diffText := string(diffBytes)
@@ -432,7 +437,7 @@ func TestWriteGlobalsDiffForDebug_NoRules(t *testing.T) {
 	ip := newTestPhase()
 	ip.writeGlobalsDiffForDebug(filePath, nil)
 
-	dest := util.GetBuildTemp(filepath.Join("debug", "otelc.globals.go.diff"))
+	dest := filepath.Join(ip.debugArtifactDir(), "otelc.globals.go.diff")
 	diffBytes, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	diffText := string(diffBytes)
@@ -448,14 +453,34 @@ func TestWriteDiffForDebugRemovesStaleDiffOnNoOp(t *testing.T) {
 	t.Setenv(util.EnvOtelcDebug, "1")
 
 	files := sourcePair(t, originalSource) // both are originalSource
-	dest := util.GetBuildTemp(filepath.Join("debug", "source.go.diff"))
+	ip := newTestPhase()
+	dest := filepath.Join(ip.debugArtifactDir(), "source.go.diff")
 	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
 	require.NoError(t, os.WriteFile(dest, []byte("stale diff content from build 1"), 0o644))
 
-	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, nil)
+	ip.writeDiffForDebug(files.oldFile, files.newFile, nil)
 
 	_, err := os.Stat(dest)
 	assert.True(t, os.IsNotExist(err), "expected stale diff to be removed on no-op, stat returned %v", err)
+}
+
+func TestDebugArtifactDir_Layout(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	ip := newTestPhase()
+	ip.compileArgs = []string{"-p", "example.com/pkg"}
+
+	// Direct mode: uses sessions/<session>/<pkg>
+	t.Setenv(util.EnvOtelcBuildSession, "")
+	session := fmt.Sprintf("direct_%d", os.Getppid())
+	expectedDirect := util.GetBuildTemp(filepath.Join("debug", "sessions", session, "example_com_pkg"))
+	assert.Equal(t, expectedDirect, ip.debugArtifactDir())
+
+	// Wrapper mode: uses debug/<pkg>
+	t.Setenv(util.EnvOtelcBuildSession, "wrapper_12345")
+	expectedWrapper := util.GetBuildTemp(filepath.Join("debug", "example_com_pkg"))
+	assert.Equal(t, expectedWrapper, ip.debugArtifactDir())
 }
 
 func TestWriteDiffForDebugRemovesStaleDiffOnFileReadError(t *testing.T) {
@@ -464,21 +489,22 @@ func TestWriteDiffForDebugRemovesStaleDiffOnFileReadError(t *testing.T) {
 	t.Setenv(util.EnvOtelcDebug, "1")
 
 	files := sourcePair(t, instrumentedSource)
-	dest := util.GetBuildTemp(filepath.Join("debug", filepath.Base(files.oldFile)+".diff"))
+	ip := newTestPhase()
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(files.oldFile)+".diff")
 	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
 
 	// Pre-create stale diff
 	require.NoError(t, os.WriteFile(dest, []byte("stale diff"), 0o644))
 	// Missing oldFile with matching basename
 	missingOld := filepath.Join(t.TempDir(), filepath.Base(files.oldFile))
-	newTestPhase().writeDiffForDebug(missingOld, files.newFile, nil)
+	ip.writeDiffForDebug(missingOld, files.newFile, nil)
 	_, err := os.Stat(dest)
 	assert.True(t, os.IsNotExist(err), "expected stale diff to be removed when oldFile read fails")
 
 	// Pre-create stale diff again
 	require.NoError(t, os.WriteFile(dest, []byte("stale diff"), 0o644))
 	// Missing newFile
-	newTestPhase().writeDiffForDebug(files.oldFile, "/non/existent/new.go", nil)
+	ip.writeDiffForDebug(files.oldFile, "/non/existent/new.go", nil)
 	_, err = os.Stat(dest)
 	assert.True(t, os.IsNotExist(err), "expected stale diff to be removed when newFile read fails")
 }
@@ -488,11 +514,12 @@ func TestWriteAddedSourceDiffForDebugRemovesStaleDiffOnReadError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	t.Setenv(util.EnvOtelcDebug, "1")
 
-	dest := util.GetBuildTemp(filepath.Join("debug", "otelc.missing.go.diff"))
+	ip := newTestPhase()
+	dest := filepath.Join(ip.debugArtifactDir(), "otelc.missing.go.diff")
 	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
 	require.NoError(t, os.WriteFile(dest, []byte("stale diff"), 0o644))
 
-	newTestPhase().writeAddedSourceDiffForDebug("/non/existent/otelc.missing.go", "header")
+	ip.writeAddedSourceDiffForDebug("/non/existent/otelc.missing.go", "header")
 	_, err := os.Stat(dest)
 	assert.True(t, os.IsNotExist(err), "expected stale diff to be removed when added file read fails")
 }
@@ -617,28 +644,35 @@ func TestDebugLifecycle_StalePackageCleaned(t *testing.T) {
 	t.Setenv(util.EnvOtelcDebug, "1")
 
 	// Build 1: Package A compiles and produces a diff
-	t.Setenv(util.EnvOtelcBuildSession, "build_1")
+	t.Setenv(util.EnvOtelcBuildSession, "direct_111111")
 	require.NoError(t, EnsureDebugInitialized(t.Context()))
 
-	pkgADir := util.GetBuildTemp(filepath.Join("debug", "example_com_pkg_a"))
+	pkgADir := DebugSessionDir("direct_111111", "example_com_pkg_a")
 	require.NoError(t, os.MkdirAll(pkgADir, 0o755))
 	diffA := filepath.Join(pkgADir, "a.go.diff")
 	require.NoError(t, os.WriteFile(diffA, []byte("diff A"), 0o644))
 	require.FileExists(t, diffA)
 
 	// Build 2: Package A is cached (not compiled). Package B compiles.
-	t.Setenv(util.EnvOtelcBuildSession, "build_2")
+	t.Setenv(util.EnvOtelcBuildSession, "direct_222222")
 	require.NoError(t, EnsureDebugInitialized(t.Context()))
 
-	pkgBDir := util.GetBuildTemp(filepath.Join("debug", "example_com_pkg_b"))
+	pkgBDir := DebugSessionDir("direct_222222", "example_com_pkg_b")
 	require.NoError(t, os.MkdirAll(pkgBDir, 0o755))
 	diffB := filepath.Join(pkgBDir, "b.go.diff")
 	require.NoError(t, os.WriteFile(diffB, []byte("diff B"), 0o644))
 
-	// Stale diff A from Build 1 must be absent
-	assert.NoFileExists(t, diffA)
+	// Stale diff A from Build 1 must be absent from Build 2's session
+	diffAInBuild2 := filepath.Join(DebugSessionDir("direct_222222", "example_com_pkg_a"), "a.go.diff")
+	assert.NoFileExists(t, diffAInBuild2)
 	// Current diff B from Build 2 must exist
 	assert.FileExists(t, diffB)
+	// Build 1 (PID 111111 is dead) was pruned by CleanStaleSessions
+	assert.NoFileExists(t, diffA)
+	// Latest session points to Build 2
+	latest, err := ReadDebugSession()
+	require.NoError(t, err)
+	assert.Equal(t, "direct_222222", latest)
 }
 
 func TestDebugLifecycle_CachedBuildCleaned(t *testing.T) {
@@ -647,28 +681,36 @@ func TestDebugLifecycle_CachedBuildCleaned(t *testing.T) {
 	t.Setenv(util.EnvOtelcDebug, "1")
 
 	// Build 1: Package A compiles and produces a diff
-	t.Setenv(util.EnvOtelcBuildSession, "build_1")
+	t.Setenv(util.EnvOtelcBuildSession, "direct_111111")
 	require.NoError(t, EnsureDebugInitialized(t.Context()))
 
-	pkgADir := util.GetBuildTemp(filepath.Join("debug", "example_com_pkg_a"))
+	pkgADir := DebugSessionDir("direct_111111", "example_com_pkg_a")
 	require.NoError(t, os.MkdirAll(pkgADir, 0o755))
 	diffA := filepath.Join(pkgADir, "a.go.diff")
 	require.NoError(t, os.WriteFile(diffA, []byte("diff A"), 0o644))
 	require.FileExists(t, diffA)
 
 	// Build 2: Entire build served from cache (no compilation steps)
-	t.Setenv(util.EnvOtelcBuildSession, "build_2")
+	t.Setenv(util.EnvOtelcBuildSession, "direct_222222")
 	require.NoError(t, EnsureDebugInitialized(t.Context()))
 
 	// Diff A must not masquerade as freshly generated by Build 2
+	diffAInBuild2 := filepath.Join(DebugSessionDir("direct_222222", "example_com_pkg_a"), "a.go.diff")
+	assert.NoFileExists(t, diffAInBuild2)
+	// Dead Build 1 was cleaned
 	assert.NoFileExists(t, diffA)
+	// Latest points to Build 2
+	latest, err := ReadDebugSession()
+	require.NoError(t, err)
+	assert.Equal(t, "direct_222222", latest)
 }
 
 func TestDebugLifecycle_ConcurrentChildren(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	t.Setenv(util.EnvOtelcDebug, "1")
-	t.Setenv(util.EnvOtelcBuildSession, "build_concurrent")
+	session := fmt.Sprintf("direct_%d", os.Getpid())
+	t.Setenv(util.EnvOtelcBuildSession, session)
 
 	const numChildren = 10
 	var wg sync.WaitGroup
@@ -682,7 +724,7 @@ func TestDebugLifecycle_ConcurrentChildren(t *testing.T) {
 				errCh <- err
 				return
 			}
-			pkgDir := util.GetBuildTemp(filepath.Join("debug", fmt.Sprintf("pkg_%d", idx)))
+			pkgDir := DebugSessionDir(session, fmt.Sprintf("pkg_%d", idx))
 			if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 				errCh <- err
 				return
@@ -703,9 +745,89 @@ func TestDebugLifecycle_ConcurrentChildren(t *testing.T) {
 
 	// Verify all children's artifacts survived without deleting each other
 	for i := range numChildren {
-		p := filepath.Join("debug", fmt.Sprintf("pkg_%d", i), fmt.Sprintf("file_%d.go.diff", i))
-		diffPath := util.GetBuildTemp(p)
+		diffPath := DebugSessionDir(session, fmt.Sprintf("pkg_%d", i), fmt.Sprintf("file_%d.go.diff", i))
 		assert.FileExists(t, diffPath)
+	}
+}
+
+func TestDebugLifecycle_ConcurrentDifferentSessions(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// Both sessions use live process IDs so CleanStaleSessions recognizes them as actively running
+	sessionA := fmt.Sprintf("direct_%d_a", os.Getpid())
+	sessionB := fmt.Sprintf("direct_%d_b", os.Getppid())
+
+	// Step 1: Session A child initializes and writes A.diff
+	t.Setenv(util.EnvOtelcBuildSession, sessionA)
+	require.NoError(t, EnsureDebugInitialized(t.Context()))
+	pkgADir := DebugSessionDir(sessionA, "pkg_a")
+	require.NoError(t, os.MkdirAll(pkgADir, 0o755))
+	diffA := filepath.Join(pkgADir, "a.go.diff")
+	require.NoError(t, os.WriteFile(diffA, []byte("diff A"), 0o644))
+	require.FileExists(t, diffA)
+
+	// Step 2: Session B child initializes concurrently / overlapping and writes B.diff
+	t.Setenv(util.EnvOtelcBuildSession, sessionB)
+	require.NoError(t, EnsureDebugInitialized(t.Context()))
+	pkgBDir := DebugSessionDir(sessionB, "pkg_b")
+	require.NoError(t, os.MkdirAll(pkgBDir, 0o755))
+	diffB := filepath.Join(pkgBDir, "b.go.diff")
+	require.NoError(t, os.WriteFile(diffB, []byte("diff B"), 0o644))
+	require.FileExists(t, diffB)
+
+	// Step 3: Another child from Session A initializes/continues
+	t.Setenv(util.EnvOtelcBuildSession, sessionA)
+	require.NoError(t, EnsureDebugInitialized(t.Context()))
+
+	// Assert: Neither build deleted the other's active artifacts
+	assert.FileExists(t, diffA, "Build A's active artifact must survive Session B initialization")
+	assert.FileExists(t, diffB, "Build B's active artifact must survive subsequent Session A child initialization")
+
+	// Step 4: Simultaneous session initialization using goroutines to exercise the lock/session path
+	const workersPerSession = 5
+	var wg sync.WaitGroup
+	errCh := make(chan error, workersPerSession*2)
+
+	for i := range workersPerSession {
+		wg.Add(2)
+		go func(idx int) {
+			defer wg.Done()
+			pDir := DebugSessionDir(sessionA, fmt.Sprintf("goroutine_pkg_a_%d", idx))
+			if err := os.MkdirAll(pDir, 0o755); err != nil {
+				errCh <- err
+				return
+			}
+			fPath := filepath.Join(pDir, "file.diff")
+			if err := os.WriteFile(fPath, []byte("a"), 0o644); err != nil {
+				errCh <- err
+				return
+			}
+		}(i)
+		go func(idx int) {
+			defer wg.Done()
+			pDir := DebugSessionDir(sessionB, fmt.Sprintf("goroutine_pkg_b_%d", idx))
+			if err := os.MkdirAll(pDir, 0o755); err != nil {
+				errCh <- err
+				return
+			}
+			fPath := filepath.Join(pDir, "file.diff")
+			if err := os.WriteFile(fPath, []byte("b"), 0o644); err != nil {
+				errCh <- err
+				return
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	for i := range workersPerSession {
+		assert.FileExists(t, DebugSessionDir(sessionA, fmt.Sprintf("goroutine_pkg_a_%d", i), "file.diff"))
+		assert.FileExists(t, DebugSessionDir(sessionB, fmt.Sprintf("goroutine_pkg_b_%d", i), "file.diff"))
 	}
 }
 
@@ -724,27 +846,102 @@ func TestDebugLifecycle_SetupRetention(t *testing.T) {
 	require.NoError(t, RecordDebugSession("setup_12345"))
 
 	// Build 1 runs after setup
-	t.Setenv(util.EnvOtelcBuildSession, "build_1")
+	t.Setenv(util.EnvOtelcBuildSession, "direct_111111")
 	require.NoError(t, EnsureDebugInitialized(t.Context()))
 
+	session1PkgDir := DebugSessionDir("direct_111111", "example_com_app")
+	assert.FileExists(t, filepath.Join(session1PkgDir, "otelc.runtime.go"))
+	assert.FileExists(t, filepath.Join(session1PkgDir, "otelc.runtime.go.diff"))
+
 	// Package compilation adds compiler diff
-	appDiff := filepath.Join(pkgDir, "app.go.diff")
+	appDiff := filepath.Join(session1PkgDir, "app.go.diff")
 	require.NoError(t, os.WriteFile(appDiff, []byte("diff app"), 0o644))
 
 	// Both setup runtime artifacts and compiler diffs exist in Build 1
-	assert.FileExists(t, runtimeSource)
-	assert.FileExists(t, runtimeDiff)
+	assert.FileExists(t, filepath.Join(session1PkgDir, "otelc.runtime.go"))
+	assert.FileExists(t, filepath.Join(session1PkgDir, "otelc.runtime.go.diff"))
 	assert.FileExists(t, appDiff)
 
 	// Build 2 runs (direct mode without re-running setup)
-	t.Setenv(util.EnvOtelcBuildSession, "build_2")
+	t.Setenv(util.EnvOtelcBuildSession, "direct_222222")
 	require.NoError(t, EnsureDebugInitialized(t.Context()))
 
-	// Stale compiler diff is cleaned
-	assert.NoFileExists(t, appDiff)
-	// Setup runtime artifacts are preserved
+	session2PkgDir := DebugSessionDir("direct_222222", "example_com_app")
+	// Setup runtime artifacts are preserved in Build 2
+	assert.FileExists(t, filepath.Join(session2PkgDir, "otelc.runtime.go"))
+	assert.FileExists(t, filepath.Join(session2PkgDir, "otelc.runtime.go.diff"))
+	// Stale compiler diff is absent from Build 2
+	assert.NoFileExists(t, filepath.Join(session2PkgDir, "app.go.diff"))
+	// Stable setup runtime artifacts remain intact
 	assert.FileExists(t, runtimeSource)
 	assert.FileExists(t, runtimeDiff)
+}
+
+func TestDebugLifecycle_InitializationFailure(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	session := "direct_999999"
+	t.Setenv(util.EnvOtelcBuildSession, session)
+	readyMarker := debugSessionReadyMarker(session)
+
+	failingCleaner := func(path string) error {
+		return errors.New("simulated cleanup failure")
+	}
+
+	// Attempt 1: initialization must fail
+	err := EnsureDebugInitializedWithCleaner(t.Context(), session, failingCleaner)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "simulated cleanup failure")
+
+	// Verify session is NOT marked ready
+	assert.NoFileExists(t, readyMarker, "ready marker must not be written when cleanup fails")
+
+	// Verify session is NOT recorded as current/latest
+	latest, readErr := ReadDebugSession()
+	require.NoError(t, readErr)
+	assert.NotEqual(t, session, latest, "failed session must not be published as current")
+
+	// Attempt 2: retry should succeed now that cleanup succeeds (using os.RemoveAll)
+	require.NoError(t, EnsureDebugInitializedWithCleaner(t.Context(), session, os.RemoveAll))
+	assert.FileExists(t, readyMarker, "ready marker must be written after successful initialization")
+
+	latest, readErr = ReadDebugSession()
+	require.NoError(t, readErr)
+	assert.Equal(t, session, latest, "session must be published once initialization succeeds")
+}
+
+func TestCleanStaleCompilerArtifacts_ErrorSurfaced(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	debugDir := util.GetBuildTemp("debug")
+	pkgDir := filepath.Join(debugDir, "example_com_pkg")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+
+	// Create a non-empty directory named file.go.diff so os.Remove fails portably
+	unremovable := filepath.Join(pkgDir, "file.go.diff")
+	require.NoError(t, os.MkdirAll(filepath.Join(unremovable, "child"), 0o755))
+
+	err := CleanStaleCompilerArtifacts()
+	require.Error(t, err, "CleanStaleCompilerArtifacts must surface filesystem errors rather than swallow them")
+}
+
+func TestToolexec_InitializationFailure_FailsCommand(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// Create a file at .otelc-build/debug so directory creation fails
+	debugPath := filepath.Join(workDir, ".otelc-build", "debug")
+	require.NoError(t, os.MkdirAll(filepath.Dir(debugPath), 0o755))
+	require.NoError(t, os.WriteFile(debugPath, []byte("blocking-file"), 0o644))
+
+	err := Toolexec(t.Context(), []string{"go", "-V=full"}, false)
+	require.Error(t, err, "Toolexec must fail when debug initialization fails under debug mode")
+	assert.Contains(t, err.Error(), "failed to initialize debug artifacts")
 }
 
 func TestDebugLifecycle_DebugOffNoOp(t *testing.T) {
@@ -753,7 +950,7 @@ func TestDebugLifecycle_DebugOffNoOp(t *testing.T) {
 	t.Setenv(util.EnvOtelcDebug, "0")
 
 	require.NoError(t, EnsureDebugInitialized(t.Context()))
-	assert.NoFileExists(t, util.GetBuildTemp(".debug_session"))
+	assert.NoFileExists(t, debugLatestSessionFilePath())
 }
 
 func TestToolexec_DebugInitialization(t *testing.T) {

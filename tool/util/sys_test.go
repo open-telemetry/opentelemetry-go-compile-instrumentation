@@ -528,3 +528,11 @@ func TestNormalizePath(t *testing.T) {
 	assert.Equal(t, "a/c", NormalizePath("a/b/../c"))
 	assert.Equal(t, ".", NormalizePath(""))
 }
+
+func TestIsProcessAlive(t *testing.T) {
+	assert.True(t, IsProcessAlive(os.Getpid()))
+	assert.True(t, IsProcessAlive(os.Getppid()))
+	assert.False(t, IsProcessAlive(-1))
+	assert.False(t, IsProcessAlive(0))
+	assert.False(t, IsProcessAlive(99999999))
+}
