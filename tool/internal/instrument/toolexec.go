@@ -67,6 +67,11 @@ type instrumentPhase struct {
 	// has no entries when the table is unavailable, such as after an
 	// older setup run.
 	importNames map[string]string
+	// Hook files already parsed via parseHookFileCached, keyed by absolute
+	// file path. A hook package directory is typically shared by many func
+	// rules (one file implementing dozens of before/after pairs), so caching
+	// by file avoids re-parsing it once per rule.
+	parsedHookFiles map[string]*dst.File
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }

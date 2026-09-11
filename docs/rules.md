@@ -40,9 +40,12 @@ Rules are typically distributed as `*.otelc.yml` files within instrumentation pa
 
 ### Rule shape
 
-Every rule is a YAML map entry whose key is the rule name:
+Every rule file declares the minimum `otelc` version required to read it. The reserved
+top-level `version` key is followed by map entries whose keys are rule names:
 
 ```yaml
+version: "v1.0.0"
+
 rule_name:
   target: <package import path>       # required
   version: <version range>            # optional
@@ -57,6 +60,12 @@ rule_name:
     <alias>: <path>
   name: <explicit name>               # optional; defaults to YAML key
 ```
+
+The file-level `version` is a released `otelc` semantic version. Each rule's nested
+`version` field is unrelated: it limits the versions of the target package to which that
+rule applies. When a package contains multiple rule files, `otelc` enforces the highest
+minimum version declared by those files. Legacy files without a top-level `version` are
+treated as requiring `v1.0.0` and produce a warning.
 
 ### Top-level fields
 
@@ -784,6 +793,7 @@ Currently supported replace string features:
 | `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                  |
 | `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                      |
 | `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type         |
+| `{{.FuncReturnOfType type}}`   | The first return value of the enclosing function matching the given type                               |
 | `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                 |
 | `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                          |
 
