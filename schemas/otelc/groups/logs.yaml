@@ -6,7 +6,7 @@
 #   log             instrumentation/log/log_hook.go                           (BeforeLogOutput)
 #   log/slog        instrumentation/log/slog/slog_hook.go                     (AfterSlogNewRecord)
 #   sirupsen/logrus instrumentation/github.com/sirupsen/logrus/logrus_hook.go (traceHook.Fire)
-#   rs/zerolog      instrumentation/github.com/rs/zerolog/zerolog_hook.go     (AfterZerologNew)
+#   rs/zerolog      instrumentation/github.com/rs/zerolog/zerolog_hook.go     (public event finalizers)
 #
 # These instrumentations create no spans, record no metrics, and emit no OTel
 # log records. They only correlate the application's *own* logging output with

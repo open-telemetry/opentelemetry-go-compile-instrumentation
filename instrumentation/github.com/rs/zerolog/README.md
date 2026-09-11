@@ -4,13 +4,13 @@ This document explains how the `github.com/rs/zerolog` instrumentation provided 
 
 ## Overview
 
-`instrumentation/github.com/rs/zerolog` hooks `zerolog.New` after it creates a logger. It adds a zerolog hook to that logger, which appends `trace_id` and `span_id` fields when an active span is available. Zerolog copies hooks to derived loggers, so this covers local, derived, and package-global loggers created through `New`.
+`instrumentation/github.com/rs/zerolog` hooks zerolog's public event finalization methods: `Msg`, `Msgf`, `MsgFunc`, and `Send`. Before each method finalizes an event, the instrumentation appends `trace_id` and `span_id` fields when an active span is available. Because enrichment is applied to the per-event value, this covers local, derived, and package-global loggers without mutating shared logger values.
 
 The instrumentation is enabled by default and can be configured with the `logs/zerolog` key in `OTEL_GO_ENABLED_INSTRUMENTATIONS` or `OTEL_GO_DISABLED_INSTRUMENTATIONS`.
 
 ## How trace and span IDs are attached
 
-The hook calls `runtime.GetTraceAndSpanID()`, which returns the current goroutine's active trace and span IDs from goroutine-local storage (GLS), or two empty strings if none is available. If the trace ID is empty, the event is left unchanged. The span ID is added only when it is non-empty.
+The finalization hooks call `runtime.GetTraceAndSpanID()`, which returns the current goroutine's active trace and span IDs from goroutine-local storage (GLS), or two empty strings if none is available. If the trace ID is empty, the event is left unchanged. The span ID is added only when it is non-empty.
 
 **`go.opentelemetry.io/otel/sdk/trace` must already be part of the application's build dependency graph (as seen by `go list -deps` / `go build -a -x -n`) for this instrumentation to inject `trace_id`/`span_id`.**
 
