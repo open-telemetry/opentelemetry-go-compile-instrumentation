@@ -573,80 +573,183 @@ echo nothing useful
 
 func TestDropPlanIrrelevantFlags(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		expected []string
+		name       string
+		subcommand string
+		args       []string
+		expected   []string
 	}{
 		{
-			name:     "no flags",
-			args:     []string{"./..."},
-			expected: []string{"./..."},
+			name:       "no flags",
+			subcommand: subcmdBuild,
+			args:       []string{"./..."},
+			expected:   []string{"./..."},
 		},
 		{
-			name:     "nil args",
-			args:     nil,
-			expected: []string{},
+			name:       "nil args",
+			subcommand: subcmdBuild,
+			args:       nil,
+			expected:   []string{},
 		},
 		{
-			name:     "drops -json",
-			args:     []string{"-json", "./..."},
-			expected: []string{"./..."},
+			name:       "drops -json",
+			subcommand: subcmdBuild,
+			args:       []string{"-json", "./..."},
+			expected:   []string{"./..."},
 		},
 		{
-			name:     "drops --json",
-			args:     []string{"--json", "./..."},
-			expected: []string{"./..."},
+			name:       "drops --json",
+			subcommand: subcmdBuild,
+			args:       []string{"--json", "./..."},
+			expected:   []string{"./..."},
 		},
 		{
-			name:     "drops -json=true",
-			args:     []string{"-json=true", "./..."},
-			expected: []string{"./..."},
+			name:       "drops -json=true",
+			subcommand: subcmdBuild,
+			args:       []string{"-json=true", "./..."},
+			expected:   []string{"./..."},
 		},
 		{
 			// -json=false already leaves the plan on stderr, but the dry run
 			// has no use for either form.
-			name:     "drops -json=false",
-			args:     []string{"-json=false", "./..."},
-			expected: []string{"./..."},
+			name:       "drops -json=false",
+			subcommand: subcmdBuild,
+			args:       []string{"-json=false", "./..."},
+			expected:   []string{"./..."},
 		},
 		{
-			name:     "keeps other flags",
-			args:     []string{"-tags=integration", "-json", "-race", "./cmd"},
-			expected: []string{"-tags=integration", "-race", "./cmd"},
+			name:       "keeps other flags",
+			subcommand: subcmdBuild,
+			args:       []string{"-tags=integration", "-json", "-race", "./cmd"},
+			expected:   []string{"-tags=integration", "-race", "./cmd"},
 		},
 		{
-			name:     "keeps a separated flag value that follows -json",
-			args:     []string{"-json", "-run", "TestX", "./..."},
-			expected: []string{"-run", "TestX", "./..."},
+			name:       "keeps a separated flag value that follows -json",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "-run", "TestX", "./..."},
+			expected:   []string{"-run", "TestX", "./..."},
+		},
+		{
+			name:       "keeps a separated -test.run flag value that follows -json",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "-test.run", "TestX", "./..."},
+			expected:   []string{"-test.run", "TestX", "./..."},
+		},
+		{
+			name:       "keeps joined -test.run flag value",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "-test.run=TestX", "./..."},
+			expected:   []string{"-test.run=TestX", "./..."},
+		},
+		{
+			name:       "keeps separated --test.run flag value",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "--test.run", "TestX", "./..."},
+			expected:   []string{"--test.run", "TestX", "./..."},
+		},
+		{
+			name:       "keeps -json when it is the value of -test.run",
+			subcommand: subcmdTest,
+			args:       []string{"-test.run", "-json", "./..."},
+			expected:   []string{"-test.run", "-json", "./..."},
 		},
 		{
 			// `-o -json` names an output file called "-json"; it is a value,
 			// not a flag.
-			name:     "keeps -json as the value of another flag",
-			args:     []string{"-o", "-json", "./cmd"},
-			expected: []string{"-o", "-json", "./cmd"},
+			name:       "keeps -json as the value of another flag",
+			subcommand: subcmdBuild,
+			args:       []string{"-o", "-json", "./cmd"},
+			expected:   []string{"-o", "-json", "./cmd"},
 		},
 		{
 			// Everything after -args belongs to the test binary.
-			name:     "keeps -json after -args",
-			args:     []string{"./...", "-args", "-json", "-v"},
-			expected: []string{"./...", "-args", "-json", "-v"},
+			name:       "keeps -json after -args",
+			subcommand: subcmdTest,
+			args:       []string{"./...", "-args", "-json", "-v"},
+			expected:   []string{"./...", "-args", "-json", "-v"},
 		},
 		{
-			name:     "drops -json before -args and keeps it after",
-			args:     []string{"-json", "./...", "-args", "-json"},
-			expected: []string{"./...", "-args", "-json"},
+			name:       "drops -json before -args and keeps it after",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./...", "-args", "-json"},
+			expected:   []string{"./...", "-args", "-json"},
 		},
 		{
-			name:     "tolerates a trailing value flag with no value",
-			args:     []string{"-json", "./...", "-run"},
-			expected: []string{"./...", "-run"},
+			name:       "tolerates a trailing value flag with no value",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./...", "-run"},
+			expected:   []string{"./...", "-run"},
+		},
+		{
+			name:       "tolerates a trailing -test.run flag with no value",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./...", "-test.run"},
+			expected:   []string{"./...", "-test.run"},
+		},
+		{
+			// go test ./pkg -- -test.run TestName input.go
+			// The output should preserve the delimiter and every trailing argument exactly and in order.
+			name:       "go test exact preservation after delimiter --",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "--", "-test.run", "TestName", "input.go"},
+			expected:   []string{"./pkg", "--", "-test.run", "TestName", "input.go"},
+		},
+		{
+			name:       "go test drops -json before -- and preserves after --",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--", "-json", "input.go"},
+			expected:   []string{"./pkg", "--", "-json", "input.go"},
+		},
+		{
+			name:       "go test drops -json before --args and preserves after --args",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--args", "-json", "input.go"},
+			expected:   []string{"./pkg", "--args", "-json", "input.go"},
+		},
+		{
+			name:       "go test preserves empty delimiter --",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--"},
+			expected:   []string{"./pkg", "--"},
+		},
+		{
+			name:       "go test preserves repeated delimiter -- --",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--", "--", "-json"},
+			expected:   []string{"./pkg", "--", "--", "-json"},
+		},
+		{
+			name:       "go build -- closes flag parsing and preserves positional -json",
+			subcommand: subcmdBuild,
+			args:       []string{"-json", "./pkg", "--", "-json", "main.go"},
+			expected:   []string{"./pkg", "--", "-json", "main.go"},
+		},
+		{
+			name:       "go test preserves -json after positional test-argv boundary",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "-run", "TestX", "positional", "-json"},
+			expected:   []string{"./pkg", "-run", "TestX", "positional", "-json"},
+		},
+		{
+			name:       "go test preserves full tail untouched after positional test-argv boundary",
+			subcommand: subcmdTest,
+			args: []string{
+				"-json",
+				"./pkg",
+				"-run",
+				"TestX",
+				"positional",
+				"-race",
+				"-mod=vendor",
+				"-tags=x",
+				"./other",
+			},
+			expected: []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, dropPlanIrrelevantFlags(tt.args))
+			assert.Equal(t, tt.expected, dropPlanIrrelevantFlags(tt.subcommand, tt.args))
 		})
 	}
 }

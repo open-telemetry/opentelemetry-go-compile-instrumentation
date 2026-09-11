@@ -606,7 +606,12 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	return &PinResult{}, nil
 }
 
-func prepareVendoredBuild(ctx context.Context, logger *slog.Logger, args []string) ([]string, error) {
+func prepareVendoredBuild(
+	ctx context.Context,
+	logger *slog.Logger,
+	subcommand string,
+	args []string,
+) ([]string, error) {
 	if !vendoringActive(ctx, util.GetOtelcWorkDir()) {
 		return args, nil
 	}
@@ -617,7 +622,7 @@ func prepareVendoredBuild(ctx context.Context, logger *slog.Logger, args []strin
 		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
 	}
 
-	return rewriteModVendor(args), nil
+	return rewriteModVendor(subcommand, args), nil
 }
 
 type PinOptions struct {
@@ -662,16 +667,20 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	// moduleDirs being empty means Pin was invoked as a standalone command
 	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
+		subcommand := opts.Subcommand
+		if subcommand == "" {
+			subcommand = subcmdBuild
+		}
 		// For same reason as Setup, we have to check vendoring state before
 		// forcing module mode and rewriting vendor/ paths to module mode.
-		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
+		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), subcommand, opts.Args)
 		if err != nil {
 			return nil, err
 		}
 		opts.Args = args
 
 		// Use opts.Args to find module directories
-		pkgs, getErr := getBuildPackages(ctx, opts.Args)
+		pkgs, getErr := getBuildPackages(ctx, subcommand, opts.Args)
 		if getErr != nil {
 			return nil, getErr
 		}

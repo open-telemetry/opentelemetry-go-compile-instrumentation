@@ -105,48 +105,165 @@ func TestForceModMod(t *testing.T) {
 
 func TestRewriteModVendor(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		want []string
+		name       string
+		subcommand string
+		args       []string
+		want       []string
 	}{
-		{"vendor single token", []string{"build", "-mod=vendor", "./..."}, []string{"build", "-mod=mod", "./..."}},
-		{"vendor two token", []string{"build", "-mod", "vendor", "./..."}, []string{"build", "-mod", "mod", "./..."}},
 		{
-			"readonly untouched",
-			[]string{"build", "-mod=readonly", "./..."},
-			[]string{"build", "-mod=readonly", "./..."},
+			name:       "vendor single token",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "-mod=vendor", "./..."},
+			want:       []string{"build", "-mod=mod", "./..."},
 		},
-		{"mod untouched", []string{"build", "-mod=mod", "./..."}, []string{"build", "-mod=mod", "./..."}},
-		{"no mod flag", []string{"build", "-race", "./..."}, []string{"build", "-race", "./..."}},
-		// -mod as the last arg: the two-token branch must not index past the end.
-		{"bare mod as last arg", []string{"build", "-mod"}, []string{"build", "-mod"}},
 		{
-			"multiple occurrences all rewritten",
-			[]string{"build", "-mod=vendor", "-o", "x", "-mod", "vendor"},
-			[]string{"build", "-mod=mod", "-o", "x", "-mod", "mod"},
+			name:       "vendor two token",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "-mod", "vendor", "./..."},
+			want:       []string{"build", "-mod", "mod", "./..."},
+		},
+		{
+			name:       "readonly untouched",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "-mod=readonly", "./..."},
+			want:       []string{"build", "-mod=readonly", "./..."},
+		},
+		{
+			name:       "mod untouched",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "-mod=mod", "./..."},
+			want:       []string{"build", "-mod=mod", "./..."},
+		},
+		{
+			name:       "no mod flag",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "-race", "./..."},
+			want:       []string{"build", "-race", "./..."},
+		},
+		// -mod as the last arg: the two-token branch must not index past the end.
+		{
+			name:       "bare mod as last arg",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "-mod"},
+			want:       []string{"build", "-mod"},
+		},
+		{
+			name:       "multiple occurrences all rewritten",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "-mod=vendor", "-o", "x", "-mod", "vendor"},
+			want:       []string{"build", "-mod=mod", "-o", "x", "-mod", "mod"},
 		},
 		// A positional "vendor" not preceded by -mod is a build target, not a flag.
-		{"positional vendor left alone", []string{"build", "vendor"}, []string{"build", "vendor"}},
+		{
+			name:       "positional vendor left alone",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "vendor"},
+			want:       []string{"build", "vendor"},
+		},
 		// Go's flag parser treats the double-dash form the same as single-dash.
 		{
-			"double-dash vendor single token",
-			[]string{"build", "--mod=vendor", "./..."},
-			[]string{"build", "-mod=mod", "./..."},
+			name:       "double-dash vendor single token",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "--mod=vendor", "./..."},
+			want:       []string{"build", "-mod=mod", "./..."},
 		},
 		{
-			"double-dash vendor two token",
-			[]string{"build", "--mod", "vendor", "./..."},
-			[]string{"build", "--mod", "mod", "./..."},
+			name:       "double-dash vendor two token",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "--mod", "vendor", "./..."},
+			want:       []string{"build", "--mod", "mod", "./..."},
 		},
 		{
-			"double-dash readonly untouched",
-			[]string{"build", "--mod=readonly", "./..."},
-			[]string{"build", "--mod=readonly", "./..."},
+			name:       "double-dash readonly untouched",
+			subcommand: subcmdBuild,
+			args:       []string{"build", "--mod=readonly", "./..."},
+			want:       []string{"build", "--mod=readonly", "./..."},
+		},
+		// Test-binary arguments after delimiters must never be mutated
+		{
+			name:       "test delimiter dash-dash preserves -mod=vendor tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "--", "-mod=vendor"},
+			want:       []string{"./pkg", "--", "-mod=vendor"},
+		},
+		{
+			name:       "test delimiter -args preserves -mod=vendor tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-args", "-mod=vendor"},
+			want:       []string{"./pkg", "-args", "-mod=vendor"},
+		},
+		{
+			name:       "test delimiter --args preserves -mod=vendor tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "--args", "-mod=vendor"},
+			want:       []string{"./pkg", "--args", "-mod=vendor"},
+		},
+		{
+			name:       "test delimiter dash-dash preserves -mod vendor two-token tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "--", "-mod", "vendor"},
+			want:       []string{"./pkg", "--", "-mod", "vendor"},
+		},
+		// Test flag values that resemble build flags must never be mutated
+		{
+			name:       "test flag value -test.run preserves -mod=vendor",
+			subcommand: subcmdTest,
+			args:       []string{"-test.run", "-mod=vendor", "./pkg"},
+			want:       []string{"-test.run", "-mod=vendor", "./pkg"},
+		},
+		{
+			name:       "test flag value -run preserves -mod=vendor",
+			subcommand: subcmdTest,
+			args:       []string{"-run", "-mod=vendor", "./pkg"},
+			want:       []string{"-run", "-mod=vendor", "./pkg"},
+		},
+		// Real build flags in go test must be rewritten
+		{
+			name:       "genuine build flag in go test is rewritten",
+			subcommand: subcmdTest,
+			args:       []string{"-mod=vendor", "./pkg"},
+			want:       []string{"-mod=mod", "./pkg"},
+		},
+		{
+			name:       "genuine two-token build flag in go test is rewritten",
+			subcommand: subcmdTest,
+			args:       []string{"-mod", "vendor", "./pkg"},
+			want:       []string{"-mod", "mod", "./pkg"},
+		},
+		// Unknown test flag value is preserved
+		{
+			name:       "unknown test flag value preserves -mod=vendor",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-custom=-mod=vendor"},
+			want:       []string{"./pkg", "-custom=-mod=vendor"},
+		},
+		// Positional test-argv boundary preserves -mod=vendor
+		{
+			name:       "positional test arg preserves -mod=vendor",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-run", "TestX", "positional", "-mod=vendor"},
+			want:       []string{"./pkg", "-run", "TestX", "positional", "-mod=vendor"},
+		},
+		{
+			name:       "joined unknown flag followed by positional preserves -mod=vendor",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-custom=x", "positional", "-mod=vendor"},
+			want:       []string{"./pkg", "-custom=x", "positional", "-mod=vendor"},
+		},
+		{
+			name:       "definitive positional tail preserves -mod=vendor",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+			want:       []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, rewriteModVendor(tt.args))
+			subcmd := tt.subcommand
+			if subcmd == "" {
+				subcmd = subcmdBuild
+			}
+			assert.Equal(t, tt.want, rewriteModVendor(subcmd, tt.args))
 		})
 	}
 }
