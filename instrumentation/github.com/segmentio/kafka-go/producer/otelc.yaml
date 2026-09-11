@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 kafka_writer_writemessages:
   target: github.com/segmentio/kafka-go
   where:

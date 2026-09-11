@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -107,6 +108,49 @@ func TestBeforeRoundTrip(t *testing.T) {
 			},
 			expectSpan: true,
 		},
+		{
+			name: "nil request does not panic",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				return nil
+			},
+			expectSpan: false,
+		},
+		{
+			name: "request with nil Header does not panic and injects trace headers",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				u, _ := url.Parse("http://example.com/path")
+				return &http.Request{
+					Method: http.MethodGet,
+					URL:    u,
+					Header: nil,
+				}
+			},
+			expectSpan: true,
+			validateRequest: func(t *testing.T, req *http.Request) {
+				require.NotNil(t, req.Header)
+				assert.NotEmpty(t, req.Header.Get("traceparent"))
+			},
+		},
+		{
+			name: "request with nil URL does not panic",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				return &http.Request{
+					Method: http.MethodGet,
+					URL:    nil,
+					Header: make(http.Header),
+				}
+			},
+			expectSpan: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -129,12 +173,11 @@ func TestBeforeRoundTrip(t *testing.T) {
 				assert.Equal(t, 0, len(spans), "span should not be ended in Before hook")
 
 				// Check that data was stored
-				data, ok := mockCtx.GetData().(map[string]interface{})
+				data, ok := mockCtx.GetData().(*hookData)
 				require.True(t, ok, "data should be stored")
 				require.NotNil(t, data, "data should not be nil")
 
-				span, ok := data["span"].(trace.Span)
-				require.True(t, ok, "span should be in data")
+				span := data.span
 				require.NotNil(t, span, "span should not be nil")
 
 				if tt.validateSpan != nil {
@@ -174,15 +217,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-					"req":  req,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			response: &http.Response{
@@ -203,15 +241,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-					"req":  req,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			response: nil,
@@ -235,15 +268,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-					"req":  req,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			response: &http.Response{
@@ -265,15 +293,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-					"req":  req,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			response: &http.Response{
@@ -312,15 +335,10 @@ func TestAfterRoundTrip(t *testing.T) {
 			},
 			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
 				testTracer := tp.Tracer(instrumentationName)
-				req, _ := http.NewRequest("GET", "http://example.com/path", nil)
-				ctx, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+				_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
 
 				mockCtx := hooktest.NewMockHookContext()
-				mockCtx.SetData(map[string]interface{}{
-					"ctx":  ctx,
-					"span": span,
-					"req":  req,
-				})
+				mockCtx.SetData(&hookData{span: span})
 				return mockCtx
 			},
 			response: &http.Response{
@@ -429,4 +447,25 @@ func TestAfterRoundTrip_DisabledAfterStart_Regression(t *testing.T) {
 	ended = sr.Ended()
 	require.Len(t, ended, 1, "span created by BeforeRoundTrip must be ended by AfterRoundTrip")
 	assert.Equal(t, "GET", ended[0].Name())
+}
+
+// BenchmarkRoundTripHooks measures the per-request overhead of the hook pair.
+// Run with -benchmem to see the allocation count.
+func BenchmarkRoundTripHooks(b *testing.B) {
+	b.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	tp := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	b.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	transport := &http.Transport{}
+	req := httptest.NewRequest("GET", "http://example.com/path", nil)
+	res := &http.Response{StatusCode: http.StatusOK, Request: req}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		mockCtx := hooktest.NewMockHookContext()
+		BeforeRoundTrip(mockCtx, transport, req)
+		AfterRoundTrip(mockCtx, res, nil)
+	}
 }

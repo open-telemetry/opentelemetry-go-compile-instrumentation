@@ -6,13 +6,11 @@ package main
 import (
 	"errors"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -121,31 +119,52 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		if readErr != nil {
 			return ex.Wrapf(readErr, "reading rule file %s", path)
 		}
-		var rules map[string]yamlRule
-		if unmarshalErr := yaml.Unmarshal(content, &rules); unmarshalErr != nil {
-			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
+		ruleEntries, parseErr := parseRuleEntries(content, path, modulePath)
+		if parseErr != nil {
+			return parseErr
 		}
-		for _, name := range slices.Sorted(maps.Keys(rules)) {
-			ruleConfig := rules[name]
-			if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
-				return ex.Wrapf(validateErr, "validating version for rule %q in file %s", name, path)
-			}
-			if ruleConfig.Target == "" {
-				continue
-			}
-			if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
-				return ex.Wrapf(validateErr, "validating target for rule %q in file %s", name, path)
-			}
-			entries = append(entries, Entry{
-				ModulePath:   modulePath,
-				Target:       ruleConfig.Target,
-				VersionRange: ruleConfig.VersionRange,
-			})
-		}
+		entries = append(entries, ruleEntries...)
 		return nil
 	})
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading rules for module %s", modulePath)
+	}
+	return entries, nil
+}
+
+func parseRuleEntries(content []byte, path, modulePath string) (Manifest, error) {
+	return parseRuleEntriesForVersion(content, path, modulePath, util.Version)
+}
+
+func parseRuleEntriesForVersion(content []byte, path, modulePath, currentVersion string) (Manifest, error) {
+	doc, err := rule.ParseFile(content)
+	if err != nil {
+		return nil, ex.Wrapf(err, "parsing rule file %s", path)
+	}
+	if err = rule.CheckVersion(currentVersion, doc.MinimumVersion); err != nil {
+		return nil, ex.Wrapf(err, "validating minimum otelc version in rule file %s", path)
+	}
+
+	entries := make(Manifest, 0, len(doc.Entries))
+	for _, entry := range doc.Entries {
+		var ruleConfig yamlRule
+		if decodeErr := entry.Node.Decode(&ruleConfig); decodeErr != nil {
+			return nil, ex.Wrapf(decodeErr, "parsing rule %q in %s", entry.Name, path)
+		}
+		if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
+			return nil, ex.Wrapf(validateErr, "validating version for rule %q in file %s", entry.Name, path)
+		}
+		if ruleConfig.Target == "" {
+			continue
+		}
+		if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
+			return nil, ex.Wrapf(validateErr, "validating target for rule %q in file %s", entry.Name, path)
+		}
+		entries = append(entries, Entry{
+			ModulePath:   modulePath,
+			Target:       ruleConfig.Target,
+			VersionRange: ruleConfig.VersionRange,
+		})
 	}
 	return entries, nil
 }

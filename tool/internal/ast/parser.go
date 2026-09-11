@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
@@ -59,13 +60,13 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 
 // ParseSnippet parses the AST from incomplete source code snippet.
 func (ap *AstParser) ParseSnippet(source string) ([]dst.Stmt, error) {
-	if source == "" {
+	if strings.TrimSpace(source) == "" {
 		return nil, ex.New("empty source")
 	}
-	snippet := "package main; func _() {" + source + "}"
+	snippet := "package main; func _() {" + source + "\n}"
 	file, err := decorator.ParseFile(ap.fset, "", snippet, 0)
 	if err != nil {
-		return nil, ex.Wrap(err)
+		return nil, ex.Wrapf(err, "can not parse snippet %s", source)
 	}
 	funcDecl := util.AssertType[*dst.FuncDecl](file.Decls[0])
 	return funcDecl.Body.List, nil
@@ -102,14 +103,18 @@ func WriteFile(filePath string, root *dst.File) error {
 	return writeFile(file, filePath, root)
 }
 
-func writeFile(w io.WriteCloser, filePath string, root *dst.File) error {
+func writeFile(w io.WriteCloser, filePath string, root *dst.File) (retErr error) {
+	// The deferred close runs on every return path, including a panic during the write.
+	// The deferred close reports an error only when the write succeeds, so the write error takes priority.
+	defer func() {
+		if closeErr := w.Close(); closeErr != nil && retErr == nil {
+			retErr = ex.Wrapf(closeErr, "failed to close file %s", filePath)
+		}
+	}()
+
 	r := decorator.NewRestorer()
 	if err := r.Fprint(w, root); err != nil {
-		_ = w.Close()
 		return ex.Wrapf(err, "failed to write to file %s", filePath)
-	}
-	if err := w.Close(); err != nil {
-		return ex.Wrapf(err, "failed to close file %s", filePath)
 	}
 	return nil
 }

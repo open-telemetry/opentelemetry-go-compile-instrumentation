@@ -6,14 +6,15 @@
 #   log             instrumentation/log/log_hook.go                           (BeforeLogOutput)
 #   log/slog        instrumentation/log/slog/slog_hook.go                     (AfterSlogNewRecord)
 #   sirupsen/logrus instrumentation/github.com/sirupsen/logrus/logrus_hook.go (traceHook.Fire)
+#   uber/zap        instrumentation/go.uber.org/zap/zap_hook.go               (BeforeCheckedEntryWrite)
 #   rs/zerolog      instrumentation/github.com/rs/zerolog/zerolog_hook.go     (public event finalizers)
 #
 # These instrumentations create no spans, record no metrics, and emit no OTel
 # log records. They only correlate the application's *own* logging output with
 # the active trace: each hook reads the current trace and span ID from
 # goroutine-local storage and adds them to the log line the application was
-# already writing --- as `slog` attributes, as `logrus.Entry` fields, or as a
-# ` trace_id=<id> span_id=<id>` suffix on the stdlib `log` output.
+# already writing --- as `slog` attributes, as `logrus.Entry` fields, as zap
+# fields, or as a ` trace_id=<id> span_id=<id>` suffix on the stdlib `log` output.
 #
 # The resulting `trace_id` / `span_id` keys are fields of the application's log
 # format, not OpenTelemetry attributes: they are not attached to any span,

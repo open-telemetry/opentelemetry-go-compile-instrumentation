@@ -80,6 +80,32 @@ func TestLogsLogrus(t *testing.T) {
 	require.NotEmpty(t, spanMatches, "Expected span_id to be injected into logrus messages")
 }
 
+func TestLogsZap(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "logszap", "go", "build", "-a")
+
+	f := testutil.NewTestFixture(t, testutil.WithoutCollector())
+	output := f.Run("logszap")
+
+	zapMessages := []string{
+		"zap info message with context",
+		"zap info with field",
+		"zap sugar info message",
+		"zap info message without context",
+	}
+	for _, msg := range zapMessages {
+		require.Contains(t, output, msg, "Expected zap message: %s", msg)
+	}
+
+	traceIDPattern := regexp.MustCompile(`"trace_id":"[a-f0-9]{32}"`)
+	matches := traceIDPattern.FindAllString(output, -1)
+	require.NotEmpty(t, matches, "Expected trace_id to be injected into zap messages")
+
+	spanIDPattern := regexp.MustCompile(`"span_id":"[a-f0-9]{16}"`)
+	spanMatches := spanIDPattern.FindAllString(output, -1)
+	require.NotEmpty(t, spanMatches, "Expected span_id to be injected into zap messages")
+}
+
 func TestLogsZerolog(t *testing.T) {
 	t.Parallel()
 	testutil.Build(t, "", "logszerolog", "go", "build", "-a")

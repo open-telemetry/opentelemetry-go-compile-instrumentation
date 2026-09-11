@@ -112,13 +112,17 @@ func (r *ImportConfig) WriteFile(filename string) error {
 	return r.writeFile(file, filename)
 }
 
-func (r *ImportConfig) writeFile(w io.WriteCloser, filename string) error {
+func (r *ImportConfig) writeFile(w io.WriteCloser, filename string) (retErr error) {
+	// The deferred close runs on every return path, including a panic during the write.
+	// The deferred close reports an error only when the write succeeds, so the write error takes priority.
+	defer func() {
+		if closeErr := w.Close(); closeErr != nil && retErr == nil {
+			retErr = ex.Wrapf(closeErr, "failed to close file %s", filename)
+		}
+	}()
+
 	if err := r.write(w); err != nil {
-		_ = w.Close()
 		return ex.Wrapf(err, "failed to write to file %s", filename)
-	}
-	if err := w.Close(); err != nil {
-		return ex.Wrapf(err, "failed to close file %s", filename)
 	}
 	return nil
 }
