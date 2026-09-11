@@ -49,10 +49,23 @@ func (ip *instrumentPhase) applyRulesCapturingDiffs(
 	rules []rule.InstRule,
 	root *dst.File,
 ) (bool, []ruleChange, error) {
+	return ip.applyRulesCapturingDiffsWithRenderer(ctx, rules, root, ast.RenderFile)
+}
+
+func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
+	ctx context.Context,
+	rules []rule.InstRule,
+	root *dst.File,
+	render func(*dst.File) ([]byte, error),
+) (bool, []ruleChange, error) {
 	debug := diffDebugEnabled()
 	var prev []byte
 	if debug {
-		prev, _ = ast.RenderFile(root)
+		var err error
+		prev, err = render(root)
+		if err != nil {
+			return false, nil, ex.Wrapf(err, "rendering AST before applying rules")
+		}
 	}
 
 	var (
@@ -69,7 +82,10 @@ func (ip *instrumentPhase) applyRulesCapturingDiffs(
 			continue
 		}
 
-		after, _ := ast.RenderFile(root)
+		after, err := render(root)
+		if err != nil {
+			return hasFuncRule, changes, ex.Wrapf(err, "rendering AST after applying rule %s", r.GetName())
+		}
 		if !bytes.Equal(prev, after) {
 			changes = append(changes, ruleChange{name: r.GetName(), before: prev, after: after})
 		}

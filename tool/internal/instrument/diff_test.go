@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"errors"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -272,4 +274,73 @@ func TestWriteDiffForDebugUnchangedOverallWithRuleChanges(t *testing.T) {
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "=== rule 1/1: temporary-edit ===")
+}
+
+func TestApplyRulesCapturingDiffsInitialRenderError(t *testing.T) {
+	t.Setenv(util.EnvOtelcDebug, "1")
+	render := func(*dst.File) ([]byte, error) {
+		return nil, errors.New("simulated initial render failure")
+	}
+
+	hasFuncRule, changes, err := newTestPhase().applyRulesCapturingDiffsWithRenderer(
+		context.Background(), nil, wrapVarDeclFile(), render)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rendering AST before applying rules")
+	assert.False(t, hasFuncRule)
+	assert.Nil(t, changes)
+}
+
+func TestApplyRulesCapturingDiffsPostRuleRenderError(t *testing.T) {
+	t.Setenv(util.EnvOtelcDebug, "1")
+	ruleX := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_x"},
+		Kind:         "var",
+		Identifier:   "X",
+		Wrap:         "double({{ . }})",
+	}
+	ruleY := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_y"},
+		Kind:         "var",
+		Identifier:   "Y",
+		Wrap:         "triple({{ . }})",
+	}
+
+	callCount := 0
+	render := func(f *dst.File) ([]byte, error) {
+		callCount++
+		// 1: initial render, 2: post ruleX render, 3: post ruleY render (fails)
+		if callCount <= 2 {
+			return ast.RenderFile(f)
+		}
+		return nil, errors.New("simulated post-rule render failure")
+	}
+
+	hasFuncRule, changes, err := newTestPhase().applyRulesCapturingDiffsWithRenderer(
+		context.Background(), []rule.InstRule{ruleX, ruleY}, wrapVarDeclFile(), render)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rendering AST after applying rule wrap_y")
+	assert.False(t, hasFuncRule)
+	require.Len(t, changes, 1)
+	assert.Equal(t, "wrap_x", changes[0].name)
+}
+
+func TestApplyRulesCapturingDiffsRenderErrorSkippedWhenDebugOff(t *testing.T) {
+	t.Setenv(util.EnvOtelcDebug, "")
+	render := func(*dst.File) ([]byte, error) {
+		t.Fatal("render should not be called when debug is disabled")
+		return nil, errors.New("should not be called")
+	}
+
+	ruleX := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_x"},
+		Kind:         "var",
+		Identifier:   "X",
+		Wrap:         "double({{ . }})",
+	}
+
+	hasFuncRule, changes, err := newTestPhase().applyRulesCapturingDiffsWithRenderer(
+		context.Background(), []rule.InstRule{ruleX}, wrapVarDeclFile(), render)
+	require.NoError(t, err)
+	assert.False(t, hasFuncRule)
+	assert.Nil(t, changes)
 }
