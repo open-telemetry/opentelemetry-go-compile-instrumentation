@@ -755,3 +755,74 @@ func TestDebugLifecycle_DebugOffNoOp(t *testing.T) {
 	require.NoError(t, EnsureDebugInitialized(t.Context()))
 	assert.NoFileExists(t, util.GetBuildTemp(".debug_session"))
 }
+
+func TestToolexec_DebugInitialization(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// Call Toolexec with tool version probe (should intercept and initialize debug)
+	_ = Toolexec(t.Context(), []string{"go", "-V=full"}, false)
+	session, err := ReadDebugSession()
+	require.NoError(t, err)
+	assert.NotEmpty(t, session)
+
+	// Call Toolexec nested, should skip debug initialization
+	t.Setenv(util.EnvOtelcBuildSession, "new_nested_session")
+	_ = Toolexec(t.Context(), []string{"go", "-V=full"}, true)
+	sessionAfter, _ := ReadDebugSession()
+	assert.Equal(t, session, sessionAfter)
+}
+
+func TestGetCurrentBuildSession(t *testing.T) {
+	t.Setenv(util.EnvOtelcBuildSession, "custom_wrapper_session")
+	assert.Equal(t, "custom_wrapper_session", GetCurrentBuildSession())
+
+	t.Setenv(util.EnvOtelcBuildSession, "")
+	assert.Equal(t, fmt.Sprintf("direct_%d", os.Getppid()), GetCurrentBuildSession())
+}
+
+func TestReadDebugSession_NotExist(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	session, err := ReadDebugSession()
+	require.NoError(t, err)
+	assert.Empty(t, session)
+}
+
+func TestCleanStaleCompilerArtifacts_NotExist(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	require.NoError(t, CleanStaleCompilerArtifacts())
+}
+
+func TestWriteAddedSourceDiff_MissingFile(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	dest := filepath.Join(workDir, "stale.diff")
+	require.NoError(t, os.WriteFile(dest, []byte("stale diff content"), 0o644))
+
+	WriteAddedSourceDiff(dest, filepath.Join(workDir, "nonexistent.go"), "header", nil)
+	assert.NoFileExists(t, dest, "expected stale diff to be removed if added source cannot be read")
+}
+
+func TestWriteAddedSourceDiff_HeaderWithoutNewline(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	srcFile := filepath.Join(workDir, "added.go")
+	require.NoError(t, os.WriteFile(srcFile, []byte("package test\n"), 0o644))
+
+	dest := filepath.Join(workDir, "added.go.diff")
+	WriteAddedSourceDiff(dest, srcFile, "# header line", nil)
+
+	require.FileExists(t, dest)
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(string(content), "# header line\n--- /dev/null"))
+}
