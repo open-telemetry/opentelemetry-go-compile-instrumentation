@@ -21,10 +21,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-const (
-	envOtelcSourceRoot = "OTELC_SOURCE_ROOT"
-	goModFileName      = "go.mod"
-)
+const envOtelcSourceRoot = "OTELC_SOURCE_ROOT"
 
 func repositorySourceRoot() (string, error) {
 	root := os.Getenv(envOtelcSourceRoot)
@@ -206,7 +203,7 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") {
+			if name == "testdata" || name == vendorDirName || strings.HasPrefix(name, ".") {
 				return filepath.SkipDir
 			}
 			return nil

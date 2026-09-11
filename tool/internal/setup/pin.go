@@ -166,8 +166,6 @@ func generateOtelInstrumentationGo(imports map[string]bool, opts PinOptions) *ds
 	}
 }
 
-const goModFile = "go.mod"
-
 func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 	if !semver.IsValid(version) || version == "v0.0.0" || module.IsPseudoVersion(version) {
 		return false, nil
@@ -192,7 +190,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 }
 
 func ensureOtelcRequire(moduleDir, version string) (bool, error) {
-	goModPath := filepath.Join(moduleDir, goModFile)
+	goModPath := filepath.Join(moduleDir, goModFileName)
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return false, ex.Wrap(err)

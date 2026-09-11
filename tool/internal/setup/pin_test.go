@@ -6,7 +6,6 @@ package setup
 import (
 	"fmt"
 	"go/token"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,7 +27,7 @@ import (
 
 // discardLogger returns a logger that drops all output, keeping test logs quiet.
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestRemoveImports(t *testing.T) {
@@ -738,6 +737,7 @@ rule: value
 		require.Error(t, err)
 	})
 }
+
 func TestUpdateToolFile(t *testing.T) {
 	trueValue := true
 

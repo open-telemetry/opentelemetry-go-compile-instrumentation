@@ -7,9 +7,6 @@ on:
 
 permissions:
   contents: read
-env:
-  # TODO: Configure dependabot or renovate to update this version.
-  GOLANGCI_LINT_VERSION: v2.11.3
 
 jobs:
   # This is a required workflow, so it must always run and report a status.
@@ -27,13 +24,15 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           persist-credentials: false
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: filter
         with:
           filters: |
             code:
               - '**/*.go'
               - '.tools/golangci.yml'
+              - '.tools/go.mod'
+              - '.tools/go.sum'
               - '.github/workflows/lint-golang.yaml'
 
   golangci-lint:
@@ -45,12 +44,22 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Read golangci-lint version
+        id: golangci
+        run: |
+          ver=$(go -C .tools list -m -f '{{.Version}}' github.com/golangci/golangci-lint/v2)
+          if [ -z "$ver" ]; then
+            echo "failed to read golangci-lint version from .tools/go.mod" >&2
+            exit 1
+          fi
+          echo "version=${ver}"
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20  # v9.2.0
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          version: ${{ steps.golangci.outputs.version }}
           args: --config .tools/golangci.yml
 
   done:
