@@ -23,9 +23,23 @@ func (l logEnabler) Enable() bool {
 
 var enabler = logEnabler{}
 
-type traceHook struct{}
+func BeforeZerologEventMsg(_ hook.HookContext, event *zerolog.Event, _ string) {
+	enrichEvent(event)
+}
 
-func (traceHook) Run(event *zerolog.Event, level zerolog.Level, message string) {
+func BeforeZerologEventMsgf(_ hook.HookContext, event *zerolog.Event, _ string, _ ...interface{}) {
+	enrichEvent(event)
+}
+
+func BeforeZerologEventMsgFunc(_ hook.HookContext, event *zerolog.Event, _ func() string) {
+	enrichEvent(event)
+}
+
+func BeforeZerologEventSend(_ hook.HookContext, event *zerolog.Event) {
+	enrichEvent(event)
+}
+
+func enrichEvent(event *zerolog.Event) {
 	if !enabler.Enable() || event == nil {
 		return
 	}
@@ -39,14 +53,4 @@ func (traceHook) Run(event *zerolog.Event, level zerolog.Level, message string) 
 	if spanID != "" {
 		event.Str(spanIDKey, spanID)
 	}
-}
-
-func BeforeZerologNewEvent(_ hook.HookContext, logger *zerolog.Logger, _ zerolog.Level, _ func(string)) {
-	if !enabler.Enable() || logger == nil {
-		return
-	}
-
-	logger.OtelcInitOnce.Do(func() {
-		*logger = logger.Hook(traceHook{})
-	})
 }

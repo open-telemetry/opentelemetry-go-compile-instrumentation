@@ -52,10 +52,10 @@ func main() {
 }
 
 func emitEvents(logger *zerolog.Logger, appended string) {
-	logger.Trace().Msgf("trace message %s", appended)
+	logger.Trace().Msg("trace message " + appended)
 	logger.Debug().Msgf("debug message %s", appended)
-	logger.Info().Msgf("info message %s", appended)
-	logger.Warn().Msgf("warn message %s", appended)
+	logger.Info().MsgFunc(func() string { return "info message " + appended })
+	logger.Warn().Str("message", "warn message "+appended).Send()
 	logger.Error().Msgf("error message %s", appended)
 	logger.Err(errors.New("test error")).Msgf("err with message %s", appended)
 	logger.Log().Msgf("log message %s", appended)
