@@ -67,6 +67,9 @@ type instrumentPhase struct {
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
+	// Rules whose application required globals, recorded in application order
+	// so writeGlobals can attribute the generated globals file to its contributors.
+	globalsContributors []string
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
@@ -251,6 +254,14 @@ func CleanupImportTrackingFiles() {
 	for _, file := range files {
 		_ = os.Remove(file) // Best effort cleanup
 	}
+}
+
+// CleanupDebugArtifacts removes debug artifacts from previous builds.
+// Should be called at the start of a build under debug mode to clean up
+// stale diffs and debug files from prior runs.
+// This is exported for use by the setup phase.
+func CleanupDebugArtifacts() error {
+	return os.RemoveAll(util.GetBuildTemp("debug"))
 }
 
 // loadAddedImports discovers and merges all per-process import tracking files.

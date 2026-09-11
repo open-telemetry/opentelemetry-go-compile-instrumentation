@@ -739,3 +739,61 @@ func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	err := cmd.Run(t.Context(), []string{"setup", mainFile})
 	require.Error(t, err)
 }
+
+func TestSetup_CleansDebugArtifactsWhenDebugEnabled(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// Pre-create stale debug artifact
+	staleDir := filepath.Join(util.GetBuildTemp("debug"), "stale_pkg")
+	require.NoError(t, os.MkdirAll(staleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(staleDir, "stale.diff"), []byte("stale"), 0o644))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	_ = cmd.Run(t.Context(), []string{"setup", "."})
+
+	assert.NoDirExists(t, staleDir, "expected stale debug directory to be cleaned by setup")
+}
+
+func TestSetup_RetainsDebugArtifactsWhenDebugDisabled(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcDebug, "")
+
+	// Pre-create stale debug artifact
+	staleDir := filepath.Join(util.GetBuildTemp("debug"), "stale_pkg")
+	require.NoError(t, os.MkdirAll(staleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(staleDir, "stale.diff"), []byte("stale"), 0o644))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	_ = cmd.Run(t.Context(), []string{"setup", "."})
+
+	assert.DirExists(t, staleDir, "expected stale debug directory to be retained when debug is off")
+}
+
+func TestRunGoBuild_CleansDebugArtifactsWhenDebugEnabled(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// Pre-create stale debug artifact
+	staleDir := filepath.Join(util.GetBuildTemp("debug"), "stale_pkg")
+	require.NoError(t, os.MkdirAll(staleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(staleDir, "stale.diff"), []byte("stale"), 0o644))
+
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action:          GoBuild,
+	}
+	// Passing a non-existent package causes Setup to fail fast without
+	// launching buildWithToolexec, while verifying runGoBuild executed
+	// CleanupDebugArtifacts at its lifecycle boundary.
+	_ = cmd.Run(t.Context(), []string{"go", "build", "./nonexistent_pkg"})
+
+	assert.NoDirExists(t, staleDir, "expected stale debug directory to be cleaned by runGoBuild")
+}

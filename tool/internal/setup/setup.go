@@ -336,6 +336,14 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
+	} else if instrument.DiffDebugEnabled() {
+		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
+		// as it prepares the environment for a subsequent toolexec build.
+		// For `otelc go ...`, runGoBuild already performed this cleanup at its
+		// lifecycle boundary before invoking Setup.
+		if err := instrument.CleanupDebugArtifacts(); err != nil {
+			return ex.Wrapf(err, "cleaning debug artifacts")
+		}
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -641,6 +649,11 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
+	if instrument.DiffDebugEnabled() {
+		if err := instrument.CleanupDebugArtifacts(); err != nil {
+			return ex.Wrapf(err, "cleaning debug artifacts")
+		}
+	}
 
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.

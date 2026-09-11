@@ -344,3 +344,217 @@ func TestApplyRulesCapturingDiffsRenderErrorSkippedWhenDebugOff(t *testing.T) {
 	assert.False(t, hasFuncRule)
 	assert.Nil(t, changes)
 }
+
+func wrapFuncFile() *dst.File {
+	return &dst.File{
+		Name: &dst.Ident{Name: "main"},
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.VAR,
+				Specs: []dst.Spec{&dst.ValueSpec{
+					Names:  []*dst.Ident{{Name: "X"}},
+					Type:   &dst.Ident{Name: "int"},
+					Values: []dst.Expr{&dst.BasicLit{Kind: token.INT, Value: "1"}},
+				}},
+			},
+			&dst.FuncDecl{
+				Name: &dst.Ident{Name: "main"},
+				Type: &dst.FuncType{Params: &dst.FieldList{}},
+				Body: &dst.BlockStmt{},
+			},
+		},
+	}
+}
+
+func TestWriteFileRuleDiffForDebug(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	filePath := filepath.Join(workDir, "otelc.helper.go")
+	content := "package main\n\nfunc Helper() string { return \"ok\" }\n"
+	require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
+
+	ip := newTestPhase()
+	ip.compileArgs = []string{"-p", "example.com/mypkg"}
+	ip.writeFileRuleDiffForDebug(filePath, "inject_helper")
+
+	dest := util.GetBuildTemp(filepath.Join("debug", "example_com_mypkg", "otelc.helper.go.diff"))
+	diffBytes, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	diffText := string(diffBytes)
+
+	assert.Contains(t, diffText, "=== rule: inject_helper ===")
+	assert.Contains(t, diffText, "--- /dev/null")
+	assert.Contains(t, diffText, "+++ "+filePath)
+	assert.Contains(t, diffText, "+package main")
+	assert.Contains(t, diffText, "+func Helper() string { return \"ok\" }")
+}
+
+func TestWriteGlobalsDiffForDebug(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	filePath := filepath.Join(workDir, "otelc.globals.go")
+	content := "package main\n\nvar GlobalVal = 42\n"
+	require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
+
+	ip := newTestPhase()
+	ip.compileArgs = []string{"-p", "example.com/mypkg"}
+	ip.writeGlobalsDiffForDebug(filePath, []string{"rule_one", "rule_two"})
+
+	dest := util.GetBuildTemp(filepath.Join("debug", "example_com_mypkg", "otelc.globals.go.diff"))
+	diffBytes, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	diffText := string(diffBytes)
+
+	assert.Contains(t, diffText, "=== generated instrumentation file: otelc.globals.go ===")
+	assert.Contains(t, diffText, "rules:\n  - rule_one\n  - rule_two")
+	assert.Contains(t, diffText, "--- /dev/null")
+	assert.Contains(t, diffText, "+++ "+filePath)
+	assert.Contains(t, diffText, "+var GlobalVal = 42")
+}
+
+func TestWriteGlobalsDiffForDebug_NoRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	filePath := filepath.Join(workDir, "otelc.globals.go")
+	content := "package main\n\nvar GlobalVal = 42\n"
+	require.NoError(t, os.WriteFile(filePath, []byte(content), 0o644))
+
+	ip := newTestPhase()
+	ip.writeGlobalsDiffForDebug(filePath, nil)
+
+	dest := util.GetBuildTemp(filepath.Join("debug", "otelc.globals.go.diff"))
+	diffBytes, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	diffText := string(diffBytes)
+
+	assert.Contains(t, diffText, "=== generated instrumentation file: otelc.globals.go ===")
+	assert.NotContains(t, diffText, "rules:")
+	assert.Contains(t, diffText, "--- /dev/null")
+}
+
+func TestWriteDiffForDebugRemovesStaleDiffOnNoOp(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	files := sourcePair(t, originalSource) // both are originalSource
+	dest := util.GetBuildTemp(filepath.Join("debug", "source.go.diff"))
+	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, os.WriteFile(dest, []byte("stale diff content from build 1"), 0o644))
+
+	newTestPhase().writeDiffForDebug(files.oldFile, files.newFile, nil)
+
+	_, err := os.Stat(dest)
+	assert.True(t, os.IsNotExist(err), "expected stale diff to be removed on no-op, stat returned %v", err)
+}
+
+func TestWriteDiffForDebugRemovesStaleDiffOnFileReadError(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	files := sourcePair(t, instrumentedSource)
+	dest := util.GetBuildTemp(filepath.Join("debug", filepath.Base(files.oldFile)+".diff"))
+	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
+
+	// Pre-create stale diff
+	require.NoError(t, os.WriteFile(dest, []byte("stale diff"), 0o644))
+	// Missing oldFile with matching basename
+	missingOld := filepath.Join(t.TempDir(), filepath.Base(files.oldFile))
+	newTestPhase().writeDiffForDebug(missingOld, files.newFile, nil)
+	_, err := os.Stat(dest)
+	assert.True(t, os.IsNotExist(err), "expected stale diff to be removed when oldFile read fails")
+
+	// Pre-create stale diff again
+	require.NoError(t, os.WriteFile(dest, []byte("stale diff"), 0o644))
+	// Missing newFile
+	newTestPhase().writeDiffForDebug(files.oldFile, "/non/existent/new.go", nil)
+	_, err = os.Stat(dest)
+	assert.True(t, os.IsNotExist(err), "expected stale diff to be removed when newFile read fails")
+}
+
+func TestWriteAddedSourceDiffForDebugRemovesStaleDiffOnReadError(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	dest := util.GetBuildTemp(filepath.Join("debug", "otelc.missing.go.diff"))
+	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, os.WriteFile(dest, []byte("stale diff"), 0o644))
+
+	newTestPhase().writeAddedSourceDiffForDebug("/non/existent/otelc.missing.go", "header")
+	_, err := os.Stat(dest)
+	assert.True(t, os.IsNotExist(err), "expected stale diff to be removed when added file read fails")
+}
+
+func TestWriteAddedSourceDiffForDebugSkipsWhenDebugOff(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	for _, debugVal := range []string{"", "0"} {
+		t.Run("debug="+debugVal, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcDebug, debugVal)
+			filePath := filepath.Join(workDir, "otelc.helper.go")
+			require.NoError(t, os.WriteFile(filePath, []byte("package main\n"), 0o644))
+
+			ip := newTestPhase()
+			ip.writeFileRuleDiffForDebug(filePath, "my_rule")
+			ip.writeGlobalsDiffForDebug(filePath, []string{"r1"})
+
+			dest := util.GetBuildTemp(filepath.Join("debug", "otelc.helper.go.diff"))
+			_, err := os.Stat(dest)
+			assert.True(t, os.IsNotExist(err))
+		})
+	}
+}
+
+func TestCleanupDebugArtifacts(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	debugDir := util.GetBuildTemp("debug")
+	pkgDir := filepath.Join(debugDir, "some_pkg")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "file.go.diff"), []byte("diff content"), 0o644))
+
+	require.DirExists(t, debugDir)
+	require.NoError(t, CleanupDebugArtifacts())
+	assert.NoDirExists(t, debugDir)
+}
+
+func TestApplyRulesCapturingDiffsTracksGlobalsContributors(t *testing.T) {
+	t.Setenv(util.EnvOtelcDebug, "1")
+	ruleX := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "raw_rule_x"},
+		Func:         "main",
+		Raw:          "println(1)",
+	}
+	ruleY := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "decl_rule_y"},
+		Kind:         "var",
+		Identifier:   "X",
+		Wrap:         "double({{ . }})",
+	}
+
+	ip := newTestPhase()
+	needsGlobals, _, err := ip.applyRulesCapturingDiffs(
+		context.Background(), []rule.InstRule{ruleX, ruleY}, wrapFuncFile())
+	require.NoError(t, err)
+	assert.True(t, needsGlobals)
+	assert.Equal(t, []string{"raw_rule_x"}, ip.globalsContributors)
+
+	// Now check with debug off: contributors list is untouched
+	t.Setenv(util.EnvOtelcDebug, "")
+	ip2 := newTestPhase()
+	needsGlobals2, _, err := ip2.applyRulesCapturingDiffs(
+		context.Background(), []rule.InstRule{ruleX}, wrapFuncFile())
+	require.NoError(t, err)
+	assert.True(t, needsGlobals2)
+	assert.Nil(t, ip2.globalsContributors)
+}

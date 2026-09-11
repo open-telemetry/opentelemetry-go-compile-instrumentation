@@ -333,6 +333,7 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	}
 	ip.addCompileArg(path)
 	ip.keepForDebug(path)
+	ip.writeGlobalsDiffForDebug(path, ip.globalsContributors)
 	return nil
 }
 

@@ -23,10 +23,10 @@ import (
 
 const diffContextLines = 3
 
-// diffDebugEnabled parses OTELC_DEBUG the same way the --debug flag does
+// DiffDebugEnabled parses OTELC_DEBUG the same way the --debug flag does
 // (urfave/cli's EnvVars source), so OTELC_DEBUG=0 disables the diff output
 // the same as an absent variable, rather than only an empty string doing so.
-func diffDebugEnabled() bool {
+func DiffDebugEnabled() bool {
 	debug, err := strconv.ParseBool(os.Getenv(util.EnvOtelcDebug))
 	return err == nil && debug
 }
@@ -58,7 +58,7 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 	root *dst.File,
 	render func(*dst.File) ([]byte, error),
 ) (bool, []ruleChange, error) {
-	debug := diffDebugEnabled()
+	debug := DiffDebugEnabled()
 	var prev []byte
 	if debug {
 		var err error
@@ -69,29 +69,34 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 	}
 
 	var (
-		hasFuncRule bool
-		changes     []ruleChange
+		needsGlobals bool
+		changes      []ruleChange
 	)
 	for _, r := range rules {
-		funcRule, err1 := ip.applyOneRule(ctx, r, root)
+		ruleNeedsGlobals, err1 := ip.applyOneRule(ctx, r, root)
 		if err1 != nil {
-			return hasFuncRule, changes, ex.Wrapf(err1, "applying rule %s", r.GetName())
+			return needsGlobals, changes, ex.Wrapf(err1, "applying rule %s", r.GetName())
 		}
-		hasFuncRule = hasFuncRule || funcRule
+		if ruleNeedsGlobals {
+			needsGlobals = true
+			if debug {
+				ip.globalsContributors = append(ip.globalsContributors, r.GetName())
+			}
+		}
 		if !debug {
 			continue
 		}
 
 		after, err := render(root)
 		if err != nil {
-			return hasFuncRule, changes, ex.Wrapf(err, "rendering AST after applying rule %s", r.GetName())
+			return needsGlobals, changes, ex.Wrapf(err, "rendering AST after applying rule %s", r.GetName())
 		}
 		if !bytes.Equal(prev, after) {
 			changes = append(changes, ruleChange{name: r.GetName(), before: prev, after: after})
 		}
 		prev = after
 	}
-	return hasFuncRule, changes, nil
+	return needsGlobals, changes, nil
 }
 
 // writeDiffForDebug writes a report of what otelc wove into oldFile next to
@@ -102,21 +107,26 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 // post-processing (optimizeTJumps) can still alter the file after the last
 // rule has run, so the per-rule sections need not sum to it.
 func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []ruleChange) {
-	if !diffDebugEnabled() {
+	if !DiffDebugEnabled() {
 		return
 	}
 
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(oldFile)+".diff")
+
 	oldContent, err := os.ReadFile(oldFile)
 	if err != nil {
+		_ = os.Remove(dest)
 		ip.Warn("failed to read original file for diff", "path", oldFile, "error", err)
 		return
 	}
 	newContent, err := os.ReadFile(newFile)
 	if err != nil {
+		_ = os.Remove(dest)
 		ip.Warn("failed to read instrumented file for diff", "path", newFile, "error", err)
 		return
 	}
 	if bytes.Equal(oldContent, newContent) && len(changes) == 0 {
+		_ = os.Remove(dest)
 		return
 	}
 
@@ -142,7 +152,6 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 		_, _ = report.WriteString(fullText)
 	}
 
-	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(oldFile)+".diff")
 	if err = os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		ip.Warn("failed to create directory for instrumentation diff", "dest", dest, "error", err)
 		return
@@ -152,6 +161,65 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 		return
 	}
 	ip.Info("Wrote instrumentation diff", "path", dest, "rules", len(changes))
+}
+
+// writeAddedSourceDiffForDebug writes a unified diff representing a new file
+// introduced entirely by instrumentation, with /dev/null as the original source.
+func (ip *instrumentPhase) writeAddedSourceDiffForDebug(newFile, header string) {
+	if !DiffDebugEnabled() {
+		return
+	}
+
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(newFile)+".diff")
+
+	newContent, err := os.ReadFile(newFile)
+	if err != nil {
+		_ = os.Remove(dest)
+		ip.Warn("failed to read added file for diff", "path", newFile, "error", err)
+		return
+	}
+
+	diffText := unifiedDiff(nil, newContent, "/dev/null", newFile)
+
+	var report strings.Builder
+	if header != "" {
+		_, _ = report.WriteString(header)
+		if !strings.HasSuffix(header, "\n") {
+			_ = report.WriteByte('\n')
+		}
+	}
+	_, _ = report.WriteString(diffText)
+
+	if err = os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		ip.Warn("failed to create directory for instrumentation diff", "dest", dest, "error", err)
+		return
+	}
+	if err = os.WriteFile(dest, []byte(report.String()), 0o600); err != nil {
+		ip.Warn("failed to write instrumentation diff", "dest", dest, "error", err)
+		return
+	}
+	ip.Info("Wrote added source instrumentation diff", "path", dest)
+}
+
+// writeFileRuleDiffForDebug records a generated InstFileRule file in the debug
+// report, attributed to the rule that introduced it.
+func (ip *instrumentPhase) writeFileRuleDiffForDebug(newFile, ruleName string) {
+	header := fmt.Sprintf("=== rule: %s ===", ruleName)
+	ip.writeAddedSourceDiffForDebug(newFile, header)
+}
+
+// writeGlobalsDiffForDebug records the generated otelc.globals.go file in the
+// debug report, attributing it to the rules that required its generation.
+func (ip *instrumentPhase) writeGlobalsDiffForDebug(path string, contributors []string) {
+	var header strings.Builder
+	_, _ = header.WriteString("=== generated instrumentation file: " + otelcGlobalsFile + " ===")
+	if len(contributors) > 0 {
+		_, _ = header.WriteString("\nrules:")
+		for _, c := range contributors {
+			_, _ = fmt.Fprintf(&header, "\n  - %s", c)
+		}
+	}
+	ip.writeAddedSourceDiffForDebug(path, header.String())
 }
 
 func unifiedDiff(a, b []byte, fromFile, toFile string) string {

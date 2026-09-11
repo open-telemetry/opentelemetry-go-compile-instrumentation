@@ -76,7 +76,7 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 }
 
 func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
-	hasFuncRule := false
+	needsGlobals := false
 	// Apply file rules first because they can introduce new files that used
 	// by other rules such as raw rules
 	for _, rule := range rset.FileRules {
@@ -95,11 +95,11 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		}
 
 		// Apply the rules to the target file
-		funcRuleApplied, changes, err1 := ip.applyRulesCapturingDiffs(ctx, rules, root)
+		appliedNeedsGlobals, changes, err1 := ip.applyRulesCapturingDiffs(ctx, rules, root)
 		if err1 != nil {
 			return err1
 		}
-		hasFuncRule = hasFuncRule || funcRuleApplied
+		needsGlobals = needsGlobals || appliedNeedsGlobals
 		// Since trampoline-jump-if is performance-critical, perform AST level
 		// optimization for them before writing to file
 		if err = ip.optimizeTJumps(); err != nil {
@@ -112,9 +112,9 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		}
 	}
 
-	// Write globals file if any function is instrumented because injected code
+	// Write globals file if any rule requires it because injected code
 	// always requires some global variables and auxiliary declarations
-	if hasFuncRule {
+	if needsGlobals {
 		return ip.writeGlobals(rset.PackageName)
 	}
 	return nil

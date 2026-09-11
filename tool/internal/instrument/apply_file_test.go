@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestStripBuildIgnoreTag(t *testing.T) {
@@ -227,4 +228,48 @@ func SubHelper() {}
 	require.NoError(t, err)
 	assert.Contains(t, string(outData), "package targetpkg")
 	assert.Contains(t, string(outData), "func SubHelper()")
+}
+
+func TestApplyFileRule_DiffUnderDebug(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	content := `package sourcepkg
+
+func Helper() string {
+	return "ok"
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     workDir,
+		compileArgs: []string{"-p", "example.com/mypkg"},
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "helper.go",
+		Path:         "example.com/mypkg",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_file_rule"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.NoError(t, err)
+
+	outPath := filepath.Join(workDir, "otelc.helper.go")
+	require.FileExists(t, outPath)
+	assert.Contains(t, ip.compileArgs, outPath)
+
+	diffPath := util.GetBuildTemp(filepath.Join("debug", "example_com_mypkg", "otelc.helper.go.diff"))
+	require.FileExists(t, diffPath)
+	diffBytes, err := os.ReadFile(diffPath)
+	require.NoError(t, err)
+	diffText := string(diffBytes)
+	assert.Contains(t, diffText, "=== rule: test_file_rule ===")
+	assert.Contains(t, diffText, "--- /dev/null")
+	assert.Contains(t, diffText, "+++ "+outPath)
 }
