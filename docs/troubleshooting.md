@@ -98,9 +98,12 @@ When running with `--debug` (or `OTELC_DEBUG=1`), `otelc` writes unified `.diff`
 showing all source modifications and source additions introduced into the Go compiler:
 
 - **Output paths**: Diffs are written under `.otelc-build/debug/<escaped-package>/`, where
-  `<escaped-package>` is derived from the package/compiler import path (the `-p` flag passed
-  to the compiler) with slashes and dots replaced by underscores
-  (e.g. `github_com_redis_go-redis_v9`).
+  `<escaped-package>` is derived from the package/import path (the `-p` flag passed
+  to the compiler, or `pkg.PkgPath` during setup) with slashes and dots replaced by underscores
+  (e.g. `github_com_redis_go-redis_v9` or `example_com_app_cmd_client`). Both runtime helper
+  artifacts and compiler phase instrumentation reports use this package-scoped path, ensuring
+  packages with identical directory basenames (such as `cmd/client` and `internal/client`) never
+  collide.
 - **Modified source files**: Reports contain labeled sections for each applied rule in
   application order (`=== rule X/N: <name> ===`), followed by an authoritative full diff
   (`=== full diff: <original> -> <compiled> ===`) that includes any post-processing
@@ -114,9 +117,19 @@ showing all source modifications and source additions introduced into the Go com
   - `otelc.runtime.go.diff`: Added file generated during setup to hold runtime imports,
     linkage, and helper declarations required by matched instrumentation rules, listing the
     contributing rules responsible for requiring the runtime file.
-- **Stale diff management**: At the start of a `--debug` build, `otelc` resets the
-  `.otelc-build/debug` directory at the parent build lifecycle boundary so stale artifacts
-  from earlier builds cannot masquerade as output from the current build.
+- **Stale diff management**: At the start of a `--debug` build, `otelc` ensures a clean
+  artifact state so stale reports from earlier builds cannot masquerade as output from the
+  current build:
+  - In wrapper mode (`otelc --debug go build/test/install`), `otelc` resets the
+    `.otelc-build/debug` directory at the parent build lifecycle boundary before setup and
+    compilation begin.
+  - In direct `-toolexec` / `GOFLAGS` mode (`go build` with `-toolexec="otelc toolexec"`),
+    `otelc` safely initializes debug output across concurrent compiler processes using an
+    advisory file lock and build session token. When a new direct build begins, stale compiler
+    diffs from prior runs are cleared so cached packages do not leave misleading current-looking
+    reports, while runtime artifacts from setup are preserved.
+  - Standalone `otelc --debug setup` resets `.otelc-build/debug` before generating fresh
+    runtime files.
 - **Go build cache**: The Go toolchain only invokes compiler tools (`-toolexec`) for
   packages that are actually recompiled. If Go serves a package entirely from cache,
   `otelc` does not re-instrument it during that run and no fresh `.diff` is generated.
@@ -156,7 +169,7 @@ Run `otelc cleanup` to remove them.
 | `matched.json` | Rules that matched dependencies; empty array when nothing matched. |
 | `debug/<package>/*.diff` | Instrumentation diff reports (per-rule and full diffs, plus `/dev/null` added files). |
 | `debug/<package>/*` | Retained copies of instrumented and generated source files sent to the compiler. |
-| `debug/main/otelc.runtime.go` | Generated helper file for runtime hooks and file injections. |
+| `debug/<package>/otelc.runtime.go` | Generated helper file for runtime hooks and file declarations for `<package>`. |
 | `debug/main/go.mod` | Copy of `go.mod` after `otelc` adds its `replace` directives. |
 | `gocache/` | Persistent Go build cache used across `otelc` builds. |
 | `added_imports.<pid>.json` | Per-process import tracking used during the link phase. |

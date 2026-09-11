@@ -107,6 +107,30 @@ func TestGOFLAGSPreparedBuild(t *testing.T) {
 		build.directBuild(build.moduleDir, false)
 		build.runAndRequireHTTPSpan()
 	})
+
+	t.Run("debug diff lifecycle across builds", func(t *testing.T) {
+		debugEnv := append(baseEnv, "OTELC_DEBUG=1")
+		build := newPreparedBuildCase(t, absoluteOtelcPath, debugEnv, goFlags, ".")
+		build.setup()
+
+		debugDir := filepath.Join(build.moduleDir, ".otelc-build", "debug")
+		require.DirExists(t, debugDir)
+
+		runtimeDiff := filepath.Join(debugDir, "example_com_otelc-prepared", "otelc.runtime.go.diff")
+		require.FileExists(t, runtimeDiff)
+
+		// Build 1: direct build under debug
+		build.directBuild(build.moduleDir, false)
+		build.runAndRequireHTTPSpan()
+		require.FileExists(t, runtimeDiff)
+
+		// Build 2: run again where packages are served from cache
+		build.directBuild(build.moduleDir, false)
+		build.runAndRequireHTTPSpan()
+
+		// Runtime diff from setup must remain preserved across direct cached builds
+		require.FileExists(t, runtimeDiff)
+	})
 }
 
 type preparedBuildCase struct {

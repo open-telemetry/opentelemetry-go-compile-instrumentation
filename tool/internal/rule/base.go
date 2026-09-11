@@ -5,9 +5,7 @@ package rule
 
 import (
 	"fmt"
-	"maps"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/util"
@@ -192,32 +190,28 @@ func (irs *InstRuleSet) SetCgoFileMap(cgoFiles map[string]string) {
 	irs.CgoFileMap = cgoFiles
 }
 
-// AllFuncRules returns all function rules from the rule set as a flat slice
-// with deterministic order.
+// AllFuncRules returns all function rules from the rule set as a flat slice.
 func (irs *InstRuleSet) AllFuncRules() []*InstFuncRule {
-	keys := slices.Sorted(maps.Keys(irs.FuncRules))
 	n := 0
-	for _, k := range keys {
-		n += len(irs.FuncRules[k])
+	for _, rs := range irs.FuncRules {
+		n += len(rs)
 	}
 	rules := make([]*InstFuncRule, 0, n)
-	for _, k := range keys {
-		rules = append(rules, irs.FuncRules[k]...)
+	for _, rs := range irs.FuncRules {
+		rules = append(rules, rs...)
 	}
 	return rules
 }
 
-// AllStructRules returns all struct rules from the rule set as a flat slice
-// with deterministic order.
+// AllStructRules returns all struct rules from the rule set as a flat slice.
 func (irs *InstRuleSet) AllStructRules() []*InstStructRule {
-	keys := slices.Sorted(maps.Keys(irs.StructRules))
 	n := 0
-	for _, k := range keys {
-		n += len(irs.StructRules[k])
+	for _, rs := range irs.StructRules {
+		n += len(rs)
 	}
 	rules := make([]*InstStructRule, 0, n)
-	for _, k := range keys {
-		rules = append(rules, irs.StructRules[k]...)
+	for _, rs := range irs.StructRules {
+		rules = append(rules, rs...)
 	}
 	return rules
 }

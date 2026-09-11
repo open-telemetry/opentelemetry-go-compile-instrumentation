@@ -154,21 +154,22 @@ func runtimeContributors(funcRules []*rule.InstFuncRule, fileRules []*rule.InstF
 		contributors = append(contributors, name)
 	}
 
+	slices.Sort(contributors)
 	return contributors
 }
 
-func (sp *setupPhase) writeRuntimeDiffForDebug(srcPath string, contributors []string) {
+func (sp *setupPhase) writeRuntimeDiffForDebug(srcPath, pkgPath string, contributors []string) {
 	if !instrument.DiffDebugEnabled() {
 		return
 	}
-	dest := filepath.Join(setupDebugDir(srcPath), filepath.Base(srcPath)+".diff")
+	dest := filepath.Join(setupDebugDir(pkgPath), filepath.Base(srcPath)+".diff")
 	header := instrument.FormatGeneratedFileHeader(otelcRuntimeFile, contributors)
 	instrument.WriteAddedSourceDiff(dest, srcPath, header, sp.logger)
 }
 
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
-func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, packagePath, packageName string) error {
+func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkgDir, pkgName, pkgPath string) error {
 	funcRules := []*rule.InstFuncRule{}
 	fileRules := []*rule.InstFileRule{}
 	for _, m := range matched {
@@ -184,8 +185,8 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	// Generate the variable declarations that used by otel runtime
 	varDecls := genVarDecl(funcRules)
 	// build the ast
-	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), packageName)
-	otelcRuntimeFilePath := filepath.Join(packagePath, otelcRuntimeFile)
+	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), pkgName)
+	otelcRuntimeFilePath := filepath.Join(pkgDir, otelcRuntimeFile)
 	// Track file in state manager
 	if stateManager, found := stateManagerFromContext(ctx); found {
 		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
@@ -196,8 +197,8 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
-	keepForDebug(ctx, otelcRuntimeFilePath)
-	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, runtimeContributors(funcRules, fileRules))
+	keepForDebug(ctx, otelcRuntimeFilePath, pkgPath)
+	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, pkgPath, runtimeContributors(funcRules, fileRules))
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
 }

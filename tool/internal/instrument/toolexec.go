@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dave/dst"
+	"github.com/gofrs/flock"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -77,18 +78,11 @@ func (ip *instrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *instrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *instrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
-// escapeModPath turns a module import path into a filesystem-safe directory
-// name for debug artifacts, e.g. "a/b.c" -> "a_b_c".
-func escapeModPath(s string) string {
-	s = strings.ReplaceAll(s, "/", "_")
-	return strings.ReplaceAll(s, ".", "_")
-}
-
 // debugArtifactDir returns the directory under .otelc-build holding this
 // package's debug artifacts.
 func (ip *instrumentPhase) debugArtifactDir() string {
 	modPath := util.FindFlagValue(ip.compileArgs, "-p")
-	return util.GetBuildTemp(filepath.Join("debug", escapeModPath(modPath)))
+	return util.GetBuildTemp(filepath.Join("debug", util.EscapePackagePath(modPath)))
 }
 
 // keepForDebug keeps the the file to .otelc-build directory for debugging
@@ -256,11 +250,144 @@ func CleanupImportTrackingFiles() {
 	}
 }
 
+func debugLockPath() string {
+	return util.GetBuildTemp("debug.lock")
+}
+
+func debugSessionFilePath() string {
+	return util.GetBuildTemp(".debug_session")
+}
+
+// RecordDebugSession writes the given session token to the debug session file.
+func RecordDebugSession(token string) error {
+	path := debugSessionFilePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(token), 0o600)
+}
+
+// ReadDebugSession reads the session token from the debug session file.
+// If the file does not exist, it returns an empty string without error.
+func ReadDebugSession() (string, error) {
+	data, err := os.ReadFile(debugSessionFilePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// GetCurrentBuildSession returns the session token for the current build.
+// If EnvOtelcBuildSession is set (wrapper mode), it returns that value.
+// Otherwise (direct mode), it derives the token from the parent process ID (ppid).
+func GetCurrentBuildSession() string {
+	if s := os.Getenv(util.EnvOtelcBuildSession); s != "" {
+		return s
+	}
+	return fmt.Sprintf("direct_%d", os.Getppid())
+}
+
+// CleanStaleCompilerArtifacts removes compiled source diffs and retained source files
+// from previous builds, while preserving runtime helper artifacts (otelc.runtime.go and
+// otelc.runtime.go.diff) generated during the setup phase.
+func CleanStaleCompilerArtifacts() error {
+	debugDir := util.GetBuildTemp("debug")
+	entries, err := os.ReadDir(debugDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, entry := range entries {
+		entryPath := filepath.Join(debugDir, entry.Name())
+		if !entry.IsDir() {
+			if entry.Name() != ".session" {
+				_ = os.Remove(entryPath)
+			}
+			continue
+		}
+
+		subEntries, subErr := os.ReadDir(entryPath)
+		if subErr != nil {
+			continue
+		}
+		remaining := 0
+		for _, sub := range subEntries {
+			name := sub.Name()
+			if name == "otelc.runtime.go" || name == "otelc.runtime.go.diff" {
+				remaining++
+				continue
+			}
+			_ = os.Remove(filepath.Join(entryPath, name))
+		}
+		if remaining == 0 {
+			_ = os.Remove(entryPath)
+		}
+	}
+	return nil
+}
+
+// EnsureDebugInitialized ensures that debug artifacts for the current build session
+// are initialized safely and exactly once across concurrent toolexec processes.
+// In direct mode (GOFLAGS=-toolexec), this removes stale compiler artifacts from
+// previous builds so that cached packages do not leave misleading diff reports.
+func EnsureDebugInitialized(ctx context.Context) error {
+	if !DiffDebugEnabled() {
+		return nil
+	}
+
+	currentSession := GetCurrentBuildSession()
+
+	// Fast lock-free check
+	session, err := ReadDebugSession()
+	if err == nil && session == currentSession {
+		return nil
+	}
+
+	// Acquire advisory lock
+	lockPath := debugLockPath()
+	if mkErr := os.MkdirAll(filepath.Dir(lockPath), 0o755); mkErr != nil {
+		return mkErr
+	}
+	fileLock := flock.New(lockPath)
+	if lockErr := fileLock.Lock(); lockErr != nil {
+		return ex.Wrapf(lockErr, "locking debug initialization")
+	}
+	defer func() {
+		_ = fileLock.Unlock()
+	}()
+
+	// Double check under lock
+	session, err = ReadDebugSession()
+	if err == nil && session == currentSession {
+		return nil
+	}
+
+	// If setup just ran for this workspace, its runtime artifacts are fresh;
+	// promote the session without wiping them.
+	if strings.HasPrefix(session, "setup_") {
+		return RecordDebugSession(currentSession)
+	}
+
+	// Otherwise, clean stale compiler artifacts from prior builds
+	if cleanErr := CleanStaleCompilerArtifacts(); cleanErr != nil {
+		util.LoggerFromContext(ctx).WarnContext(ctx, "failed cleaning stale compiler artifacts", "error", cleanErr)
+	}
+
+	return RecordDebugSession(currentSession)
+}
+
 // CleanupDebugArtifacts removes debug artifacts from previous builds.
 // Should be called at the start of a build under debug mode to clean up
 // stale diffs and debug files from prior runs.
 // This is exported for use by the setup phase.
 func CleanupDebugArtifacts() error {
+	_ = os.Remove(debugSessionFilePath())
 	return os.RemoveAll(util.GetBuildTemp("debug"))
 }
 
@@ -506,6 +633,13 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 // nested (see EnvOtelcNestedToolexec) means this runs inside a go command
 // another otelc spawned; such invocations only rewrite tool version probes.
 func Toolexec(ctx context.Context, args []string, nested bool) error {
+	// Initialize debug artifacts once per build session if debug diffs are enabled
+	if DiffDebugEnabled() && !nested {
+		if err := EnsureDebugInitialized(ctx); err != nil {
+			util.LoggerFromContext(ctx).WarnContext(ctx, "failed to initialize debug artifacts", "error", err)
+		}
+	}
+
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
 

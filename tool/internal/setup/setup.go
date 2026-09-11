@@ -36,28 +36,27 @@ func (sp *setupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args
 func (sp *setupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *setupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
-func setupDebugDir(srcPath string) string {
-	escape := func(s string) string {
-		s = strings.ReplaceAll(s, "/", "_")
-		s = strings.ReplaceAll(s, ".", "_")
-		return s
+func setupDebugDir(pkgPath string) string {
+	if pkgPath == "" {
+		pkgPath = "main"
 	}
-
-	var name string
-	if filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()) {
-		name = "main"
-	} else {
-		name = escape(filepath.Base(filepath.Dir(srcPath)))
-	}
-
-	return filepath.Join(util.GetBuildTemp("debug"), name)
+	return filepath.Join(util.GetBuildTemp("debug"), util.EscapePackagePath(pkgPath))
 }
 
 // keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
-func keepForDebug(ctx context.Context, srcPath string) {
+func keepForDebug(ctx context.Context, srcPath string, pkgPath ...string) {
 	logger := util.LoggerFromContext(ctx)
-	dstPath := filepath.Join(setupDebugDir(srcPath), filepath.Base(srcPath))
+	var targetDir string
+	switch {
+	case len(pkgPath) > 0 && pkgPath[0] != "":
+		targetDir = setupDebugDir(pkgPath[0])
+	case filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()):
+		targetDir = setupDebugDir("main")
+	default:
+		targetDir = setupDebugDir(filepath.Base(filepath.Dir(srcPath)))
+	}
+	dstPath := filepath.Join(targetDir, filepath.Base(srcPath))
 	if err := util.CopyFile(srcPath, dstPath); err != nil {
 		logger.WarnContext(ctx, "failed to record added file", "path", srcPath, "error", err)
 	}
@@ -314,7 +313,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, pkgDir, pkg.Name); err != nil {
+		if err := sp.addDeps(ctx, matched, pkgDir, pkg.Name, pkg.PkgPath); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
@@ -435,6 +434,10 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, pkgs, matched); err != nil {
 		return err
+	}
+
+	if cmd.Name != "go" && instrument.DiffDebugEnabled() {
+		_ = instrument.RecordDebugSession(fmt.Sprintf("setup_%d", time.Now().UnixNano()))
 	}
 
 	// Write the matched ruleset to matched.json for further instrument phase
@@ -656,6 +659,9 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 		if err := instrument.CleanupDebugArtifacts(); err != nil {
 			return ex.Wrapf(err, "cleaning debug artifacts")
 		}
+		sessionID := fmt.Sprintf("wrapper_%d", time.Now().UnixNano())
+		_ = os.Setenv(util.EnvOtelcBuildSession, sessionID)
+		_ = instrument.RecordDebugSession(sessionID)
 	}
 
 	defer func() {
