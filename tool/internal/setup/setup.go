@@ -436,10 +436,6 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if cmd.Name != "go" && instrument.DiffDebugEnabled() {
-		_ = instrument.RecordDebugSession(fmt.Sprintf("setup_%d", time.Now().UnixNano()))
-	}
-
 	// Write the matched ruleset to matched.json for further instrument phase
 	return sp.store(ctx, matched, moduleDirs)
 }
@@ -659,9 +655,6 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 		if err := instrument.CleanupDebugArtifacts(); err != nil {
 			return ex.Wrapf(err, "cleaning debug artifacts")
 		}
-		sessionID := fmt.Sprintf("wrapper_%d", time.Now().UnixNano())
-		_ = os.Setenv(util.EnvOtelcBuildSession, sessionID)
-		_ = instrument.RecordDebugSession(sessionID)
 	}
 
 	defer func() {

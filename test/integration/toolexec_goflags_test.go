@@ -108,55 +108,40 @@ func TestGOFLAGSPreparedBuild(t *testing.T) {
 		build.runAndRequireHTTPSpan()
 	})
 
-	t.Run("debug diff lifecycle across builds", func(t *testing.T) {
+	t.Run("debug diff direct mode integration", func(t *testing.T) {
 		debugEnv := append(baseEnv, "OTELC_DEBUG=1")
 		build := newPreparedBuildCase(t, absoluteOtelcPath, debugEnv, goFlags, ".")
+
+		// 1. Plant a stale debug artifact from a previous run
+		staleDir := filepath.Join(build.moduleDir, ".otelc-build", "debug", "stale_pkg")
+		require.NoError(t, os.MkdirAll(staleDir, 0o755))
+		staleDiff := filepath.Join(staleDir, "stale.go.diff")
+		require.NoError(t, os.WriteFile(staleDiff, []byte("stale diff content"), 0o644))
+
+		// 2. Run otelc setup under debug to establish the diagnostic lifecycle boundary
 		build.setup()
+
+		// Verify stale debug files were cleared by setup
+		require.NoFileExists(t, staleDiff, "otelc setup must clear stale debug artifacts under debug mode")
 
 		debugDir := filepath.Join(build.moduleDir, ".otelc-build", "debug")
 		require.DirExists(t, debugDir)
 
+		// Verify setup runtime diff was generated in the package directory
 		runtimeDiff := filepath.Join(debugDir, "example_com_otelc-prepared", "otelc.runtime.go.diff")
 		require.FileExists(t, runtimeDiff)
 
-		// Build 1: direct build under debug
-		build.directBuild(build.moduleDir, false)
-		build.runAndRequireHTTPSpan()
+		// 3. Run direct OTELC_DEBUG=1 go build -a to force package recompilation
+		build.directBuild(build.moduleDir, false, "-a")
+
+		compilerDiff := filepath.Join(debugDir, "net_http", "roundtrip.go.diff")
+		require.FileExists(t, compilerDiff)
+
+		// 5. Verify runtime diff remains available
 		require.FileExists(t, runtimeDiff)
 
-		latestFile := filepath.Join(debugDir, "sessions", "latest")
-		require.FileExists(t, latestFile)
-		session1Bytes, err := os.ReadFile(latestFile)
-		require.NoError(t, err)
-		session1 := strings.TrimSpace(string(session1Bytes))
-		require.NotEmpty(t, session1)
-
-		// Build 1 session must contain both setup runtime diff and compiler-generated diff
-		session1RuntimeDiff := filepath.Join(debugDir, "sessions", session1, "example_com_otelc-prepared", "otelc.runtime.go.diff")
-		session1CompilerDiff := filepath.Join(debugDir, "sessions", session1, "net_http", "roundtrip.go.diff")
-		require.FileExists(t, session1RuntimeDiff)
-		require.FileExists(t, session1CompilerDiff)
-
-		// Build 2: run again where packages are served from cache (no compilation)
-		build.directBuild(build.moduleDir, false)
+		// Verify binary runs and produces HTTP span
 		build.runAndRequireHTTPSpan()
-
-		// Runtime diff from setup must remain preserved across direct cached builds
-		require.FileExists(t, runtimeDiff)
-
-		session2Bytes, err := os.ReadFile(latestFile)
-		require.NoError(t, err)
-		session2 := strings.TrimSpace(string(session2Bytes))
-		require.NotEmpty(t, session2)
-		require.NotEqual(t, session1, session2, "cached build must run under a new build session")
-
-		// Build 2 session must contain the setup runtime diff...
-		session2RuntimeDiff := filepath.Join(debugDir, "sessions", session2, "example_com_otelc-prepared", "otelc.runtime.go.diff")
-		require.FileExists(t, session2RuntimeDiff)
-
-		// ...but must NOT contain the stale compiler-generated diff from Build 1
-		session2CompilerDiff := filepath.Join(debugDir, "sessions", session2, "net_http", "roundtrip.go.diff")
-		require.NoFileExists(t, session2CompilerDiff, "stale compiler diff from build 1 must be absent in build 2 session")
 	})
 }
 
@@ -259,10 +244,12 @@ func (b *preparedBuildCase) plainBuild() {
 	require.NoError(b.t, err, "plain go build failed:\n%s", output)
 }
 
-func (b *preparedBuildCase) directBuild(buildDir string, emptyWorkDirEnv bool) {
+func (b *preparedBuildCase) directBuild(buildDir string, emptyWorkDirEnv bool, extraArgs ...string) {
 	b.t.Helper()
 
-	cmd := exec.CommandContext(b.t.Context(), "go", "build", "-o", b.appPath(), ".")
+	args := append([]string{"build", "-o", b.appPath()}, extraArgs...)
+	args = append(args, ".")
+	cmd := exec.CommandContext(b.t.Context(), "go", args...)
 	cmd.Dir = buildDir
 	cmd.Env = preparedDropInBuildEnvironment(b.baseEnv, b.goCache, b.goFlags)
 	if emptyWorkDirEnv {

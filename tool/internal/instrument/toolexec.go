@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -16,12 +15,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dave/dst"
-	"github.com/gofrs/flock"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -65,8 +62,7 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
-	// Hook files already parsed via parseHookFileCached, keyed by absolute
-	// file path. A hook package directory is typically shared by many func
+	// Cache for parsed hook files. Many rules share the same hook file across
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
@@ -80,25 +76,12 @@ func (ip *instrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *instrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *instrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
-const debugSessionsDirName = "sessions"
-
-func isWrapperMode() bool {
-	return strings.HasPrefix(os.Getenv(util.EnvOtelcBuildSession), "wrapper_")
-}
-
 // debugArtifactDir returns the directory under .otelc-build holding this
-// package's debug artifacts. In wrapper mode, artifacts live directly under
-// .otelc-build/debug/<package>/. In direct mode, artifacts are scoped to the
-// build session (.otelc-build/debug/sessions/<session>/<package>/) so concurrent
-// independent builds do not invalidate each other's active diff reports.
+// package's debug artifacts (.otelc-build/debug/<escaped-package>/).
 func (ip *instrumentPhase) debugArtifactDir() string {
 	modPath := util.FindFlagValue(ip.compileArgs, "-p")
 	pkgDir := util.EscapePackagePath(modPath)
-	if isWrapperMode() {
-		return util.GetBuildTemp(filepath.Join("debug", pkgDir))
-	}
-	session := GetCurrentBuildSession()
-	return DebugSessionDir(session, pkgDir)
+	return util.GetBuildTemp(filepath.Join("debug", pkgDir))
 }
 
 // keepForDebug keeps the the file to .otelc-build directory for debugging
@@ -264,286 +247,6 @@ func CleanupImportTrackingFiles() {
 	for _, file := range files {
 		_ = os.Remove(file) // Best effort cleanup
 	}
-}
-
-func debugLockPath() string {
-	return util.GetBuildTemp("debug.lock")
-}
-
-func debugSessionsBaseDir() string {
-	return util.GetBuildTemp(filepath.Join("debug", debugSessionsDirName))
-}
-
-// DebugSessionDir returns the directory holding artifacts for a given build session,
-// optionally appending subpaths (such as package directories).
-func DebugSessionDir(session string, subpath ...string) string {
-	elem := append([]string{"debug", debugSessionsDirName, session}, subpath...)
-	return util.GetBuildTemp(filepath.Join(elem...))
-}
-
-func debugSessionReadyMarker(session string) string {
-	return filepath.Join(DebugSessionDir(session), ".ready")
-}
-
-func debugLatestSessionFilePath() string {
-	return filepath.Join(debugSessionsBaseDir(), "latest")
-}
-
-// RecordDebugSession writes the given session token to the latest session file.
-func RecordDebugSession(token string) error {
-	path := debugLatestSessionFilePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(token), 0o600)
-}
-
-// ReadDebugSession reads the latest session token.
-// If the file does not exist, it returns an empty string without error.
-func ReadDebugSession() (string, error) {
-	path := debugLatestSessionFilePath()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
-}
-
-// GetCurrentBuildSession returns the session token for the current build.
-// If EnvOtelcBuildSession is set (wrapper mode), it returns that value.
-// Otherwise (direct mode), it derives the token from the parent process ID (ppid).
-func GetCurrentBuildSession() string {
-	if s := os.Getenv(util.EnvOtelcBuildSession); s != "" {
-		return s
-	}
-	return fmt.Sprintf("direct_%d", os.Getppid())
-}
-
-// CleanStaleSessions removes session directories from previous builds whose
-// parent processes are no longer alive. Active overlapping builds are preserved.
-func CleanStaleSessions() error {
-	sessionsDir := debugSessionsBaseDir()
-	entries, err := os.ReadDir(sessionsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	var errs []error
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, "direct_") {
-			continue
-		}
-		pidStr := strings.TrimPrefix(name, "direct_")
-		if idx := strings.IndexByte(pidStr, '_'); idx != -1 {
-			pidStr = pidStr[:idx]
-		}
-		pid, convErr := strconv.Atoi(pidStr)
-		if convErr != nil {
-			continue
-		}
-		// If process is dead, prune this session directory
-		if !util.IsProcessAlive(pid) {
-			if rmErr := os.RemoveAll(filepath.Join(sessionsDir, name)); rmErr != nil && !os.IsNotExist(rmErr) {
-				errs = append(errs, rmErr)
-			}
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func copySetupRuntimeArtifacts(sessionDir string) error {
-	debugDir := util.GetBuildTemp("debug")
-	entries, err := os.ReadDir(debugDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == debugSessionsDirName {
-			continue
-		}
-		pkgName := entry.Name()
-		pkgDir := filepath.Join(debugDir, pkgName)
-
-		runtimeSrc := filepath.Join(pkgDir, "otelc.runtime.go")
-		runtimeDiff := filepath.Join(pkgDir, "otelc.runtime.go.diff")
-
-		targetPkgDir := filepath.Join(sessionDir, pkgName)
-
-		if _, statErr := os.Stat(runtimeSrc); statErr == nil {
-			if mkErr := os.MkdirAll(targetPkgDir, 0o755); mkErr != nil {
-				return mkErr
-			}
-			if cpErr := util.CopyFile(runtimeSrc, filepath.Join(targetPkgDir, "otelc.runtime.go")); cpErr != nil {
-				return cpErr
-			}
-		}
-		if _, statErr := os.Stat(runtimeDiff); statErr == nil {
-			if mkErr := os.MkdirAll(targetPkgDir, 0o755); mkErr != nil {
-				return mkErr
-			}
-			if cpErr := util.CopyFile(runtimeDiff, filepath.Join(targetPkgDir, "otelc.runtime.go.diff")); cpErr != nil {
-				return cpErr
-			}
-		}
-	}
-	return nil
-}
-
-func cleanPackageCompilerArtifacts(entryPath string) error {
-	subEntries, subErr := os.ReadDir(entryPath)
-	if subErr != nil {
-		return subErr
-	}
-	var errs []error
-	remaining := 0
-	for _, sub := range subEntries {
-		name := sub.Name()
-		if name == "otelc.runtime.go" || name == "otelc.runtime.go.diff" {
-			remaining++
-			continue
-		}
-		if rmErr := os.Remove(filepath.Join(entryPath, name)); rmErr != nil && !os.IsNotExist(rmErr) {
-			errs = append(errs, rmErr)
-		}
-	}
-	if remaining == 0 {
-		if rmErr := os.Remove(entryPath); rmErr != nil && !os.IsNotExist(rmErr) {
-			errs = append(errs, rmErr)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// CleanStaleCompilerArtifacts removes compiled source diffs and retained source files
-// from previous builds, while preserving runtime helper artifacts (otelc.runtime.go and
-// otelc.runtime.go.diff) generated during the setup phase.
-func CleanStaleCompilerArtifacts() error {
-	debugDir := util.GetBuildTemp("debug")
-	entries, err := os.ReadDir(debugDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	var errs []error
-	for _, entry := range entries {
-		entryPath := filepath.Join(debugDir, entry.Name())
-		if !entry.IsDir() {
-			if entry.Name() != ".session" {
-				if rmErr := os.Remove(entryPath); rmErr != nil && !os.IsNotExist(rmErr) {
-					errs = append(errs, rmErr)
-				}
-			}
-			continue
-		}
-		if entry.Name() == debugSessionsDirName {
-			continue
-		}
-
-		if pkgErr := cleanPackageCompilerArtifacts(entryPath); pkgErr != nil {
-			errs = append(errs, pkgErr)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// EnsureDebugInitialized ensures that debug artifacts for the current build session
-// are initialized safely and exactly once across concurrent toolexec processes.
-// In direct mode, each build receives an isolated session directory so overlapping
-// builds never delete each other's active diff reports.
-func EnsureDebugInitialized(ctx context.Context) error {
-	return EnsureDebugInitializedWithCleaner(ctx, GetCurrentBuildSession(), os.RemoveAll)
-}
-
-// EnsureDebugInitializedWithCleaner initializes the debug session directory using the provided
-// cleaner function. Exported for tests requiring simulated cleanup failure injection.
-func EnsureDebugInitializedWithCleaner(_ context.Context, session string, cleaner func(string) error) error {
-	if !DiffDebugEnabled() {
-		return nil
-	}
-
-	// In wrapper mode, runGoBuild already established and cleaned debug output upfront
-	if isWrapperMode() {
-		return nil
-	}
-
-	// If no otelc work directory was discovered (e.g. toolchain invocation for GOROOT
-	// packages running from a directory without .otelc-build), skip debug initialization.
-	if os.Getenv(util.EnvOtelcWorkDir) == "" {
-		return nil
-	}
-
-	sessionDir := DebugSessionDir(session)
-	readyMarker := debugSessionReadyMarker(session)
-
-	// Fast lock-free check
-	if _, err := os.Stat(readyMarker); err == nil {
-		return nil
-	}
-
-	// Acquire advisory lock
-	lockPath := debugLockPath()
-	if mkErr := os.MkdirAll(filepath.Dir(lockPath), 0o755); mkErr != nil {
-		return mkErr
-	}
-	fileLock := flock.New(lockPath)
-	if lockErr := fileLock.Lock(); lockErr != nil {
-		return ex.Wrapf(lockErr, "locking debug initialization")
-	}
-	defer func() {
-		_ = fileLock.Unlock()
-	}()
-
-	// Double-check under lock
-	if _, err := os.Stat(readyMarker); err == nil {
-		return nil
-	}
-
-	// Prune dead sessions from prior finished builds (active overlapping builds are preserved)
-	_ = CleanStaleSessions()
-
-	// Clean this session directory if it previously existed (e.g. reused PID)
-	if err := cleaner(sessionDir); err != nil && !os.IsNotExist(err) {
-		return ex.Wrapf(err, "cleaning session directory %s", sessionDir)
-	}
-
-	// Create fresh session directory
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		return ex.Wrapf(err, "creating session directory %s", sessionDir)
-	}
-
-	// Copy prerequisite setup runtime artifacts into this build's session directory
-	if err := copySetupRuntimeArtifacts(sessionDir); err != nil {
-		return ex.Wrapf(err, "copying setup runtime artifacts to session %s", session)
-	}
-
-	// Record latest session for discoverability
-	if err := RecordDebugSession(session); err != nil {
-		return ex.Wrapf(err, "recording latest debug session")
-	}
-
-	// Publish ready marker only after successful namespace establishment
-	if err := os.WriteFile(readyMarker, []byte(fmt.Sprintf("%d\n", time.Now().UnixNano())), 0o600); err != nil {
-		return ex.Wrapf(err, "writing debug session ready marker")
-	}
-
-	return nil
 }
 
 // CleanupDebugArtifacts removes debug artifacts from previous builds.
@@ -796,13 +499,6 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 // nested (see EnvOtelcNestedToolexec) means this runs inside a go command
 // another otelc spawned; such invocations only rewrite tool version probes.
 func Toolexec(ctx context.Context, args []string, nested bool) error {
-	// Initialize debug artifacts once per build session if debug diffs are enabled
-	if DiffDebugEnabled() && !nested {
-		if err := EnsureDebugInitialized(ctx); err != nil {
-			return ex.Wrapf(err, "failed to initialize debug artifacts")
-		}
-	}
-
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
 

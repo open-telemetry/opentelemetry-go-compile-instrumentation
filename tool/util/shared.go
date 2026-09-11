@@ -27,15 +27,13 @@ const (
 	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
 	// command otelc itself ran (e.g. `go list -export`).
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
-	// EnvOtelcBuildSession is used to identify a build session for debug artifact lifecycle.
-	EnvOtelcBuildSession = "OTELC_BUILD_SESSION"
-	BuildTempDir         = ".otelc-build"
-	BuildLockFile        = BuildTempDir + ".lock"
-	OtelcRoot            = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot         = OtelcRoot + "/pkg"
-	OtelcInstRoot        = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot     = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe         = "otelc"
+	BuildTempDir           = ".otelc-build"
+	BuildLockFile          = BuildTempDir + ".lock"
+	OtelcRoot              = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot           = OtelcRoot + "/pkg"
+	OtelcInstRoot          = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot       = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe           = "otelc"
 )
 
 // IsRuleFile reports whether name identifies an otelc rule file.
