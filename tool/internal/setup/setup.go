@@ -66,67 +66,6 @@ func isSetup() bool {
 	return false
 }
 
-// flagsWithPathValues contains flags that accept a value from "go build" command.
-//
-//nolint:gochecknoglobals // private lookup table
-var flagsWithPathValues = map[string]bool{
-	"-C":             true,
-	"-o":             true,
-	"-p":             true,
-	"-covermode":     true,
-	"-coverpkg":      true,
-	"-asmflags":      true,
-	"-buildmode":     true,
-	"-buildvcs":      true,
-	"-compiler":      true,
-	"-gccgoflags":    true,
-	"-gcflags":       true,
-	"-installsuffix": true,
-	"-ldflags":       true,
-	"-mod":           true,
-	"-modfile":       true,
-	"-overlay":       true,
-	"-pgo":           true,
-	"-pkgdir":        true,
-	"-tags":          true,
-	"-toolexec":      true,
-}
-
-// testFlagsWithValues contains `go test` flags that take a separate value
-// argument. Their values are not packages, so splitBuildTargets skips them when
-// scanning for package targets (e.g. `go test -run TestX ./pkg` — TestX is the
-// value of -run, not a package). `-args` is handled separately by
-// splitBuildTargets, which stops scanning at it.
-//
-//nolint:gochecknoglobals // private lookup table
-var testFlagsWithValues = map[string]bool{
-	"-bench":                true,
-	"-benchtime":            true,
-	"-blockprofile":         true,
-	"-blockprofilerate":     true,
-	"-count":                true,
-	"-coverprofile":         true,
-	"-cpu":                  true,
-	"-cpuprofile":           true,
-	"-exec":                 true,
-	"-fuzz":                 true,
-	"-fuzzminimizetime":     true,
-	"-fuzztime":             true,
-	"-list":                 true,
-	"-memprofile":           true,
-	"-memprofilerate":       true,
-	"-mutexprofile":         true,
-	"-mutexprofilefraction": true,
-	"-outputdir":            true,
-	"-parallel":             true,
-	"-run":                  true,
-	"-shuffle":              true,
-	"-skip":                 true,
-	"-timeout":              true,
-	"-trace":                true,
-	"-vet":                  true,
-}
-
 // Go subcommands that otelc wraps with toolexec instrumentation.
 const (
 	subcmdBuild   = "build"
@@ -149,63 +88,17 @@ const (
 	flagJSON = "-json"
 )
 
-func isTestDelimiter(arg string) bool {
-	return arg == delimiterDashDash || arg == flagArgs || arg == flagArgsDashDash
-}
-
 func findTestDelimiter(subcommand string, args []string) int {
 	if subcommand != subcmdTest {
 		return -1
 	}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if isTestDelimiter(arg) {
-			return i
-		}
-		if strings.HasPrefix(arg, "-") {
-			flag := parseFlag(arg, true)
-			if !flag.hasValue && flag.takesValue {
-				i++ // skip separated value
-			}
+	classified := classifyArgs(subcommand, args)
+	for _, a := range classified {
+		if a.Kind == ArgTestDelimiter {
+			return a.Index
 		}
 	}
 	return -1
-}
-
-// flagName returns the flag name of arg in single-dash form, without a joined
-// value. The go command accepts -flag and --flag interchangeably.
-func flagName(arg string) string {
-	name, _, _ := strings.Cut(arg, "=")
-	if strings.HasPrefix(name, "--") {
-		return name[1:]
-	}
-	return name
-}
-
-type parsedFlag struct {
-	name       string
-	hasValue   bool
-	takesValue bool
-}
-
-func parseFlag(arg string, isTest bool) parsedFlag {
-	rawName, _, hasValue := strings.Cut(arg, "=")
-	name := flagName(rawName)
-	if flagsWithPathValues[name] {
-		return parsedFlag{name: name, hasValue: hasValue, takesValue: true}
-	}
-	if !isTest {
-		return parsedFlag{name: name, hasValue: hasValue, takesValue: false}
-	}
-	if testFlagsWithValues[name] {
-		return parsedFlag{name: name, hasValue: hasValue, takesValue: true}
-	}
-	if suffix, ok := strings.CutPrefix(name, "-test."); ok {
-		if testFlagsWithValues["-"+suffix] {
-			return parsedFlag{name: name, hasValue: hasValue, takesValue: true}
-		}
-	}
-	return parsedFlag{name: name, hasValue: hasValue, takesValue: false}
 }
 
 // getBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
@@ -220,7 +113,7 @@ func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]
 	if err != nil {
 		return nil, err
 	}
-	buildFlags := extractBuildFlags(args)
+	buildFlags := extractBuildFlags(subcommand, args)
 
 	var (
 		pkgs    []*packages.Package
@@ -268,31 +161,23 @@ func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
 func splitBuildTargets(subcommand string, args []string) ([]string, []string, error) {
+	classified := classifyArgs(subcommand, args)
 	var pkgs, files []string
-	isTest := subcommand == subcmdTest
 
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-
-		if isTest && isTestDelimiter(arg) {
-			break
-		}
-
-		if strings.HasPrefix(arg, "-") {
-			flag := parseFlag(arg, isTest)
-			if !flag.hasValue && flag.takesValue {
-				if i+1 >= len(args) {
-					return nil, nil, ex.Newf("flag %q requires a value", arg)
-				}
-				i++ // skip this flag's separate value
+	for i, a := range classified {
+		if (a.Kind == ArgBuildFlag || a.Kind == ArgTestFlag) && !a.HasValue && takesValue(a.FlagName) {
+			if i == len(classified)-1 ||
+				(i+1 < len(classified) && classified[i+1].Kind != ArgBuildFlagValue && classified[i+1].Kind != ArgTestFlagValue) {
+				return nil, nil, ex.Newf("flag %q requires a value", a.Raw)
 			}
-			continue
 		}
 
-		if filepath.Ext(arg) == ".go" {
-			files = append(files, arg)
-		} else {
-			pkgs = append(pkgs, arg)
+		if a.Kind == ArgTarget {
+			if filepath.Ext(a.Raw) == ".go" {
+				files = append(files, a.Raw)
+			} else {
+				pkgs = append(pkgs, a.Raw)
+			}
 		}
 	}
 
@@ -412,7 +297,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		// below call it) would still resolve vendor/ paths without an @version;
 		// rewrite it to module mode when vendoring is active so both build phases
 		// agree on where the dependency source lives.
-		args = rewriteModVendor(args)
+		args = rewriteModVendor(subcommand, args)
 	}
 
 	if isSetup() {
@@ -499,28 +384,6 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 	return env, nil
 }
 
-// buildContextFlagsWithValue are go build flags that take a value and affect the build context.
-//
-//nolint:gochecknoglobals // private lookup table
-var buildContextFlagsWithValue = map[string]bool{
-	"-C":       true, // Change directory before running the command
-	"-overlay": true, // JSON overlay file used by go list/build
-	"-tags":    true, // build tags
-	"-mod":     true, // Module mode (vendor, mod, readonly)
-	"-modfile": true, // Custom go.mod file
-}
-
-// buildContextBoolFlags are go build boolean flags that affect the build context.
-//
-//nolint:gochecknoglobals // private lookup table
-var buildContextBoolFlags = map[string]bool{
-	"-race":     true, // Race detector
-	"-msan":     true, // Memory sanitizer
-	"-cover":    true, // Coverage
-	"-asan":     true, // Address sanitizer
-	"-trimpath": true, // Remove file system paths from compiled archives
-}
-
 // extractBuildFlags extracts flags that affect the build context from the arguments.
 // These flags need to be forwarded to `go list` when resolving import archives.
 // Returns a slice of flag arguments preserving their original form.
@@ -529,7 +392,11 @@ var buildContextBoolFlags = map[string]bool{
 //   - GOFLAGS=-race with -race=false on CLI (result: -race=false)
 //   - -race -race=false (result: -race=false)
 //   - -race=false -race (result: -race)
-func extractBuildFlags(args []string) []string {
+func extractBuildFlags(subcommand string, args []string) []string {
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
+	classified := classifyArgs(subcommand, args)
 	var valueFlags []string
 	type boolFlagValue struct {
 		set   bool
@@ -537,50 +404,36 @@ func extractBuildFlags(args []string) []string {
 	}
 	boolFlagState := make(map[string]boolFlagValue) // Track final state of boolean flags
 
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
+	for i, a := range classified {
+		if a.Kind != ArgBuildFlag {
+			continue
+		}
 
-		// Handle -flag=value format
-		if idx := strings.Index(arg, "="); idx > 0 {
-			flagName := arg[:idx]
-			flagValue := arg[idx+1:]
-
-			// Handle value flags (e.g., -tags=foo, -mod=vendor)
-			if buildContextFlagsWithValue[flagName] {
-				valueFlags = append(valueFlags, arg)
-				continue
+		if isBuildContextFlagWithValue(a.FlagName) {
+			if a.HasValue {
+				valueFlags = append(valueFlags, a.Raw)
+			} else if i+1 < len(classified) && classified[i+1].Kind == ArgBuildFlagValue {
+				valueFlags = append(valueFlags, a.Raw, classified[i+1].Raw)
 			}
+			continue
+		}
 
-			// Handle boolean flags in =value format (e.g., -race=true, -race=false)
-			// strconv.ParseBool accepts: 1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False
-			if buildContextBoolFlags[flagName] {
-				if enabled, err := strconv.ParseBool(flagValue); err == nil {
-					boolFlagState[flagName] = boolFlagValue{set: true, value: enabled} // Last value wins
+		if isBuildContextBoolFlag(a.FlagName) {
+			if a.HasValue {
+				if enabled, err := strconv.ParseBool(a.Value); err == nil {
+					boolFlagState[a.FlagName] = boolFlagValue{set: true, value: enabled} // Last value wins
 				}
-				// Parse error: ignore invalid value
-				continue
+			} else {
+				boolFlagState[a.FlagName] = boolFlagValue{set: true, value: true}
 			}
-			// Unrecognized -flag=value: skip it
 			continue
-		}
-
-		// Handle boolean flags like -race, -msan, -cover, -asan (implies true)
-		if buildContextBoolFlags[arg] {
-			boolFlagState[arg] = boolFlagValue{set: true, value: true}
-			continue
-		}
-
-		// Handle -flag value format (for flags that take values)
-		if buildContextFlagsWithValue[arg] && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-			valueFlags = append(valueFlags, arg, args[i+1])
-			i++ // Skip the value
 		}
 	}
 
 	// Collect boolean flags that are enabled (in deterministic order)
 	var enabledBoolFlags []string
-	for flag := range buildContextBoolFlags {
-		if state, ok := boolFlagState[flag]; ok && state.set {
+	for flag, state := range boolFlagState {
+		if state.set {
 			if state.value {
 				enabledBoolFlags = append(enabledBoolFlags, flag)
 			} else {
@@ -588,10 +441,8 @@ func extractBuildFlags(args []string) []string {
 			}
 		}
 	}
-	// Sort for deterministic output
 	slices.Sort(enabledBoolFlags)
 
-	// Combine: value flags first, then boolean flags
 	return append(valueFlags, enabledBoolFlags...)
 }
 
@@ -610,7 +461,7 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) []string {
 	subcommand := args[0]
 	restArgs := args[1:]
 	if vendored {
-		restArgs = rewriteModVendor(restArgs)
+		restArgs = rewriteModVendor(subcommand, restArgs)
 	}
 	if _, fileTargets, err2 := splitBuildTargets(subcommand, restArgs); err2 == nil && len(fileTargets) > 0 {
 		// add otelc.runtime.go manually to command line for file targets
@@ -651,9 +502,11 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
-	buildFlags := extractBuildFlags(args)
+	subcommand := args[0]
+	restArgs := args[1:]
+	buildFlags := extractBuildFlags(subcommand, restArgs)
 	if vendored {
-		buildFlags = rewriteModVendor(buildFlags)
+		buildFlags = rewriteModVendor(subcommand, buildFlags)
 	}
 	if len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)

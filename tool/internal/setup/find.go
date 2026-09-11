@@ -80,40 +80,33 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 // the go command's stderr, and -json moves it to stdout as a stream of JSON
 // build-output events instead, so the plan parses empty and no dependency is
 // found. The real build keeps the flag; only the dry run drops it.
-//
-//nolint:gochecknoglobals // private lookup table
-var planIrrelevantFlags = map[string]bool{
-	flagJSON: true,
-}
-
 // dropPlanIrrelevantFlags returns cmdArgs without the flags listed in
 // planIrrelevantFlags. Arguments after test delimiters go to the test binary rather than
 // the go command, so they pass through untouched, and a value that follows a
 // flag in separated form travels with its flag so it is never read as one.
 func dropPlanIrrelevantFlags(subcommand string, cmdArgs []string) []string {
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
+	classified := classifyArgs(subcommand, cmdArgs)
+	dropIndices := make(map[int]bool)
+
+	for i, a := range classified {
+		if (a.Kind == ArgBuildFlag || a.Kind == ArgTestFlag) && isPlanIrrelevantFlag(a.FlagName) {
+			dropIndices[a.Index] = true
+			if !a.HasValue && i+1 < len(classified) &&
+				(classified[i+1].Kind == ArgBuildFlagValue ||
+					classified[i+1].Kind == ArgTestFlagValue) {
+				dropIndices[classified[i+1].Index] = true
+			}
+		}
+	}
+
 	kept := make([]string, 0, len(cmdArgs))
-	isTest := subcommand == subcmdTest
-	for i := 0; i < len(cmdArgs); i++ {
-		arg := cmdArgs[i]
-
-		if isTest && isTestDelimiter(arg) {
-			kept = append(kept, cmdArgs[i:]...)
-			break
-		}
-		if !strings.HasPrefix(arg, "-") {
+	for i, arg := range cmdArgs {
+		if !dropIndices[i] {
 			kept = append(kept, arg)
-			continue
 		}
-
-		flag := parseFlag(arg, isTest)
-		end := i + 1
-		if !flag.hasValue && flag.takesValue && end < len(cmdArgs) {
-			end++ // the flag's value is the next argument
-		}
-		if !planIrrelevantFlags[flag.name] {
-			kept = append(kept, cmdArgs[i:end]...)
-		}
-		i = end - 1
 	}
 	return kept
 }
