@@ -86,6 +86,107 @@ package hooks
 const marker = "//go:build ignore"
 `,
 		},
+		{
+			name: "strips combined build ignore and platform directive",
+			input: `//go:build ignore && linux
+
+package main
+
+func main() {}
+`,
+			expected: `
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name: "preserves standalone platform directive without ignore",
+			input: `//go:build linux
+
+package main
+
+func main() {}
+`,
+			expected: `//go:build linux
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name: "strips legacy plus:build ignore directive",
+			input: `// +build ignore
+
+package main
+
+func main() {}
+`,
+			expected: `
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name: "strips legacy plus:build ignore directive while preserving legacy platform directive",
+			input: `// +build ignore
+// +build darwin linux
+
+package main
+
+func main() {}
+`,
+			expected: `
+// +build darwin linux
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name: "strips compound modern build directive containing ignore",
+			input: `//go:build ignore && (darwin || linux)
+
+package main
+
+func main() {}
+`,
+			expected: `
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name: "preserves compound modern build directive without ignore",
+			input: `//go:build darwin || linux
+
+package main
+
+func main() {}
+`,
+			expected: `//go:build darwin || linux
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name: "malformed build directive is not treated as ignore and left unchanged",
+			input: `//go:build (invalid &&
+package main
+`,
+			expected: `//go:build (invalid &&
+package main
+`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -227,4 +328,55 @@ func SubHelper() {}
 	require.NoError(t, err)
 	assert.Contains(t, string(outData), "package targetpkg")
 	assert.Contains(t, string(outData), "func SubHelper()")
+}
+
+// TestApplyFileRule_CombinedIgnoreAndPlatformTag verifies that a file rule source
+// carrying the combined constraint //go:build ignore && linux has the entire
+// constraint line stripped. Prior to the containsIgnoreTag fix, expr.String()
+// returned "ignore && linux" (not "ignore"), so the line was left in the generated
+// source, which would make the injected file invisible to the compiler.
+//
+// NOTE on compile-time platform enforcement: applyFileRule currently adds the
+// generated file unconditionally to compileArgs regardless of GOOS/GOARCH.
+// Evaluating any remaining build constraints against the target platform and
+// conditionally omitting the file from the compile command is a broader follow-up
+// (see the discussion on PR #1358).
+func TestApplyFileRule_CombinedIgnoreAndPlatformTag(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+
+	// //go:build ignore && linux is valid Go: a single compound expression.
+	// The whole line must be stripped because it contains the "ignore" tag.
+	content := "//go:build ignore && linux\n\npackage sourcepkg\n\nfunc LinuxHelper() string {\n\treturn \"linux\"\n}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "helper.go",
+		Path:         "example.com/mypkg",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_linux_combined_rule"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.NoError(t, err)
+
+	outPath := filepath.Join(workDir, "otelc.helper.go")
+	require.FileExists(t, outPath)
+
+	outData, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	// The entire //go:build ignore && linux line must be gone — not just the
+	// ignore term — because the line-level stripping removes the whole directive.
+	assert.NotContains(t, string(outData), "//go:build ignore && linux")
+	assert.NotContains(t, string(outData), "//go:build ignore")
+	// The generated file is still added to compileArgs by applyFileRule;
+	// restricting it to the matching platform is a follow-up concern.
+	assert.Contains(t, ip.compileArgs, outPath)
+	assert.Contains(t, string(outData), "package targetpkg")
+	assert.Contains(t, string(outData), "func LinuxHelper()")
 }

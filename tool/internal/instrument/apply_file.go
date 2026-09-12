@@ -17,19 +17,56 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// stripBuildIgnoreTag removes genuine "//go:build ignore" constraint lines
-// from content, line by line. It leaves every other occurrence of that text —
-// inside a string literal, inside comment prose, anywhere that isn't itself a
-// build-constraint line — untouched. See #1069: a whole-file substring
-// replace corrupted both of those.
+// stripBuildIgnoreTag removes genuine build constraint lines specifying "ignore"
+// (both modern "//go:build ignore" and legacy "// +build ignore") from content,
+// line by line. It preserves other build constraints (such as OS, architecture,
+// or Go version tags) as well as text inside string literals or comment prose.
+// See #1069 and #1095.
 func stripBuildIgnoreTag(content string) string {
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
-		if constraint.IsGoBuild(line) {
+		if isBuildIgnoreLine(line) {
 			lines[i] = ""
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// isBuildIgnoreLine reports whether line is a build-constraint directive
+// (either modern //go:build or legacy // +build) that contains an "ignore"
+// tag anywhere in its expression tree.
+//
+// Checking only the prefix (constraint.IsGoBuild) and comparing
+// expr.String() == "ignore" would miss combined constraints such as
+// //go:build ignore && linux, where the parsed expression string is
+// "ignore && linux". Instead we walk the constraint.Expr tree to detect
+// any "ignore" tag node, regardless of AND/OR/NOT depth.
+func isBuildIgnoreLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !constraint.IsGoBuild(trimmed) && !constraint.IsPlusBuild(trimmed) {
+		return false
+	}
+	expr, err := constraint.Parse(trimmed)
+	if err != nil {
+		return false
+	}
+	return containsIgnoreTag(expr)
+}
+
+// containsIgnoreTag recursively walks a constraint.Expr tree and reports
+// whether any leaf TagExpr has the tag "ignore".
+func containsIgnoreTag(expr constraint.Expr) bool {
+	switch e := expr.(type) {
+	case *constraint.TagExpr:
+		return e.Tag == "ignore"
+	case *constraint.AndExpr:
+		return containsIgnoreTag(e.X) || containsIgnoreTag(e.Y)
+	case *constraint.OrExpr:
+		return containsIgnoreTag(e.X) || containsIgnoreTag(e.Y)
+	case *constraint.NotExpr:
+		return containsIgnoreTag(e.X)
+	}
+	return false
 }
 
 // applyFileRule introduces the new file to the target package at compile time.
