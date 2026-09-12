@@ -159,9 +159,16 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 		}
 
 		if debugEnabled() {
+			var method, urlStr string
+			if res.Request != nil {
+				method = res.Request.Method
+				if res.Request.URL != nil {
+					urlStr = res.Request.URL.String()
+				}
+			}
 			logger.Debug("AfterRoundTrip called",
-				"method", res.Request.Method,
-				"url", res.Request.URL.String(),
+				"method", method,
+				"url", urlStr,
 				"status_code", res.StatusCode,
 				"duration_ms", time.Since(data.start).Milliseconds())
 		}
