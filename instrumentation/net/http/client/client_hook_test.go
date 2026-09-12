@@ -4,8 +4,10 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -371,6 +373,76 @@ func TestAfterRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAfterRoundTrip_NilRequestAndURL_DebugEnabled(t *testing.T) {
+	oldLogger := logger
+	defer func() { logger = oldLogger }()
+
+	t.Run("nil request does not panic and logs empty method and url with debug logging", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		sr, tp := setupTestTracer(t)
+		testTracer := tp.Tracer(instrumentationName)
+		_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+
+		mockCtx := hooktest.NewMockHookContext()
+		mockCtx.SetData(&hookData{span: span})
+
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Request:    nil,
+		}
+
+		assert.NotPanics(t, func() {
+			AfterRoundTrip(mockCtx, resp, nil)
+		})
+
+		spans := sr.Ended()
+		require.Len(t, spans, 1)
+		assert.Equal(t, codes.Unset, spans[0].Status().Code)
+
+		logOutput := buf.String()
+		assert.Contains(t, logOutput, `"msg":"AfterRoundTrip called"`)
+		assert.Contains(t, logOutput, `"method":""`)
+		assert.Contains(t, logOutput, `"url":""`)
+		assert.Contains(t, logOutput, `"status_code":200`)
+	})
+
+	t.Run("request with nil URL does not panic and logs method and empty url with debug logging", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		sr, tp := setupTestTracer(t)
+		testTracer := tp.Tracer(instrumentationName)
+		_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+
+		mockCtx := hooktest.NewMockHookContext()
+		mockCtx.SetData(&hookData{span: span})
+
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Request: &http.Request{
+				Method: http.MethodGet,
+				URL:    nil,
+			},
+		}
+
+		assert.NotPanics(t, func() {
+			AfterRoundTrip(mockCtx, resp, nil)
+		})
+
+		spans := sr.Ended()
+		require.Len(t, spans, 1)
+		assert.Equal(t, codes.Unset, spans[0].Status().Code)
+
+		logOutput := buf.String()
+		assert.Contains(t, logOutput, `"msg":"AfterRoundTrip called"`)
+		assert.Contains(t, logOutput, `"method":"GET"`)
+		assert.Contains(t, logOutput, `"url":""`)
+		assert.Contains(t, logOutput, `"status_code":200`)
+	})
 }
 
 func TestClientEnabler(t *testing.T) {
