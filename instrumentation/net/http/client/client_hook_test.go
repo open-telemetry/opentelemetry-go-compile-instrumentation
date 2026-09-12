@@ -6,6 +6,8 @@ package client
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -351,6 +353,57 @@ func TestAfterRoundTrip(t *testing.T) {
 				assert.Equal(t, 1, len(spans))
 			},
 		},
+		{
+			name: "response with nil Request",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+
+				mockCtx := hooktest.NewMockHookContext()
+				mockCtx.SetData(&hookData{span: span})
+				return mockCtx
+			},
+			response: &http.Response{
+				StatusCode: 200,
+				Request:    nil,
+			},
+			err: nil,
+			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
+				require.Len(t, spans, 1)
+				span := spans[0]
+				assert.Equal(t, codes.Unset, span.Status().Code)
+			},
+		},
+		{
+			name: "response with nil Request URL",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupContext: func(tp *sdktrace.TracerProvider) hook.HookContext {
+				testTracer := tp.Tracer(instrumentationName)
+				_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+
+				mockCtx := hooktest.NewMockHookContext()
+				mockCtx.SetData(&hookData{span: span})
+				return mockCtx
+			},
+			response: &http.Response{
+				StatusCode: 200,
+				Request: &http.Request{
+					Method: http.MethodGet,
+					URL:    nil,
+				},
+			},
+			err: nil,
+			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
+				require.Len(t, spans, 1)
+				span := spans[0]
+				assert.Equal(t, codes.Unset, span.Status().Code)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -371,6 +424,59 @@ func TestAfterRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAfterRoundTrip_NilRequestAndURL_DebugEnabled(t *testing.T) {
+	oldLogger := logger
+	logger = slog.New(slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	defer func() { logger = oldLogger }()
+
+	t.Run("nil request does not panic with debug logging", func(t *testing.T) {
+		sr, tp := setupTestTracer(t)
+		testTracer := tp.Tracer(instrumentationName)
+		_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+
+		mockCtx := hooktest.NewMockHookContext()
+		mockCtx.SetData(&hookData{span: span})
+
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Request:    nil,
+		}
+
+		assert.NotPanics(t, func() {
+			AfterRoundTrip(mockCtx, resp, nil)
+		})
+
+		spans := sr.Ended()
+		require.Len(t, spans, 1)
+		assert.Equal(t, codes.Unset, spans[0].Status().Code)
+	})
+
+	t.Run("request with nil URL does not panic with debug logging", func(t *testing.T) {
+		sr, tp := setupTestTracer(t)
+		testTracer := tp.Tracer(instrumentationName)
+		_, span := testTracer.Start(context.Background(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+
+		mockCtx := hooktest.NewMockHookContext()
+		mockCtx.SetData(&hookData{span: span})
+
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Request: &http.Request{
+				Method: http.MethodGet,
+				URL:    nil,
+			},
+		}
+
+		assert.NotPanics(t, func() {
+			AfterRoundTrip(mockCtx, resp, nil)
+		})
+
+		spans := sr.Ended()
+		require.Len(t, spans, 1)
+		assert.Equal(t, codes.Unset, spans[0].Status().Code)
+	})
 }
 
 func TestClientEnabler(t *testing.T) {
