@@ -99,6 +99,22 @@ func stripCompleteFlag(args []string) []string {
 	return args
 }
 
+// resolvePackageName reads the package clause from the compile command's own
+// sources. Returns an empty name if the command lists no readable Go file.
+func (ip *instrumentPhase) resolvePackageName() (string, error) {
+	for _, arg := range ip.compileArgs {
+		if !util.IsGoFile(arg) || !util.PathExists(arg) {
+			continue
+		}
+		name, err := ast.ParsePackageName(arg)
+		if err != nil {
+			return "", ex.Wrapf(err, "parsing package clause from %s", arg)
+		}
+		return name, nil
+	}
+	return "", nil
+}
+
 func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
