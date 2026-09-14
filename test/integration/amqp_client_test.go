@@ -62,6 +62,34 @@ func TestAmqpClient(t *testing.T) {
 	require.Equal(t, send.SpanID(), process.ParentSpanID())
 }
 
+func TestAmqpClient_AutoAck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("rabbitmq testcontainer not supported on windows")
+	}
+	testcontainers.SkipIfProviderIsNotHealthy(t)
+
+	t.Parallel()
+	testutil.Build(t, "", "amqpclient", "go", "build", "-a")
+
+	amqpURL := startRabbitMQ(t)
+
+	f := testutil.NewTestFixture(t)
+	out := f.Run("amqpclient", "-amqp-url="+amqpURL, "-queue=autoack", "-auto-ack")
+	require.Contains(t, out, "published message")
+	require.Contains(t, out, "consumed message")
+
+	spans := testutil.AllSpans(f.Traces())
+	require.Len(t, spans, 2)
+
+	receive := testutil.RequireSpan(t, f.Traces(),
+		func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer },
+	)
+	require.Equal(t, "autoack receive", receive.Name())
+	require.NotEqual(t, ptrace.StatusCodeError, receive.Status().Code())
+	testutil.RequireAttribute(t, receive, "messaging.operation.name", "receive")
+	testutil.RequireAttribute(t, receive, "messaging.operation.type", "receive")
+}
+
 func TestAmqpClient_Disabled(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("rabbitmq testcontainer not supported on windows")

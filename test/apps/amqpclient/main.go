@@ -19,6 +19,7 @@ import (
 func main() {
 	queue := flag.String("queue", "orders", "queue name")
 	url := flag.String("amqp-url", envOr("AMQP_URL", "amqp://guest:guest@localhost:5672/"), "AMQP URL")
+	autoAck := flag.Bool("auto-ack", false, "consume with auto-ack")
 	flag.Parse()
 
 	conn, err := amqp.Dial(*url)
@@ -38,7 +39,7 @@ func main() {
 		log.Fatalf("declare: %v", err)
 	}
 
-	deliveries, err := ch.Consume(q.Name, "", false, false, false, false, nil)
+	deliveries, err := ch.Consume(q.Name, "", *autoAck, false, false, false, nil)
 	if err != nil {
 		log.Fatalf("consume: %v", err)
 	}
@@ -56,8 +57,10 @@ func main() {
 
 	select {
 	case d := <-deliveries:
-		if err := d.Ack(false); err != nil {
-			log.Fatalf("ack: %v", err)
+		if !*autoAck {
+			if err := d.Ack(false); err != nil {
+				log.Fatalf("ack: %v", err)
+			}
 		}
 		slog.Info("consumed message", "queue", q.Name)
 	case <-ctx.Done():
