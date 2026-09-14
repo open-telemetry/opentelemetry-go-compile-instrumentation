@@ -1244,6 +1244,9 @@ This rule adds a new Go source file to the target package.
 - Introducing new functionalities or APIs to an existing package.
 
 **Selectors:** none. File rules apply to the target package as a whole and have no point selector.
+`where.file` predicates are honored: the file is added when any source file in the package
+satisfies them. Units the toolchain generates, such as the test main, have no source files, so
+`is_test` still applies there while file-content predicates like `has_func` see an empty file.
 
 **Modifier (`do: - add_file:`):**
 

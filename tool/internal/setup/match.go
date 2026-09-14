@@ -139,8 +139,15 @@ func (sp *setupPhase) runMatch(
 	// Separate file rules from rules that need precise matching
 	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
 	for _, r := range filteredRules {
-		// If the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
+			applies, err := fileRuleApplies(ctx, dep, fr)
+			if err != nil {
+				return nil, err
+			}
+			if !applies {
+				sp.Debug("Skip file rule, where clause did not match", "rule", fr, "dep", dep)
+				continue
+			}
 			set.AddFileRule(fr)
 			sp.Info("Match file rule", "rule", fr, "dep", dep)
 			continue
@@ -163,6 +170,37 @@ func (sp *setupPhase) runMatch(
 	}
 
 	return sp.preciseMatching(ctx, dep, preciseRules, set)
+}
+
+// fileRuleApplies reports whether a file rule's where clause holds for dep. The
+// rule adds one file to the whole package, so any matching source file is enough.
+func fileRuleApplies(ctx context.Context, dep *Dependency, fr *rule.InstFileRule) (bool, error) {
+	where := fr.GetWhere()
+	if where == nil {
+		return true, nil
+	}
+	f, err := build(where)
+	if err != nil {
+		return false, ex.Wrapf(err, "build where filter for rule %q", fr.GetName())
+	}
+	isTest := dep.IsTest || isTestBuild(dep.Sources)
+	if len(dep.Sources) == 0 {
+		// Generated units like the test main have nothing to parse.
+		return f.Match(&matchContext{IsTest: isTest, AST: &dst.File{Name: dst.NewIdent("")}}), nil
+	}
+	for _, source := range dep.Sources {
+		if err = ctx.Err(); err != nil {
+			return false, err
+		}
+		tree, parseErr := ast.ParseFileFast(source)
+		if parseErr != nil {
+			return false, parseErr
+		}
+		if f.Match(&matchContext{IsTest: isTest, SourceFile: source, AST: tree}) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ruleFilter pairs a rule with its pre-compiled where filter (if any).
@@ -208,7 +246,7 @@ func (sp *setupPhase) preciseMatching(
 
 	// IsTest is a property of the whole compile (every file in a test build
 	// shares it), so compute it once and reuse it across each file's context.
-	isTest := isTestBuild(dep.Sources)
+	isTest := dep.IsTest || isTestBuild(dep.Sources)
 
 	for _, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
