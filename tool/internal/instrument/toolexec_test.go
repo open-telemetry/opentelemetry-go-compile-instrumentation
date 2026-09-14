@@ -17,7 +17,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -719,6 +721,60 @@ func TestResolvePackageName(t *testing.T) {
 		_, err := ip.resolvePackageName()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "parsing package clause")
+	})
+}
+
+func TestInterceptCompileFileRuleWithoutPackageName(t *testing.T) {
+	setup := func(t *testing.T, sources ...string) (string, []string) {
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+
+		rulesDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(rulesDir, "added.go"),
+			[]byte("//go:build ignore\n\npackage myrules\n\nfunc init() {}\n"), 0o644))
+
+		// Setup hands over an empty PackageName for the generated test main.
+		set := rule.NewInstRuleSet("main")
+		fileRule := &rule.InstFileRule{File: "added.go", Path: rulesDir, ResolvedPath: rulesDir}
+		fileRule.Name = "add_to_main"
+		set.AddFileRule(fileRule)
+		data, err := json.Marshal([]*rule.InstRuleSet{set})
+		require.NoError(t, err)
+		matched := util.GetMatchedRuleFile()
+		require.NoError(t, os.MkdirAll(filepath.Dir(matched), 0o755))
+		require.NoError(t, os.WriteFile(matched, data, 0o644))
+
+		buildDir := t.TempDir()
+		args := []string{"compile", "-o", filepath.Join(buildDir, "_pkg_.a"), "-p", "main", "-buildid", "x"}
+		for _, name := range sources {
+			path := filepath.Join(buildDir, name)
+			require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o644))
+			args = append(args, path)
+		}
+		return buildDir, args
+	}
+
+	t.Run("resolves the name from the compile sources", func(t *testing.T) {
+		buildDir, args := setup(t, "_testmain.go")
+		ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+
+		newArgs, err := interceptCompile(ctx, args)
+		require.NoError(t, err)
+
+		added := filepath.Join(buildDir, "otelc.added.go")
+		assert.Contains(t, newArgs, added)
+		name, err := ast.ParsePackageName(added)
+		require.NoError(t, err)
+		assert.Equal(t, "main", name)
+	})
+
+	t.Run("errors when there is nothing to resolve from", func(t *testing.T) {
+		buildDir, args := setup(t)
+		ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+
+		_, err := interceptCompile(ctx, args)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot resolve the package name")
+		assert.NoFileExists(t, filepath.Join(buildDir, "otelc.added.go"))
 	})
 }
 
