@@ -10,8 +10,10 @@ import (
 
 var _ propagation.TextMapCarrier = TableCarrier{}
 
-// TableCarrier adapts an AMQP table to a TextMapCarrier so W3C trace
-// context can ride on Publishing.Headers / Delivery.Headers.
+// TableCarrier writes W3C trace context into Publishing.Headers and
+// Delivery.Headers. TraceContext looks up traceparent and tracestate by
+// name and never calls Keys. Keys still allocates and scans the whole
+// table if a composite propagator such as Baggage calls it.
 type TableCarrier struct {
 	table *amqp.Table
 }
@@ -45,7 +47,7 @@ func (c TableCarrier) Set(key, value string) {
 	(*c.table)[key] = value
 }
 
-// Keys lists header keys.
+// Keys lists header keys. One allocation and one full scan per call.
 func (c TableCarrier) Keys() []string {
 	if c.table == nil || *c.table == nil {
 		return nil

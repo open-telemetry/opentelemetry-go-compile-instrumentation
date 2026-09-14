@@ -2,26 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package amqp091 provides compile-time OpenTelemetry instrumentation for
-// github.com/rabbitmq/amqp091-go.
-//
-// Publish, PublishWithContext, and PublishWithDeferredConfirmWithContext all
-// call (*Channel).PublishWithDeferredConfirm. That is the only publish span.
-// The library drops the PublishWithContext context before that call, so
-// BeforePublishWithContext stashes it for the send span to parent from.
-// Publisher confirms do not extend the span: AfterPublishWithDeferredConfirm
-// ends it when the write is handed to the client, the same limit kafka-go
-// has for async writes.
-//
-// Consume and ConsumeWithContext return a delivery channel. The after hook
-// replaces that channel. Each Delivery starts a CONSUMER span. Manual-ack
-// spans use operation process and end on Delivery.Ack / Nack / Reject or
-// Channel.Ack / Nack / Reject (including multiple=true). Auto-ack spans use
-// operation receive and end when the Delivery is read: the server already
-// settled the message, so there is no later finish signal. Closing the
-// consume channel ends leftover process spans so they do not leak.
-//
-// (*Channel).connection is unexported, so these spans do not set
-// server.address. The instrumentation is trace-only.
+// github.com/rabbitmq/amqp091-go. Limits and attribute choices live in
+// README.md in this directory.
 package amqp091
 
 import (
@@ -65,14 +47,8 @@ var (
 
 	errDeliveryNotInitialized = errors.New("delivery not initialized")
 
-	// ponytail: one parent slot per *Channel. Concurrent PublishWithContext
-	// on the same Channel can swap parents; serialize publishes or use one
-	// Channel per goroutine if that matters.
 	publishParents sync.Map // *amqp.Channel -> context.Context
-
-	// ponytail: entries live until process exit. Hook Channel.Close to
-	// drop them if short-lived channels become common.
-	channelAcks sync.Map // *amqp.Channel -> *pendingAcks
+	channelAcks    sync.Map // *amqp.Channel -> *pendingAcks
 )
 
 func initInstrumentation() {
@@ -110,6 +86,9 @@ func startSpan(ctx context.Context, req semconv.Request, kind trace.SpanKind) (c
 	)
 }
 
+// cloneTable copies top-level keys only. Inject adds string headers and does
+// not mutate nested Table values, so a shallow copy does not alias the
+// caller's map.
 func cloneTable(t amqp.Table) amqp.Table {
 	out := make(amqp.Table, len(t))
 	for k, v := range t {
@@ -260,9 +239,9 @@ func BeforeConsumeWithContext(
 }
 
 // AfterConsume replaces the delivery channel so each Delivery carries a span.
-// The Enable() check is omitted: if BeforeConsume was disabled, GetData is
-// empty. Re-checking here could skip the wrap if the flag flipped between
-// Before and After.
+// Enable is not re-checked. BeforeConsume's only early return is disable,
+// which leaves GetData empty. After still skips the wrap when Consume
+// returns an error or a nil channel, even if data is set.
 func AfterConsume(ictx hook.HookContext, deliveries <-chan amqp.Delivery, err error) {
 	data, ok := ictx.GetData().(*consumeData)
 	if !ok || data == nil || err != nil || deliveries == nil {
@@ -277,6 +256,8 @@ func BeforeGet(ictx hook.HookContext, ch *amqp.Channel, queue string, autoAck bo
 }
 
 // AfterGet attaches a consumer span to a successful Get delivery.
+// There is no consume channel to close, so an unacked Get process span
+// stays open until the process exits. See README.md.
 func AfterGet(ictx hook.HookContext, msg amqp.Delivery, ok bool, err error) {
 	data, got := ictx.GetData().(*consumeData)
 	if !got || data == nil || err != nil || !ok {
@@ -286,6 +267,9 @@ func AfterGet(ictx hook.HookContext, msg amqp.Delivery, ok bool, err error) {
 }
 
 func wrapDeliveries(ch *amqp.Channel, queue string, autoAck bool, in <-chan amqp.Delivery) <-chan amqp.Delivery {
+	// Library Consume channels are unbuffered (amqp091-go channel.go).
+	// The wrapper is unbuffered too, so the consumer still blocks the
+	// library the same way.
 	out := make(chan amqp.Delivery)
 	pending := &pendingAcks{}
 	go func() {
@@ -313,6 +297,7 @@ func startDeliverySpan(ch *amqp.Channel, queue string, autoAck bool, d amqp.Deli
 	parent := propagator.Extract(context.Background(), amqprop.NewTableCarrier(&d.Headers))
 	_, span := startSpan(parent, req, trace.SpanKindConsumer)
 	if autoAck {
+		// Auto-ack span ends when the Delivery is read. See README.md.
 		span.End()
 		return d
 	}

@@ -6,6 +6,10 @@ groups:
   #   instrumentation/github.com/rabbitmq/amqp091-go/hook.go
   #   instrumentation/github.com/rabbitmq/amqp091-go/semconv/client.go
   #
+  # make lint-schema (Weaver) checks registry shape against upstream
+  # semconv. It does not compare this list to TraceAttrs. Keeping the two
+  # in sync is a review check, same as kafka.yaml.
+  #
   # Trace-only. One producer span per PublishWithDeferredConfirm. One consumer
   # span per Delivery (process until Delivery or Channel Ack/Nack/Reject,
   # including multiple=true, or receive when auto-ack).

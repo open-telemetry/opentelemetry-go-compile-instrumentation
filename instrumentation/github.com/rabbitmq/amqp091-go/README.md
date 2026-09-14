@@ -3,27 +3,58 @@
 Compile-time OpenTelemetry instrumentation for
 [`github.com/rabbitmq/amqp091-go`](https://github.com/rabbitmq/amqp091-go).
 
+Limits and attributes are documented here. The `hook.go` package comment
+points at this file.
+
 | Target | Span | Notes |
 | --- | --- | --- |
-| `(*Channel).PublishWithDeferredConfirm` | `{exchange} send` | Covers `Publish`, `PublishWithContext`, and `PublishWithDeferredConfirmWithContext`. |
-| `(*Channel).Consume` / `ConsumeWithContext` | `{queue} process` or `{queue} receive` | The delivery channel is replaced. Manual-ack spans end on `Delivery` or `Channel` Ack / Nack / Reject, including `multiple=true`. Auto-ack spans end when the Delivery is read (server already settled). |
-| `(*Channel).Get` | same as Consume | One delivery. |
+| `(*Channel).PublishWithDeferredConfirm` | `{exchange} send` | Also covers `Publish`, `PublishWithContext`, and `PublishWithDeferredConfirmWithContext`. |
+| `(*Channel).Consume` / `ConsumeWithContext` | `{queue} process` or `{queue} receive` | The after hook replaces the delivery channel. Manual-ack spans end on `Delivery` or `Channel` Ack, Nack, or Reject, including `multiple=true`. Auto-ack spans end when the Delivery is read. |
+| `(*Channel).Get` | same as Consume | One delivery. If Get is never acked, the process span stays open until the process exits. Consume leftover spans end when the delivery channel closes. |
 
-W3C `traceparent` is injected into a **copy** of `Publishing.Headers` and extracted from `Delivery.Headers`. The caller's header map is not mutated.
+The hook injects W3C `traceparent` into a copy of `Publishing.Headers` and
+extracts it from `Delivery.Headers`. It does not change the caller's header
+map. The copy is shallow. Only top-level keys are added.
 
-`PublishWithContext`'s context is dropped by the library before `PublishWithDeferredConfirm`. The WithContext before-hooks stash that context so the send span parents from it. If the API context has no span, the GLS span (inbound HTTP or gRPC) is used. Publisher confirms do not extend the send span.
+The library drops the `PublishWithContext` context before
+`PublishWithDeferredConfirm`. The WithContext before-hooks store that
+context so the send span uses it as the parent. If that context has no span,
+the send span uses the GLS span (inbound HTTP or gRPC).
 
-Span names use `{exchange} send` and `{queue} process|receive`. The routing key is `messaging.rabbitmq.destination.routing_key` only: keys such as `order.{id}` must not enter the span name. Empty exchange is `(default)`, not `amq.default`, so the name stays stable and readable. Official `{exchange}:{routing key}` destination names are not used for the same cardinality reason.
+`publishParents` holds one context per `*Channel`. Two goroutines calling
+`PublishWithContext` on the same Channel can use each other's context as
+the parent. amqp091-go already tells callers not to publish concurrently on
+one Channel. Use one Channel per goroutine, or publish one at a time.
 
-`(*Channel).connection` is unexported, so these spans do not set `server.address`.
+The send span ends when the client accepts the write. It does not wait for
+a broker confirm. This hook does not set a `messaging.kafka.async`
+attribute. RabbitMQ confirms use `Channel.Confirm`, which is a separate
+optional API. Span duration is the client hand-off, not delivery.
 
-Auto-ack uses operation `receive` and ends when the Delivery is taken from the channel. The server has already acknowledged the message, so there is no later Ack. That read is the finish indicator. A process span held until the consume channel closes would include idle time and would be the wrong duration.
+Span names are `{exchange} send` and `{queue} process` or `{queue} receive`.
+The routing key is only `messaging.rabbitmq.destination.routing_key`. Keys
+such as `order.{id}` must not go in the span name. An empty exchange is
+`(default)`, not `amq.default`. A real exchange named `(default)` looks the
+same as the empty default exchange. Official `{exchange}:{routing key}`
+destination names are not used for the same reason.
 
-Successful `Nack` / `Reject` end the process span as Unset. They are finish signals, not failed operations. A failed inner call still records `codes.Error`.
+`(*Channel).connection` is unexported, so these spans do not set
+`server.address`.
 
-Each `Consume` starts one extra goroutine that reads the library channel and writes a wrapped one. Closing the consume channel ends leftover process spans.
+Auto-ack uses operation `receive` and ends when the Delivery is taken from
+the channel. That duration is the read, not user processing. Holding a
+process span until the consume channel closes would include idle time.
 
-This instrumentation is trace-only. Ack/nack/sent metrics are a follow-up.
+A successful `Nack` or `Reject` ends the process span as Unset. A failed
+inner call still records `codes.Error`.
+
+Each `Consume` starts one extra goroutine. The library delivery channel is
+unbuffered. The wrapper is unbuffered too, so the consumer still blocks the
+library the same way. Closing the consume channel ends leftover process
+spans.
+
+This instrumentation is trace-only. Ack, nack, and sent metrics are a
+follow-up.
 
 ### Enable / disable
 
@@ -37,7 +68,7 @@ Instrumentation key: `AMQP` (case-insensitive).
 ## Supported versions
 
 - Module: `github.com/rabbitmq/amqp091-go`
-- Minimum bound: **v1.10.0** (`ConsumeWithContext`).
+- Minimum bound: **v1.9.0** (`ConsumeWithContext` landed in v1.9.0).
 
 ## Tests
 

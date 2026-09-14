@@ -32,8 +32,9 @@ type Request struct {
 }
 
 // DefaultExchange is the span destination when the publish exchange is empty.
-// The default exchange is a real AMQP name (the empty string). Using this
-// token keeps the span name low-cardinality and readable.
+// The AMQP default exchange is the empty string. amq.default is a different
+// exchange. A real exchange named (default) produces the same span name as
+// an empty-exchange publish.
 const DefaultExchange = "(default)"
 
 // DestinationName is messaging.destination.name: the exchange for a send,
@@ -51,7 +52,7 @@ func DestinationName(req Request) string {
 }
 
 // SpanName is "{destination} {operation}". The routing key is not in the name.
-// Keys such as order.{id} would explode cardinality.
+// A key such as order.{id} would make each message its own span name.
 func SpanName(req Request) string {
 	return DestinationName(req) + " " + string(req.Operation)
 }
@@ -76,6 +77,8 @@ func TraceAttrs(req Request) []attribute.KeyValue {
 	if key := strings.TrimSpace(req.RoutingKey); key != "" {
 		attrs = append(attrs, semconv.MessagingRabbitMQDestinationRoutingKey(key))
 	}
+	// Current callers never set Queue on a send Request. The OperationSend
+	// check is for a future send Request that also carries a queue name.
 	if q := strings.TrimSpace(req.Queue); q != "" && req.Operation != OperationSend {
 		attrs = append(attrs, semconv.MessagingDestinationSubscriptionName(q))
 	}

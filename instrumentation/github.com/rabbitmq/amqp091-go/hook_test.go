@@ -352,6 +352,30 @@ func TestPublish_DoesNotMutateCallerHeaders(t *testing.T) {
 	require.Equal(t, "1", written.Headers["x-custom"])
 }
 
+func TestPublishWithDeferredConfirmWithContext_UsesAPIParent(t *testing.T) {
+	sr := setupTest(t)
+
+	ctx, parent := tracer.Start(context.Background(), "handler")
+	ch := &amqp.Channel{}
+	msg := amqp.Publishing{Body: []byte("hello")}
+	BeforePublishWithDeferredConfirmWithContext(hooktest.NewMockHookContext(), ch, ctx, "ex", "rk", false, false, msg)
+
+	pub := hooktest.NewMockHookContext(ch, "ex", "rk", false, false, msg)
+	BeforePublishWithDeferredConfirm(pub, ch, "ex", "rk", false, false, msg)
+	AfterPublishWithDeferredConfirm(pub, nil, nil)
+	parent.End()
+
+	var send sdktrace.ReadOnlySpan
+	for _, s := range sr.Ended() {
+		if s.Name() == "ex send" {
+			send = s
+			break
+		}
+	}
+	require.NotNil(t, send)
+	require.Equal(t, parent.SpanContext().SpanID(), send.Parent().SpanID())
+}
+
 func TestPublishWithContext_UsesAPIParent(t *testing.T) {
 	sr := setupTest(t)
 
