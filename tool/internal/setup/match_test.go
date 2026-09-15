@@ -689,7 +689,7 @@ func TestLoadDefaultRules(t *testing.T) {
 		"example.com/foo": filepath.Join(tmp, "foo"),
 	})
 	writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
-	moduleDirs := map[string]bool{tmp: true}
+	moduleDirs := []string{tmp}
 
 	// Prepare setup phase and set custom rules via environment variable and flag
 	sp := newTestSetupPhase()
@@ -1980,6 +1980,14 @@ func TestLoadRules_FindToolFilesError(t *testing.T) {
 	require.NoError(t, err)
 
 	sp := newTestSetupPhase()
-	_, err = sp.loadRules(context.Background(), map[string]bool{dir: true})
+	_, err = sp.loadRules(context.Background(), []string{dir})
 	require.Error(t, err)
+}
+
+func TestLoadRules_EmptyModuleDirs(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	sp := newTestSetupPhase()
+	rules, err := sp.loadRules(t.Context(), []string{})
+	require.NoError(t, err)
+	assert.Nil(t, rules)
 }
