@@ -748,3 +748,35 @@ func TestFindGoSources(t *testing.T) {
 		assert.True(t, filepath.IsAbs(s), "source path must be absolute: %s", s)
 	}
 }
+
+func TestFindGoSourcesDetectsTestBuild(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	testSrc := filepath.Join(dir, "main_test.go")
+	require.NoError(t, os.WriteFile(src, []byte("package main\n"), 0o644))
+	require.NoError(t, os.WriteFile(testSrc, []byte("package main\n"), 0o644))
+
+	tests := []struct {
+		name        string
+		args        []string
+		wantIsTest  bool
+		wantSources int
+	}{
+		{"normal build", []string{"-p", "main", src}, false, 1},
+		{"package augmented with tests", []string{"-p", "example.com/app", src, testSrc}, true, 2},
+		{
+			"generated test main not on disk yet",
+			[]string{"-p", "main", filepath.Join(dir, "b001", "_testmain.go")},
+			true,
+			0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dep, err := findGoSources(context.Background(), tt.args, map[string]string{})
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantIsTest, dep.IsTest)
+			assert.Len(t, dep.Sources, tt.wantSources)
+		})
+	}
+}
