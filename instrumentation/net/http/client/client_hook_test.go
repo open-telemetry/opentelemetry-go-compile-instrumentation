@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -104,6 +105,49 @@ func TestBeforeRoundTrip(t *testing.T) {
 				ctx := context.WithValue(context.Background(), "test-key", "test-value")
 				req, _ := http.NewRequestWithContext(ctx, "GET", "http://example.com/path", nil)
 				return req
+			},
+			expectSpan: true,
+		},
+		{
+			name: "nil request does not panic",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				return nil
+			},
+			expectSpan: false,
+		},
+		{
+			name: "request with nil Header does not panic and injects trace headers",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				u, _ := url.Parse("http://example.com/path")
+				return &http.Request{
+					Method: http.MethodGet,
+					URL:    u,
+					Header: nil,
+				}
+			},
+			expectSpan: true,
+			validateRequest: func(t *testing.T, req *http.Request) {
+				require.NotNil(t, req.Header)
+				assert.NotEmpty(t, req.Header.Get("traceparent"))
+			},
+		},
+		{
+			name: "request with nil URL does not panic",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				return &http.Request{
+					Method: http.MethodGet,
+					URL:    nil,
+					Header: make(http.Header),
+				}
 			},
 			expectSpan: true,
 		},
