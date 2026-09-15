@@ -5,7 +5,7 @@ package main
 
 import _ "unsafe"
 
-func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+func Func1(p1 string, p2 int) (_unnamedRetVal_4242419412_0 float32, _unnamedRetVal_4242419412_1 error) {
 	//line <generated>:1
 	if OtelBeforeTrampoline_Func14242419412(&p1, &p2); false {
 	} else {

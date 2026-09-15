@@ -30,6 +30,7 @@ const preparedMainSource = `package main
 import (
 	"flag"
 	"io"
+	"log"
 	"net/http"
 )
 
@@ -39,14 +40,14 @@ func main() {
 
 	resp, err := http.Get(*addr + "/hello")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 		_ = resp.Body.Close()
-		panic(err)
+		log.Fatal(err)
 	}
 	if err := resp.Body.Close(); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 `

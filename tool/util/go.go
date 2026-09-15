@@ -92,12 +92,12 @@ func IsCgoCommand(line string) bool {
 		!strings.Contains(line, "-dynimport")
 }
 
-// splitGoflags splits a GOFLAGS value into tokens like the go command does
+// SplitGoflags splits a GOFLAGS value into tokens like the go command does
 // (https://cs.opensource.google/go/go/+/master:src/cmd/internal/quoted/quoted.go)
 //
 // space-separated, but a token starting with a quote runs to the matching close quote.
 // Quotes are kept so tokens re-join verbatim.
-func splitGoflags(goflags string) []string {
+func SplitGoflags(goflags string) []string {
 	isSpace := func(c byte) bool {
 		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 	}
@@ -135,20 +135,33 @@ func splitGoflags(goflags string) []string {
 // children's toolexec: none for setup discovery, an explicit CLI flag for
 // `otelc go build`, and nested version-only mode during instrumentation.
 func StripToolexecFromGoflags(goflags string) string {
-	tokens := splitGoflags(goflags)
+	tokens := SplitGoflags(goflags)
 	kept := make([]string, 0, len(tokens))
 	for _, token := range tokens {
-		unquoted := token
-		if len(unquoted) >= 2 && (unquoted[0] == '\'' || unquoted[0] == '"') &&
-			unquoted[len(unquoted)-1] == unquoted[0] {
-			unquoted = unquoted[1 : len(unquoted)-1]
-		}
+		unquoted := UnquoteGoflagsToken(token)
 		if unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") {
 			continue
 		}
 		kept = append(kept, token)
 	}
 	return strings.Join(kept, " ")
+}
+
+// quotedTokenMinLen is the shortest GOFLAGS token that can hold a surrounding
+// quote pair: one opening quote and one closing quote.
+const quotedTokenMinLen = 2
+
+// UnquoteGoflagsToken removes one pair of surrounding matching quotes from a
+// GOFLAGS token, mirroring how the go command interprets it before acting on
+// the flag. A token without a matching surrounding quote pair is returned
+// unchanged. The token should already have been produced by SplitGoflags.
+func UnquoteGoflagsToken(token string) string {
+	if len(token) >= quotedTokenMinLen {
+		if q := token[0]; (q == '\'' || q == '"') && token[len(token)-1] == q {
+			return token[1 : len(token)-1]
+		}
+	}
+	return token
 }
 
 // QuoteGoflagsToken quotes a token for inclusion in a GOFLAGS value, following

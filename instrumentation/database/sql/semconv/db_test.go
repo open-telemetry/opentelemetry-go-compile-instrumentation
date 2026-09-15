@@ -257,6 +257,27 @@ func TestDatabaseSqlRequest_Struct(t *testing.T) {
 	assert.Equal(t, "testdb", req.DbName)
 }
 
+func TestOperationName(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{name: "select", query: "SELECT * FROM users", want: "SELECT"},
+		{name: "lowercase", query: "insert into t values (1)", want: "INSERT"},
+		{name: "leading whitespace", query: "  \n\tupdate users set x=1", want: "UPDATE"},
+		{name: "empty", query: "", want: ""},
+		{name: "whitespace only", query: " \t\n ", want: ""},
+		{name: "single token", query: "ping", want: "PING"},
+		{name: "start transaction", query: "START TRANSACTION", want: "START"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, OperationName(tt.query))
+		})
+	}
+}
+
 func TestDbClientRequestTraceAttrs_ContainsExpectedKeys(t *testing.T) {
 	req := DatabaseSqlRequest{
 		OpType:     "query",

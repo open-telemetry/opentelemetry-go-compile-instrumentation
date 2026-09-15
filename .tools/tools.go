@@ -15,4 +15,5 @@ import (
 	_ "github.com/rhysd/actionlint/cmd/actionlint"
 	_ "github.com/sethvargo/ratchet"
 	_ "go.opentelemetry.io/build-tools/crosslink"
+	_ "golang.org/x/vuln/cmd/govulncheck"
 )

@@ -65,6 +65,43 @@ func TestKafkaRequestTraceAttrs_Producer(t *testing.T) {
 	assert.False(t, hasPartition)
 }
 
+func TestKafkaRequestTraceAttrs_ProducerAsync(t *testing.T) {
+	attrs := KafkaRequestTraceAttrs(KafkaRequest{
+		Destination: "orders",
+		Operation:   KafkaOperationSend,
+		Async:       true,
+	})
+	m := attrMap(attrs)
+
+	assert.True(t, m["messaging.kafka.async"].AsBool())
+}
+
+func TestKafkaRequestTraceAttrs_ProducerSyncOmitsAsync(t *testing.T) {
+	attrs := KafkaRequestTraceAttrs(KafkaRequest{
+		Destination: "orders",
+		Operation:   KafkaOperationSend,
+		Async:       false,
+	})
+	m := attrMap(attrs)
+
+	_, hasAsync := m["messaging.kafka.async"]
+	assert.False(t, hasAsync)
+}
+
+func TestKafkaRequestTraceAttrs_ConsumerIgnoresAsync(t *testing.T) {
+	// Async only has meaning for the producer (send) side; it must never be
+	// emitted for a receive operation even if the field is mistakenly set.
+	attrs := KafkaRequestTraceAttrs(KafkaRequest{
+		Destination: "orders",
+		Operation:   KafkaOperationReceive,
+		Async:       true,
+	})
+	m := attrMap(attrs)
+
+	_, hasAsync := m["messaging.kafka.async"]
+	assert.False(t, hasAsync)
+}
+
 func TestKafkaRequestTraceAttrs_Consumer(t *testing.T) {
 	attrs := KafkaRequestTraceAttrs(KafkaRequest{
 		Endpoint:        "localhost:9092",

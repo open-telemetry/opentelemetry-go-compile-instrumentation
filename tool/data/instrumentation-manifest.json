@@ -9,6 +9,11 @@
     "versionRange": "v1.0.0"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/apache/cassandra-gocql-driver/v2",
+    "target": "github.com/apache/cassandra-gocql-driver/v2",
+    "versionRange": "v2.0.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/aws/aws-sdk-go-v2",
     "target": "github.com/aws/aws-sdk-go-v2/config"
   },
@@ -25,6 +30,11 @@
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2",
     "target": "github.com/linode/linodego/v2",
     "versionRange": "v2.4.1"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/olivere/elastic/v7",
+    "target": "github.com/olivere/elastic/v7",
+    "versionRange": "v7.0.0"
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go",
@@ -79,6 +89,11 @@
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/trace",
     "target": "go.opentelemetry.io/otel/trace"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.uber.org/zap",
+    "target": "go.uber.org/zap/zapcore",
+    "versionRange": "v1.21.0"
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/client",

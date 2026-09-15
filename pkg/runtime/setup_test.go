@@ -19,6 +19,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestShutdownSignals(t *testing.T) {
@@ -26,6 +27,60 @@ func TestShutdownSignals(t *testing.T) {
 	require.Len(t, signals, 2)
 	assert.Contains(t, signals, os.Interrupt)
 	assert.Contains(t, signals, syscall.SIGTERM)
+}
+
+// errShutdownProcessor is a span processor whose Shutdown always fails, used to
+// exercise the handler's error-logging branch.
+type errShutdownProcessor struct{}
+
+func (errShutdownProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (errShutdownProcessor) OnEnd(sdktrace.ReadOnlySpan)                     {}
+func (errShutdownProcessor) ForceFlush(context.Context) error                { return nil }
+func (errShutdownProcessor) Shutdown(context.Context) error                  { return errors.New("shutdown failed") }
+
+// recordingProcessor records whether Shutdown was called.
+type recordingProcessor struct{ shutdownCalled bool }
+
+func (*recordingProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (*recordingProcessor) OnEnd(sdktrace.ReadOnlySpan)                     {}
+func (*recordingProcessor) ForceFlush(context.Context) error                { return nil }
+func (p *recordingProcessor) Shutdown(context.Context) error                { p.shutdownCalled = true; return nil }
+
+// runShutdownHandler drives handleShutdownSignal inline with a SIGTERM already
+// queued, exercising the flush path without delivering a real signal to the test
+// process. Reaching the return proves the handler neither exits nor re-raises.
+func runShutdownHandler(t *testing.T) {
+	t.Helper()
+	sigCh := make(chan os.Signal, 1)
+	sigCh <- syscall.SIGTERM
+	handleShutdownSignal(sigCh)
+}
+
+func TestHandleShutdownSignalFlushesProviders(t *testing.T) {
+	restoreProviders(t)
+	rp := &recordingProcessor{}
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rp))
+	meterProvider, loggerProvider = nil, nil
+
+	runShutdownHandler(t)
+
+	assert.True(t, rp.shutdownCalled, "handler should flush the tracer provider on shutdown")
+}
+
+func TestHandleShutdownSignalLogsFlushError(t *testing.T) {
+	restoreProviders(t)
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(errShutdownProcessor{}))
+	meterProvider, loggerProvider = nil, nil
+
+	var buf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	runShutdownHandler(t)
+
+	assert.Contains(t, buf.String(), "shutdown failed",
+		"flush errors should be logged during shutdown")
 }
 
 func TestLogLevel(t *testing.T) {
@@ -118,7 +173,7 @@ func TestSetupOpenTelemetryPropagatorsFromEnv(t *testing.T) {
 	setupOpenTelemetry(Config{InstrumentationName: "test-inst"})
 
 	fields := otel.GetTextMapPropagator().Fields()
-	assert.Contains(t, fields, "x-b3-traceid",
+	assert.Contains(t, fields, "b3",
 		"OTEL_PROPAGATORS=b3 should install the b3 propagator")
 	assert.NotContains(t, fields, "traceparent",
 		"the default tracecontext propagator should be replaced")
@@ -271,6 +326,40 @@ func TestSetupTraceProviderNoneExporter(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Nil(t, tracerProvider, "no trace provider should be installed for OTEL_TRACES_EXPORTER=none")
+}
+
+func TestUseSimpleSpanProcessor(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		want     bool
+	}{
+		{"literal true", "true", true},
+		{"uppercase TRUE", "TRUE", true},
+		{"mixed case True", "True", true},
+		{"literal false", "false", false},
+		{"arbitrary value", "1", false},
+		{"unset", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", tt.envValue)
+			assert.Equal(t, tt.want, useSimpleSpanProcessor())
+		})
+	}
+}
+
+func TestNewSpanProcessorUsesSimpleSpanProcessor(t *testing.T) {
+	t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "TRUE")
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(newSpanProcessor(exporter)))
+	t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+
+	_, span := provider.Tracer("test").Start(context.Background(), "test")
+	span.End()
+
+	assert.Len(t, exporter.GetSpans(), 1, "simple processor should export completed spans immediately")
 }
 
 func TestSetupMeterProviderNoneExporter(t *testing.T) {

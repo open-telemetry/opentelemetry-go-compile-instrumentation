@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
@@ -79,6 +81,28 @@ func TestAnthropicClient(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("count_tokens", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		server := startMockAnthropicServer(t, 0, 0)
+
+		f.Run("anthropicclient",
+			fmt.Sprintf("-addr=%s", server.URL),
+			"-api-key=test-key",
+			"-model=claude-sonnet-4-5",
+			"-count-tokens",
+		)
+
+		span := f.RequireSingleSpan()
+		require.Equal(t, "count_tokens claude-sonnet-4-5", span.Name())
+		testutil.RequireAttribute(t, span, "gen_ai.system", "anthropic")
+		testutil.RequireAttribute(t, span, "gen_ai.operation.name", "count_tokens")
+		testutil.RequireAttribute(t, span, "gen_ai.request.model", "claude-sonnet-4-5")
+		testutil.RequireAttribute(t, span, "gen_ai.provider.name", "local")
+		testutil.RequireAttribute(t, span, "gen_ai.usage.input_tokens", int64(5))
+		_, found := testutil.Attrs(span)["gen_ai.usage.output_tokens"]
+		require.False(t, found, "count_tokens has no output tokens")
+	})
 }
 
 // startMockAnthropicServer creates a mock Anthropic API server for testing.
@@ -88,6 +112,12 @@ func startMockAnthropicServer(t *testing.T, cacheRead, cacheCreation int64) *htt
 	t.Helper()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/messages/count_tokens", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"input_tokens": 5}); err != nil {
+			t.Errorf("failed to encode response: %v", err)
+		}
+	})
 	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		// Parse model from request body
 		var reqBody struct {

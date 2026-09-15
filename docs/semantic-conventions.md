@@ -52,9 +52,10 @@ schemas/otelc/
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
+│   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
-│   ├── logs.yaml            # log, log/slog, logrus — no telemetry (correlation only)
+│   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 │   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
@@ -116,7 +117,7 @@ This command:
 Compare the current version against the latest to see available updates:
 
 ```bash
-make registry-diff
+make semantic-conventions/diff
 ```
 
 This command automatically:
@@ -240,7 +241,7 @@ Fix any errors or warnings reported by the validator.
 Generate a diff report to document your changes:
 
 ```bash
-make registry-diff
+make semantic-conventions/diff
 ```
 
 Review the diff to ensure only expected changes are present.
@@ -313,7 +314,7 @@ This job ensures the registry and code stay consistent with the pinned version:
 
 This job shows what's new in the latest semantic conventions:
 
-1. **Generate Diff**: Runs `make registry-diff` to compare current version vs latest
+1. **Generate Diff**: Runs `make semantic-conventions/diff` to compare current version vs latest
 2. **Upload Report**: Uploads the diff report as an artifact
 3. **PR Comment**: Posts an informational comment showing:
    - What new semantic conventions are available

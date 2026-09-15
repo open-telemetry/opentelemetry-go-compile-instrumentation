@@ -32,6 +32,7 @@ const vendoredAppMain = `package main
 import (
 	"flag"
 	"fmt"
+	"log"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,7 +47,7 @@ func main() {
 	})
 
 	if err := r.Run(fmt.Sprintf(":%d", *port)); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 `
@@ -77,7 +78,9 @@ func TestVendoredBuild(t *testing.T) {
 
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/hello/OpenTelemetry", port)) //nolint:noctx
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/hello/OpenTelemetry", port), nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusOK, resp.StatusCode)

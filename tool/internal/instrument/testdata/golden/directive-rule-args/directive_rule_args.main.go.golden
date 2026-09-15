@@ -1,0 +1,13 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//otelc:span
+func divide(a int, b int) (_unnamedRetVal_1082567017_0 int, _unnamedRetVal_1082567017_1 error) {
+	println("enter divide args=2 arg0=a arg1=b")
+	defer println("exit divide rets=2 ret0=_unnamedRetVal_1082567017_0 ret1=_unnamedRetVal_1082567017_1")
+	return a / b, nil
+}
+
+func main() { divide(4, 2) }

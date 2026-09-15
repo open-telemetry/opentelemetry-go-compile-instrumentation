@@ -9,11 +9,11 @@ import _ "unsafe"
 // as part of `go test`. The is_test: true rule matches that test build and the
 // golden captures the injected trampolines — the positive counterpart to
 // is-test-filter-no-match, where the same rule is gated out of a normal build.
-func ProcessRequest(req string) (_unnamedRetVal0 error) {
+func ProcessRequest(req string) (_unnamedRetVal_2587785677_0 error) {
 	//line <generated>:1
 	if hookContext2587785677, _ := OtelBeforeTrampoline_ProcessRequest2587785677(&req); false {
 	} else {
-		defer OtelAfterTrampoline_ProcessRequest2587785677(hookContext2587785677, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_ProcessRequest2587785677(hookContext2587785677, &_unnamedRetVal_2587785677_0)
 	}
 	//line main_test.go:11:2
 	println("processing:", req)

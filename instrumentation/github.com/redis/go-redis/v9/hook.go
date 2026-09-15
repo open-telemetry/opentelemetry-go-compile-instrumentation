@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -25,6 +26,14 @@ var (
 	logger   = runtime.Logger()
 	tracer   trace.Tracer
 	initOnce sync.Once
+)
+
+const (
+	redisAuthCmd         = "auth"
+	redisHelloCmd        = "hello"
+	redisSetNameOption   = "setname"
+	redisHelloAuthArgN   = 2
+	redisQueryTextRedact = "?"
 )
 
 func initInstrumentation() {
@@ -140,11 +149,17 @@ func (o *otelRedisHook) DialHook(next redis.DialHook) redis.DialHook {
 }
 
 func getRedisV9Statement(cmd redis.Cmder) string {
-	b := make([]byte, 0, 64)
+	args := cmd.Args()
+	redactStart, redactEnd := redisV9CredentialRedactRange(cmd.Name(), args)
 
-	for i, arg := range cmd.Args() {
+	b := make([]byte, 0, 64)
+	for i, arg := range args {
 		if i > 0 {
 			b = append(b, ' ')
+		}
+		if i >= redactStart && i < redactEnd {
+			b = append(b, redisQueryTextRedact...)
+			continue
 		}
 		b = redisV9AppendArg(b, arg)
 	}
@@ -155,6 +170,50 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 	}
 
 	return string(b)
+}
+
+// redisV9CredentialRedactRange returns a half-open index range of args that
+// must not appear in db.query.text. AUTH arguments are credentials. HELLO
+// AUTH username/password are too; SETNAME and the protocol version are not.
+func redisV9CredentialRedactRange(name string, args []interface{}) (start, end int) {
+	switch name {
+	case redisAuthCmd:
+		if len(args) > 1 {
+			return 1, len(args)
+		}
+	case redisHelloCmd:
+		if i := redisV9HelloAuthIndex(args); i >= 0 {
+			return i + 1, min(i+1+redisHelloAuthArgN, len(args))
+		}
+	}
+	return 0, 0
+}
+
+func redisV9HelloAuthIndex(args []interface{}) int {
+	for i := 1; i < len(args); i++ {
+		if !redisV9ArgEqualFold(args[i], redisAuthCmd) {
+			continue
+		}
+		// AUTH and SETNAME each take a fixed number of args in the HELLO
+		// grammar, so a client literally named "auth" can only appear
+		// directly after "setname" - a one-token lookback is enough.
+		if i > 1 && redisV9ArgEqualFold(args[i-1], redisSetNameOption) {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func redisV9ArgEqualFold(v interface{}, s string) bool {
+	switch a := v.(type) {
+	case string:
+		return strings.EqualFold(a, s)
+	case []byte:
+		return strings.EqualFold(string(a), s)
+	default:
+		return false
+	}
 }
 
 func redisV9AppendArg(b []byte, v interface{}) []byte {

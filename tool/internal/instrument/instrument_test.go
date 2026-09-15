@@ -34,7 +34,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
-	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/golden"
 )
 
@@ -153,14 +152,16 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, p.testName, rulesFileName))
 	require.NoError(t, err)
 
-	var rawRules map[string]map[string]any
-	yaml.Unmarshal(data, &rawRules)
+	doc, parseErr := rule.ParseFile(data)
+	require.NoError(t, parseErr)
+	rules, rulesErr := doc.Rules()
+	require.NoError(t, rulesErr)
 
 	// Parse the source AST once and reuse it for every rule's where.file gating
 	// below. The gating is per-rule, but the tree is shared, so N rules do not
 	// trigger N reparses of the same file.
-	sourceTree, parseErr := ast.ParseFileFast(p.sourceFile)
-	require.NoError(t, parseErr)
+	sourceTree, sourceParseErr := ast.ParseFileFast(p.sourceFile)
+	require.NoError(t, sourceParseErr)
 
 	ruleSet := &rule.InstRuleSet{
 		// PackageName is the Go package identifier (from the source clause);
@@ -173,94 +174,64 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),
 		CallRules:      make(map[string][]*rule.InstCallRule),
+		LitRules:       make(map[string][]*rule.InstLitRule),
 		DirectiveRules: make(map[string][]*rule.InstDirectiveRule),
 		DeclRules:      make(map[string][]*rule.InstDeclRule),
 		FileRules:      make([]*rule.InstFileRule, 0),
 	}
 
-	// Sort rule names to ensure deterministic order in tests
-	ruleNames := make([]string, 0, len(rawRules))
-	for name := range rawRules {
-		ruleNames = append(ruleNames, name)
-	}
-	slices.Sort(ruleNames)
+	for _, instRule := range rules {
+		// The golden harness has no setup phase, so the where.file filter
+		// that setup.preciseMatching would evaluate is applied inline here.
+		// A rule whose file predicate does not match the source is skipped,
+		// exactly as it would be gated out during matching.
+		if !whereFileMatchesRule(t, instRule, p.isTest, sourceTree) {
+			continue
+		}
 
-	for _, name := range ruleNames {
-		propsList, normErr := rule.Normalize(rawRules[name])
-		require.NoError(t, normErr)
-		for _, props := range propsList {
-			props["name"] = name
-			ruleData, _ := yaml.Marshal(props)
+		// Mirror the setup-phase package gate: a rule applies only when its
+		// target selects this fixture's import path (exact equality or glob
+		// match). This lets golden fixtures prove glob match vs no-match
+		// against realistic deep import paths, not just "main".
+		if !targetMatches(map[string]any{"target": instRule.GetTarget()}, p.importPath) {
+			continue
+		}
 
-			// The golden harness has no setup phase, so the where.file filter
-			// that setup.preciseMatching would evaluate is applied inline here.
-			// A rule whose file predicate does not match the source is skipped,
-			// exactly as it would be gated out during matching.
-			if !whereFileMatches(t, ruleData, p.isTest, sourceTree) {
-				continue
+		switch r := instRule.(type) {
+		case *rule.InstStructRule:
+			ruleSet.StructRules[p.sourceFile] = append(ruleSet.StructRules[p.sourceFile], r)
+		case *rule.InstFileRule:
+			ruleSet.FileRules = append(ruleSet.FileRules, r)
+		case *rule.InstDirectiveRule:
+			ruleSet.DirectiveRules[p.sourceFile] = append(ruleSet.DirectiveRules[p.sourceFile], r)
+		case *rule.InstRawRule:
+			ruleSet.RawRules[p.sourceFile] = append(ruleSet.RawRules[p.sourceFile], r)
+		case *rule.InstFuncRule:
+			ruleSet.FuncRules[p.sourceFile] = append(ruleSet.FuncRules[p.sourceFile], r)
+		case *rule.InstCallRule:
+			for _, file := range p.packageFiles {
+				ruleSet.CallRules[file] = append(ruleSet.CallRules[file], r)
 			}
-
-			// Mirror the setup-phase package gate: a rule applies only when its
-			// target selects this fixture's import path (exact equality or glob
-			// match). This lets golden fixtures prove glob match vs no-match
-			// against realistic deep import paths, not just "main".
-			if !targetMatches(props, p.importPath) {
-				continue
+		case *rule.InstLitRule:
+			for _, file := range p.packageFiles {
+				ruleSet.LitRules[file] = append(ruleSet.LitRules[file], r)
 			}
-
-			switch {
-			case props["struct"] != nil:
-				r, _ := rule.NewInstStructRule(ruleData, name)
-				ruleSet.StructRules[p.sourceFile] = append(ruleSet.StructRules[p.sourceFile], r)
-			case props["file"] != nil:
-				r, _ := rule.NewInstFileRule(ruleData, name)
-				ruleSet.FileRules = append(ruleSet.FileRules, r)
-			case props["directive"] != nil:
-				r, _ := rule.NewInstDirectiveRule(ruleData, name)
-				ruleSet.DirectiveRules[p.sourceFile] = append(ruleSet.DirectiveRules[p.sourceFile], r)
-			case props["raw"] != nil:
-				r, _ := rule.NewInstRawRule(ruleData, name)
-				ruleSet.RawRules[p.sourceFile] = append(ruleSet.RawRules[p.sourceFile], r)
-			case props["func"] != nil:
-				r, _ := rule.NewInstFuncRule(ruleData, name)
-				ruleSet.FuncRules[p.sourceFile] = append(ruleSet.FuncRules[p.sourceFile], r)
-			case props["function_call"] != nil:
-				r, _ := rule.NewInstCallRule(ruleData, name)
-				for _, file := range p.packageFiles {
-					ruleSet.CallRules[file] = append(ruleSet.CallRules[file], r)
-				}
-			case props["identifier"] != nil:
-				r, _ := rule.NewInstDeclRule(ruleData, name)
-				ruleSet.DeclRules[p.sourceFile] = append(ruleSet.DeclRules[p.sourceFile], r)
-			}
+		case *rule.InstDeclRule:
+			ruleSet.DeclRules[p.sourceFile] = append(ruleSet.DeclRules[p.sourceFile], r)
 		}
 	}
 
 	return ruleSet
 }
 
-// whereFileMatches evaluates the rule's where.file predicate against the
-// already-parsed source tree, mirroring the gating that setup.preciseMatching
-// performs. It returns true when there is no file predicate. The golden harness
-// builds the matched rule set by hand (no setup phase), so this keeps fixtures
-// honest: a rule whose file filter does not match is gated out and produces no
-// instrumentation. The caller parses the tree once and shares it across rules.
-//
-// isTest reports whether the fixture is a test build (its source is a
-// source_test.go file), mirroring setup.isTestBuild; the is_test predicate is
-// evaluated against it.
-func whereFileMatches(t *testing.T, ruleData []byte, isTest bool, tree *dst.File) bool {
+func whereFileMatchesRule(t *testing.T, instRule rule.InstRule, isTest bool, tree *dst.File) bool {
 	t.Helper()
 
-	var probe struct {
-		Where *rule.WhereDef `yaml:"where"`
-	}
-	require.NoError(t, yaml.Unmarshal(ruleData, &probe))
-	if probe.Where == nil || probe.Where.File == nil {
+	where := instRule.GetWhere()
+	if where == nil || where.File == nil {
 		return true
 	}
-
-	return fileFilterMatches(t, probe.Where.File, isTest, tree)
+	return fileFilterMatches(t, where.File, isTest, tree)
 }
 
 // fileFilterMatches reports whether a where.file predicate matches the parsed
@@ -419,7 +390,7 @@ func createImportCfg(path string, helpers []helperPkg) {
 	}
 
 	// Resolve common standard library packages that might be needed
-	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io"}
+	commonPkgs := []string{"fmt", "unsafe", "runtime", "strings", "io", "context"}
 	for _, pkg := range commonPkgs {
 		cmd := exec.CommandContext(ctx, "go", "list", "-export", "-json", pkg)
 		output, err := cmd.Output()
@@ -698,11 +669,29 @@ func TestGroupRules(t *testing.T) {
 			},
 			expectedFiles: []string{"file1.go"},
 		},
+		{
+			// Insertion order (both in the map literal below and, more
+			// importantly, in Go's own randomized map iteration at runtime)
+			// deliberately does not match sorted order, so this only passes
+			// if groupRules actually sorts rather than happening to agree.
+			name: "returned files are sorted, not insertion order",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules:   make(map[string][]*rule.InstFuncRule),
+				StructRules: make(map[string][]*rule.InstStructRule),
+				RawRules:    make(map[string][]*rule.InstRawRule),
+				DeclRules: map[string][]*rule.InstDeclRule{
+					"zzz.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_zzz"}, Identifier: "X"}},
+					"aaa.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_aaa"}, Identifier: "X"}},
+					"mmm.go": {{InstBaseRule: rule.InstBaseRule{Name: "r_mmm"}, Identifier: "X"}},
+				},
+			},
+			expectedFiles: []string{"aaa.go", "mmm.go", "zzz.go"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			grouped := groupRules("", tt.ruleSet)
+			grouped, files := groupRules("", tt.ruleSet)
 
 			// Check expected files are present
 			for _, file := range tt.expectedFiles {
@@ -712,6 +701,17 @@ func TestGroupRules(t *testing.T) {
 
 			// Check no unexpected files
 			assert.Len(t, grouped, len(tt.expectedFiles))
+
+			// The second return value must be expectedFiles in sorted order.
+			// expectedFiles is written in sorted order in every case above,
+			// but sort a clone rather than relying on that by convention.
+			wantFiles := slices.Clone(tt.expectedFiles)
+			slices.Sort(wantFiles)
+			if len(wantFiles) == 0 {
+				assert.Empty(t, files)
+			} else {
+				assert.Equal(t, wantFiles, files)
+			}
 
 			if tt.validate != nil {
 				tt.validate(t, grouped)
