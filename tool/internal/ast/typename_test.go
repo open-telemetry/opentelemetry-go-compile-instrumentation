@@ -261,7 +261,7 @@ func TestTypeNameMatches_ImportAliasResolution(t *testing.T) {
 
 func TestImportAliasMap(t *testing.T) {
 	t.Run("nil file returns nil", func(t *testing.T) {
-		assert.Nil(t, ImportAliasMap(nil))
+		assert.Nil(t, ImportAliasMap(nil, nil))
 	})
 
 	t.Run("resolves default and aliased imports, skips blank and dot imports", func(t *testing.T) {
@@ -279,7 +279,7 @@ func f(r *http.Request, r2 *althttp.Request) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 2)
 		assert.Equal(t, "net/http", imports["http"])
 		assert.Equal(t, "net/http", imports["althttp"])
@@ -300,7 +300,7 @@ func f(t *jwt.Token, n *yaml.Node) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Equal(t, "github.com/golang-jwt/jwt/v5", imports["jwt"])
 		assert.Equal(t, "gopkg.in/yaml.v3", imports["yaml"])
 	})
@@ -318,7 +318,7 @@ func f(x *foo.T, y *bar.T) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 2)
 		assert.Equal(t, "github.com/a/foo/v2", imports["foo"])
 		assert.Equal(t, "github.com/b/bar/v2", imports["bar"])
@@ -335,9 +335,59 @@ func f(c *redis.Client) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.NotContains(t, imports, "redis")
 		assert.Equal(t, "github.com/redis/go-redis/v9", imports["go-redis"])
+	})
+
+	t.Run("resolvedNames resolves a package name unrelated to its import path", func(t *testing.T) {
+		// This test uses the same fixture, with the real name supplied.
+		// The import must be keyed by "redis", not the guessed
+		// "go-redis".
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"github.com/redis/go-redis/v9": "redis"}
+		imports := ImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["redis"])
+		assert.NotContains(t, imports, "go-redis")
+	})
+
+	t.Run("resolvedNames miss falls back to the guess", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"example.com/unrelated": "whatever"}
+		imports := ImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["go-redis"])
+	})
+
+	t.Run("explicit alias in the file always wins over resolvedNames", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import goredis "github.com/redis/go-redis/v9"
+
+func f(c *goredis.Client) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"github.com/redis/go-redis/v9": "redis"}
+		imports := ImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["goredis"])
+		assert.NotContains(t, imports, "redis")
 	})
 
 	t.Run("v-prefixed last segment that is not a version suffix is preserved", func(t *testing.T) {
@@ -352,7 +402,7 @@ func f(c *vault.Client) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Equal(t, "github.com/hashicorp/vault", imports["vault"])
 	})
 
@@ -362,7 +412,7 @@ func f(c *vault.Client) {}
 			{Path: &dst.BasicLit{Value: `"net/http"`}},
 		}}
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 1)
 		assert.Equal(t, "net/http", imports["http"])
 	})
@@ -373,7 +423,7 @@ func f(c *vault.Client) {}
 			{Path: &dst.BasicLit{Value: `"net/http"`}},
 		}}
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 1)
 		assert.Equal(t, "net/http", imports["http"])
 	})
@@ -399,7 +449,7 @@ func f(c *vault.Client) {}
 			},
 		}
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 2)
 		assert.Equal(t, "net/http", imports["http"])
 		assert.Equal(t, "net/http", imports["althttp"])
@@ -423,7 +473,7 @@ func f(c *vault.Client) {}
 			},
 		}
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 1)
 		assert.Equal(t, "net/http", imports["http"])
 		assert.NotContains(t, imports, "ignored")

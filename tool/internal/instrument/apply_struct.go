@@ -19,14 +19,22 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 		return ex.Newf("can not find struct %q (missing, or not a struct type)", rule.Struct)
 	}
 
+	_, aliasOverrides := ip.resolveImportOverrides(root, rule.Imports)
+
+	for _, field := range rule.NewField {
+		typeExpr, err := parseGoTypeExpression(field.Type)
+		if err != nil {
+			return ex.Wrapf(err, "failed to parse type %q for field %q", field.Type, field.Name)
+		}
+		replaceQualifierAliases(typeExpr, aliasOverrides)
+		structType.Fields.List = append(structType.Fields.List, ast.Field(field.Name, typeExpr))
+	}
+
 	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
 		return err
 	}
 
-	for _, field := range rule.NewField {
-		ast.AddStructField(structType, field.Name, field.Type)
-	}
 	ip.Info("Apply struct rule", "rule", rule)
 	return nil
 }
