@@ -764,7 +764,12 @@ func TestFindGoSourcesDetectsTestBuild(t *testing.T) {
 	}{
 		{"normal build", []string{"-p", "main", src}, false, 1},
 		{"package augmented with tests", []string{"-p", "example.com/app", src, testSrc}, true, 2},
-		{"generated test main not on disk yet", []string{"-p", "main", filepath.Join(dir, "b001", "_testmain.go")}, true, 0},
+		{
+			"generated test main not on disk yet",
+			[]string{"-p", "main", filepath.Join(dir, "b001", "_testmain.go")},
+			true,
+			0,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
