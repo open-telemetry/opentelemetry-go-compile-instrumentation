@@ -62,11 +62,13 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
-	// Hook files already parsed via parseHookFileCached, keyed by absolute
-	// file path. A hook package directory is typically shared by many func
+	// Cache for parsed hook files. Many rules share the same hook file across
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
+	// Rules whose application required globals, recorded in application order
+	// so writeGlobals can attribute the generated globals file to its contributors.
+	globalsContributors []string
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
@@ -74,16 +76,18 @@ func (ip *instrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *instrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *instrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
+// debugArtifactDir returns the directory under .otelc-build holding this
+// package's debug artifacts (.otelc-build/debug/<escaped-package>/).
+func (ip *instrumentPhase) debugArtifactDir() string {
+	modPath := util.FindFlagValue(ip.compileArgs, "-p")
+	pkgDir := util.EscapePackagePath(modPath)
+	return util.GetBuildTemp(filepath.Join("debug", pkgDir))
+}
+
 // keepForDebug keeps the the file to .otelc-build directory for debugging
 func (ip *instrumentPhase) keepForDebug(name string) {
-	escape := func(s string) string {
-		dirName := strings.ReplaceAll(s, "/", "_")
-		dirName = strings.ReplaceAll(dirName, ".", "_")
-		return dirName
-	}
-	modPath := util.FindFlagValue(ip.compileArgs, "-p")
-	dest := filepath.Join("debug", escape(modPath), filepath.Base(name))
-	err := util.CopyFile(name, util.GetBuildTemp(dest))
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(name))
+	err := util.CopyFile(name, dest)
 	if err != nil { // error is tolerable here as this is only for debugging
 		ip.Warn("failed to save modified file", "dest", dest, "error", err)
 	}
@@ -243,6 +247,14 @@ func CleanupImportTrackingFiles() {
 	for _, file := range files {
 		_ = os.Remove(file) // Best effort cleanup
 	}
+}
+
+// CleanupDebugArtifacts removes debug artifacts from previous builds.
+// Should be called at the start of a build under debug mode to clean up
+// stale diffs and debug files from prior runs.
+// This is exported for use by the setup phase.
+func CleanupDebugArtifacts() error {
+	return os.RemoveAll(util.GetBuildTemp("debug"))
 }
 
 // loadAddedImports discovers and merges all per-process import tracking files.

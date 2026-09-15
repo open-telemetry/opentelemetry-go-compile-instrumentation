@@ -333,10 +333,11 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	}
 	ip.addCompileArg(path)
 	ip.keepForDebug(path)
+	ip.writeGlobalsDiffForDebug(path, ip.globalsContributors)
 	return nil
 }
 
-func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
+func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string, changes []ruleChange) error {
 	// Write the instrumented AST to the new file in the working directory
 	newFile := filepath.Join(ip.workDir, filepath.Base(oldFile))
 	if strings.HasSuffix(oldFile, ".cgo1.go") {
@@ -352,6 +353,7 @@ func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) err
 		return ex.Wrapf(err, "writing instrumented file %s", newFile)
 	}
 	ip.keepForDebug(newFile)
+	ip.writeDiffForDebug(oldFile, newFile, changes)
 
 	// Replace the original file with the new file in the compile command
 	replace := false
