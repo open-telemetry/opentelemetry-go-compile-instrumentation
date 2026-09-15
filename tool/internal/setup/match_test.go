@@ -2066,3 +2066,42 @@ func TestPreciseMatching_IsTestFromDependency(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, set.FuncRules, 1)
 }
+
+func TestRunMatch_FileRuleWherePackageLevel(t *testing.T) {
+	a := writeGoSource(t, "a.go", "package main\n\nfunc A() {}\n")
+	b := writeGoSource(t, "b.go", "package main\n\nfunc B() {}\n")
+	mock := writeGoSource(t, "mock.go", "package main\n\ntype Mock struct{}\n")
+	notMock := &rule.WhereDef{File: &rule.FilterDef{Not: &rule.FilterDef{HasStruct: "Mock"}}}
+	bothFuncs := &rule.WhereDef{File: &rule.FilterDef{AllOf: []rule.FilterDef{{HasFunc: "A"}, {HasFunc: "B"}}}}
+
+	tests := []struct {
+		name    string
+		where   *rule.WhereDef
+		sources []string
+		want    bool
+	}{
+		{"not is false when any file declares it", notMock, []string{a, mock}, false},
+		{"not holds when no file declares it", notMock, []string{a, b}, true},
+		{"all-of can be satisfied by different files", bothFuncs, []string{a, b}, true},
+		{"all-of fails when a declaration is missing", bothFuncs, []string{a}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fileRule := &rule.InstFileRule{
+				InstBaseRule: rule.InstBaseRule{Name: "add_to_main", Target: "main", Where: tt.where},
+				File:         "added.go",
+				Path:         "example.com/rules",
+			}
+			dep := &Dependency{ImportPath: "main", Sources: tt.sources}
+			rules := map[string][]rule.InstRule{"main": {fileRule}}
+
+			set, err := newTestSetupPhase().runMatch(t.Context(), dep, rules, nil)
+			require.NoError(t, err)
+			if tt.want {
+				assert.Len(t, set.FileRules, 1)
+			} else {
+				assert.Empty(t, set.FileRules)
+			}
+		})
+	}
+}

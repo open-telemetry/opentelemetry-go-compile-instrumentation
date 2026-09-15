@@ -173,7 +173,8 @@ func (sp *setupPhase) runMatch(
 }
 
 // fileRuleApplies reports whether a file rule's where clause holds for dep. The
-// rule adds one file to the whole package, so any matching source file is enough.
+// rule adds one file to the whole package, so the clause is checked against the
+// package rather than each file on its own.
 func fileRuleApplies(ctx context.Context, dep *Dependency, fr *rule.InstFileRule) (bool, error) {
 	where := fr.GetWhere()
 	if where == nil {
@@ -183,11 +184,7 @@ func fileRuleApplies(ctx context.Context, dep *Dependency, fr *rule.InstFileRule
 	if err != nil {
 		return false, ex.Wrapf(err, "build where filter for rule %q", fr.GetName())
 	}
-	isTest := dep.IsTest || isTestBuild(dep.Sources)
-	if len(dep.Sources) == 0 {
-		// Generated units like the test main have nothing to parse.
-		return f.Match(&matchContext{IsTest: isTest, AST: &dst.File{Name: dst.NewIdent("")}}), nil
-	}
+	trees := make([]*dst.File, 0, len(dep.Sources))
 	for _, source := range dep.Sources {
 		if err = ctx.Err(); err != nil {
 			return false, err
@@ -196,11 +193,9 @@ func fileRuleApplies(ctx context.Context, dep *Dependency, fr *rule.InstFileRule
 		if parseErr != nil {
 			return false, parseErr
 		}
-		if f.Match(&matchContext{IsTest: isTest, SourceFile: source, AST: tree}) {
-			return true, nil
-		}
+		trees = append(trees, tree)
 	}
-	return false, nil
+	return f.Match(&matchContext{IsTest: dep.IsTest || isTestBuild(dep.Sources), Package: trees}), nil
 }
 
 // ruleFilter pairs a rule with its pre-compiled where filter (if any).
