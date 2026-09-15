@@ -539,7 +539,7 @@ func TestUpdateImportConfigWriteError(t *testing.T) {
 	}
 	err := ip.updateImportConfig(t.Context(), map[string]string{"fmt": "fmt"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create file")
+	assert.Contains(t, err.Error(), "failed to create temporary file")
 }
 
 func TestUpdateImportConfigTrackError(t *testing.T) {
@@ -682,22 +682,29 @@ func TestInterceptLinkAllImportsPresent(t *testing.T) {
 }
 
 func TestInterceptLinkWriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod permissions are not enforced consistently on Windows")
+	}
+
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
 	writeAddedImports(t, map[string]string{"fmt": "/new/fmt.a"})
 
-	linkCfg := filepath.Join(workDir, "importcfg.link")
+	cfgDir := filepath.Join(workDir, "linkcfg")
+	require.NoError(t, os.Mkdir(cfgDir, 0o755))
+	linkCfg := filepath.Join(cfgDir, "importcfg.link")
 	require.NoError(t, os.WriteFile(linkCfg, []byte("packagefile context=/old/context.a\n"), 0o644))
-	// Make the file read-only so the rewrite fails.
-	require.NoError(t, os.Chmod(linkCfg, 0o444))
-	t.Cleanup(func() { _ = os.Chmod(linkCfg, 0o600) })
+	// The rewrite is atomic, so it needs to create a temporary file alongside
+	// the target. Make the directory read-only so that creation fails.
+	require.NoError(t, os.Chmod(cfgDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(cfgDir, 0o755) })
 
 	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", linkCfg}
 	_, err := interceptLink(ctx, args)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create file")
+	assert.Contains(t, err.Error(), "failed to create temporary file")
 }
 
 func TestInterceptToolVersionWriteError(t *testing.T) {
