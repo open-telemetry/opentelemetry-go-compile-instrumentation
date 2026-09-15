@@ -13,6 +13,7 @@ The project structure is as follows:
     - `aws/aws-sdk-go-v2`: AWS SDK for Go v2 instrumentation
     - `gin-gonic/gin`: Gin instrumentation
     - `olivere/elastic/v7`: Elasticsearch instrumentation
+    - `rabbitmq/amqp091-go`: RabbitMQ messaging instrumentation
     - `go-redis/redis/v9`: Redis instrumentation
   - `go.mongodb.org/mongo-driver/mongo`: MongoDB instrumentation
   - `go.mongodb.org/mongo-driver/v2/mongo`: MongoDB instrumentation
