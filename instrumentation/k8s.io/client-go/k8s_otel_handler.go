@@ -57,11 +57,18 @@ func (h k8SOtelEventHandler) OnUpdate(oldObj, newObj any) {
 }
 
 func (h k8SOtelEventHandler) OnDelete(obj any) {
+	// Unwrap only for metadata extraction: a DeletedFinalStateUnknown tombstone
+	// means client-go's cache lost track of the object (e.g. a missed watch
+	// event during a resync), so the delete is inferred rather than confirmed.
+	// The wrapped user handler needs the original, possibly-wrapped obj to make
+	// that same determination itself; forwarding the unwrapped value would
+	// silently change observable application behavior under instrumentation.
+	metaObj := obj
 	if o, ok := obj.(cache.DeletedFinalStateUnknown); ok {
-		obj = o.Obj
+		metaObj = o.Obj
 	}
 
-	objInfo := getObjectInfo(obj)
+	objInfo := getObjectInfo(metaObj)
 	attrs := semconv.K8SObjectInfoTraceAttrs(objInfo)
 
 	spanName := getSpanName(objInfo.Kind, "delete")

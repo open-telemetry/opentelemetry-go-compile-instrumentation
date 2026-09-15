@@ -11,6 +11,9 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -271,9 +274,7 @@ func TestSyntheticNamesDoNotShadowBareStyleGlobal(t *testing.T) {
 // function declaration it contains.
 func parseFileFunc(t *testing.T, source string) (*dst.File, *dst.FuncDecl) {
 	t.Helper()
-	parser := ast.NewAstParser()
-	file, err := parser.ParseSource(source)
-	require.NoError(t, err)
+	file := parseFile(t, source)
 	for _, decl := range file.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
 			return file, funcDecl
@@ -391,4 +392,70 @@ func TestFindJumpPointStopsAtUnlabelledTail(t *testing.T) {
 	chainJump(t, first, tail)
 
 	assert.Nil(t, findJumpPoint(first))
+}
+
+// context.go is the source of truth that api.tmpl mirrors; it lives in the
+// sibling pkg/ module, so the path is relative to this package dir.
+const hookContextSource = "../../../pkg/hook/context.go"
+
+// TestAPITemplateMatchesHookContext keeps api.tmpl byte-identical to
+// pkg/hook/context.go (issue #899). api.tmpl is embedded and parsed for its
+// HookContext decls, so any drift silently desyncs the generated interface.
+// We compare the embedded templateAPI, i.e. the exact bytes the tool builds in.
+func TestAPITemplateMatchesHookContext(t *testing.T) {
+	source, err := os.ReadFile(hookContextSource)
+	require.NoError(t, err)
+
+	require.Equal(t, string(source), templateAPI,
+		"%s and api.tmpl have drifted; re-sync with `make build` "+
+			"(or `cp %s tool/internal/instrument/api.tmpl`)",
+		hookContextSource, hookContextSource)
+}
+
+func TestParseFileMissingFile(t *testing.T) {
+	ip := &instrumentPhase{}
+	_, err := ip.parseFile("/nonexistent/path/source.go")
+	require.Error(t, err)
+}
+
+func TestInstrumentParseFileError(t *testing.T) {
+	ip := &instrumentPhase{}
+
+	rset := rule.NewInstRuleSet("example.com/pkg")
+	rset.FuncRules["/nonexistent/does-not-exist.go"] = []*rule.InstFuncRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Func:         "Foo",
+			Before:       "BeforeFoo",
+			Path:         "example.com/hook",
+		},
+	}
+
+	err := ip.instrument(context.Background(), rset)
+	require.Error(t, err)
+}
+
+func TestInstrument_WriteInstrumentedError(t *testing.T) {
+	// A valid source file whose path does not match compileArgs causes writeInstrumented to fail.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "source.go")
+	require.NoError(t, os.WriteFile(src, []byte("package main\nvar X = 1\n"), 0o644))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     tmp,
+		compileArgs: []string{"other.go"}, // doesn't match src, causing writeInstrumented to error
+	}
+
+	rset := rule.NewInstRuleSet("main")
+	rset.DeclRules[src] = []*rule.InstDeclRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Identifier:   "X",
+			Replace:      "2",
+		},
+	}
+
+	err := ip.instrument(context.Background(), rset)
+	require.Error(t, err)
 }

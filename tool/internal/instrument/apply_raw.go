@@ -6,8 +6,8 @@ package instrument
 import (
 	"context"
 	"fmt"
-	"go/format"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/dave/dst"
@@ -47,6 +47,19 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 	}
 }
 
+// renderRawCode renders the shared function template variables (FuncName,
+// FuncArgument N, FuncReturn N, ...) in raw code injected by a raw rule.
+func renderRawCode(raw string, decl *dst.FuncDecl, hash string, imports map[string]string) (string, error) {
+	if !strings.Contains(raw, "{{") {
+		return raw, nil
+	}
+	tmpl, err := rule.ParseFuncTemplate(raw)
+	if err != nil {
+		return "", err
+	}
+	return tmpl.Execute(newFuncTemplateData(decl, nil, imports, hash))
+}
+
 type insertPos struct {
 	pattern   *regexp.Regexp
 	placement string
@@ -76,19 +89,14 @@ func insertRawAtPattern(
 			return true
 		}
 
-		astNode, nodeFound := restorer.Ast.Nodes[stmt]
-		if !nodeFound {
+		text, err := ast.RenderNode(restorer, stmt)
+		if err != nil {
+			logger.WarnContext(ctx, "Failed to restore AST node to source code", "error", err)
 			return true
 		}
 
-		var buf strings.Builder
-		if err := format.Node(&buf, restorer.Fset, astNode); err != nil {
-			logger.Warn("Failed to restore AST node to source code", "error", err)
-			return true
-		}
-
-		logger.Debug("Matching statement with pattern", "stmt", buf.String(), "pattern", pos.pattern.String())
-		if !pos.pattern.MatchString(buf.String()) {
+		logger.DebugContext(ctx, "Matching statement with pattern", "stmt", text, "pattern", pos.pattern.String())
+		if !pos.pattern.MatchString(text) {
 			return true
 		}
 
@@ -98,8 +106,8 @@ func insertRawAtPattern(
 				cursor.InsertBefore(s)
 			}
 		case "after":
-			for i := len(stmts) - 1; i >= 0; i-- {
-				cursor.InsertAfter(stmts[i])
+			for _, s := range slices.Backward(stmts) {
+				cursor.InsertAfter(s)
 			}
 		}
 
@@ -116,9 +124,15 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
+
+	raw, err := renderRawCode(r.Raw, decl, r.Identity(), ast.ImportAliasMap(root))
+	if err != nil {
+		return ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
+	}
+
 	// Parse the raw code into AST statements
 	p := ast.NewAstParser()
-	stmts, err := p.ParseSnippet(r.Raw)
+	stmts, err := p.ParseSnippet(raw)
 	if err != nil {
 		return err
 	}
@@ -130,7 +144,10 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 			return ex.Wrapf(restoreErr, "failed to restore the AST")
 		}
 
-		pattern := regexp.MustCompile(r.Pattern)
+		pattern, compileErr := regexp.Compile(r.Pattern)
+		if compileErr != nil {
+			return ex.Wrapf(compileErr, "invalid raw rule pattern %q", r.Pattern)
+		}
 		pos := insertPos{
 			pattern:   pattern,
 			placement: r.Placement,
@@ -151,7 +168,7 @@ func insertRaw(ctx context.Context, r *rule.InstRawRule, decl *dst.FuncDecl, roo
 
 // applyRawRule injects the raw code into the target function at the beginning
 // of the function.
-func (ip *InstrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
+func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
 	// Find the target function to be instrumented
 	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
 	if err != nil {

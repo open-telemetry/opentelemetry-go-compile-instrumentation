@@ -27,6 +27,7 @@ func groupRules(workDir string, rset *rule.InstRuleSet) (map[string][]rule.InstR
 	addRulesToMap(rset.StructRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.RawRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.CallRules, file2rules, rset.CgoFileMap, workDir)
+	addRulesToMap(rset.LitRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DirectiveRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DeclRules, file2rules, rset.CgoFileMap, workDir)
 	return file2rules, slices.Sorted(maps.Keys(file2rules))
@@ -49,9 +50,10 @@ func addRulesToMap[T rule.InstRule](
 	}
 }
 
-// applyOneRule applies a single rule to the target file and reports whether
-// the rule counts as a function rule (i.e. whether a globals file is needed).
-func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (bool, error) {
+// applyOneRule applies a single rule to the target file and reports whether the
+// rule injected code that depends on the globals file (i.e. whether a globals
+// file is needed).
+func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (bool, error) {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		return true, ip.applyFuncRule(ctx, rt, root)
@@ -63,15 +65,17 @@ func (ip *InstrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 		return true, ip.applyRawRule(ctx, rt, root)
 	case *rule.InstCallRule:
 		return false, ip.applyCallRule(ctx, rt, root)
+	case *rule.InstLitRule:
+		return false, ip.applyLitRule(ctx, rt, root)
 	case *rule.InstDirectiveRule:
-		return true, ip.applyDirectiveRule(ctx, rt, root)
+		return ip.applyDirectiveRule(ctx, rt, root)
 	default:
 		util.ShouldNotReachHere()
 		return false, nil
 	}
 }
 
-func (ip *InstrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
+func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
 	// by other rules such as raw rules

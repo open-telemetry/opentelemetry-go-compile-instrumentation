@@ -19,6 +19,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestShutdownSignals(t *testing.T) {
@@ -172,7 +173,7 @@ func TestSetupOpenTelemetryPropagatorsFromEnv(t *testing.T) {
 	setupOpenTelemetry(Config{InstrumentationName: "test-inst"})
 
 	fields := otel.GetTextMapPropagator().Fields()
-	assert.Contains(t, fields, "x-b3-traceid",
+	assert.Contains(t, fields, "b3",
 		"OTEL_PROPAGATORS=b3 should install the b3 propagator")
 	assert.NotContains(t, fields, "traceparent",
 		"the default tracecontext propagator should be replaced")
@@ -325,6 +326,40 @@ func TestSetupTraceProviderNoneExporter(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Nil(t, tracerProvider, "no trace provider should be installed for OTEL_TRACES_EXPORTER=none")
+}
+
+func TestUseSimpleSpanProcessor(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		want     bool
+	}{
+		{"literal true", "true", true},
+		{"uppercase TRUE", "TRUE", true},
+		{"mixed case True", "True", true},
+		{"literal false", "false", false},
+		{"arbitrary value", "1", false},
+		{"unset", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", tt.envValue)
+			assert.Equal(t, tt.want, useSimpleSpanProcessor())
+		})
+	}
+}
+
+func TestNewSpanProcessorUsesSimpleSpanProcessor(t *testing.T) {
+	t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "TRUE")
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(newSpanProcessor(exporter)))
+	t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+
+	_, span := provider.Tracer("test").Start(context.Background(), "test")
+	span.End()
+
+	assert.Len(t, exporter.GetSpans(), 1, "simple processor should export completed spans immediately")
 }
 
 func TestSetupMeterProviderNoneExporter(t *testing.T) {

@@ -166,7 +166,7 @@ The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 1. Runs `make test-unit/coverage` to generate `coverage-tool.txt` and `coverage-pkg.txt`.
 2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
 
-Codecov evaluates each flag against the target defined in `codecov.yml` and posts the result as an
+Codecov evaluates each flag against the target defined in `.github/codecov.yml` and posts the result as an
 **enforcing** status check (`informational: false`): a coverage shortfall below the target fails
 the check and blocks the PR.
 

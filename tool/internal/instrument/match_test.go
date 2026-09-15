@@ -23,6 +23,17 @@ func writeMatchedJSONForLoad(t *testing.T, contents string) {
 	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(contents), 0o644))
 }
 
+func TestLoadMissingMatchedRules(t *testing.T) {
+	// Point the work dir at an empty directory: matched.json does not exist,
+	// which is what a bare -toolexec build sees when setup never ran.
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+
+	ip := &instrumentPhase{logger: slog.Default()}
+	_, err := ip.load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "otelc setup")
+}
+
 func TestLoadAndMatchLegacyMatchedJSON(t *testing.T) {
 	writeMatchedJSONForLoad(t, `[{
 		"package_name":"svc",
@@ -44,7 +55,7 @@ func TestLoadAndMatchLegacyMatchedJSON(t *testing.T) {
 		"file_rules":[]
 	}]`)
 
-	ip := &InstrumentPhase{logger: slog.Default()}
+	ip := &instrumentPhase{logger: slog.Default()}
 	sets, err := ip.load()
 	require.NoError(t, err)
 	require.Len(t, sets, 1)
@@ -91,7 +102,7 @@ func TestLoadAndMatchMatchedJSONWithCandidates(t *testing.T) {
 		"file_rules":[]
 	}]`)
 
-	ip := &InstrumentPhase{logger: slog.Default()}
+	ip := &instrumentPhase{logger: slog.Default()}
 	sets, err := ip.load()
 	require.NoError(t, err)
 	require.Len(t, sets, 1)

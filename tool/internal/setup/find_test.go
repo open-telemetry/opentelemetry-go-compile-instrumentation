@@ -480,6 +480,33 @@ echo nothing useful
 			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./..."},
 		},
 		{
+			// -json makes `go test` write the plan to stdout as JSON events
+			// instead of to stderr as shell commands, which leaves the plan
+			// empty. The dry run must drop it.
+			name:       "drops -json from a go test plan",
+			subcommand: "test",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"-json", "-count=1", "./..."},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{"test", "-a", "-x", "-n", "-count=1", "./..."},
+		},
+		{
+			// `go build -json` reports build output as JSON events too.
+			name: "drops -json from a go build plan",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"-json", "./cmd"},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./cmd"},
+		},
+		{
 			// The test subcommand must list a `go test` plan, which surfaces the
 			// test-augmented, external test, and test-main compiles that is_test
 			// gates on. A `go build` plan would never contain them.
@@ -544,6 +571,107 @@ echo nothing useful
 	}
 }
 
+func TestDropPlanIrrelevantFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected []string
+	}{
+		{
+			name:     "no flags",
+			args:     []string{"./..."},
+			expected: []string{"./..."},
+		},
+		{
+			name:     "nil args",
+			args:     nil,
+			expected: []string{},
+		},
+		{
+			name:     "drops -json",
+			args:     []string{"-json", "./..."},
+			expected: []string{"./..."},
+		},
+		{
+			name:     "drops --json",
+			args:     []string{"--json", "./..."},
+			expected: []string{"./..."},
+		},
+		{
+			name:     "drops -json=true",
+			args:     []string{"-json=true", "./..."},
+			expected: []string{"./..."},
+		},
+		{
+			// -json=false already leaves the plan on stderr, but the dry run
+			// has no use for either form.
+			name:     "drops -json=false",
+			args:     []string{"-json=false", "./..."},
+			expected: []string{"./..."},
+		},
+		{
+			name:     "keeps other flags",
+			args:     []string{"-tags=integration", "-json", "-race", "./cmd"},
+			expected: []string{"-tags=integration", "-race", "./cmd"},
+		},
+		{
+			name:     "keeps a separated flag value that follows -json",
+			args:     []string{"-json", "-run", "TestX", "./..."},
+			expected: []string{"-run", "TestX", "./..."},
+		},
+		{
+			// `-o -json` names an output file called "-json"; it is a value,
+			// not a flag.
+			name:     "keeps -json as the value of another flag",
+			args:     []string{"-o", "-json", "./cmd"},
+			expected: []string{"-o", "-json", "./cmd"},
+		},
+		{
+			// Everything after -args belongs to the test binary.
+			name:     "keeps -json after -args",
+			args:     []string{"./...", "-args", "-json", "-v"},
+			expected: []string{"./...", "-args", "-json", "-v"},
+		},
+		{
+			name:     "drops -json before -args and keeps it after",
+			args:     []string{"-json", "./...", "-args", "-json"},
+			expected: []string{"./...", "-args", "-json"},
+		},
+		{
+			name:     "tolerates a trailing value flag with no value",
+			args:     []string{"-json", "./...", "-run"},
+			expected: []string{"./...", "-run"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, dropPlanIrrelevantFlags(tt.args))
+		})
+	}
+}
+
+func TestFlagName(t *testing.T) {
+	tests := []struct {
+		arg      string
+		expected string
+	}{
+		{arg: "-json", expected: "-json"},
+		{arg: "--json", expected: "-json"},
+		{arg: "-json=false", expected: "-json"},
+		{arg: "--tags=integration", expected: "-tags"},
+		{arg: "./...", expected: "./..."},
+		{arg: "-", expected: "-"},
+		{arg: "--", expected: "-"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.arg, func(t *testing.T) {
+			assert.Equal(t, tt.expected, flagName(tt.arg))
+		})
+	}
+}
+
 func TestFindModVersion(t *testing.T) {
 	tests := []struct {
 		name string
@@ -599,5 +727,24 @@ func TestFindModVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, findModVersion(tt.path))
 		})
+	}
+}
+
+func TestFindGoSources(t *testing.T) {
+	dir := t.TempDir()
+	srcA := filepath.Join(dir, "a.go")
+	srcB := filepath.Join(dir, "b.go")
+	require.NoError(t, os.WriteFile(srcA, []byte("package p\n"), 0o644))
+	require.NoError(t, os.WriteFile(srcB, []byte("package p\n"), 0o644))
+
+	args := []string{"-p", "example.com/p", srcA, srcB}
+	dep, err := findGoSources(context.Background(), args, map[string]string{})
+	require.NoError(t, err)
+	require.NotNil(t, dep)
+
+	assert.Equal(t, "example.com/p", dep.ImportPath)
+	require.Len(t, dep.Sources, 2)
+	for _, s := range dep.Sources {
+		assert.True(t, filepath.IsAbs(s), "source path must be absolute: %s", s)
 	}
 }

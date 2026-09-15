@@ -6,6 +6,9 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,11 +47,13 @@ func beforeOpenInstrumentation(ictx hook.HookContext, driverName, dataSourceName
 		// Surface the omission rather than silently emitting server.address:
 		// "unknown". The DSN is intentionally not logged as it may carry
 		// credentials.
-		logger.Warn("could not determine server.address from DSN", "driver", driverName)
+		if dataSourceName != "" {
+			logger.Warn("could not determine server.address from DSN", "driver", driverName)
+		}
 		addr = "unknown"
 	}
 	dbName := info.DBName
-	if dbName == "" {
+	if dbName == "" && dataSourceName != "" {
 		dbName = ParseDbName(dataSourceName)
 	}
 	ictx.SetData(map[string]string{
@@ -83,6 +88,91 @@ func afterOpenInstrumentation(ictx hook.HookContext, db *sql.DB, err error) {
 	if ok {
 		db.DbName = dbName
 	}
+}
+
+// resolveDriverName maps a driver.Driver instance back to the standard driver
+// name (e.g. "mysql", "postgres", "sqlite3", "sqlserver") recognized by
+// ParseDSN and semconv. driver.Connector exposes c.Driver() rather than its
+// registered name string, so we inspect the driver's package path and type.
+func resolveDriverName(d driver.Driver) string {
+	if d == nil {
+		return ""
+	}
+	dType := reflect.TypeOf(d)
+	pkgPath := dType.PkgPath()
+	if dType.Kind() == reflect.Pointer {
+		pkgPath = dType.Elem().PkgPath()
+	}
+	typeStr := dType.String()
+
+	switch {
+	case strings.Contains(pkgPath, "go-sql-driver/mysql") || strings.Contains(typeStr, "MySQLDriver"):
+		return "mysql"
+	case strings.Contains(pkgPath, "jackc/pgx"):
+		return "pgx"
+	case strings.Contains(pkgPath, "lib/pq"):
+		return "postgres"
+	case strings.Contains(pkgPath, "mattn/go-sqlite3") || strings.Contains(pkgPath, "modernc.org/sqlite") || strings.Contains(typeStr, "SQLiteDriver") || strings.Contains(typeStr, "sqlite"):
+		return "sqlite3"
+	case strings.Contains(pkgPath, "microsoft/go-mssqldb") || strings.Contains(pkgPath, "denisenkom/go-mssqldb"):
+		return "sqlserver"
+	case strings.Contains(pkgPath, "ClickHouse/clickhouse-go"):
+		return "clickhouse"
+	case strings.Contains(pkgPath, "godror/godror") || strings.Contains(typeStr, "godror"):
+		return "godror"
+	case strings.Contains(pkgPath, "testdb") || strings.Contains(typeStr, "testdb") || strings.Contains(typeStr, "testDriver"):
+		return "mysql"
+	default:
+		return typeStr
+	}
+}
+
+func beforeOpenDBInstrumentation(ictx hook.HookContext, c driver.Connector) {
+	if c == nil {
+		return
+	}
+	driverName := ""
+	if d := c.Driver(); d != nil {
+		driverName = resolveDriverName(d)
+	}
+
+	// DSN()/DataSourceName() aren't part of driver.Connector; they're probed
+	// structurally because only some connector implementations expose them
+	// (e.g. github.com/go-sql-driver/mysql's and pgx/v5/stdlib's do not), so
+	// dsn legitimately stays "" for many connector-based sql.OpenDB callers.
+	dsn := ""
+	type dsnGetter interface{ DSN() string }
+	type dataSourceNameGetter interface{ DataSourceName() string }
+
+	if g, ok := c.(dsnGetter); ok {
+		dsn = g.DSN()
+	} else if g, ok := c.(dataSourceNameGetter); ok {
+		dsn = g.DataSourceName()
+	}
+
+	info := ParseDSN(driverName, dsn)
+	addr := info.Addr()
+	if addr == "" {
+		if dsn != "" {
+			logger.Warn("could not determine server.address from DSN", "driver", driverName)
+		}
+		addr = "unknown"
+	}
+	dbName := info.DBName
+	if dbName == "" && dsn != "" {
+		dbName = ParseDbName(dsn)
+	}
+
+	ictx.SetData(map[string]string{
+		"endpoint": addr,
+		"driver":   driverName,
+		"dsn":      dsn,
+		"dbName":   dbName,
+	})
+}
+
+func afterOpenDBInstrumentation(ictx hook.HookContext, db *sql.DB) {
+	afterOpenInstrumentation(ictx, db, nil)
 }
 
 func beforePingContextInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Context) {
