@@ -623,6 +623,80 @@ func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestGenerateRuntimePerPackageSkipsSelfImport covers the import path reaching
+// addDeps for each selected package. A hook package in the application module
+// is selected by `otelc go test ./...` and must not import itself.
+func TestGenerateRuntimePerPackageSkipsSelfImport(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	hooksDir := filepath.Join(appDir, "hooks")
+	mustWriteFile(t, filepath.Join(appDir, "answer.go"), "package app\n")
+	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+
+	pkgs := []*packages.Package{
+		{
+			PkgPath: "example.com/app",
+			Name:    "app",
+			GoFiles: []string{filepath.Join(appDir, "answer.go")},
+		},
+		{
+			PkgPath: "example.com/app/hooks",
+			Name:    "hooks",
+			GoFiles: []string{filepath.Join(hooksDir, "hooks.go")},
+		},
+	}
+
+	rset := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app")},
+		nil,
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	// The instrumented package still gets the hook import.
+	generated, err := os.ReadFile(filepath.Join(appDir, otelcRuntimeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(generated), `_ "example.com/app/hooks"`)
+
+	// The hook package has nothing left to import, so no file is written.
+	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
+}
+
+// TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets verifies that a hook
+// package does not import itself when the build names files instead of packages.
+// A file target loads one synthetic "command-line-arguments" package, so the real
+// import path must come from the module that owns the directory.
+func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	moduleDir := t.TempDir()
+	hooksDir := filepath.Join(moduleDir, "hooks")
+	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "answer.go"), "package app\n")
+	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+
+	pkgs := []*packages.Package{
+		{
+			PkgPath: pkgload.CommandLineArgumentsPackage,
+			Name:    "hooks",
+			GoFiles: []string{filepath.Join(hooksDir, "hooks.go")},
+		},
+	}
+
+	rset := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app")},
+		nil,
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	// A skip for any other reason also writes no file, so assert the resolved path too.
+	assert.Equal(t, "example.com/app/hooks", sp.runtimeImportPath(t.Context(), pkgs[0], hooksDir))
+	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
+}
+
 func TestGetBuildPackages_LoadErrors(t *testing.T) {
 	ctx := t.Context()
 	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
