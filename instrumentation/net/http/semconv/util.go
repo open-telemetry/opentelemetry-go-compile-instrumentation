@@ -8,6 +8,7 @@ package semconv
 import (
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -216,4 +217,56 @@ func SpanMethod(method string) string {
 		return "HTTP"
 	}
 	return standardized
+}
+
+// sensitiveQueryParams lists the query parameter keys whose values are redacted
+// from url.full and url.query by default, per the OpenTelemetry URL semantic
+// conventions (https://opentelemetry.io/docs/specs/semconv/registry/attributes/url/).
+// Matching is case-sensitive.
+var sensitiveQueryParams = map[string]struct{}{ //nolint:gochecknoglobals // fixed spec-defined lookup table
+	"X-Amz-Signature":      {},
+	"X-Amz-Credential":     {},
+	"X-Amz-Security-Token": {},
+	"sig":                  {},
+	"X-Goog-Signature":     {},
+}
+
+// redactedQueryValue is the placeholder written in place of a sensitive query
+// parameter value.
+const redactedQueryValue = "REDACTED"
+
+// redactQuery returns rawQuery with the values of sensitive query parameters
+// replaced by REDACTED. Key order and every other parameter are preserved, and
+// key matching is case-sensitive, following the URL semantic conventions. Input
+// with no sensitive keys is returned unchanged so the common case allocates
+// nothing.
+func redactQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return rawQuery
+	}
+	parts := strings.Split(rawQuery, "&")
+	redacted := false
+	for i, part := range parts {
+		key, _, found := strings.Cut(part, "=")
+		if !found {
+			continue
+		}
+		// A key may be percent encoded and the server decodes it before use, so
+		// s%69g names the same parameter as sig. Match on the decoded form, or an
+		// encoded key slips its value past the filter. The original spelling is
+		// written back so nothing but the value changes, and a key that does not
+		// decode is matched as written.
+		lookup := key
+		if decoded, err := url.QueryUnescape(key); err == nil {
+			lookup = decoded
+		}
+		if _, ok := sensitiveQueryParams[lookup]; ok {
+			parts[i] = key + "=" + redactedQueryValue
+			redacted = true
+		}
+	}
+	if !redacted {
+		return rawQuery
+	}
+	return strings.Join(parts, "&")
 }

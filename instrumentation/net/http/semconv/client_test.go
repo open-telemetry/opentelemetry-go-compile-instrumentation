@@ -132,6 +132,22 @@ func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 			},
 			unexpected: []string{"http.request.method_original"},
 		},
+		{
+			name: "url.full redacts sensitive query parameters",
+			req: &http.Request{
+				Method: "GET",
+				URL: &url.URL{
+					Scheme:   "https",
+					Host:     "example.com",
+					Path:     "/download",
+					RawQuery: "file=doc.pdf&X-Amz-Signature=deadbeef&sig=tok",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"url.full": "https://example.com/download?file=doc.pdf&X-Amz-Signature=REDACTED&sig=REDACTED",
+			},
+		},
 	}
 
 	client := NewHTTPClient(nil)
