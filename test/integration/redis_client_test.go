@@ -35,7 +35,7 @@ func TestRedisClient(t *testing.T) {
 			require.Contains(t, output, "testvalue")
 
 			spans := testutil.AllSpans(f.Traces())
-			require.GreaterOrEqual(t, len(spans), 3, "expected at least 3 spans (SET, GET, DEL)")
+			require.GreaterOrEqual(t, len(spans), 4, "expected at least 4 spans (SET, GET, CONN GET, DEL)")
 
 			// Verify SET span
 			setSpan := testutil.RequireSpan(t, f.Traces(),
@@ -50,18 +50,20 @@ func TestRedisClient(t *testing.T) {
 				"set testkey testvalue",
 			)
 
-			// Verify GET span
-			getSpan := testutil.RequireSpan(t, f.Traces(),
-				testutil.IsClient,
-				testutil.HasAttribute("db.operation.name", "get"),
-			)
-			testutil.RequireRedisClientSemconv(
-				t,
-				getSpan,
-				"get",
-				server.Addr(),
-				"get testkey",
-			)
+			getCount := 0
+			for _, span := range spans {
+				if testutil.IsClient(span) && testutil.HasAttribute("db.operation.name", "get")(span) {
+					getCount++
+					testutil.RequireRedisClientSemconv(
+						t,
+						span,
+						"get",
+						server.Addr(),
+						"get testkey",
+					)
+				}
+			}
+			require.Equal(t, 2, getCount, "client GET and Conn GET should each produce one span")
 
 			// Verify DEL span
 			delSpan := testutil.RequireSpan(t, f.Traces(),

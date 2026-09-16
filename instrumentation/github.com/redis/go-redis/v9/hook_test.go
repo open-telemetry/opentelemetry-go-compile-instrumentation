@@ -552,3 +552,44 @@ func TestDialHook_Error(t *testing.T) {
 	assert.Equal(t, expectedErr, err)
 	assert.Nil(t, conn)
 }
+
+func TestClientConnInheritsParentHook(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Protocol: 2,
+		Dialer: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errors.New("dial disabled")
+		},
+	})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+
+	afterNewRedisClientV9(nil, client)
+
+	conn := client.Conn()
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+
+	_ = conn.Get(context.Background(), "k").Err()
+
+	var getSpans int
+	var serverAddress, serverPort any
+	for _, span := range sr.Ended() {
+		if span.Name() != "get" {
+			continue
+		}
+		getSpans++
+		attrMap := make(map[string]any)
+		for _, attr := range span.Attributes() {
+			attrMap[string(attr.Key)] = attr.Value.AsInterface()
+		}
+		serverAddress = attrMap["server.address"]
+		serverPort = attrMap["server.port"]
+	}
+	require.Equal(t, 1, getSpans, "Conn() must reuse the client hook")
+	assert.Equal(t, "localhost", serverAddress)
+	assert.Equal(t, int64(6379), serverPort)
+}
