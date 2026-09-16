@@ -664,6 +664,38 @@ func TestGenerateRuntimePerPackageSkipsSelfImport(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
 }
 
+// TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets covers the same
+// invariant for `otelc go build <file>.go`, which loads one synthetic
+// "command-line-arguments" package instead of a real import path.
+func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	moduleDir := t.TempDir()
+	hooksDir := filepath.Join(moduleDir, "hooks")
+	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "answer.go"), "package app\n")
+	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+
+	pkgs := []*packages.Package{
+		{
+			PkgPath: pkgload.CommandLineArgumentsPackage,
+			Name:    "hooks",
+			GoFiles: []string{filepath.Join(hooksDir, "hooks.go")},
+		},
+	}
+
+	rset := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app")},
+		nil,
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	// Asserted directly so an unrelated skip cannot pass the check below vacuously.
+	assert.Equal(t, "example.com/app/hooks", sp.runtimeImportPath(t.Context(), pkgs[0], hooksDir))
+	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
+}
+
 func TestGetBuildPackages_LoadErrors(t *testing.T) {
 	ctx := t.Context()
 	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")

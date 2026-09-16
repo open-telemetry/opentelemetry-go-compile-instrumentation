@@ -300,7 +300,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		// Introduce additional hook code by generating otelc.runtime.go
 		if err := sp.addDeps(ctx, matched, runtimePackage{
 			dir:        pkgDir,
-			importPath: pkg.PkgPath,
+			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
 			name:       pkg.Name,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
@@ -308,6 +308,39 @@ func (sp *setupPhase) generateRuntimePerPackage(
 	}
 
 	return nil
+}
+
+// runtimeImportPath returns the import path of the package receiving a generated
+// runtime file. File targets load one synthetic "command-line-arguments" package,
+// so their real path has to come from the module owning the directory. Falling
+// back to the synthetic path keeps builds outside a module working.
+func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Package, pkgDir string) string {
+	if pkg.PkgPath != pkgload.CommandLineArgumentsPackage {
+		return pkg.PkgPath
+	}
+
+	importPath, err := resolveImportPath(ctx, pkgDir)
+	if err != nil {
+		sp.Warn("cannot derive the import path of a file target", "dir", pkgDir, "error", err)
+		return pkg.PkgPath
+	}
+
+	return importPath
+}
+
+// resolveImportPath returns the canonical import path of the package in pkgDir.
+// The directory is loaded as a package pattern, so the result is the real path
+// rather than the synthetic one a file target carries.
+func resolveImportPath(ctx context.Context, pkgDir string) (string, error) {
+	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, []string{"-C", pkgDir}, ".")
+	if err != nil {
+		return "", err
+	}
+	if len(pkgs) == 0 || len(pkgs[0].Errors) > 0 || pkgs[0].PkgPath == "" {
+		return "", ex.Newf("cannot resolve the import path of the package in %s", pkgDir)
+	}
+
+	return pkgs[0].PkgPath, nil
 }
 
 // Setup prepares the environment for further instrumentation. It runs
