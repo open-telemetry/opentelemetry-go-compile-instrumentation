@@ -222,7 +222,7 @@ func TestAfterProcessDeltas(t *testing.T) {
 			},
 		},
 		{
-			name: "instrumentation disabled",
+			name: "disabled after span started still ends the span",
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
@@ -236,8 +236,10 @@ func TestAfterProcessDeltas(t *testing.T) {
 			},
 			err: nil,
 			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
-				// Span should not be ended because instrumentation is disabled
-				assert.Equal(t, 0, len(spans))
+				// A span created by the before hook while enabled must still be
+				// ended even if instrumentation is disabled before the after hook
+				// runs, otherwise it leaks.
+				require.Len(t, spans, 1)
 			},
 		},
 	} {
@@ -380,7 +382,7 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 			},
 		},
 		{
-			name: "instrumentation disabled",
+			name: "disabled after span started still ends the span",
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "k8s_client_go")
 			},
@@ -394,8 +396,10 @@ func TestAfterProcessDeltasInBatch(t *testing.T) {
 			},
 			err: nil,
 			validateSpan: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
-				// Span should not be ended because instrumentation is disabled
-				assert.Equal(t, 0, len(spans))
+				// A span created by the before hook while enabled must still be
+				// ended even if instrumentation is disabled before the after hook
+				// runs, otherwise it leaks.
+				require.Len(t, spans, 1)
 			},
 		},
 	} {
