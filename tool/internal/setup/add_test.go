@@ -188,3 +188,37 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	err := sp.addDeps(t.Context(), matched, runtimePackage{dir: invalidPath, name: "main"})
 	assert.Error(t, err)
 }
+
+// TestAddDepsRemovesStaleRuntimeFile covers two successive setups of one package.
+// The first generates a runtime file from an external rule; the second sees only
+// a self-referencing rule, so the file must go rather than stay active with its
+// old imports and linkname directives.
+func TestAddDepsRemovesStaleRuntimeFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp := newTestSetupPhase()
+	stateManager := newStateManager()
+	ctx := contextWithStateManager(t.Context(), stateManager)
+
+	pkg := runtimePackage{dir: tmpDir, importPath: "example.com/local-hooks", name: "hooks"}
+	runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
+
+	external := []*rule.InstRuleSet{
+		newTestRuleSet(
+			"example.com/app",
+			[]*rule.InstFuncRule{newTestFuncRule("example.com/external-hooks", "example.com/app")},
+			nil,
+		),
+	}
+	require.NoError(t, sp.addDeps(ctx, external, pkg))
+	require.FileExists(t, runtimeFilePath)
+
+	selfOnly := []*rule.InstRuleSet{
+		newTestRuleSet(
+			"example.com/app",
+			[]*rule.InstFuncRule{newTestFuncRule("example.com/local-hooks", "example.com/app")},
+			nil,
+		),
+	}
+	require.NoError(t, sp.addDeps(ctx, selfOnly, pkg))
+	assert.NoFileExists(t, runtimeFilePath)
+}

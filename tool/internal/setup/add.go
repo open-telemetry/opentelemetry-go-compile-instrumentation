@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 
@@ -15,6 +16,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
@@ -120,6 +122,29 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 	}
 }
 
+// removeRuntimeFile deletes a runtime file left in pkgDir by an earlier setup
+// whose rules no longer apply. Its imports and linkname declarations would
+// otherwise stay active in the build.
+func (sp *setupPhase) removeRuntimeFile(ctx context.Context, pkgDir string) error {
+	otelcRuntimeFilePath := filepath.Join(pkgDir, otelcRuntimeFile)
+	if !util.PathExists(otelcRuntimeFilePath) {
+		return nil
+	}
+
+	// Track before removing so a later revert can restore the file.
+	if stateManager, found := stateManagerFromContext(ctx); found {
+		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(otelcRuntimeFilePath); err != nil {
+		return ex.Wrapf(err, "removing stale otelc runtime file %s", otelcRuntimeFilePath)
+	}
+	sp.Info("Removed stale otelc.runtime.go", "path", otelcRuntimeFilePath)
+
+	return nil
+}
+
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
 //
@@ -142,7 +167,7 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 		}
 	}
 	if len(funcRules) == 0 && len(fileRules) == 0 {
-		return nil
+		return sp.removeRuntimeFile(ctx, pkg.dir)
 	}
 
 	// Add required imports
