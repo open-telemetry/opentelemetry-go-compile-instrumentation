@@ -310,10 +310,11 @@ func (sp *setupPhase) generateRuntimePerPackage(
 	return nil
 }
 
-// runtimeImportPath returns the import path of the package receiving a generated
-// runtime file. File targets load one synthetic "command-line-arguments" package,
-// so their real path has to come from the module owning the directory. Falling
-// back to the synthetic path keeps builds outside a module working.
+// runtimeImportPath returns the import path of the package that receives a
+// generated runtime file. A file target loads one synthetic
+// "command-line-arguments" package, so the real path comes from the module that
+// owns the directory. If the module does not resolve, runtimeImportPath returns
+// the synthetic path, and a build outside a module continues to work.
 func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Package, pkgDir string) string {
 	if pkg.PkgPath != pkgload.CommandLineArgumentsPackage {
 		return pkg.PkgPath
@@ -329,8 +330,8 @@ func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Packa
 }
 
 // resolveImportPath returns the canonical import path of the package in pkgDir.
-// The directory is loaded as a package pattern, so the result is the real path
-// rather than the synthetic one a file target carries.
+// resolveImportPath loads pkgDir as a package pattern, so the result is the real
+// import path and not the synthetic path that a file target carries.
 func resolveImportPath(ctx context.Context, pkgDir string) (string, error) {
 	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, []string{"-C", pkgDir}, ".")
 	if err != nil {

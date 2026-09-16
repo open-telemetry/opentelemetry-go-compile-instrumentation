@@ -122,16 +122,16 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 	}
 }
 
-// removeRuntimeFile deletes a runtime file left in pkgDir by an earlier setup
-// whose rules no longer apply. Its imports and linkname declarations would
-// otherwise stay active in the build.
+// removeRuntimeFile deletes the runtime file in pkgDir that an earlier setup
+// generated from rules that no longer apply. A stale runtime file keeps its old
+// imports and linkname declarations active in the build.
 func (sp *setupPhase) removeRuntimeFile(ctx context.Context, pkgDir string) error {
 	otelcRuntimeFilePath := filepath.Join(pkgDir, otelcRuntimeFile)
 	if !util.PathExists(otelcRuntimeFilePath) {
 		return nil
 	}
 
-	// Track before removing so a later revert can restore the file.
+	// Track the file first so that a later revert can restore it.
 	if stateManager, found := stateManagerFromContext(ctx); found {
 		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
 			return err

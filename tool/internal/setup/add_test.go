@@ -111,8 +111,8 @@ func TestAddDeps(t *testing.T) {
 			goldenFile:        "",
 		},
 		{
-			// The generated file is correct, but linking this shape still fails, because this
-			// package and the instrumented one both push the external hook's linkname. See
+			// The generated file is correct. The link still fails, because this package and
+			// the instrumented package both define the same hook linkname. See
 			// https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1361
 			name: "self_and_external_rules",
 			matched: []*rule.InstRuleSet{
@@ -190,9 +190,9 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 }
 
 // TestAddDepsRemovesStaleRuntimeFile covers two successive setups of one package.
-// The first generates a runtime file from an external rule; the second sees only
-// a self-referencing rule, so the file must go rather than stay active with its
-// old imports and linkname directives.
+// The first setup generates a runtime file from an external rule. The second setup
+// matches only a self-referencing rule, so addDeps must delete the runtime file.
+// A stale runtime file keeps the old imports and linkname declarations active.
 func TestAddDepsRemovesStaleRuntimeFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	sp := newTestSetupPhase()

@@ -664,9 +664,10 @@ func TestGenerateRuntimePerPackageSkipsSelfImport(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
 }
 
-// TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets covers the same
-// invariant for `otelc go build <file>.go`, which loads one synthetic
-// "command-line-arguments" package instead of a real import path.
+// TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets verifies that a hook
+// package does not import itself when the build names files instead of packages.
+// A file target loads one synthetic "command-line-arguments" package, so the real
+// import path must come from the module that owns the directory.
 func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
 	sp := newTestSetupPhase()
 
@@ -691,7 +692,7 @@ func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
 	)
 	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
 
-	// Asserted directly so an unrelated skip cannot pass the check below vacuously.
+	// A skip for any other reason also writes no file, so assert the resolved path too.
 	assert.Equal(t, "example.com/app/hooks", sp.runtimeImportPath(t.Context(), pkgs[0], hooksDir))
 	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
 }
