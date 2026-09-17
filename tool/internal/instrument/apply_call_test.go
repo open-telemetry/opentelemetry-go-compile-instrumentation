@@ -5,7 +5,11 @@ package instrument
 
 import (
 	"context"
+	goast "go/ast"
+	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -1024,4 +1029,150 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse generated code")
+}
+
+func writeTempGoFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
+}
+
+// selectorPosition returns the line and column, in that order, of the
+// occurrence-th (1-indexed) "x.name(...)" selector it finds.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns
+func selectorPosition(t *testing.T, path, name string, occurrence int) (int, int) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	require.NoError(t, err)
+
+	var line, col int
+	seen := 0
+	goast.Inspect(f, func(n goast.Node) bool {
+		sel, ok := n.(*goast.SelectorExpr)
+		if !ok || sel.Sel.Name != name {
+			return true
+		}
+		seen++
+		if seen == occurrence {
+			pos := fset.Position(sel.Sel.Pos())
+			line, col = pos.Line, pos.Column
+		}
+		return true
+	})
+	require.GreaterOrEqual(t, seen, occurrence, "fewer than %d occurrences of selector %q", occurrence, name)
+	return line, col
+}
+
+func TestCheckPackageForMethodCalls_ValueAndPointerReceiver(t *testing.T) {
+	dir := t.TempDir()
+	src := `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string)  {}
+func (l *Logger) Warn(msg string) {}
+
+type Embedder struct {
+	Logger
+}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+
+	p := &Logger{}
+	p.Warn("uh oh")
+
+	var e Embedder
+	e.Info("promoted")
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "Info", 1) // l.Info("hi")
+	importPath, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "Logger", recvType)
+
+	line, col = selectorPosition(t, path, "Warn", 1)
+	importPath, recvType, ok = pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "*Logger", recvType)
+
+	// Promoted through embedding: the receiver is Logger, not Embedder.
+	line, col = selectorPosition(t, path, "Info", 2)
+	importPath, recvType, ok = pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "Logger", recvType)
+}
+
+func TestCheckPackageForMethodCalls_NonMethodSelectorDoesNotMatch(t *testing.T) {
+	dir := t.TempDir()
+	src := `package sample
+
+type Point struct{ X int }
+
+func run() {
+	p := Point{X: 1}
+	_ = p.X // plain field access, not a method call
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "X", 1) // p.X
+	_, _, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	assert.False(t, ok)
+}
+
+func TestCheckPackageForMethodCalls_PositionMatchesAstParser(t *testing.T) {
+	// Pins the position convention against tool/internal/ast.AstParser,
+	// the parser the rewrite pass actually uses.
+	dir := t.TempDir()
+	src := `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	p := ast.NewAstParser()
+	root, err := p.Parse(path, 0)
+	require.NoError(t, err)
+
+	var line, col int
+	dst.Inspect(root, func(n dst.Node) bool {
+		sel, ok := n.(*dst.SelectorExpr)
+		if !ok || sel.Sel.Name != "Info" {
+			return true
+		}
+		pos := p.FindPosition(sel.Sel)
+		line, col = pos.Line, pos.Column
+		return false
+	})
+	require.NotZero(t, line, "did not find Info selector via dst")
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	_, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "Logger", recvType)
 }
