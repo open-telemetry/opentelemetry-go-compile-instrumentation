@@ -115,7 +115,7 @@ func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, encl
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
-func (*instrumentPhase) applyCallReplace(
+func (ip *instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -130,7 +130,7 @@ func (*instrumentPhase) applyCallReplace(
 	replacements := make(map[*dst.CallExpr]dst.Expr)
 	var wrapError error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
-		if !matchesCallRule(call, r, importAliases) {
+		if !ip.matchesRule(call, r, importAliases) {
 			return true
 		}
 		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases)
@@ -182,7 +182,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		if !ok {
 			return true
 		}
-		if matchesCallRule(call, r, importAliases) {
+		if ip.matchesRule(call, r, importAliases) {
 			matchingCalls = append(matchingCalls, call)
 		}
 		return true
@@ -285,6 +285,56 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 
 	resolvedPath, ok := importAliases[ident.Name]
 	return ok && resolvedPath == importPath
+}
+
+// matchesRule dispatches by selector: function_call or method_call.
+func (ip *instrumentPhase) matchesRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map[string]string) bool {
+	if r.MethodCall != "" {
+		return ip.matchesMethodCallRule(call, r)
+	}
+	return matchesCallRule(call, r, importAliases)
+}
+
+// matchesMethodCallRule ensures that files that never mention the method
+// name skip type-checking entirely.
+func (ip *instrumentPhase) matchesMethodCallRule(call *dst.CallExpr, r *rule.InstCallRule) bool {
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	if !ok || sel.Sel.Name != r.FuncName {
+		return false
+	}
+
+	info := ip.ensureMethodCallInfo()
+	if info == nil {
+		return false
+	}
+
+	pos := ip.parser.FindPosition(sel.Sel)
+	if pos.Filename == "" {
+		return false
+	}
+
+	importPath, recvType, ok := info.methodReceiver(pos.Filename, pos.Line, pos.Column)
+	return ok && importPath == r.ImportPath && recvType == r.RecvType
+}
+
+// ensureMethodCallInfo type-checks the package at most once.
+func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
+	if ip.methodCallInfoLoaded {
+		return ip.methodCallInfo
+	}
+	ip.methodCallInfoLoaded = true
+
+	pkgPath := util.FindFlagValue(ip.compileArgs, "-p")
+	files := packageSourceFiles(ip.compileArgs)
+	info, err := checkPackageForMethodCalls(pkgPath, files, ip.importConfig)
+	if err != nil {
+		ip.Warn("method_call type-checking failed; method_call rules will not match in this package",
+			"package", pkgPath, "error", err)
+		return nil
+	}
+
+	ip.methodCallInfo = info
+	return ip.methodCallInfo
 }
 
 // packageSourceFiles returns the compile command's source files
