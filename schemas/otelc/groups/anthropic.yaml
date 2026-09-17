@@ -7,10 +7,10 @@ groups:
   #   instrumentation/github.com/anthropics/anthropic-sdk-go/semconv/genai.go  (attribute keys)
   #
   # The anthropic-sdk-go instrumentation is trace-only: it wraps the SDK HTTP
-  # transport and creates one client span per Messages API call
-  # (`POST /v1/messages`, `gen_ai.operation.name` = `chat`), and records no
-  # metrics. `/v1/messages/count_tokens` and `/v1/messages/batches` are not
-  # instrumented.
+  # transport and creates one client span per Messages or Count Tokens call
+  # (`POST /v1/messages`, `gen_ai.operation.name` = `chat`;
+  # `POST /v1/messages/count_tokens`, `gen_ai.operation.name` = `count_tokens`).
+  # It records no metrics. `/v1/messages/batches` is not instrumented.
   #
   # Most attributes are standard upstream OpenTelemetry GenAI attributes
   # (referenced with `ref:`). `gen_ai.usage.total_tokens` and
@@ -31,6 +31,9 @@ groups:
   #     server-sent-event responses, which are currently passed through without
   #     accumulation (see #679). `gen_ai.request.is_stream` is set only on that
   #     SSE path.
+  #   - `POST /v1/messages/count_tokens` records only the request model and
+  #     `gen_ai.usage.input_tokens`. It has no response id, response model,
+  #     finish reasons, or output tokens.
   # ---------------------------------------------------------------------------
 
   - id: registry.otelc.gen_ai.anthropic
@@ -55,7 +58,7 @@ groups:
     type: span
     span_kind: client
     stability: development
-    brief: Anthropic client span, one per Messages API call.
+    brief: Anthropic client span, one per Messages or Count Tokens API call.
     attributes:
       - ref: gen_ai.system
       - ref: gen_ai.provider.name

@@ -132,6 +132,19 @@ const (
 	subcmdBuild   = "build"
 	subcmdInstall = "install"
 	subcmdTest    = "test"
+
+	goModFileName = "go.mod"
+	vendorDirName = "vendor"
+	flagMod       = "-mod"
+)
+
+// Go command flags that the argument scanners treat specially.
+const (
+	// flagArgs separates the go command's own arguments from the ones it
+	// passes through to the test binary.
+	flagArgs = "-args"
+	// flagJSON makes the go command report its output as JSON events.
+	flagJSON = "-json"
 )
 
 // GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
@@ -213,7 +226,7 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 
 		// Everything after `-args` is passed to the test binary, not the go
 		// command, so it can contain neither packages nor go flags.
-		if arg == "-args" {
+		if arg == flagArgs {
 			break
 		}
 
