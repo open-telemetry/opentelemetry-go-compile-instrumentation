@@ -127,7 +127,7 @@ func newRule(raw []byte, name string, fields map[string]any) (InstRule, error) {
 		return NewInstRawRule(raw, name)
 	case fields[selFunc] != nil:
 		return NewInstFuncRule(raw, name)
-	case fields[selFunctionCall] != nil:
+	case fields[selFunctionCall] != nil, fields[selMethodCall] != nil:
 		return NewInstCallRule(raw, name)
 	case fields[selStructLiteral] != nil:
 		return NewInstLitRule(raw, name)

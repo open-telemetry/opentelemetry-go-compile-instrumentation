@@ -5,7 +5,12 @@ package instrument
 
 import (
 	"context"
+	goast "go/ast"
+	"go/parser"
 	"go/token"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -1024,4 +1030,348 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse generated code")
+}
+
+func writeTempGoFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
+}
+
+// selectorPosition returns the line and column, in that order, of the
+// occurrence-th (1-indexed) "x.name(...)" selector it finds.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns
+func selectorPosition(t *testing.T, path, name string, occurrence int) (int, int) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	require.NoError(t, err)
+
+	var line, col int
+	seen := 0
+	goast.Inspect(f, func(n goast.Node) bool {
+		sel, ok := n.(*goast.SelectorExpr)
+		if !ok || sel.Sel.Name != name {
+			return true
+		}
+		seen++
+		if seen == occurrence {
+			pos := fset.Position(sel.Sel.Pos())
+			line, col = pos.Line, pos.Column
+		}
+		return true
+	})
+	require.GreaterOrEqual(t, seen, occurrence, "fewer than %d occurrences of selector %q", occurrence, name)
+	return line, col
+}
+
+func TestCheckPackageForMethodCalls_ValueAndPointerReceiver(t *testing.T) {
+	dir := t.TempDir()
+	src := `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string)  {}
+func (l *Logger) Warn(msg string) {}
+
+type Embedder struct {
+	Logger
+}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+
+	p := &Logger{}
+	p.Warn("uh oh")
+
+	var e Embedder
+	e.Info("promoted")
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "Info", 1) // l.Info("hi")
+	importPath, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "Logger", recvType)
+
+	line, col = selectorPosition(t, path, "Warn", 1)
+	importPath, recvType, ok = pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "*Logger", recvType)
+
+	// Promoted through embedding: the receiver is Logger, not Embedder.
+	line, col = selectorPosition(t, path, "Info", 2)
+	importPath, recvType, ok = pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "Logger", recvType)
+}
+
+func TestCheckPackageForMethodCalls_NonMethodSelectorDoesNotMatch(t *testing.T) {
+	dir := t.TempDir()
+	src := `package sample
+
+type Point struct{ X int }
+
+func run() {
+	p := Point{X: 1}
+	_ = p.X // plain field access, not a method call
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "X", 1) // p.X
+	_, _, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	assert.False(t, ok)
+}
+
+func TestCheckPackageForMethodCalls_PositionMatchesAstParser(t *testing.T) {
+	// Pins the position convention against tool/internal/ast.AstParser,
+	// the parser the rewrite pass actually uses.
+	dir := t.TempDir()
+	src := `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	p := ast.NewAstParser()
+	root, err := p.Parse(path, 0)
+	require.NoError(t, err)
+
+	var line, col int
+	dst.Inspect(root, func(n dst.Node) bool {
+		sel, ok := n.(*dst.SelectorExpr)
+		if !ok || sel.Sel.Name != "Info" {
+			return true
+		}
+		pos := p.FindPosition(sel.Sel)
+		line, col = pos.Line, pos.Column
+		return false
+	})
+	require.NotZero(t, line, "did not find Info selector via dst")
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	_, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "Logger", recvType)
+}
+
+// testMethodCallPkgPath is the package path every method_call test in this
+// file compiles its sample source as.
+const testMethodCallPkgPath = "example.com/sample"
+
+// methodCallRule builds an InstCallRule directly, bypassing YAML parsing.
+func methodCallRule(recvType, funcName, replace string) *rule.InstCallRule {
+	return &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_method"},
+		MethodCall:   testMethodCallPkgPath + "." + recvType + "." + funcName,
+		ImportPath:   testMethodCallPkgPath,
+		RecvType:     recvType,
+		FuncName:     funcName,
+		Replace:      replace,
+	}
+}
+
+// setupMethodCallPhase parses source through parseFile so the dst and type-checking passes see the same file.
+func setupMethodCallPhase(t *testing.T, source string) (*instrumentPhase, *dst.File) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.go")
+	require.NoError(t, os.WriteFile(path, []byte(source), 0o600))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		compileArgs: []string{"compile", "-p", testMethodCallPkgPath, "-o", filepath.Join(dir, "sample.a"), path},
+	}
+	root, err := ip.parseFile(path)
+	require.NoError(t, err)
+	return ip, root
+}
+
+func TestApplyCallRule_MethodCall_ValueReceiver(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `traced(l.Info("hi"))`)
+}
+
+func TestApplyCallRule_MethodCall_PointerReceiver(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type DB struct{}
+
+func (db *DB) QueryContext(q string) {}
+
+func run() {
+	db := &DB{}
+	db.QueryContext("select 1")
+}
+`)
+	r := methodCallRule("*DB", "QueryContext", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `traced(db.QueryContext("select 1"))`)
+}
+
+func TestApplyCallRule_MethodCall_PointerRuleDoesNotMatchValueReceiver(t *testing.T) {
+	// "*DB" must not match a value receiver, mirroring InstFuncRule's Recv.
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type DB struct{}
+
+func (db DB) QueryContext(q string) {}
+
+func run() {
+	var db DB
+	db.QueryContext("select 1")
+}
+`)
+	r := methodCallRule("*DB", "QueryContext", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.NotContains(t, out, "traced(")
+}
+
+func TestApplyCallRule_MethodCall_EmbeddedPromotedMethod(t *testing.T) {
+	// Info is promoted from Logger to Embedder. The rule targets Logger.
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+type Embedder struct {
+	Logger
+}
+
+func run() {
+	var e Embedder
+	e.Info("promoted")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `traced(e.Info("promoted"))`)
+}
+
+func TestApplyCallRule_MethodCall_WrongReceiverTypeDoesNotMatch(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+type OtherLogger struct{}
+
+func (l Logger) Info(msg string)      {}
+func (l OtherLogger) Info(msg string) {}
+
+func run() {
+	var o OtherLogger
+	o.Info("hi")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.NotContains(t, out, "traced(")
+}
+
+func TestApplyCallRule_MethodCall_NameMismatchSkipsTypeChecking(t *testing.T) {
+	// A method-name mismatch must reject before ever building package type
+	// info.
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Warn(msg string) {}
+
+func run() {
+	var l Logger
+	l.Warn("hi")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	assert.False(t, ip.methodCallInfoLoaded,
+		"a call whose method name doesn't match the rule must never trigger type-checking")
+}
+
+func TestApplyCallRule_MethodCall_CachesPackageInfoAcrossRules(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+func (l Logger) Warn(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+	l.Warn("uh oh")
+}
+`)
+	infoRule := methodCallRule("Logger", "Info", "tracedInfo({{ . }})")
+	warnRule := methodCallRule("Logger", "Warn", "tracedWarn({{ . }})")
+
+	require.NoError(t, ip.applyCallRule(context.Background(), infoRule, root))
+	info := ip.methodCallInfo
+	require.NotNil(t, info, "first method_call rule must have built package info")
+
+	require.NoError(t, ip.applyCallRule(context.Background(), warnRule, root))
+	assert.Same(t, info, ip.methodCallInfo,
+		"a second method_call rule on the same package must reuse, not rebuild, the cached package info")
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `tracedInfo(l.Info("hi"))`)
+	assert.Contains(t, out, `tracedWarn(l.Warn("uh oh"))`)
 }
