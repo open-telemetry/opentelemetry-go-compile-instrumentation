@@ -6,6 +6,8 @@ package setup
 import (
 	"context"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"log/slog"
 	"maps"
 	"os"
@@ -146,7 +148,7 @@ const (
 //   - args [] returns packages for "."
 func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
-	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule | packages.NeedImports | packages.NeedDeps
 
 	pkgTargets, fileTargets, err := splitBuildTargets(args)
 	if err != nil {
@@ -290,6 +292,8 @@ func (sp *setupPhase) generateRuntimePerPackage(
 	pkgs []*packages.Package,
 	matched []*rule.InstRuleSet,
 ) error {
+	importedByOther := findImportedPackages(pkgs)
+
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
@@ -297,13 +301,106 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			continue
 		}
 
+		emitLinknames := !importedByOther[pkg.PkgPath]
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, pkgDir, pkg.Name); err != nil {
+		if err := sp.addDeps(ctx, matched, pkgDir, pkg.Name, emitLinknames); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
 
 	return nil
+}
+
+// findImportedPackages returns a set of package paths in pkgs that are imported
+// by at least one other package in pkgs.
+//
+// In Go, push //go:linkname variable initializers define the symbol in that package's
+// compiled object archive (.a). If multiple packages in the same link unit emit
+// push linknames for the same symbol (e.g. <hook>.OtelGetStackImpl), cmd/link
+// fails with duplicate symbol definition errors.
+//
+// To prevent collisions, only root-level packages (packages not imported by any
+// other selected package in the build) emit push linknames into their otelc.runtime.go.
+// Packages imported by other packages in the build emit only blank hook imports.
+//
+// Trade-off note: In `go test ./...`, each package with tests produces its own test
+// binary. Because Go's build system compiles each package archive (.a) once, an
+// imported dependency's archive cannot simultaneously contain linkname definitions
+// for its own test binary while omitting them when linked into the importing root's
+// test binary. Consequently, isolated dependency test binaries fall back to nil stack
+// handlers on panic recovery, which is safely handled at runtime while ensuring
+// all production binaries and test link units build and link cleanly without collisions.
+func findImportedPackages(pkgs []*packages.Package) map[string]bool {
+	builtPkgs := make(map[string]bool, len(pkgs))
+	for _, pkg := range pkgs {
+		builtPkgs[pkg.PkgPath] = true
+	}
+
+	importedByOther := make(map[string]bool)
+	fset := token.NewFileSet()
+
+	for _, pkg := range pkgs {
+		markPackageDeps(pkg, builtPkgs, importedByOther)
+		pkgDir := pkgload.PackageDir(pkg)
+		if pkgDir != "" {
+			markTestFileImports(pkgDir, pkg.PkgPath, builtPkgs, importedByOther, fset)
+		}
+	}
+
+	return importedByOther
+}
+
+func markPackageDeps(
+	pkg *packages.Package,
+	builtPkgs, importedByOther map[string]bool,
+) {
+	visited := make(map[string]bool)
+	var walk func(imports map[string]*packages.Package)
+	walk = func(imports map[string]*packages.Package) {
+		for path, dep := range imports {
+			if visited[path] {
+				continue
+			}
+			visited[path] = true
+			if builtPkgs[path] && path != pkg.PkgPath {
+				importedByOther[path] = true
+			}
+			if dep != nil && len(dep.Imports) > 0 {
+				walk(dep.Imports)
+			}
+		}
+	}
+	walk(pkg.Imports)
+}
+
+func markTestFileImports(
+	pkgDir, pkgPath string,
+	builtPkgs, importedByOther map[string]bool,
+	fset *token.FileSet,
+) {
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		testFilePath := filepath.Join(pkgDir, entry.Name())
+		parsed, parseErr := parser.ParseFile(fset, testFilePath, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			continue
+		}
+		for _, imp := range parsed.Imports {
+			if imp.Path == nil {
+				continue
+			}
+			importPath, unquoteErr := strconv.Unquote(imp.Path.Value)
+			if unquoteErr == nil && builtPkgs[importPath] && importPath != pkgPath {
+				importedByOther[importPath] = true
+			}
+		}
+	}
 }
 
 // Setup prepares the environment for further instrumentation. It runs

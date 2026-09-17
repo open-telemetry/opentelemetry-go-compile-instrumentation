@@ -739,3 +739,132 @@ func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	err := cmd.Run(t.Context(), []string{"setup", mainFile})
 	require.Error(t, err)
 }
+
+func TestFindImportedPackages(t *testing.T) {
+	t.Run("single_package", func(t *testing.T) {
+		pkgs := []*packages.Package{
+			{PkgPath: "example.com/app"},
+		}
+		imported := findImportedPackages(pkgs)
+		assert.Empty(t, imported)
+	})
+
+	t.Run("direct_import", func(t *testing.T) {
+		libPkg := &packages.Package{PkgPath: "example.com/app/lib"}
+		appPkg := &packages.Package{
+			PkgPath: "example.com/app",
+			Imports: map[string]*packages.Package{
+				"example.com/app/lib": libPkg,
+			},
+		}
+		pkgs := []*packages.Package{appPkg, libPkg}
+		imported := findImportedPackages(pkgs)
+		assert.True(t, imported["example.com/app/lib"])
+		assert.False(t, imported["example.com/app"])
+	})
+
+	t.Run("transitive_import", func(t *testing.T) {
+		cPkg := &packages.Package{PkgPath: "example.com/c"}
+		bPkg := &packages.Package{
+			PkgPath: "example.com/b",
+			Imports: map[string]*packages.Package{
+				"example.com/c": cPkg,
+			},
+		}
+		aPkg := &packages.Package{
+			PkgPath: "example.com/a",
+			Imports: map[string]*packages.Package{
+				"example.com/b": bPkg,
+			},
+		}
+		pkgs := []*packages.Package{aPkg, bPkg, cPkg}
+		imported := findImportedPackages(pkgs)
+		assert.False(t, imported["example.com/a"])
+		assert.True(t, imported["example.com/b"])
+		assert.True(t, imported["example.com/c"])
+	})
+
+	t.Run("test_file_import", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		appDir := filepath.Join(tmpDir, "app")
+		libDir := filepath.Join(tmpDir, "lib")
+		require.NoError(t, os.MkdirAll(appDir, 0o755))
+		require.NoError(t, os.MkdirAll(libDir, 0o755))
+
+		mustWriteFile(t, filepath.Join(appDir, "app.go"), "package app\n")
+		mustWriteFile(t, filepath.Join(appDir, "app_test.go"), "package app\nimport \"example.com/app/lib\"\n")
+		mustWriteFile(t, filepath.Join(libDir, "lib.go"), "package lib\n")
+
+		appPkg := &packages.Package{
+			PkgPath: "example.com/app",
+			GoFiles: []string{filepath.Join(appDir, "app.go")},
+		}
+		libPkg := &packages.Package{
+			PkgPath: "example.com/app/lib",
+			GoFiles: []string{filepath.Join(libDir, "lib.go")},
+		}
+		pkgs := []*packages.Package{appPkg, libPkg}
+		imported := findImportedPackages(pkgs)
+		assert.True(t, imported["example.com/app/lib"])
+		assert.False(t, imported["example.com/app"])
+	})
+}
+
+func TestGenerateRuntimePerPackage_OmitDuplicateLinknames(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	libDir := filepath.Join(tmpDir, "lib")
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
+	require.NoError(t, os.MkdirAll(libDir, 0o755))
+
+	mustWriteFile(t, filepath.Join(appDir, "answer.go"), "package app\nimport \"example.com/app/lib\"\n")
+	mustWriteFile(t, filepath.Join(libDir, "lib.go"), "package lib\n")
+
+	libPkg := &packages.Package{
+		PkgPath: "example.com/app/lib",
+		Name:    "lib",
+		GoFiles: []string{filepath.Join(libDir, "lib.go")},
+	}
+	appPkg := &packages.Package{
+		PkgPath: "example.com/app",
+		Name:    "app",
+		GoFiles: []string{filepath.Join(appDir, "answer.go")},
+		Imports: map[string]*packages.Package{
+			"example.com/app/lib": libPkg,
+		},
+	}
+	pkgs := []*packages.Package{appPkg, libPkg}
+
+	rset := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/hooks", "example.com/app")},
+		nil,
+	)
+
+	err := sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset})
+	require.NoError(t, err)
+
+	// Root package app must define the push linknames
+	appRuntimeFile := filepath.Join(appDir, otelcRuntimeFile)
+	require.FileExists(t, appRuntimeFile)
+	appContent, err := os.ReadFile(appRuntimeFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(appContent), `//go:linkname _getstack0 example.com/hooks.OtelGetStackImpl`)
+	assert.Contains(t, string(appContent), `//go:linkname _printstack0 example.com/hooks.OtelPrintStackImpl`)
+	assert.Contains(t, string(appContent), `_ "example.com/hooks"`)
+
+	// Dependent package lib must NOT define the push linknames (to prevent duplicate symbols)
+	// but MUST contain the hook import
+	libRuntimeFile := filepath.Join(libDir, otelcRuntimeFile)
+	require.FileExists(t, libRuntimeFile)
+	libContent, err := os.ReadFile(libRuntimeFile)
+	require.NoError(t, err)
+	assert.NotContains(t, string(libContent), `//go:linkname`)
+	assert.NotContains(t, string(libContent), `_getstack`)
+	assert.NotContains(t, string(libContent), `_printstack`)
+	assert.NotContains(t, string(libContent), `runtime/debug`)
+	assert.NotContains(t, string(libContent), `"log"`)
+	assert.Contains(t, string(libContent), `_ "example.com/hooks"`)
+}

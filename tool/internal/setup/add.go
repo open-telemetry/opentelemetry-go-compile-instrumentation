@@ -28,15 +28,18 @@ var requiredImports = map[string]string{
 	"unsafe":        "_",           // The golinkname tag depends on unsafe
 }
 
-func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []dst.Decl {
+func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule, emitLinknames bool) []dst.Decl {
 	var imports map[string]string
-	if len(funcRules) > 0 {
+	if emitLinknames && len(funcRules) > 0 {
 		imports = maps.Clone(requiredImports) // clone required imports to avoid mutating the global map
 		for _, m := range funcRules {
 			imports[m.Path] = ast.IdentIgnore
 		}
 	} else {
 		imports = make(map[string]string)
+		for _, m := range funcRules {
+			imports[m.Path] = ast.IdentIgnore
+		}
 	}
 	for _, m := range fileRules {
 		imports[m.Path] = ast.IdentIgnore
@@ -113,7 +116,12 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
-func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, packagePath, packageName string) error {
+func (sp *setupPhase) addDeps(
+	ctx context.Context,
+	matched []*rule.InstRuleSet,
+	packagePath, packageName string,
+	emitLinknames bool,
+) error {
 	funcRules := []*rule.InstFuncRule{}
 	fileRules := []*rule.InstFileRule{}
 	for _, m := range matched {
@@ -125,9 +133,12 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	}
 
 	// Add required imports
-	importDecls := genImportDecl(funcRules, fileRules)
-	// Generate the variable declarations that used by otel runtime
-	varDecls := genVarDecl(funcRules)
+	importDecls := genImportDecl(funcRules, fileRules, emitLinknames)
+	var varDecls []dst.Decl
+	if emitLinknames {
+		// Generate the variable declarations used by otel runtime
+		varDecls = genVarDecl(funcRules)
+	}
 	// build the ast
 	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), packageName)
 	otelcRuntimeFilePath := filepath.Join(packagePath, otelcRuntimeFile)
