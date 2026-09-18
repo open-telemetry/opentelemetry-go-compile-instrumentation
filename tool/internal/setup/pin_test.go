@@ -925,7 +925,7 @@ go 1.25
 		0o644,
 	))
 
-	toolFile := filepath.Join(dir, ToolFileCanonical)
+	toolFile := filepath.Join(dir, toolFileCanonical)
 	writeToolFile(t, toolFile, "fmt")
 
 	opts := PinOptions{
@@ -947,7 +947,7 @@ go 1.25
 	ctx := util.ContextWithLogger(t.Context(), debugLogger)
 
 	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
-	require.Contains(t, logs.String(), "skipping go mod tidy")
+	require.Contains(t, logs.String(), skipTidyMessage)
 
 	toolFileAfterSecond, err := os.ReadFile(toolFile)
 	require.NoError(t, err)
@@ -972,7 +972,7 @@ go 1.25
 		0o644,
 	))
 
-	toolFile := filepath.Join(dir, ToolFileCanonical)
+	toolFile := filepath.Join(dir, toolFileCanonical)
 	writeToolFile(t, toolFile, "fmt")
 
 	opts := PinOptions{
@@ -991,7 +991,7 @@ go 1.25
 	ctx := util.ContextWithLogger(t.Context(), debugLogger)
 
 	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
-	require.NotContains(t, logs.String(), "skipping go mod tidy")
+	require.NotContains(t, logs.String(), skipTidyMessage)
 	require.FileExists(t, goSumPath, "go mod tidy should have restored go.sum")
 }
 
@@ -1034,7 +1034,7 @@ go 1.25
 	ctx := util.ContextWithLogger(t.Context(), debugLogger)
 
 	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
-	require.Contains(t, logs.String(), "skipping go mod tidy")
+	require.Contains(t, logs.String(), skipTidyMessage)
 
 	goModAfterSecond, err := os.ReadFile(goModPath)
 	require.NoError(t, err)
@@ -1072,11 +1072,37 @@ go 1.25
 
 	// A prune must flip toolFileChanged and force the tidy.
 	require.NoError(t, updateToolFile(ctx, toolFile, map[string]bool{"fmt": true}, opts))
-	require.NotContains(t, logs.String(), "skipping go mod tidy")
+	require.NotContains(t, logs.String(), skipTidyMessage)
 
 	toolFileAfter, err := os.ReadFile(toolFile)
 	require.NoError(t, err)
 	require.NotContains(t, string(toolFileAfter), `"fmt"`)
+}
+
+func TestEnsureOtelcRequire_DevVersionReportsMissingRequire(t *testing.T) {
+	dir := t.TempDir()
+
+	// Tool directive present, require line absent: the state a dev build
+	// leaves behind, since ensureOtelcRequireVersion will not pin v0.0.0 or a
+	// pseudo-version and so cannot add the require itself.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, goModFileName),
+		[]byte(`module example.com/test
+
+go 1.25
+
+tool go.opentelemetry.io/otelc/tool/cmd/otelc
+`),
+		0o644,
+	))
+
+	for _, version := range []string{"v0.0.0", "v0.0.0-20260101000000-000000000000", "(devel)"} {
+		t.Run(version, func(t *testing.T) {
+			modified, err := ensureOtelcRequire(dir, version)
+			require.NoError(t, err)
+			require.True(t, modified, "a missing require must be reported so the caller still tidies")
+		})
+	}
 }
 
 func TestUpdateToolFile_ParseError(t *testing.T) {
