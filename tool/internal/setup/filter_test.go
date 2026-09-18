@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/dave/dst"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"

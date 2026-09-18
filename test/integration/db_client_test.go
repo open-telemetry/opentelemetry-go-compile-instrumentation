@@ -265,6 +265,20 @@ func TestDBClient(t *testing.T) {
 				wantDb:     "master",
 			},
 			{
+				// Regression test for #1131: the address/database separator
+				// for a non-parenthesized "unix:" DSN is the last '/', not
+				// the first, because the socket path owns every '/' before
+				// it. Asserted end-to-end here so the parsed DSNInfo is
+				// verified to reach the span attributes, not just the
+				// parser output in isolation.
+				name:       "MySQL non-parenthesized unix socket",
+				driverName: "mysql",
+				dsn:        "user:pass@unix:/tmp/mysql.sock/inventory",
+				wantAddr:   "/tmp/mysql.sock",
+				wantPort:   0,
+				wantDb:     "inventory",
+			},
+			{
 				name:       "SQLite3 local file",
 				driverName: "sqlite3",
 				dsn:        "file:test.db?cache=shared",
