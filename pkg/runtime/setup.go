@@ -363,11 +363,10 @@ func handleShutdownSignal(sigCh chan os.Signal) {
 	// is used rather than syscall.Kill because syscall.Kill is not defined on
 	// Windows; there the call is a no-op and the host keeps its own behavior.
 	proc, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		logger.Error("failed to look up own process to re-raise signal", "error", err)
-		return
+	if err == nil {
+		err = proc.Signal(sig)
 	}
-	if err := proc.Signal(sig); err != nil {
+	if err != nil {
 		logger.Error("failed to re-raise signal", "signal", sig.String(), "error", err)
 	}
 }
