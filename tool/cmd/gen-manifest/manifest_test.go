@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package manifest
+package main
 
 import (
 	"encoding/json"
@@ -14,12 +14,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/data"
 )
 
 func TestGenerate(t *testing.T) {
 	root := t.TempDir()
 	writeModule(t, root, "parent", "example.com/parent")
 	writeRuleFile(t, root, "parent/otelc.yaml", `
+version: "v1.0.0"
 later:
   target: example.com/target
   version: v2.0.0
@@ -33,6 +36,7 @@ empty:
   version: v3.0.0
 `)
 	writeRuleFile(t, root, "parent/client.otelc.yml", `
+version: "v1.1.0"
 client:
   target: example.com/client
 `)
@@ -52,6 +56,7 @@ ignored:
 
 	writeModule(t, root, "parent/nested", "example.com/nested")
 	writeRuleFile(t, root, "parent/nested/server.otelc.yaml", `
+version: "v1.0.0"
 server:
   target: example.com/server
   version: v1.5.0
@@ -129,6 +134,23 @@ func TestGenerateRejectsInvalidVersionRanges(t *testing.T) {
 			require.ErrorContains(t, err, "generating manifest from")
 		})
 	}
+}
+
+func TestGenerateRejectsInvalidRuleValue(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "module", "example.com/test")
+	writeRuleFile(t, root, "module/otelc.yaml", `invalid: value`)
+
+	_, err := Generate(root)
+	require.ErrorContains(t, err, `parsing rule "invalid" in otelc.yaml`)
+}
+
+func TestParseRuleEntriesRejectsNewerOtelcVersion(t *testing.T) {
+	_, err := parseRuleEntriesForVersion(
+		[]byte(`version: "v99.0.0"`), "otelc.yaml", "example.com/test", "v1.0.0",
+	)
+	require.ErrorContains(t, err, "requires otelc >= v99.0.0")
+	require.ErrorContains(t, err, "validating minimum otelc version in rule file otelc.yaml")
 }
 
 func TestGenerateReportsInvalidRulesDeterministically(t *testing.T) {
@@ -293,6 +315,12 @@ func TestGenerateErrors(t *testing.T) {
 			rule:    "invalid: yaml: {",
 			wantErr: "parsing rule file",
 		},
+		{
+			name:    "invalid minimum otelc version",
+			goMod:   "module example.com/test\n",
+			rule:    `version: "1.0.0"`,
+			wantErr: "not a valid release version",
+		},
 	}
 
 	for _, test := range tests {
@@ -364,9 +392,12 @@ func TestLoadModuleEntriesRejectsEscapingRuleSymlink(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoad(t *testing.T) {
-	got, err := load()
-	require.NoError(t, err)
+// TestEmbeddedManifestMatchesGeneratorContract guards the checked-in artifact
+// this generator produces: it must unmarshal, describe complete entries, and
+// stay sorted and deduplicated the way Generate leaves it.
+func TestEmbeddedManifestMatchesGeneratorContract(t *testing.T) {
+	var got Manifest
+	require.NoError(t, json.Unmarshal(data.GetManifestJSON(), &got))
 	require.NotEmpty(t, got)
 
 	for _, entry := range got {

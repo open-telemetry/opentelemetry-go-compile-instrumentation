@@ -1,0 +1,29 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # github.com/olivere/elastic/v7 instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/olivere/elastic/v7/hook.go          (span lifecycle)
+  #   instrumentation/github.com/olivere/elastic/v7/semconv/client.go (ClientTraceAttrs)
+  #
+  # The olivere/elastic instrumentation is trace-only: it creates one client
+  # span per PerformRequest call and records no metrics. db.collection.name is
+  # the target index when the path has one. db.response.status_code is set
+  # from the response or from elastic.Error.Status. server.address and url.full
+  # are omitted: PerformRequest picks the host after the before hook.
+  # db.query.text is omitted so request bodies are not exported by default.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.db.elasticsearch.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: Elasticsearch client span, one per olivere/elastic PerformRequest call.
+    attributes:
+      - ref: db.system.name
+      - ref: db.operation.name
+      - ref: db.collection.name
+      - ref: network.transport
+      - ref: http.request.method
+      - ref: url.path
+      - ref: db.response.status_code

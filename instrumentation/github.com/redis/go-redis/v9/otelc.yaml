@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 redis_hook_newclient:
   target: github.com/redis/go-redis/v9
   where:

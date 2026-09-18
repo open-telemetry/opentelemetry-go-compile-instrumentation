@@ -334,3 +334,20 @@ func TestExtractGZip_MkdirAllError(t *testing.T) {
 	err = extractGZip(bytes.NewReader(nil), filePath)
 	require.Error(t, err)
 }
+
+func TestExtractGZip_CloseError(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, err := gw.Write([]byte("test data for gzip stream"))
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+
+	// Truncate the gzip trailer to trigger a gzip.Reader.Close error
+	truncated := buf.Bytes()[:len(buf.Bytes())-4]
+
+	tmpDir := t.TempDir()
+	err = extractGZip(bytes.NewReader(truncated), tmpDir)
+	require.Error(t, err)
+}

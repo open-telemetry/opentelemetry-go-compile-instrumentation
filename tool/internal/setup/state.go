@@ -103,7 +103,7 @@ func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, 
 	dirs := slices.Sorted(maps.Keys(moduleDirs))
 	// Find all go.mod, go.sum, and tool files
 	for _, moduleDir := range dirs {
-		goModFile := filepath.Join(moduleDir, "go.mod")
+		goModFile := filepath.Join(moduleDir, goModFileName)
 		goSumFile := filepath.Join(moduleDir, "go.sum")
 		canonical := filepath.Join(moduleDir, toolFileCanonical)
 		alias := filepath.Join(moduleDir, toolFileAlias)

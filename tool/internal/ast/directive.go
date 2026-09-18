@@ -81,9 +81,16 @@ func scanArgs(input string) ([]DirectiveArg, error) {
 	}
 	args := make([]DirectiveArg, 0, len(tokens))
 	for _, tok := range tokens {
-		key, value, found := strings.Cut(tok, ":")
+		key, value, found := cutUnquoted(tok, ':')
 		if !found {
-			return nil, ex.Newf("argument %q missing colon separator", tok)
+			return nil, ex.Newf("argument %q has no unquoted colon separator; "+
+				"quote only the value, as in key:\"a:b\"", tok)
+		}
+		if key == "" {
+			return nil, ex.Newf("argument %q has an empty key", tok)
+		}
+		if strings.ContainsRune(key, '"') {
+			return nil, ex.Newf("argument %q has a quoted or malformed key", tok)
 		}
 		if strings.HasPrefix(value, "'") {
 			return nil, ex.Newf("single-quoted values are not supported in argument %q", tok)
@@ -213,4 +220,29 @@ func tokenize(input string) ([]string, error) {
 		tokens = append(tokens, current.String())
 	}
 	return tokens, nil
+}
+
+// cutUnquoted splits tok at the first occurrence of sep that falls outside
+// a double-quoted region, mirroring tokenize's quote/escape tracking so a
+// separator inside a quoted key or value is never mistaken for the
+// key:value boundary. found is false if no such separator exists.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns; see doc comment above for result order
+func cutUnquoted(tok string, sep rune) (string, string, bool) {
+	inQuote := false
+	escaped := false
+
+	for i, ch := range tok {
+		switch {
+		case escaped:
+			escaped = false
+		case ch == '\\' && inQuote:
+			escaped = true
+		case ch == '"':
+			inQuote = !inQuote
+		case ch == sep && !inQuote:
+			return tok[:i], tok[i+utf8.RuneLen(sep):], true
+		}
+	}
+	return tok, "", false
 }

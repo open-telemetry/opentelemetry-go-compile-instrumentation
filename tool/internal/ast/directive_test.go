@@ -90,10 +90,10 @@ func TestMatchDirective(t *testing.T) {
 
 func TestScanArgs(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected []DirectiveArg
-		hasError bool
+		name        string
+		input       string
+		expected    []DirectiveArg
+		errContains string // non-empty pins the error to the expected branch
 	}{
 		{
 			name:     "simple key:value",
@@ -116,14 +116,14 @@ func TestScanArgs(t *testing.T) {
 			},
 		},
 		{
-			name:     "single quotes rejected",
-			input:    "key:'single'",
-			hasError: true,
+			name:        "single quotes rejected",
+			input:       "key:'single'",
+			errContains: "single-quoted values are not supported",
 		},
 		{
-			name:     "unclosed quote",
-			input:    `key:"unclosed`,
-			hasError: true,
+			name:        "unclosed quote",
+			input:       `key:"unclosed`,
+			errContains: "unclosed double quote",
 		},
 		{
 			name:     "empty input",
@@ -139,9 +139,9 @@ func TestScanArgs(t *testing.T) {
 			},
 		},
 		{
-			name:     "missing colon",
-			input:    "nocolon",
-			hasError: true,
+			name:        "missing colon",
+			input:       "nocolon",
+			errContains: "has no unquoted colon separator",
 		},
 		{
 			name:  "empty value",
@@ -150,13 +150,71 @@ func TestScanArgs(t *testing.T) {
 				{Key: "key", Value: ""},
 			},
 		},
+		{
+			name:        "empty key rejected",
+			input:       ":value",
+			errContains: "has an empty key",
+		},
+		{
+			name:        "bare colon rejected",
+			input:       ":",
+			errContains: "has an empty key",
+		},
+		{
+			name:        "fully quoted token has no unquoted colon separator",
+			input:       `"key:value"`,
+			errContains: "has no unquoted colon separator",
+		},
+		{
+			name:        "quoted key rejected",
+			input:       `"k":v`,
+			errContains: "has a quoted or malformed key",
+		},
+		{
+			name:        "escaped quote inside quoted key does not end the quote early",
+			input:       `"a\"b":value`,
+			errContains: "has a quoted or malformed key",
+		},
+		{
+			name:  "quoted value containing colon",
+			input: `url:"https://example.com/path"`,
+			expected: []DirectiveArg{
+				{Key: "url", Value: "https://example.com/path"},
+			},
+		},
+		{
+			name:  "bare value containing colon splits at first colon only",
+			input: "key:a:b:c",
+			expected: []DirectiveArg{
+				{Key: "key", Value: "a:b:c"},
+			},
+		},
+		{
+			name:  "multiple args one with quoted colon value",
+			input: `op:"http:post" tag:foo`,
+			expected: []DirectiveArg{
+				{Key: "op", Value: "http:post"},
+				{Key: "tag", Value: "foo"},
+			},
+		},
+		{
+			// Backslash outside a quoted region is not an escape in either
+			// tokenize or cutUnquoted. This is a characterization test: it
+			// records today's behaviour so the change is visible if someone
+			// later adds bare-backslash escaping.
+			name:  "backslash in a bare key is not an escape",
+			input: `k\:v`,
+			expected: []DirectiveArg{
+				{Key: `k\`, Value: "v"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := scanArgs(tt.input)
-			if tt.hasError {
-				require.Error(t, err)
+			if tt.errContains != "" {
+				require.ErrorContains(t, err, tt.errContains)
 				return
 			}
 			require.NoError(t, err)

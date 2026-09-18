@@ -15,6 +15,7 @@ var allowlist = []string{ //nolint:gochecknoglobals // private lookup table
 	"instrumentation/database/sql/dsnparse/parse_addr_test.go",
 	"instrumentation/database/sql/dsnparse/parse_dialects_test.go",
 	"instrumentation/database/sql/dsnparse/parse_fuzz_test.go", // fuzz target for parse.go
+	"tool/internal/ast/directive_fuzz_test.go",                 // fuzz target for directive.go
 	"instrumentation/database/sql/semconv/db_ipv6_test.go",
 
 	"instrumentation/github.com/openai/openai-go/middleware_integration_test.go",

@@ -106,11 +106,16 @@ func TestWriteFile_CreateError(t *testing.T) {
 }
 
 type mockWriteCloser struct {
-	writeErr error
-	closeErr error
+	writeErr     error
+	closeErr     error
+	panicOnWrite bool
+	closed       bool
 }
 
 func (m *mockWriteCloser) Write(p []byte) (int, error) {
+	if m.panicOnWrite {
+		panic("simulated write panic")
+	}
 	if m.writeErr != nil {
 		return 0, m.writeErr
 	}
@@ -118,6 +123,7 @@ func (m *mockWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (m *mockWriteCloser) Close() error {
+	m.closed = true
 	return m.closeErr
 }
 
@@ -269,4 +275,13 @@ func TestWrite_DeterministicOrder(t *testing.T) {
 		"packagefile net/http=/path/to/net/http.a",
 		"packagefile strings=/path/to/strings.a",
 	}, packageFileLines)
+}
+
+func TestWriteFile_PanicSafety(t *testing.T) {
+	cfg := ImportConfig{
+		PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
+	}
+	mock := &mockWriteCloser{panicOnWrite: true}
+	require.Panics(t, func() { _ = cfg.writeFile(mock, "importcfg") })
+	assert.True(t, mock.closed, "the file must be closed even when writing panics")
 }
