@@ -24,29 +24,31 @@ const redisGoRedisModule = "github.com/redis/go-redis/v9"
 func TestRedisClient(t *testing.T) {
 	t.Parallel()
 
+	// Copy before either build. otelc setup mutates test/apps/redisclient/go.mod,
+	// and a parallel copy would pick up the instrumentation require and MVS
+	// to v9.22.0.
+	legacyAppsDir := pinnedRedisClient(t, "v9.8.0")
+
 	// Both cases go through otelc. Equal GET counts fail if the Conn version
 	// gate is wrong: missing the pre-v9.9 hook drops a span, injecting the
 	// hook after v9.9.0 adds a duplicate.
 	for _, tc := range []struct {
 		name    string
+		appsDir string
 		version string
 	}{
-		{name: "conn_after_v9.9", version: ""},
-		{name: "conn_v9.8.0", version: "v9.8.0"},
+		{name: "conn_after_v9.9"},
+		{name: "conn_v9.8.0", appsDir: legacyAppsDir, version: "v9.8.0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			appsDir := ""
+			testutil.Build(t, tc.appsDir, "redisclient", "go", "build", "-a")
 			if tc.version != "" {
-				appsDir = pinnedRedisClient(t, tc.version)
-			}
-			testutil.Build(t, appsDir, "redisclient", "go", "build", "-a")
-			if tc.version != "" {
-				requireRedisModuleVersion(t, filepath.Join(appsDir, "redisclient"), tc.version)
+				requireRedisModuleVersion(t, filepath.Join(tc.appsDir, "redisclient"), tc.version)
 			}
 
-			assertRedisClientSpans(t, appsDir)
+			assertRedisClientSpans(t, tc.appsDir)
 		})
 	}
 }
@@ -131,12 +133,14 @@ func pinnedRedisClient(t *testing.T, version string) string {
 	require.NoError(t, os.MkdirAll(appDir, 0o755))
 	require.NoError(t, os.CopyFS(appDir, os.DirFS(src)))
 
-	testutil.BumpToVersions(t, appDir, map[string]string{
-		redisGoRedisModule: version,
-	})
-	// Instrumentation requires a newer go-redis; replace keeps the pin after setup.
-	goMod(t, appDir, "edit", "-replace="+redisGoRedisModule+"="+redisGoRedisModule+"@"+version)
-	goMod(t, appDir, "tidy")
+	// Replace first so tidy cannot MVS up to the instrumentation module pin.
+	goModOffWork(t, appDir, "edit", "-replace="+redisGoRedisModule+"="+redisGoRedisModule+"@"+version)
+	cmd := exec.CommandContext(t.Context(), "go", "get", redisGoRedisModule+"@"+version)
+	cmd.Dir = appDir
+	cmd.Env = goWorkOffEnv()
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "go get %s@%s:\n%s", redisGoRedisModule, version, out)
+	goModOffWork(t, appDir, "tidy")
 	requireRedisModuleVersion(t, appDir, version)
 	return appsDir
 }
@@ -146,10 +150,24 @@ func requireRedisModuleVersion(t *testing.T, appDir, version string) {
 
 	cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Version}}", redisGoRedisModule)
 	cmd.Dir = appDir
+	cmd.Env = goWorkOffEnv()
 	out, err := cmd.Output()
 	require.NoError(t, err, "go list -m %s failed in %s", redisGoRedisModule, appDir)
 	require.Equal(t, version, strings.TrimSpace(string(out)),
 		"%s must stay at %s so the Conn version gate is the one under test", redisGoRedisModule, version)
+}
+
+func goModOffWork(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "go", append([]string{"mod"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = goWorkOffEnv()
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+}
+
+func goWorkOffEnv() []string {
+	return append(os.Environ(), "GOWORK=off")
 }
 
 // StartRedisServer creates and starts a miniredis server for testing.
