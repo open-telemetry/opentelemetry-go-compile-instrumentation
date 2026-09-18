@@ -793,6 +793,7 @@ Currently supported replace string features:
 | `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                  |
 | `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                      |
 | `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type         |
+| `{{.FuncReturnOfType type}}`   | The first return value of the enclosing function matching the given type                               |
 | `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                 |
 | `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                          |
 

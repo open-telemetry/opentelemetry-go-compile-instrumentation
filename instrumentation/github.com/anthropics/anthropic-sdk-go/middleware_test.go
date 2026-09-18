@@ -33,7 +33,8 @@ func TestClassifyOperation(t *testing.T) {
 	}{
 		{"/v1/messages", opMessages},
 		{"/anthropic/v1/messages", opMessages},
-		{"/v1/messages/count_tokens", opUnknown},
+		{"/v1/messages/count_tokens", opCountTokens},
+		{"/anthropic/v1/messages/count_tokens", opCountTokens},
 		{"/v1/messages/batches", opUnknown},
 		{"/v1/models", opUnknown},
 	}
@@ -65,6 +66,7 @@ func TestGetProviderName(t *testing.T) {
 
 func TestOperationName(t *testing.T) {
 	assert.Equal(t, "chat", operationName(opMessages))
+	assert.Equal(t, "count_tokens", operationName(opCountTokens))
 	assert.Equal(t, "", operationName(opUnknown))
 }
 
@@ -345,7 +347,7 @@ func TestOtelMiddleware_Messages_NoCacheUsage(t *testing.T) {
 	assert.False(t, found, "cache_creation attribute should be omitted when zero")
 }
 
-func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
+func TestOtelMiddleware_CountTokens(t *testing.T) {
 	sr := setupTestTracer(t)
 
 	middleware := OtelMiddleware()
@@ -353,7 +355,9 @@ func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
 	req, _ := http.NewRequest(
 		"POST",
 		"http://api.anthropic.com/v1/messages/count_tokens",
-		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5"}`))),
+		io.NopCloser(
+			bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"Hello"}]}`)),
+		),
 	)
 
 	next := func(r *http.Request) (*http.Response, error) {
@@ -367,7 +371,19 @@ func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
 	resp, err := middleware(req, next)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Empty(t, sr.Ended())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, "count_tokens claude-sonnet-4-5", spans[0].Name())
+
+	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "gen_ai.system", "anthropic")
+	assertAttribute(t, attrs, "gen_ai.operation.name", "count_tokens")
+	assertAttribute(t, attrs, "gen_ai.request.model", "claude-sonnet-4-5")
+	assertAttribute(t, attrs, "gen_ai.provider.name", "anthropic")
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 5)
+	_, found := findAttribute(attrs, "gen_ai.usage.output_tokens")
+	assert.False(t, found, "count_tokens has no output tokens")
 }
 
 // TestOtelMiddleware_InvalidRequestJSON verifies that a request body which
