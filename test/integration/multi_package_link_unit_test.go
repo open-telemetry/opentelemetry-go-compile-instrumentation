@@ -191,21 +191,16 @@ instrument_helper:
 	// 3. otelc setup ./... generates runtime files to inspect linkname placement
 	runMultiPkgOtelcCommand(t, moduleDir, env, otelcPath, "setup", "./...")
 
-	// The root package receives the hook linkname declarations and imports
+	// The root package receives hook imports and no linknames
 	rootRuntimeFile := filepath.Join(moduleDir, "otelc.runtime.go")
 	require.FileExists(t, rootRuntimeFile)
 	rootContent, err := os.ReadFile(rootRuntimeFile)
 	require.NoError(t, err)
-	assert.Contains(
-		t,
-		string(rootContent),
-		`//go:linkname _getstack0 example.com/otelc-multi-pkg/hooks.OtelGetStackImpl`,
-	)
-	assert.Contains(
-		t,
-		string(rootContent),
-		`//go:linkname _printstack0 example.com/otelc-multi-pkg/hooks.OtelPrintStackImpl`,
-	)
+	assert.NotContains(t, string(rootContent), `//go:linkname`)
+	assert.NotContains(t, string(rootContent), `_getstack`)
+	assert.NotContains(t, string(rootContent), `_printstack`)
+	assert.NotContains(t, string(rootContent), `runtime/debug`)
+	assert.NotContains(t, string(rootContent), `"log"`)
 	assert.Contains(t, string(rootContent), `_ "example.com/otelc-multi-pkg/hooks"`)
 
 	// The subpackage lib in the same link unit receives hook imports but NOT linknames
@@ -225,7 +220,7 @@ instrument_helper:
 // packages (cmd/api, cmd/worker) import a shared library:
 // 1. `otelc go build ./...` produces no duplicate linkname definitions.
 // 2. Both binaries are generated and execute successfully.
-// 3. Each main package emits linknames, while the shared library omits them.
+// 3. Packages emit blank hook imports without linknames.
 func TestMultiPackageLinkUnit_MultipleMainPackages(t *testing.T) {
 	otelcPath, pkgReplacement := getTestEnvPaths(t)
 	moduleDir := t.TempDir()
@@ -359,21 +354,23 @@ func Before(ctx hook.HookContext) {
 	// Run otelc setup ./... to inspect generated runtime files
 	runMultiPkgOtelcCommand(t, moduleDir, env, otelcPath, "setup", "./cmd/...", "./shared")
 
-	// cmd/api is a root: must emit linknames
+	// cmd/api receives hook imports and no linknames
 	apiRuntime := filepath.Join(moduleDir, "cmd", "api", "otelc.runtime.go")
 	require.FileExists(t, apiRuntime)
 	apiContent, err := os.ReadFile(apiRuntime)
 	require.NoError(t, err)
-	assert.Contains(t, string(apiContent), `//go:linkname _getstack0`)
+	assert.NotContains(t, string(apiContent), `//go:linkname`)
+	assert.Contains(t, string(apiContent), `_ "example.com/otelc-multi-main/hooks"`)
 
-	// cmd/worker is also a root: must emit linknames
+	// cmd/worker receives hook imports and no linknames
 	workerRuntime := filepath.Join(moduleDir, "cmd", "worker", "otelc.runtime.go")
 	require.FileExists(t, workerRuntime)
 	workerContent, err := os.ReadFile(workerRuntime)
 	require.NoError(t, err)
-	assert.Contains(t, string(workerContent), `//go:linkname _getstack0`)
+	assert.NotContains(t, string(workerContent), `//go:linkname`)
+	assert.Contains(t, string(workerContent), `_ "example.com/otelc-multi-main/hooks"`)
 
-	// shared is imported by both: must NOT emit linknames
+	// shared is imported by both: also receives hook imports and no linknames
 	sharedRuntime := filepath.Join(moduleDir, "shared", "otelc.runtime.go")
 	require.FileExists(t, sharedRuntime)
 	sharedContent, err := os.ReadFile(sharedRuntime)

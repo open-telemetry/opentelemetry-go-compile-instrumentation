@@ -24,11 +24,10 @@ import (
 
 func TestAddDeps(t *testing.T) {
 	tests := []struct {
-		name          string
-		matched       []*rule.InstRuleSet
-		packageName   string
-		omitLinknames bool
-		goldenFile    string // Empty means no file should be generated
+		name        string
+		matched     []*rule.InstRuleSet
+		packageName string
+		goldenFile  string // Empty means no file should be generated
 	}{
 		{
 			name:        "empty_matched_rules",
@@ -97,19 +96,6 @@ func TestAddDeps(t *testing.T) {
 			packageName: "mypkg",
 			goldenFile:  "non_main_package_name.otelc.runtime.go.golden",
 		},
-		{
-			name: "omit_linknames_for_imported_dependency",
-			matched: []*rule.InstRuleSet{
-				newTestRuleSet(
-					"github.com/example/pkg",
-					[]*rule.InstFuncRule{newTestFuncRule("github.com/example/pkg", "github.com/example/pkg")},
-					nil,
-				),
-			},
-			packageName:   "lib",
-			omitLinknames: true,
-			goldenFile:    "no_linknames.otelc.runtime.go.golden",
-		},
 	}
 
 	for _, tt := range tests {
@@ -120,7 +106,7 @@ func TestAddDeps(t *testing.T) {
 			stateManager := newStateManager()
 			ctx := contextWithStateManager(t.Context(), stateManager)
 
-			err := sp.addDeps(ctx, tt.matched, tmpDir, tt.packageName, !tt.omitLinknames)
+			err := sp.addDeps(ctx, tt.matched, tmpDir, tt.packageName)
 			require.NoError(t, err)
 
 			runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
@@ -155,6 +141,6 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	invalidPath := filepath.Join(t.TempDir(), "nonexistent", "subdir")
 	sp := newTestSetupPhase()
 
-	err := sp.addDeps(t.Context(), matched, invalidPath, "main", true)
+	err := sp.addDeps(t.Context(), matched, invalidPath, "main")
 	assert.Error(t, err)
 }

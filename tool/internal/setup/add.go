@@ -5,7 +5,6 @@ package setup
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -21,25 +20,10 @@ const (
 	otelcRuntimeFile = "otelc.runtime.go"
 )
 
-//nolint:gochecknoglobals // This is a constant
-var requiredImports = map[string]string{
-	"runtime/debug": "_otel_debug", // The getstack function depends on runtime/debug
-	"log":           "_otel_log",   // The printstack function depends on log
-	"unsafe":        "_",           // The golinkname tag depends on unsafe
-}
-
-func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule, emitLinknames bool) []dst.Decl {
-	var imports map[string]string
-	if emitLinknames && len(funcRules) > 0 {
-		imports = maps.Clone(requiredImports) // clone required imports to avoid mutating the global map
-		for _, m := range funcRules {
-			imports[m.Path] = ast.IdentIgnore
-		}
-	} else {
-		imports = make(map[string]string)
-		for _, m := range funcRules {
-			imports[m.Path] = ast.IdentIgnore
-		}
+func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []dst.Decl {
+	imports := make(map[string]string)
+	for _, m := range funcRules {
+		imports[m.Path] = ast.IdentIgnore
 	}
 	for _, m := range fileRules {
 		imports[m.Path] = ast.IdentIgnore
@@ -50,57 +34,6 @@ func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRul
 		importDecls = append(importDecls, ast.ImportDecl(imports[k], k))
 	}
 	return importDecls
-}
-
-func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
-	decls := make([]dst.Decl, 0, len(matched))
-	uniquePath := map[string]bool{}
-	for i, m := range matched {
-		if _, ok := uniquePath[m.Path]; ok {
-			continue
-		}
-		uniquePath[m.Path] = true
-		// First variable declaration
-		// //go:linkname _getstack%d %s.OtelGetStackImpl
-		// var _getstack%d = _otel_debug.Stack
-		value := ast.SelectorExpr(ast.Ident("_otel_debug"), "Stack")
-		getStackVar := ast.VarDecl(fmt.Sprintf("_getstack%d", i), value)
-		getStackVar.Decs = dst.GenDeclDecorations{
-			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname _getstack%d %s.OtelGetStackImpl", i, m.Path)),
-		}
-		// Second variable declaration
-		// //go:linkname _printstack%d %s.OtelPrintStackImpl
-		// var _printstack%d = func (bt []byte){ _otel_log.Print(string(bt)) }
-		// build: string(bt)
-		stringCall := &dst.CallExpr{
-			Fun:  ast.Ident("string"),
-			Args: []dst.Expr{ast.Ident("bt")},
-		}
-		// build: _otel_log.Print(string(bt))
-		printCall := &dst.CallExpr{
-			Fun:  ast.SelectorExpr(ast.Ident("_otel_log"), "Print"),
-			Args: []dst.Expr{stringCall},
-		}
-		// build: func (bt []byte) { _otel_log.Print(string(bt)) }
-		printStackFunc := &dst.FuncLit{
-			Type: &dst.FuncType{
-				Params: &dst.FieldList{
-					List: []*dst.Field{
-						ast.Field("bt", ast.ArrayType(ast.Ident("byte"))),
-					},
-				},
-			},
-			Body: ast.BlockStmts(ast.ExprStmt(printCall)),
-		}
-		printStackVar := ast.VarDecl(fmt.Sprintf("_printstack%d", i), printStackFunc)
-		printStackVar.Decs = dst.GenDeclDecorations{
-			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname _printstack%d %s.OtelPrintStackImpl", i, m.Path)),
-		}
-		decls = append(decls, getStackVar, printStackVar)
-	}
-	return decls
 }
 
 func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
@@ -114,13 +47,12 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 	}
 }
 
-// addDeps generates and writes otelc.runtime.go with required imports and variable
-// declarations for OpenTelemetry instrumentation based on matched rules.
+// addDeps generates and writes otelc.runtime.go with required imports
+// for OpenTelemetry instrumentation based on matched rules.
 func (sp *setupPhase) addDeps(
 	ctx context.Context,
 	matched []*rule.InstRuleSet,
 	packagePath, packageName string,
-	emitLinknames bool,
 ) error {
 	funcRules := []*rule.InstFuncRule{}
 	fileRules := []*rule.InstFileRule{}
@@ -133,14 +65,9 @@ func (sp *setupPhase) addDeps(
 	}
 
 	// Add required imports
-	importDecls := genImportDecl(funcRules, fileRules, emitLinknames)
-	var varDecls []dst.Decl
-	if emitLinknames {
-		// Generate the variable declarations used by otel runtime
-		varDecls = genVarDecl(funcRules)
-	}
+	importDecls := genImportDecl(funcRules, fileRules)
 	// build the ast
-	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), packageName)
+	root := buildOtelcRuntimeAst(importDecls, packageName)
 	otelcRuntimeFilePath := filepath.Join(packagePath, otelcRuntimeFile)
 	// Track file in state manager
 	if stateManager, found := stateManagerFromContext(ctx); found {
