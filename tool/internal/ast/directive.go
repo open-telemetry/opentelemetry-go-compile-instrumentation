@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -19,19 +20,12 @@ type DirectiveArg struct {
 	Value string
 }
 
-// matchDirective checks if a single decoration string matches the given directive.
-// The decoration must be a line comment (starting with //) with no space after //,
-// and the directive name must follow immediately. If there is text after the directive
-// name, it must be separated by whitespace. The bool return alone answers "does this
-// decoration match"; the string return is the remainder after the directive name, used
-// by callers that also need the directive's arguments.
-func matchDirective(dec, directive string) (string, bool) {
+func directiveCommentBody(dec string) (string, bool) {
 	s := strings.TrimSpace(dec)
 	if !strings.HasPrefix(s, "//") {
 		return "", false
 	}
-	s = s[2:] // strip "//"
-	// No space allowed immediately after "//"
+	s = s[2:]
 	if len(s) == 0 {
 		return "", false
 	}
@@ -39,7 +33,20 @@ func matchDirective(dec, directive string) (string, bool) {
 	if unicode.IsSpace(r) {
 		return "", false
 	}
-	// Check directive name matches
+	return s, true
+}
+
+// matchDirective checks if a single decoration string matches the given directive.
+// The decoration must be a line comment (starting with //) with no space after //,
+// and the directive name must follow immediately. If there is text after the directive
+// name, it must be separated by whitespace. The bool return alone answers "does this
+// decoration match"; the string return is the remainder after the directive name, used
+// by callers that also need the directive's arguments.
+func matchDirective(dec, directive string) (string, bool) {
+	s, ok := directiveCommentBody(dec)
+	if !ok {
+		return "", false
+	}
 	if !strings.HasPrefix(s, directive) {
 		return "", false
 	}
@@ -47,12 +54,58 @@ func matchDirective(dec, directive string) (string, bool) {
 	if len(rest) == 0 {
 		return "", true
 	}
-	// Next character after directive must be whitespace (not another identifier char)
-	r, _ = utf8.DecodeRuneInString(rest)
+	r, _ := utf8.DecodeRuneInString(rest)
 	if !unicode.IsSpace(r) {
 		return "", false
 	}
 	return rest, true
+}
+
+const otelcDirectivePrefix = "otelc:"
+
+func otelcDirectiveName(dec string) (string, bool) {
+	s, ok := directiveCommentBody(dec)
+	if !ok || !strings.HasPrefix(s, otelcDirectivePrefix) {
+		return "", false
+	}
+	end := len(s)
+	for i, r := range s {
+		if unicode.IsSpace(r) {
+			end = i
+			break
+		}
+	}
+	return s[:end], true
+}
+
+func UnknownDirectiveNames(file *dst.File, known map[string]bool) []string {
+	seen := make(map[string]bool)
+	dst.Inspect(file, func(n dst.Node) bool {
+		if n == nil {
+			return false
+		}
+		decs := n.Decorations()
+		if decs == nil {
+			return true
+		}
+		collectUnknownDirectives(decs.Start, known, seen)
+		collectUnknownDirectives(decs.End, known, seen)
+		return true
+	})
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func collectUnknownDirectives(decs []string, known, seen map[string]bool) {
+	for _, dec := range decs {
+		if name, ok := otelcDirectiveName(dec); ok && !known[name] {
+			seen[name] = true
+		}
+	}
 }
 
 // parseDirectiveArgs finds the directive in the decoration string, extracts

@@ -605,3 +605,94 @@ func Foo() {}
 		})
 	}
 }
+
+func TestUnknownDirectiveNames(t *testing.T) {
+	knownIgnore := map[string]bool{"otelc:ignore": true}
+
+	tests := []struct {
+		name     string
+		src      string
+		known    map[string]bool
+		expected []string
+	}{
+		{
+			name: "known directive is not reported",
+			src: `package p
+//otelc:ignore
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{},
+		},
+		{
+			name: "typo of a known directive is reported",
+			src: `package p
+//otelc:ignore
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:ignore"},
+		},
+		{
+			name: "non-otelc comment is not reported",
+			src: `package p
+// a plain doc comment
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{},
+		},
+		{
+			name: "space after slashes is not directive syntax",
+			src: `package p
+// otelc:ignore
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{},
+		},
+		{
+			name: "file-level directive is reported",
+			src: `//otelc:ignore
+
+package p
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:ignore"},
+		},
+		{
+			name: "duplicate unknown directives collapse to one entry",
+			src: `package p
+//otelc:ignore
+func Foo() {}
+
+//otelc:ignore
+func Bar() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:ignore"},
+		},
+		{
+			name: "distinct unknown directives are sorted",
+			src: `package p
+//otelc:zzz
+func Foo() {}
+
+//otelc:aaa
+func Bar() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:aaa", "otelc:zzz"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, UnknownDirectiveNames(tree, tt.known))
+		})
+	}
+}

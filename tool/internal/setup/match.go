@@ -210,6 +210,8 @@ func (sp *setupPhase) preciseMatching(
 	// shares it), so compute it once and reuse it across each file's context.
 	isTest := isTestBuild(dep.Sources)
 
+	known := knownDirectiveNames(rules)
+
 	for _, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -228,6 +230,8 @@ func (sp *setupPhase) preciseMatching(
 		// All files in a Go package share the same declared package name, so
 		// this is idempotent across iterations; SetPackageName asserts non-empty.
 		set.SetPackageName(tree.Name.Name)
+
+		sp.warnUnknownDirectives(source, tree, known)
 
 		// mctx is allocated once per source file and reused across all rules
 		// evaluated against that file. All fields are constant for a given
@@ -250,6 +254,27 @@ func (sp *setupPhase) preciseMatching(
 		}
 	}
 	return set, nil
+}
+
+func knownDirectiveNames(rules []rule.InstRule) map[string]bool {
+	known := make(map[string]bool, len(util.BuiltinDirectives))
+	for _, name := range util.BuiltinDirectives {
+		known[name] = true
+	}
+	for _, r := range rules {
+		if dr, ok := r.(*rule.InstDirectiveRule); ok {
+			known[dr.Directive] = true
+		}
+	}
+	return known
+}
+
+// warnUnknownDirectives logs a warning for every otelc: directive comment in
+// tree that matches no name in known.
+func (sp *setupPhase) warnUnknownDirectives(source string, tree *dst.File, known map[string]bool) {
+	for _, name := range ast.UnknownDirectiveNames(tree, known) {
+		sp.Warn("Unrecognized directive comment", "directive", name, "file", source)
+	}
 }
 
 // isTestBuild reports whether a compile invocation is part of a `go test` run.

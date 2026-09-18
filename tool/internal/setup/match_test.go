@@ -1976,6 +1976,66 @@ func TestPreciseMatching_MatchOneRuleError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestKnownDirectiveNames(t *testing.T) {
+	rules := []rule.InstRule{
+		&rule.InstFuncRule{InstBaseRule: rule.InstBaseRule{Name: "f"}, Func: "Foo"},
+		&rule.InstDirectiveRule{InstBaseRule: rule.InstBaseRule{Name: "d"}, Directive: "otelc:span"},
+	}
+
+	known := knownDirectiveNames(rules)
+
+	assert.True(t, known[util.DirectiveIgnore])
+	assert.True(t, known[util.DirectiveInstrument])
+	assert.True(t, known["otelc:span"])
+	assert.False(t, known["otelc:trace"])
+}
+
+func TestPreciseMatching_WarnsOnUnknownDirective(t *testing.T) {
+	srcFile := writeGoSource(t, "typo.go", "package typo\n\n//otelc:ignore\nfunc Foo() {}\n")
+	dep := &Dependency{
+		ImportPath: "example.com/typo",
+		Sources:    []string{srcFile},
+	}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: "example.com/typo"},
+		Func:         "Foo",
+		Before:       "BeforeFoo",
+		Path:         "example.com/hooks",
+	}
+
+	var buf bytes.Buffer
+	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))}
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	_, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "otelc:ignore")
+	assert.Contains(t, out, srcFile)
+}
+
+func TestPreciseMatching_NoWarnForKnownDirective(t *testing.T) {
+	srcFile := writeGoSource(t, "known.go", "package known\n\n//otelc:ignore\nfunc Foo() {}\n")
+	dep := &Dependency{
+		ImportPath: "example.com/known",
+		Sources:    []string{srcFile},
+	}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: "example.com/known"},
+		Func:         "Foo",
+		Before:       "BeforeFoo",
+		Path:         "example.com/hooks",
+	}
+
+	var buf bytes.Buffer
+	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))}
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	_, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+
+	assert.Empty(t, buf.String())
+}
+
 func TestRulesFromDirWalkError(t *testing.T) {
 	_, err := rulesFromDir(filepath.Join(t.TempDir(), "missing"), false)
 	require.Error(t, err)

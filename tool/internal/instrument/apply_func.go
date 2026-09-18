@@ -22,9 +22,6 @@ import (
 const (
 	tJumpLabel       = "/* __TRAMPOLINE_JUMP_IF__ */"
 	otelcGlobalsFile = "otelc.globals.go"
-
-	directiveIgnore     = "otelc:ignore"
-	directiveInstrument = "otelc:instrument"
 )
 
 func makeName(r *rule.InstFuncRule, funcDecl *dst.FuncDecl, isBefore bool) string {
@@ -408,7 +405,7 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	// A function-level //otelc:ignore opts this function out even when a rule
 	// matches it. The func rule then contributes no instrumented function, so it
 	// must not force a globals file to be written for the package.
-	if ast.FuncLeadHasDirective(funcDecl, directiveIgnore) {
+	if ast.FuncLeadHasDirective(funcDecl, util.DirectiveIgnore) {
 		ip.Debug("Skip func rule due to //otelc:ignore", "func", rule.Func, "rule", rule.Name)
 		return false, nil
 	}
