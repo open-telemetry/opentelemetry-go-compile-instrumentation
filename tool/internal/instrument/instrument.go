@@ -100,7 +100,7 @@ func (ip *instrumentPhase) skipRuleForFileIgnore(root *dst.File, r rule.InstRule
 	if err != nil {
 		return false, ex.Wrapf(err, "finding function %s", fr.Func)
 	}
-	if !ok || !ast.FuncLeadHasDirective(funcDecl, directiveInstrument) {
+	if !ok || !ast.FuncLeadHasDirective(funcDecl, util.DirectiveInstrument) {
 		ip.Debug("Skip func rule due to file-level //otelc:ignore", "func", fr.Func, "rule", r.GetName())
 		return true, nil
 	}
@@ -116,7 +116,7 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 		return false, ex.Wrapf(err, "parsing file %s", file)
 	}
 
-	fileIgnored := ast.FileHasLeadingDirective(root, directiveIgnore)
+	fileIgnored := ast.FileHasLeadingDirective(root, util.DirectiveIgnore)
 	if fileIgnored {
 		ip.Debug("File-level //otelc:ignore found, only //otelc:instrument functions will be instrumented",
 			"file", file)
