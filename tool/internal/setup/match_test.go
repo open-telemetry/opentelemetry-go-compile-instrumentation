@@ -2071,7 +2071,13 @@ func TestRunMatch_VersionFilteredOut(t *testing.T) {
 	}
 
 	sp := newTestSetupPhase()
-	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{"example.com/v": {funcRule}}, nil, nil)
+	set, err := sp.runMatch(
+		context.Background(),
+		dep,
+		map[string][]rule.InstRule{"example.com/v": {funcRule}},
+		nil,
+		nil,
+	)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty())
 }

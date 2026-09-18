@@ -48,12 +48,7 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 }
 
 func excludeTargetsNeedRootExpansion(excludes []string) bool {
-	for _, pattern := range excludes {
-		if rule.IsRootTarget(pattern) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(excludes, rule.IsRootTarget)
 }
 
 func (sp *setupPhase) buildExpandedExcludeTargets(
@@ -68,7 +63,7 @@ func (sp *setupPhase) buildExpandedExcludeTargets(
 		}
 	}
 	if !needsRoot {
-		return nil, nil
+		return map[rule.InstRule][]string{}, nil
 	}
 
 	if err := sp.ensureRootModulePaths(ctx); err != nil {
