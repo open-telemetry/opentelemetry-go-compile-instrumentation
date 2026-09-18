@@ -480,6 +480,83 @@ func f(c *vault.Client) {}
 	})
 }
 
+func TestResolvedImportAliasMap(t *testing.T) {
+	t.Run("nil file returns nil", func(t *testing.T) {
+		assert.Nil(t, ResolvedImportAliasMap(nil, nil))
+	})
+
+	t.Run("unaliased import with no resolvedNames entry is omitted, not guessed", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		imports := ResolvedImportAliasMap(file, nil)
+		assert.Empty(t, imports)
+	})
+
+	t.Run("resolvedNames hit is kept", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"github.com/redis/go-redis/v9": "redis"}
+		imports := ResolvedImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["redis"])
+	})
+
+	t.Run("explicit alias in the file is kept even without resolvedNames", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import goredis "github.com/redis/go-redis/v9"
+
+func f(c *goredis.Client) {}
+`)
+		require.NoError(t, err)
+
+		imports := ResolvedImportAliasMap(file, nil)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["goredis"])
+	})
+
+	t.Run("unaliased import matching guess is kept via resolvedNames", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "net/http"
+
+func f(r *http.Request) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"net/http": "http"}
+		imports := ResolvedImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "net/http", imports["http"])
+	})
+
+	t.Run("unaliased import with no resolvedNames table at all is omitted", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "net/http"
+
+func f(r *http.Request) {}
+`)
+		require.NoError(t, err)
+
+		assert.Empty(t, ResolvedImportAliasMap(file, nil))
+	})
+}
+
 func TestDefaultImportAlias(t *testing.T) {
 	tests := []struct {
 		input string
