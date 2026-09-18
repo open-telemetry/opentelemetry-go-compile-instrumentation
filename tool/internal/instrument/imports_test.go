@@ -290,6 +290,21 @@ func run() {}
 	assert.Equal(t, map[string]string{"traced": "f"}, overrides)
 }
 
+func TestResolveImportOverrides_UnresolvedUnaliasedImportProducesNoOverride(t *testing.T) {
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func run() {}
+`)
+
+	ip := newTestPhase()
+	_, overrides := ip.resolveImportOverrides(root, map[string]string{"redis": importPath})
+
+	assert.Empty(t, overrides)
+}
+
 // --- resolveAliasOverrides tests ---
 
 func TestResolveAliasOverrides_MismatchProducesOverride(t *testing.T) {

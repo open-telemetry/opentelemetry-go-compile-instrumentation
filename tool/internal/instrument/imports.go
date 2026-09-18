@@ -111,8 +111,9 @@ func (ip *instrumentPhase) resolveImportOverrides(
 ) (map[string]string, map[string]string) {
 	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
-	existingAliases := make(map[string]string, len(importAliases))
-	for alias, path := range importAliases {
+	resolvedAliases := ast.ResolvedImportAliasMap(root, ip.importNames)
+	existingAliases := make(map[string]string, len(resolvedAliases))
+	for alias, path := range resolvedAliases {
 		existingAliases[path] = alias
 	}
 	aliasOverrides := resolveAliasOverrides(ruleImports, existingAliases)
