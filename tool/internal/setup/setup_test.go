@@ -739,3 +739,64 @@ func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	err := cmd.Run(t.Context(), []string{"setup", mainFile})
 	require.Error(t, err)
 }
+
+func TestGenerateRuntimePerPackage(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	libDir := filepath.Join(tmpDir, "lib")
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
+	require.NoError(t, os.MkdirAll(libDir, 0o755))
+
+	mustWriteFile(t, filepath.Join(appDir, "answer.go"), "package app\nimport \"example.com/app/lib\"\n")
+	mustWriteFile(t, filepath.Join(libDir, "lib.go"), "package lib\n")
+
+	libPkg := &packages.Package{
+		PkgPath: "example.com/app/lib",
+		Name:    "lib",
+		GoFiles: []string{filepath.Join(libDir, "lib.go")},
+	}
+	appPkg := &packages.Package{
+		PkgPath: "example.com/app",
+		Name:    "app",
+		GoFiles: []string{filepath.Join(appDir, "answer.go")},
+		Imports: map[string]*packages.Package{
+			"example.com/app/lib": libPkg,
+		},
+	}
+	pkgs := []*packages.Package{appPkg, libPkg}
+
+	rset := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/hooks", "example.com/app")},
+		nil,
+	)
+
+	err := sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset})
+	require.NoError(t, err)
+
+	// App package generates otelc.runtime.go with hook import and no linknames
+	appRuntimeFile := filepath.Join(appDir, otelcRuntimeFile)
+	require.FileExists(t, appRuntimeFile)
+	appContent, err := os.ReadFile(appRuntimeFile)
+	require.NoError(t, err)
+	assert.NotContains(t, string(appContent), `//go:linkname`)
+	assert.NotContains(t, string(appContent), `_getstack`)
+	assert.NotContains(t, string(appContent), `_printstack`)
+	assert.NotContains(t, string(appContent), `runtime/debug`)
+	assert.NotContains(t, string(appContent), `"log"`)
+	assert.Contains(t, string(appContent), `_ "example.com/hooks"`)
+
+	// Dependent package lib generates otelc.runtime.go with hook import and no linknames
+	libRuntimeFile := filepath.Join(libDir, otelcRuntimeFile)
+	require.FileExists(t, libRuntimeFile)
+	libContent, err := os.ReadFile(libRuntimeFile)
+	require.NoError(t, err)
+	assert.NotContains(t, string(libContent), `//go:linkname`)
+	assert.NotContains(t, string(libContent), `_getstack`)
+	assert.NotContains(t, string(libContent), `_printstack`)
+	assert.NotContains(t, string(libContent), `runtime/debug`)
+	assert.NotContains(t, string(libContent), `"log"`)
+	assert.Contains(t, string(libContent), `_ "example.com/hooks"`)
+}
