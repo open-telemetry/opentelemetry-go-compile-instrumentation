@@ -109,6 +109,9 @@ func (f File) Rules() ([]InstRule, error) {
 			if validateErr := util.ValidateVersionRange(r.GetVersion()); validateErr != nil {
 				return nil, ex.Wrapf(validateErr, "rule %q", entry.Name)
 			}
+			if validateErr := ValidateExcludeTargets(r.GetExcludeTargets()); validateErr != nil {
+				return nil, ex.Wrapf(validateErr, "rule %q", entry.Name)
+			}
 			rules = append(rules, r)
 		}
 	}
