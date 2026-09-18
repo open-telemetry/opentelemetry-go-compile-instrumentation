@@ -312,10 +312,10 @@ func shutdownSignals() []os.Signal {
 	return []os.Signal{os.Interrupt, syscall.SIGTERM}
 }
 
-// setupSignalHandler flushes the OTel SDK on SIGINT/SIGTERM so buffered telemetry
-// survives shutdown, then steps aside. It never exits or re-raises the signal:
-// the application owns its own exit path and exit code. Terminating here would
-// race an application running its own graceful shutdown and could truncate it.
+// setupSignalHandler flushes the OTel SDK on SIGINT or SIGTERM. Buffered
+// telemetry survives the shutdown. setupSignalHandler then re-raises the
+// signal, so the process still terminates through its normal disposition,
+// the OS default or a handler that the host application registers.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
 		sigCh := make(chan os.Signal, 1)
@@ -324,14 +324,17 @@ func setupSignalHandler() {
 	})
 }
 
-// handleShutdownSignal waits for the first signal on sigCh and flushes the SDK.
-// It does not exit or re-raise the signal, leaving the process exit to the
-// application or the OS default disposition.
+// handleShutdownSignal waits for the first signal on sigCh and flushes the
+// SDK. handleShutdownSignal then re-raises the same signal, so the normal
+// exit path for the process still runs, whether that path is the OS default
+// or a handler that the host application registers.
 func handleShutdownSignal(sigCh chan os.Signal) {
 	sig := <-sigCh
 
-	// Stop listening on otelc's channel so host application signal handlers
-	// remain active and a repeated signal reaches the default disposition.
+	// Deregister otelc's channel only. A host application that registered its
+	// own channel for this signal keeps receiving it. Once sigCh is the last
+	// registration, this also restores the OS default disposition, which the
+	// re-raise below then triggers.
 	signal.Stop(sigCh)
 
 	logger.Info("received signal, flushing telemetry", "signal", sig.String())
@@ -343,5 +346,19 @@ func handleShutdownSignal(sigCh chan os.Signal) {
 		logger.Error("error flushing telemetry during shutdown", "error", err)
 	} else {
 		logger.Info("OpenTelemetry SDK shutdown completed successfully")
+	}
+
+	// Re-raise the received signal so a process with no other handler for it
+	// terminates through the OS default disposition. Without this call, such a
+	// process needs a second SIGINT or SIGTERM to terminate. os.Process.Signal
+	// is used rather than syscall.Kill because syscall.Kill is not defined on
+	// Windows; there the call is a no-op and the host keeps its own behavior.
+	proc, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		logger.Error("failed to look up own process to re-raise signal", "error", err)
+		return
+	}
+	if err := proc.Signal(sig); err != nil {
+		logger.Error("failed to re-raise signal", "signal", sig.String(), "error", err)
 	}
 }
