@@ -111,3 +111,29 @@ func TestSetCandidatesEmptyClearsField(t *testing.T) {
 	set.SetCandidates(nil)
 	assert.Nil(t, set.Candidates)
 }
+
+func TestSetCandidatesLitRule(t *testing.T) {
+	litRule := &InstLitRule{
+		InstBaseRule:  InstBaseRule{Name: "mark-lit", Target: "example.com/svc"},
+		StructLiteral: "net/http.Transport",
+		ImportPath:    "net/http",
+		TypeName:      "Transport",
+		Field:         []*InstLitField{{Name: "Internal", Value: "true"}},
+	}
+
+	set := NewInstRuleSet("example.com/svc")
+	set.SetCandidates([]InstRule{litRule})
+
+	require.NotNil(t, set.Candidates)
+	require.Len(t, set.Candidates.LitRules, 1)
+	assert.Equal(t, "mark-lit", set.Candidates.LitRules[0].Name)
+	assert.Equal(t, "net/http.Transport", set.Candidates.LitRules[0].StructLiteral)
+
+	raw, err := json.Marshal(set.Candidates)
+	require.NoError(t, err)
+
+	var decoded InstRuleCandidates
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	require.Len(t, decoded.LitRules, 1)
+	assert.Equal(t, "mark-lit", decoded.LitRules[0].Name)
+}

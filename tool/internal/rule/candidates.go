@@ -19,6 +19,7 @@ type InstRuleCandidates struct {
 	CallRules      []*InstCallRule      `json:"call_rules,omitempty"`
 	DirectiveRules []*InstDirectiveRule `json:"directive_rules,omitempty"`
 	DeclRules      []*InstDeclRule      `json:"decl_rules,omitempty"`
+	LitRules       []*InstLitRule       `json:"lit_rules,omitempty"`
 	FileRules      []*InstFileRule      `json:"file_rules,omitempty"`
 }
 
@@ -47,6 +48,8 @@ func candidatesFromRules(rules []InstRule) *InstRuleCandidates {
 			c.DirectiveRules = append(c.DirectiveRules, rt)
 		case *InstDeclRule:
 			c.DeclRules = append(c.DeclRules, rt)
+		case *InstLitRule:
+			c.LitRules = append(c.LitRules, rt)
 		case *InstFileRule:
 			c.FileRules = append(c.FileRules, rt)
 		default:
