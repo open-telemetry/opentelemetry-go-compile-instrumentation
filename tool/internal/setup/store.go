@@ -15,23 +15,57 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+// rulePaths returns the deduplicated import paths referenced by the file and
+// function rules of every ruleset, including its package-level candidates.
+func rulePaths(matched []*rule.InstRuleSet) []string {
+	var paths []string
+	for _, ruleset := range matched {
+		for _, fileRule := range ruleset.FileRules {
+			paths = append(paths, fileRule.Path)
+		}
+		for _, funcRule := range ruleset.AllFuncRules() {
+			paths = append(paths, funcRule.Path)
+		}
+		if c := ruleset.Candidates; c != nil {
+			for _, fileRule := range c.FileRules {
+				paths = append(paths, fileRule.Path)
+			}
+			for _, funcRule := range c.FuncRules {
+				paths = append(paths, funcRule.Path)
+			}
+		}
+	}
+	slices.Sort(paths)
+	return slices.Compact(paths)
+}
+
+// applyResolvedPaths embeds the resolved local directory of each rule's import
+// path back into the rules, candidates included.
+func applyResolvedPaths(matched []*rule.InstRuleSet, resolved map[string]string) {
+	for _, ruleset := range matched {
+		for _, fileRule := range ruleset.FileRules {
+			fileRule.ResolvedPath = resolved[fileRule.Path]
+		}
+		for _, funcRule := range ruleset.AllFuncRules() {
+			funcRule.ResolvedPath = resolved[funcRule.Path]
+		}
+		if c := ruleset.Candidates; c != nil {
+			for _, fileRule := range c.FileRules {
+				fileRule.ResolvedPath = resolved[fileRule.Path]
+			}
+			for _, funcRule := range c.FuncRules {
+				funcRule.ResolvedPath = resolved[funcRule.Path]
+			}
+		}
+	}
+}
+
 // resolveRulePaths resolves the import paths referenced by function and file rules
 // to absolute filesystem paths.
 func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
 	dirs := slices.Sorted(maps.Keys(moduleDirs))
 
-	var pending []string
-	for _, ruleset := range matched {
-		for _, fileRule := range ruleset.FileRules {
-			pending = append(pending, fileRule.Path)
-		}
-		for _, funcRule := range ruleset.AllFuncRules() {
-			pending = append(pending, funcRule.Path)
-		}
-	}
-	slices.Sort(pending)
-	pending = slices.Compact(pending)
-
+	pending := rulePaths(matched)
 	resolved := make(map[string]string, len(pending))
 	var lastErr error
 
@@ -86,14 +120,7 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 		return ex.Wrapf(lastErr, "failed to resolve import path %q", pending[0])
 	}
 
-	for _, ruleset := range matched {
-		for _, fileRule := range ruleset.FileRules {
-			fileRule.ResolvedPath = resolved[fileRule.Path]
-		}
-		for _, funcRule := range ruleset.AllFuncRules() {
-			funcRule.ResolvedPath = resolved[funcRule.Path]
-		}
-	}
+	applyResolvedPaths(matched, resolved)
 
 	return nil
 }
