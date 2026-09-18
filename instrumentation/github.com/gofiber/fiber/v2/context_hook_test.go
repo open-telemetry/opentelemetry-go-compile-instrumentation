@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
 
@@ -12,17 +13,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/codes"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
 type mockHookContext struct {
 	hook.HookContext
-	params   []any
-	keyData  map[string]any
+	params  []any
+	keyData map[string]any
 }
 
 func newMockHookContext(params ...any) *mockHookContext {
@@ -64,7 +65,7 @@ func TestFiberBeforeAndAfterNext(t *testing.T) {
 		c.SetUserContext(ctx)
 
 		BeforeNext(ictx, c)
-		AfterNext(ictx)
+		AfterNext(ictx, nil)
 
 		return c.SendString("ok")
 	})
@@ -111,7 +112,7 @@ func TestFiberAfterNext_ErrorStatus(t *testing.T) {
 
 		BeforeNext(ictx, c)
 		c.Status(500)
-		AfterNext(ictx)
+		AfterNext(ictx, nil)
 
 		return c.SendStatus(500)
 	})
@@ -133,4 +134,42 @@ func TestFiberAfterNext_ErrorStatus(t *testing.T) {
 		}
 	}
 	assert.True(t, hasStatusAttr)
+}
+
+func TestFiberAfterNext_HandlerError(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	tracer := tp.Tracer("test")
+
+	app := fiber.New()
+	handlerErr := errors.New("handler failed")
+
+	app.Get("/boom", func(c *fiber.Ctx) error {
+		ictx := newMockHookContext(c)
+
+		ctx, span := tracer.Start(context.Background(), "GET")
+		defer span.End()
+
+		c.SetUserContext(ctx)
+
+		BeforeNext(ictx, c)
+		// Next returned an error and Fiber has not mapped it to a status yet, so
+		// the response still reads 200 at this point.
+		AfterNext(ictx, handlerErr)
+
+		return c.SendString("ok")
+	})
+
+	req := httptest.NewRequest("GET", "/boom", nil)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1)
+	assert.Equal(t, codes.Error, spans[0].Status.Code)
+	assert.Equal(t, handlerErr.Error(), spans[0].Status.Description)
+
+	require.Len(t, spans[0].Events, 1)
+	assert.Equal(t, "exception", spans[0].Events[0].Name)
 }

@@ -58,8 +58,10 @@ func BeforeNext(ictx hook.HookContext, c *fiber.Ctx) {
 	logger.Debug("fiber route resolved", "route", route)
 }
 
-// AfterNext runs after (*fiber.Ctx).Next returns.
-func AfterNext(ictx hook.HookContext) {
+// AfterNext runs after (*fiber.Ctx).Next returns. nextErr is Next's return
+// value: the error a downstream handler returned, before Fiber's error handler
+// has turned it into a response status.
+func AfterNext(ictx hook.HookContext, nextErr error) {
 	enabled, _ := ictx.GetKeyData(enabledDataKey).(bool)
 	if !enabled {
 		return
@@ -84,8 +86,18 @@ func AfterNext(ictx hook.HookContext) {
 	}
 
 	status := c.Response().StatusCode()
+	span.SetAttributes(semconv.HTTPResponseStatusCodeKey.Int(status))
+
+	// A handler error is the more precise signal: Fiber's error handler maps it
+	// to a status only after Next returns, so the response may still read 200
+	// here even though the request failed.
+	if nextErr != nil {
+		span.RecordError(nextErr)
+		span.SetStatus(codes.Error, nextErr.Error())
+		return
+	}
+
 	if status >= 500 {
 		span.SetStatus(codes.Error, "")
 	}
-	span.SetAttributes(semconv.HTTPResponseStatusCodeKey.Int(status))
 }
