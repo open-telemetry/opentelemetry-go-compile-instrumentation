@@ -239,10 +239,10 @@ func TestRewriteModVendor(t *testing.T) {
 		},
 		// Positional test-argv boundary preserves -mod=vendor
 		{
-			name:       "positional test arg preserves -mod=vendor",
+			name:       "positional test arg after unjoined unknown flag preserves -mod=vendor",
 			subcommand: subcmdTest,
-			args:       []string{"./pkg", "-run", "TestX", "positional", "-mod=vendor"},
-			want:       []string{"./pkg", "-run", "TestX", "positional", "-mod=vendor"},
+			args:       []string{"./pkg", "-custom", "value", "positional", "-mod=vendor"},
+			want:       []string{"./pkg", "-custom", "value", "positional", "-mod=vendor"},
 		},
 		{
 			name:       "joined unknown flag followed by positional preserves -mod=vendor",
@@ -251,10 +251,22 @@ func TestRewriteModVendor(t *testing.T) {
 			want:       []string{"./pkg", "-custom=x", "positional", "-mod=vendor"},
 		},
 		{
-			name:       "definitive positional tail preserves -mod=vendor",
+			name:       "definitive positional tail after unknown flag preserves -mod=vendor",
 			subcommand: subcmdTest,
-			args:       []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
-			want:       []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+			args:       []string{"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+			want:       []string{"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+		},
+		{
+			name:       "genuine build flag with package targets on both sides of -run is rewritten",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-run", "TestX", "math", "-mod=vendor"},
+			want:       []string{"./pkg", "-run", "TestX", "math", "-mod=mod"},
+		},
+		{
+			name:       "genuine two-token build flag with package targets on both sides of -run is rewritten",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-run", "TestX", "math", "-mod", "vendor"},
+			want:       []string{"./pkg", "-run", "TestX", "math", "-mod", "mod"},
 		},
 	}
 	for _, tt := range tests {

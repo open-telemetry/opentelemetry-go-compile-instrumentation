@@ -217,9 +217,8 @@ func classifyValueFlag(
 }
 
 type testArgState struct {
-	inPkgList              bool
-	packageListEstablished bool
-	testArgsFinalized      bool
+	pkgDiscoveryClosed bool
+	testArgsFinalized  bool
 }
 
 func classifyBuildFlagToken(args []string, i int) (int, []ClassifiedArg) {
@@ -287,7 +286,7 @@ func classifyTestFlagToken(
 	}
 
 	// Unknown / custom flag: closes the package list region.
-	state.packageListEstablished = true
+	state.pkgDiscoveryClosed = true
 	item := ClassifiedArg{
 		Index:    i,
 		Raw:      arg,
@@ -306,7 +305,7 @@ func classifyPositionalTestArg(
 	wasAfterUnknown bool,
 	unknownName string,
 ) ClassifiedArg {
-	if !state.inPkgList && state.packageListEstablished {
+	if state.pkgDiscoveryClosed {
 		if wasAfterUnknown {
 			// Optimistically treated as the separated value for the preceding unknown flag.
 			return ClassifiedArg{
@@ -328,8 +327,6 @@ func classifyPositionalTestArg(
 	}
 
 	// Establishing or adding to the package list.
-	state.inPkgList = true
-	state.packageListEstablished = true
 	return ClassifiedArg{
 		Index: i,
 		Raw:   arg,
@@ -417,10 +414,6 @@ func classifyTestArgs(args []string) []ClassifiedArg {
 		}
 
 		if strings.HasPrefix(arg, "-") {
-			if testState.inPkgList {
-				testState.inPkgList = false
-			}
-
 			consumed, items, unjoinedUnknown, name := classifyTestFlagToken(
 				args, i, &testState,
 			)

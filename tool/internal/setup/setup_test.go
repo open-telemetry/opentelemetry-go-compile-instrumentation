@@ -610,15 +610,32 @@ func TestSplitBuildTargets(t *testing.T) {
 	})
 
 	t.Run(
-		"known flag after package terminates package list and trailing positional becomes test argv",
+		"known flag preserves package discovery for trailing positional",
 		func(t *testing.T) {
 			pkgs, files, err := splitBuildTargets(subcmdTest, []string{"./pkg", "-run", "TestX", "./other"})
 			require.NoError(t, err)
-			assert.Equal(t, []string{"./pkg"}, pkgs)
+			assert.Equal(t, []string{"./pkg", "./other"}, pkgs)
+			assert.Empty(t, files)
+
+			pkgs, files, err = splitBuildTargets(subcmdTest, []string{"fmt", "-run", "TestX", "math"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"fmt", "math"}, pkgs)
 			assert.Empty(t, files)
 
 			pkgs, files, err = splitBuildTargets(subcmdTest, []string{
-				"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other",
+				"./pkg", "-run", "TestX", "math", "-race", "-mod=vendor", "-tags=x", "./other",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./pkg", "math", "./other"}, pkgs)
+			assert.Empty(t, files)
+		},
+	)
+
+	t.Run(
+		"unknown flag closes package discovery and trailing positional becomes test argv",
+		func(t *testing.T) {
+			pkgs, files, err := splitBuildTargets(subcmdTest, []string{
+				"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other",
 			})
 			require.NoError(t, err)
 			assert.Equal(t, []string{"./pkg"}, pkgs)
@@ -974,15 +991,15 @@ func TestExtractBuildFlags(t *testing.T) {
 			expected:   []string{"-race"},
 		},
 		{
-			name:       "test-binary positional tail ignores subsequent build-looking flags",
+			name:       "test-binary positional tail after unknown flag ignores subsequent build-looking flags",
 			subcommand: subcmdTest,
-			args:       []string{"./pkg", "-run", "TestX", "positional", "-tags=integration"},
+			args:       []string{"./pkg", "-custom=x", "positional", "-tags=integration"},
 			expected:   nil,
 		},
 		{
-			name:       "test-binary positional tail ignores build and boolean flags",
+			name:       "test-binary positional tail after unknown flag ignores build and boolean flags",
 			subcommand: subcmdTest,
-			args:       []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+			args:       []string{"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
 			expected:   nil,
 		},
 		{
@@ -990,6 +1007,12 @@ func TestExtractBuildFlags(t *testing.T) {
 			subcommand: subcmdTest,
 			args:       []string{"./pkg", "-custom=x", "positional", "-mod=vendor"},
 			expected:   nil,
+		},
+		{
+			name:       "packages on both sides of -run extracts build flags",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-run", "TestX", "math", "-tags=integration"},
+			expected:   []string{"-tags=integration"},
 		},
 	}
 
