@@ -318,10 +318,8 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	}
 	modified = modified || added
 
-	// A dev build reports a version ensureOtelcRequireVersion refuses to pin
-	// (v0.0.0, a pseudo-version), so it leaves a missing require line missing.
-	// Report the change anyway, so the caller still tidies and go resolves a
-	// version for the require it adds.
+	// Dev builds can't pin their own version, so a missing require stays
+	// missing. Report it anyway so the caller tidies and go resolves one.
 	if !modified {
 		return !hasRequire, nil
 	}
@@ -432,8 +430,8 @@ func emitUnresolvedSkipWarnings(
 	}
 }
 
-// skipTidyMessage is logged when updateToolFile skips go mod tidy. It is the
-// only outward sign that the skip fired, so the tests match on it.
+// skipTidyMessage is logged when updateToolFile skips go mod tidy. Tests match
+// on it, since a skipped tidy leaves nothing else behind.
 const skipTidyMessage = "tool file and go.mod unchanged, skipping go mod tidy"
 
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
@@ -474,12 +472,9 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 		return ensureErr
 	}
 
-	// go mod tidy loads the whole module graph, so skip it when this run
-	// changed nothing it can react to. Everything that does change module
-	// state still tidies: prunes and directive changes flip toolFileChanged,
-	// the require or tool directive flips goModChanged, and a missing go.sum
-	// fails the check below. Manual edits to go.mod are the user's to tidy,
-	// the same as in an uninstrumented project.
+	// go mod tidy loads the whole module graph, so only run it when otelc
+	// changed the tool file or go.mod, or go.sum is missing. Manual go.mod
+	// edits are left for the user to tidy.
 	goSumPath := filepath.Join(filepath.Dir(toolFile), "go.sum")
 	if !toolFileChanged && !goModChanged && util.PathExists(goSumPath) {
 		util.LoggerFromContext(ctx).DebugContext(ctx, skipTidyMessage, "toolFile", toolFile)

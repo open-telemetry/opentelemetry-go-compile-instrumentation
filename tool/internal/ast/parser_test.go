@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -96,6 +97,35 @@ func TestWriteFileAtomic(t *testing.T) {
 	data, err := os.ReadFile(out)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "func Bar()")
+}
+
+// unprintableFile returns an AST that the restorer cannot turn back into
+// source: go/format re-parses files with grouped imports, and a function
+// named "1bad" does not parse.
+func unprintableFile(t *testing.T) *dst.File {
+	t.Helper()
+
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nimport (\n\t\"fmt\"\n)\n\nfunc Foo() { fmt.Println() }\n")
+	require.NoError(t, err)
+
+	FindFuncDeclWithoutRecv(file, "Foo").Name = dst.NewIdent("1bad")
+	return file
+}
+
+func TestPrintFile_RestoreError(t *testing.T) {
+	data, err := PrintFile(unprintableFile(t))
+	require.ErrorContains(t, err, "failed to restore AST")
+	assert.Nil(t, data)
+}
+
+func TestWriteFileAtomic_RestoreError(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "atomic.go")
+
+	err := WriteFileAtomic(out, unprintableFile(t))
+	require.ErrorContains(t, err, "failed to restore AST")
+	require.ErrorContains(t, err, out)
+	assert.NoFileExists(t, out)
 }
 
 func TestParseAst(t *testing.T) {

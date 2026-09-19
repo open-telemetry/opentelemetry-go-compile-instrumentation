@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -1105,14 +1106,51 @@ tool go.opentelemetry.io/otelc/tool/cmd/otelc
 	}
 }
 
-func TestUpdateToolFile_ParseError(t *testing.T) {
+func TestUpdateToolFile_ReadError(t *testing.T) {
 	err := updateToolFile(t.Context(),
 		filepath.Join(t.TempDir(), "does-not-exist.go"),
 		nil,
 		PinOptions{},
 	)
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestUpdateToolFile_ParseError(t *testing.T) {
+	toolFile := filepath.Join(t.TempDir(), toolFileCanonical)
+	require.NoError(t, os.WriteFile(toolFile, []byte("this is not go"), 0o644))
+
+	err := updateToolFile(t.Context(), toolFile, nil, PinOptions{})
+
+	require.ErrorContains(t, err, "failed to parse file")
+}
+
+func TestUpdateToolFile_WriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod permissions are not enforced consistently on Windows")
+	}
+
+	dir := t.TempDir()
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	original, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+
+	// A read-only directory still lets updateToolFile read the tool file, but
+	// not replace it, since the atomic write needs a temp file next to it.
+	require.NoError(t, os.Chmod(dir, 0o555))
+	t.Cleanup(func() {
+		_ = os.Chmod(dir, 0o755)
+	})
+
+	// Pruning "fmt" changes the tool file, so updateToolFile has to write it.
+	err = updateToolFile(t.Context(), toolFile, map[string]bool{"fmt": true}, PinOptions{Prune: true})
+	require.ErrorContains(t, err, "failed to create temporary file")
+
+	after, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Equal(t, string(original), string(after))
 }
 
 func TestUpdateToolFile_EnsureRequireError(t *testing.T) {
