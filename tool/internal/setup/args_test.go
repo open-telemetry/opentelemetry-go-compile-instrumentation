@@ -264,7 +264,7 @@ func TestClassifyArgs_Test_Aliases(t *testing.T) {
 
 func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 	t.Run(
-		"known flag after package list ends package discovery and trailing positional becomes test argv",
+		"known flag preserves package discovery for trailing positional",
 		func(t *testing.T) {
 			args := []string{"./pkg", "-run", "TestX", "./other"}
 			got := classifyArgs(subcmdTest, args)
@@ -273,13 +273,55 @@ func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 				{Index: 0, Raw: "./pkg", Kind: ArgTarget},
 				{Index: 1, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
 				{Index: 2, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
-				{Index: 3, Raw: "./other", Kind: ArgTestBinary},
+				{Index: 3, Raw: "./other", Kind: ArgTarget},
 			}
 			assert.Equal(t, expected, got)
 		},
 	)
 
-	t.Run("known flag followed by positional then build-looking flag", func(t *testing.T) {
+	t.Run(
+		"package targets on both sides of -run",
+		func(t *testing.T) {
+			args := []string{"fmt", "-run", "TestX", "math"}
+			got := classifyArgs(subcmdTest, args)
+
+			expected := []ClassifiedArg{
+				{Index: 0, Raw: "fmt", Kind: ArgTarget},
+				{Index: 1, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
+				{Index: 2, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
+				{Index: 3, Raw: "math", Kind: ArgTarget},
+			}
+			assert.Equal(t, expected, got)
+		},
+	)
+
+	t.Run(
+		"package targets interspersed with recognized test and build flags",
+		func(t *testing.T) {
+			args := []string{"-v", "fmt", "-run", "TestX", "math", "-tags=integration", "./other"}
+			got := classifyArgs(subcmdTest, args)
+
+			expected := []ClassifiedArg{
+				{Index: 0, Raw: "-v", Kind: ArgBuildFlag, FlagName: "-v", HasValue: false},
+				{Index: 1, Raw: "fmt", Kind: ArgTarget},
+				{Index: 2, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
+				{Index: 3, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
+				{Index: 4, Raw: "math", Kind: ArgTarget},
+				{
+					Index:    5,
+					Raw:      "-tags=integration",
+					Kind:     ArgBuildFlag,
+					FlagName: "-tags",
+					HasValue: true,
+					Value:    "integration",
+				},
+				{Index: 6, Raw: "./other", Kind: ArgTarget},
+			}
+			assert.Equal(t, expected, got)
+		},
+	)
+
+	t.Run("known flag followed by target package then build flag", func(t *testing.T) {
 		args := []string{"./pkg", "-run", "TestX", "positional", "-tags=integration"}
 		got := classifyArgs(subcmdTest, args)
 
@@ -287,20 +329,27 @@ func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 			{Index: 0, Raw: "./pkg", Kind: ArgTarget},
 			{Index: 1, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
 			{Index: 2, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
-			{Index: 3, Raw: "positional", Kind: ArgTestBinary},
-			{Index: 4, Raw: "-tags=integration", Kind: ArgTestBinary},
+			{Index: 3, Raw: "positional", Kind: ArgTarget},
+			{
+				Index:    4,
+				Raw:      "-tags=integration",
+				Kind:     ArgBuildFlag,
+				FlagName: "-tags",
+				HasValue: true,
+				Value:    "integration",
+			},
 		}
 		assert.Equal(t, expected, got)
 	})
 
-	t.Run("vendoring isolation after positional test arg", func(t *testing.T) {
-		args := []string{"./pkg", "-run", "TestX", "positional", "-mod=vendor"}
+	t.Run("vendoring isolation after unjoined unknown flag and positional test arg", func(t *testing.T) {
+		args := []string{"./pkg", "-custom", "value", "positional", "-mod=vendor"}
 		got := classifyArgs(subcmdTest, args)
 
 		expected := []ClassifiedArg{
 			{Index: 0, Raw: "./pkg", Kind: ArgTarget},
-			{Index: 1, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
-			{Index: 2, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
+			{Index: 1, Raw: "-custom", Kind: ArgTestBinary, FlagName: "-custom", HasValue: false},
+			{Index: 2, Raw: "value", Kind: ArgTestBinary, FlagName: "-custom", Value: "value"},
 			{Index: 3, Raw: "positional", Kind: ArgTestBinary},
 			{Index: 4, Raw: "-mod=vendor", Kind: ArgTestBinary},
 		}
@@ -348,18 +397,17 @@ func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 	})
 
 	t.Run("definitive positional tail classifies all subsequent tokens as test binary", func(t *testing.T) {
-		args := []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"}
+		args := []string{"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other"}
 		got := classifyArgs(subcmdTest, args)
 
 		expected := []ClassifiedArg{
 			{Index: 0, Raw: "./pkg", Kind: ArgTarget},
-			{Index: 1, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
-			{Index: 2, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
-			{Index: 3, Raw: "positional", Kind: ArgTestBinary},
-			{Index: 4, Raw: "-race", Kind: ArgTestBinary},
-			{Index: 5, Raw: "-mod=vendor", Kind: ArgTestBinary},
-			{Index: 6, Raw: "-tags=x", Kind: ArgTestBinary},
-			{Index: 7, Raw: "./other", Kind: ArgTestBinary},
+			{Index: 1, Raw: "-custom=x", Kind: ArgTestBinary, FlagName: "-custom", HasValue: true, Value: "x"},
+			{Index: 2, Raw: "positional", Kind: ArgTestBinary},
+			{Index: 3, Raw: "-race", Kind: ArgTestBinary},
+			{Index: 4, Raw: "-mod=vendor", Kind: ArgTestBinary},
+			{Index: 5, Raw: "-tags=x", Kind: ArgTestBinary},
+			{Index: 6, Raw: "./other", Kind: ArgTestBinary},
 		}
 		assert.Equal(t, expected, got)
 	})

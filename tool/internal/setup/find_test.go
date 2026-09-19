@@ -726,8 +726,8 @@ func TestDropPlanIrrelevantFlags(t *testing.T) {
 		{
 			name:       "go test preserves -json after positional test-argv boundary",
 			subcommand: subcmdTest,
-			args:       []string{"-json", "./pkg", "-run", "TestX", "positional", "-json"},
-			expected:   []string{"./pkg", "-run", "TestX", "positional", "-json"},
+			args:       []string{"-json", "./pkg", "-custom=x", "positional", "-json"},
+			expected:   []string{"./pkg", "-custom=x", "positional", "-json"},
 		},
 		{
 			name:       "go test preserves full tail untouched after positional test-argv boundary",
@@ -735,15 +735,20 @@ func TestDropPlanIrrelevantFlags(t *testing.T) {
 			args: []string{
 				"-json",
 				"./pkg",
-				"-run",
-				"TestX",
+				"-custom=x",
 				"positional",
 				"-race",
 				"-mod=vendor",
 				"-tags=x",
 				"./other",
 			},
-			expected: []string{"./pkg", "-run", "TestX", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+			expected: []string{"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+		},
+		{
+			name:       "go test drops -json even with package targets on both sides of -run",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "-run", "TestX", "math", "-json"},
+			expected:   []string{"./pkg", "-run", "TestX", "math"},
 		},
 	}
 
