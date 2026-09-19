@@ -80,52 +80,33 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 // the go command's stderr, and -json moves it to stdout as a stream of JSON
 // build-output events instead, so the plan parses empty and no dependency is
 // found. The real build keeps the flag; only the dry run drops it.
-//
-//nolint:gochecknoglobals // private lookup table
-var planIrrelevantFlags = map[string]bool{
-	flagJSON: true,
-}
-
-// flagName returns the flag name of arg in single-dash form, without a joined
-// value. The go command accepts -flag and --flag interchangeably.
-func flagName(arg string) string {
-	name, _, _ := strings.Cut(arg, "=")
-	if strings.HasPrefix(name, "--") {
-		return name[1:]
-	}
-	return name
-}
-
 // dropPlanIrrelevantFlags returns cmdArgs without the flags listed in
-// planIrrelevantFlags. Arguments after -args go to the test binary rather than
+// planIrrelevantFlags. Arguments after test delimiters go to the test binary rather than
 // the go command, so they pass through untouched, and a value that follows a
 // flag in separated form travels with its flag so it is never read as one.
-func dropPlanIrrelevantFlags(cmdArgs []string) []string {
+func dropPlanIrrelevantFlags(subcommand string, cmdArgs []string) []string {
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
+	classified := classifyArgs(subcommand, cmdArgs)
+	dropIndices := make(map[int]bool)
+
+	for i, a := range classified {
+		if (a.Kind == ArgBuildFlag || a.Kind == ArgTestFlag) && isPlanIrrelevantFlag(a.FlagName) {
+			dropIndices[a.Index] = true
+			if !a.HasValue && i+1 < len(classified) &&
+				(classified[i+1].Kind == ArgBuildFlagValue ||
+					classified[i+1].Kind == ArgTestFlagValue) {
+				dropIndices[classified[i+1].Index] = true
+			}
+		}
+	}
+
 	kept := make([]string, 0, len(cmdArgs))
-	for i := 0; i < len(cmdArgs); i++ {
-		arg := cmdArgs[i]
-
-		// Everything after -args is passed to the test binary, so it can
-		// contain neither go flags nor packages.
-		if arg == flagArgs {
-			kept = append(kept, cmdArgs[i:]...)
-			break
-		}
-		if !strings.HasPrefix(arg, "-") {
+	for i, arg := range cmdArgs {
+		if !dropIndices[i] {
 			kept = append(kept, arg)
-			continue
 		}
-
-		name := flagName(arg)
-		end := i + 1
-		if !strings.Contains(arg, "=") && (flagsWithPathValues[name] || testFlagsWithValues[name]) &&
-			end < len(cmdArgs) {
-			end++ // the flag's value is the next argument
-		}
-		if !planIrrelevantFlags[name] {
-			kept = append(kept, cmdArgs[i:end]...)
-		}
-		i = end - 1
 	}
 	return kept
 }
@@ -152,7 +133,7 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 		planVerb = subcmdTest
 	}
 	// The full command is: "go build/test -a -x -n {...}"
-	planArgs := dropPlanIrrelevantFlags(cmdArgs)
+	planArgs := dropPlanIrrelevantFlags(subcommand, cmdArgs)
 	prefix := []string{planVerb, "-a", "-x", "-n"}
 	args := make([]string, 0, len(prefix)+len(planArgs))
 	args = append(args, prefix...)
