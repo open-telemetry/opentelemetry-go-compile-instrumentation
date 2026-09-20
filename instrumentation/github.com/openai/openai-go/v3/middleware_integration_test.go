@@ -574,3 +574,91 @@ func TestOtelMiddleware_AzurePath(t *testing.T) {
 	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
 	assertAttribute(t, attrs, "gen_ai.provider.name", "azure")
 }
+
+// streamingChatResponse returns a next func serving a two-chunk SSE chat
+// completion, the shape the middleware hands to the streaming reader.
+func streamingChatResponse() func(*http.Request) (*http.Response, error) {
+	const streamData = "data: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4\"," +
+		"\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4\"," +
+		"\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}]," +
+		"\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n" +
+		"data: [DONE]\n\n"
+
+	return func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(streamData))),
+		}, nil
+	}
+}
+
+func streamingChatRequest(t *testing.T) *http.Request {
+	t.Helper()
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4","stream":true}`))),
+	)
+	require.NoError(t, err)
+	return req
+}
+
+// A streaming span outlives the middleware call: the middleware hands it to the
+// streaming reader, which ends it when the stream finishes. Ending it in the
+// middleware instead would cut the response attributes, which only arrive in
+// the final chunk, so this pins where the span may be ended.
+func TestOtelMiddleware_StreamingSpanOutlivesMiddleware(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	resp, err := OtelMiddleware()(streamingChatRequest(t), streamingChatResponse())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	require.Empty(t, sr.Ended(),
+		"the span must stay open until the stream finishes, not end when the middleware returns")
+
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1, "draining the stream must end the span exactly once")
+	assertInt64Attribute(t, spans[0].Attributes(), "gen_ai.usage.total_tokens", 7)
+}
+
+// A caller that closes the response body without reading it still gets one
+// ended span. Nothing else ends the span in that path, so without this the
+// span would leak.
+func TestOtelMiddleware_StreamingSpanEndedOnCloseWithoutRead(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	resp, err := OtelMiddleware()(streamingChatRequest(t), streamingChatResponse())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Empty(t, sr.Ended())
+
+	require.NoError(t, resp.Body.Close())
+
+	require.Len(t, sr.Ended(), 1, "closing an unread stream must end the span exactly once")
+}
+
+// Closing twice, or closing after draining, must not end the span a second
+// time. A double end is silently ignored by the SDK but would double-count in
+// any exporter that tracks span starts and ends.
+func TestOtelMiddleware_StreamingSpanEndedOnceOnRepeatedClose(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	resp, err := OtelMiddleware()(streamingChatRequest(t), streamingChatResponse())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.NoError(t, resp.Body.Close())
+
+	require.Len(t, sr.Ended(), 1, "repeated Close must not end the span again")
+}
