@@ -28,8 +28,6 @@ instrumentation/google.golang.org/grpc/client/client.otelc.yaml
 Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
-version: "v1.0.0"
-
 inject_to_grpc_newserver:
   target: google.golang.org/grpc
   version: v1.63.0,v1.70.0
@@ -42,13 +40,18 @@ inject_to_grpc_newserver:
         path: go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server
 ```
 
-- Top-level `version`: Minimum released `otelc` version required to read this file.
 - `target`: Import path of the package to instrument.
 - Rule-level `version`: Target package version range to match. The left bound is inclusive, the right bound is exclusive. If it is not specified, the rule is applicable to all versions.
 - `where`: Non-package selectors. `func` names the function to hook.
 - `do`: Ordered list of modifiers. `inject_hooks` declares this rule type and carries:
   - `before` / `after`: names of the hook functions.
   - `path`: import path where the hook functions are defined.
+
+> [!NOTE]
+> Do not add a top-level `version` key to rule files under `instrumentation/`.
+> That key declares the minimum `otelc` version needed to parse the file, but
+> published rule files must stay readable by currently supported released
+> `otelc` versions, which reject it. See [rules.md](rules.md#rule-shape).
 
 > [!NOTE]
 > The 2-tier `where`/`do` schema and all other rule types are documented in [rules.md](rules.md). The schema invariants are recorded in [ADR-0003](adr/0003-structured-rule-schema.md).
