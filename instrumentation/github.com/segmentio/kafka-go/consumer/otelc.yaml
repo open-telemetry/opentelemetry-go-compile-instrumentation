@@ -1,5 +1,3 @@
-version: "v1.0.0"
-
 kafka_reader_readmessage:
   target: github.com/segmentio/kafka-go
   where:
