@@ -1,5 +1,3 @@
-version: "v1.0.0"
-
 # (*Client).Request is the shared HTTP path for Search, Index, Bulk, Delete,
 # and the rest of the public opensearch-go v5 API. Node discovery and health
 # checks live on the transport and never reach Request, so they do not create
