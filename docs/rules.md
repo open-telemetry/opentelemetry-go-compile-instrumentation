@@ -82,6 +82,15 @@ treated as requiring `v1.0.0` and produce a warning.
 > baseline. Currently supported released `otelc` versions parse every top-level
 > key as a rule and reject a scalar `version` entry. Unversioned rule files
 > remain the compatible baseline.
+>
+> For the same reason, published rules must restrict themselves to features the
+> currently supported released `otelc` versions understand. An unversioned file
+> is always processed by those compilers — while it must still parse on them,
+> there is no way to gate it on a newer `otelc` — so a rule relying on newer
+> functionality would fail at rule-processing time rather than at a clean
+> version check. Once a `version`-aware release is part of the supported
+> baseline, rule files that need newer functionality should declare it with the
+> top-level `version` key; files that remain compatible may stay unversioned.
 
 ### Top-level fields
 
