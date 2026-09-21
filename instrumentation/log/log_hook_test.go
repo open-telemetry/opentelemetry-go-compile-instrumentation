@@ -223,7 +223,8 @@ func TestBeforeLogOutput_BracketedTraceID(t *testing.T) {
 	wrapped := wrappedFn.(func([]byte) []byte)
 	result := string(wrapped([]byte{}))
 	assert.Contains(t, result, "[trace_id=existing]")
-	assert.NotContains(t, result, "trace_id=abc123")
+	assert.Contains(t, result, "trace_id=abc123")
+	assert.Contains(t, result, "span_id=def456")
 }
 
 func TestBeforeLogOutput_LeadingTraceID(t *testing.T) {
@@ -245,8 +246,9 @@ func TestBeforeLogOutput_LeadingTraceID(t *testing.T) {
 	wrappedFn := ictx.GetParam(3)
 	wrapped := wrappedFn.(func([]byte) []byte)
 	result := string(wrapped([]byte{}))
-	assert.Contains(t, result, "trace_id=existing")
-	assert.NotContains(t, result, "trace_id=abc123")
+	assert.Contains(t, result, "trace_id=existing message")
+	assert.Contains(t, result, "trace_id=abc123")
+	assert.Contains(t, result, "span_id=def456")
 }
 
 func TestBeforeLogOutput_EmptyOutput(t *testing.T) {
