@@ -17,11 +17,12 @@ import (
 
 func TestHTTPServerRequestTraceAttrs(t *testing.T) {
 	tests := []struct {
-		name     string
-		server   string
-		req      *http.Request
-		opts     RequestTraceAttrsOpts
-		expected map[string]interface{}
+		name       string
+		server     string
+		req        *http.Request
+		opts       RequestTraceAttrsOpts
+		expected   map[string]interface{}
+		unexpected []string
 	}{
 		{
 			name:   "basic GET request",
@@ -109,7 +110,7 @@ func TestHTTPServerRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
-			name:   "QUERY method",
+			name:   "QUERY method not in defaults",
 			server: "",
 			req: &http.Request{
 				Method:     "QUERY",
@@ -121,7 +122,76 @@ func TestHTTPServerRequestTraceAttrs(t *testing.T) {
 				Proto: "HTTP/1.1",
 			},
 			expected: map[string]interface{}{
-				"http.request.method": "QUERY",
+				"http.request.method":          "_OTHER",
+				"http.request.method_original": "QUERY",
+			},
+		},
+		{
+			name:   "unknown method",
+			server: "",
+			req: &http.Request{
+				Method:     "CUSTOM",
+				Host:       "example.com",
+				RemoteAddr: "192.168.1.1:12345",
+				URL: &url.URL{
+					Path: "/api",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"http.request.method":          "_OTHER",
+				"http.request.method_original": "CUSTOM",
+			},
+		},
+		{
+			name:   "literal _OTHER method",
+			server: "",
+			req: &http.Request{
+				Method:     "_OTHER",
+				Host:       "example.com",
+				RemoteAddr: "192.168.1.1:12345",
+				URL: &url.URL{
+					Path: "/api",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"http.request.method": "_OTHER",
+			},
+			unexpected: []string{"http.request.method_original"},
+		},
+		{
+			name:   "empty method",
+			server: "",
+			req: &http.Request{
+				Method:     "",
+				Host:       "example.com",
+				RemoteAddr: "192.168.1.1:12345",
+				URL: &url.URL{
+					Path: "/api",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"http.request.method": "_OTHER",
+			},
+			unexpected: []string{"http.request.method_original"},
+		},
+		{
+			name:   "lowercase known method",
+			server: "",
+			req: &http.Request{
+				Method:     "get",
+				Host:       "example.com",
+				RemoteAddr: "192.168.1.1:12345",
+				URL: &url.URL{
+					Path: "/api",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"http.request.method":          "GET",
+				"http.request.method_original": "get",
 			},
 		},
 	}
@@ -142,6 +212,10 @@ func TestHTTPServerRequestTraceAttrs(t *testing.T) {
 				actualVal, ok := attrMap[key]
 				require.True(t, ok, "expected attribute %s not found", key)
 				assert.Equal(t, expectedVal, actualVal, "attribute %s value mismatch", key)
+			}
+			for _, key := range tt.unexpected {
+				_, ok := attrMap[key]
+				assert.False(t, ok, "unexpected attribute %s", key)
 			}
 		})
 	}
@@ -319,7 +393,12 @@ func TestHTTPServerSpanName(t *testing.T) {
 		{"GET", "/api/users", "GET /api/users"},
 		{"POST", "/api/users/{id}", "POST /api/users/{id}"},
 		{"GET", "", "GET"},
-		{"", "/api/users", " /api/users"},
+		{"", "/api/users", "HTTP /api/users"},
+		{"", "", "HTTP"},
+		{"CUSTOM", "/api", "HTTP /api"},
+		{"CUSTOM", "", "HTTP"},
+		{"get", "/api", "GET /api"},
+		{"QUERY", "/search", "HTTP /search"},
 	}
 
 	for _, tt := range tests {

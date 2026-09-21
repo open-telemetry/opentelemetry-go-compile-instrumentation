@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 add_gls_field:
   target: "runtime"
   where:

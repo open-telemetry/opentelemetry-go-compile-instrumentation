@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -16,69 +17,81 @@ import (
 
 // resolveRulePaths resolves the import paths referenced by function and file rules
 // to absolute filesystem paths.
-//
-// This must be done during the setup phase because the instrument phase no longer
-// has enough context to resolve import paths (module directories). The resolved paths
-// are embedded into the rules and consumed directly during instrumentation.
 func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
-	cache := make(map[string]string)
+	dirs := slices.Sorted(maps.Keys(moduleDirs))
 
-	dirs := make([]string, 0, len(moduleDirs))
-	for dir := range moduleDirs {
-		dirs = append(dirs, dir)
+	var pending []string
+	for _, ruleset := range matched {
+		for _, fileRule := range ruleset.FileRules {
+			pending = append(pending, fileRule.Path)
+		}
+		for _, funcRule := range ruleset.AllFuncRules() {
+			pending = append(pending, funcRule.Path)
+		}
 	}
-	slices.Sort(dirs)
+	slices.Sort(pending)
+	pending = slices.Compact(pending)
 
-	resolve := func(goPath string) (string, error) {
-		if dir, ok := cache[goPath]; ok {
-			return dir, nil
+	resolved := make(map[string]string, len(pending))
+	var lastErr error
+
+	// findPackage returns the single package in pkgs matching importPath, nil if
+	// none matched (the caller retries it against the next module dir), or an
+	// error if importPath ambiguously matched more than one package.
+	findPackage := func(pkgs []*packages.Package, importPath string) (*packages.Package, error) {
+		var found *packages.Package
+		for _, pkg := range pkgs {
+			if pkg.PkgPath != importPath || len(pkg.Errors) > 0 || pkg.Dir == "" {
+				continue
+			}
+			if found != nil {
+				return nil, ex.Newf("import path %q resolved to multiple packages", importPath)
+			}
+			found = pkg
+		}
+		return found, nil
+	}
+
+	for _, moduleDir := range dirs {
+		if len(pending) == 0 {
+			break
 		}
 
-		var lastErr error
-		for _, moduleDir := range dirs {
-			pkgs, err := packages.Load(&packages.Config{
-				Mode:    packages.NeedFiles,
-				Context: ctx,
-				Dir:     moduleDir,
-			}, goPath)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			if len(pkgs) == 0 {
-				lastErr = ex.New("no packages found")
-				continue
-			}
-			if len(pkgs[0].Errors) > 0 {
-				lastErr = pkgs[0].Errors[0]
-				continue
-			}
-			if len(pkgs) > 1 {
-				return "", ex.Newf("import path %q resolved to %d packages", goPath, len(pkgs))
-			}
-
-			cache[goPath] = pkgs[0].Dir
-			return pkgs[0].Dir, nil
+		pkgs, loadErr := packages.Load(&packages.Config{
+			Mode:    packages.NeedName | packages.NeedFiles,
+			Context: ctx,
+			Dir:     moduleDir,
+		}, pending...)
+		if loadErr != nil {
+			lastErr = loadErr
+			continue
 		}
 
-		return "", ex.Wrapf(lastErr, "failed to resolve import path %q", goPath)
+		next := pending[:0]
+		for _, p := range pending {
+			pkg, err := findPackage(pkgs, p)
+			switch {
+			case err != nil:
+				return err
+			case pkg == nil:
+				next = append(next, p)
+			default:
+				resolved[p] = pkg.Dir
+			}
+		}
+		pending = next
+	}
+
+	if len(pending) > 0 {
+		return ex.Wrapf(lastErr, "failed to resolve import path %q", pending[0])
 	}
 
 	for _, ruleset := range matched {
 		for _, fileRule := range ruleset.FileRules {
-			dir, err := resolve(fileRule.Path)
-			if err != nil {
-				return err
-			}
-			fileRule.ResolvedPath = dir
+			fileRule.ResolvedPath = resolved[fileRule.Path]
 		}
-
 		for _, funcRule := range ruleset.AllFuncRules() {
-			dir, err := resolve(funcRule.Path)
-			if err != nil {
-				return err
-			}
-			funcRule.ResolvedPath = dir
+			funcRule.ResolvedPath = resolved[funcRule.Path]
 		}
 	}
 

@@ -20,6 +20,7 @@ import (
 
 const (
 	debugLogFilename = "debug.log"
+	flagWorkDir      = "work-dir"
 )
 
 func main() {
@@ -29,7 +30,7 @@ func main() {
 		HideVersion: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:      "work-dir",
+				Name:      flagWorkDir,
 				Aliases:   []string{"w"},
 				Usage:     "The path to a directory where working files will be written",
 				TakesFile: true,
@@ -118,9 +119,9 @@ func main() {
 }
 
 func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-	workDir, err := filepath.Abs(cmd.String("work-dir"))
+	workDir, err := filepath.Abs(cmd.String(flagWorkDir))
 	if err != nil {
-		return ctx, ex.Wrapf(err, "failed to resolve work directory %q", cmd.String("work-dir"))
+		return ctx, ex.Wrapf(err, "failed to resolve work directory %q", cmd.String(flagWorkDir))
 	}
 
 	// Bare -toolexec (GOFLAGS drop-in): no parent set OTELC_WORK_DIR, and the
@@ -128,7 +129,7 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	// read-only module cache). Discover the dir from `otelc setup` rather than
 	// trusting cwd; skip filesystem setup when none is found instead of
 	// creating .otelc-build in an arbitrary location.
-	if cmd.Args().First() == "toolexec" && !cmd.IsSet("work-dir") && os.Getenv(util.EnvOtelcWorkDir) == "" {
+	if cmd.Args().First() == "toolexec" && !cmd.IsSet(flagWorkDir) && os.Getenv(util.EnvOtelcWorkDir) == "" {
 		workDir = util.DiscoverWorkDir(workDir)
 		if workDir == "" {
 			return ctx, nil
