@@ -40,12 +40,9 @@ Rules are typically distributed as `*.otelc.yml` files within instrumentation pa
 
 ### Rule shape
 
-Every rule file declares the minimum `otelc` version required to read it. The reserved
-top-level `version` key is followed by map entries whose keys are rule names:
+Every rule file is a YAML mapping whose keys are rule names:
 
 ```yaml
-version: "v1.0.0"
-
 rule_name:
   target: <package import path>       # required
   version: <version range>            # optional
@@ -61,11 +58,39 @@ rule_name:
   name: <explicit name>               # optional; defaults to YAML key
 ```
 
+A rule file may also declare the minimum `otelc` version required to read it via the
+reserved top-level `version` key:
+
+```yaml
+version: "v1.1.0"
+
+rule_name:
+  target: <package import path>
+  # ...
+```
+
 The file-level `version` is a released `otelc` semantic version. Each rule's nested
 `version` field is unrelated: it limits the versions of the target package to which that
 rule applies. When a package contains multiple rule files, `otelc` enforces the highest
-minimum version declared by those files. Legacy files without a top-level `version` are
+minimum version declared by those files. Files without a top-level `version` are
 treated as requiring `v1.0.0` and produce a warning.
+
+> [!NOTE]
+> Published instrumentation rule files — including the rules bundled with `otelc`
+> under `instrumentation/` — must not use the top-level `version` key until the
+> first released `otelc` that supports it is part of the supported consumer
+> baseline. Currently supported released `otelc` versions parse every top-level
+> key as a rule and reject a scalar `version` entry. Unversioned rule files
+> remain the compatible baseline.
+>
+> For the same reason, published rules must restrict themselves to features the
+> currently supported released `otelc` versions understand. An unversioned file
+> is always processed by those compilers — while it must still parse on them,
+> there is no way to gate it on a newer `otelc` — so a rule relying on newer
+> functionality would fail at rule-processing time rather than at a clean
+> version check. Once a `version`-aware release is part of the supported
+> baseline, rule files that need newer functionality should declare it with the
+> top-level `version` key; files that remain compatible may stay unversioned.
 
 ### Top-level fields
 
