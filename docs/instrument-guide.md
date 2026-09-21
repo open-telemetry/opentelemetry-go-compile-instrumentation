@@ -52,8 +52,7 @@ inject_to_grpc_newserver:
 > That key declares the minimum `otelc` version needed to parse the file, but
 > published rule files must stay readable by currently supported released
 > `otelc` versions, which reject it. See [rules.md](rules.md#rule-shape).
-
-> [!NOTE]
+>
 > The 2-tier `where`/`do` schema and all other rule types are documented in [rules.md](rules.md). The schema invariants are recorded in [ADR-0003](adr/0003-structured-rule-schema.md).
 
 ## 2. Implement Hooks
