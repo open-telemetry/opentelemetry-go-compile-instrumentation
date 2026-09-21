@@ -16,29 +16,11 @@ const (
 	instrumentationKey = "logs/log"
 	traceIDKey         = "trace_id"
 	spanIDKey          = "span_id"
-	traceIDMarker      = traceIDKey + "="
+	traceIDMarker      = " " + traceIDKey + "="
 )
 
 func hasTraceID(b []byte) bool {
-	marker := []byte(traceIDMarker)
-	for len(b) >= len(marker) {
-		idx := bytes.Index(b, marker)
-		if idx == -1 {
-			return false
-		}
-		if idx == 0 || !isIdentChar(b[idx-1]) {
-			return true
-		}
-		b = b[idx+1:]
-	}
-	return false
-}
-
-func isIdentChar(c byte) bool {
-	return (c >= 'a' && c <= 'z') ||
-		(c >= 'A' && c <= 'Z') ||
-		(c >= '0' && c <= '9') ||
-		c == '_'
+	return bytes.Contains(b, []byte(traceIDMarker))
 }
 
 type logEnabler struct{}
