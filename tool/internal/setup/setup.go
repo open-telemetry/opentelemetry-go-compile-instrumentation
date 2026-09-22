@@ -421,6 +421,23 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
+	// The hook packages the pass above selected get blank-imported into the
+	// application below, which compiles their dependencies too. The build plan
+	// never saw those, so match them now.
+	injected, err := sp.matchInjectedDeps(ctx, matched, deps, moduleDirs, util.GetOtelcWorkDir())
+	if err != nil {
+		return err
+	}
+	matched = append(matched, injected...)
+
+	// Reported here rather than per matching pass: an individual pass matching
+	// nothing is normal, it is the combined result that tells the user whether
+	// anything will be instrumented.
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
+	}
+
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, pkgs, matched); err != nil {
 		return err
