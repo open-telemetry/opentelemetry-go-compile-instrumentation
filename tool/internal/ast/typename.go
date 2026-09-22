@@ -198,6 +198,14 @@ func ImportAliasMap(file *dst.File) map[string]string {
 		}
 
 		if existingPath == path {
+			// The same path imported twice, e.g. `import "net/http"` followed by
+			// `import http "net/http"`. The alias already resolves to that path,
+			// but an explicit spelling must still be recorded: a later import
+			// whose default alias collides with it should not make the alias
+			// ambiguous.
+			if isExplicit {
+				explicit[alias] = true
+			}
 			continue
 		}
 

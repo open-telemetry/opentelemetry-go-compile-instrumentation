@@ -546,11 +546,13 @@ func f() {}
 
 	t.Run("explicit alias overrides colliding default alias", func(t *testing.T) {
 		p := NewAstParser()
+		// The explicit alias is spelled the same as the first import's default
+		// alias, so the two genuinely collide and the override path runs.
 		file, err := p.ParseSource(`package main
 
 import (
 	"example.com/m/bar"
-	otherbar "example.com/m/other/bar"
+	bar "example.com/m/other/bar"
 )
 
 func f() {}
@@ -558,8 +560,45 @@ func f() {}
 		require.NoError(t, err)
 
 		imports := ImportAliasMap(file)
-		assert.Equal(t, "example.com/m/bar", imports["bar"])
-		assert.Equal(t, "example.com/m/other/bar", imports["otherbar"])
+		assert.Equal(t, "example.com/m/other/bar", imports["bar"],
+			"an explicit alias must win over a colliding default alias")
+	})
+
+	t.Run("conflicting explicit aliases are excluded", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	tpl "text/template"
+	tpl "html/template"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.NotContains(t, imports, "tpl",
+			"two explicit aliases spelled the same resolve to different paths, so neither may be used")
+	})
+
+	t.Run("same path imported twice keeps the explicit alias", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import (
+	"net/http"
+	http "net/http"
+	"example.com/m/http"
+)
+
+func f() {}
+`)
+		require.NoError(t, err)
+
+		imports := ImportAliasMap(file)
+		assert.Equal(t, "net/http", imports["http"],
+			"the explicit alias must survive a later import whose default alias collides")
 	})
 
 	t.Run("explicit alias wins over subsequent default alias", func(t *testing.T) {
