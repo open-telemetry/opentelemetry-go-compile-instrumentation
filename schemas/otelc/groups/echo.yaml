@@ -4,7 +4,7 @@ groups:
   #
   # Source of truth for this file:
   #   instrumentation/github.com/labstack/echo/v4/hook.go
-  #   (AfterFind / BeforeError / BeforeDefaultHTTPErrorHandler)
+  #   (AfterFind / BeforeError / BeforeEchoServeHTTP / BeforeDefaultHTTPErrorHandler)
   #
   # The echo instrumentation creates no spans and records no metrics of its own.
   # An echo application is served through `net/http`, so the server span already
