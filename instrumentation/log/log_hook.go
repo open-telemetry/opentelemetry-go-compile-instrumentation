@@ -17,10 +17,11 @@ const (
 	traceIDKey         = "trace_id"
 	spanIDKey          = "span_id"
 	traceIDMarker      = " " + traceIDKey + "="
+	traceIDPrefix      = traceIDKey + "="
 )
 
 func hasTraceID(b []byte) bool {
-	return bytes.Contains(b, []byte(traceIDMarker))
+	return bytes.HasPrefix(b, []byte(traceIDPrefix)) || bytes.Contains(b, []byte(traceIDMarker))
 }
 
 type logEnabler struct{}
