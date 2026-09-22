@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -180,7 +181,32 @@ func TestAfterFind_MethodNotAllowedDoesNotSetRoute(t *testing.T) {
 	e.Router().Find(http.MethodPost, "/users/42", c)
 
 	require.NotEmpty(t, c.Path(), "Find writes Path() on 405; that is the case under test")
-	require.NotNil(t, c.Get(echo.ContextKeyHeaderAllow))
+	require.Equal(t,
+		reflect.ValueOf(echo.MethodNotAllowedHandler).Pointer(),
+		reflect.ValueOf(c.Handler()).Pointer(),
+	)
+
+	AfterFind(hooktest.NewMockHookContext(c))
+	span.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, "POST", sr.Ended()[0].Name())
+	for _, a := range sr.Ended()[0].Attributes() {
+		assert.NotEqual(t, "http.route", string(a.Key))
+	}
+}
+
+func TestAfterFind_MethodNotAllowedWithoutHeaderAllowKey(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	_, span := tr.Start(context.Background(), "POST")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/users/42", nil).
+		WithContext(trace.ContextWithSpan(context.Background(), span))
+	c := e.NewContext(req, httptest.NewRecorder())
+	c.SetPath("/users/:id")
+	c.SetHandler(echo.MethodNotAllowedHandler)
+	require.Nil(t, c.Get(echo.ContextKeyHeaderAllow))
 
 	AfterFind(hooktest.NewMockHookContext(c))
 	span.End()
