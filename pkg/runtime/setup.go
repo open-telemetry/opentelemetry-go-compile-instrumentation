@@ -36,6 +36,12 @@ var (
 	tracerProvider        *sdktrace.TracerProvider
 	loggerProvider        *sdklog.LoggerProvider
 	registerSignalHandler sync.Once
+	// shutdownSigCh is the channel setupSignalHandler registers. The process
+	// never needs it again, but the package's tests do: the handler is
+	// process-wide and outlives the test that installed it, so a test that
+	// delivers a real signal deregisters it first. Otherwise it also receives
+	// that signal and re-raises it after the test has cleaned up.
+	shutdownSigCh chan os.Signal
 )
 
 func init() {
@@ -327,9 +333,9 @@ func shutdownSignals() []os.Signal {
 // the OS default or a handler that the host application registers.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, shutdownSignals()...)
-		go handleShutdownSignal(sigCh)
+		shutdownSigCh = make(chan os.Signal, 1)
+		signal.Notify(shutdownSigCh, shutdownSignals()...)
+		go handleShutdownSignal(shutdownSigCh)
 	})
 }
 
