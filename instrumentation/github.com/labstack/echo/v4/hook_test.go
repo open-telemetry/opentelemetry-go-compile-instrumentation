@@ -352,6 +352,36 @@ func TestBeforeDefaultHTTPErrorHandler_Skips4xx(t *testing.T) {
 	assert.Empty(t, sr.Ended()[0].Events())
 }
 
+func TestBeforeDefaultHTTPErrorHandler_NestedInternal4xxSkipped(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	_, span := tr.Start(context.Background(), "GET")
+	c := newEchoContextWithRoute(t, http.MethodGet, "/users/:id", "/users/42", span)
+
+	outer := echo.NewHTTPError(http.StatusInternalServerError, "wrapper")
+	outer.Internal = echo.NewHTTPError(http.StatusNotFound, "missing")
+	BeforeDefaultHTTPErrorHandler(hooktest.NewMockHookContext(c), echo.New(), outer, c)
+	span.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Unset, sr.Ended()[0].Status().Code)
+	assert.Empty(t, sr.Ended()[0].Events())
+}
+
+func TestBeforeDefaultHTTPErrorHandler_NestedInternal5xxRecorded(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	_, span := tr.Start(context.Background(), "GET")
+	c := newEchoContextWithRoute(t, http.MethodGet, "/users/:id", "/users/42", span)
+
+	outer := echo.NewHTTPError(http.StatusNotFound, "wrapper")
+	outer.Internal = echo.NewHTTPError(http.StatusInternalServerError, "boom")
+	BeforeDefaultHTTPErrorHandler(hooktest.NewMockHookContext(c), echo.New(), outer, c)
+	span.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Error, sr.Ended()[0].Status().Code)
+	require.Len(t, sr.Ended()[0].Events(), 1)
+}
+
 func TestRecordRequestError_IdempotentAcrossBothHooks(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 	_, span := tr.Start(context.Background(), "GET")
