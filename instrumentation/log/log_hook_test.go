@@ -324,21 +324,3 @@ func TestHasTraceID_ZeroAllocs(t *testing.T) {
 	})
 	assert.Equal(t, float64(0), matchAllocs)
 }
-
-func BenchmarkHasTraceID_NoMatch(b *testing.B) {
-	msg := []byte("2026/09/18 10:00:00 standard log message without trace id\n")
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = hasTraceID(msg)
-	}
-}
-
-func BenchmarkHasTraceID_Match(b *testing.B) {
-	msg := []byte("2026/09/18 10:00:00 standard log message trace_id=abcdef123456\n")
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = hasTraceID(msg)
-	}
-}
