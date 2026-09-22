@@ -136,11 +136,16 @@ func (sp *setupPhase) runMatch(
 		filteredRules = append(filteredRules, r)
 	}
 
+	trees, err := parsePackageSources(ctx, dep)
+	if err != nil {
+		return nil, err
+	}
+
 	// Separate file rules from rules that need precise matching
 	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
 	for _, r := range filteredRules {
 		if fr, ok := r.(*rule.InstFileRule); ok {
-			applies, err := fileRuleApplies(ctx, dep, fr)
+			applies, err := fileRuleApplies(ctx, dep, fr, trees)
 			if err != nil {
 				return nil, err
 			}
@@ -158,24 +163,35 @@ func (sp *setupPhase) runMatch(
 	}
 
 	if len(preciseRules) == 0 {
-		if !set.IsEmpty() && len(dep.Sources) > 0 {
-			name, err := ast.ParsePackageName(dep.Sources[0])
-			if err != nil {
-				return nil, err
-			}
-			set.SetPackageName(name)
+		if !set.IsEmpty() && len(trees) > 0 {
+			set.SetPackageName(trees[0].Name.Name)
 		}
 
 		return set, nil
 	}
 
-	return sp.preciseMatching(ctx, dep, preciseRules, set)
+	return sp.preciseMatchingWithTrees(ctx, dep, preciseRules, set, trees)
+}
+
+func parsePackageSources(ctx context.Context, dep *Dependency) ([]*dst.File, error) {
+	trees := make([]*dst.File, 0, len(dep.Sources))
+	for _, source := range dep.Sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		tree, err := ast.ParseFileFast(source)
+		if err != nil {
+			return nil, err
+		}
+		trees = append(trees, tree)
+	}
+	return trees, nil
 }
 
 // fileRuleApplies reports whether a file rule's where clause holds for dep. The
 // rule adds one file to the whole package, so the clause is checked against the
 // package rather than each file on its own.
-func fileRuleApplies(ctx context.Context, dep *Dependency, fr *rule.InstFileRule) (bool, error) {
+func fileRuleApplies(ctx context.Context, dep *Dependency, fr *rule.InstFileRule, trees []*dst.File) (bool, error) {
 	where := fr.GetWhere()
 	if where == nil {
 		return true, nil
@@ -184,16 +200,8 @@ func fileRuleApplies(ctx context.Context, dep *Dependency, fr *rule.InstFileRule
 	if err != nil {
 		return false, ex.Wrapf(err, "build where filter for rule %q", fr.GetName())
 	}
-	trees := make([]*dst.File, 0, len(dep.Sources))
-	for _, source := range dep.Sources {
-		if err = ctx.Err(); err != nil {
-			return false, err
-		}
-		tree, parseErr := ast.ParseFileFast(source)
-		if parseErr != nil {
-			return false, parseErr
-		}
-		trees = append(trees, tree)
+	if f == nil {
+		return true, nil
 	}
 	return f.Match(&matchContext{IsTest: dep.IsTest || isTestBuild(dep.Sources), Package: trees}), nil
 }
@@ -217,6 +225,20 @@ func (sp *setupPhase) preciseMatching(
 	dep *Dependency,
 	rules []rule.InstRule,
 	set *rule.InstRuleSet,
+) (*rule.InstRuleSet, error) {
+	trees, err := parsePackageSources(ctx, dep)
+	if err != nil {
+		return nil, err
+	}
+	return sp.preciseMatchingWithTrees(ctx, dep, rules, set, trees)
+}
+
+func (sp *setupPhase) preciseMatchingWithTrees(
+	ctx context.Context,
+	dep *Dependency,
+	rules []rule.InstRule,
+	set *rule.InstRuleSet,
+	trees []*dst.File,
 ) (*rule.InstRuleSet, error) {
 	if len(dep.Sources) == 0 {
 		return set, nil
@@ -243,7 +265,7 @@ func (sp *setupPhase) preciseMatching(
 	// shares it), so compute it once and reuse it across each file's context.
 	isTest := dep.IsTest || isTestBuild(dep.Sources)
 
-	for _, source := range dep.Sources {
+	for i, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -254,10 +276,7 @@ func (sp *setupPhase) preciseMatching(
 		// (nil, non-nil error) on failure. A (nil, nil) return is not
 		// possible per the Go stdlib parser.ParseFile and dave/dst
 		// DecorateFile contracts that ParseFileFast composes.
-		tree, err := ast.ParseFileFast(source)
-		if err != nil {
-			return nil, err
-		}
+		tree := trees[i]
 		// All files in a Go package share the same declared package name, so
 		// this is idempotent across iterations; SetPackageName asserts non-empty.
 		set.SetPackageName(tree.Name.Name)
@@ -277,7 +296,7 @@ func (sp *setupPhase) preciseMatching(
 			if rf.where != nil && !rf.where.Match(&mctx) {
 				continue
 			}
-			if err = sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
+			if err := sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
 				return nil, err
 			}
 		}

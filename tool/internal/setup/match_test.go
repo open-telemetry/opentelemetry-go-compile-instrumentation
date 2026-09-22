@@ -1998,6 +1998,7 @@ func TestRunMatch_FileRuleWhere(t *testing.T) {
 		want  bool
 	}{
 		{"no where clause applies", nil, &Dependency{Sources: []string{prod}}, true},
+		{"empty where clause applies", &rule.WhereDef{}, &Dependency{Sources: []string{prod}}, true},
 		{"is_test true skips a normal build", isTest(&yes), &Dependency{Sources: []string{prod}}, false},
 		{"is_test true applies to a test build", isTest(&yes), &Dependency{Sources: []string{prod, test}}, true},
 		{"is_test false applies to a normal build", isTest(&no), &Dependency{Sources: []string{prod}}, true},
