@@ -1137,6 +1137,31 @@ func run() {
 	assert.False(t, ok)
 }
 
+func TestCheckPackageForMethodCalls_MethodExpressionDoesNotMatch(t *testing.T) {
+	// Method expressions (unbound) and bound method calls both share the
+	// pkg.Method selector shape, but only the bound call match
+	dir := t.TempDir()
+	src := `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	Logger.Info(l, "hi")
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "Info", 1) // Logger.Info(l, "hi")
+	_, _, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	assert.False(t, ok, "a method expression must not resolve as a bound method call")
+}
+
 func TestCheckPackageForMethodCalls_PositionMatchesAstParser(t *testing.T) {
 	// Pins the position convention against tool/internal/ast.AstParser,
 	// the parser the rewrite pass actually uses.
@@ -1374,4 +1399,25 @@ func run() {
 	out := renderFile(t, root)
 	assert.Contains(t, out, `tracedInfo(l.Info("hi"))`)
 	assert.Contains(t, out, `tracedWarn(l.Warn("uh oh"))`)
+}
+
+func TestApplyCallRule_MethodCall_MethodExpressionDoesNotMatch(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	Logger.Info(l, "hi")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.NotContains(t, out, "traced(")
 }

@@ -427,6 +427,12 @@ func (pi *methodCallPackageInfo) methodReceiver(file string, line, col int) (str
 		return "", "", false
 	}
 
+	// Only bound method calls (recv.Method(...)) should match
+	// Exclude method expressions (Type.Method(recv, ...))
+	if selection.Kind() != types.MethodVal {
+		return "", "", false
+	}
+
 	fn, isFunc := selection.Obj().(*types.Func)
 	if !isFunc {
 		return "", "", false
