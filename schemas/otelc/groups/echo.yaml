@@ -1,0 +1,34 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # labstack/echo/v4 instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/labstack/echo/v4/hook.go
+  #   (AfterFind / BeforeError / BeforeEchoServeHTTP / BeforeDefaultHTTPErrorHandler)
+  #
+  # The echo instrumentation creates no spans and records no metrics of its own.
+  # An echo application is served through `net/http`, so the server span already
+  # exists by the time echo's router runs (see `groups/http.yaml` for the
+  # `net/http` contract). This instrumentation only *enriches* that existing
+  # `net/http` server span, once per request, after Router.Find has matched a
+  # route:
+  #
+  #   - it renames the span from `<METHOD>` to `<METHOD> <route pattern>`
+  #   - it sets `http.route` to the matched route pattern
+  #   - it sets the span status to Error and records `c.Error(err)` or a
+  #     handler `return err` (5xx / plain error) as a span exception. 4xx
+  #     including 404/405 is left unset.
+  #
+  # Nothing is set when no route matches (e.g. a 404) or when the span is not
+  # recording. Span status and recorded exceptions are span fields rather than
+  # attributes, so `http.route` below is the instrumentation's whole attribute
+  # surface. It is a standard upstream attribute, referenced with `ref:`.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.echo
+    type: attribute_group
+    display_name: otelc echo attributes
+    brief: >
+      Attributes the echo instrumentation adds to the enclosing `net/http` server span once echo's router has matched a route.
+    attributes:
+      - ref: http.route
