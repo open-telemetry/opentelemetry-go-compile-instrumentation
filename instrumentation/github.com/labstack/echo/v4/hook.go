@@ -111,16 +111,17 @@ func firstEchoContext(ictx hook.HookContext) echo.Context {
 }
 
 // matchedRoute is false for Echo's default 404/405 handlers. Find still
-// writes Path() when a path node exists but the method does not (405),
-// and stores allowed methods on ContextKeyHeaderAllow.
+// writes Path() when a path node exists but the method does not (405).
+// Compare handler pointers; ContextKeyHeaderAllow is not in early v4.
 func matchedRoute(c echo.Context) bool {
-	if c.Get(echo.ContextKeyHeaderAllow) != nil {
-		return false
-	}
 	h := c.Handler()
 	if h == nil {
 		return false
 	}
 	// Go forbids func == func except vs nil.
-	return reflect.ValueOf(h).Pointer() != reflect.ValueOf(echo.NotFoundHandler).Pointer()
+	hp := reflect.ValueOf(h).Pointer()
+	if hp == reflect.ValueOf(echo.NotFoundHandler).Pointer() {
+		return false
+	}
+	return hp != reflect.ValueOf(echo.MethodNotAllowedHandler).Pointer()
 }
