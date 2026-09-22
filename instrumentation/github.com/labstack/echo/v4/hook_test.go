@@ -382,6 +382,47 @@ func TestBeforeDefaultHTTPErrorHandler_NestedInternal5xxRecorded(t *testing.T) {
 	require.Len(t, sr.Ended()[0].Events(), 1)
 }
 
+func TestBeforeEchoServeHTTP_WrapsCustomHTTPErrorHandler(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	_, span := tr.Start(context.Background(), "GET")
+	c := newEchoContextWithRoute(t, http.MethodGet, "/users/:id", "/users/42", span)
+
+	e := echo.New()
+	var customCalled bool
+	e.HTTPErrorHandler = func(err error, ctx echo.Context) {
+		customCalled = true
+		_ = ctx.NoContent(http.StatusInternalServerError)
+	}
+
+	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), c.Request())
+	e.HTTPErrorHandler(errors.New("handler returned error"), c)
+	span.End()
+
+	assert.True(t, customCalled)
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Error, sr.Ended()[0].Status().Code)
+	require.Len(t, sr.Ended()[0].Events(), 1)
+}
+
+func TestBeforeEchoServeHTTP_WrapsOnce(t *testing.T) {
+	e := echo.New()
+	e.HTTPErrorHandler = func(error, echo.Context) {}
+
+	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	first := reflect.ValueOf(e.HTTPErrorHandler).Pointer()
+	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, first, reflect.ValueOf(e.HTTPErrorHandler).Pointer())
+}
+
+func TestBeforeEchoServeHTTP_DisabledDoesNotWrap(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "echo")
+
+	e := echo.New()
+	orig := reflect.ValueOf(e.HTTPErrorHandler).Pointer()
+	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, orig, reflect.ValueOf(e.HTTPErrorHandler).Pointer())
+}
+
 func TestRecordRequestError_IdempotentAcrossBothHooks(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 	_, span := tr.Start(context.Background(), "GET")

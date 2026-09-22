@@ -22,6 +22,24 @@ func main() {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+	// Custom handler, not DefaultHTTPErrorHandler. Instrumentation must
+	// still record handler `return err` (see BeforeEchoServeHTTP).
+	e.HTTPErrorHandler = func(err error, c echo.Context) {
+		code := http.StatusInternalServerError
+		msg := err.Error()
+		if he, ok := err.(*echo.HTTPError); ok {
+			if herr, ok := he.Internal.(*echo.HTTPError); ok {
+				he = herr
+			}
+			code = he.Code
+			if m, ok := he.Message.(string); ok {
+				msg = m
+			}
+		}
+		if !c.Response().Committed {
+			_ = c.JSON(code, map[string]string{"message": msg})
+		}
+	}
 
 	e.GET("/hello/:name", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{

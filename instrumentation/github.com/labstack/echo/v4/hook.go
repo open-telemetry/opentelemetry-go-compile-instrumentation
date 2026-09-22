@@ -4,7 +4,9 @@
 package server
 
 import (
+	"net/http"
 	"reflect"
+	"sync"
 
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/codes"
@@ -66,14 +68,39 @@ func BeforeError(_ hook.HookContext, recv any, err error) {
 	recordRequestError(c, err)
 }
 
+// BeforeEchoServeHTTP wraps e.HTTPErrorHandler once so handler `return err`
+// is recorded even when the application replaced the default handler.
+func BeforeEchoServeHTTP(_ hook.HookContext, e *echo.Echo, _ http.ResponseWriter, _ *http.Request) {
+	if !enabler.Enable() || e == nil {
+		return
+	}
+	installErrorHandlerHook(e)
+}
+
 // BeforeDefaultHTTPErrorHandler runs before (*Echo).DefaultHTTPErrorHandler.
-// ServeHTTP calls this for handler `return err`; c.Error() also lands here
-// when the default handler is installed.
+// ServeHTTP calls this for handler `return err` when the default handler is
+// still installed.
 func BeforeDefaultHTTPErrorHandler(_ hook.HookContext, _ *echo.Echo, err error, c echo.Context) {
 	if !enabler.Enable() {
 		return
 	}
 	recordRequestError(c, err)
+}
+
+// hookedErrorHandlers tracks Echo instances whose HTTPErrorHandler is wrapped.
+var hookedErrorHandlers sync.Map
+
+func installErrorHandlerHook(e *echo.Echo) {
+	if _, loaded := hookedErrorHandlers.LoadOrStore(e, struct{}{}); loaded {
+		return
+	}
+	orig := e.HTTPErrorHandler
+	e.HTTPErrorHandler = func(err error, c echo.Context) {
+		recordRequestError(c, err)
+		if orig != nil {
+			orig(err, c)
+		}
+	}
 }
 
 func recordRequestError(c echo.Context, err error) {
