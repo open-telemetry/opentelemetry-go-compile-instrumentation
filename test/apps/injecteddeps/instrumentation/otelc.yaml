@@ -1,0 +1,20 @@
+injecteddeps_serve_mux:
+  target: net/http
+  where:
+    func: NewServeMux
+  do:
+    - inject_hooks:
+        after: afterNewServeMux
+        path: go.opentelemetry.io/otelc/test/apps/injecteddeps/instrumentation
+
+# Targets a package the application does not import. It reaches the build only
+# through the hook above, so matching it requires a pass over the dependencies
+# that injection adds.
+injected_target_flag:
+  target: go.opentelemetry.io/otelc/test/apps/injecteddeps/instrumentation/target
+  where:
+    kind: var
+    identifier: Instrumented
+  do:
+    - assign_value:
+        replace: "true"
