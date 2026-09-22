@@ -4,19 +4,23 @@
 package instrument
 
 import (
+	"bytes"
 	"context"
 	goast "go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/tools/go/gcexportdata"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
@@ -706,6 +710,29 @@ func TestMatchesCallRule_WrongFunctionName(t *testing.T) {
 	assert.False(t, matches)
 }
 
+func TestMatchesCallRule_ChainedSelectorDoesNotMatch(t *testing.T) {
+	r := &rule.InstCallRule{
+		ImportPath: "net/http",
+		FuncName:   "Get",
+	}
+
+	// a.b.Get(): sel.X is itself a selector expression, not a plain
+	// identifier, so the package qualifier can't be resolved.
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X: &dst.SelectorExpr{
+				X:   &dst.Ident{Name: "a"},
+				Sel: &dst.Ident{Name: "b"},
+			},
+			Sel: &dst.Ident{Name: "Get"},
+		},
+	}
+
+	matches := matchesCallRule(call, r, nil)
+
+	assert.False(t, matches)
+}
+
 func TestMatchesCallRule_NonSelectorExpression(t *testing.T) {
 	r := &rule.InstCallRule{
 		ImportPath: "net/http",
@@ -993,6 +1020,18 @@ func TestApplyCallRule_NoMatchIsNoOp(t *testing.T) {
 	err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err, "applyCallRule must no-op when no calls match")
+}
+
+func TestApplyCallAppendArgs_WarnsAndKeepsGoingOnError(t *testing.T) {
+	// The call still matches the rule, but the append_args entry itself is
+	// not a parseable Go expression
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("")
+	r.AppendArgs = []string{"(("}
+
+	modified := newTestPhase().applyCallAppendArgs(r, file, nil)
+
+	assert.True(t, modified, "the call matched the rule even though appending its args failed")
 }
 
 func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
@@ -1420,4 +1459,220 @@ func run() {
 
 	out := renderFile(t, root)
 	assert.NotContains(t, out, "traced(")
+}
+
+func TestMatchesMethodCallRule_TypeCheckFailureSkipsMatch(t *testing.T) {
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		compileArgs: []string{"compile", "-p", testMethodCallPkgPath, filepath.Join(t.TempDir(), "missing.go")},
+	}
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "l"},
+			Sel: &dst.Ident{Name: "Info"},
+		},
+	}
+
+	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.True(t, ip.methodCallInfoLoaded)
+	assert.Nil(t, ip.methodCallInfo)
+}
+
+func TestMatchesMethodCallRule_UnmappedSelectorSkipsMatch(t *testing.T) {
+	ip, _ := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "l"},
+			Sel: &dst.Ident{Name: "Info"},
+		},
+	}
+
+	assert.False(t, ip.matchesMethodCallRule(call, r))
+}
+
+func TestCheckPackageForMethodCalls_NonexistentFileFails(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.go")
+
+	_, err := checkPackageForMethodCalls("example.com/sample", []string{missing}, imports.ImportConfig{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "opening")
+}
+
+func TestCheckPackageForMethodCalls_SyntaxErrorFails(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "sample.go", `package sample
+
+func run( {
+`)
+
+	_, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing")
+}
+
+func TestCheckPackageForMethodCalls_TypeErrorIsIgnored(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "sample.go", `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+	var s string = 1
+	_ = s
+}
+`)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "Info", 1)
+	_, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok, "a type error elsewhere must not prevent resolving unrelated selections")
+	assert.Equal(t, "Logger", recvType)
+}
+
+func TestMethodReceiver_PositionNotFound(t *testing.T) {
+	pi := &methodCallPackageInfo{selByPos: map[methodCallPosition]*types.Selection{}}
+
+	_, _, ok := pi.methodReceiver("sample.go", 1, 1)
+
+	assert.False(t, ok)
+}
+
+func TestMethodReceiver_AnonymousInterfaceReceiverDoesNotMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "sample.go", `package sample
+
+func run() {
+	var a interface{ M() }
+	a.M()
+}
+`)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "M", 1)
+	_, _, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	assert.False(t, ok, "an anonymous interface receiver has no named type to report")
+}
+
+// buildFakeArchive writes a minimal cmd/compile-style archive file
+func buildFakeArchive(t *testing.T, dir, name string, data []byte) string {
+	t.Helper()
+	const objapi = "go object go1.99\n"
+	const marker = "$$B\n"
+	const trailer = "\n$$\n"
+	payload := objapi + marker + string(data) + trailer
+
+	header := make([]byte, 60)
+	copy(header, []byte("__.PKGDEF"))
+	sizeStr := strconv.Itoa(len(payload))
+	copy(header[48:58], []byte(sizeStr))
+	for i := 48 + len(sizeStr); i < 58; i++ {
+		header[i] = ' '
+	}
+	header[58] = '`'
+	header[59] = '\n'
+
+	var buf bytes.Buffer
+	buf.WriteString("!<arch>\n")
+	buf.Write(header)
+	buf.WriteString(payload)
+
+	path := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o600))
+	return path
+}
+
+func TestExportImporter_Import_Unsafe(t *testing.T) {
+	imp := newExportImporter(token.NewFileSet(), nil)
+
+	pkg, err := imp.Import("unsafe")
+
+	require.NoError(t, err)
+	assert.Same(t, types.Unsafe, pkg)
+}
+
+func TestExportImporter_ImportFrom_MissingArchive(t *testing.T) {
+	imp := newExportImporter(token.NewFileSet(), nil)
+
+	_, err := imp.ImportFrom("example.com/missing", "", 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no archive for import path")
+}
+
+func TestExportImporter_ImportFrom_OpenArchiveError(t *testing.T) {
+	dir := t.TempDir()
+	imp := newExportImporter(token.NewFileSet(), map[string]string{
+		"example.com/gone": filepath.Join(dir, "does-not-exist.a"),
+	})
+
+	_, err := imp.ImportFrom("example.com/gone", "", 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "opening archive")
+}
+
+func TestExportImporter_ImportFrom_NewReaderError(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "notanarchive.a", "not an archive at all")
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path})
+
+	_, err := imp.ImportFrom("example.com/bad", "", 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading export data section")
+}
+
+func TestExportImporter_ImportFrom_DecodeError(t *testing.T) {
+	dir := t.TempDir()
+	path := buildFakeArchive(t, dir, "bad.a", []byte("Z"))
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path})
+
+	_, err := imp.ImportFrom("example.com/bad", "", 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decoding export data")
+}
+
+func TestExportImporter_ImportFrom_SuccessAndCache(t *testing.T) {
+	dir := t.TempDir()
+
+	fset := token.NewFileSet()
+	pkg := types.NewPackage("example.com/fake", "fake")
+	pkg.MarkComplete()
+	var data bytes.Buffer
+	require.NoError(t, gcexportdata.Write(&data, fset, pkg))
+
+	path := buildFakeArchive(t, dir, "fake.a", data.Bytes())
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/fake": path})
+
+	got, err := imp.ImportFrom("example.com/fake", "", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "example.com/fake", got.Path())
+	assert.True(t, got.Complete())
+
+	require.NoError(t, os.Remove(path))
+
+	got2, err := imp.ImportFrom("example.com/fake", "", 0)
+	require.NoError(t, err, "a cached complete package must not be re-read from disk")
+	assert.Same(t, got, got2)
 }
