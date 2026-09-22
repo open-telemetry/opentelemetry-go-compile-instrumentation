@@ -4,7 +4,6 @@
 package server
 
 import (
-	"errors"
 	"reflect"
 
 	"github.com/labstack/echo/v4"
@@ -81,8 +80,7 @@ func recordRequestError(c echo.Context, err error) {
 	if err == nil || c == nil || c.Request() == nil {
 		return
 	}
-	var he *echo.HTTPError
-	if errors.As(err, &he) && he.Code < 500 {
+	if he, ok := effectiveHTTPError(err); ok && he.Code < 500 {
 		return
 	}
 	if c.Get(errRecordedKey) != nil {
@@ -95,6 +93,19 @@ func recordRequestError(c echo.Context, err error) {
 	c.Set(errRecordedKey, struct{}{})
 	span.SetStatus(codes.Error, err.Error())
 	span.RecordError(err)
+}
+
+// effectiveHTTPError follows DefaultHTTPErrorHandler: one Internal unwrap
+// when that value is also *echo.HTTPError.
+func effectiveHTTPError(err error) (*echo.HTTPError, bool) {
+	he, ok := err.(*echo.HTTPError)
+	if !ok {
+		return nil, false
+	}
+	if herr, ok := he.Internal.(*echo.HTTPError); ok {
+		he = herr
+	}
+	return he, true
 }
 
 func firstEchoContext(ictx hook.HookContext) echo.Context {
