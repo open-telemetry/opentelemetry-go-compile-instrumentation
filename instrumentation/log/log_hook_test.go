@@ -247,8 +247,7 @@ func TestBeforeLogOutput_LeadingTraceID(t *testing.T) {
 	wrapped := wrappedFn.(func([]byte) []byte)
 	result := string(wrapped([]byte{}))
 	assert.Contains(t, result, "trace_id=existing message")
-	assert.Contains(t, result, "trace_id=abc123")
-	assert.Contains(t, result, "span_id=def456")
+	assert.NotContains(t, result, "trace_id=abc123")
 }
 
 func TestBeforeLogOutput_EmptyOutput(t *testing.T) {
@@ -323,4 +322,10 @@ func TestHasTraceID_ZeroAllocs(t *testing.T) {
 		_ = hasTraceID(matchMsg)
 	})
 	assert.Equal(t, float64(0), matchAllocs)
+
+	leadingMsg := []byte("trace_id=abcdef123456 standard log message\n")
+	leadingAllocs := testing.AllocsPerRun(1000, func() {
+		_ = hasTraceID(leadingMsg)
+	})
+	assert.Equal(t, float64(0), leadingAllocs)
 }
