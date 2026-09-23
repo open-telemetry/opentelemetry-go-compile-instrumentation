@@ -8,7 +8,7 @@ replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../../pkg/runtime
 
 require (
 	github.com/stretchr/testify v1.12.1
-	go.mongodb.org/mongo-driver/v2 v2.8.1
+	go.mongodb.org/mongo-driver/v2 v2.9.1
 	// this should be updated to a tagged release once one is published by contrib
 	go.opentelemetry.io/contrib/instrumentation/go.mongodb.org/mongo-driver/v2/mongo/otelmongo v0.0.0-20260814181354-b0f078590c22
 	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
