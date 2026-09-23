@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"strings"
 
 	"golang.org/x/tools/go/packages"
 
@@ -22,65 +21,6 @@ import (
 // so reaching this bound means something is wrong and it is reported rather
 // than passed over.
 const maxInjectionPasses = 5
-
-// packageLoadFlags names the go build flags that change which files a package
-// resolves to, or where its modules are resolved from. The build plan comes
-// from a dry run carrying the user's flags, so the hook closure has to be
-// resolved with the same ones; otherwise the two disagree about the very same
-// package and a package that is genuinely in the build goes unmatched.
-//
-//nolint:gochecknoglobals // private lookup table
-var packageLoadFlags = map[string]bool{
-	"-tags":    true,
-	"-mod":     true,
-	"-modfile": true,
-	"-overlay": true,
-	// Each of these adds a build tag of its own.
-	"-race":  true,
-	"-msan":  true,
-	"-asan":  true,
-	"-cover": true,
-}
-
-// packageLoadFlagsTakingValue names the subset of packageLoadFlags whose value
-// may be a separate argument ("-tags foo" as well as "-tags=foo").
-//
-//nolint:gochecknoglobals // private lookup table
-var packageLoadFlagsTakingValue = map[string]bool{
-	"-tags":    true,
-	"-mod":     true,
-	"-modfile": true,
-	"-overlay": true,
-}
-
-// buildFlagsForLoad returns the subset of cmdArgs that packages.Load needs in
-// order to resolve packages the way the build itself does. Package patterns,
-// output paths and everything else are dropped, since Load takes its own.
-func buildFlagsForLoad(cmdArgs []string) []string {
-	flags := make([]string, 0)
-	for i := 0; i < len(cmdArgs); i++ {
-		arg := cmdArgs[i]
-
-		// Everything after -args belongs to the test binary.
-		if arg == flagArgs {
-			break
-		}
-		if !strings.HasPrefix(arg, "-") {
-			continue
-		}
-
-		name := flagName(arg)
-		end := i + 1
-		if !strings.Contains(arg, "=") && packageLoadFlagsTakingValue[name] && end < len(cmdArgs) {
-			end++ // the flag's value is the next argument
-		}
-		if packageLoadFlags[name] {
-			flags = append(flags, cmdArgs[i:end]...)
-		}
-		i = end - 1
-	}
-	return flags
-}
 
 // hookPackagePaths returns the packages otelc.runtime.go blank-imports for the
 // given rules, which is every hook package those rules name.
@@ -213,13 +153,21 @@ func runInjectionPasses(
 // application imports the library being instrumented, so the plan already
 // covers it. It bites a hook package whose rules target its own module, which
 // the application has no reason to import.
+// injectionSource is where matchInjectedDeps resolves the hook closure from:
+// the directory a go/packages load runs in, and the build flags it needs in
+// order to agree with the original dry run about the same package. Bundled
+// into one value so matchInjectedDeps stays under the argument-count limit.
+type injectionSource struct {
+	dir        string
+	buildFlags []string
+}
+
 func (sp *setupPhase) matchInjectedDeps(
 	ctx context.Context,
 	matched []*rule.InstRuleSet,
 	deps []*Dependency,
 	moduleDirs map[string]bool,
-	dir string,
-	buildFlags []string,
+	src injectionSource,
 ) ([]*rule.InstRuleSet, error) {
 	known := make(map[string]bool, len(deps))
 	for _, dep := range deps {
@@ -228,7 +176,7 @@ func (sp *setupPhase) matchInjectedDeps(
 
 	pass := injectionPass{
 		load: func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error) {
-			injected, err := injectedDeps(ctx, hookPaths, known, dir, buildFlags)
+			injected, err := injectedDeps(ctx, hookPaths, known, src.dir, src.buildFlags)
 			if err != nil {
 				// Completing the plan is an improvement on it, not a
 				// precondition for building, so a closure that will not resolve

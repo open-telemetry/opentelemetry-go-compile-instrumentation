@@ -6,8 +6,9 @@ package setup
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,6 +33,13 @@ func fileRuleWithPath(name, path string) *rule.InstFileRule {
 	}
 }
 
+// fakeSrcFile returns an OS-appropriate absolute path for a rule's source
+// file. AddFuncRule only asserts the path is absolute and uses it as a map
+// key; the file is never created or read.
+func fakeSrcFile(name string) string {
+	return filepath.Join(os.TempDir(), name)
+}
+
 func TestHookPackagePaths(t *testing.T) {
 	t.Run("no rules", func(t *testing.T) {
 		assert.Empty(t, hookPackagePaths(nil))
@@ -39,7 +47,7 @@ func TestHookPackagePaths(t *testing.T) {
 
 	t.Run("collects func and file rule paths", func(t *testing.T) {
 		set := rule.NewInstRuleSet("example.com/svc")
-		set.AddFuncRule("/src/a.go", funcRuleWithPath("fn", "example.com/hooks"))
+		set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/hooks"))
 		set.AddFileRule(fileRuleWithPath("file", "example.com/filehooks"))
 
 		assert.ElementsMatch(t,
@@ -50,11 +58,11 @@ func TestHookPackagePaths(t *testing.T) {
 
 	t.Run("deduplicates across rules and sets", func(t *testing.T) {
 		first := rule.NewInstRuleSet("example.com/one")
-		first.AddFuncRule("/src/a.go", funcRuleWithPath("fn1", "example.com/hooks"))
-		first.AddFuncRule("/src/b.go", funcRuleWithPath("fn2", "example.com/hooks"))
+		first.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn1", "example.com/hooks"))
+		first.AddFuncRule(fakeSrcFile("b.go"), funcRuleWithPath("fn2", "example.com/hooks"))
 
 		second := rule.NewInstRuleSet("example.com/two")
-		second.AddFuncRule("/src/c.go", funcRuleWithPath("fn3", "example.com/hooks"))
+		second.AddFuncRule(fakeSrcFile("c.go"), funcRuleWithPath("fn3", "example.com/hooks"))
 
 		assert.Equal(t,
 			[]string{"example.com/hooks"},
@@ -64,7 +72,7 @@ func TestHookPackagePaths(t *testing.T) {
 
 	t.Run("skips rules with no path", func(t *testing.T) {
 		set := rule.NewInstRuleSet("example.com/svc")
-		set.AddFuncRule("/src/a.go", funcRuleWithPath("fn", ""))
+		set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", ""))
 
 		assert.Empty(t, hookPackagePaths([]*rule.InstRuleSet{set}))
 	})
@@ -86,46 +94,20 @@ func TestInjectedDepsSkipsKnownPackages(t *testing.T) {
 // not a precondition for building, so failing to resolve them must leave the
 // build running on the plan otelc already has.
 func TestMatchInjectedDepsDegradesWhenLoadFails(t *testing.T) {
-	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
 
 	set := rule.NewInstRuleSet("example.com/svc")
-	set.AddFuncRule("/src/a.go", funcRuleWithPath("fn", "example.com/hooks"))
+	set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/hooks"))
 
 	extra, err := sp.matchInjectedDeps(
-		t.Context(), []*rule.InstRuleSet{set}, nil, nil, "/nonexistent-dir-xyz", nil,
+		t.Context(), []*rule.InstRuleSet{set}, nil, nil, injectionSource{dir: "/nonexistent-dir-xyz"},
 	)
 	require.NoError(t, err, "an unresolvable closure must not fail an otherwise fine build")
 	assert.Empty(t, extra)
 }
 
-func TestBuildFlagsForLoad(t *testing.T) {
-	tests := map[string]struct {
-		args []string
-		want []string
-	}{
-		"nothing to carry":     {args: []string{"-o", "/tmp/x", "."}, want: []string{}},
-		"joined tags":          {args: []string{"-tags=a,b", "."}, want: []string{"-tags=a,b"}},
-		"separated tags":       {args: []string{"-tags", "a,b", "."}, want: []string{"-tags", "a,b"}},
-		"valueless flags kept": {args: []string{"-race", "-a", "."}, want: []string{"-race"}},
-		"mod and modfile": {
-			args: []string{"-mod=mod", "-modfile", "go.alt.mod", "."},
-			want: []string{"-mod=mod", "-modfile", "go.alt.mod"},
-		},
-		"value is not mistaken for a flag": {
-			args: []string{"-modfile", "-weird.mod", "-tags=x"},
-			want: []string{"-modfile", "-weird.mod", "-tags=x"},
-		},
-		"test binary args ignored": {
-			args: []string{"-tags=x", "-args", "-tags=no"},
-			want: []string{"-tags=x"},
-		},
-	}
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, buildFlagsForLoad(tc.args))
-		})
-	}
-}
+// Build-flag extraction itself is covered by the existing TestExtractBuildFlags
+// in setup_test.go; matchInjectedDeps now reuses that function directly.
 
 // TestRunInjectionPassesReportsNonConvergence covers the bound being reached.
 // Truncating quietly would reintroduce the very failure this whole pass exists
@@ -140,7 +122,7 @@ func TestRunInjectionPassesReportsNonConvergence(t *testing.T) {
 		},
 		match: func(_ context.Context, _ []*Dependency) ([]*rule.InstRuleSet, error) {
 			set := rule.NewInstRuleSet("example.com/svc")
-			set.AddFuncRule("/src/a.go", funcRuleWithPath("fn", "example.com/hooks"))
+			set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/hooks"))
 			return []*rule.InstRuleSet{set}, nil
 		},
 	}
@@ -164,7 +146,7 @@ func TestRunInjectionPassesConverges(t *testing.T) {
 		},
 		match: func(_ context.Context, _ []*Dependency) ([]*rule.InstRuleSet, error) {
 			set := rule.NewInstRuleSet("example.com/svc")
-			set.AddFuncRule("/src/a.go", funcRuleWithPath("fn", "example.com/hooks"))
+			set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/hooks"))
 			return []*rule.InstRuleSet{set}, nil
 		},
 	}
