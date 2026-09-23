@@ -23,7 +23,6 @@ func TestAmqpClient(t *testing.T) {
 	}
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
-	t.Parallel()
 	testutil.Build(t, "", "amqpclient", "go", "build", "-a")
 
 	amqpURL := startRabbitMQ(t)
@@ -68,7 +67,6 @@ func TestAmqpClient_AutoAck(t *testing.T) {
 	}
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
-	t.Parallel()
 	testutil.Build(t, "", "amqpclient", "go", "build", "-a")
 
 	amqpURL := startRabbitMQ(t)
@@ -96,7 +94,6 @@ func TestAmqpClient_Disabled(t *testing.T) {
 	}
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
-	t.Parallel()
 	testutil.Build(t, "", "amqpclient", "go", "build", "-a")
 
 	amqpURL := startRabbitMQ(t)
