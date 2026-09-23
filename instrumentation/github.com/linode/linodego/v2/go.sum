@@ -28,8 +28,6 @@ github.com/klauspost/compress v1.19.1 h1:VsB4HPswih7mmZ8WleSFQ75c/Ui1M4trX5oAsJn
 github.com/klauspost/compress v1.19.1/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
-github.com/linode/linodego/v2 v2.5.0 h1:QZN+cn4X0CTy0cjDPc2qMrzboFKoxl7oTT98gyrelEU=
-github.com/linode/linodego/v2 v2.5.0/go.mod h1:hqAHPXvT46Ds0iSdZbUWR7niOgBv+6PmlyQq13JVWPc=
 github.com/linode/linodego/v2 v2.7.0 h1:vyqxwrTbCPRUO1cHdDOP0D8UDI2cfmtdMqE3+95iApY=
 github.com/linode/linodego/v2 v2.7.0/go.mod h1:PYCnQa9auhd8uq62Xhsabt0QTQl0X5LLPTxyF6L++0Q=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
