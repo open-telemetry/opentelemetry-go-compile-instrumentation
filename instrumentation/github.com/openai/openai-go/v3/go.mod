@@ -3,7 +3,7 @@ module go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3
 go 1.25.0
 
 require (
-	github.com/openai/openai-go/v3 v3.53.0
+	github.com/openai/openai-go/v3 v3.62.0
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0

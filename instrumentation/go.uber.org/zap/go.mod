@@ -10,7 +10,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.28.0
 )
 
 require (
