@@ -424,7 +424,9 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// The hook packages the pass above selected get blank-imported into the
 	// application below, which compiles their dependencies too. The build plan
 	// never saw those, so match them now.
-	injected, err := sp.matchInjectedDeps(ctx, matched, deps, moduleDirs, util.GetOtelcWorkDir())
+	injected, err := sp.matchInjectedDeps(
+		ctx, matched, deps, moduleDirs, util.GetOtelcWorkDir(), buildFlagsForLoad(args),
+	)
 	if err != nil {
 		return err
 	}

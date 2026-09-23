@@ -18,3 +18,14 @@ injected_target_flag:
   do:
     - assign_value:
         replace: "true"
+
+# Reachable only under the injectedtag build tag. Resolving the hook's closure
+# without the build's own flags misses it entirely.
+injected_extra_flag:
+  target: go.opentelemetry.io/otelc/test/apps/injecteddeps/instrumentation/extra
+  where:
+    kind: var
+    identifier: Extra
+  do:
+    - assign_value:
+        replace: "true"

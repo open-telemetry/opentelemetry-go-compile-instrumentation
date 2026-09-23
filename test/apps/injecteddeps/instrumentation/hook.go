@@ -16,5 +16,5 @@ import (
 // blank-imported into the application, which is exactly the case the rule
 // targeting it has to survive.
 func afterNewServeMux(_ hook.HookContext, _ *http.ServeMux) {
-	fmt.Printf("injecteddeps: target.Instrumented=%v\n", target.Instrumented)
+	fmt.Printf("injecteddeps: target.Instrumented=%v extra=%s\n", target.Instrumented, extraStatus())
 }
