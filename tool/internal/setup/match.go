@@ -351,7 +351,7 @@ func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {
 			return ex.Wrap(err)
 		}
 
-		if skipSubmodules && d.IsDir() && p != path && util.PathExists(filepath.Join(p, "go.mod")) {
+		if skipSubmodules && d.IsDir() && p != path && util.PathExists(filepath.Join(p, goModFileName)) {
 			return filepath.SkipDir
 		}
 

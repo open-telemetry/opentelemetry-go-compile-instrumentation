@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"io"
 	"log/slog"
 	"testing"
 
@@ -14,7 +13,7 @@ import (
 // TestInstrumentPhaseLogDelegators exercises the thin slog delegators on
 // instrumentPhase. They must forward to the underlying logger without panicking.
 func TestInstrumentPhaseLogDelegators(t *testing.T) {
-	ip := &instrumentPhase{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ip := &instrumentPhase{logger: slog.New(slog.DiscardHandler)}
 	assert.NotPanics(t, func() {
 		ip.Info("info", "k", "v")
 		ip.Warn("warn", "k", "v")

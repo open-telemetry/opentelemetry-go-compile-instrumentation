@@ -5,13 +5,76 @@ package instrument
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
+
+func TestGetHookFuncCachesParsedFile(t *testing.T) {
+	dir := t.TempDir()
+	hookFile := filepath.Join(dir, "hook.go")
+	// Two hook functions in one file, as a real instrumentation package
+	// typically has many rules sharing one hook file.
+	require.NoError(t, os.WriteFile(
+		hookFile,
+		[]byte("package hook\n\nfunc beforeA() {}\nfunc beforeB() {}\n"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	ruleA := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	first, err := ip.getHookFunc(ruleA, true)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	// Corrupt the file so a real re-parse would fail; a second lookup for a
+	// *different* rule sharing the same file only succeeds if it reuses the
+	// cached parse instead of re-reading and re-parsing hook.go.
+	require.NoError(t, os.WriteFile(hookFile, []byte("not valid go"), 0o600))
+
+	ruleB := &rule.InstFuncRule{Before: "beforeB", ResolvedPath: dir}
+	second, err := ip.getHookFunc(ruleB, true)
+	require.NoError(t, err)
+	assert.Equal(t, "beforeB", second.Name.Name)
+}
+
+func TestGetHookFuncPropagatesParseError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "hook.go"),
+		[]byte("not valid go"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	_, err := ip.getHookFunc(r, true)
+	require.Error(t, err)
+}
+
+func TestMaterializeTemplateClonesIndependently(t *testing.T) {
+	ip1 := &instrumentPhase{target: &dst.File{}}
+	require.NoError(t, ip1.materializeTemplate())
+
+	ip2 := &instrumentPhase{target: &dst.File{}}
+	require.NoError(t, ip2.materializeTemplate())
+
+	// Mutate ip1's hook context type name, as implementHookContext does per
+	// instrumented function, and confirm ip2's independently-cloned copy is
+	// unaffected by it.
+	typeSpec1 := ip1.hookCtxDecl.Specs[0].(*dst.TypeSpec) //nolint:forcetypeassert // test
+	originalName := typeSpec1.Name.Name
+	typeSpec1.Name.Name += "Suffix"
+
+	typeSpec2 := ip2.hookCtxDecl.Specs[0].(*dst.TypeSpec) //nolint:forcetypeassert // test
+	assert.Equal(t, originalName, typeSpec2.Name.Name)
+}
 
 func TestBaseTypeName(t *testing.T) {
 	tests := []struct {
