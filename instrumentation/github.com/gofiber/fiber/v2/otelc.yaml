@@ -1,8 +1,8 @@
-fiber_context_next_hook:
+fiber_router_next_hook:
   target: github.com/gofiber/fiber/v2
   where:
-    func: Next
-    recv: "*Ctx"
+    func: next
+    recv: "*App"
   do:
     - inject_hooks:
         before: BeforeNext
