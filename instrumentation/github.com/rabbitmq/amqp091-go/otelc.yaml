@@ -109,3 +109,16 @@ amqp_hook_reject:
         before: BeforeReject
         after: AfterReject
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+# Without this, publishParents and channelAcks entries for a closed channel
+# are never removed, leaking the *Channel pointer forever.
+amqp_hook_close:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.9.0
+  where:
+    func: Close
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforeClose
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
