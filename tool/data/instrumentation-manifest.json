@@ -64,7 +64,8 @@
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/rs/zerolog",
-    "target": "github.com/rs/zerolog"
+    "target": "github.com/rs/zerolog",
+    "versionRange": "v1.27.0"
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/consumer",
