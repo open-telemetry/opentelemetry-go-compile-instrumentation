@@ -238,7 +238,7 @@ func TestIncomingTraceContextIsContinued(t *testing.T) {
 
 	const (
 		traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
-		spanID  = "00f067aa0ba902b7"
+		spanID  = "0102030405060708"
 	)
 
 	app := fiber.New()
