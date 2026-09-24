@@ -30,7 +30,7 @@ replace: '"replaced"'
 			ruleName: "assign_global_var",
 			check: func(t *testing.T, r *InstDeclRule) {
 				assert.Equal(t, "assign_global_var", r.Name)
-				assert.Equal(t, "example.com/pkg", r.Target)
+				assert.Equal(t, "example.com/pkg", r.Target.String())
 				assert.Equal(t, "var", r.Kind)
 				assert.Equal(t, "GlobalVar", r.Identifier)
 				assert.Equal(t, `"replaced"`, r.Replace)

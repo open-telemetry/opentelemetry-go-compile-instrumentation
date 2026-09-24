@@ -21,7 +21,7 @@ import (
 type InstRule interface {
 	String() string      // The string representation of the rule
 	GetName() string     // The unique name of the rule
-	GetTarget() string   // The target module path where the rule is applied
+	GetTarget() *Target  // The packages the rule applies to
 	GetVersion() string  // The version range of target module if available, e.g "v1.0.0,v2.0.0"
 	GetWhere() *WhereDef // Optional non-package selectors that remain after normalization
 }
@@ -68,7 +68,7 @@ type WhereDef struct {
 // InstBaseRule is the base rule for all instrumentation rules.
 type InstBaseRule struct {
 	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`
-	Target  string            `json:"target"            yaml:"target"`
+	Target  Target            `json:"target"            yaml:"target"`
 	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
 	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"`
 	Where   *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
@@ -76,7 +76,7 @@ type InstBaseRule struct {
 
 func (ibr *InstBaseRule) String() string      { return ibr.Name }
 func (ibr *InstBaseRule) GetName() string     { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string   { return ibr.Target }
+func (ibr *InstBaseRule) GetTarget() *Target  { return &ibr.Target }
 func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
 func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
 

@@ -12,6 +12,7 @@
   - [Modifier names → rule types](#modifier-names--rule-types)
   - [Special `target` values](#special-target-values)
   - [Glob targets](#glob-targets)
+  - [Target lists](#target-lists)
   - [Valid and invalid shapes](#valid-and-invalid-shapes)
 - [Loading Rules](#loading-rules)
   - [Rule Source Precedence](#rule-source-precedence)
@@ -47,7 +48,7 @@ top-level `version` key is followed by map entries whose keys are rule names:
 version: "v1.0.0"
 
 rule_name:
-  target: <package import path>       # required
+  target: <package pattern or list>   # required
   version: <version range>            # optional
   where:                              # optional; non-package selectors
     <selector keys>
@@ -71,7 +72,7 @@ treated as requiring `v1.0.0` and produce a warning.
 
 | Key       | Required | Meaning                                                            |
 | --------- | -------- | ------------------------------------------------------------------ |
-| `target`  | yes      | Package import path or glob, matched against the `-p` flag.        |
+| `target`  | yes      | Package pattern, or a list of them, matched against the `-p` flag. |
 | `version` | no       | Version range `start_inclusive,end_exclusive`. Omit to match all.  |
 | `where`   | no       | Non-package selectors and file-level predicates.                   |
 | `do`      | yes      | Ordered modifier list. Modifier name declares the rule type.       |
@@ -80,7 +81,7 @@ treated as requiring `v1.0.0` and produce a warning.
 
 Field notes:
 
-- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package. May also be a glob to match a package family — see [Glob targets](#glob-targets).
+- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package. May also be a glob to match a package family — see [Glob targets](#glob-targets). It can also be a list of patterns, including entries that exclude packages. See [Target lists](#target-lists).
 - `version` (string, optional): Specifies a version range for the target package using the format `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` matches versions ≥ `v0.11.0` and < `v0.12.0`. Omit to match all versions.
 - `where` (map, optional): Non-package selectors. Flat selector keys inside `where` are an implicit `all-of`. File-level predicates live under `where.file`. See [ADR-0003](adr/0003-structured-rule-schema.md#where-semantics) for the full list of selector keys and the qualifier composition (`all-of`, `one-of`, `not`).
 - `do` (sequence, required): Ordered list of modifier entries. Each entry is a single-key map whose key names the modifier (`inject_hooks`, `inject_code`, `add_struct_fields`, `add_file`, `wrap_call`, `expand_directive`, `assign_value`). A single-modifier rule may also use map form (`do: <modifier>: …`), but the canonical form is the sequence form.
@@ -302,7 +303,11 @@ Rules:
   below it. If a build spans multiple modules, it matches the union of all
   resolved roots. The setup phase expands this selector through the normal glob
   target matcher, so rules do not need to hardcode the application's module
-  path.
+  path. It does not match packages named `main`, which compile as `main`
+  rather than under the module path; list both to reach them.
+- Both `$root` and `main` can also be excluded in a [target list](#target-lists):
+  `not: main` keeps a rule out of the main package, and `not: $root` keeps it
+  to dependencies outside the root module.
 - An empty or whitespace-only `target` is rejected at load time: `target` is
   the sole package selector, so a rule without one can never match.
 
@@ -331,6 +336,31 @@ Glob matching uses [`bmatcuk/doublestar`](https://github.com/bmatcuk/doublestar#
 
 See the [doublestar pattern reference](https://github.com/bmatcuk/doublestar#patterns)
 for the full grammar.
+
+### Target lists
+
+`target` also accepts a list, the same way in every rule type. Each entry is a
+pattern (an import path, a glob, `$root`, or `main`) that adds packages, or a
+`not:` entry whose pattern removes them:
+
+```yaml
+wrap_get:
+  target:
+    - $root
+    - main
+    - not: example.com/app/internal/generated/**
+  where:
+    function_call: net/http.Get
+  do:
+    - wrap_call:
+        replace: tracedGet({{ . }})
+```
+
+- A package is selected when it matches at least one pattern and no `not:`
+  entry. The order of the entries does not matter.
+- A list selects nothing by default, so it needs at least one pattern. A list
+  of only `not:` entries is rejected at load time.
+- A single string is the same as a list with one pattern.
 
 ### Valid and invalid shapes
 

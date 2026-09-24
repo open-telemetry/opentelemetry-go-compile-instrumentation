@@ -64,6 +64,6 @@ func (r *InstDirectiveRule) validate() error {
 // template — never of the rule's name.
 func (r *InstDirectiveRule) Identity() string {
 	enc := func(s string) string { return strconv.Itoa(len(s)) + ":" + s }
-	parts := []string{enc(r.Target), enc(r.Version), enc(r.Directive), enc(r.Template)}
+	parts := []string{enc(r.Target.String()), enc(r.Version), enc(r.Directive), enc(r.Template)}
 	return util.CRC32(strings.Join(parts, ""))
 }
