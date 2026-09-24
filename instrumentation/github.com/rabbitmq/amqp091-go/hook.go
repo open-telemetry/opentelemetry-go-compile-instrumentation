@@ -369,6 +369,26 @@ func AfterReject(ictx hook.HookContext, err error) {
 	afterChannelSettle(ictx, err)
 }
 
+// -----------------------------------------------------------------------------
+// Channel lifecycle: (*Channel).Close
+// -----------------------------------------------------------------------------
+
+// BeforeClose ends any process spans still awaiting acknowledgement on ch and
+// drops ch's entries from publishParents and channelAcks. Without this,
+// closing a channel leaves its *Channel pointer, and any still-open spans it
+// holds, reachable from these package-level maps forever.
+func BeforeClose(_ hook.HookContext, ch *amqp.Channel) {
+	if ch == nil {
+		return
+	}
+	publishParents.Delete(ch)
+	if v, ok := channelAcks.LoadAndDelete(ch); ok {
+		if p, ok := v.(*pendingAcks); ok {
+			p.endAll()
+		}
+	}
+}
+
 func afterChannelSettle(ictx hook.HookContext, err error) {
 	call, ok := ictx.GetData().(*ackCall)
 	if !ok || call == nil {
