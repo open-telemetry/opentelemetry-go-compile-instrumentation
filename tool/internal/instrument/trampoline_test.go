@@ -5,13 +5,76 @@ package instrument
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
+
+func TestGetHookFuncCachesParsedFile(t *testing.T) {
+	dir := t.TempDir()
+	hookFile := filepath.Join(dir, "hook.go")
+	// Two hook functions in one file, as a real instrumentation package
+	// typically has many rules sharing one hook file.
+	require.NoError(t, os.WriteFile(
+		hookFile,
+		[]byte("package hook\n\nfunc beforeA() {}\nfunc beforeB() {}\n"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	ruleA := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	first, err := ip.getHookFunc(ruleA, true)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	// Corrupt the file so a real re-parse would fail; a second lookup for a
+	// *different* rule sharing the same file only succeeds if it reuses the
+	// cached parse instead of re-reading and re-parsing hook.go.
+	require.NoError(t, os.WriteFile(hookFile, []byte("not valid go"), 0o600))
+
+	ruleB := &rule.InstFuncRule{Before: "beforeB", ResolvedPath: dir}
+	second, err := ip.getHookFunc(ruleB, true)
+	require.NoError(t, err)
+	assert.Equal(t, "beforeB", second.Name.Name)
+}
+
+func TestGetHookFuncPropagatesParseError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "hook.go"),
+		[]byte("not valid go"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	_, err := ip.getHookFunc(r, true)
+	require.Error(t, err)
+}
+
+func TestMaterializeTemplateClonesIndependently(t *testing.T) {
+	ip1 := &instrumentPhase{target: &dst.File{}}
+	require.NoError(t, ip1.materializeTemplate())
+
+	ip2 := &instrumentPhase{target: &dst.File{}}
+	require.NoError(t, ip2.materializeTemplate())
+
+	// Mutate ip1's hook context type name, as implementHookContext does per
+	// instrumented function, and confirm ip2's independently-cloned copy is
+	// unaffected by it.
+	typeSpec1 := ip1.hookCtxDecl.Specs[0].(*dst.TypeSpec) //nolint:forcetypeassert // test
+	originalName := typeSpec1.Name.Name
+	typeSpec1.Name.Name += "Suffix"
+
+	typeSpec2 := ip2.hookCtxDecl.Specs[0].(*dst.TypeSpec) //nolint:forcetypeassert // test
+	assert.Equal(t, originalName, typeSpec2.Name.Name)
+}
 
 func TestBaseTypeName(t *testing.T) {
 	tests := []struct {
@@ -466,16 +529,16 @@ type genHookContext struct {
 func (c *genHookContext) SetParam(idx int, val any) {
 	if idx == 0 {
 		if val == nil {
-			*(c.params[0].(*int)) = 0
+			*c.params[0].(*int) = 0
 		} else {
-			*(c.params[0].(*int)) = val.(int)
+			*c.params[0].(*int) = val.(int)
 		}
 	}
 }
 
 func (c *genHookContext) GetParam(idx int) any {
 	if idx == 0 {
-		return *(c.params[0].(*int))
+		return *c.params[0].(*int)
 	}
 	return nil
 }
@@ -483,16 +546,16 @@ func (c *genHookContext) GetParam(idx int) any {
 func (c *genHookContext) SetReturnVal(idx int, val any) {
 	if idx == 0 {
 		if val == nil {
-			*(c.returnVals[0].(*error)) = nil
+			*c.returnVals[0].(*error) = nil
 		} else {
-			*(c.returnVals[0].(*error)) = val.(error)
+			*c.returnVals[0].(*error) = val.(error)
 		}
 	}
 }
 
 func (c *genHookContext) GetReturnVal(idx int) any {
 	if idx == 0 {
-		return *(c.returnVals[0].(*error))
+		return *c.returnVals[0].(*error)
 	}
 	return nil
 }
@@ -566,6 +629,79 @@ func TestIsTypeParameter(t *testing.T) {
 	assert.False(t, isTypeParameter(&dst.StarExpr{X: dst.NewIdent("T")}, tp))
 }
 
+func TestContainsTypeParameter(t *testing.T) {
+	tp := typeParamsT()
+
+	// Real nested cases must work
+	assert.True(t, containsTypeParameter(dst.NewIdent("T"), tp))
+	assert.True(t, containsTypeParameter(&dst.StarExpr{X: dst.NewIdent("T")}, tp))
+	assert.True(t, containsTypeParameter(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp))
+	assert.True(t, containsTypeParameter(&dst.MapType{Key: dst.NewIdent("string"), Value: dst.NewIdent("T")}, tp))
+
+	// Generic index expressions
+	assert.True(t, containsTypeParameter(&dst.IndexExpr{X: dst.NewIdent("Container"), Index: dst.NewIdent("T")}, tp))
+	assert.False(t, containsTypeParameter(&dst.IndexExpr{X: dst.NewIdent("Container"), Index: dst.NewIdent("int")}, tp))
+	assert.True(t, containsTypeParameter(
+		&dst.IndexListExpr{X: dst.NewIdent("Container"), Indices: []dst.Expr{dst.NewIdent("T"), dst.NewIdent("U")}},
+		tp,
+	))
+	assert.False(t, containsTypeParameter(
+		&dst.IndexListExpr{
+			X:       dst.NewIdent("Container"),
+			Indices: []dst.Expr{dst.NewIdent("int"), dst.NewIdent("string")},
+		},
+		tp,
+	))
+
+	// Non-matching identifiers
+	assert.False(t, containsTypeParameter(dst.NewIdent("string"), tp))
+	assert.False(t, containsTypeParameter(dst.NewIdent("T"), nil))
+
+	// False-positive risks must return false
+	assert.False(
+		t,
+		containsTypeParameter(
+			&dst.SelectorExpr{
+				X:   dst.NewIdent("pkg"),
+				Sel: dst.NewIdent("T"),
+			}, tp,
+		),
+		"selector name pkg.T should not match",
+	)
+
+	funcType := &dst.FuncType{
+		Params: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("T")}, Type: dst.NewIdent("int")},
+		}},
+	}
+	assert.False(t, containsTypeParameter(funcType, tp), "parameter named T should not match")
+
+	// Anonymous composite types containing type parameters
+	assert.True(
+		t,
+		containsTypeParameter(&dst.ParenExpr{X: dst.NewIdent("T")}, tp),
+		"parenthesized type (T) should match",
+	)
+
+	structType := &dst.StructType{
+		Fields: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("X")}, Type: dst.NewIdent("T")},
+		}},
+	}
+	assert.True(t, containsTypeParameter(structType, tp), "struct{ X T } should match")
+
+	interfaceType := &dst.InterfaceType{
+		Methods: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("M")}, Type: &dst.FuncType{
+				Params: &dst.FieldList{List: []*dst.Field{
+					{Type: dst.NewIdent("T")},
+				}},
+			}},
+		}},
+	}
+	assert.True(t, containsTypeParameter(interfaceType, tp), "interface{ M(T) } should match")
+}
+
 func TestReplaceTypeParamsWithAny(t *testing.T) {
 	tp := typeParamsT()
 
@@ -574,34 +710,24 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("pointer to type parameter", func(t *testing.T) {
+	t.Run("pointer to type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.StarExpr{X: dst.NewIdent("T")}, tp)
-		star, ok := got.(*dst.StarExpr)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, star.X)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("slice of type parameter", func(t *testing.T) {
+	t.Run("slice of type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp)
-		arr, ok := got.(*dst.ArrayType)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, arr.Elt)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("map with type parameter key and value", func(t *testing.T) {
+	t.Run("map with type parameter key and value becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.MapType{Key: dst.NewIdent("T"), Value: dst.NewIdent("T")}, tp)
-		m, ok := got.(*dst.MapType)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, m.Key)
-		assert.IsType(t, &dst.InterfaceType{}, m.Value)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("channel of type parameter", func(t *testing.T) {
+	t.Run("channel of type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.ChanType{Dir: dst.SEND, Value: dst.NewIdent("T")}, tp)
-		ch, ok := got.(*dst.ChanType)
-		require.True(t, ok)
-		assert.Equal(t, dst.SEND, ch.Dir)
-		assert.IsType(t, &dst.InterfaceType{}, ch.Value)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
 	t.Run("generic index expression becomes interface{}", func(t *testing.T) {
@@ -617,14 +743,12 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("variadic type parameter preserves ellipsis", func(t *testing.T) {
+	t.Run("variadic type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.Ellipsis{Elt: dst.NewIdent("T")}, tp)
-		ell, ok := got.(*dst.Ellipsis)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, ell.Elt)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("func type processes params and results", func(t *testing.T) {
+	t.Run("func type with type parameter becomes interface{}", func(t *testing.T) {
 		fn := &dst.FuncType{
 			Params: &dst.FieldList{List: []*dst.Field{
 				{Names: []*dst.Ident{dst.NewIdent("x")}, Type: dst.NewIdent("T")},
@@ -634,15 +758,7 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 			}},
 		}
 		got := replaceTypeParamsWithAny(fn, tp)
-		newFn, ok := got.(*dst.FuncType)
-		require.True(t, ok)
-		require.Len(t, newFn.Params.List, 1)
-		require.Len(t, newFn.Results.List, 1)
-		// The named parameter keeps its name but its type becomes interface{}.
-		require.Len(t, newFn.Params.List[0].Names, 1)
-		assert.Equal(t, "x", newFn.Params.List[0].Names[0].Name)
-		assert.IsType(t, &dst.InterfaceType{}, newFn.Params.List[0].Type)
-		assert.IsType(t, &dst.InterfaceType{}, newFn.Results.List[0].Type)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
 	t.Run("non-type-param identifier is returned unchanged", func(t *testing.T) {

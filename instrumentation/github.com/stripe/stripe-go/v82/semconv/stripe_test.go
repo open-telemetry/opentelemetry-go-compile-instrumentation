@@ -33,13 +33,17 @@ func TestTemplatePath(t *testing.T) {
 		{"underscored resource", "/v1/payment_intents", "/v1/payment_intents"},
 		{"v1 namespace", "/v1/billing_portal/sessions", "/v1/billing_portal/sessions"},
 		{"v1 namespace with id", "/v1/checkout/sessions/cs_test_a1B2c3", "/v1/checkout/sessions/{id}"},
-		{"underscored subresource", "/v1/customers/cus_NffrFeUfNV2Hib/payment_methods",
-			"/v1/customers/{id}/payment_methods"},
+		{
+			"underscored subresource", "/v1/customers/cus_NffrFeUfNV2Hib/payment_methods",
+			"/v1/customers/{id}/payment_methods",
+		},
 
 		// Stripe-generated identifiers must be templated away.
 		{"single id", "/v1/customers/cus_NffrFeUfNV2Hib", "/v1/customers/{id}"},
-		{"nested ids", "/v1/customers/cus_NffrFeUfNV2Hib/sources/card_1MvoiJ2eZvKYlo2C",
-			"/v1/customers/{id}/sources/{id}"},
+		{
+			"nested ids", "/v1/customers/cus_NffrFeUfNV2Hib/sources/card_1MvoiJ2eZvKYlo2C",
+			"/v1/customers/{id}/sources/{id}",
+		},
 		{"numeric id", "/v1/invoices/12345", "/v1/invoices/{id}"},
 		{"v2 namespaced", "/v2/core/events/evt_1MvoiJ2eZvKYlo2C", "/v2/core/events/{id}"},
 		{"already templated", "/v1/customers/{id}", "/v1/customers/{id}"},

@@ -11,7 +11,7 @@ import (
 	"github.com/valyala/fasttemplate"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // InstCallRule represents a rule that wraps function calls at call sites.

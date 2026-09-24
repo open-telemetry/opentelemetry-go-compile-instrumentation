@@ -6,7 +6,7 @@ on:
   # uploaded by the unprivileged "Generate Registry Diff" workflow.
   # The job-level 'if' additionally verifies the triggering event was a
   # pull_request to prevent abuse via manual re-runs or other triggers.
-  workflow_run:
+  workflow_run:  # zizmor: ignore[dangerous-triggers] consumes validated artifact data without checking out or executing it
     workflows: ["Generate Registry Diff"]
     types:
       - completed

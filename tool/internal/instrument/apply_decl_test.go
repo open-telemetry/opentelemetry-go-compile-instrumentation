@@ -6,7 +6,6 @@ package instrument
 import (
 	"context"
 	"go/token"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -22,7 +21,7 @@ import (
 // do not exercise import injection or compilation (logger discards all output).
 func newTestPhase() *instrumentPhase {
 	return &instrumentPhase{
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger: slog.New(slog.DiscardHandler),
 	}
 }
 
