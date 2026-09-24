@@ -370,14 +370,21 @@ func AfterReject(ictx hook.HookContext, err error) {
 }
 
 // -----------------------------------------------------------------------------
-// Channel lifecycle: (*Channel).Close
+// Channel lifecycle: (*Channel).shutdown
 // -----------------------------------------------------------------------------
 
-// BeforeClose ends any process spans still awaiting acknowledgement on ch and
-// drops ch's entries from publishParents and channelAcks. Without this,
-// closing a channel leaves its *Channel pointer, and any still-open spans it
-// holds, reachable from these package-level maps forever.
-func BeforeClose(_ hook.HookContext, ch *amqp.Channel) {
+// BeforeShutdown ends any process spans still awaiting acknowledgement on ch
+// and drops ch's entries from publishParents and channelAcks. Without this,
+// a channel that is torn down leaves its *Channel pointer, and any still-open
+// spans it holds, reachable from these package-level maps forever.
+//
+// shutdown is hooked instead of Close because Close is not the only way a
+// channel goes away: Connection.shutdown (lost connection, server-initiated
+// close, or Connection.Close) tears every channel down by calling
+// ch.shutdown directly, bypassing Close entirely. Both paths converge on
+// shutdown, and it is idempotent (guarded by ch.destructor.Do), so hooking it
+// here covers every teardown path with no risk of running twice.
+func BeforeShutdown(_ hook.HookContext, ch *amqp.Channel, _ *amqp.Error) {
 	if ch == nil {
 		return
 	}

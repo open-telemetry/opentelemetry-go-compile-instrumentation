@@ -10,8 +10,8 @@ points at this file.
 | --- | --- | --- |
 | `(*Channel).PublishWithDeferredConfirm` | `{exchange} send` | Also covers `Publish`, `PublishWithContext`, and `PublishWithDeferredConfirmWithContext`. |
 | `(*Channel).Consume` / `ConsumeWithContext` | `{queue} process` or `{queue} receive` | The after hook replaces the delivery channel. Manual-ack spans end on `Delivery` or `Channel` Ack, Nack, or Reject, including `multiple=true`. Auto-ack spans end when the Delivery is read. |
-| `(*Channel).Get` | same as Consume | One delivery. If Get is never acked, the process span stays open until `Channel.Close`. |
-| `(*Channel).Close` | n/a | Ends any process spans still awaiting acknowledgement on this channel (Consume or Get) and drops the channel's entries from the internal publish/ack tracking maps, so a closed channel is not held onto forever. |
+| `(*Channel).Get` | same as Consume | One delivery. If Get is never acked, the process span stays open until the channel is torn down. |
+| `(*Channel).shutdown` | n/a | The single point every channel teardown path (explicit `Close`, a lost connection, or a server-initiated close) funnels through. Ends any process spans still awaiting acknowledgement on this channel (Consume or Get) and drops the channel's entries from the internal publish/ack tracking maps, so a torn-down channel is not held onto forever. |
 
 The hook injects W3C `traceparent` into a copy of `Publishing.Headers` and
 extracts it from `Delivery.Headers`. It does not change the caller's header
