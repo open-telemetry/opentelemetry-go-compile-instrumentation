@@ -6,6 +6,7 @@
 package test
 
 import (
+	"fmt"
 	"testing"
 
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -16,10 +17,14 @@ import (
 func TestHttp(t *testing.T) {
 	f := testutil.NewTestFixture(t)
 
-	f.BuildAndStart("httpserver")
-	testutil.WaitForTCP(t, "127.0.0.1:8080")
+	port := testutil.FreePort(t)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	url := "http://" + addr
 
-	f.BuildAndRun("httpclient", "-addr", "http://127.0.0.1:8080", "-name", "test")
+	f.BuildAndStart("httpserver", fmt.Sprintf("-port=%d", port))
+	testutil.WaitForTCP(t, addr)
+
+	f.BuildAndRun("httpclient", "-addr", url, "-name", "test")
 
 	f.RequireTraceCount(1)    // hello request
 	f.RequireSpansPerTrace(2) // client + server per trace
@@ -32,10 +37,10 @@ func TestHttp(t *testing.T) {
 		t,
 		helloClientSpan,
 		"GET",
-		"http://127.0.0.1:8080/hello?name=test",
+		url+"/hello?name=test",
 		"127.0.0.1",
 		200,
-		8080,
+		int64(port),
 		"1.1",
 		"http",
 	)
@@ -51,7 +56,7 @@ func TestHttp(t *testing.T) {
 		"/hello",
 		"http",
 		200,
-		8080,
+		int64(port),
 		"127.0.0.1",
 		"Go-http-client/1.1",
 		"1.1",
