@@ -35,6 +35,49 @@ func TestShouldExclude(t *testing.T) {
 	}
 }
 
+func TestNormalizeHeaderPermissions(t *testing.T) {
+	tests := []struct {
+		name string
+		hdr  tar.Header
+		want int64
+	}{
+		{
+			name: "directory",
+			hdr: tar.Header{
+				Typeflag: tar.TypeDir,
+				Mode:     0o700,
+			},
+			want: 0o755,
+		},
+		{
+			name: "regular file ignores exec bits",
+			hdr: tar.Header{
+				Typeflag: tar.TypeReg,
+				Mode:     0o777,
+			},
+			want: 0o644,
+		},
+		{
+			name: "regular file keeps normalized mode",
+			hdr: tar.Header{
+				Typeflag: tar.TypeReg,
+				Mode:     0o600,
+			},
+			want: 0o644,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hdr := tt.hdr
+			normalizeHeader(&hdr)
+			if hdr.Mode != tt.want {
+				t.Fatalf("normalizeHeader mode = %#o, want %#o", hdr.Mode, tt.want)
+			}
+		})
+	}
+}
+
 // TestArchive_ExcludesOSJunk reproduces the scenario from the bug report: an
 // untracked .DS_Store dropped into a source directory by macOS Finder must
 // not end up in the produced archive.

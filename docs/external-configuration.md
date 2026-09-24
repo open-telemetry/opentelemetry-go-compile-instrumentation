@@ -121,6 +121,22 @@ Rule files are discovered in the **package directory** (not the module root), an
 skips any subdirectory that contains its own `go.mod` — so sub-modules are not accidentally
 included. The rule schema is documented in [Instrumentation Rules](rules.md).
 
+Each rule file should declare its minimum required `otelc` version with the reserved
+top-level `version` key:
+
+```yaml
+version: "v1.0.0"
+
+my_rule:
+  target: example.com/package
+  # ...
+```
+
+The requirement is evaluated per file. If a package contains multiple rule files, the
+highest declared minimum is the package's effective requirement. This also keeps standalone
+files supplied through `--rules` self-contained. For compatibility, an unversioned file is
+currently treated as requiring `v1.0.0` and produces a warning.
+
 ## Discovery and Resolution Protocol
 
 When `otelc` finds a tool file during setup, it runs the following algorithm to build the
