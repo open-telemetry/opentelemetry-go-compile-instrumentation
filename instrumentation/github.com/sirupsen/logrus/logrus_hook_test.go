@@ -4,32 +4,39 @@
 package logrus
 
 import (
+	goruntime "runtime"
 	"testing"
+	"time"
+	"weak"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 func resetHookState() {
-	hookInitMu.Lock()
-	defer hookInitMu.Unlock()
-	hookInitMap = make(map[*logrus.Logger]bool)
-	fieldInitMap = make(map[*logrus.Logger]bool)
-	formatterInit = false
+	initMu.Lock()
+	defer initMu.Unlock()
+	initialized = nil
 }
 
 func hasTraceHook(logger *logrus.Logger) bool {
+	return countTraceHooks(logger) > 0
+}
+
+func countTraceHooks(logger *logrus.Logger) int {
+	count := 0
 	for _, hooks := range logger.Hooks {
 		for _, h := range hooks {
 			if _, ok := h.(*traceHook); ok {
-				return true
+				count++
 			}
 		}
 	}
-	return false
+	return count
 }
 
 func TestLogEnabler_Enable(t *testing.T) {
@@ -140,14 +147,12 @@ func TestTraceHook_Fire_NoTraceContext(t *testing.T) {
 // TestAfterLogrusNew_NilMapAtCallTime covers the AfterLogrusNew init-order
 // panic (see #1028): the hook is wired via //go:linkname, so it can fire
 // before this package's own var initializers have run, meaning
-// hookInitMap can still be nil the moment the hook is invoked. It must
+// initialized can still be nil the moment the hook is invoked. It must
 // lazily initialize the map rather than panic on a nil-map write.
 func TestAfterLogrusNew_NilMapAtCallTime(t *testing.T) {
-	hookInitMu.Lock()
-	hookInitMap = nil
-	fieldInitMap = nil
-	formatterInit = false
-	hookInitMu.Unlock()
+	initMu.Lock()
+	initialized = nil
+	initMu.Unlock()
 	t.Cleanup(resetHookState)
 
 	ictx := hooktest.NewMockHookContext()
@@ -160,14 +165,12 @@ func TestAfterLogrusNew_NilMapAtCallTime(t *testing.T) {
 }
 
 // TestAfterLogrusWithField_NilMapAtCallTime is the AfterLogrusWithField
-// counterpart of TestAfterLogrusNew_NilMapAtCallTime: fieldInitMap can also
+// counterpart of TestAfterLogrusNew_NilMapAtCallTime: initialized can also
 // still be nil when the hook fires.
 func TestAfterLogrusWithField_NilMapAtCallTime(t *testing.T) {
-	hookInitMu.Lock()
-	hookInitMap = nil
-	fieldInitMap = nil
-	formatterInit = false
-	hookInitMu.Unlock()
+	initMu.Lock()
+	initialized = nil
+	initMu.Unlock()
 	t.Cleanup(resetHookState)
 
 	ictx := hooktest.NewMockHookContext()
@@ -178,6 +181,81 @@ func TestAfterLogrusWithField_NilMapAtCallTime(t *testing.T) {
 	})
 
 	assert.True(t, hasTraceHook(logger))
+}
+
+// TestEnsureTraceHook_SharedAcrossPaths covers #1002: hookInitMap and
+// fieldInitMap used to be tracked separately, so a logger that went
+// through AfterLogrusNew and then AfterLogrusWithField (an ordinary
+// sequence: create a logger, then attach a field to it) got traceHook
+// attached twice, once per path. Every log line then ran the hook twice.
+// AfterLogrusNew and AfterLogrusWithField must share one guard so the
+// second path recognizes a logger the first path already handled.
+func TestEnsureTraceHook_SharedAcrossPaths(t *testing.T) {
+	resetHookState()
+
+	ictx := hooktest.NewMockHookContext()
+	logger := logrus.New()
+	entry := &logrus.Entry{Logger: logger, Data: logrus.Fields{}}
+
+	AfterLogrusNew(ictx, logger)
+	AfterLogrusWithField(ictx, entry)
+
+	assert.Equal(t, len(logrus.AllLevels), countTraceHooks(logger))
+}
+
+// TestEnsureTraceHook_SharedAcrossPaths_ReverseOrder is the same case as
+// TestEnsureTraceHook_SharedAcrossPaths with the two hooks firing in the
+// opposite order.
+func TestEnsureTraceHook_SharedAcrossPaths_ReverseOrder(t *testing.T) {
+	resetHookState()
+
+	ictx := hooktest.NewMockHookContext()
+	logger := logrus.New()
+	entry := &logrus.Entry{Logger: logger, Data: logrus.Fields{}}
+
+	AfterLogrusWithField(ictx, entry)
+	AfterLogrusNew(ictx, logger)
+
+	assert.Equal(t, len(logrus.AllLevels), countTraceHooks(logger))
+}
+
+// TestEnsureTraceHook_ForgetsCollectedLogger covers the other half of
+// #1002: initialized used to be keyed by *logrus.Logger, so every logger
+// instrumentation ever saw stayed in the map, and reachable, for the life
+// of the process. A program that creates many short-lived loggers (one per
+// request, one per test, ...) leaked memory without bound. The map is now
+// keyed by a weak pointer with a cleanup that removes the entry once the
+// logger is collected, so a logger that is no longer referenced anywhere
+// else should eventually drop out of the map on its own.
+func TestEnsureTraceHook_ForgetsCollectedLogger(t *testing.T) {
+	resetHookState()
+
+	newTrackedLogger := func() weak.Pointer[logrus.Logger] {
+		ictx := hooktest.NewMockHookContext()
+		logger := logrus.New()
+		AfterLogrusNew(ictx, logger)
+		return weak.Make(logger)
+	}
+	wp := newTrackedLogger()
+
+	initMu.Lock()
+	_, tracked := initialized[wp]
+	initMu.Unlock()
+	require.True(t, tracked, "logger should be tracked right after AfterLogrusNew")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		goruntime.GC()
+
+		initMu.Lock()
+		_, stillTracked := initialized[wp]
+		initMu.Unlock()
+		if !stillTracked {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("logger entry was never forgotten after the logger became unreachable")
 }
 
 func TestAfterLogrusNew_Disabled(t *testing.T) {
