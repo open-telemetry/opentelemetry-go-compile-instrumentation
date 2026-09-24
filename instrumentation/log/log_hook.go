@@ -4,6 +4,7 @@
 package log
 
 import (
+	"bytes"
 	"log"
 	"strings"
 
@@ -15,7 +16,13 @@ const (
 	instrumentationKey = "logs/log"
 	traceIDKey         = "trace_id"
 	spanIDKey          = "span_id"
+	traceIDMarker      = " " + traceIDKey + "="
+	traceIDPrefix      = traceIDKey + "="
 )
+
+func hasTraceID(b []byte) bool {
+	return bytes.HasPrefix(b, []byte(traceIDPrefix)) || bytes.Contains(b, []byte(traceIDMarker))
+}
 
 type logEnabler struct{}
 
@@ -42,7 +49,7 @@ func BeforeLogOutput(
 			return b
 		}
 
-		if strings.Contains(string(b), traceIDKey) {
+		if hasTraceID(b) {
 			return b
 		}
 
