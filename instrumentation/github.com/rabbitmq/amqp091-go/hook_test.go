@@ -464,7 +464,7 @@ func TestBeforeGet_StoresChannel(t *testing.T) {
 	require.Equal(t, "orders", data.queue)
 }
 
-func TestBeforeClose_RemovesChannelMapEntries(t *testing.T) {
+func TestBeforeShutdown_RemovesChannelMapEntries(t *testing.T) {
 	setupTest(t)
 
 	ch := &amqp.Channel{}
@@ -476,7 +476,7 @@ func TestBeforeClose_RemovesChannelMapEntries(t *testing.T) {
 	require.True(t, publishParentsOK)
 	require.True(t, channelAcksOK)
 
-	BeforeClose(hooktest.NewMockHookContext(), ch)
+	BeforeShutdown(hooktest.NewMockHookContext(), ch, nil)
 
 	_, publishParentsOK = publishParents.Load(ch)
 	_, channelAcksOK = channelAcks.Load(ch)
@@ -484,7 +484,7 @@ func TestBeforeClose_RemovesChannelMapEntries(t *testing.T) {
 	require.False(t, channelAcksOK, "channelAcks must not hold a closed channel forever")
 }
 
-func TestBeforeClose_EndsSpansStillAwaitingAck(t *testing.T) {
+func TestBeforeShutdown_EndsSpansStillAwaitingAck(t *testing.T) {
 	sr := setupTest(t)
 
 	ch := &amqp.Channel{}
@@ -493,21 +493,21 @@ func TestBeforeClose_EndsSpansStillAwaitingAck(t *testing.T) {
 	AfterGet(ictx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}, true, nil)
 	require.Empty(t, sr.Ended(), "process span must stay open until acked or the channel closes")
 
-	BeforeClose(hooktest.NewMockHookContext(), ch)
+	BeforeShutdown(hooktest.NewMockHookContext(), ch, nil)
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1, "closing the channel must end spans left waiting on ack")
 	require.Equal(t, "orders process", spans[0].Name())
 }
 
-func TestBeforeClose_NilChannelIsNoop(t *testing.T) {
+func TestBeforeShutdown_NilChannelIsNoop(t *testing.T) {
 	setupTest(t)
 	require.NotPanics(t, func() {
-		BeforeClose(hooktest.NewMockHookContext(), nil)
+		BeforeShutdown(hooktest.NewMockHookContext(), nil, nil)
 	})
 }
 
-func TestBeforeClose_DoesNotAffectOtherChannels(t *testing.T) {
+func TestBeforeShutdown_DoesNotAffectOtherChannels(t *testing.T) {
 	sr := setupTest(t)
 
 	closed := &amqp.Channel{}
@@ -518,7 +518,7 @@ func TestBeforeClose_DoesNotAffectOtherChannels(t *testing.T) {
 	ictx.SetData(&consumeData{ch: other, queue: "orders", autoAck: false})
 	AfterGet(ictx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}, true, nil)
 
-	BeforeClose(hooktest.NewMockHookContext(), closed)
+	BeforeShutdown(hooktest.NewMockHookContext(), closed, nil)
 
 	require.Empty(t, sr.Ended(), "closing an unrelated channel must not end other channels' spans")
 	_, ok := publishParents.Load(other)
