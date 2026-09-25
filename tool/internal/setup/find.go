@@ -26,6 +26,9 @@ type Dependency struct {
 	Version    string
 	Sources    []string
 	CgoFiles   map[string]string
+	// IsTest is set from every Go file the command lists, including generated
+	// ones like _testmain.go that are not on disk during the dry run.
+	IsTest bool
 }
 
 func (d *Dependency) String() string {
@@ -233,6 +236,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		if !util.IsGoFile(arg) {
 			continue
 		}
+		dep.IsTest = dep.IsTest || isTestBuild([]string{arg})
 		if !util.PathExists(arg) {
 			// Try to resolve as CGO generated file
 			objDir := util.NormalizePath(filepath.Dir(arg))
