@@ -121,8 +121,8 @@ instrument_sql_exec:
 - Composition sub-groups `all-of`, `one-of`, `not` may appear at any position
   to compose nested selector groups.
 - Point selector keys recognized at the top of `where`:
-  `func`, `recv`, `struct`, `struct_literal`, `function_call`, `directive`,
-  `kind`, `identifier`.
+  `func`, `recv`, `struct`, `struct_literal`, `function_call`, `method_call`,
+  `directive`, `kind`, `identifier`.
 - File-level predicates live under `where.file`.
 - `target` and `version` **must not** appear inside `where`. They are
   package-scope selectors and stay top-level.
@@ -752,9 +752,10 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 **Selectors (under `where`):**
 
-| Field           | Type   | Required | Notes                                                |
-| --------------- | ------ | -------- | ---------------------------------------------------- |
-| `function_call` | string | Yes      | Qualified function name: `package/path.FunctionName` |
+| Field           | Type   | Required                             | Notes                                                                            |
+| --------------- | ------ | ------------------------------------ | -------------------------------------------------------------------------------- |
+| `function_call` | string | One of `function_call`/`method_call` | Qualified function name: `package/path.FunctionName`                             |
+| `method_call`   | string | One of `function_call`/`method_call` | Qualified method name: `package/path.Type.Method` or `package/path.*Type.Method` |
 
 **Modifier (`do: - wrap_call:`):**
 
@@ -942,6 +943,22 @@ Examples:
 - Unqualified calls like `Get()` without a package prefix
 - Calls from different packages (e.g., `other.Get()` when rule specifies `net/http.Get`)
 
+**Understanding method_call Matching:**
+
+`method_call` matches on the call's receiver type using the qualified format: `package/path.Type.Method`, or `package/path.*Type.Method` for a method with a pointer receiver.
+
+As with the `recv` field on function hook rules, the `*` must be present to match a pointer receiver and absent to match a value receiver — the two do not match each other.
+
+Examples:
+
+- `go.uber.org/zap.*Logger.Info` matches `logger.Info(...)` where `logger` has a pointer-receiver `*zap.Logger`
+- `database/sql.*DB.QueryContext` matches `db.QueryContext(...)` where `db` has a pointer-receiver `*sql.DB`
+
+**What does NOT match:**
+
+- A same-named method on a different type
+- A pointer-receiver method when the rule omits `*` (or vice versa)
+
 **Examples:**
 
 #### Example 1: Wrapping Standard Library Calls
@@ -1102,16 +1119,41 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 
 ---
 
+#### Example 6: Wrapping a Method Call by Receiver Type
+
+```yaml
+wrap_zap_info:
+  target: myapp
+  where:
+    method_call: go.uber.org/zap.*Logger.Info
+  do:
+    - wrap_call:
+        replace: "tracedInfo({{ . }})"
+```
+
+Gives:
+
+```go
+func handle(logger *zap.Logger) {
+    logger.Info("request handled")
+    // becomes:
+    tracedInfo(logger.Info("request handled"))
+}
+```
+
+---
+
 **Important Notes:**
 
-- The `{{ . }}` placeholder in the `replace` string represents the original function call.
+- The `{{ . }}` placeholder in the `replace` string represents the original function or method call.
 - The `replace` string must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
 - The `replace` string can only reference packages and functions that are already imported or defined in the target file.
-- Call rules only affect call sites in the target package, not the function definition itself.
-- Multiple calls to the same function will all be wrapped independently.
-- Use the qualified format `package/path.FunctionName` for functions.
+- Call rules only affect call sites in the target package, not the function or method definition itself.
+- Multiple calls to the same function or method will all be wrapped independently.
+- Use the qualified format `package/path.FunctionName` for functions, or `package/path.Type.Method` (`package/path.*Type.Method` for a pointer receiver) for methods.
 - All packages referenced in `append_args` must be in the target module's `go.mod`.
 - Ellipsis calls without `variadic_type` are skipped with a logged warning.
+- A rule must set exactly one of `function_call` or `method_call`.
 
 ### 5. Directive Rule
 

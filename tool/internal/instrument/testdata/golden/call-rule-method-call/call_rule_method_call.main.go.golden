@@ -1,0 +1,13 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-method-call/helpers/logger"
+
+func tracedInfo(s string) {}
+
+func main() {
+	var l logger.Logger
+	tracedInfo(l.Info("hello"))
+}

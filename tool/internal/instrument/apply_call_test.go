@@ -4,16 +4,26 @@
 package instrument
 
 import (
+	"bytes"
 	"context"
+	goast "go/ast"
+	"go/parser"
 	"go/token"
+	"go/types"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/tools/go/gcexportdata"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -700,6 +710,29 @@ func TestMatchesCallRule_WrongFunctionName(t *testing.T) {
 	assert.False(t, matches)
 }
 
+func TestMatchesCallRule_ChainedSelectorDoesNotMatch(t *testing.T) {
+	r := &rule.InstCallRule{
+		ImportPath: "net/http",
+		FuncName:   "Get",
+	}
+
+	// a.b.Get(): sel.X is itself a selector expression, not a plain
+	// identifier, so the package qualifier can't be resolved.
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X: &dst.SelectorExpr{
+				X:   &dst.Ident{Name: "a"},
+				Sel: &dst.Ident{Name: "b"},
+			},
+			Sel: &dst.Ident{Name: "Get"},
+		},
+	}
+
+	matches := matchesCallRule(call, r, nil)
+
+	assert.False(t, matches)
+}
+
 func TestMatchesCallRule_NonSelectorExpression(t *testing.T) {
 	r := &rule.InstCallRule{
 		ImportPath: "net/http",
@@ -989,6 +1022,18 @@ func TestApplyCallRule_NoMatchIsNoOp(t *testing.T) {
 	require.NoError(t, err, "applyCallRule must no-op when no calls match")
 }
 
+func TestApplyCallAppendArgs_WarnsAndKeepsGoingOnError(t *testing.T) {
+	// The call still matches the rule, but the append_args entry itself is
+	// not a parseable Go expression
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("")
+	r.AppendArgs = []string{"(("}
+
+	modified := newTestPhase().applyCallAppendArgs(r, file, nil)
+
+	assert.True(t, modified, "the call matched the rule even though appending its args failed")
+}
+
 func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 	// A file with no matching calls should cause applyCallAppendArgs to
 	// return false so applyCallRule can skip the file as a no-op.
@@ -1024,4 +1069,610 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse generated code")
+}
+
+func writeTempGoFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
+}
+
+// selectorPosition returns the line and column, in that order, of the
+// occurrence-th (1-indexed) "x.name(...)" selector it finds.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns
+func selectorPosition(t *testing.T, path, name string, occurrence int) (int, int) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	require.NoError(t, err)
+
+	var line, col int
+	seen := 0
+	goast.Inspect(f, func(n goast.Node) bool {
+		sel, ok := n.(*goast.SelectorExpr)
+		if !ok || sel.Sel.Name != name {
+			return true
+		}
+		seen++
+		if seen == occurrence {
+			pos := fset.Position(sel.Sel.Pos())
+			line, col = pos.Line, pos.Column
+		}
+		return true
+	})
+	require.GreaterOrEqual(t, seen, occurrence, "fewer than %d occurrences of selector %q", occurrence, name)
+	return line, col
+}
+
+func TestCheckPackageForMethodCalls_ValueAndPointerReceiver(t *testing.T) {
+	dir := t.TempDir()
+	src := `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string)  {}
+func (l *Logger) Warn(msg string) {}
+
+type Embedder struct {
+	Logger
+}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+
+	p := &Logger{}
+	p.Warn("uh oh")
+
+	var e Embedder
+	e.Info("promoted")
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "Info", 1) // l.Info("hi")
+	importPath, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "Logger", recvType)
+
+	line, col = selectorPosition(t, path, "Warn", 1)
+	importPath, recvType, ok = pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "*Logger", recvType)
+
+	// Promoted through embedding: the receiver is Logger, not Embedder.
+	line, col = selectorPosition(t, path, "Info", 2)
+	importPath, recvType, ok = pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "example.com/sample", importPath)
+	assert.Equal(t, "Logger", recvType)
+}
+
+func TestCheckPackageForMethodCalls_NonMethodSelectorDoesNotMatch(t *testing.T) {
+	dir := t.TempDir()
+	src := `package sample
+
+type Point struct{ X int }
+
+func run() {
+	p := Point{X: 1}
+	_ = p.X // plain field access, not a method call
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "X", 1) // p.X
+	_, _, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	assert.False(t, ok)
+}
+
+func TestCheckPackageForMethodCalls_MethodExpressionDoesNotMatch(t *testing.T) {
+	// Method expressions (unbound) and bound method calls both share the
+	// pkg.Method selector shape, but only the bound call match
+	dir := t.TempDir()
+	src := `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	Logger.Info(l, "hi")
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "Info", 1) // Logger.Info(l, "hi")
+	_, _, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	assert.False(t, ok, "a method expression must not resolve as a bound method call")
+}
+
+func TestCheckPackageForMethodCalls_PositionMatchesAstParser(t *testing.T) {
+	// Pins the position convention against tool/internal/ast.AstParser,
+	// the parser the rewrite pass actually uses.
+	dir := t.TempDir()
+	src := `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+}
+`
+	path := writeTempGoFile(t, dir, "sample.go", src)
+
+	p := ast.NewAstParser()
+	root, err := p.Parse(path, 0)
+	require.NoError(t, err)
+
+	var line, col int
+	dst.Inspect(root, func(n dst.Node) bool {
+		sel, ok := n.(*dst.SelectorExpr)
+		if !ok || sel.Sel.Name != "Info" {
+			return true
+		}
+		pos := p.FindPosition(sel.Sel)
+		line, col = pos.Line, pos.Column
+		return false
+	})
+	require.NotZero(t, line, "did not find Info selector via dst")
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	_, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok)
+	assert.Equal(t, "Logger", recvType)
+}
+
+// testMethodCallPkgPath is the package path every method_call test in this
+// file compiles its sample source as.
+const testMethodCallPkgPath = "example.com/sample"
+
+// methodCallRule builds an InstCallRule directly, bypassing YAML parsing.
+func methodCallRule(recvType, funcName, replace string) *rule.InstCallRule {
+	return &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_method"},
+		MethodCall:   testMethodCallPkgPath + "." + recvType + "." + funcName,
+		ImportPath:   testMethodCallPkgPath,
+		RecvType:     recvType,
+		FuncName:     funcName,
+		Replace:      replace,
+	}
+}
+
+// setupMethodCallPhase parses source through parseFile so the dst and type-checking passes see the same file.
+func setupMethodCallPhase(t *testing.T, source string) (*instrumentPhase, *dst.File) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.go")
+	require.NoError(t, os.WriteFile(path, []byte(source), 0o600))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		compileArgs: []string{"compile", "-p", testMethodCallPkgPath, "-o", filepath.Join(dir, "sample.a"), path},
+	}
+	root, err := ip.parseFile(path)
+	require.NoError(t, err)
+	return ip, root
+}
+
+func TestApplyCallRule_MethodCall_ValueReceiver(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `traced(l.Info("hi"))`)
+}
+
+func TestApplyCallRule_MethodCall_PointerReceiver(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type DB struct{}
+
+func (db *DB) QueryContext(q string) {}
+
+func run() {
+	db := &DB{}
+	db.QueryContext("select 1")
+}
+`)
+	r := methodCallRule("*DB", "QueryContext", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `traced(db.QueryContext("select 1"))`)
+}
+
+func TestApplyCallRule_MethodCall_PointerRuleDoesNotMatchValueReceiver(t *testing.T) {
+	// "*DB" must not match a value receiver, mirroring InstFuncRule's Recv.
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type DB struct{}
+
+func (db DB) QueryContext(q string) {}
+
+func run() {
+	var db DB
+	db.QueryContext("select 1")
+}
+`)
+	r := methodCallRule("*DB", "QueryContext", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.NotContains(t, out, "traced(")
+}
+
+func TestApplyCallRule_MethodCall_EmbeddedPromotedMethod(t *testing.T) {
+	// Info is promoted from Logger to Embedder. The rule targets Logger.
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+type Embedder struct {
+	Logger
+}
+
+func run() {
+	var e Embedder
+	e.Info("promoted")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `traced(e.Info("promoted"))`)
+}
+
+func TestApplyCallRule_MethodCall_WrongReceiverTypeDoesNotMatch(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+type OtherLogger struct{}
+
+func (l Logger) Info(msg string)      {}
+func (l OtherLogger) Info(msg string) {}
+
+func run() {
+	var o OtherLogger
+	o.Info("hi")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.NotContains(t, out, "traced(")
+}
+
+func TestApplyCallRule_MethodCall_NameMismatchSkipsTypeChecking(t *testing.T) {
+	// A method-name mismatch must reject before ever building package type
+	// info.
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Warn(msg string) {}
+
+func run() {
+	var l Logger
+	l.Warn("hi")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	assert.False(t, ip.methodCallInfoLoaded,
+		"a call whose method name doesn't match the rule must never trigger type-checking")
+}
+
+func TestApplyCallRule_MethodCall_CachesPackageInfoAcrossRules(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+func (l Logger) Warn(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+	l.Warn("uh oh")
+}
+`)
+	infoRule := methodCallRule("Logger", "Info", "tracedInfo({{ . }})")
+	warnRule := methodCallRule("Logger", "Warn", "tracedWarn({{ . }})")
+
+	require.NoError(t, ip.applyCallRule(context.Background(), infoRule, root))
+	info := ip.methodCallInfo
+	require.NotNil(t, info, "first method_call rule must have built package info")
+
+	require.NoError(t, ip.applyCallRule(context.Background(), warnRule, root))
+	assert.Same(t, info, ip.methodCallInfo,
+		"a second method_call rule on the same package must reuse, not rebuild, the cached package info")
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `tracedInfo(l.Info("hi"))`)
+	assert.Contains(t, out, `tracedWarn(l.Warn("uh oh"))`)
+}
+
+func TestApplyCallRule_MethodCall_MethodExpressionDoesNotMatch(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	Logger.Info(l, "hi")
+}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.NotContains(t, out, "traced(")
+}
+
+func TestMatchesMethodCallRule_TypeCheckFailureSkipsMatch(t *testing.T) {
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		compileArgs: []string{"compile", "-p", testMethodCallPkgPath, filepath.Join(t.TempDir(), "missing.go")},
+	}
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "l"},
+			Sel: &dst.Ident{Name: "Info"},
+		},
+	}
+
+	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.True(t, ip.methodCallInfoLoaded)
+	assert.Nil(t, ip.methodCallInfo)
+}
+
+func TestMatchesMethodCallRule_UnmappedSelectorSkipsMatch(t *testing.T) {
+	ip, _ := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+`)
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "l"},
+			Sel: &dst.Ident{Name: "Info"},
+		},
+	}
+
+	assert.False(t, ip.matchesMethodCallRule(call, r))
+}
+
+func TestCheckPackageForMethodCalls_NonexistentFileFails(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.go")
+
+	_, err := checkPackageForMethodCalls("example.com/sample", []string{missing}, imports.ImportConfig{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "opening")
+}
+
+func TestCheckPackageForMethodCalls_SyntaxErrorFails(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "sample.go", `package sample
+
+func run( {
+`)
+
+	_, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing")
+}
+
+func TestCheckPackageForMethodCalls_TypeErrorIsIgnored(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "sample.go", `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+	var s string = 1
+	_ = s
+}
+`)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "Info", 1)
+	_, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	require.True(t, ok, "a type error elsewhere must not prevent resolving unrelated selections")
+	assert.Equal(t, "Logger", recvType)
+}
+
+func TestMethodReceiver_PositionNotFound(t *testing.T) {
+	pi := &methodCallPackageInfo{selByPos: map[methodCallPosition]*types.Selection{}}
+
+	_, _, ok := pi.methodReceiver("sample.go", 1, 1)
+
+	assert.False(t, ok)
+}
+
+func TestMethodReceiver_AnonymousInterfaceReceiverDoesNotMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "sample.go", `package sample
+
+func run() {
+	var a interface{ M() }
+	a.M()
+}
+`)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "M", 1)
+	_, _, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	assert.False(t, ok, "an anonymous interface receiver has no named type to report")
+}
+
+// buildFakeArchive writes a minimal cmd/compile-style archive file
+func buildFakeArchive(t *testing.T, dir, name string, data []byte) string {
+	t.Helper()
+	const objapi = "go object go1.99\n"
+	const marker = "$$B\n"
+	const trailer = "\n$$\n"
+	payload := objapi + marker + string(data) + trailer
+
+	header := make([]byte, 60)
+	copy(header, []byte("__.PKGDEF"))
+	sizeStr := strconv.Itoa(len(payload))
+	copy(header[48:58], []byte(sizeStr))
+	for i := 48 + len(sizeStr); i < 58; i++ {
+		header[i] = ' '
+	}
+	header[58] = '`'
+	header[59] = '\n'
+
+	var buf bytes.Buffer
+	buf.WriteString("!<arch>\n")
+	buf.Write(header)
+	buf.WriteString(payload)
+
+	path := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o600))
+	return path
+}
+
+func TestExportImporter_Import_Unsafe(t *testing.T) {
+	imp := newExportImporter(token.NewFileSet(), nil)
+
+	pkg, err := imp.Import("unsafe")
+
+	require.NoError(t, err)
+	assert.Same(t, types.Unsafe, pkg)
+}
+
+func TestExportImporter_ImportFrom_MissingArchive(t *testing.T) {
+	imp := newExportImporter(token.NewFileSet(), nil)
+
+	_, err := imp.ImportFrom("example.com/missing", "", 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no archive for import path")
+}
+
+func TestExportImporter_ImportFrom_OpenArchiveError(t *testing.T) {
+	dir := t.TempDir()
+	imp := newExportImporter(token.NewFileSet(), map[string]string{
+		"example.com/gone": filepath.Join(dir, "does-not-exist.a"),
+	})
+
+	_, err := imp.ImportFrom("example.com/gone", "", 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "opening archive")
+}
+
+func TestExportImporter_ImportFrom_NewReaderError(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "notanarchive.a", "not an archive at all")
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path})
+
+	_, err := imp.ImportFrom("example.com/bad", "", 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading export data section")
+}
+
+func TestExportImporter_ImportFrom_DecodeError(t *testing.T) {
+	dir := t.TempDir()
+	path := buildFakeArchive(t, dir, "bad.a", []byte("Z"))
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path})
+
+	_, err := imp.ImportFrom("example.com/bad", "", 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decoding export data")
+}
+
+func TestExportImporter_ImportFrom_SuccessAndCache(t *testing.T) {
+	dir := t.TempDir()
+
+	fset := token.NewFileSet()
+	pkg := types.NewPackage("example.com/fake", "fake")
+	pkg.MarkComplete()
+	var data bytes.Buffer
+	require.NoError(t, gcexportdata.Write(&data, fset, pkg))
+
+	path := buildFakeArchive(t, dir, "fake.a", data.Bytes())
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/fake": path})
+
+	got, err := imp.ImportFrom("example.com/fake", "", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "example.com/fake", got.Path())
+	assert.True(t, got.Complete())
+
+	require.NoError(t, os.Remove(path))
+
+	got2, err := imp.ImportFrom("example.com/fake", "", 0)
+	require.NoError(t, err, "a cached complete package must not be re-read from disk")
+	assert.Same(t, got, got2)
 }
