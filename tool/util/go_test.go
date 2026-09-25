@@ -4,10 +4,13 @@
 package util
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsCompileCommand(t *testing.T) {
@@ -638,6 +641,207 @@ func TestSplitCompileCmds(t *testing.T) {
 			actual := SplitCompileCmds(tt.input)
 			if !reflect.DeepEqual(actual, tt.expected) {
 				t.Errorf("Expected: %#v, got: %#v", tt.expected, actual)
+			}
+		})
+	}
+}
+
+func TestUnquoteGoflagsToken(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{name: "unquoted token unchanged", token: "-mod=mod", want: "-mod=mod"},
+		{name: "single-quoted token stripped", token: "'-mod=readonly'", want: "-mod=readonly"},
+		{name: "double-quoted token stripped", token: `"-mod=readonly"`, want: "-mod=readonly"},
+		{name: "mismatched pair unchanged", token: `'-mod=readonly"`, want: `'-mod=readonly"`},
+		{name: "double layer strips one layer", token: `"'-mod=readonly'"`, want: "'-mod=readonly'"},
+		{name: "one-character token unchanged", token: "'", want: "'"},
+		{name: "empty token unchanged", token: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, UnquoteGoflagsToken(tt.token))
+		})
+	}
+}
+
+func TestQuoteGoflagsToken(t *testing.T) {
+	tests := []struct {
+		name    string
+		token   string
+		want    string
+		wantErr bool
+	}{
+		{name: "plain token unquoted", token: "-race", want: "-race"},
+		{name: "token with space uses single quotes", token: "foo bar", want: "'foo bar'"},
+		{name: "token with tab uses single quotes", token: "foo\tbar", want: "'foo\tbar'"},
+		// quoted.Split only opens a quoted field on a leading quote, so an
+		// interior quote is literal and must be left alone. Quoting it anyway
+		// would drag a second quote character into the token and break the
+		// outer quoting applied for GOFLAGS.
+		{name: "interior single quote stays unquoted", token: "it's", want: "it's"},
+		{name: "interior double quote stays unquoted", token: `say"hi"`, want: `say"hi"`},
+		{name: "interior quotes of both kinds stay unquoted", token: `a'b"c`, want: `a'b"c`},
+		// A leading quote would be read as an opening delimiter, so it does
+		// need wrapping even without whitespace.
+		{name: "leading single quote uses double quotes", token: "'foo", want: `"'foo"`},
+		{name: "leading double quote uses single quotes", token: `"foo`, want: `'"foo'`},
+		{name: "token with double quote uses single quotes", token: `say "hi"`, want: `'say "hi"'`},
+		{name: "token with both quotes errors", token: `a ' " b`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := QuoteGoflagsToken(tt.token)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestBuildToolexecFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		execPath string
+		want     string
+		wantErr  bool
+	}{
+		{
+			name:     "path without spaces stays unquoted",
+			execPath: "/usr/local/bin/otelc",
+			want:     "-toolexec=/usr/local/bin/otelc toolexec",
+		},
+		{
+			name:     "path with spaces is single quoted",
+			execPath: `C:\Program Files\otelc\otelc.exe`,
+			want:     `-toolexec='C:\Program Files\otelc\otelc.exe' toolexec`,
+		},
+		{
+			name:     "path with a single quote falls back to double quotes",
+			execPath: "/home/it's me/otelc",
+			want:     `-toolexec="/home/it's me/otelc" toolexec`,
+		},
+		{
+			// Regression: a quote with no whitespace needs no quoting at all.
+			// Wrapping it used to leave both quote characters in the flag, which
+			// made the outer GOFLAGS quoting in EnableNestedToolexec fail for a
+			// path that is otherwise perfectly usable.
+			name:     "path with a quote but no space stays unquoted",
+			execPath: "/tmp/it's/otelc",
+			want:     "-toolexec=/tmp/it's/otelc toolexec",
+		},
+		{
+			name:     "path with both quote characters errors",
+			execPath: `/home/it's "me"/otelc`,
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildToolexecFlag(tt.execPath)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// A -toolexec entry built by BuildToolexecFlag carries its own inner quotes
+// once the executable path has a space, so stripping has to see past them.
+func TestStripToolexecFromGoflagsWithNestedQuotes(t *testing.T) {
+	inner, err := BuildToolexecFlag(`C:\Program Files\otelc\otelc.exe`)
+	require.NoError(t, err)
+	token, err := QuoteGoflagsToken(inner)
+	require.NoError(t, err)
+
+	assert.Empty(t, StripToolexecFromGoflags(token))
+	assert.Equal(t, "-mod=mod", StripToolexecFromGoflags("-mod=mod "+token))
+	assert.Equal(t, "-mod=mod", StripToolexecFromGoflags(token+" -mod=mod"))
+}
+
+func TestNewFileScanner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lines.txt")
+	require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644))
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	// Advance the offset first; NewFileScanner must seek back to the start.
+	_, err = f.Seek(3, 0)
+	require.NoError(t, err)
+
+	scanner, err := NewFileScanner(f, 4096)
+	require.NoError(t, err)
+
+	var lines []string
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	require.NoError(t, scanner.Err())
+	assert.Equal(t, []string{"line1", "line2", "line3"}, lines)
+}
+
+func TestStripToolexecFromGoflags(t *testing.T) {
+	tests := []struct {
+		name     string
+		goflags  string
+		expected string
+	}{
+		{
+			name:     "empty",
+			goflags:  "",
+			expected: "",
+		},
+		{
+			name:     "no toolexec flag",
+			goflags:  "-mod=mod -race",
+			expected: "-mod=mod -race",
+		},
+		{
+			name:     "bare toolexec flag",
+			goflags:  "-toolexec=otelc",
+			expected: "",
+		},
+		{
+			name:     "single-quoted toolexec flag with space",
+			goflags:  "'-toolexec=otelc toolexec'",
+			expected: "",
+		},
+		{
+			name:     "double-quoted toolexec flag with space",
+			goflags:  `"-toolexec=otelc toolexec"`,
+			expected: "",
+		},
+		{
+			name:     "toolexec flag between other flags",
+			goflags:  "-mod=mod '-toolexec=otelc toolexec' -race",
+			expected: "-mod=mod -race",
+		},
+		{
+			name:     "other quoted flags are preserved verbatim",
+			goflags:  "'-tags=a b' -toolexec=otelc",
+			expected: "'-tags=a b'",
+		},
+		{
+			name:     "extra whitespace between flags",
+			goflags:  "  -mod=mod   -toolexec=otelc  ",
+			expected: "-mod=mod",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StripToolexecFromGoflags(tt.goflags); got != tt.expected {
+				t.Errorf("StripToolexecFromGoflags(%q) = %q, want %q", tt.goflags, got, tt.expected)
 			}
 		})
 	}

@@ -12,12 +12,11 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/profile"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
 //nolint:gochecknoglobals // Profiling session is shared between Before/After hooks.
-var activeSession *profile.Session
+var activeSession *profileSession
 
 // initProfiling starts profiling if --profile-path and --profile flags are set.
 // It calls os.Setenv so child processes spawned via -toolexec inherit the
@@ -46,7 +45,7 @@ func initProfiling(ctx context.Context, cmd *cli.Command) (context.Context, erro
 
 	// Guard against placing profiles inside .otelc-build/ which Cleanup removes.
 	buildTemp := util.GetBuildTempDir()
-	if strings.HasPrefix(profilePath, buildTemp) {
+	if isSubPath(profilePath, buildTemp) {
 		return ctx, ex.Newf(
 			"profile-path %q must not be inside the build temp directory %q",
 			profilePath, buildTemp,
@@ -55,21 +54,21 @@ func initProfiling(ctx context.Context, cmd *cli.Command) (context.Context, erro
 
 	// Parse and validate profile types before touching the filesystem.
 	joined := strings.Join(profiles, ",")
-	types, err := profile.ParseTypes(joined)
+	types, err := parseProfileTypes(joined)
 	if err != nil {
 		return ctx, err
 	}
 
 	// Set env vars BEFORE starting profiling so that os.Environ() in
 	// BuildWithToolexec (setup.go) propagates them to child processes.
-	if setErr := os.Setenv(profile.EnvProfilePath, profilePath); setErr != nil {
-		return ctx, ex.Wrapf(setErr, "set %s", profile.EnvProfilePath)
+	if setErr := os.Setenv(envProfilePath, profilePath); setErr != nil {
+		return ctx, ex.Wrapf(setErr, "set %s", envProfilePath)
 	}
-	if setErr := os.Setenv(profile.EnvEnabledProfiles, joined); setErr != nil {
-		return ctx, ex.Wrapf(setErr, "set %s", profile.EnvEnabledProfiles)
+	if setErr := os.Setenv(envEnabledProfiles, joined); setErr != nil {
+		return ctx, ex.Wrapf(setErr, "set %s", envEnabledProfiles)
 	}
 
-	session, err := profile.Start(profilePath, types)
+	session, err := startProfileSession(profilePath, types)
 	if err != nil {
 		return ctx, err
 	}
@@ -93,7 +92,7 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 	logger := util.LoggerFromContext(ctx)
 	logger.InfoContext(ctx, "stopping profiling")
 
-	stopErr := activeSession.Stop()
+	stopErr := activeSession.stop()
 	activeSession = nil
 
 	if !cmd.Bool("profile-summary") {
@@ -102,18 +101,27 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 
 	// Summary mode: merge all per-process files into one file per type.
 	// Use the absolute path stored in env (set by initProfiling).
-	profileDir := os.Getenv(profile.EnvProfilePath)
+	profileDir := os.Getenv(envProfilePath)
 	if profileDir == "" {
 		return ex.New("profile path not set")
 	}
 
-	rawTypes := os.Getenv(profile.EnvEnabledProfiles)
-	types, parseErr := profile.ParseTypes(rawTypes)
+	rawTypes := os.Getenv(envEnabledProfiles)
+	types, parseErr := parseProfileTypes(rawTypes)
 	if parseErr != nil || len(types) == 0 {
 		return ex.Join(stopErr, parseErr)
 	}
 
 	logger.InfoContext(ctx, "merging profile files", "dir", profileDir)
-	mergeErr := profile.Merge(ctx, profileDir, types)
+	mergeErr := mergeProfiles(ctx, profileDir, types)
 	return ex.Join(stopErr, mergeErr)
+}
+
+// isSubPath reports whether target is equal to base or located inside base.
+func isSubPath(target, base string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || !strings.HasPrefix(rel, "..")
 }

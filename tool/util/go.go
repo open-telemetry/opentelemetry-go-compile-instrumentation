@@ -92,12 +92,12 @@ func IsCgoCommand(line string) bool {
 		!strings.Contains(line, "-dynimport")
 }
 
-// splitGoflags splits a GOFLAGS value into tokens like the go command does
+// SplitGoflags splits a GOFLAGS value into tokens like the go command does
 // (https://cs.opensource.google/go/go/+/master:src/cmd/internal/quoted/quoted.go)
 //
 // space-separated, but a token starting with a quote runs to the matching close quote.
 // Quotes are kept so tokens re-join verbatim.
-func splitGoflags(goflags string) []string {
+func SplitGoflags(goflags string) []string {
 	isSpace := func(c byte) bool {
 		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 	}
@@ -135,14 +135,10 @@ func splitGoflags(goflags string) []string {
 // children's toolexec: none for setup discovery, an explicit CLI flag for
 // `otelc go build`, and nested version-only mode during instrumentation.
 func StripToolexecFromGoflags(goflags string) string {
-	tokens := splitGoflags(goflags)
+	tokens := SplitGoflags(goflags)
 	kept := make([]string, 0, len(tokens))
 	for _, token := range tokens {
-		unquoted := token
-		if len(unquoted) >= 2 && (unquoted[0] == '\'' || unquoted[0] == '"') &&
-			unquoted[len(unquoted)-1] == unquoted[0] {
-			unquoted = unquoted[1 : len(unquoted)-1]
-		}
+		unquoted := UnquoteGoflagsToken(token)
 		if unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") {
 			continue
 		}
@@ -151,17 +147,40 @@ func StripToolexecFromGoflags(goflags string) string {
 	return strings.Join(kept, " ")
 }
 
-// QuoteGoflagsToken quotes a token for inclusion in a GOFLAGS value, following
-// the same rules as cmd/internal/quoted.Join: unquoted if it has no space,
-// tab, or quote characters; otherwise wrapped in whichever of ' or " doesn't
-// appear in the token. A token containing both quote characters can't be
-// safely represented and returns an error.
+// quotedTokenMinLen is the shortest GOFLAGS token that can hold a surrounding
+// quote pair: one opening quote and one closing quote.
+const quotedTokenMinLen = 2
+
+// UnquoteGoflagsToken removes one pair of surrounding matching quotes from a
+// GOFLAGS token, mirroring how the go command interprets it before acting on
+// the flag. A token without a matching surrounding quote pair is returned
+// unchanged. The token should already have been produced by SplitGoflags.
+func UnquoteGoflagsToken(token string) string {
+	if len(token) >= quotedTokenMinLen {
+		if q := token[0]; (q == '\'' || q == '"') && token[len(token)-1] == q {
+			return token[1 : len(token)-1]
+		}
+	}
+	return token
+}
+
+// QuoteGoflagsToken quotes a token for inclusion in a GOFLAGS value so that
+// cmd/internal/quoted.Split reads it back as a single field. Split only treats
+// a quote as opening a quoted field when it is the first byte of that field,
+// and performs no unescaping, so quotes further inside a token are literal and
+// need no quoting. A token is therefore quoted only when it contains
+// whitespace, or when it starts with a quote that would otherwise be read as an
+// opening delimiter; it is then wrapped in whichever of ' or " does not appear
+// in it. A token needing quotes that already contains both characters can't be
+// represented and returns an error.
 func QuoteGoflagsToken(token string) (string, error) {
+	if !strings.ContainsAny(token, " \t\n\r") &&
+		!strings.HasPrefix(token, "'") && !strings.HasPrefix(token, `"`) {
+		return token, nil
+	}
 	hasSingleQuote := strings.ContainsRune(token, '\'')
 	hasDoubleQuote := strings.ContainsRune(token, '"')
 	switch {
-	case !strings.ContainsAny(token, " \t\n\r'\""):
-		return token, nil
 	case !hasSingleQuote:
 		return "'" + token + "'", nil
 	case !hasDoubleQuote:
@@ -169,6 +188,18 @@ func QuoteGoflagsToken(token string) (string, error) {
 	default:
 		return "", ex.Newf("cannot quote token containing both single and double quotes: %q", token)
 	}
+}
+
+// BuildToolexecFlag returns the -toolexec flag that points the go command at
+// the given executable in toolexec mode. execPath is quoted when it needs to be,
+// because cmd/go splits the flag's value with cmd/internal/quoted.Split, so an
+// unquoted path containing a space would be read as a path plus extra arguments.
+func BuildToolexecFlag(execPath string) (string, error) {
+	quotedPath, err := QuoteGoflagsToken(execPath)
+	if err != nil {
+		return "", ex.Wrapf(err, "quoting otelc executable path for -toolexec")
+	}
+	return "-toolexec=" + quotedPath + " toolexec", nil
 }
 
 // FindFlagValue finds the value of a flag in the command line.

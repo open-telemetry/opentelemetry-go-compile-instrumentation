@@ -9,6 +9,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
+	httpsemconv "go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
@@ -76,7 +77,7 @@ func BeforeNext(ictx hook.HookContext, c *gin.Context) {
 	// later recording span on the same request from being enriched.
 	c.Set(routeSetKey, struct{}{})
 
-	span.SetName(c.Request.Method + " " + route)
+	span.SetName(httpsemconv.HTTPServerSpanName(c.Request.Method, route))
 	span.SetAttributes(semconv.HTTPRouteKey.String(route))
 
 	logger.Debug("gin route resolved", "route", route)

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
+	kafkaprop "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/internal/propagation"
 	"go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
 	"go.opentelemetry.io/otelc/pkg/runtime"
@@ -52,43 +53,6 @@ func initInstrumentation() {
 	})
 }
 
-// headerCarrier adapts a slice of kafka.Header to the OpenTelemetry
-// TextMapCarrier interface so trace context can be propagated through Kafka
-// message headers.
-type headerCarrier struct {
-	headers *[]kafka.Header
-}
-
-// Get returns the value of the first header matching key, or "" if absent.
-func (c headerCarrier) Get(key string) string {
-	for _, h := range *c.headers {
-		if h.Key == key {
-			return string(h.Value)
-		}
-	}
-	return ""
-}
-
-// Set replaces any existing header with key, otherwise appends a new one.
-func (c headerCarrier) Set(key, value string) {
-	for i := range *c.headers {
-		if (*c.headers)[i].Key == key {
-			(*c.headers)[i].Value = []byte(value)
-			return
-		}
-	}
-	*c.headers = append(*c.headers, kafka.Header{Key: key, Value: []byte(value)})
-}
-
-// Keys lists the header keys carried by this carrier.
-func (c headerCarrier) Keys() []string {
-	keys := make([]string, 0, len(*c.headers))
-	for _, h := range *c.headers {
-		keys = append(keys, h.Key)
-	}
-	return keys
-}
-
 // -----------------------------------------------------------------------------
 // Consumer: (*kafka.Reader).ReadMessage(ctx)
 // -----------------------------------------------------------------------------
@@ -101,6 +65,13 @@ type consumerData struct {
 	start    time.Time
 }
 
+// fetchMessageCallKey marks a context as coming from (*kafka.Reader).ReadMessage's
+// own call into r.FetchMessage(ctx) (see kafka-go's reader.go), so
+// BeforeFetchMessage can recognize and skip that nested call: ReadMessage is
+// already instrumented, and without this the same message would get a second,
+// duplicate consumer span from the inner FetchMessage call.
+type fetchMessageCallKey struct{}
+
 // BeforeReadMessage captures the reader configuration and the call start time so
 // AfterReadMessage can build an accurate consumer span once the message arrives.
 func BeforeReadMessage(ictx hook.HookContext, r *kafka.Reader, ctx context.Context) {
@@ -112,6 +83,16 @@ func BeforeReadMessage(ictx hook.HookContext, r *kafka.Reader, ctx context.Conte
 		return
 	}
 	initInstrumentation()
+
+	// ReadMessage's own body calls r.FetchMessage(ctx) with this same ctx value,
+	// so marking it here and writing it back via SetParam lets BeforeFetchMessage
+	// recognize that nested call and skip creating a duplicate span for it.
+	// context.WithValue panics on a nil parent, so normalize first.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = context.WithValue(ctx, fetchMessageCallKey{}, struct{}{})
+	ictx.SetParam(1, ctx)
 
 	cfg := r.Config()
 	endpoint := ""
@@ -149,7 +130,7 @@ func AfterReadMessage(ictx hook.HookContext, msg kafka.Message, err error) {
 	if parent == nil {
 		parent = context.Background()
 	}
-	parent = propagator.Extract(parent, headerCarrier{headers: &msg.Headers})
+	parent = propagator.Extract(parent, kafkaprop.NewHeaderCarrier(&msg.Headers))
 
 	req := semconv.KafkaRequest{
 		Endpoint:        data.endpoint,
@@ -175,16 +156,45 @@ func AfterReadMessage(ictx hook.HookContext, msg kafka.Message, err error) {
 	span.End()
 }
 
+// BeforeFetchMessage captures the reader configuration and the call start time
+// so AfterFetchMessage can build an accurate consumer span once the message
+// arrives. FetchMessage does not auto-commit the offset; the caller must
+// explicitly call CommitMessages after processing.
+//
+// (*kafka.Reader).ReadMessage's own implementation calls r.FetchMessage(ctx)
+// internally, and both methods are instrumented (see otelc.yaml), so a call to
+// ReadMessage would otherwise also trigger this hook for its nested FetchMessage
+// call, producing two consumer spans for one message. When ctx carries the
+// marker BeforeReadMessage set, this is that nested call, so it's skipped here:
+// no data is stored, and AfterFetchMessage's delegation to AfterReadMessage
+// already no-ops on missing data (see its comment).
+func BeforeFetchMessage(ictx hook.HookContext, r *kafka.Reader, ctx context.Context) {
+	if ctx != nil && ctx.Value(fetchMessageCallKey{}) != nil {
+		return
+	}
+	BeforeReadMessage(ictx, r, ctx)
+}
+
+// AfterFetchMessage creates a consumer span for a message received via
+// FetchMessage. It delegates to AfterReadMessage because the two methods share
+// the same parameter layout and span semantics.
+//
+// The Enable() check is intentionally omitted — see AfterReadMessage.
+func AfterFetchMessage(ictx hook.HookContext, msg kafka.Message, err error) {
+	AfterReadMessage(ictx, msg, err)
+}
+
 // ExtractContext extracts the trace context from a Kafka message's headers
 // and returns a context.Context that carries the propagated span context.
 //
-// Use this with the message returned by (*kafka.Reader).ReadMessage to
-// continue the trace in downstream message-processing code:
+// Use this with the message returned by (*kafka.Reader).ReadMessage or
+// (*kafka.Reader).FetchMessage to continue the trace in downstream
+// message-processing code:
 //
-//	msg, err := r.ReadMessage(ctx)
+//	msg, err := r.FetchMessage(ctx)
 //	ctx = consumer.ExtractContext(msg)
 //	// spans created with ctx will be children of the producer span.
 func ExtractContext(msg kafka.Message) context.Context {
 	initInstrumentation()
-	return propagator.Extract(context.Background(), headerCarrier{headers: &msg.Headers})
+	return propagator.Extract(context.Background(), kafkaprop.NewHeaderCarrier(&msg.Headers))
 }

@@ -170,14 +170,7 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 		return nil
 	}
 
-	spanProcessor := sdktrace.NewBatchSpanProcessor(traceExporter,
-		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
-		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
-	)
-	if os.Getenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR") == "true" {
-		spanProcessor = sdktrace.NewSimpleSpanProcessor(traceExporter)
-		logger.Debug("using SimpleSpanProcessor for immediate span export")
-	}
+	spanProcessor := newSpanProcessor(traceExporter)
 
 	tracerProvider = sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
@@ -189,6 +182,22 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 
 	logger.Info("trace provider initialized with auto-export")
 	return nil
+}
+
+func newSpanProcessor(traceExporter sdktrace.SpanExporter) sdktrace.SpanProcessor {
+	if useSimpleSpanProcessor() {
+		logger.Debug("using SimpleSpanProcessor for immediate span export")
+		return sdktrace.NewSimpleSpanProcessor(traceExporter)
+	}
+
+	return sdktrace.NewBatchSpanProcessor(traceExporter,
+		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
+		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
+	)
+}
+
+func useSimpleSpanProcessor() bool {
+	return strings.EqualFold(os.Getenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR"), "true")
 }
 
 // setupMeterProvider creates and configures the meter provider
@@ -312,34 +321,37 @@ func shutdownSignals() []os.Signal {
 	return []os.Signal{os.Interrupt, syscall.SIGTERM}
 }
 
-// setupSignalHandler registers a goroutine that listens for OS signals
-// and gracefully shuts down the OpenTelemetry SDK when receiving SIGINT or SIGTERM.
-// This ensures telemetry is flushed before the application exits.
-// This function is safe to call multiple times; it will only register the handler once.
+// setupSignalHandler flushes the OTel SDK on SIGINT/SIGTERM so buffered telemetry
+// survives shutdown, then steps aside. It never exits or re-raises the signal:
+// the application owns its own exit path and exit code. Terminating here would
+// race an application running its own graceful shutdown and could truncate it.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
 		sigCh := make(chan os.Signal, 1)
-		signals := shutdownSignals()
-		signal.Notify(sigCh, signals...)
-
-		go func() {
-			sig := <-sigCh
-			logger.Info("received signal, initiating graceful shutdown", "signal", sig.String())
-
-			// Create a context with timeout for shutdown
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			// Shutdown OTel SDK
-			if err := Shutdown(ctx); err != nil {
-				logger.Error("error during shutdown", "error", err)
-			} else {
-				logger.Info("OpenTelemetry SDK shutdown completed successfully")
-			}
-
-			// After shutdown completes, exit cleanly.
-			signal.Reset(signals...)
-			os.Exit(0)
-		}()
+		signal.Notify(sigCh, shutdownSignals()...)
+		go handleShutdownSignal(sigCh)
 	})
+}
+
+// handleShutdownSignal waits for the first signal on sigCh and flushes the SDK.
+// It does not exit or re-raise the signal, leaving the process exit to the
+// application or the OS default disposition.
+func handleShutdownSignal(sigCh chan os.Signal) {
+	sig := <-sigCh
+
+	// Stop listening now so a repeated signal isn't swallowed by our buffered
+	// channel but reaches the app or the default disposition, keeping the
+	// "press again to force quit" behavior.
+	signal.Stop(sigCh)
+
+	logger.Info("received signal, flushing telemetry", "signal", sig.String())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := Shutdown(ctx); err != nil {
+		logger.Error("error flushing telemetry during shutdown", "error", err)
+	} else {
+		logger.Info("OpenTelemetry SDK shutdown completed successfully")
+	}
 }

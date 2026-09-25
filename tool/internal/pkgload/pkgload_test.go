@@ -306,7 +306,7 @@ func TestResolveModuleDir(t *testing.T) {
 			}
 
 			require.Equal(t, expectedDir, mod.Dir)
-			moduleDir, err := ResolveModuleDir(ctx, workDir)
+			moduleDir, err := resolveModuleDir(ctx, workDir)
 			require.NoError(t, err)
 			require.Equal(t, expectedDir, moduleDir)
 		})

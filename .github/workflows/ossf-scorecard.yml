@@ -8,40 +8,12 @@ on:
     - cron: "13 5 * * 4"  # once a week
   workflow_dispatch:
 
-permissions: read-all
+permissions: {}
 
 jobs:
   analysis:
-    runs-on: ubuntu-latest
     permissions:
-      # Needed for Code scanning upload
-      security-events: write
-      # Needed for GitHub OIDC token if publish_results is true
-      id-token: write
-    steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a  # v2.4.3
-        with:
-          results_file: results.sarif
-          results_format: sarif
-          publish_results: true
-
-      # Upload the results as artifacts (optional). Commenting out will disable
-      # uploads of run results in SARIF format to the repository Actions tab.
-      # https://docs.github.com/en/actions/advanced-guides/storing-workflow-data-as-artifacts
-      - name: "Upload artifact"
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
-        with:
-          name: SARIF file
-          path: results.sarif
-          retention-days: 5
-
-      # Upload the results to GitHub's code scanning dashboard (optional).
-      # Commenting out will disable upload of results to your repo's Code Scanning dashboard
-      - name: "Upload to code-scanning"
-        uses: github/codeql-action/upload-sarif@cf1bb45a277cb3c205638b2cd5c984db1c46a412  # v4.31.7
-        with:
-          sarif_file: results.sarif
+      contents: read  # for actions/checkout
+      id-token: write  # for Scorecard to publish results
+      security-events: write  # for the SARIF upload to code scanning
+    uses: open-telemetry/shared-workflows/.github/workflows/scorecard.yml@f13d0cb656d7244ca8c1638b6996dbaef1083bdd  # v0.6.0

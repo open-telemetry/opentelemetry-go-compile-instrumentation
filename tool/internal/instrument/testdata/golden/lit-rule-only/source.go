@@ -1,0 +1,35 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "io"
+
+// Empty literal takes both fields.
+func Bare() *io.LimitedReader {
+	return &io.LimitedReader{}
+}
+
+// Existing keys are kept and overridden in place.
+func Configured(r io.Reader) *io.LimitedReader {
+	return &io.LimitedReader{R: r, N: 100}
+}
+
+type holder struct{ lr *io.LimitedReader }
+
+// Literal nested inside another literal, with no name bound to it.
+func Nested() *holder {
+	return &holder{lr: &io.LimitedReader{}}
+}
+
+// A different type from the same package is left alone.
+func Other() *io.SectionReader {
+	return &io.SectionReader{}
+}
+
+func main() {
+	_ = Bare()
+	_ = Configured(nil)
+	_ = Nested()
+	_ = Other()
+}

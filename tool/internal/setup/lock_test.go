@@ -29,7 +29,7 @@ func lockTestDir(t *testing.T) {
 func TestAcquireBuildLockExcludes(t *testing.T) {
 	lockTestDir(t)
 
-	release1, err := AcquireBuildLock(t.Context())
+	release1, err := acquireBuildLock(t.Context())
 	require.NoError(t, err)
 	locked := util.PathExists(buildLockPath())
 
@@ -41,7 +41,7 @@ func TestAcquireBuildLockExcludes(t *testing.T) {
 	var second atomic.Bool
 	done := make(chan error, 1)
 	go func() {
-		release2, err2 := AcquireBuildLock(ctx)
+		release2, err2 := acquireBuildLock(ctx)
 		if err2 == nil {
 			second.Store(true)
 			release2()
@@ -68,7 +68,7 @@ func TestAcquireBuildLockExcludes(t *testing.T) {
 func TestAcquireBuildLockCancellable(t *testing.T) {
 	lockTestDir(t)
 
-	release, err := AcquireBuildLock(t.Context())
+	release, err := acquireBuildLock(t.Context())
 	require.NoError(t, err)
 	defer release()
 
@@ -76,14 +76,14 @@ func TestAcquireBuildLockCancellable(t *testing.T) {
 	// this is what Ctrl-C during the wait resolves to.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*buildLockRetryInterval)
 	defer cancel()
-	_, err = AcquireBuildLock(ctx)
+	_, err = acquireBuildLock(ctx)
 	require.Error(t, err)
 }
 
 func TestAcquireBuildLockRemovesFileOnRelease(t *testing.T) {
 	lockTestDir(t)
 
-	release, err := AcquireBuildLock(t.Context())
+	release, err := acquireBuildLock(t.Context())
 	require.NoError(t, err)
 	lockedWhileHeld := util.PathExists(buildLockPath())
 
@@ -105,7 +105,7 @@ func TestAcquireBuildLockLeftoverFileDoesNotBlock(t *testing.T) {
 	// deadline far shorter than anything a real contender would produce.
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	release, err := AcquireBuildLock(ctx)
+	release, err := acquireBuildLock(ctx)
 	require.NoError(t, err, "a leftover lock file must not block acquisition")
 
 	release()
@@ -143,7 +143,7 @@ func TestAcquireBuildLockMissingWorkDirIsNoop(t *testing.T) {
 	// A work dir that was never created has no module state to protect:
 	// acquisition must not invent directories just to place a lock file —
 	// `otelc cleanup` on a never-set-up tree stays a true no-op.
-	release, err := AcquireBuildLock(t.Context())
+	release, err := acquireBuildLock(t.Context())
 	require.NoError(t, err)
 	release()
 	assert.False(t, util.PathExists(missing), "no-op acquisition must not create the work dir")

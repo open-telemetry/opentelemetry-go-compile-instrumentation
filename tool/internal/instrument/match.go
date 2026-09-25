@@ -14,7 +14,7 @@ import (
 
 // load loads the matched rules from the build temp directory.
 // TODO: Shared memory across all sub-processes is possible
-func (ip *InstrumentPhase) load() ([]*rule.InstRuleSet, error) {
+func (ip *instrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	f := util.GetMatchedRuleFile()
 	content, err := os.ReadFile(f)
 	if os.IsNotExist(err) {
@@ -36,7 +36,7 @@ func (ip *InstrumentPhase) load() ([]*rule.InstRuleSet, error) {
 }
 
 // match matches the rules with the compile command.
-func (ip *InstrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rule.InstRuleSet {
+func (ip *instrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rule.InstRuleSet {
 	// One package can only be matched with one rule set, so it's safe to return
 	// the first matched rule set.
 	importPath := util.FindFlagValue(args, "-p")

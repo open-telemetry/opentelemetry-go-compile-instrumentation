@@ -13,17 +13,29 @@ import (
 	"log"
 	"log/slog"
 
-	_ "go.opentelemetry.io/otelc/test/shared/testdb"
+	"go.opentelemetry.io/otelc/test/shared/testdb"
 )
 
 var (
 	driverName = flag.String("driver", "testdb", "The database driver name")
 	dsn        = flag.String("dsn", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", "The data source name")
-	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, prepare, all")
+	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-fail, prepare, opendb, all")
 )
 
 func main() {
 	flag.Parse()
+
+	if *op == "opendb" {
+		// Exercises sql.OpenDB's driver.Connector path (hook_opendb), as
+		// opposed to sql.Open's driver-name-string path exercised by every
+		// other op: the connector wraps the registered "mysql" test driver
+		// without going through sql.Open's driverName argument at all.
+		db := sql.OpenDB(testdb.NewConnector(*dsn))
+		defer db.Close()
+		doPing(context.Background(), db)
+		slog.Info("database operations completed successfully")
+		return
+	}
 
 	db, err := sql.Open(*driverName, *dsn)
 	if err != nil {
@@ -42,6 +54,16 @@ func main() {
 		doQuery(ctx, db)
 	case "tx":
 		doTx(ctx, db)
+	case "tx-fail":
+		// Use a dedicated db connection with the fail-tx driver.
+		// The outer 'db' uses the default driver, so we open a new one here.
+		db.Close()
+		failDB, err := sql.Open("testdb-fail", *dsn)
+		if err != nil {
+			log.Fatalf("failed to open fail-tx database: %v", err)
+		}
+		defer failDB.Close()
+		doTxFail(ctx, failDB)
 	case "prepare":
 		doPrepare(ctx, db)
 	case "all":
@@ -121,4 +143,15 @@ func doTx(ctx context.Context, db *sql.DB) {
 		log.Fatalf("failed to commit: %v", err)
 	}
 	slog.Info("transaction committed")
+}
+
+func doTxFail(ctx context.Context, db *sql.DB) {
+	// BeginTx is expected to fail with this driver; the span must still be
+	// ended and the error status must be recorded (fixes issue #835).
+	_, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		slog.Info("expected BeginTx failure recorded", "error", err)
+		return
+	}
+	log.Fatalf("expected BeginTx to fail but it succeeded")
 }

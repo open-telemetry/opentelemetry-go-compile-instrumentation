@@ -13,7 +13,9 @@ are instrumented automatically.
 
 For projects that need tighter control — because they use a narrow set of libraries, because
 they ship a library themselves, or because they need reproducible, auditable builds — you can
-declare exactly which instrumentations to enable. See [External Configuration Sources](external-configuration.md)
+declare exactly which instrumentations to enable either at **build-time** or at **run-time**.
+
+- **Build-Time Selection**: See [External Configuration Sources](external-configuration.md)
 for the `otel.instrumentation.go` mechanism that makes this explicit and source-controlled.
 
 ### Runtime selection without rebuilding
@@ -133,6 +135,9 @@ to propagate trace context:
   goroutine keeps returning the span that was already on top of the stack until it ends and the
   stack drops back below the limit. This is logged at debug level
   (`OTEL_LOG_LEVEL=debug`); increase the limit if legitimately deep call stacks trigger it.
+  Values must be positive integers; any other value (including `0`, negative numbers, and
+  non-numeric strings) is silently ignored and the default is used. For example,
+  `OTEL_GLS_MAX_SPANS=2000` allows up to 2000 live spans per goroutine.
 - `OTEL_GLS_MAX_SPAN_STATES` (default `100000`) bounds the shared span lifecycle map used across
   all goroutines to recognize when a span has ended. Once it is full, the oldest tracked entry is
   evicted (also logged at debug level) to make room for new spans. Eviction marks that entry
@@ -155,6 +160,11 @@ enabled.
 
 See [GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for the
 operational constraints.
+
+Run-time behavior can also be controlled using the two `otelc`-specific environment variables:
+
+- `OTEL_GO_ENABLED_INSTRUMENTATIONS`: Use this to specify which instrumentations should be enabled at run-time itself.
+- `OTEL_GO_DISABLED_INSTRUMENTATIONS`: Use this to specify which instrumentations to disable at run-time.
 
 ## Verifying Your Configuration
 

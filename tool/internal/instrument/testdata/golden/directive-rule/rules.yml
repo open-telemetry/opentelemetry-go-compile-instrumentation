@@ -5,5 +5,5 @@ span_directive:
   do:
     - expand_directive:
         template: |-
-          println("span start: {{FuncName}}")
-          defer println("span end: {{FuncName}}")
+          println("span start: {{.FuncName}}")
+          defer println("span end: {{.FuncName}}")

@@ -5,13 +5,13 @@ package main
 
 import _ "unsafe"
 
-func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+func Func1(p1 string, p2 int) (_unnamedRetVal_155800511_0 float32, _unnamedRetVal_155800511_1 error) {
 	//line <generated>:1
 	if OtelBeforeTrampoline_Func1155800511(&p1, &p2); false {
 	} else {
 		if false {
 		} else {
-			defer OtelAfterTrampoline_Func11412092233(&HookContextImpl1412092233{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal0, &_unnamedRetVal1}}, &_unnamedRetVal0, &_unnamedRetVal1)
+			defer OtelAfterTrampoline_Func11412092233(&HookContextImpl1412092233{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1}}, &_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1)
 		}
 	}
 	//line main.go:7:2

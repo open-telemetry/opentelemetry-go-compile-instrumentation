@@ -1,0 +1,13 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+type Calculator struct{}
+
+func (c *Calculator) Divide(a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
+	println("enter Divide recv=c arg0=a")
+	return a / b, nil
+}
+
+func main() { (&Calculator{}).Divide(4, 2) }

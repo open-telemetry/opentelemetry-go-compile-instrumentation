@@ -1,0 +1,9 @@
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          println("enter {{ .FuncName }} args={{ .FuncArgumentCount }} arg0={{ .FuncArgument 0 }} arg1={{ .FuncArgument 1 }}")
+          defer println("exit {{ .FuncName }} rets={{ .FuncReturnCount }} ret0={{ .FuncReturn 0 }} ret1={{ .FuncReturn 1 }}")

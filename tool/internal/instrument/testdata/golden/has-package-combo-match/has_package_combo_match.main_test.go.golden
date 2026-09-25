@@ -11,11 +11,11 @@ import _ "unsafe"
 // has_package: main_test]. This is the realistic discriminating case: the
 // external test package compiles at import path main_test, the internal test
 // package at main — has_package selects one when the glob matches both.
-func ExternalHelper() (_unnamedRetVal0 error) {
+func ExternalHelper() (_unnamedRetVal_2215449730_0 error) {
 	//line <generated>:1
 	if hookContext2215449730, _ := OtelBeforeTrampoline_ExternalHelper2215449730(); false {
 	} else {
-		defer OtelAfterTrampoline_ExternalHelper2215449730(hookContext2215449730, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_ExternalHelper2215449730(hookContext2215449730, &_unnamedRetVal_2215449730_0)
 	}
 	//line main_test.go:13:2
 	println("external helper")

@@ -36,6 +36,14 @@ const (
 	OtelcToolExe           = "otelc"
 )
 
+// IsRuleFile reports whether name identifies an otelc rule file.
+func IsRuleFile(name string) bool {
+	return name == "otelc.yml" ||
+		name == "otelc.yaml" ||
+		strings.HasSuffix(name, ".otelc.yml") ||
+		strings.HasSuffix(name, ".otelc.yaml")
+}
+
 func GetMatchedRuleFile() string {
 	const matchedRuleFile = "matched.json"
 	return GetBuildTemp(matchedRuleFile)

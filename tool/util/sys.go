@@ -58,7 +58,7 @@ func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
 
-func IsUnix() bool {
+func isUnix() bool {
 	return runtime.GOOS == "linux" || runtime.GOOS == "darwin"
 }
 

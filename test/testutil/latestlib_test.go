@@ -11,6 +11,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestInstrumentedTargets(t *testing.T) {
+	rulesRoot := t.TempDir()
+	ruleFiles := map[string]string{
+		"otelc.yaml":        "example.com/yaml",
+		"otelc.yml":         "example.com/yml",
+		"client.otelc.yaml": "example.com/prefixed-yaml",
+		"server.otelc.yml":  "example.com/prefixed-yml",
+	}
+
+	for filename, target := range ruleFiles {
+		content := "rule:\n  target: " + target + "\n  version: v1.0.0\n"
+		require.NoError(t, os.WriteFile(filepath.Join(rulesRoot, filename), []byte(content), 0o600))
+	}
+
+	// Unrelated YAML files are not otelc rule files and must be ignored.
+	require.NoError(t, os.WriteFile(filepath.Join(rulesRoot, "rules.yaml"), []byte("invalid: ["), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(rulesRoot, "rules.yml"), []byte("invalid: ["), 0o600))
+
+	targets := InstrumentedTargets(t, rulesRoot)
+	require.Len(t, targets, len(ruleFiles))
+	for _, target := range ruleFiles {
+		require.Equal(t, []string{"v1.0.0"}, targets[target])
+	}
+}
+
 func TestFindMatchingVersionRanges(t *testing.T) {
 	tests := []struct {
 		name        string

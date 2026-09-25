@@ -103,13 +103,13 @@ func TestAddDeps(t *testing.T) {
 			tmpDir := t.TempDir()
 			sp := newTestSetupPhase()
 
-			stateManager := NewStateManager()
-			ctx := ContextWithStateManager(t.Context(), stateManager)
+			stateManager := newStateManager()
+			ctx := contextWithStateManager(t.Context(), stateManager)
 
 			err := sp.addDeps(ctx, tt.matched, tmpDir, tt.packageName)
 			require.NoError(t, err)
 
-			runtimeFilePath := filepath.Join(tmpDir, OtelcRuntimeFile)
+			runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
 
 			if tt.goldenFile == "" {
 				assert.NoFileExists(t, runtimeFilePath)
