@@ -464,7 +464,7 @@ func TestBeforeGet_StoresChannel(t *testing.T) {
 	require.Equal(t, "orders", data.queue)
 }
 
-func TestBeforeShutdown_RemovesChannelMapEntries(t *testing.T) {
+func TestShutdown_RemovesChannelMapEntries(t *testing.T) {
 	setupTest(t)
 
 	ch := &amqp.Channel{}
@@ -476,7 +476,9 @@ func TestBeforeShutdown_RemovesChannelMapEntries(t *testing.T) {
 	require.True(t, publishParentsOK)
 	require.True(t, channelAcksOK)
 
-	BeforeShutdown(hooktest.NewMockHookContext(), ch, nil)
+	ictx := hooktest.NewMockHookContext()
+	BeforeShutdown(ictx, ch, nil)
+	AfterShutdown(ictx)
 
 	_, publishParentsOK = publishParents.Load(ch)
 	_, channelAcksOK = channelAcks.Load(ch)
@@ -484,30 +486,41 @@ func TestBeforeShutdown_RemovesChannelMapEntries(t *testing.T) {
 	require.False(t, channelAcksOK, "channelAcks must not hold a closed channel forever")
 }
 
-func TestBeforeShutdown_EndsSpansStillAwaitingAck(t *testing.T) {
+func TestShutdown_EndsSpansStillAwaitingAck(t *testing.T) {
 	sr := setupTest(t)
 
 	ch := &amqp.Channel{}
-	ictx := hooktest.NewMockHookContext()
-	ictx.SetData(&consumeData{ch: ch, queue: "orders", autoAck: false})
-	AfterGet(ictx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}, true, nil)
+	getCtx := hooktest.NewMockHookContext()
+	getCtx.SetData(&consumeData{ch: ch, queue: "orders", autoAck: false})
+	AfterGet(getCtx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}, true, nil)
 	require.Empty(t, sr.Ended(), "process span must stay open until acked or the channel closes")
 
-	BeforeShutdown(hooktest.NewMockHookContext(), ch, nil)
+	ictx := hooktest.NewMockHookContext()
+	BeforeShutdown(ictx, ch, nil)
+	AfterShutdown(ictx)
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1, "closing the channel must end spans left waiting on ack")
 	require.Equal(t, "orders process", spans[0].Name())
 }
 
-func TestBeforeShutdown_NilChannelIsNoop(t *testing.T) {
+func TestShutdown_NilChannelIsNoop(t *testing.T) {
 	setupTest(t)
 	require.NotPanics(t, func() {
-		BeforeShutdown(hooktest.NewMockHookContext(), nil, nil)
+		ictx := hooktest.NewMockHookContext()
+		BeforeShutdown(ictx, nil, nil)
+		AfterShutdown(ictx)
 	})
 }
 
-func TestBeforeShutdown_DoesNotAffectOtherChannels(t *testing.T) {
+func TestAfterShutdown_NoStashedChannelIsNoop(t *testing.T) {
+	setupTest(t)
+	require.NotPanics(t, func() {
+		AfterShutdown(hooktest.NewMockHookContext())
+	})
+}
+
+func TestShutdown_DoesNotAffectOtherChannels(t *testing.T) {
 	sr := setupTest(t)
 
 	closed := &amqp.Channel{}
@@ -518,9 +531,41 @@ func TestBeforeShutdown_DoesNotAffectOtherChannels(t *testing.T) {
 	ictx.SetData(&consumeData{ch: other, queue: "orders", autoAck: false})
 	AfterGet(ictx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}, true, nil)
 
-	BeforeShutdown(hooktest.NewMockHookContext(), closed, nil)
+	shutdownCtx := hooktest.NewMockHookContext()
+	BeforeShutdown(shutdownCtx, closed, nil)
+	AfterShutdown(shutdownCtx)
 
 	require.Empty(t, sr.Ended(), "closing an unrelated channel must not end other channels' spans")
 	_, ok := publishParents.Load(other)
 	require.True(t, ok, "closing an unrelated channel must not remove other channels' entries")
+}
+
+// TestShutdown_DeliveryDuringTeardownIsStillCleanedUp guards against the race
+// flagged in review: amqp091-go's Channel.Get selects on ch.rpc and ch.errors
+// concurrently, so a response already in flight when shutdown starts can
+// still complete successfully and call acksFor(ch) while shutdown is
+// tearing the channel down. If cleanup ran in the before hook, this delivery
+// would recreate the map entry right after it was deleted, leaking it again.
+// Running cleanup in the after hook, once shutdown has actually finished,
+// catches it regardless of when during teardown the delivery lands.
+func TestShutdown_DeliveryDuringTeardownIsStillCleanedUp(t *testing.T) {
+	sr := setupTest(t)
+	ch := &amqp.Channel{}
+
+	ictx := hooktest.NewMockHookContext()
+	BeforeShutdown(ictx, ch, nil)
+
+	// Simulates a Get response that was already in flight when shutdown
+	// began, landing partway through teardown.
+	getCtx := hooktest.NewMockHookContext()
+	getCtx.SetData(&consumeData{ch: ch, queue: "orders", autoAck: false})
+	AfterGet(getCtx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}, true, nil)
+
+	AfterShutdown(ictx)
+
+	_, publishParentsOK := publishParents.Load(ch)
+	_, channelAcksOK := channelAcks.Load(ch)
+	require.False(t, publishParentsOK, "a delivery racing with shutdown must not leave the channel in publishParents")
+	require.False(t, channelAcksOK, "a delivery racing with shutdown must not leave the channel in channelAcks")
+	require.Len(t, sr.Ended(), 1, "a delivery racing with shutdown must still have its span ended, not leaked")
 }
