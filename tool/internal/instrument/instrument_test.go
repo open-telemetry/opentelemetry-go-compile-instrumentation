@@ -190,10 +190,10 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		}
 
 		// Mirror the setup-phase package gate: a rule applies only when its
-		// target selects this fixture's import path (exact equality or glob
-		// match). This lets golden fixtures prove glob match vs no-match
-		// against realistic deep import paths, not just "main".
-		if !targetMatches(map[string]any{"target": instRule.GetTarget()}, p.importPath) {
+		// target selects this fixture's import path. This lets golden fixtures
+		// prove match vs no-match against realistic deep import paths, not
+		// just "main".
+		if !instRule.GetTarget().Matches(p.importPath, nil) {
 			continue
 		}
 
@@ -315,22 +315,6 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 			"evaluate (%+v); extend fileFilterMatches to mirror setup.buildFile", def)
 		return false
 	}
-}
-
-// targetMatches reports whether a rule's target selects importPath, mirroring
-// setup-phase package selection: a glob target matches via MatchGlobTarget, an
-// exact target matches only on equality. A missing, non-string, or empty target
-// never matches, so an invalid fixture fails the golden test instead of silently
-// being applied.
-func targetMatches(props map[string]any, importPath string) bool {
-	target, ok := props["target"].(string)
-	if !ok || strings.TrimSpace(target) == "" {
-		return false
-	}
-	if rule.IsGlobTarget(target) {
-		return rule.MatchGlobTarget(target, importPath)
-	}
-	return target == importPath
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {

@@ -48,7 +48,7 @@ func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 }
 
 type targetRule struct {
-	target string
+	target *rule.Target
 	rule   rule.InstRule
 }
 
@@ -60,7 +60,7 @@ func (sp *setupPhase) matchGlobRules(
 	var matched []rule.InstRule
 	var seen map[rule.InstRule]bool
 	for _, gr := range globRules {
-		if !rule.MatchGlobTarget(gr.target, dep.ImportPath) {
+		if !gr.target.Matches(dep.ImportPath, sp.rootModulePaths) {
 			continue
 		}
 		if matched == nil {
@@ -76,7 +76,7 @@ func (sp *setupPhase) matchGlobRules(
 		}
 		seen[gr.rule] = true
 		matched = append(matched, gr.rule)
-		sp.Debug("Match glob target", "rule", gr.rule.GetName(), "target", gr.target, "dep", dep.ImportPath)
+		sp.Debug("Match target", "rule", gr.rule.GetName(), "target", gr.target.String(), "dep", dep.ImportPath)
 	}
 	if matched == nil {
 		return relevantRules
@@ -90,8 +90,9 @@ func (sp *setupPhase) matchGlobRules(
 // Rules reach this function through two paths:
 //   - exactRules is the rule index keyed by exact target import path. The fast
 //     path is a single map lookup on dep.ImportPath.
-//   - globRules are rules whose target uses glob syntax; each one's pattern is
-//     evaluated against dep.ImportPath because they cannot be pre-indexed by key.
+//   - globRules are rules whose target is anything but a single exact import
+//     path (a glob, $root, or a list); each one's target is evaluated against
+//     dep.ImportPath because it cannot be pre-indexed by key.
 func (sp *setupPhase) runMatch(
 	ctx context.Context,
 	dep *Dependency,
@@ -519,15 +520,20 @@ func (sp *setupPhase) matchDeps(
 		return nil, nil
 	}
 
-	// Split rules into two matching tiers. Exact-target rules are pre-indexed
-	// by import path so each dependency resolves them with one map lookup
-	// (unchanged fast path). Glob-target rules cannot be keyed, so they are
-	// kept in a flat slice and evaluated against every dependency's import path.
+	// Split rules into two matching tiers. Rules whose target is a single exact
+	// import path are pre-indexed so each dependency resolves them with one map
+	// lookup (unchanged fast path). Every other target (a glob, $root, or a
+	// list) cannot be keyed, so those rules are kept in a flat slice and
+	// evaluated against every dependency's import path.
 	exactRules := make(map[string][]rule.InstRule)
 	globRules := make([]targetRule, 0)
 	for _, r := range allRules {
 		target := r.GetTarget()
-		if rule.IsRootTarget(target) {
+		if path, ok := target.Exact(); ok {
+			exactRules[path] = append(exactRules[path], r)
+			continue
+		}
+		if target.UsesRoot() {
 			if len(sp.rootModulePaths) == 0 && len(sp.buildPackages) > 0 {
 				sp.rootModulePaths, err = rootModulePaths(ctx, sp.buildPackages)
 				if err != nil {
@@ -535,18 +541,11 @@ func (sp *setupPhase) matchDeps(
 				}
 			}
 			if len(sp.rootModulePaths) == 0 {
-				return nil, ex.Newf("rule %q uses target %q, but no root module was found", r.GetName(), target)
+				return nil, ex.Newf("rule %q uses target %q, but no root module was found",
+					r.GetName(), rule.TargetRoot)
 			}
-			for _, root := range sp.rootModulePaths {
-				globRules = append(globRules, targetRule{target: root + "/**", rule: r})
-			}
-			continue
 		}
-		if rule.IsGlobTarget(target) {
-			globRules = append(globRules, targetRule{target: target, rule: r})
-			continue
-		}
-		exactRules[target] = append(exactRules[target], r)
+		globRules = append(globRules, targetRule{target: target, rule: r})
 	}
 
 	// Match the default rules with the found dependencies

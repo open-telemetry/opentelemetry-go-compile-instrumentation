@@ -167,8 +167,8 @@ func generateOtelInstrumentationGo(imports map[string]bool, opts PinOptions) *ds
 }
 
 type yamlRule struct {
-	Target       string `yaml:"target"`
-	VersionRange string `yaml:"version"`
+	Target       rule.Target `yaml:"target"`
+	VersionRange string      `yaml:"version"`
 }
 
 func loadModuleRules(
@@ -211,7 +211,7 @@ func loadModuleRules(
 			if decodeErr := entry.Node.Decode(&r); decodeErr != nil {
 				return ex.Wrapf(decodeErr, "parsing rule %q in %s", entry.Name, path)
 			}
-			if r.Target != "" {
+			if !r.Target.IsZero() {
 				loaded[module] = append(loaded[module], r)
 			}
 		}
@@ -371,16 +371,15 @@ type instrumentationTargetMatch struct {
 }
 
 // instrumentationRuleMatchesDep reports whether r's target matches dep.
-// Root targets always pin the instrumentation module.
+// Targets that include $root always pin the instrumentation module; setup
+// matches them precisely later. Other targets are matched without the root
+// module paths, so an excluded $root excludes nothing here, which can only
+// pin a module that setup then leaves unused.
 func instrumentationRuleMatchesDep(dep *Dependency, r yamlRule) instrumentationTargetMatch {
-	switch {
-	case rule.IsRootTarget(r.Target):
+	if r.Target.IncludesRoot() {
 		return instrumentationTargetMatch{matched: true, isRoot: true}
-	case rule.IsGlobTarget(r.Target):
-		return instrumentationTargetMatch{matched: rule.MatchGlobTarget(r.Target, dep.ImportPath)}
-	default:
-		return instrumentationTargetMatch{matched: r.Target == dep.ImportPath}
 	}
+	return instrumentationTargetMatch{matched: r.Target.Matches(dep.ImportPath, nil)}
 }
 
 func recordUnresolvedSkip(

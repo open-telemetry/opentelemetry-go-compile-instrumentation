@@ -170,6 +170,37 @@ func TestFileRules(t *testing.T) {
 			wantErr: "not a valid glob pattern",
 		},
 		{
+			name:     "struct with target list",
+			content:  "rule:\n  target:\n    - example.com/pkg\n    - not: example.com/pkg/internal\n  struct: Server\n",
+			wantType: &InstStructRule{},
+		},
+		{
+			name:     "function call with target list",
+			content:  "rule:\n  target: [$root, main]\n  function_call: net/http.Get\n  replace: tracedGet({{ . }})\n",
+			wantType: &InstCallRule{},
+		},
+		{
+			name: "structured rule with target list",
+			content: "rule:\n  target:\n    - example.com/pkg/**\n    - not: example.com/pkg/mock\n" +
+				"  where:\n    func: Run\n  do:\n    - inject_code:\n        raw: _ = 0\n",
+			wantType: &InstRawRule{},
+		},
+		{
+			name:    "target list with only not entries",
+			content: "rule:\n  target:\n    - not: example.com/pkg\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "selects no package",
+		},
+		{
+			name:    "target list with an invalid entry",
+			content: "rule:\n  target:\n    - skip: example.com/pkg\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "must be a pattern or {not: pattern}",
+		},
+		{
+			name:    "target list with an invalid glob",
+			content: "rule:\n  target:\n    - example.com/pkg\n    - not: example.com/[pkg\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "not a valid glob pattern",
+		},
+		{
 			name:    "invalid version range",
 			content: "rule:\n  target: example.com/pkg\n  version: v1.0.0,\n  func: Run\n  raw: _ = 0\n",
 			wantErr: "non-empty start and end bounds",

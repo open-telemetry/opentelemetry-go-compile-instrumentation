@@ -15,14 +15,14 @@ func TestInstBaseRuleAccessors(t *testing.T) {
 	where := &WhereDef{Func: "Foo"}
 	base := &InstBaseRule{
 		Name:    "myrule",
-		Target:  "example.com/pkg",
+		Target:  NewTarget("example.com/pkg"),
 		Version: "v1.0.0,v2.0.0",
 		Where:   where,
 	}
 
 	assert.Equal(t, "myrule", base.String())
 	assert.Equal(t, "myrule", base.GetName())
-	assert.Equal(t, "example.com/pkg", base.GetTarget())
+	assert.Equal(t, "example.com/pkg", base.GetTarget().String())
 	assert.Equal(t, "v1.0.0,v2.0.0", base.GetVersion())
 	assert.Same(t, where, base.GetWhere())
 

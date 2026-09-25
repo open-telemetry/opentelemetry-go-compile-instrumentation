@@ -77,6 +77,6 @@ func (r *InstRawRule) validate() error {
 // target, version, func, and raw code — never of the rule's name.
 func (r *InstRawRule) Identity() string {
 	enc := func(s string) string { return strconv.Itoa(len(s)) + ":" + s }
-	parts := []string{enc(r.Target), enc(r.Version), enc(r.Func), enc(r.Recv), enc(r.Raw)}
+	parts := []string{enc(r.Target.String()), enc(r.Version), enc(r.Func), enc(r.Recv), enc(r.Raw)}
 	return util.CRC32(strings.Join(parts, ""))
 }
