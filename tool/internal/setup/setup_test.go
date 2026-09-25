@@ -766,6 +766,32 @@ func TestExtractBuildFlags(t *testing.T) {
 	}
 }
 
+func TestAddBuildFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "without change directory", args: []string{"."}, want: []string{"-work", "-toolexec=x", "."}},
+		{
+			name: "separate change directory",
+			args: []string{"-C", "app", "."},
+			want: []string{"-C", "app", "-work", "-toolexec=x", "."},
+		},
+		{
+			name: "joined change directory",
+			args: []string{"-C=app", "."},
+			want: []string{"-C=app", "-work", "-toolexec=x", "."},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, addBuildFlags(tt.args, "-work", "-toolexec=x"))
+		})
+	}
+}
+
 func TestIsSetup(t *testing.T) {
 	// isSetup is currently a stub that always reports false.
 	assert.False(t, isSetup())

@@ -8,6 +8,7 @@ package test
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -34,7 +35,6 @@ import (
 // Not parallel: this and TestInjectedDependenciesRespectBuildFlags build the
 // same application directory and would race on its .otelc-build.
 func TestInjectedDependenciesAreMatched(t *testing.T) {
-
 	const targetPkg = util.OtelcRoot + "/test/apps/injecteddeps/instrumentation/target"
 
 	testutil.Build(t, "", "injecteddeps", "go", "build", "-a")
@@ -77,7 +77,6 @@ func TestInjectedDependenciesAreMatched(t *testing.T) {
 // resolving the hook's closure without them sees a different set of files, and
 // a package that is genuinely in the build goes unmatched.
 func TestInjectedDependenciesRespectBuildFlags(t *testing.T) {
-
 	const extraPkg = util.OtelcRoot + "/test/apps/injecteddeps/instrumentation/extra"
 
 	testutil.Build(t, "", "injecteddeps", "go", "build", "-a", "-tags", "injectedtag")
@@ -102,4 +101,34 @@ func TestInjectedDependenciesRespectBuildFlags(t *testing.T) {
 
 	output := testutil.Run(t, "", "injecteddeps", nil)
 	assert.Contains(t, output, "extra=true")
+}
+
+func TestInjectedDependenciesRespectChangeDirectory(t *testing.T) {
+	otelc, err := testutil.OtelcPath()
+	require.NoError(t, err)
+
+	appsDir, err := filepath.Abs(filepath.Join("..", "apps"))
+	require.NoError(t, err)
+	appDir := filepath.Join(appsDir, "injecteddeps")
+	buildDir := filepath.Join(appsDir, util.BuildTempDir)
+	binary := filepath.Join(appDir, "injecteddeps")
+	if util.IsWindows() {
+		binary += ".exe"
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(binary)
+		_ = os.RemoveAll(buildDir)
+		_ = os.Remove(buildDir + ".lock")
+	})
+
+	cmd := exec.CommandContext(t.Context(), otelc, "go", "build", "-C", "injecteddeps", ".")
+	cmd.Dir = appsDir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	cmd = exec.CommandContext(t.Context(), binary)
+	cmd.Dir = appDir
+	out, err = cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+	assert.Contains(t, string(out), "injecteddeps: target.Instrumented=true")
 }

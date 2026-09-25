@@ -78,15 +78,53 @@ func TestHookPackagePaths(t *testing.T) {
 	})
 }
 
-// TestInjectedDepsSkipsKnownPackages pins the filtering half of injectedDeps
-// without loading any package: a hook path that is already in the build plan
-// contributes nothing, so no second matching pass is triggered for it.
+// TestInjectedDepsSkipsKnownPackages covers the empty-input guard: no hook
+// paths means no load is attempted at all.
 func TestInjectedDepsSkipsKnownPackages(t *testing.T) {
 	known := map[string]bool{"example.com/hooks": true}
 
-	deps, err := injectedDeps(t.Context(), nil, known, t.TempDir(), nil)
+	deps, err := injectedDeps(t.Context(), nil, known, nil)
 	require.NoError(t, err)
 	assert.Empty(t, deps)
+}
+
+// TestInjectedDepsSkipsAlreadyKnownDependency loads a real hook package whose
+// own path is already in known, and asserts it is left out of the result
+// while its not-yet-known dependency is still resolved and returned. This is
+// the load-then-filter path the nil-input case above cannot exercise.
+func TestInjectedDepsSkipsAlreadyKnownDependency(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/injecttest\n\ngo 1.24\n")
+	mustWriteFile(t, filepath.Join(dir, "hooks", "hooks.go"),
+		"package hooks\n\nimport _ \"example.com/injecttest/internal\"\n")
+	mustWriteFile(t, filepath.Join(dir, "internal", "internal.go"), "package internal\n")
+
+	known := map[string]bool{"example.com/injecttest/hooks": true}
+	deps, err := injectedDeps(
+		t.Context(), []string{"example.com/injecttest/hooks"}, known, []string{"-C", dir},
+	)
+	require.NoError(t, err)
+
+	require.Len(t, deps, 1)
+	assert.Equal(t, "example.com/injecttest/internal", deps[0].ImportPath)
+	assert.True(t, known["example.com/injecttest/internal"], "the resolved dependency must be marked known")
+}
+
+// TestInjectedDepsReturnsErrorOnPackageLoadFailure covers a packages.Load call
+// that returns a nil top-level error while still reporting a failure on one
+// of the loaded packages: walking past that would match rules against a
+// closure that is silently missing part of what the hook actually imports.
+func TestInjectedDepsReturnsErrorOnPackageLoadFailure(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/injecttest\n\ngo 1.24\n")
+	mustWriteFile(t, filepath.Join(dir, "broken", "broken.go"),
+		"package broken\n\nimport _ \"example.com/injecttest/missing\"\n")
+
+	_, err := injectedDeps(
+		t.Context(), []string{"example.com/injecttest/broken"}, map[string]bool{}, []string{"-C", dir},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "example.com/injecttest/missing")
 }
 
 // TestMatchInjectedDepsDegradesWhenLoadFails covers a closure that cannot be
@@ -95,12 +133,13 @@ func TestInjectedDepsSkipsKnownPackages(t *testing.T) {
 // build running on the plan otelc already has.
 func TestMatchInjectedDepsDegradesWhenLoadFails(t *testing.T) {
 	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+	missingDir := filepath.Join(t.TempDir(), "missing")
 
 	set := rule.NewInstRuleSet("example.com/svc")
 	set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/hooks"))
 
 	extra, err := sp.matchInjectedDeps(
-		t.Context(), []*rule.InstRuleSet{set}, nil, nil, injectionSource{dir: "/nonexistent-dir-xyz"},
+		t.Context(), []*rule.InstRuleSet{set}, nil, nil, []string{"-C", missingDir},
 	)
 	require.NoError(t, err, "an unresolvable closure must not fail an otherwise fine build")
 	assert.Empty(t, extra)
@@ -109,29 +148,31 @@ func TestMatchInjectedDepsDegradesWhenLoadFails(t *testing.T) {
 // Build-flag extraction itself is covered by the existing TestExtractBuildFlags
 // in setup_test.go; matchInjectedDeps now reuses that function directly.
 
-// TestRunInjectionPassesReportsNonConvergence covers the bound being reached.
-// Truncating quietly would reintroduce the very failure this whole pass exists
-// to remove: a rule that is never matched, on a green build.
-func TestRunInjectionPassesReportsNonConvergence(t *testing.T) {
+func TestRunInjectionPassesFollowsLongChain(t *testing.T) {
+	const chainLength = 6
 	n := 0
 	pass := injectionPass{
-		// Always reports a package never seen before, so the loop can never settle.
 		load: func(_ context.Context, _ []string, _ map[string]bool) ([]*Dependency, error) {
 			n++
+			if n > chainLength {
+				return nil, nil
+			}
 			return []*Dependency{{ImportPath: fmt.Sprintf("example.com/pkg%d", n)}}, nil
 		},
 		match: func(_ context.Context, _ []*Dependency) ([]*rule.InstRuleSet, error) {
 			set := rule.NewInstRuleSet("example.com/svc")
-			set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/hooks"))
+			set.AddFuncRule(
+				fakeSrcFile(fmt.Sprintf("%d.go", n)),
+				funcRuleWithPath("fn", fmt.Sprintf("example.com/hooks/%d", n)),
+			)
 			return []*rule.InstRuleSet{set}, nil
 		},
 	}
 
-	extra, converged, err := runInjectionPasses(t.Context(), nil, map[string]bool{}, 3, pass)
+	extra, err := runInjectionPasses(t.Context(), nil, map[string]bool{}, pass)
 	require.NoError(t, err)
-	assert.False(t, converged, "running out of passes must be reported, not passed over")
-	assert.Len(t, extra, 3, "every pass that ran still contributes its rule sets")
-	assert.Equal(t, 3, n, "the bound must cap the number of passes")
+	assert.Len(t, extra, chainLength)
+	assert.Equal(t, chainLength+1, n, "the pass after the last match must detect convergence")
 }
 
 func TestRunInjectionPassesConverges(t *testing.T) {
@@ -151,8 +192,7 @@ func TestRunInjectionPassesConverges(t *testing.T) {
 		},
 	}
 
-	extra, converged, err := runInjectionPasses(t.Context(), nil, map[string]bool{}, maxInjectionPasses, pass)
+	extra, err := runInjectionPasses(t.Context(), nil, map[string]bool{}, pass)
 	require.NoError(t, err)
-	assert.True(t, converged)
 	assert.Len(t, extra, 1)
 }
