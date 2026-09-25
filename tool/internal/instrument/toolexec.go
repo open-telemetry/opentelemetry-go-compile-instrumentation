@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/build"
 	"log/slog"
 	"maps"
 	"os"
@@ -29,6 +30,9 @@ import (
 
 type instrumentPhase struct {
 	logger *slog.Logger
+	// buildContext evaluates build constraints (GOOS, GOARCH, etc.) for file rules.
+	// If nil, defaults to &build.Default.
+	buildContext *build.Context
 	// The working directory during compilation
 	workDir string
 	// The importcfg configuration
@@ -73,6 +77,13 @@ func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, 
 func (ip *instrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg, args...) }
 func (ip *instrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *instrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
+
+func (ip *instrumentPhase) getBuildContext() *build.Context {
+	if ip.buildContext != nil {
+		return ip.buildContext
+	}
+	return &build.Default
+}
 
 // keepForDebug keeps the the file to .otelc-build directory for debugging
 func (ip *instrumentPhase) keepForDebug(name string) {
