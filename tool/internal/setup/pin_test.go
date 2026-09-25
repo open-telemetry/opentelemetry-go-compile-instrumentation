@@ -806,6 +806,47 @@ func TestPinLockedEmptyYAMLLeavesNoTemporaryState(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(tmp, toolFileCanonical))
 }
 
+func TestPinLockedProcessesYAMLAndUnconfiguredModules(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	yamlRoot := filepath.Join(tmp, "yaml-root")
+	unconfiguredRoot := filepath.Join(tmp, "unconfigured-root")
+	require.NoError(t, os.MkdirAll(yamlRoot, 0o755))
+	require.NoError(t, os.MkdirAll(unconfiguredRoot, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(yamlRoot, goModFileName),
+		[]byte("module example.com/yaml-root\n\ngo 1.25\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(yamlRoot, instrumentationYAMLCanonical),
+		[]byte("instrumentations: []\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(unconfiguredRoot, goModFileName),
+		[]byte("module example.com/unconfigured-root\n\ngo 1.25\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(unconfiguredRoot, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+
+	result, err := pinLocked(t.Context(), PinOptions{ModuleDirs: map[string]bool{
+		yamlRoot:         true,
+		unconfiguredRoot: true,
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, result.AllDeps)
+	require.NoFileExists(t, filepath.Join(yamlRoot, toolFileCanonical))
+	require.FileExists(t, filepath.Join(unconfiguredRoot, toolFileCanonical))
+}
+
 func TestAutoPinYAMLDoesNotModifyYAML(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, tmp)
