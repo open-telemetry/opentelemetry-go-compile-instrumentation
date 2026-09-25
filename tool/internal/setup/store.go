@@ -6,7 +6,6 @@ package setup
 import (
 	"context"
 	"encoding/json"
-	"maps"
 	"slices"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -17,8 +16,8 @@ import (
 
 // resolveRulePaths resolves the import paths referenced by function and file rules
 // to absolute filesystem paths.
-func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
-	dirs := slices.Sorted(maps.Keys(moduleDirs))
+func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
+	dirs := normalizeModuleDirs(moduleDirs)
 
 	var pending []string
 	for _, ruleset := range matched {
@@ -100,7 +99,7 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 
 // store stores the matched rules to the file
 // It's the pair of the InstrumentPhase.load
-func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs map[string]bool) error {
+func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
 	if err := resolveRulePaths(ctx, matched, moduleDirs); err != nil {
 		return ex.Wrapf(err, "resolving rule paths")
 	}
