@@ -114,8 +114,12 @@ amqp_hook_reject:
 # connection, server-initiated close, Connection.Close) tears channels down by
 # calling ch.shutdown directly, bypassing Close. Both paths converge here, and
 # shutdown is idempotent, so this is the one place that catches every teardown.
-# Without this, publishParents and channelAcks entries for a torn-down channel
-# are never removed, leaking the *Channel pointer forever.
+# Cleanup runs in the after hook, not before: shutdown closes every consumer's
+# delivery channel and marks the channel closed as part of its own body, so an
+# in-flight Get or delivery that could recreate a map entry has already failed
+# or drained by the time cleanup runs. Without this, publishParents and
+# channelAcks entries for a torn-down channel are never removed, leaking the
+# *Channel pointer forever.
 amqp_hook_shutdown:
   target: github.com/rabbitmq/amqp091-go
   version: v1.9.0
@@ -125,4 +129,5 @@ amqp_hook_shutdown:
   do:
     - inject_hooks:
         before: BeforeShutdown
+        after: AfterShutdown
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
