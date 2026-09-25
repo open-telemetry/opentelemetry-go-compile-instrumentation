@@ -31,7 +31,10 @@ func TestGRPCServerGRPCClient(t *testing.T) {
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", backPort))
 
 	// Send request to frontend via gRPC
-	conn, err := grpc.NewClient(fmt.Sprintf("127.0.0.1:%d", frontPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		fmt.Sprintf("127.0.0.1:%d", frontPort),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -51,7 +54,7 @@ func TestGRPCServerGRPCClient(t *testing.T) {
 	f.RequireSpansPerTrace(3)
 
 	grpcClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
-	
+
 	// Collect all grpc server spans manually since testutil.RequireSpans is undefined
 	var grpcServerSpans []ptrace.Span
 	for i := 0; i < f.Traces().ResourceSpans().Len(); i++ {
@@ -71,7 +74,7 @@ func TestGRPCServerGRPCClient(t *testing.T) {
 	// Find the frontend server span (it is the parent of the grpcClientSpan)
 	var frontendServerSpan ptrace.Span
 	var backendServerSpan ptrace.Span
-	
+
 	for _, span := range grpcServerSpans {
 		if span.SpanID() == grpcClientSpan.ParentSpanID() {
 			frontendServerSpan = span
@@ -86,6 +89,16 @@ func TestGRPCServerGRPCClient(t *testing.T) {
 	require.Equal(t, frontendServerSpan.TraceID(), grpcClientSpan.TraceID(), "trace ID mismatch")
 	require.Equal(t, frontendServerSpan.TraceID(), backendServerSpan.TraceID(), "trace ID mismatch")
 
-	require.Equal(t, frontendServerSpan.SpanID(), grpcClientSpan.ParentSpanID(), "gRPC client parent must be Frontend server")
-	require.Equal(t, grpcClientSpan.SpanID(), backendServerSpan.ParentSpanID(), "Backend server parent must be gRPC client")
+	require.Equal(
+		t,
+		frontendServerSpan.SpanID(),
+		grpcClientSpan.ParentSpanID(),
+		"gRPC client parent must be Frontend server",
+	)
+	require.Equal(
+		t,
+		grpcClientSpan.SpanID(),
+		backendServerSpan.ParentSpanID(),
+		"Backend server parent must be gRPC client",
+	)
 }

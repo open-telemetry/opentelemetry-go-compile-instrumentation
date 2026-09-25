@@ -17,9 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
-var (
-	endpoint = flag.String("endpoint", "http://localhost:8080", "DynamoDB endpoint URL")
-)
+var endpoint = flag.String("endpoint", "http://localhost:8080", "DynamoDB endpoint URL")
 
 func main() {
 	flag.Parse()
