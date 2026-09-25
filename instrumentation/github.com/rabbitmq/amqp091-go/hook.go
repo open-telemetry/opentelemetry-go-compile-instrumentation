@@ -369,6 +369,51 @@ func AfterReject(ictx hook.HookContext, err error) {
 	afterChannelSettle(ictx, err)
 }
 
+// -----------------------------------------------------------------------------
+// Channel lifecycle: (*Channel).shutdown
+// -----------------------------------------------------------------------------
+
+// BeforeShutdown stashes ch for AfterShutdown to clean up once shutdown has
+// actually finished.
+//
+// shutdown is hooked instead of Close because Close is not the only way a
+// channel goes away: Connection.shutdown (lost connection, server-initiated
+// close, or Connection.Close) tears every channel down by calling
+// ch.shutdown directly, bypassing Close entirely. Both paths converge on
+// shutdown, and it is idempotent (guarded by ch.destructor.Do), so hooking it
+// here covers every teardown path with no risk of running twice.
+func BeforeShutdown(ictx hook.HookContext, ch *amqp.Channel, _ *amqp.Error) {
+	if ch == nil {
+		return
+	}
+	ictx.SetData(ch)
+}
+
+// AfterShutdown ends any process spans still awaiting acknowledgement on ch
+// and drops ch's entries from publishParents and channelAcks. Without this,
+// a channel that is torn down leaves its *Channel pointer, and any still-open
+// spans it holds, reachable from these package-level maps forever.
+//
+// This runs after shutdown, not before: shutdown closes every consumer's
+// delivery channel and marks ch closed as part of its own body, so an
+// in-flight Get or delivery that could still call acksFor or
+// stashPublishParent has already failed or been drained by the time this
+// hook fires. Cleaning up beforehand left a window where such a call could
+// recreate the map entry immediately after this hook deleted it, leaking it
+// again under a channel-close race.
+func AfterShutdown(ictx hook.HookContext) {
+	ch, ok := ictx.GetData().(*amqp.Channel)
+	if !ok || ch == nil {
+		return
+	}
+	publishParents.Delete(ch)
+	if v, ok := channelAcks.LoadAndDelete(ch); ok {
+		if p, ok := v.(*pendingAcks); ok {
+			p.endAll()
+		}
+	}
+}
+
 func afterChannelSettle(ictx hook.HookContext, err error) {
 	call, ok := ictx.GetData().(*ackCall)
 	if !ok || call == nil {
