@@ -196,3 +196,10 @@ func VersionInRange(version, versionRange string) bool {
 	// Minimal version only? i.e. "v0.11.0"
 	return semver.Compare(version, versionRange) >= 0
 }
+
+// EscapePackagePath turns a package or module import path into a filesystem-safe
+// directory name for debug artifacts, e.g. "a/b.c" -> "a_b_c".
+func EscapePackagePath(s string) string {
+	s = strings.ReplaceAll(s, "/", "_")
+	return strings.ReplaceAll(s, ".", "_")
+}
