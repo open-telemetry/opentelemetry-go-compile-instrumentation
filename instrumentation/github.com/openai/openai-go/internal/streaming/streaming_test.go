@@ -545,7 +545,6 @@ func assertSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, 
 }
 
 func TestStreamingReader_ContentCapture(t *testing.T) {
-
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
@@ -645,7 +644,14 @@ func TestStreamingReader_CompletionContentCapture(t *testing.T) {
 	streamData := "data: {\"choices\":[{\"index\":0,\"text\":\"hello \"}]}\n\n" +
 		"data: {\"choices\":[{\"index\":0,\"text\":\"world\",\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
-	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpCompletion, true, ContentCaptureLimit)
+	reader := NewStreamingReader(
+		io.NopCloser(strings.NewReader(streamData)),
+		span,
+		time.Now(),
+		OpCompletion,
+		true,
+		ContentCaptureLimit,
+	)
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())
@@ -662,7 +668,14 @@ func TestStreamingReader_SeparatesChoiceContent(t *testing.T) {
 	_, span := tp.Tracer("test").Start(t.Context(), "multiple-choices")
 
 	streamData := "data: {\"choices\":[{\"index\":1,\"delta\":{\"content\":\"beta\"}},{\"index\":0,\"delta\":{\"content\":\"alpha\"}}]}\n\ndata: [DONE]\n\n"
-	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, true, ContentCaptureLimit)
+	reader := NewStreamingReader(
+		io.NopCloser(strings.NewReader(streamData)),
+		span,
+		time.Now(),
+		OpChat,
+		true,
+		ContentCaptureLimit,
+	)
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())
@@ -680,7 +693,14 @@ func TestStreamingReader_AbortedStreamRecordsError(t *testing.T) {
 	_, span := tp.Tracer("test").Start(t.Context(), "aborted-stream")
 
 	streamData := "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
-	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, false, ContentCaptureLimit)
+	reader := NewStreamingReader(
+		io.NopCloser(strings.NewReader(streamData)),
+		span,
+		time.Now(),
+		OpChat,
+		false,
+		ContentCaptureLimit,
+	)
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())
@@ -697,7 +717,14 @@ func TestStreamingReader_AbortedStreamRecordsContent(t *testing.T) {
 	_, span := tp.Tracer("test").Start(t.Context(), "aborted-stream-content")
 
 	streamData := "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
-	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, true, ContentCaptureLimit)
+	reader := NewStreamingReader(
+		io.NopCloser(strings.NewReader(streamData)),
+		span,
+		time.Now(),
+		OpChat,
+		true,
+		ContentCaptureLimit,
+	)
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())

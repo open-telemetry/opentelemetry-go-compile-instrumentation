@@ -48,7 +48,12 @@ func main() {
 	r := gin.New()
 	r.GET("/hello", func(c *gin.Context) {
 		// Create a request to the backend, explicitly passing the context for propagation
-		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", fmt.Sprintf("http://127.0.0.1:%d/api/backend", *backPort), nil)
+		req, err := http.NewRequestWithContext(
+			c.Request.Context(),
+			"GET",
+			fmt.Sprintf("http://127.0.0.1:%d/api/backend", *backPort),
+			nil,
+		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

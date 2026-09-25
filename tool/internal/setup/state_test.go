@@ -130,6 +130,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileCanonical),
+					filepath.Join(moduleDir, toolFileAlias),
 					filepath.Join(tmp, "go.work.sum"),
 				}
 			},
@@ -149,6 +150,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileCanonical),
+					filepath.Join(moduleDir, toolFileAlias),
 					filepath.Join(tmp, "go.work.sum"),
 				}
 			},
@@ -165,6 +167,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileCanonical),
+					filepath.Join(moduleDir, toolFileAlias),
 				}
 			},
 		},
@@ -190,6 +193,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileAlias),
+					filepath.Join(moduleDir, toolFileCanonical),
 				}
 			},
 		},
@@ -206,6 +210,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileCanonical),
+					filepath.Join(moduleDir, toolFileAlias),
 				}
 			},
 		},

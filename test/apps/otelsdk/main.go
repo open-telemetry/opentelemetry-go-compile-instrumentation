@@ -170,7 +170,8 @@ func evictionHandler(w http.ResponseWriter, r *http.Request) {
 		// span-c ended and was spliced out, so the local stack's tail is
 		// span-b, unless span-b was wrongly evicted alongside span-a.
 		survivor := trace.SpanFromContext(context.Background())
-		spanBSurvived := survivor.SpanContext().IsValid() && survivor.SpanContext().SpanID() == spanB.SpanContext().SpanID()
+		spanBSurvived := survivor.SpanContext().IsValid() &&
+			survivor.SpanContext().SpanID() == spanB.SpanContext().SpanID()
 		fmt.Printf("OTEL_SDK_EVICT: span-b survived=%t\n", spanBSurvived)
 		spanB.End()
 	}()

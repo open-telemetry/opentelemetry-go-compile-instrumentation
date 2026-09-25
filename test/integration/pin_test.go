@@ -64,6 +64,10 @@ func runPin(t *testing.T, workDir string, args ...string) (string, error) {
 
 	cmd := exec.CommandContext(t.Context(), otelc, append([]string{"pin"}, args...)...)
 	cmd.Dir = workDir
+	cmd.Env = os.Environ()
+	if os.Getenv("OTELC_SOURCE_ROOT") == "" {
+		cmd.Env = append(cmd.Env, "OTELC_SOURCE_ROOT="+filepath.Dir(otelc))
+	}
 
 	out, outErr := cmd.CombinedOutput()
 	if outErr != nil {

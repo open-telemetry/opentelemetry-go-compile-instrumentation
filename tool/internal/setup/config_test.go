@@ -88,6 +88,38 @@ func TestFindToolFile(t *testing.T) {
 	}
 }
 
+func TestFindInstrumentationYAMLFile(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		files []string
+		want  string
+		err   bool
+	}{
+		{name: "none"},
+		{name: "canonical", files: []string{instrumentationYAMLCanonical}, want: instrumentationYAMLCanonical},
+		{name: "alias", files: []string{instrumentationYAMLAlias}, want: instrumentationYAMLAlias},
+		{name: "both", files: []string{instrumentationYAMLCanonical, instrumentationYAMLAlias}, err: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, name := range tt.files {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o644))
+			}
+			got, err := findInstrumentationYAMLFile(dir)
+			if tt.err {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.want == "" {
+				require.Empty(t, got)
+			} else {
+				require.Equal(t, filepath.Join(dir, tt.want), got)
+			}
+		})
+	}
+}
+
 func TestResolveInstrumentationConfig(t *testing.T) {
 	type wantConfig struct {
 		tool  string
