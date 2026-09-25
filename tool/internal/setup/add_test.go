@@ -24,10 +24,11 @@ import (
 
 func TestAddDeps(t *testing.T) {
 	tests := []struct {
-		name        string
-		matched     []*rule.InstRuleSet
-		packageName string
-		goldenFile  string // Empty means no file should be generated
+		name              string
+		matched           []*rule.InstRuleSet
+		packageImportPath string
+		packageName       string
+		goldenFile        string // Empty means no file should be generated
 	}{
 		{
 			name:        "empty_matched_rules",
@@ -96,6 +97,41 @@ func TestAddDeps(t *testing.T) {
 			packageName: "mypkg",
 			goldenFile:  "non_main_package_name.otelc.runtime.go.golden",
 		},
+		{
+			name: "self_only_rules",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/local-hooks",
+					[]*rule.InstFuncRule{newTestFuncRule("example.com/local-hooks", "example.com/app")},
+					[]*rule.InstFileRule{newTestFileRule("example.com/local-hooks", "example.com/app")},
+				),
+			},
+			packageImportPath: "example.com/local-hooks",
+			packageName:       "hooks",
+			goldenFile:        "",
+		},
+		{
+			// The generated file is correct. The link still fails, because this package and
+			// the instrumented package both define the same hook linkname. See
+			// https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1361
+			name: "self_and_external_rules",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app",
+					[]*rule.InstFuncRule{
+						newTestFuncRule("example.com/local-hooks", "example.com/app"),
+						newTestFuncRule("example.com/external-hooks", "example.com/app"),
+					},
+					[]*rule.InstFileRule{
+						newTestFileRule("example.com/local-hooks", "example.com/app"),
+						newTestFileRule("example.com/external-file-hooks", "example.com/app"),
+					},
+				),
+			},
+			packageImportPath: "example.com/local-hooks",
+			packageName:       "hooks",
+			goldenFile:        "mixed_self_and_external.otelc.runtime.go.golden",
+		},
 	}
 
 	for _, tt := range tests {
@@ -106,13 +142,18 @@ func TestAddDeps(t *testing.T) {
 			stateManager := newStateManager()
 			ctx := contextWithStateManager(t.Context(), stateManager)
 
-			err := sp.addDeps(ctx, tt.matched, tmpDir, tt.packageName)
+			err := sp.addDeps(ctx, tt.matched, runtimePackage{
+				dir:        tmpDir,
+				importPath: tt.packageImportPath,
+				name:       tt.packageName,
+			})
 			require.NoError(t, err)
 
 			runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
 
 			if tt.goldenFile == "" {
 				assert.NoFileExists(t, runtimeFilePath)
+				assert.NotContains(t, stateManager.files, runtimeFilePath)
 				return
 			}
 
@@ -123,6 +164,9 @@ func TestAddDeps(t *testing.T) {
 			require.Contains(t, stateManager.files, runtimeFilePath)
 
 			actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+			if tt.packageImportPath != "" {
+				assert.NotContains(t, actualNorm, tt.packageImportPath)
+			}
 			golden.Assert(t, actualNorm, tt.goldenFile)
 		})
 	}
@@ -141,6 +185,40 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	invalidPath := filepath.Join(t.TempDir(), "nonexistent", "subdir")
 	sp := newTestSetupPhase()
 
-	err := sp.addDeps(t.Context(), matched, invalidPath, "main")
+	err := sp.addDeps(t.Context(), matched, runtimePackage{dir: invalidPath, name: "main"})
 	assert.Error(t, err)
+}
+
+// TestAddDepsRemovesStaleRuntimeFile covers two successive setups of one package.
+// The first setup generates a runtime file from an external rule. The second setup
+// matches only a self-referencing rule, so addDeps must delete the runtime file.
+// A stale runtime file keeps the old imports and linkname declarations active.
+func TestAddDepsRemovesStaleRuntimeFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp := newTestSetupPhase()
+	stateManager := newStateManager()
+	ctx := contextWithStateManager(t.Context(), stateManager)
+
+	pkg := runtimePackage{dir: tmpDir, importPath: "example.com/local-hooks", name: "hooks"}
+	runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
+
+	external := []*rule.InstRuleSet{
+		newTestRuleSet(
+			"example.com/app",
+			[]*rule.InstFuncRule{newTestFuncRule("example.com/external-hooks", "example.com/app")},
+			nil,
+		),
+	}
+	require.NoError(t, sp.addDeps(ctx, external, pkg))
+	require.FileExists(t, runtimeFilePath)
+
+	selfOnly := []*rule.InstRuleSet{
+		newTestRuleSet(
+			"example.com/app",
+			[]*rule.InstFuncRule{newTestFuncRule("example.com/local-hooks", "example.com/app")},
+			nil,
+		),
+	}
+	require.NoError(t, sp.addDeps(ctx, selfOnly, pkg))
+	assert.NoFileExists(t, runtimeFilePath)
 }
