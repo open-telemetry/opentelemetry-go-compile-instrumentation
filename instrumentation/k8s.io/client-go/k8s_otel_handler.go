@@ -91,16 +91,18 @@ func getSpanName(kind, action string) string {
 	return "k8s.informer.object." + action
 }
 
-// gvkCache caches the GroupVersionKind lookup for each object Go type. An
-// informer only ever watches a single Go type for its lifetime, and
-// scheme.Scheme.ObjectKinds is a reflection-based registry scan, expensive
-// to run on every event in what is otherwise the hottest path this
-// instrumentation has. The mapping from a Go type to its GVK is fixed once
-// the scheme registry is built at process startup and is never mutated
-// afterward, so caching it indefinitely, keyed by reflect.Type, is safe.
-// Both hits and misses are cached: an unregistered type produces the same
-// answer on every call, so caching the miss too avoids re-scanning (and
-// re-logging) for a type that will never resolve.
+// gvkCache caches the GroupVersionKind lookup for each typed object's Go
+// type. lookupGVK only ever stores into this cache for objects that don't
+// carry their own embedded GVK, i.e. genuinely typed objects like *corev1.Pod
+// rather than unstructured.Unstructured. For those, a Go type maps to exactly
+// one GVK for the lifetime of the process, since the scheme registry is built
+// once at startup and never mutated afterward, so caching indefinitely, keyed
+// by reflect.Type, is safe. scheme.Scheme.ObjectKinds is a reflection-based
+// registry scan, expensive to run on every event in what is otherwise the
+// hottest path this instrumentation has. Both hits and misses are cached: an
+// unregistered type produces the same answer on every call, so caching the
+// miss too avoids re-scanning (and re-logging) for a type that will never
+// resolve.
 var gvkCache sync.Map // reflect.Type -> gvkLookup
 
 type gvkLookup struct {
@@ -115,6 +117,25 @@ type gvkLookup struct {
 var objectKindsFunc = scheme.Scheme.ObjectKinds
 
 func lookupGVK(runtimeObj runtime.Object) gvkLookup {
+	// Objects from dynamic informers (unstructured.Unstructured) carry their
+	// own GVK, populated from the API server's response, and can be read
+	// directly without a scheme lookup. This isn't just an optimization: it's
+	// required for correctness. Every CRD watched through a dynamic informer
+	// shares the single Go type unstructured.Unstructured, so caching by
+	// reflect.Type below would collide two unrelated CRDs into the same cache
+	// entry. Reading the embedded GVK sidesteps the cache entirely for these,
+	// so no collision is possible.
+	if gvk := runtimeObj.GetObjectKind().GroupVersionKind(); !gvk.Empty() {
+		return gvkLookup{kind: gvk.Kind, apiVersion: gvk.GroupVersion().String(), ok: true}
+	}
+
+	// Typed objects (e.g. *corev1.Pod) don't carry their own GVK; it must
+	// come from the scheme registry, which is expensive enough to cache. The
+	// mapping from a Go type to its GVK is fixed once the scheme registry is
+	// built at process startup, so caching indefinitely, keyed by
+	// reflect.Type, is safe here specifically because everything reaching
+	// this point is a genuinely typed object, one Go type can only mean one
+	// GVK.
 	t := reflect.TypeOf(runtimeObj)
 	if cached, hit := gvkCache.Load(t); hit {
 		return cached.(gvkLookup) //nolint:forcetypeassert // only this function ever stores into gvkCache

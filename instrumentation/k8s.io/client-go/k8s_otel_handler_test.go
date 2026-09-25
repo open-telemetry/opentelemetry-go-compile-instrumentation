@@ -14,6 +14,7 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
@@ -404,4 +405,34 @@ type unregisteredObject struct {
 
 func (o *unregisteredObject) DeepCopyObject() runtime.Object {
 	return &unregisteredObject{TypeMeta: o.TypeMeta}
+}
+
+// TestLookupGVK_UnstructuredObjectsDoNotCollide guards against the bug the
+// reflect.Type cache would reintroduce: every CRD watched through a dynamic
+// informer shares the single Go type unstructured.Unstructured, so two
+// different CRDs must not be able to evict or shadow each other's GVK.
+func TestLookupGVK_UnstructuredObjectsDoNotCollide(t *testing.T) {
+	gvkCache = sync.Map{}
+	real := objectKindsFunc
+	stub, calls := stubObjectKinds(t, real)
+	objectKindsFunc = stub
+	t.Cleanup(func() { objectKindsFunc = real })
+
+	widget := &unstructured.Unstructured{}
+	widget.SetAPIVersion("example.com/v1")
+	widget.SetKind("Widget")
+
+	gadget := &unstructured.Unstructured{}
+	gadget.SetAPIVersion("example.com/v1")
+	gadget.SetKind("Gadget")
+
+	widgetResult := lookupGVK(widget)
+	gadgetResult := lookupGVK(gadget)
+	widgetAgain := lookupGVK(widget)
+
+	assert.Equal(t, 0, *calls, "unstructured objects carry their own GVK and must never hit the scheme scan")
+	assert.Equal(t, "Widget", widgetResult.kind)
+	assert.Equal(t, "Gadget", gadgetResult.kind)
+	assert.Equal(t, widgetResult, widgetAgain, "repeated lookups on the same object must agree")
+	assert.NotEqual(t, widgetResult, gadgetResult, "two different CRDs sharing the unstructured.Unstructured Go type must not collide")
 }
