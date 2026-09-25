@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -296,6 +297,14 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 		}
 	}
 
+	hasRequire := false
+	for _, req := range f.Require {
+		if req.Mod.Path == util.OtelcRoot {
+			hasRequire = true
+			break
+		}
+	}
+
 	if !hasTool {
 		if addErr := f.AddTool(util.OtelcToolCmdRoot); addErr != nil {
 			return false, ex.Wrap(addErr)
@@ -309,8 +318,10 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	}
 	modified = modified || added
 
+	// Dev builds can't pin their own version, so a missing require stays
+	// missing. Report it anyway so the caller tidies and go resolves one.
 	if !modified {
-		return false, nil
+		return !hasRequire, nil
 	}
 
 	if writeErr := writeGoMod(goModPath, f); writeErr != nil {
@@ -419,7 +430,16 @@ func emitUnresolvedSkipWarnings(
 	}
 }
 
+// skipTidyMessage is logged when updateToolFile skips go mod tidy. Tests match
+// on it, since a skipped tidy leaves nothing else behind.
+const skipTidyMessage = "tool file and go.mod unchanged, skipping go mod tidy"
+
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
+	original, readErr := os.ReadFile(toolFile)
+	if readErr != nil {
+		return ex.Wrap(readErr)
+	}
+
 	p := ast.NewAstParser()
 
 	f, parseErr := p.Parse(toolFile, parser.ParseComments)
@@ -435,13 +455,30 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	updateGenerateDirective(f, opts)
 
-	if writeErr := ast.WriteFileAtomic(toolFile, f); writeErr != nil {
-		return writeErr
+	updated, printErr := ast.PrintFile(f)
+	if printErr != nil {
+		return printErr
 	}
 
-	_, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
+	toolFileChanged := !bytes.Equal(updated, original)
+	if toolFileChanged {
+		if writeErr := util.WriteFileAtomic(toolFile, updated); writeErr != nil {
+			return writeErr
+		}
+	}
+
+	goModChanged, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
 	if ensureErr != nil {
 		return ensureErr
+	}
+
+	// go mod tidy loads the whole module graph, so only run it when otelc
+	// changed the tool file or go.mod, or go.sum is missing. Manual go.mod
+	// edits are left for the user to tidy.
+	goSumPath := filepath.Join(filepath.Dir(toolFile), "go.sum")
+	if !toolFileChanged && !goModChanged && util.PathExists(goSumPath) {
+		util.LoggerFromContext(ctx).DebugContext(ctx, skipTidyMessage, "toolFile", toolFile)
+		return nil
 	}
 
 	return runModTidy(ctx, filepath.Dir(toolFile))

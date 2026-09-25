@@ -119,16 +119,26 @@ func writeFile(w io.WriteCloser, filePath string, root *dst.File) (retErr error)
 	return nil
 }
 
-// WriteFileAtomic writes the AST to a file atomically.
-func WriteFileAtomic(filePath string, root *dst.File) error {
+// PrintFile renders the AST to source bytes without writing it anywhere.
+func PrintFile(root *dst.File) ([]byte, error) {
 	var buf bytes.Buffer
 
 	r := decorator.NewRestorer()
 	if err := r.Fprint(&buf, root); err != nil {
-		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
+		return nil, ex.Wrapf(err, "failed to restore AST")
 	}
 
-	return util.WriteFileAtomic(filePath, buf.Bytes())
+	return buf.Bytes(), nil
+}
+
+// WriteFileAtomic writes the AST to a file atomically.
+func WriteFileAtomic(filePath string, root *dst.File) error {
+	data, err := PrintFile(root)
+	if err != nil {
+		return ex.Wrapf(err, "for file %s", filePath)
+	}
+
+	return util.WriteFileAtomic(filePath, data)
 }
 
 // ParsePackageName parses only the package name from a file, skipping
