@@ -25,12 +25,21 @@ func TestHTTPServer(t *testing.T) {
 		scheme string
 		path   string
 		method string
+		status int
 	}{
 		{
 			name:   "basic",
 			scheme: "http",
 			path:   "/hello",
 			method: "GET",
+			status: http.StatusOK,
+		},
+		{
+			name:   "informational response",
+			scheme: "http",
+			path:   "/informational",
+			method: "GET",
+			status: http.StatusCreated,
 		},
 	}
 
@@ -46,7 +55,7 @@ func TestHTTPServer(t *testing.T) {
 			resp, err := http.Get(url)
 			require.NoError(t, err)
 			defer resp.Body.Close()
-			require.Equal(t, http.StatusOK, resp.StatusCode)
+			require.Equal(t, tc.status, resp.StatusCode)
 			f.WaitForSpans(1)
 
 			span := f.RequireSingleSpan()
@@ -56,7 +65,7 @@ func TestHTTPServer(t *testing.T) {
 				tc.method,
 				tc.path,
 				tc.scheme,
-				200,
+				int64(tc.status),
 				int64(port),
 				"127.0.0.1",
 				"Go-http-client/1.1",
