@@ -26,3 +26,7 @@ import (
 func isTransientLockFileError(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION)
 }
+
+func isAccessDeniedError(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED)
+}

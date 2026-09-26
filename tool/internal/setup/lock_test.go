@@ -5,11 +5,13 @@ package setup
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -147,4 +149,68 @@ func TestAcquireBuildLockMissingWorkDirIsNoop(t *testing.T) {
 	require.NoError(t, err)
 	release()
 	assert.False(t, util.PathExists(missing), "no-op acquisition must not create the work dir")
+}
+
+func TestAcquireBuildLockAccessDeniedRetryAndEscalate(t *testing.T) {
+	lockTestDir(t)
+
+	origTryAcquire := tryAcquireFn
+	origIsAccessDenied := isAccessDeniedErrorFn
+	defer func() {
+		tryAcquireFn = origTryAcquire
+		isAccessDeniedErrorFn = origIsAccessDenied
+	}()
+
+	isAccessDeniedErrorFn = func(err error) bool {
+		return err != nil && err.Error() == "simulated access denied"
+	}
+
+	simulatedErr := errors.New("simulated access denied")
+
+	// 1. Initial attempt fails with non-access-denied error: returns error immediately.
+	tryAcquireFn = func(string) (*flock.Flock, bool, bool, error) {
+		return nil, false, false, errors.New("fatal open error")
+	}
+	_, err := acquireBuildLock(t.Context())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fatal open error")
+
+	// 2. Initial attempt fails with access-denied, enters wait loop, retries and succeeds.
+	var attempts atomic.Int32
+	tryAcquireFn = func(path string) (*flock.Flock, bool, bool, error) {
+		n := attempts.Add(1)
+		if n <= 2 {
+			return nil, false, false, simulatedErr
+		}
+		return flock.New(path), true, false, nil
+	}
+	release, err := acquireBuildLock(t.Context())
+	require.NoError(t, err)
+	release()
+
+	// 3. Access denied error persists for maxConsecutiveAccessDenied: escalates and fails.
+	attempts.Store(0)
+	tryAcquireFn = func(string) (*flock.Flock, bool, bool, error) {
+		attempts.Add(1)
+		return nil, false, false, simulatedErr
+	}
+	_, err = acquireBuildLock(t.Context())
+	require.Error(t, err)
+	require.ErrorIs(t, err, simulatedErr)
+	assert.GreaterOrEqual(t, attempts.Load(), int32(maxConsecutiveAccessDenied))
+
+	// 4. Unexpected error in ticker loop: fails immediately.
+	attempts.Store(0)
+	tryAcquireFn = func(string) (*flock.Flock, bool, bool, error) {
+		n := attempts.Add(1)
+		if n == 1 {
+			// First attempt says not acquired (normal contention)
+			return nil, false, false, nil
+		}
+		// In ticker loop, unexpected fatal error
+		return nil, false, false, errors.New("unexpected error in loop")
+	}
+	_, err = acquireBuildLock(t.Context())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unexpected error in loop")
 }
