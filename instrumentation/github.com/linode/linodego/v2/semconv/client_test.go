@@ -114,6 +114,12 @@ func TestLinodegoErrorTraceAttrs(t *testing.T) {
 	assert.False(t, hasErrType)
 }
 
+func TestErrorType(t *testing.T) {
+	attr := ErrorType(errors.New("plain error"))
+	assert.Equal(t, attribute.Key("error.type"), attr.Key)
+	assert.Equal(t, "*errors.errorString", attr.Value.AsString())
+}
+
 func TestHTTPClientStatus(t *testing.T) {
 	sc, _ := HTTPClientStatus(200)
 	assert.Equal(t, codes.Unset, sc)

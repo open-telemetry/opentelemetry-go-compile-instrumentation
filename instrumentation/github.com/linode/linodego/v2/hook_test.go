@@ -189,6 +189,8 @@ func TestBeforeAfterDoRequest_PlainError(t *testing.T) {
 	got := spans[0]
 	assert.Equal(t, codes.Error, got.Status().Code)
 	assert.Equal(t, "network down", got.Status().Description)
+	attrs := attrMap(got.Attributes())
+	assert.Equal(t, "*errors.errorString", attrs["error.type"])
 }
 
 func TestBeforeDoRequest_Disabled(t *testing.T) {
@@ -252,6 +254,26 @@ func TestPublicMethodHooks_Error(t *testing.T) {
 	assert.Equal(t, codes.Error, got.Status().Code)
 	attrs := attrMap(got.Attributes())
 	assert.Equal(t, int64(404), attrs["http.response.status_code"])
+}
+
+func TestPublicMethodHooks_PlainError(t *testing.T) {
+	sr, _ := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(nil, parent, 123)
+	ictx.FuncName = "GetInstance"
+
+	BeforeAPICall2(ictx, nil, parent, 123)
+	AfterAPICall2(ictx, nil, errors.New("network down"))
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	got := spans[0]
+	assert.Equal(t, codes.Error, got.Status().Code)
+	assert.Equal(t, "network down", got.Status().Description)
+	attrs := attrMap(got.Attributes())
+	assert.Equal(t, "*errors.errorString", attrs["error.type"])
 }
 
 func TestPublicMethodHooks_Disabled(t *testing.T) {
