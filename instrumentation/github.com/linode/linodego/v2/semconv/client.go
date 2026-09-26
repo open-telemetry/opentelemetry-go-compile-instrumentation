@@ -132,6 +132,11 @@ func LinodegoErrorTraceAttrs(err error) []attribute.KeyValue {
 	return attrs
 }
 
+// ErrorType returns the error.type attribute for a given error.
+func ErrorType(err error) attribute.KeyValue {
+	return semconv.ErrorType(err)
+}
+
 // HTTPClientStatus returns the span status for an HTTP response status code.
 // Matches HTTP client semantic conventions: 4xx/5xx are Error; others Unset.
 func HTTPClientStatus(code int) (codes.Code, string) {
