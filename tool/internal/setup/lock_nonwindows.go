@@ -12,3 +12,7 @@ package setup
 func isTransientLockFileError(_ error) bool {
 	return false
 }
+
+func isAccessDeniedError(_ error) bool {
+	return false
+}

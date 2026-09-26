@@ -23,6 +23,13 @@ import (
 // the caller cancels (Ctrl-C), and a log line makes the waiting visible.
 const buildLockRetryInterval = 200 * time.Millisecond
 
+// maxConsecutiveAccessDenied is the number of consecutive access-denied errors
+// tolerated during build lock wait. On Windows, handle teardown during lock
+// release or background indexer/scanner open races can transiently return
+// ERROR_ACCESS_DENIED. Consecutive errors beyond this budget indicate a real
+// permission failure and are escalated.
+const maxConsecutiveAccessDenied = 5
+
 // buildLockPath returns the path of the advisory lock file.
 // The lock lives next to .otelc-build, not inside it: cleanup removes the
 // directory while holding the lock, and Windows cannot delete an open file.
@@ -64,6 +71,12 @@ func withBuildLock(ctx context.Context, fn func(context.Context) error) error {
 	return fn(contextWithBuildLockHeld(ctx))
 }
 
+//nolint:gochecknoglobals // test seam
+var (
+	tryAcquireFn          = tryAcquire
+	isAccessDeniedErrorFn = isAccessDeniedError
+)
+
 // acquireBuildLock serializes otelc invocations that mutate the module.
 // Without it, concurrent runs race on go.mod/go.sum and .otelc-build/ and
 // a second invocation can snapshot already-mutated state as its "original".
@@ -83,9 +96,13 @@ func acquireBuildLock(ctx context.Context) (func(), error) {
 		return func() {}, nil
 	}
 
-	lock, acquired, leftover, err := tryAcquire(path)
+	var consecutiveAccessDenied int
+	lock, acquired, leftover, err := tryAcquireFn(path)
 	if err != nil {
-		return nil, err
+		if !isAccessDeniedErrorFn(err) {
+			return nil, err
+		}
+		consecutiveAccessDenied++
 	}
 	if acquired {
 		if leftover {
@@ -108,10 +125,18 @@ func acquireBuildLock(ctx context.Context) (func(), error) {
 		case <-ctx.Done():
 			return nil, ex.Wrapf(ctx.Err(), "waiting for build lock %s", path)
 		case <-ticker.C:
-			lock, acquired, _, err = tryAcquire(path)
+			lock, acquired, _, err = tryAcquireFn(path)
 			if err != nil {
+				if isAccessDeniedErrorFn(err) && consecutiveAccessDenied < maxConsecutiveAccessDenied {
+					consecutiveAccessDenied++
+					logger.DebugContext(ctx,
+						"build lock attempt returned access denied; retrying",
+						"path", path, "attempt", consecutiveAccessDenied, "error", err)
+					continue
+				}
 				return nil, err
 			}
+			consecutiveAccessDenied = 0
 			if acquired {
 				return releaseFunc(ctx, lock), nil
 			}

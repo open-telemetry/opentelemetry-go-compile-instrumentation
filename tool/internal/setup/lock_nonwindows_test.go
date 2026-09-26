@@ -24,6 +24,11 @@ func TestIsTransientLockFileError(t *testing.T) {
 	require.False(t, isTransientLockFileError(nil))
 }
 
+func TestIsAccessDeniedError(t *testing.T) {
+	require.False(t, isAccessDeniedError(fs.ErrPermission))
+	require.False(t, isAccessDeniedError(nil))
+}
+
 func TestTryAcquireStaleLockCleanup(t *testing.T) {
 	lockTestDir(t)
 	tmpDir := t.TempDir()

@@ -23,3 +23,11 @@ func TestIsTransientLockFileError(t *testing.T) {
 	require.False(t, isTransientLockFileError(fs.ErrPermission))
 	require.False(t, isTransientLockFileError(nil))
 }
+
+func TestIsAccessDeniedError(t *testing.T) {
+	denied := &fs.PathError{Op: "open", Path: "x", Err: windows.ERROR_ACCESS_DENIED}
+	require.True(t, isAccessDeniedError(denied))
+
+	require.False(t, isAccessDeniedError(windows.ERROR_SHARING_VIOLATION))
+	require.False(t, isAccessDeniedError(nil))
+}
