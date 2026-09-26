@@ -9,8 +9,11 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/signal"
+	"runtime"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,11 +52,47 @@ func (p *recordingProcessor) Shutdown(context.Context) error                { p.
 // runShutdownHandler drives handleShutdownSignal inline with a SIGTERM already
 // queued, exercising the flush path without delivering a real signal to the test
 // process. Reaching the return proves the handler neither exits nor re-raises.
+// isolateFromGlobalSignalHandler deregisters the process-wide handler that
+// Initialize installs, if an earlier test in this binary triggered it (for
+// example through SetupOTelSDK). Tests run in random order, so without this
+// that handler can also receive the real signal a test delivers and re-raise
+// it after the test's cleanups have deregistered every other channel, which
+// terminates the test binary.
+func isolateFromGlobalSignalHandler(t *testing.T) {
+	t.Helper()
+	if shutdownSigCh != nil {
+		signal.Stop(shutdownSigCh)
+	}
+}
+
 func runShutdownHandler(t *testing.T) {
 	t.Helper()
+	isolateFromGlobalSignalHandler(t)
+
+	// handleShutdownSignal re-raises the signal it consumed. Register a channel
+	// for it so the re-raise is delivered here rather than reaching the OS
+	// default disposition, which would terminate the test binary.
+	absorbCh := make(chan os.Signal, 1)
+	signal.Notify(absorbCh, shutdownSignals()...)
+	t.Cleanup(func() { signal.Stop(absorbCh) })
+
 	sigCh := make(chan os.Signal, 1)
 	sigCh <- syscall.SIGTERM
 	handleShutdownSignal(sigCh)
+
+	if runtime.GOOS == "windows" {
+		// os.Process.Signal cannot deliver SIGTERM on Windows, so there is no
+		// re-raised signal to drain.
+		return
+	}
+
+	// Drain the re-raised signal while absorbCh is still registered. Leaving it
+	// pending would let it terminate the binary once the cleanup above runs.
+	select {
+	case <-absorbCh:
+	case <-time.After(time.Second):
+		t.Fatal("handleShutdownSignal did not re-raise the signal")
+	}
 }
 
 func TestHandleShutdownSignalFlushesProviders(t *testing.T) {
@@ -81,6 +120,52 @@ func TestHandleShutdownSignalLogsFlushError(t *testing.T) {
 
 	assert.Contains(t, buf.String(), "shutdown failed",
 		"flush errors should be logged during shutdown")
+}
+
+func TestHandleShutdownSignalPreservesHostSignalHandler(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGTERM is not delivered to a process on Windows")
+	}
+	restoreProviders(t)
+	isolateFromGlobalSignalHandler(t)
+
+	// hostCh stands in for a host application that registers its own channel
+	// for the shutdown signals. It must still receive the signal after
+	// handleShutdownSignal has run, and it keeps the re-raised signal from
+	// terminating the test process.
+	hostCh := make(chan os.Signal, 1)
+	signal.Notify(hostCh, shutdownSignals()...)
+	t.Cleanup(func() { signal.Stop(hostCh) })
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, shutdownSignals()...)
+	t.Cleanup(func() { signal.Stop(sigCh) })
+
+	proc, err := os.FindProcess(os.Getpid())
+	require.NoError(t, err)
+	require.NoError(t, proc.Signal(syscall.SIGTERM))
+
+	// The signal above reaches both registrations. Drain the host copy first so
+	// the receive below can only observe the signal handleShutdownSignal
+	// re-raises.
+	select {
+	case <-hostCh:
+	case <-time.After(time.Second):
+		t.Fatal("host signal channel did not receive the original signal")
+	}
+
+	// This call blocks until the OS signal above reaches sigCh.
+	handleShutdownSignal(sigCh)
+
+	// Receiving again proves two things: handleShutdownSignal re-raised the
+	// signal, and it left the host registration intact. Draining the re-raised
+	// signal here also keeps it from reaching the OS default disposition, which
+	// would terminate this test binary once the cleanups deregister hostCh.
+	select {
+	case <-hostCh:
+	case <-time.After(time.Second):
+		t.Fatal("host signal channel did not receive the re-raised signal after handleShutdownSignal ran")
+	}
 }
 
 func TestLogLevel(t *testing.T) {
