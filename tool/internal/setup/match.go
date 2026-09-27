@@ -136,6 +136,10 @@ func (sp *setupPhase) runMatch(
 		filteredRules = append(filteredRules, r)
 	}
 
+if len(filteredRules) == 0 {
+		return set, nil
+	}
+
 	trees, err := parsePackageSources(ctx, dep)
 	if err != nil {
 		return nil, err
