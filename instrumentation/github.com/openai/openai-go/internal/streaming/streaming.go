@@ -226,6 +226,9 @@ func (r *StreamingReader) finalize(flush bool, err error) {
 		r.span.SetStatus(codes.Error, "stream aborted")
 		if hardErr {
 			r.span.RecordError(err)
+			// Set error.type to the Go error type name, matching the HTTP
+			// middleware behaviour (see middleware.go: otelsemconv.ErrorType).
+			r.span.SetAttributes(errorTypeKey.String(errorTypeName(err)))
 		}
 	}
 	r.span.SetAttributes(

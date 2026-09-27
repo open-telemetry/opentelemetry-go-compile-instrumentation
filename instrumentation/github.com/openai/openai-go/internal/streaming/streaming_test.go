@@ -422,6 +422,7 @@ func TestStreamingReader_AbortOnReadError(t *testing.T) {
 	assert.Equal(t, "stream aborted", s.Status().Description)
 	require.Len(t, s.Events(), 1)
 	assert.Equal(t, "exception", s.Events()[0].Name)
+	assertAttribute(t, s.Attributes(), "error.type", "*errors.errorString")
 	assertSliceAttribute(t, s.Attributes(), "gen_ai.response.finish_reasons", []string{"error"})
 }
 
