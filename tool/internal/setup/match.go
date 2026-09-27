@@ -121,24 +121,39 @@ func (sp *setupPhase) runMatch(
 		return set, nil
 	}
 
-	// filter rules by version
-	filteredRules := make([]rule.InstRule, 0, len(relevantRules))
-	for _, r := range relevantRules {
+	filteredRules := sp.filterVersionMatchedRules(dep, relevantRules)
+	if len(filteredRules) == 0 {
+		return set, nil
+	}
+
+	return sp.matchFilteredRules(ctx, dep, filteredRules, set)
+}
+
+func (sp *setupPhase) filterVersionMatchedRules(
+	dep *Dependency,
+	rules []rule.InstRule,
+) []rule.InstRule {
+	filtered := make([]rule.InstRule, 0, len(rules))
+	for _, r := range rules {
 		if !matchVersion(dep, r) {
 			if unresolvedVersionSkip(dep.Version, r.GetVersion()) {
-				// Per-rule: setup drops individual rules, so each skip is actionable.
 				warnUnresolvedVersionSkip(sp.Warn, dep.ImportPath, r.GetVersion(),
 					"rule", r.GetName(),
 				)
 			}
 			continue
 		}
-		filteredRules = append(filteredRules, r)
+		filtered = append(filtered, r)
 	}
-	if len(filteredRules) == 0 {
-		return set, nil
-	}
+	return filtered
+}
 
+func (sp *setupPhase) matchFilteredRules(
+	ctx context.Context,
+	dep *Dependency,
+	filteredRules []rule.InstRule,
+	set *rule.InstRuleSet,
+) (*rule.InstRuleSet, error) {
 	// Separate file rules from rules that need precise matching
 	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
 	var trees []*dst.File
