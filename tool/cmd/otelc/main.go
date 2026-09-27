@@ -14,7 +14,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/profile"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -52,13 +51,13 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:    "profile-path",
-				Sources: cli.EnvVars(profile.EnvProfilePath),
+				Sources: cli.EnvVars(envProfilePath),
 				Usage:   "Directory for profiling output",
 				Hidden:  true,
 			},
 			&cli.StringSliceFlag{
 				Name:    "profile",
-				Sources: cli.EnvVars(profile.EnvEnabledProfiles),
+				Sources: cli.EnvVars(envEnabledProfiles),
 				Usage:   "Enable profiling: cpu, heap, trace (repeatable)",
 				Hidden:  true,
 			},
