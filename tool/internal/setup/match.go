@@ -135,19 +135,39 @@ func (sp *setupPhase) runMatch(
 		}
 		filteredRules = append(filteredRules, r)
 	}
-
-	trees, err := parsePackageSources(ctx, dep)
-	if err != nil {
-		return nil, err
+	if len(filteredRules) == 0 {
+		return set, nil
 	}
 
 	// Separate file rules from rules that need precise matching
 	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
+	var trees []*dst.File
+	treesParsed := false
+	parseTrees := func() error {
+		if treesParsed {
+			return nil
+		}
+		var err error
+		trees, err = parsePackageSources(ctx, dep)
+		if err != nil {
+			return err
+		}
+		treesParsed = true
+		return nil
+	}
 	for _, r := range filteredRules {
 		if fr, ok := r.(*rule.InstFileRule); ok {
-			applies, err := fileRuleApplies(ctx, dep, fr, trees)
-			if err != nil {
+			if fr.GetWhere() == nil {
+				set.AddFileRule(fr)
+				sp.Info("Match file rule", "rule", fr, "dep", dep)
+				continue
+			}
+			if err := parseTrees(); err != nil {
 				return nil, err
+			}
+			applies, matchErr := fileRuleApplies(dep, fr, trees)
+			if matchErr != nil {
+				return nil, matchErr
 			}
 			if !applies {
 				sp.Debug("Skip file rule, where clause did not match", "rule", fr, "dep", dep)
@@ -163,13 +183,22 @@ func (sp *setupPhase) runMatch(
 	}
 
 	if len(preciseRules) == 0 {
-		if !set.IsEmpty() && len(trees) > 0 {
-			set.SetPackageName(trees[0].Name.Name)
+		if !set.IsEmpty() && len(dep.Sources) > 0 {
+			name, err := ast.ParsePackageName(dep.Sources[0])
+			if err != nil {
+				return nil, err
+			}
+			set.SetPackageName(name)
 		}
 
 		return set, nil
 	}
 
+	if !treesParsed {
+		if err := parseTrees(); err != nil {
+			return nil, err
+		}
+	}
 	return sp.preciseMatchingWithTrees(ctx, dep, preciseRules, set, trees)
 }
 
@@ -191,7 +220,7 @@ func parsePackageSources(ctx context.Context, dep *Dependency) ([]*dst.File, err
 // fileRuleApplies reports whether a file rule's where clause holds for dep. The
 // rule adds one file to the whole package, so the clause is checked against the
 // package rather than each file on its own.
-func fileRuleApplies(ctx context.Context, dep *Dependency, fr *rule.InstFileRule, trees []*dst.File) (bool, error) {
+func fileRuleApplies(dep *Dependency, fr *rule.InstFileRule, trees []*dst.File) (bool, error) {
 	where := fr.GetWhere()
 	if where == nil {
 		return true, nil

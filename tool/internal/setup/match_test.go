@@ -1877,6 +1877,34 @@ func TestRunMatch_VersionFilteredOut(t *testing.T) {
 	require.True(t, set.IsEmpty())
 }
 
+func TestRunMatch_VersionFilteredOutSkipsParsing(t *testing.T) {
+	srcFile := writeGoSource(t, "invalid.go", "not valid go {{{")
+	dep := &Dependency{
+		ImportPath: "example.com/v",
+		Version:    "v1.0.0",
+		Sources:    []string{srcFile},
+	}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "vrule",
+			Target:  "example.com/v",
+			Version: "v2.0.0",
+		},
+		Func:   "Handler",
+		Before: "BeforeHandler",
+		Path:   "example.com/hooks",
+	}
+
+	set, err := newTestSetupPhase().runMatch(
+		t.Context(),
+		dep,
+		map[string][]rule.InstRule{"example.com/v": {funcRule}},
+		nil,
+	)
+	require.NoError(t, err)
+	require.True(t, set.IsEmpty())
+}
+
 func TestPreciseMatching_NoSources(t *testing.T) {
 	dep := &Dependency{ImportPath: "example.com/empty"}
 	funcRule := &rule.InstFuncRule{
