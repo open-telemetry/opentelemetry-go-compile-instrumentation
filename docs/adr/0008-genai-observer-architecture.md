@@ -1,6 +1,6 @@
-# 7. GenAI Observer Architecture
+# 8. GenAI Observer Architecture
 
-Date: 2026-08-24
+Date: 2026-08-24 (Updated: 2026-09-27)
 
 ## Status
 
@@ -58,17 +58,21 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+type TokenUsage struct {
+	PromptTokens             *int64
+	CompletionTokens         *int64
+	TotalTokens              *int64
+	CacheReadInputTokens     *int64
+	CacheCreationInputTokens *int64
+}
+
 type ExtractedData struct {
-	ID                       string
-	Model                    string
-	PromptTokens             int64
-	CompletionTokens         int64
-	TotalTokens              int64
-	CacheReadInputTokens     int64
-	CacheCreationInputTokens int64
-	FinishReasons            []string
-	ContentDelta             string
-	ProviderAttributes       []attribute.KeyValue
+	ID                 string
+	Model              string
+	Usage              TokenUsage
+	FinishReasons      []string
+	ContentDelta       string
+	ProviderAttributes []attribute.KeyValue
 }
 
 type ChunkExtractor func(rawFrame []byte) ExtractedData
@@ -83,11 +87,24 @@ func (o *Observer) ObserveHook(ctx context.Context, span trace.Span, data Extrac
 ### 2. HTTP SDK Instrumentation (OpenAI, Anthropic, Gemini)
 
 For SDKs operating over HTTP SSE transports:
-* **Frame Splitting vs Event Decoding:** `Observer.WrapStream()` delimits stream chunks on standard SSE message boundaries (`\n\n`). This makes the transport reader protocol-agnostic: OpenAI single-line payloads (`data: {...}\n\n`) and Anthropic multi-line frames (`event: message_start\ndata: {...}\n\n`) are both delivered intact to the provider's `ChunkExtractor`.
-* **State Machine Dispatch:** The `ChunkExtractor` decodes provider-specific fields (e.g. Anthropic's `event: message_start` input tokens vs `event: message_delta` output tokens) and normalizes them into `ExtractedData`.
-* **Prompt Cache Normalization:** Cache read and creation metrics are mapped directly into `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_creation.input_tokens` without double-counting (OpenAI includes cached tokens in `prompt_tokens`, while Anthropic reports them separately).
-* **Time-To-First-Token (TTFT):** Measured automatically upon the first non-empty content delta.
-* **Bounded Content Capture:** Enforces opt-in privacy constraints (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`) and strict 16 KiB / UTF-8 boundary truncation centrally, preventing memory accumulation leaks and malformed runes.
+
+* **Frame Splitting vs Event Decoding:** 
+  `Observer.WrapStream()` delimits stream chunks on standard SSE message boundaries per the W3C SSE specification (`\r\n\r\n`, `\n\n`, or `\r\r`). 
+  The internal stream scanner maintains a sliding window across multiple `io.Reader.Read` calls so that delimiter sequences split across read buffers or packet boundaries (e.g. `\r` at the end of read *N*, followed by `\n\r\n` at the start of read *N+1*) are correctly reconstituted without corrupting frames.
+  This makes the transport reader protocol-agnostic: OpenAI single-line payloads (`data: {...}\n\n`) and Anthropic multi-line frames (`event: message_start\ndata: {...}\n\n`) are both delivered intact to the provider's `ChunkExtractor`.
+
+* **Token Counting and Prompt Cache Normalization:**
+  - `TokenUsage` uses pointer fields (`*int64`) so the observer unambiguously distinguishes between an omitted/missing metric (`nil`) and an explicit count of zero (`0`).
+  - Providers delivering cumulative totals at stream completion (e.g., OpenAI's final chunk when `stream_options.include_usage = true`) update the span's final usage attributes directly.
+  - Providers emitting per-event deltas (e.g., Anthropic's `message_delta.usage.output_tokens`) are accumulated incrementally into running totals across the stream lifecycle.
+  - Prompt cache tokens (`CacheReadInputTokens`, `CacheCreationInputTokens`) are mapped directly to `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_creation.input_tokens`. Providers bundling cached tokens into total prompt tokens (e.g., OpenAI `prompt_tokens_details.cached_tokens`) are normalized so that semantic attribute reporting adheres strictly to the OpenTelemetry semantic conventions without double-counting.
+
+* **Parser Buffer Boundary & Graceful Degradation:**
+  Buffering required for SSE frame reconstruction is strictly separated from message content capture:
+  - **Parser Framing Buffer:** Capped at 64 KiB. If an upstream stream emits a pathological or un-delimited frame that exceeds 64 KiB, the observer drops observation for that frame, emits a warning trace event (`gen_ai.observation_degraded`), and falls back to unbuffered byte passthrough. Under no circumstances are application read bytes or errors modified or dropped.
+  - **Message Content Capture:** Bounded by default to 16 KiB (governed by opt-in `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`). Truncation is rune-boundary aware (using `utf8.DecodeLastRune`) to eliminate malformed UTF-8 replacement characters (`\uFFFD`) at chunk cutoffs.
+
+* **Time-To-First-Token (TTFT):** Measured automatically upon the first non-empty content delta or completion chunk.
 
 ### 3. Non-HTTP Hooks (LangChain & MCP)
 
