@@ -15,6 +15,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -110,9 +111,23 @@ const (
 )
 
 type StreamingReader struct {
-	reader          io.ReadCloser
-	teeReader       io.Reader
-	logBuffer       *bytes.Buffer
+	reader         io.ReadCloser
+	teeReader      io.Reader
+	logBuffer      *bytes.Buffer
+	span           trace.Span
+	op             OperationType
+	captureContent bool
+	contentLimit   int
+	done           atomic.Bool
+	onDone         func()
+
+	// mu guards every field below. A caller may Close from a goroutine other
+	// than the one blocked in Read, e.g. to abort a stuck stream on a
+	// timeout, the same way closing an *http.Response.Body unblocks a Read on
+	// it. Read and Close both parse and update this state, so without a lock
+	// that is a data race, and for capturedStreams a possible concurrent map
+	// read/write crash, not just a rare edge case.
+	mu              sync.Mutex
 	lineBuffer      *bytes.Buffer
 	start           time.Time
 	first           time.Time
@@ -122,14 +137,8 @@ type StreamingReader struct {
 	id              string
 	responseModel   string
 	reasons         []string
-	span            trace.Span
-	op              OperationType
-	captureContent  bool
-	contentLimit    int
-	done            atomic.Bool
-	completed       atomic.Bool
+	completed       bool
 	capturedStreams map[int]*contentAccumulator
-	onDone          func()
 }
 
 // errStreamAborted is reported when a stream is torn down (e.g. client
@@ -167,13 +176,22 @@ func NewStreamingReader(
 
 func (r *StreamingReader) Read(p []byte) (n int, err error) {
 	if r.teeReader == nil {
+		// lineBuffer is also touched by Close (see the lock below), so its
+		// creation has to be under the lock too, not just the later parsing.
+		r.mu.Lock()
 		r.logBuffer = &bytes.Buffer{}
 		r.lineBuffer = &bytes.Buffer{}
 		r.teeReader = io.TeeReader(r.reader, r.logBuffer)
+		r.mu.Unlock()
 	}
 
 	n, err = r.teeReader.Read(p)
 
+	// Lock only around the parsing state, not the blocking read above: Close
+	// may run on another goroutine while this call is still waiting on the
+	// network, and it must be able to finalize and unblock us without
+	// waiting on a Read that has not returned yet.
+	r.mu.Lock()
 	if n > 0 {
 		r.processSSELines()
 	}
@@ -184,23 +202,27 @@ func (r *StreamingReader) Read(p []byte) (n int, err error) {
 		// truncated mid-chunk fragment, so leave them unparsed rather than
 		r.finalize(err == io.EOF, err)
 	}
+	r.mu.Unlock()
 
 	return n, err
 }
 
 func (r *StreamingReader) Close() error {
+	r.mu.Lock()
 	if r.done.CompareAndSwap(false, true) {
 		// Flush the line buffer first: a caller that stops reading before
 		// EOF must still get the final chunk's attributes, and the flush may
 		// itself recover the finish reason or [DONE] marker. Then decide
 		// whether the stream completed or was torn down prematurely.
 		r.flushRemaining()
-		if r.completed.Load() || len(r.reasons) > 0 {
+		if r.completed || len(r.reasons) > 0 {
 			r.finalize(false, nil)
 		} else {
 			r.finalize(false, errStreamAborted)
 		}
 	}
+	r.mu.Unlock()
+
 	if r.reader != nil {
 		return r.reader.Close()
 	}
@@ -218,7 +240,7 @@ func (r *StreamingReader) finalize(flush bool, err error) {
 	// after the last chunk but before [DONE]): the host application will
 	// surface that error, so telemetry must record it too instead of
 	// reporting a successful 200.
-	completed := r.completed.Load() || len(r.reasons) > 0
+	completed := r.completed || len(r.reasons) > 0
 	hardErr := err != nil && !errors.Is(err, io.EOF)
 	if !completed || hardErr {
 		if len(r.reasons) == 0 {
@@ -300,7 +322,7 @@ func (r *StreamingReader) flushRemaining() {
 
 	payload, done := parseSSELine(line)
 	if done {
-		r.completed.Store(true)
+		r.completed = true
 		return
 	}
 	if payload == nil {
@@ -337,7 +359,7 @@ func (r *StreamingReader) processSSELines() {
 
 		payload, done := parseSSELine(line)
 		if done {
-			r.completed.Store(true)
+			r.completed = true
 			continue
 		}
 		if payload != nil {

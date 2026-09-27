@@ -6,8 +6,10 @@ package streaming
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -716,4 +718,81 @@ func TestStreamingReader_AbortedStreamRecordsContent(t *testing.T) {
 		}
 	}
 	require.True(t, found, "expected the partial content event on an aborted stream")
+}
+
+// indexedChunkReader hands back one small SSE chunk per Read call, each
+// naming a distinct choice index, so a concurrent reader keeps writing new
+// keys into capturedStreams across many Read calls instead of finishing in
+// one shot.
+type indexedChunkReader struct {
+	chunks [][]byte
+	next   int
+}
+
+func newIndexedChunkReader(n int) *indexedChunkReader {
+	chunks := make([][]byte, n)
+	for i := range chunks {
+		chunks[i] = fmt.Appendf(nil,
+			"data: {\"choices\":[{\"index\":%d,\"delta\":{\"content\":\"x\"}}]}\n\n", i)
+	}
+	return &indexedChunkReader{chunks: chunks}
+}
+
+func (r *indexedChunkReader) Read(p []byte) (int, error) {
+	if r.next >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.chunks[r.next])
+	r.next++
+	return n, nil
+}
+
+func (r *indexedChunkReader) Close() error { return nil }
+
+// A caller may Close a StreamingReader from a goroutine other than the one
+// blocked in Read, e.g. to abort a stuck stream on a timeout, the same way
+// closing an *http.Response.Body unblocks a concurrent Read on it. Read and
+// Close both parse and mutate the reader's internal state (lineBuffer,
+// reasons, capturedStreams, ...), so this must be race-free and must never
+// end the span more than once. Run under `go test -race` to verify; this
+// loops for a time budget rather than a fixed count because the offending
+// window is narrow and needs many attempts to reliably land.
+func TestStreamingReader_ConcurrentReadCloseIsRaceFree(t *testing.T) {
+	deadline := time.Now().Add(2 * time.Second)
+	attempts := 0
+	for time.Now().Before(deadline) {
+		attempts++
+
+		sr := tracetest.NewSpanRecorder()
+		tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+		_, span := tp.Tracer("test").Start(t.Context(), "concurrent-read-close")
+
+		body := newIndexedChunkReader(32)
+		reader := NewStreamingReader(body, span, time.Now(), OpChat, true, ContentCaptureLimit)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			buf := make([]byte, 8)
+			for {
+				if _, err := reader.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = reader.Close()
+		}()
+		close(start)
+		wg.Wait()
+
+		spans := sr.Ended()
+		require.Len(t, spans, 1, "span must end exactly once even when Close races a concurrent Read")
+	}
+	t.Logf("ran %d concurrent Read/Close iterations", attempts)
 }
