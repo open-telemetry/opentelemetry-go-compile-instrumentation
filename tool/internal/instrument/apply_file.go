@@ -61,6 +61,12 @@ func stripDirectiveIgnore(line string) string {
 	return strings.Join(plusLines, "\n")
 }
 
+type exprEval struct {
+	expr    constraint.Expr
+	isConst bool
+	val     bool
+}
+
 // removeIgnore walks a constraint.Expr AST and simplifies any "ignore" TagExpr
 // according to Boolean logic where "ignore" is treated as true (since otelc
 // intends to compile files that go build ignores). If the simplified expression
@@ -68,90 +74,90 @@ func stripDirectiveIgnore(line string) string {
 // If it evaluates to false, it returns a TagExpr for "ignore" so the target
 // platform filtering correctly rejects the file.
 func removeIgnore(expr constraint.Expr) constraint.Expr {
-	e, isConst, val := simplifyIgnore(expr)
-	if isConst {
-		if val {
+	res := simplifyIgnore(expr)
+	if res.isConst {
+		if res.val {
 			return nil
 		}
 		return &constraint.TagExpr{Tag: "ignore"}
 	}
-	return e
+	return res.expr
 }
 
 // simplifyIgnore evaluates a constraint.Expr assuming "ignore" is true.
-// It returns the simplified expression, a boolean indicating if it evaluates to
-// a constant, and the constant value if true.
-func simplifyIgnore(expr constraint.Expr) (simplified constraint.Expr, isConst bool, constVal bool) {
+// It returns an exprEval struct containing the simplified expression,
+// whether it evaluates to a constant, and the constant value.
+func simplifyIgnore(expr constraint.Expr) exprEval {
 	if expr == nil {
-		return nil, true, true
+		return exprEval{isConst: true, val: true}
 	}
 	switch e := expr.(type) {
 	case *constraint.TagExpr:
 		if e.Tag == "ignore" {
-			return nil, true, true
+			return exprEval{isConst: true, val: true}
 		}
-		return e, false, false
+		return exprEval{expr: e}
 	case *constraint.NotExpr:
-		sub, subConst, subVal := simplifyIgnore(e.X)
-		if subConst {
-			return nil, true, !subVal
+		sub := simplifyIgnore(e.X)
+		if sub.isConst {
+			return exprEval{isConst: true, val: !sub.val}
 		}
-		return &constraint.NotExpr{X: sub}, false, false
+		return exprEval{expr: &constraint.NotExpr{X: sub.expr}}
 	case *constraint.AndExpr:
 		return simplifyAnd(e)
 	case *constraint.OrExpr:
 		return simplifyOr(e)
 	default:
-		return expr, false, false
+		return exprEval{expr: expr}
 	}
 }
 
 // simplifyAnd applies Boolean short-circuit rules to an AndExpr, treating
 // "ignore" as true: true&&Y→Y, false&&Y→false, X&&true→X, X&&false→false.
-func simplifyAnd(e *constraint.AndExpr) (simplified constraint.Expr, isConst bool, constVal bool) {
-	x, xConst, xVal := simplifyIgnore(e.X)
-	y, yConst, yVal := simplifyIgnore(e.Y)
+func simplifyAnd(e *constraint.AndExpr) exprEval {
+	x := simplifyIgnore(e.X)
+	y := simplifyIgnore(e.Y)
 
-	if xConst && yConst {
-		return nil, true, xVal && yVal
+	if x.isConst && y.isConst {
+		return exprEval{isConst: true, val: x.val && y.val}
 	}
-	if xConst {
-		if xVal {
-			return y, false, false
+	if x.isConst {
+		if x.val {
+			return y
 		}
-		return nil, true, false
+		return exprEval{isConst: true, val: false}
 	}
-	if yConst {
-		if yVal {
-			return x, false, false
+	if y.isConst {
+		if y.val {
+			return x
 		}
-		return nil, true, false
+		return exprEval{isConst: true, val: false}
 	}
-	return &constraint.AndExpr{X: x, Y: y}, false, false
+	return exprEval{expr: &constraint.AndExpr{X: x.expr, Y: y.expr}}
 }
 
 // simplifyOr applies Boolean short-circuit rules to an OrExpr, treating
 // "ignore" as true: true||Y→true, false||Y→Y, X||true→true, X||false→X.
-func simplifyOr(e *constraint.OrExpr) (simplified constraint.Expr, isConst bool, constVal bool) {
-	x, xConst, xVal := simplifyIgnore(e.X)
-	y, yConst, yVal := simplifyIgnore(e.Y)
+func simplifyOr(e *constraint.OrExpr) exprEval {
+	x := simplifyIgnore(e.X)
+	y := simplifyIgnore(e.Y)
 
-	if xConst && yConst {
-		return nil, true, xVal || yVal
+	if x.isConst && y.isConst {
+		return exprEval{isConst: true, val: x.val || y.val}
 	}
-	if xConst {
-		if xVal {
-			return nil, true, true
+	if x.isConst {
+		if x.val {
+			return exprEval{isConst: true, val: true}
 		}
-		return y, false, false
+		return y
 	}
-	if yConst {
-		if yVal {
-			return nil, true, true
+	if y.isConst {
+		if y.val {
+			return exprEval{isConst: true, val: true}
 		}
-		return x, false, false
+		return x
 	}
-	return &constraint.OrExpr{X: x, Y: y}, false, false
+	return exprEval{expr: &constraint.OrExpr{X: x.expr, Y: y.expr}}
 }
 
 // applyFileRule introduces the new file to the target package at compile time.
