@@ -92,9 +92,9 @@ func simplifyIgnore(expr constraint.Expr) (simplified constraint.Expr, isConst b
 		}
 		return e, false, false
 	case *constraint.NotExpr:
-		sub, isConst, val := simplifyIgnore(e.X)
-		if isConst {
-			return nil, true, !val
+		sub, subConst, subVal := simplifyIgnore(e.X)
+		if subConst {
+			return nil, true, !subVal
 		}
 		return &constraint.NotExpr{X: sub}, false, false
 	case *constraint.AndExpr:
