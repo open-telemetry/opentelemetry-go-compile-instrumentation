@@ -1,4 +1,4 @@
-# 7. GenAI Instrumentation Aligned to the Semantic Conventions Registry
+# 8. GenAI Instrumentation Aligned to the Semantic Conventions Registry
 
 Date: 2026-09-19
 
