@@ -81,7 +81,7 @@ func removeIgnore(expr constraint.Expr) constraint.Expr {
 // simplifyIgnore evaluates a constraint.Expr assuming "ignore" is true.
 // It returns the simplified expression, a boolean indicating if it evaluates to
 // a constant, and the constant value if true.
-func simplifyIgnore(expr constraint.Expr) (constraint.Expr, bool, bool) {
+func simplifyIgnore(expr constraint.Expr) (simplified constraint.Expr, isConst bool, constVal bool) {
 	if expr == nil {
 		return nil, true, true
 	}
@@ -108,7 +108,7 @@ func simplifyIgnore(expr constraint.Expr) (constraint.Expr, bool, bool) {
 
 // simplifyAnd applies Boolean short-circuit rules to an AndExpr, treating
 // "ignore" as true: true&&Y→Y, false&&Y→false, X&&true→X, X&&false→false.
-func simplifyAnd(e *constraint.AndExpr) (constraint.Expr, bool, bool) {
+func simplifyAnd(e *constraint.AndExpr) (simplified constraint.Expr, isConst bool, constVal bool) {
 	x, xConst, xVal := simplifyIgnore(e.X)
 	y, yConst, yVal := simplifyIgnore(e.Y)
 
@@ -132,7 +132,7 @@ func simplifyAnd(e *constraint.AndExpr) (constraint.Expr, bool, bool) {
 
 // simplifyOr applies Boolean short-circuit rules to an OrExpr, treating
 // "ignore" as true: true||Y→true, false||Y→Y, X||true→true, X||false→X.
-func simplifyOr(e *constraint.OrExpr) (constraint.Expr, bool, bool) {
+func simplifyOr(e *constraint.OrExpr) (simplified constraint.Expr, isConst bool, constVal bool) {
 	x, xConst, xVal := simplifyIgnore(e.X)
 	y, yConst, yVal := simplifyIgnore(e.Y)
 
