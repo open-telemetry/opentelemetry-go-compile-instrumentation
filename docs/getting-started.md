@@ -132,6 +132,7 @@ The following libraries are automatically instrumented:
 | `github.com/rabbitmq/amqp091-go` | RabbitMQ messaging spans |
 | `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
 | `github.com/linode/linodego/v2` | HTTP client spans and metrics |
+| `github.com/stripe/stripe-go` (v81/v82) | Stripe API client spans and metrics (net/http RoundTrip spans become children when both are enabled) |
 | `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | Trace/span ID log correlation |
 | `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
 | `github.com/olivere/elastic/v7` | Elasticsearch DB spans |
