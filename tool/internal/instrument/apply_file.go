@@ -61,54 +61,97 @@ func stripDirectiveIgnore(line string) string {
 	return strings.Join(plusLines, "\n")
 }
 
-// removeIgnore walks a constraint.Expr AST and prunes any "ignore" TagExpr,
-// returning the simplified constraint.Expr. If the expression contains only
-// the "ignore" tag (or becomes empty), removeIgnore returns nil.
+// removeIgnore walks a constraint.Expr AST and simplifies any "ignore" TagExpr
+// according to Boolean logic where "ignore" is treated as true (since otelc
+// intends to compile files that go build ignores). If the simplified expression
+// evaluates entirely to true, removeIgnore returns nil (no constraint).
+// If it evaluates to false, it returns a TagExpr for "ignore" so the target
+// platform filtering correctly rejects the file.
 func removeIgnore(expr constraint.Expr) constraint.Expr {
+	e, isConst, val := simplifyIgnore(expr)
+	if isConst {
+		if val {
+			return nil
+		}
+		return &constraint.TagExpr{Tag: "ignore"}
+	}
+	return e
+}
+
+// simplifyIgnore evaluates a constraint.Expr assuming "ignore" is true.
+// It returns the simplified expression, a boolean indicating if it evaluates to
+// a constant, and the constant value if true.
+func simplifyIgnore(expr constraint.Expr) (constraint.Expr, bool, bool) {
 	if expr == nil {
-		return nil
+		return nil, true, true
 	}
 	switch e := expr.(type) {
 	case *constraint.TagExpr:
 		if e.Tag == "ignore" {
-			return nil
+			return nil, true, true
 		}
-		return e
+		return e, false, false
 	case *constraint.NotExpr:
-		sub := removeIgnore(e.X)
-		if sub == nil {
-			return nil
+		sub, isConst, val := simplifyIgnore(e.X)
+		if isConst {
+			return nil, true, !val
 		}
-		return &constraint.NotExpr{X: sub}
+		return &constraint.NotExpr{X: sub}, false, false
 	case *constraint.AndExpr:
-		x := removeIgnore(e.X)
-		y := removeIgnore(e.Y)
-		if x == nil && y == nil {
-			return nil
-		}
-		if x == nil {
-			return y
-		}
-		if y == nil {
-			return x
-		}
-		return &constraint.AndExpr{X: x, Y: y}
+		return simplifyAnd(e)
 	case *constraint.OrExpr:
-		x := removeIgnore(e.X)
-		y := removeIgnore(e.Y)
-		if x == nil && y == nil {
-			return nil
-		}
-		if x == nil {
-			return y
-		}
-		if y == nil {
-			return x
-		}
-		return &constraint.OrExpr{X: x, Y: y}
+		return simplifyOr(e)
 	default:
-		return expr
+		return expr, false, false
 	}
+}
+
+// simplifyAnd applies Boolean short-circuit rules to an AndExpr, treating
+// "ignore" as true: true&&Y→Y, false&&Y→false, X&&true→X, X&&false→false.
+func simplifyAnd(e *constraint.AndExpr) (constraint.Expr, bool, bool) {
+	x, xConst, xVal := simplifyIgnore(e.X)
+	y, yConst, yVal := simplifyIgnore(e.Y)
+
+	if xConst && yConst {
+		return nil, true, xVal && yVal
+	}
+	if xConst {
+		if xVal {
+			return y, false, false
+		}
+		return nil, true, false
+	}
+	if yConst {
+		if yVal {
+			return x, false, false
+		}
+		return nil, true, false
+	}
+	return &constraint.AndExpr{X: x, Y: y}, false, false
+}
+
+// simplifyOr applies Boolean short-circuit rules to an OrExpr, treating
+// "ignore" as true: true||Y→true, false||Y→Y, X||true→true, X||false→X.
+func simplifyOr(e *constraint.OrExpr) (constraint.Expr, bool, bool) {
+	x, xConst, xVal := simplifyIgnore(e.X)
+	y, yConst, yVal := simplifyIgnore(e.Y)
+
+	if xConst && yConst {
+		return nil, true, xVal || yVal
+	}
+	if xConst {
+		if xVal {
+			return nil, true, true
+		}
+		return y, false, false
+	}
+	if yConst {
+		if yVal {
+			return nil, true, true
+		}
+		return x, false, false
+	}
+	return &constraint.OrExpr{X: x, Y: y}, false, false
 }
 
 // applyFileRule introduces the new file to the target package at compile time.

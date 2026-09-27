@@ -188,7 +188,7 @@ package main
 
 func main() {}
 `,
-			expected: `// +build linux
+			expected: `
 
 package main
 
@@ -272,7 +272,37 @@ package main
 
 func main() {}
 `,
-			expected: `
+			expected: `//go:build ignore
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name: "evaluates !ignore || windows correctly",
+			input: `//go:build !ignore || windows
+
+package main
+
+func main() {}
+`,
+			expected: `//go:build windows
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name: "evaluates !ignore && windows correctly",
+			input: `//go:build !ignore && windows
+
+package main
+
+func main() {}
+`,
+			expected: `//go:build ignore
 
 package main
 
