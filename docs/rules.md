@@ -1152,22 +1152,22 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 #### Example 6: Wrapping a Method Call by Receiver Type
 
 ```yaml
-wrap_zap_info:
+wrap_query_context:
   target: myapp
   where:
-    method_call: go.uber.org/zap.*Logger.Info
+    method_call: database/sql.*DB.QueryContext
   do:
     - wrap_call:
-        replace: "tracedInfo({{ . }})"
+        replace: "tracedQuery({{ . }})"
 ```
 
 Gives:
 
 ```go
-func handle(logger *zap.Logger) {
-    logger.Info("request handled")
+func fetch(db *sql.DB, ctx context.Context) {
+    rows, err := db.QueryContext(ctx, "SELECT 1")
     // becomes:
-    tracedInfo(logger.Info("request handled"))
+    rows, err := tracedQuery(db.QueryContext(ctx, "SELECT 1"))
 }
 ```
 
