@@ -421,6 +421,25 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
+	// The hook packages the pass above selected get blank-imported into the
+	// application below, which compiles their dependencies too. The build plan
+	// never saw those, so match them now.
+	injected, err := sp.matchInjectedDeps(
+		ctx, matched, deps, moduleDirs, extractBuildFlags(args),
+	)
+	if err != nil {
+		return err
+	}
+	matched = append(matched, injected...)
+
+	// Reported here rather than per matching pass: an individual pass matching
+	// nothing is normal, it is the combined result that tells the user whether
+	// anything will be instrumented.
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
+	}
+
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, pkgs, matched); err != nil {
 		return err
@@ -561,6 +580,25 @@ func toolexecInsertArg(execPath string) (string, error) {
 	return insert, nil
 }
 
+// addBuildFlags inserts flags after a leading -C, which the go command requires
+// to be the first flag on its command line.
+func addBuildFlags(args []string, flags ...string) []string {
+	insertAt := 0
+	if len(args) > 0 {
+		switch {
+		case args[0] == "-C" && len(args) > 1:
+			insertAt = 2
+		case strings.HasPrefix(args[0], "-C="):
+			insertAt = 1
+		}
+	}
+
+	result := make([]string, 0, len(args)+len(flags))
+	result = append(result, args[:insertAt]...)
+	result = append(result, flags...)
+	return append(result, args[insertAt:]...)
+}
+
 // toolexecBuildArgs assembles the argv for the instrumented build: the
 // original go subcommand, -work, the -toolexec flag pointing at execPath, and
 // the caller's remaining arguments. Kept free of side effects so it can be
@@ -571,15 +609,11 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string,
 	if err != nil {
 		return nil, err
 	}
-	const additionalCount = 2
+	const additionalCount = 3
 	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
 	// Add "go build"
 	newArgs = append(newArgs, "go")
 	newArgs = append(newArgs, args[:1]...)
-	// Add "-work" to give us a chance to debug instrumented code if needed
-	newArgs = append(newArgs, "-work")
-	// Add "-toolexec=..."
-	newArgs = append(newArgs, insert)
 	// Add the rest
 	restArgs := args[1:]
 	if vendored {
@@ -593,6 +627,9 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string,
 			restArgs = append(restArgs, otelcRuntimePath)
 		}
 	}
+	// Add -work and -toolexec after a leading -C. The go command rejects -C
+	// when any other flag comes before it.
+	restArgs = addBuildFlags(restArgs, "-work", insert)
 	return append(newArgs, restArgs...), nil
 }
 
