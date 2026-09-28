@@ -492,19 +492,19 @@ func TestRenderRawCode(t *testing.T) {
 			name:     "FuncName",
 			src:      "package main\nfunc Foo() {}",
 			raw:      "call({{.FuncName}})",
-			expected: "call(Foo)",
+			expected: "call(" + dynamicIdentMarker + "Foo)",
 		},
 		{
 			name:     "FuncArgument",
 			src:      "package main\nfunc Foo(ctx int, name string) {}",
 			raw:      "use({{ .FuncArgument 0 }}, {{ .FuncArgument 1 }})",
-			expected: "use(ctx, name)",
+			expected: "use(" + dynamicIdentMarker + "ctx, " + dynamicIdentMarker + "name)",
 		},
 		{
 			name:     "FuncReturn",
 			src:      "package main\nfunc Foo() (int, error) { return 0, nil }",
 			raw:      "check({{ .FuncReturn 0 }}, {{ .FuncReturn 1 }})",
-			expected: "check(_unnamedRetVal_h1_0, _unnamedRetVal_h1_1)",
+			expected: "check(" + dynamicIdentMarker + "_unnamedRetVal_h1_0, " + dynamicIdentMarker + "_unnamedRetVal_h1_1)",
 		},
 		{
 			name:     "counts",
@@ -516,55 +516,55 @@ func TestRenderRawCode(t *testing.T) {
 			name:     "trim markers",
 			src:      "package main\nfunc Foo() {}",
 			raw:      "call({{- .FuncName -}})",
-			expected: "call(Foo)",
+			expected: "call(" + dynamicIdentMarker + "Foo)",
 		},
 		{
 			name:     "receiver excluded from FuncArgument",
 			src:      "package main\ntype T struct{}\nfunc (t T) Foo(a int) {}",
 			raw:      "use({{ .FuncArgument 0 }})",
-			expected: "use(a)",
+			expected: "use(" + dynamicIdentMarker + "a)",
 		},
 		{
 			name:     "Receiver",
 			src:      "package main\ntype T struct{}\nfunc (t T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }}, {{ .FuncArgument 0 }})",
-			expected: "use(t, a)",
+			expected: "use(" + dynamicIdentMarker + "t, " + dynamicIdentMarker + "a)",
 		},
 		{
 			name:     "blank receiver gets a synthetic name",
 			src:      "package main\ntype T struct{}\nfunc (_ T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }})",
-			expected: "use(_ignoredParam_h1_0)",
+			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
 		},
 		{
 			name:     "unnamed receiver gets a synthetic name",
 			src:      "package main\ntype T struct{}\nfunc (T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }})",
-			expected: "use(_ignoredParam_h1_0)",
+			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
 		},
 		{
 			name:     "unnamed parameter gets a synthetic name",
 			raw:      "use({{ .FuncArgument 0 }})",
 			src:      "package main\nfunc Foo(int) {}",
-			expected: "use(_ignoredParam_h1_0)",
+			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
 		},
 		{
 			name:     "blank parameter gets a synthetic name",
 			src:      "package main\nfunc Foo(_ int) {}",
 			raw:      "use({{ .FuncArgument 0 }})",
-			expected: "use(_ignoredParam_h1_0)",
+			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
 		},
 		{
 			name:     "blank named return gets a synthetic name",
 			src:      "package main\nfunc Foo() (_ int) { return 0 }",
 			raw:      "check({{ .FuncReturn 0 }})",
-			expected: "check(_ignoredRetVal_h1_0)",
+			expected: "check(" + dynamicIdentMarker + "_ignoredRetVal_h1_0)",
 		},
 		{
 			name:     "named return values are collected as-is",
 			src:      "package main\nfunc Foo() (a int, b error) { return 0, nil }",
 			raw:      "check({{ .FuncReturn 0 }}, {{ .FuncReturn 1 }})",
-			expected: "check(a, b)",
+			expected: "check(" + dynamicIdentMarker + "a, " + dynamicIdentMarker + "b)",
 		},
 		{
 			name:     "control-flow actions are available",
@@ -598,8 +598,8 @@ func TestRenderRawCode_HashSaltsSyntheticNames(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEqual(t, result1, result2, "different hashes must salt the synthetic name differently")
-	assert.Equal(t, "use(_ignoredParam_h1_0)", result1)
-	assert.Equal(t, "use(_ignoredParam_h2_0)", result2)
+	assert.Equal(t, "use("+dynamicIdentMarker+"_ignoredParam_h1_0)", result1)
+	assert.Equal(t, "use("+dynamicIdentMarker+"_ignoredParam_h2_0)", result2)
 }
 
 func TestRenderRawCode_UnknownTagFails(t *testing.T) {
@@ -723,6 +723,34 @@ func Run() {}
 	require.True(t, ok)
 	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
 	assert.Equal(t, "Println", sel.Sel.Name)
+}
+
+func TestInsertRaw_DoesNotRewriteArgumentNamedSameAsRuleAlias(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run(traced Sink) {}
+`)
+	funcDecl := findFuncDeclInFile(t, root, "Run")
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "call_method"},
+		Func:         "Run",
+		Raw:          `{{ .FuncArgument 0 }}.Method()`,
+	}
+	aliases := rawAliasContext{overrides: map[string]string{"traced": "f"}}
+
+	err := insertRaw(context.Background(), r, funcDecl, root, aliases)
+
+	require.NoError(t, err)
+	stmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", funcDecl.Body.List[0])
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "traced", ident.Name, "the argument's own name must not be treated as the rule's import qualifier")
+	assert.Equal(t, "Method", sel.Sel.Name)
 }
 
 func TestApplyRawRule_AliasOverrideUsesResolvedName(t *testing.T) {

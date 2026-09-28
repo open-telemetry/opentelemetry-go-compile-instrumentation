@@ -481,6 +481,38 @@ var X = 1
 	assert.Equal(t, 1, countImportSpecs(file), "must not add a redundant import for an alias the rewrite eliminated")
 }
 
+func TestWrapDeclValue_DoesNotRewriteSubstitutedInitializer(t *testing.T) {
+	spec := &dst.ValueSpec{
+		Names: []*dst.Ident{{Name: "X"}},
+		Values: []dst.Expr{
+			&dst.CallExpr{
+				Fun:  &dst.SelectorExpr{X: &dst.Ident{Name: "env"}, Sel: &dst.Ident{Name: "Getenv"}},
+				Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"HOME"`}},
+			},
+		},
+	}
+	aliasOverrides := map[string]string{"env": "system"}
+
+	err := wrapDeclValue(spec, "env.ExpandEnv({{ . }})", 0, aliasOverrides)
+
+	require.NoError(t, err)
+	require.Len(t, spec.Values, 1)
+	outer, ok := spec.Values[0].(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", spec.Values[0])
+	outerSel, ok := outer.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", outer.Fun)
+	assert.Equal(t, "system", outerSel.X.(*dst.Ident).Name, "the rule's own qualifier must move to the file's alias")
+	assert.Equal(t, "ExpandEnv", outerSel.Sel.Name)
+	require.Len(t, outer.Args, 1)
+	inner, ok := outer.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected substituted initializer to stay a *dst.CallExpr, got %T", outer.Args[0])
+	innerSel, ok := inner.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", inner.Fun)
+	assert.Equal(t, "env", innerSel.X.(*dst.Ident).Name,
+		"the substituted initializer must not be rewritten just because it shares the rule's alias name")
+	assert.Equal(t, "Getenv", innerSel.Sel.Name)
+}
+
 func TestApplyDeclRule_DotImportConflictSurfacesAsAnError(t *testing.T) {
 	file := parseTestFile(t, `package main
 
