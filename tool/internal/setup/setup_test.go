@@ -850,6 +850,169 @@ func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestGenerateRuntimePerPackageSkipsSelfImport covers the import path reaching
+// addDeps for each selected package. A hook package in the application module
+// is selected by `otelc go test ./...` and must not import itself.
+func TestGenerateRuntimePerPackageSkipsSelfImport(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	hooksDir := filepath.Join(appDir, "hooks")
+	mustWriteFile(t, filepath.Join(appDir, "answer.go"), "package app\n")
+	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+
+	pkgs := []*packages.Package{
+		{
+			PkgPath: "example.com/app",
+			Name:    "app",
+			GoFiles: []string{filepath.Join(appDir, "answer.go")},
+		},
+		{
+			PkgPath: "example.com/app/hooks",
+			Name:    "hooks",
+			GoFiles: []string{filepath.Join(hooksDir, "hooks.go")},
+		},
+	}
+
+	rset := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app")},
+		nil,
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	// The instrumented package still gets the hook import.
+	generated, err := os.ReadFile(filepath.Join(appDir, otelcRuntimeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(generated), `_ "example.com/app/hooks"`)
+
+	// The hook package has nothing left to import, so no file is written.
+	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
+}
+
+// TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets verifies that a hook
+// package does not import itself when the build names files instead of packages.
+// A file target loads one synthetic "command-line-arguments" package, so the real
+// import path must come from the module that owns the directory.
+func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
+	moduleDir := t.TempDir()
+	sp := newTestSetupPhase()
+	sp.buildFlags = []string{"-C", moduleDir}
+	hooksDir := filepath.Join(moduleDir, "hooks")
+	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "answer.go"), "package app\n")
+	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+
+	pkgs := []*packages.Package{
+		{
+			PkgPath: pkgload.CommandLineArgumentsPackage,
+			Name:    "hooks",
+			GoFiles: []string{filepath.Join(hooksDir, "hooks.go")},
+		},
+	}
+
+	rset := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app")},
+		nil,
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	// A skip for any other reason also writes no file, so assert the resolved path too.
+	assert.Equal(t, "example.com/app/hooks", sp.runtimeImportPath(t.Context(), pkgs[0], hooksDir))
+	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
+}
+
+// TestRuntimeImportPathFallsBackWhenResolveFails verifies that a file target
+// whose directory cannot be resolved to a real import path falls back to the
+// synthetic "command-line-arguments" path instead of failing the build.
+func TestRuntimeImportPathFallsBackWhenResolveFails(t *testing.T) {
+	sp := newTestSetupPhase()
+	pkg := &packages.Package{PkgPath: pkgload.CommandLineArgumentsPackage}
+	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
+
+	assert.Equal(t, pkgload.CommandLineArgumentsPackage, sp.runtimeImportPath(t.Context(), pkg, nonExistentDir))
+}
+
+// TestRuntimeImportPathUsesBuildFlags loads a file target the way setup does and
+// checks that the import path lookup sees the same build as getBuildPackages.
+func TestRuntimeImportPathUsesBuildFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		hooksSrc string
+		args     func(moduleDir string) []string
+		want     string
+	}{
+		{
+			name:     "build tags",
+			hooksSrc: "//go:build foo\n\npackage hooks\n",
+			args: func(moduleDir string) []string {
+				return []string{"-C", moduleDir, "-tags", "foo", "hooks/hooks.go"}
+			},
+			want: "example.com/app/hooks",
+		},
+		{
+			// A relative -modfile resolves against the -C directory of the build.
+			name:     "relative modfile",
+			hooksSrc: "package hooks\n",
+			args: func(moduleDir string) []string {
+				return []string{"-C", moduleDir, "-modfile", "alt.mod", "hooks/hooks.go"}
+			},
+			want: "example.com/alt/hooks",
+		},
+		{
+			name:     "symlinked build directory",
+			hooksSrc: "package hooks\n",
+			args: func(moduleDir string) []string {
+				link := filepath.Join(t.TempDir(), "link")
+				if err := os.Symlink(moduleDir, link); err != nil {
+					t.Skipf("cannot create symlink: %v", err)
+				}
+				return []string{"-C", link, "hooks/hooks.go"}
+			},
+			want: "example.com/app/hooks",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			moduleDir := t.TempDir()
+			mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+			mustWriteFile(t, filepath.Join(moduleDir, "alt.mod"), "module example.com/alt\n\ngo 1.25.0\n")
+			mustWriteFile(t, filepath.Join(moduleDir, "hooks", "hooks.go"), tt.hooksSrc)
+
+			args := tt.args(moduleDir)
+			pkgs, err := getBuildPackages(t.Context(), args)
+			require.NoError(t, err)
+			require.Len(t, pkgs, 1)
+
+			sp := newTestSetupPhase()
+			sp.buildFlags = extractBuildFlags(args)
+			assert.Equal(t, tt.want, sp.runtimeImportPath(t.Context(), pkgs[0], pkgload.PackageDir(pkgs[0])))
+		})
+	}
+}
+
+func TestResolveImportPath_Errors(t *testing.T) {
+	ctx := t.Context()
+
+	t.Run("directory does not exist", func(t *testing.T) {
+		nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
+		_, err := resolveImportPath(ctx, nil, nonExistentDir)
+		require.Error(t, err)
+	})
+
+	t.Run("build tags exclude all files", func(t *testing.T) {
+		dir := t.TempDir()
+		mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/excluded\n\ngo 1.25.0\n")
+		mustWriteFile(t, filepath.Join(dir, "excluded.go"), "//go:build foo\n\npackage excluded\n")
+
+		_, err := resolveImportPath(ctx, []string{"-C", dir}, dir)
+		require.Error(t, err)
+	})
+}
+
 func TestGetBuildPackages_LoadErrors(t *testing.T) {
 	ctx := t.Context()
 	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
