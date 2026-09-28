@@ -387,7 +387,7 @@ func checkPackageForMethodCalls(
 		Selections: make(map[*ast.SelectorExpr]*types.Selection),
 	}
 	tcfg := &types.Config{
-		Importer: newExportImporter(fset, cfg.PackageFile),
+		Importer: newExportImporter(fset, cfg.PackageFile, cfg.ImportMap),
 		Error:    func(error) {}, // Type errors are expected and ignored here.
 	}
 	_, _ = tcfg.Check(pkgPath, fset, astFiles, info)
@@ -463,16 +463,18 @@ func (pi *methodCallPackageInfo) methodReceiver(file string, line, col int) (str
 
 // exportImporter reads a dependency's own compiled .a file.
 type exportImporter struct {
-	fset     *token.FileSet
-	archives map[string]string // import path -> .a file, from -importcfg
-	packages map[string]*types.Package
+	fset      *token.FileSet
+	archives  map[string]string // import path -> .a file, from -importcfg
+	importMap map[string]string // source import path -> its resolved/vendored path, from -importcfg
+	packages  map[string]*types.Package
 }
 
-func newExportImporter(fset *token.FileSet, archives map[string]string) *exportImporter {
+func newExportImporter(fset *token.FileSet, archives, importMap map[string]string) *exportImporter {
 	return &exportImporter{
-		fset:     fset,
-		archives: archives,
-		packages: make(map[string]*types.Package),
+		fset:      fset,
+		archives:  archives,
+		importMap: importMap,
+		packages:  make(map[string]*types.Package),
 	}
 }
 
@@ -491,6 +493,11 @@ func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*type
 	}
 
 	archive, ok := imp.archives[path]
+	if !ok {
+		if mapped, mappedOk := imp.importMap[path]; mappedOk {
+			archive, ok = imp.archives[mapped]
+		}
+	}
 	if !ok {
 		return nil, ex.Newf("no archive for import path %q in -importcfg", path)
 	}

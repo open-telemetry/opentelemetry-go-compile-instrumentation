@@ -1602,7 +1602,7 @@ func buildFakeArchive(t *testing.T, dir, name string, data []byte) string {
 }
 
 func TestExportImporter_Import_Unsafe(t *testing.T) {
-	imp := newExportImporter(token.NewFileSet(), nil)
+	imp := newExportImporter(token.NewFileSet(), nil, nil)
 
 	pkg, err := imp.Import("unsafe")
 
@@ -1611,7 +1611,7 @@ func TestExportImporter_Import_Unsafe(t *testing.T) {
 }
 
 func TestExportImporter_ImportFrom_MissingArchive(t *testing.T) {
-	imp := newExportImporter(token.NewFileSet(), nil)
+	imp := newExportImporter(token.NewFileSet(), nil, nil)
 
 	_, err := imp.ImportFrom("example.com/missing", "", 0)
 
@@ -1623,7 +1623,7 @@ func TestExportImporter_ImportFrom_OpenArchiveError(t *testing.T) {
 	dir := t.TempDir()
 	imp := newExportImporter(token.NewFileSet(), map[string]string{
 		"example.com/gone": filepath.Join(dir, "does-not-exist.a"),
-	})
+	}, nil)
 
 	_, err := imp.ImportFrom("example.com/gone", "", 0)
 
@@ -1634,7 +1634,7 @@ func TestExportImporter_ImportFrom_OpenArchiveError(t *testing.T) {
 func TestExportImporter_ImportFrom_NewReaderError(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempGoFile(t, dir, "notanarchive.a", "not an archive at all")
-	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path})
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path}, nil)
 
 	_, err := imp.ImportFrom("example.com/bad", "", 0)
 
@@ -1645,7 +1645,7 @@ func TestExportImporter_ImportFrom_NewReaderError(t *testing.T) {
 func TestExportImporter_ImportFrom_DecodeError(t *testing.T) {
 	dir := t.TempDir()
 	path := buildFakeArchive(t, dir, "bad.a", []byte("Z"))
-	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path})
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path}, nil)
 
 	_, err := imp.ImportFrom("example.com/bad", "", 0)
 
@@ -1663,7 +1663,7 @@ func TestExportImporter_ImportFrom_SuccessAndCache(t *testing.T) {
 	require.NoError(t, gcexportdata.Write(&data, fset, pkg))
 
 	path := buildFakeArchive(t, dir, "fake.a", data.Bytes())
-	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/fake": path})
+	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/fake": path}, nil)
 
 	got, err := imp.ImportFrom("example.com/fake", "", 0)
 	require.NoError(t, err)
@@ -1675,4 +1675,26 @@ func TestExportImporter_ImportFrom_SuccessAndCache(t *testing.T) {
 	got2, err := imp.ImportFrom("example.com/fake", "", 0)
 	require.NoError(t, err, "a cached complete package must not be re-read from disk")
 	assert.Same(t, got, got2)
+}
+
+func TestExportImporter_ImportFrom_ImportMapFallback(t *testing.T) {
+	dir := t.TempDir()
+
+	fset := token.NewFileSet()
+	pkg := types.NewPackage("vendor/golang.org/x/net/http2/hpack", "hpack")
+	pkg.MarkComplete()
+	var data bytes.Buffer
+	require.NoError(t, gcexportdata.Write(&data, fset, pkg))
+
+	path := buildFakeArchive(t, dir, "hpack.a", data.Bytes())
+	imp := newExportImporter(
+		token.NewFileSet(),
+		map[string]string{"vendor/golang.org/x/net/http2/hpack": path},
+		map[string]string{"golang.org/x/net/http2/hpack": "vendor/golang.org/x/net/http2/hpack"},
+	)
+
+	got, err := imp.ImportFrom("golang.org/x/net/http2/hpack", "", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "vendor/golang.org/x/net/http2/hpack", got.Path())
+	assert.True(t, got.Complete())
 }
