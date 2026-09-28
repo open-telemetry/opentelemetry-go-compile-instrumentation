@@ -48,7 +48,7 @@ func TestCollectPackageNames_EmptyInput(t *testing.T) {
 }
 
 func TestLoadPackages(t *testing.T) {
-	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, "fmt")
+	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, false, "fmt")
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "fmt", pkgs[0].Name)
@@ -72,7 +72,7 @@ func TestLoadPackagesWithChangeDirectoryFlag(t *testing.T) {
 	t.Chdir(tmpDir)
 
 	for _, buildFlags := range [][]string{{"-C", "app"}, {"-C=app"}} {
-		pkgs, err := LoadPackages(t.Context(), packages.NeedName|packages.NeedModule, buildFlags, ".")
+		pkgs, err := LoadPackages(t.Context(), packages.NeedName|packages.NeedModule, buildFlags, false, ".")
 		require.NoError(t, err)
 		require.Len(t, pkgs, 1)
 		require.NotNil(t, pkgs[0].Module)

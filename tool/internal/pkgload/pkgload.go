@@ -24,6 +24,7 @@ func LoadPackages(
 	ctx context.Context,
 	mode packages.LoadMode,
 	buildFlags []string,
+	tests bool,
 	patterns ...string,
 ) ([]*packages.Package, error) {
 	dir, buildFlags, err := loadDirFromBuildFlags(buildFlags)
@@ -35,6 +36,7 @@ func LoadPackages(
 		Context:    ctx,
 		BuildFlags: buildFlags,
 		Dir:        dir,
+		Tests:      tests,
 	}
 	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
@@ -105,7 +107,7 @@ func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
 // ResolvePackageName returns the declared package name for an import path.
 // Panics via ex.Fatalf on failure (matches existing behavior during toolexec).
 func ResolvePackageName(ctx context.Context, importPath string, buildFlags ...string) string {
-	pkgs, err := LoadPackages(ctx, packages.NeedName, buildFlags, importPath)
+	pkgs, err := LoadPackages(ctx, packages.NeedName, buildFlags, false, importPath)
 	if err != nil {
 		ex.Fatalf("failed to resolve package name for %s: %v", importPath, err)
 	}
@@ -130,7 +132,7 @@ func ResolvePackageName(ctx context.Context, importPath string, buildFlags ...st
 // transitive dependencies.
 func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...string) (map[string]string, error) {
 	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
-	pkgs, err := LoadPackages(ctx, mode, buildFlags, importPath)
+	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPath)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +219,7 @@ func PackageDir(pkg *packages.Package) string {
 
 // ResolveModule returns the module for a given package directory.
 func ResolveModule(ctx context.Context, pkgDir string) (*packages.Module, error) {
-	pkgs, err := LoadPackages(ctx, packages.NeedModule, nil, pkgDir)
+	pkgs, err := LoadPackages(ctx, packages.NeedModule, nil, false, pkgDir)
 	if err != nil {
 		return nil, err
 	}

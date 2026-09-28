@@ -150,20 +150,22 @@ const (
 	flagJSON = "-json"
 )
 
-// GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
+// GetBuildPackages loads all packages from the otelc go build/install/test or otelc setup command arguments.
 // Returns a list of loaded packages. If no package patterns are found in args,
 // defaults to loading the current directory package.
-// The args parameter should be the go build/install command arguments (e.g., ["-a", "./cmd"]).
+// subcommand is the go subcommand args from "build", "install", or "test".
+// The args parameter should be the go build/install/test command arguments (e.g., ["-a", "./cmd"]).
 // Returns an error if package loading fails or if invalid patterns are provided.
 // For example:
 //   - args ["-a", "./cmd"] returns packages for "./cmd"
 //   - args ["-a", "cmd"] returns packages for the "cmd" package in the module
 //   - args ["-a", ".", "./cmd"] returns packages for both "." and "./cmd"
 //   - args [] returns packages for "."
-func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, error) {
+func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule |
 		packages.NeedImports | packages.NeedDeps
+	tests := subcommand == subcmdTest
 
 	pkgTargets, fileTargets, err := splitBuildTargets(args)
 	if err != nil {
@@ -177,7 +179,7 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 	)
 	switch {
 	case len(fileTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, fileTargets...)
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
 		if loadErr != nil {
 			return nil, loadErr
 		}
@@ -186,12 +188,12 @@ func getBuildPackages(ctx context.Context, args []string) ([]*packages.Package, 
 			return nil, ex.New("multiple packages found for file targets")
 		}
 	case len(pkgTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, pkgTargets...)
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
 		if loadErr != nil {
 			return nil, loadErr
 		}
 	default:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, ".")
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
 		if loadErr != nil {
 			return nil, loadErr
 		}
@@ -382,7 +384,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
-	pkgs, err := getBuildPackages(ctx, args)
+	pkgs, err := getBuildPackages(ctx, subcommand, args)
 	if err != nil {
 		return err
 	}

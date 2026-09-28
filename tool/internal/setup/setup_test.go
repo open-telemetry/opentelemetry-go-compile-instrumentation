@@ -279,7 +279,7 @@ func TestGetPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgs, err := getBuildPackages(t.Context(), tt.args)
+			pkgs, err := getBuildPackages(t.Context(), subcmdBuild, tt.args)
 			if tt.expectError {
 				require.Error(t, err)
 			} else {
@@ -311,11 +311,42 @@ func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
 	))
 	t.Chdir(tmpDir)
 
-	pkgs, err := getBuildPackages(t.Context(), []string{"-C", "app", "."})
+	pkgs, err := getBuildPackages(t.Context(), subcmdBuild, []string{"-C", "app", "."})
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	require.NotNil(t, pkgs[0].Module)
 	require.Equal(t, "example.com/app", pkgs[0].Module.Path)
+}
+
+func TestGetBuildPackages_TestSubcommandIncludesTestOnlyImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main_test.go"),
+		[]byte("package main\n\nimport (\n\t\"testing\"\n\t\"unicode\"\n)\n\n"+
+			"func TestUsesUnicode(t *testing.T) { _ = unicode.IsUpper('A') }\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	buildPkgs, err := getBuildPackages(t.Context(), subcmdBuild, nil)
+	require.NoError(t, err)
+	assert.NotContains(t, pkgload.CollectPackageNames(buildPkgs), "unicode",
+		"a build must not resolve names for imports that only appear in _test.go files")
+
+	testPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
+	require.NoError(t, err)
+	assert.Contains(t, pkgload.CollectPackageNames(testPkgs), "unicode",
+		"otelc go test must resolve real names for imports that only appear in _test.go files")
 }
 
 func TestSplitBuildTargets(t *testing.T) {
@@ -824,15 +855,15 @@ func TestGetBuildPackages_LoadErrors(t *testing.T) {
 	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
 
 	// File targets with non-existent -C flag
-	_, err := getBuildPackages(ctx, []string{"-C", nonExistentDir, "main.go"})
+	_, err := getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "main.go"})
 	require.Error(t, err)
 
 	// Package targets with non-existent -C flag
-	_, err = getBuildPackages(ctx, []string{"-C", nonExistentDir, "./pkg"})
+	_, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "./pkg"})
 	require.Error(t, err)
 
 	// Default targets with non-existent -C flag
-	_, err = getBuildPackages(ctx, []string{"-C", nonExistentDir})
+	_, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir})
 	require.Error(t, err)
 }
 
