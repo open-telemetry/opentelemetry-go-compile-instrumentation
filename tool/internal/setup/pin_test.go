@@ -463,7 +463,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.2.3",
 				}},
 			},
@@ -481,7 +481,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/bar": {{
-					Target:       "example.com/bar",
+					Target:       rule.NewTarget("example.com/bar"),
 					VersionRange: "v1.2.3",
 				}},
 			},
@@ -497,7 +497,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.2.4",
 				}},
 			},
@@ -513,7 +513,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.0.0",
 				}},
 			},
@@ -529,7 +529,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "",
 				}},
 			},
@@ -547,7 +547,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/*",
+					Target:       rule.NewTarget("example.com/*"),
 					VersionRange: "v1.2.3",
 				}},
 			},
@@ -565,7 +565,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/*",
+					Target:       rule.NewTarget("example.com/*"),
 					VersionRange: "v1.2.3",
 				}},
 			},
@@ -580,12 +580,42 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target: rule.TargetRoot,
+					Target: rule.NewTarget(rule.TargetRoot),
 				}},
 			},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
+		},
+		{
+			name: "target list including root",
+			deps: []*Dependency{{ImportPath: "example.com/foo"}},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target: rule.NewTarget(rule.TargetRoot, "main"),
+				}},
+			},
+			want: map[string]bool{"example.com/instrumentation/foo": true},
+		},
+		{
+			name: "target list",
+			deps: []*Dependency{{ImportPath: "example.com/bar"}},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target: rule.NewTarget("example.com/foo", "example.com/bar"),
+				}},
+			},
+			want: map[string]bool{"example.com/instrumentation/foo": true},
+		},
+		{
+			name: "target list excluding the dependency",
+			deps: []*Dependency{{ImportPath: "example.com/foo/mock"}},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target: rule.Target{Include: []string{"example.com/foo/**"}, Exclude: []string{"example.com/foo/mock"}},
+				}},
+			},
+			want: map[string]bool{},
 		},
 		{
 			name: "multiple matches",
@@ -601,11 +631,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.0.0",
 				}},
 				"example.com/instrumentation/bar": {{
-					Target:       "example.com/bar",
+					Target:       rule.NewTarget("example.com/bar"),
 					VersionRange: "v2.0.0",
 				}},
 			},
@@ -630,7 +660,7 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 		}}
 		rules := map[string][]yamlRule{
 			"example.com/instrumentation/foo": {{
-				Target:       "example.com/foo",
+				Target:       rule.NewTarget("example.com/foo"),
 				VersionRange: "v1.0.0",
 			}},
 		}
@@ -658,8 +688,8 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 		}
 		rules := map[string][]yamlRule{
 			"example.com/instrumentation/foo": {
-				{Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
-				{Target: "example.com/foo/v1/sub", VersionRange: ""},
+				{Target: rule.NewTarget("example.com/foo/v1"), VersionRange: "v1.0.0"},
+				{Target: rule.NewTarget("example.com/foo/v1/sub"), VersionRange: ""},
 			},
 		}
 
@@ -681,8 +711,8 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 		}}
 		rules := map[string][]yamlRule{
 			"example.com/instrumentation/foo": {
-				{Target: "example.com/foo", VersionRange: "v1.0.0"},
-				{Target: "example.com/foo", VersionRange: "v2.0.0"},
+				{Target: rule.NewTarget("example.com/foo"), VersionRange: "v1.0.0"},
+				{Target: rule.NewTarget("example.com/foo"), VersionRange: "v2.0.0"},
 			},
 		}
 
@@ -735,11 +765,11 @@ ruleNested:
 	require.Contains(t, rules, "example.com/sub1/nested")
 
 	require.Len(t, rules["example.com/sub1"], 1)
-	require.Equal(t, "example.com/target", rules["example.com/sub1"][0].Target)
+	require.Equal(t, "example.com/target", rules["example.com/sub1"][0].Target.String())
 	require.Equal(t, "v1.0.0", rules["example.com/sub1"][0].VersionRange)
 
 	require.Len(t, rules["example.com/sub1/nested"], 1)
-	require.Equal(t, "example.com/nested-target", rules["example.com/sub1/nested"][0].Target)
+	require.Equal(t, "example.com/nested-target", rules["example.com/sub1/nested"][0].Target.String())
 }
 
 func TestLoadMinimalRulesMinimumVersionMetadata(t *testing.T) {
@@ -758,7 +788,7 @@ rule:
 	rules, err := loadMinimalRules(t.Context(), dir, util.Version)
 	require.NoError(t, err)
 	require.Len(t, rules["example.com/module"], 1)
-	assert.Equal(t, "example.com/target", rules["example.com/module"][0].Target)
+	assert.Equal(t, "example.com/target", rules["example.com/module"][0].Target.String())
 	assert.Equal(t, "v2.0.0,v3.0.0", rules["example.com/module"][0].VersionRange)
 }
 
@@ -819,6 +849,23 @@ func TestLoadMinimalRules_InvalidRuleYAML(t *testing.T) {
 
 	_, err := loadMinimalRules(t.Context(), dir, util.Version)
 	require.Error(t, err)
+}
+
+func TestLoadMinimalRules_InvalidTarget(t *testing.T) {
+	dir := t.TempDir()
+
+	sub1 := filepath.Join(dir, "sub1")
+	require.NoError(t, os.Mkdir(sub1, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte(`
+version: "v1.0.0"
+rule1:
+  target:
+    - not: example.com/target
+`), 0o644))
+
+	_, err := loadMinimalRules(t.Context(), dir, util.Version)
+	require.ErrorContains(t, err, "selects no package")
 }
 
 func TestValidateRuleFiles(t *testing.T) {
