@@ -243,6 +243,41 @@ func Run() {
 	assert.Equal(t, "Call", sel.Sel.Name)
 }
 
+func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Get"}},
+		Args: []dst.Expr{
+			&dst.CallExpr{Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "Value"}}},
+		},
+	}
+	root := makeCallFile(call)
+	r := httpGetRule(`traced.Wrap({{ . }})`)
+	importAliases := map[string]string{"http": "net/http"}
+	aliasOverrides := map[string]string{"traced": "f"}
+
+	modified, err := newTestPhase().applyCallReplace(r, root, importAliases, aliasOverrides)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	stmt := root.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
+	outer, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	outerSel, ok := outer.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", outer.Fun)
+	assert.Equal(t, "f", outerSel.X.(*dst.Ident).Name, "the rule's own qualifier must move to the file's alias")
+	assert.Equal(t, "Wrap", outerSel.Sel.Name)
+	require.Len(t, outer.Args, 1)
+	inner, ok := outer.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected the substituted call to stay a *dst.CallExpr, got %T", outer.Args[0])
+	require.Len(t, inner.Args, 1)
+	argCall, ok := inner.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected original argument to stay a *dst.CallExpr, got %T", inner.Args[0])
+	argSel, ok := argCall.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", argCall.Fun)
+	assert.Equal(t, "traced", argSel.X.(*dst.Ident).Name,
+		"the substituted call's own argument must not be rewritten just because it shares the rule's alias name")
+}
+
 func TestApplyCallRule_FuncArgumentUsesEnclosingFunction(t *testing.T) {
 	root := parseFile(t, `package main
 

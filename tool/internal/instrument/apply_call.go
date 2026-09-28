@@ -89,12 +89,11 @@ func (*instrumentPhase) applyCallReplace(
 		if !matchesCallRule(call, r, importAliases) {
 			return true
 		}
-		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases)
+		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases, aliasOverrides)
 		if wrapErr != nil {
 			wrapError = wrapErr
 			return false
 		}
-		replaceQualifierAliases(wrapped, aliasOverrides)
 		replacements[call] = util.AssertType[dst.Expr](dst.Clone(wrapped))
 		return true
 	})

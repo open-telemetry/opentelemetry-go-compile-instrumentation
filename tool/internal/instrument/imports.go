@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"strings"
 
 	"github.com/dave/dst"
 
@@ -147,12 +148,15 @@ func resolveAliasOverrides(ruleImports, existingAliases map[string]string) map[s
 	return overrides
 }
 
-// replaceQualifierAliases rewrites a freshly generated expression to
-// use the file's alias for an import, instead of the rule's alias.
-// overrides maps each rule alias to the file's alias.
+// replaceQualifierAliases rewrites a qualifier the rule wrote to use the
+// file's alias for an import, instead of the rule's alias. overrides maps
+// each rule alias to the file's alias.
 //
-// replaceQualifierAliases only touches the node passed in. The rewrite
-// cannot reach unrelated code that shares an identifier name.
+// Call this before stripDynamicIdents, while a target-derived identifier
+// (an argument, receiver, or function name) still carries dynamicIdentMarker.
+// The marker makes its name a different string from any rule alias, so a
+// target name that happens to match a rule's alias is never mistaken for a
+// qualifier the rule wrote.
 func replaceQualifierAliases(node dst.Node, overrides map[string]string) {
 	if len(overrides) == 0 {
 		return
@@ -168,6 +172,22 @@ func replaceQualifierAliases(node dst.Node, overrides map[string]string) {
 		}
 		if existingAlias, override := overrides[ident.Name]; override {
 			ident.Name = existingAlias
+		}
+		return true
+	})
+}
+
+// stripDynamicIdents removes dynamicIdentMarker from every identifier and
+// string literal in node, restoring the target's original name. Call this
+// once on rendered template output.
+// replaceQualifierAliases should always be called before stripDynamicIdents.
+func stripDynamicIdents(node dst.Node) {
+	dst.Inspect(node, func(n dst.Node) bool {
+		switch lit := n.(type) {
+		case *dst.Ident:
+			lit.Name = strings.TrimPrefix(lit.Name, dynamicIdentMarker)
+		case *dst.BasicLit:
+			lit.Value = strings.ReplaceAll(lit.Value, dynamicIdentMarker, "")
 		}
 		return true
 	})

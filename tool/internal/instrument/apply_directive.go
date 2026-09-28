@@ -58,6 +58,7 @@ func (ip *instrumentPhase) applyDirectiveRule(
 		}
 		for _, stmt := range stmts {
 			replaceQualifierAliases(stmt, aliasOverrides)
+			stripDynamicIdents(stmt)
 		}
 		funcDecl.Body.List = append(stmts, funcDecl.Body.List...)
 		ip.Info("Apply directive rule", "rule", r, "func", funcDecl.Name.Name)
@@ -75,5 +76,5 @@ func (ip *instrumentPhase) applyDirectiveRule(
 // renderDirective executes the template with the given data and returns the
 // resulting Go source snippet.
 func renderDirective(tmpl *rule.FuncTemplate, data *funcTemplateData) (string, error) {
-	return tmpl.Execute(data)
+	return tmpl.Execute(renderingFuncTemplateData{data})
 }

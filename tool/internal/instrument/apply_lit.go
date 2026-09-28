@@ -166,7 +166,7 @@ func (ip *instrumentPhase) setLitFields(
 				continue
 			}
 			// Composite literal fields have no enclosing function context.
-			wrapped, err := setter.wrap.compileExpression(existing.Value, nil, nil)
+			wrapped, err := setter.wrap.compileExpression(existing.Value, nil, nil, aliasOverrides)
 			if err != nil {
 				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}
@@ -174,7 +174,6 @@ func (ip *instrumentPhase) setLitFields(
 			// detach any literal nested in that expression from the tree.
 			// compileExpression already returns a fresh tree, and the old value
 			// leaves the tree in the same assignment, so no node is reused.
-			replaceQualifierAliases(wrapped, aliasOverrides)
 			existing.Value = wrapped
 			changed = true
 			continue

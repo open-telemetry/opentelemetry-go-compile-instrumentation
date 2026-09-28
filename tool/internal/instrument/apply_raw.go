@@ -65,7 +65,7 @@ func renderRawCode(raw string, decl *dst.FuncDecl, importAliases map[string]stri
 	if err != nil {
 		return "", err
 	}
-	return tmpl.Execute(newFuncTemplateData(decl, nil, importAliases, hash))
+	return tmpl.Execute(renderingFuncTemplateData{newFuncTemplateData(decl, nil, importAliases, hash)})
 }
 
 type insertPos struct {
@@ -161,6 +161,7 @@ func insertRaw(
 
 	for _, stmt := range stmts {
 		replaceQualifierAliases(stmt, aliases.overrides)
+		stripDynamicIdents(stmt)
 	}
 
 	// if specified, insert raw code at the position matched by the regex
