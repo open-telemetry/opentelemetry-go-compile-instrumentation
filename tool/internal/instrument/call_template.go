@@ -227,7 +227,7 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 // 3. Rewrite the rule's own qualifiers in that parsed result
 // 4. Replace the placeholder with the actual AST node
 func (t *callTemplate) compileExpression(
-	node dst.Expr, enclosing *dst.FuncDecl, imports map[string]string, aliasOverrides map[string]string,
+	node dst.Expr, enclosing *dst.FuncDecl, imports, aliasOverrides map[string]string,
 ) (dst.Expr, error) {
 	data := &callTemplateData{}
 	if enclosing != nil {

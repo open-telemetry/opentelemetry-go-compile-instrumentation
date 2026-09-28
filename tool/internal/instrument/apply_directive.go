@@ -69,7 +69,12 @@ func (ip *instrumentPhase) applyDirectiveRule(
 
 	// Runs after injection so that an import the rewrite above eliminated (by
 	// reusing the file's existing alias) is not added back as a duplicate.
-	if importErr := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); importErr != nil {
+	if importErr := ip.addRuleImports(
+		ctx,
+		root,
+		usedRuleImports(root, r.Imports, aliasOverrides),
+		r.Name,
+	); importErr != nil {
 		return false, importErr
 	}
 
