@@ -94,6 +94,30 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	return ap.fset.Position(astNode.Pos())
 }
 
+// PropagatePositions copies source positions from orig onto the matching
+// nodes in cloned.
+//
+// orig and cloned must have the same shape.
+func (ap *AstParser) PropagatePositions(orig, cloned dst.Node) {
+	var origNodes, clonedNodes []dst.Node
+	dst.Inspect(orig, func(n dst.Node) bool {
+		origNodes = append(origNodes, n)
+		return true
+	})
+	dst.Inspect(cloned, func(n dst.Node) bool {
+		clonedNodes = append(clonedNodes, n)
+		return true
+	})
+	if len(origNodes) != len(clonedNodes) {
+		return
+	}
+	for i, on := range origNodes {
+		if astNode, ok := ap.dec.Ast.Nodes[on]; ok {
+			ap.dec.Ast.Nodes[clonedNodes[i]] = astNode
+		}
+	}
+}
+
 // WriteFile writes the AST to a file.
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)

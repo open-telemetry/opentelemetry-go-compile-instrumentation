@@ -138,7 +138,13 @@ func (ip *instrumentPhase) applyCallReplace(
 			wrapError = wrapErr
 			return false
 		}
-		replacements[call] = util.AssertType[dst.Expr](dst.Clone(wrapped))
+		cloned := util.AssertType[dst.Expr](dst.Clone(wrapped))
+		// dst.Clone gives the wrapped call's nodes fresh pointers absent from the
+		// parser's position map
+		if ip.parser != nil {
+			ip.parser.PropagatePositions(wrapped, cloned)
+		}
+		replacements[call] = cloned
 		return true
 	})
 

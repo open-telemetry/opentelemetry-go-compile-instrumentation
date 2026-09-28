@@ -1440,6 +1440,28 @@ func run() {
 	assert.Contains(t, out, `tracedWarn(l.Warn("uh oh"))`)
 }
 
+func TestApplyCallRule_MethodCall_TwoRulesWrapSameCall(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	var l Logger
+	l.Info("hi")
+}
+`)
+	firstRule := methodCallRule("Logger", "Info", "first({{ . }})")
+	secondRule := methodCallRule("Logger", "Info", "second({{ . }})")
+
+	require.NoError(t, ip.applyCallRule(context.Background(), firstRule, root))
+	require.NoError(t, ip.applyCallRule(context.Background(), secondRule, root))
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `first(second(l.Info("hi")))`)
+}
+
 func TestApplyCallRule_MethodCall_MethodExpressionDoesNotMatch(t *testing.T) {
 	ip, root := setupMethodCallPhase(t, `package sample
 
