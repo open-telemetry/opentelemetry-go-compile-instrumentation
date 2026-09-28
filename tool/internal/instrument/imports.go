@@ -112,10 +112,14 @@ func (ip *instrumentPhase) resolveImportOverrides(
 ) (map[string]string, map[string]string) {
 	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
+	// Sort by the lexicographically smallest alias for each path, so
+	// aliases stays the same across every call
 	resolvedAliases := ast.ResolvedImportAliasMap(root, ip.importNames)
 	existingAliases := make(map[string]string, len(resolvedAliases))
 	for alias, path := range resolvedAliases {
-		existingAliases[path] = alias
+		if current, exists := existingAliases[path]; !exists || alias < current {
+			existingAliases[path] = alias
+		}
 	}
 	aliasOverrides := resolveAliasOverrides(ruleImports, existingAliases)
 	return importAliases, aliasOverrides

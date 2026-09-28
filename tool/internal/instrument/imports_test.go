@@ -290,6 +290,25 @@ func run() {}
 	assert.Equal(t, map[string]string{"traced": "f"}, overrides)
 }
 
+func TestResolveImportOverrides_DuplicatePathPicksStableAlias(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	a "fmt"
+	b "fmt"
+)
+
+func run() {}
+`)
+	ip := newTestPhase()
+
+	for range 20 {
+		_, overrides := ip.resolveImportOverrides(root, map[string]string{"traced": "fmt"})
+		assert.Equal(t, map[string]string{"traced": "a"}, overrides,
+			"the override must pick the same alias on every call")
+	}
+}
+
 func TestResolveImportOverrides_UnresolvedUnaliasedImportProducesNoOverride(t *testing.T) {
 	const importPath = "github.com/redis/go-redis/v9"
 	root := parseFile(t, `package main
