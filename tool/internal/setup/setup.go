@@ -28,6 +28,7 @@ type setupPhase struct {
 	logger          *slog.Logger
 	ruleConfig      string
 	buildPackages   []*packages.Package
+	buildFlags      []string
 	rootModulePaths []string
 }
 
@@ -311,12 +312,55 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, pkgDir, pkg.Name); err != nil {
+		if err := sp.addDeps(ctx, matched, runtimePackage{
+			dir:        pkgDir,
+			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
+			name:       pkg.Name,
+		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
 
 	return nil
+}
+
+// runtimeImportPath returns the import path of the package that receives a
+// generated runtime file. A file target loads one synthetic
+// "command-line-arguments" package, so the real path comes from the module that
+// owns the directory. If the lookup fails, runtimeImportPath returns the
+// synthetic path, and a build outside a module continues to work.
+func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Package, pkgDir string) string {
+	if pkg.PkgPath != pkgload.CommandLineArgumentsPackage {
+		return pkg.PkgPath
+	}
+
+	importPath, err := resolveImportPath(ctx, sp.buildFlags, pkgDir)
+	if err != nil {
+		// Expected outside a module, so this is not a warning on its own.
+		sp.Debug("cannot derive the import path of a file target", "dir", pkgDir, "error", err)
+		return pkg.PkgPath
+	}
+
+	return importPath
+}
+
+// resolveImportPath returns the canonical import path of the package in pkgDir.
+// resolveImportPath loads pkgDir as a package pattern, so the result is the real
+// import path and not the synthetic path that a file target carries.
+//
+// The build flags are the ones of the build, unchanged. Build tags can exclude
+// every file in pkgDir, and relative -modfile or -overlay values resolve against
+// the -C directory of the build, so pkgDir cannot replace that directory.
+func resolveImportPath(ctx context.Context, buildFlags []string, pkgDir string) (string, error) {
+	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, buildFlags, pkgDir)
+	if err != nil {
+		return "", err
+	}
+	if len(pkgs) == 0 || len(pkgs[0].Errors) > 0 || pkgs[0].PkgPath == "" {
+		return "", ex.Newf("cannot resolve the import path of the package in %s", pkgDir)
+	}
+
+	return pkgs[0].PkgPath, nil
 }
 
 // Setup prepares the environment for further instrumentation. It runs
@@ -374,6 +418,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	sp := &setupPhase{
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
+		buildFlags: extractBuildFlags(args),
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
