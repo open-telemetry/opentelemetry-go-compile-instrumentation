@@ -193,6 +193,50 @@ func stripDynamicIdents(node dst.Node) {
 	})
 }
 
+// checkAliasOverrideShadowing reports an error when an override's file
+// alias names a parameter, receiver, or named return value of `enclosing`.
+//
+// checkAliasOverrideShadowing reports no error when enclosing is nil.
+func checkAliasOverrideShadowing(overrides map[string]string, enclosing *dst.FuncDecl) error {
+	if len(overrides) == 0 || enclosing == nil {
+		return nil
+	}
+	localNames := signatureNames(enclosing)
+	for ruleAlias, fileAlias := range overrides {
+		if localNames[fileAlias] {
+			return ex.Newf(
+				"alias override conflict in %s: substituting the file's alias %q for "+
+					"rule alias %q would resolve to a parameter, receiver, or named "+
+					"return value instead of the import; rename the local identifier "+
+					"or the file's import alias",
+				enclosing.Name.Name, fileAlias, ruleAlias)
+		}
+	}
+	return nil
+}
+
+// signatureNames returns the names bound by funcDecl's receiver, parameters,
+// and named return values.
+func signatureNames(funcDecl *dst.FuncDecl) map[string]bool {
+	names := make(map[string]bool)
+	addFieldNames := func(list *dst.FieldList) {
+		if list == nil {
+			return
+		}
+		for _, field := range list.List {
+			for _, name := range field.Names {
+				if name.Name != "" && name.Name != "_" {
+					names[name.Name] = true
+				}
+			}
+		}
+	}
+	addFieldNames(funcDecl.Recv)
+	addFieldNames(funcDecl.Type.Params)
+	addFieldNames(funcDecl.Type.Results)
+	return names
+}
+
 // usedRuleImports returns the subset of ruleImports whose alias is actually
 // referenced somewhere in root. It must be called after the rule's generated
 // code has already been spliced into root.

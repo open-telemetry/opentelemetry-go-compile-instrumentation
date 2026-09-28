@@ -728,6 +728,30 @@ func Run() {}
 	assert.Equal(t, "Println", sel.Sel.Name)
 }
 
+func TestApplyRawRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+	root := parseFile(t, `package main
+
+import f "fmt"
+
+func Run(f sink) {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func: "Run",
+		Raw:  `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	fn := findFuncDeclInFile(t, root, "Run")
+	assert.Empty(t, fn.Body.List, "must not inject code that would resolve to the wrong identifier")
+}
+
 func TestInsertRaw_DoesNotRewriteArgumentNamedSameAsRuleAlias(t *testing.T) {
 	root := parseFile(t, `package main
 

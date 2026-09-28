@@ -206,6 +206,9 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	}
 
 	importAliases, aliasOverrides := ip.resolveImportOverrides(root, rule.Imports)
+	if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
+		return err
+	}
 
 	aliases := rawAliasContext{imports: importAliases, overrides: aliasOverrides}
 	if err = insertRaw(ctx, rule, funcDecl, root, aliases); err != nil {

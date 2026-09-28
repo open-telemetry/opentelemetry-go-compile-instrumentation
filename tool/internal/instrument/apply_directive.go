@@ -43,6 +43,9 @@ func (ip *instrumentPhase) applyDirectiveRule(
 	for _, match := range matches {
 		funcDecl := match.Func
 		util.Assert(funcDecl.Body != nil, "function must have a body")
+		if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
+			return false, err
+		}
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`

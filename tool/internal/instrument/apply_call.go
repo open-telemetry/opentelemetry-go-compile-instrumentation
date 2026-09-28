@@ -89,6 +89,10 @@ func (*instrumentPhase) applyCallReplace(
 		if !matchesCallRule(call, r, importAliases) {
 			return true
 		}
+		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
+			wrapError = shadowErr
+			return false
+		}
 		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases, aliasOverrides)
 		if wrapErr != nil {
 			wrapError = wrapErr

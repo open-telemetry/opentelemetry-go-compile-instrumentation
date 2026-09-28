@@ -243,6 +243,34 @@ func Run() {
 	assert.Equal(t, "Call", sel.Sel.Name)
 }
 
+func TestApplyCallRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run(f sink) {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt, ok := run.Body.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", run.Body.List[0])
+	_, ok = stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	assert.Equal(t, "http", stmt.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr).X.(*dst.Ident).Name,
+		"must not wrap the call when the override would resolve to the wrong identifier")
+}
+
 func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
 	call := &dst.CallExpr{
 		Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Get"}},

@@ -597,3 +597,33 @@ func foo() {
 	assert.Equal(t, "NewClient", sel.Sel.Name)
 	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
 }
+
+func TestApplyDirectiveRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+	root, err := ast.NewAstParser().ParseSource(`package main
+
+import f "fmt"
+
+//otelc:test
+func foo(f sink) {
+	println("hello")
+}
+`)
+	require.NoError(t, err)
+
+	r := &rule.InstDirectiveRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "test_directive",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Directive: "otelc:test",
+		Template:  "traced.Println()",
+	}
+
+	modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.False(t, modified)
+	funcDecl := findFuncDeclInFile(t, root, "foo")
+	require.Len(t, funcDecl.Body.List, 1, "must not inject code that would resolve to the wrong identifier")
+}
