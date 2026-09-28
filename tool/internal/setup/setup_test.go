@@ -462,6 +462,37 @@ func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
 	require.Equal(t, "example.com/app", pkgs[0].Module.Path)
 }
 
+func TestGetBuildPackages_TestSubcommandIncludesTestOnlyImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main_test.go"),
+		[]byte("package main\n\nimport (\n\t\"testing\"\n\t\"unicode\"\n)\n\n"+
+			"func TestUsesUnicode(t *testing.T) { _ = unicode.IsUpper('A') }\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	buildPkgs, err := getBuildPackages(t.Context(), subcmdBuild, nil)
+	require.NoError(t, err)
+	assert.NotContains(t, pkgload.CollectPackageNames(buildPkgs), "unicode",
+		"a build must not resolve names for imports that only appear in _test.go files")
+
+	testPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
+	require.NoError(t, err)
+	assert.Contains(t, pkgload.CollectPackageNames(testPkgs), "unicode",
+		"otelc go test must resolve real names for imports that only appear in _test.go files")
+}
+
 func TestSplitBuildTargets(t *testing.T) {
 	tests := []struct {
 		name        string

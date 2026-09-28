@@ -58,6 +58,7 @@ func injectedDeps(
 		ctx,
 		packages.NeedName|packages.NeedFiles|packages.NeedImports|packages.NeedDeps,
 		buildFlags,
+		false,
 		hookPaths...,
 	)
 	if err != nil {
