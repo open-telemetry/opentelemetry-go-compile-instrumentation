@@ -28,6 +28,7 @@ type setupPhase struct {
 	logger          *slog.Logger
 	ruleConfig      string
 	buildPackages   []*packages.Package
+	buildFlags      []string
 	rootModulePaths []string
 }
 
@@ -326,16 +327,17 @@ func (sp *setupPhase) generateRuntimePerPackage(
 // runtimeImportPath returns the import path of the package that receives a
 // generated runtime file. A file target loads one synthetic
 // "command-line-arguments" package, so the real path comes from the module that
-// owns the directory. If the module does not resolve, runtimeImportPath returns
-// the synthetic path, and a build outside a module continues to work.
+// owns the directory. If the lookup fails, runtimeImportPath returns the
+// synthetic path, and a build outside a module continues to work.
 func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Package, pkgDir string) string {
 	if pkg.PkgPath != pkgload.CommandLineArgumentsPackage {
 		return pkg.PkgPath
 	}
 
-	importPath, err := resolveImportPath(ctx, pkgDir)
+	importPath, err := resolveImportPath(ctx, sp.buildFlags, pkgDir)
 	if err != nil {
-		sp.Warn("cannot derive the import path of a file target", "dir", pkgDir, "error", err)
+		// Expected outside a module, so this is not a warning on its own.
+		sp.Debug("cannot derive the import path of a file target", "dir", pkgDir, "error", err)
 		return pkg.PkgPath
 	}
 
@@ -345,8 +347,12 @@ func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Packa
 // resolveImportPath returns the canonical import path of the package in pkgDir.
 // resolveImportPath loads pkgDir as a package pattern, so the result is the real
 // import path and not the synthetic path that a file target carries.
-func resolveImportPath(ctx context.Context, pkgDir string) (string, error) {
-	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, []string{"-C", pkgDir}, ".")
+//
+// The build flags are the ones of the build, unchanged. Build tags can exclude
+// every file in pkgDir, and relative -modfile or -overlay values resolve against
+// the -C directory of the build, so pkgDir cannot replace that directory.
+func resolveImportPath(ctx context.Context, buildFlags []string, pkgDir string) (string, error) {
+	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, buildFlags, pkgDir)
 	if err != nil {
 		return "", err
 	}
@@ -412,6 +418,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	sp := &setupPhase{
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
+		buildFlags: extractBuildFlags(args),
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
