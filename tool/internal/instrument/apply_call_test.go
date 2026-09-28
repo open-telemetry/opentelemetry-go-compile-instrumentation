@@ -1364,6 +1364,31 @@ func run() {
 	assert.Contains(t, out, `traced(e.Info("promoted"))`)
 }
 
+func TestApplyCallRule_MethodCall_ChainedSelector(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Client struct{}
+
+func (c *Client) Do(req string) {}
+
+type Wrapper struct {
+	Client *Client
+}
+
+func run() {
+	w := &Wrapper{Client: &Client{}}
+	w.Client.Do("req")
+}
+`)
+	r := methodCallRule("*Client", "Do", "traced({{ . }})")
+
+	err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `traced(w.Client.Do("req"))`)
+}
+
 func TestApplyCallRule_MethodCall_WrongReceiverTypeDoesNotMatch(t *testing.T) {
 	ip, root := setupMethodCallPhase(t, `package sample
 
