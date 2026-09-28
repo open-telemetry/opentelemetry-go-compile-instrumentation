@@ -11,6 +11,7 @@
 package setup
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,7 +166,10 @@ func TestAddDeps(t *testing.T) {
 
 			actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
 			if tt.packageImportPath != "" {
-				assert.NotContains(t, actualNorm, tt.packageImportPath)
+				// Match the quoted import path, not a bare substring: a remaining
+				// import for a path that merely shares tt.packageImportPath as a
+				// prefix (e.g. ".../v2") must not fail this assertion.
+				assert.NotContains(t, actualNorm, fmt.Sprintf("%q", tt.packageImportPath))
 			}
 			golden.Assert(t, actualNorm, tt.goldenFile)
 		})
@@ -196,8 +200,6 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 func TestAddDepsRemovesStaleRuntimeFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	sp := newTestSetupPhase()
-	stateManager := newStateManager()
-	ctx := contextWithStateManager(t.Context(), stateManager)
 
 	pkg := runtimePackage{dir: tmpDir, importPath: "example.com/local-hooks", name: "hooks"}
 	runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
@@ -209,7 +211,8 @@ func TestAddDepsRemovesStaleRuntimeFile(t *testing.T) {
 			nil,
 		),
 	}
-	require.NoError(t, sp.addDeps(ctx, external, pkg))
+	firstRunState := newStateManager()
+	require.NoError(t, sp.addDeps(contextWithStateManager(t.Context(), firstRunState), external, pkg))
 	require.FileExists(t, runtimeFilePath)
 
 	selfOnly := []*rule.InstRuleSet{
@@ -219,6 +222,28 @@ func TestAddDepsRemovesStaleRuntimeFile(t *testing.T) {
 			nil,
 		),
 	}
-	require.NoError(t, sp.addDeps(ctx, selfOnly, pkg))
+	// A fresh state manager, as a second `otelc` run gets. Reusing firstRunState
+	// would already record the path as missing, so the Track below would do
+	// nothing and this test would not cover the restore path.
+	secondRunState := newStateManager()
+	require.NoError(t, sp.addDeps(contextWithStateManager(t.Context(), secondRunState), selfOnly, pkg))
 	assert.NoFileExists(t, runtimeFilePath)
+
+	require.NoError(t, secondRunState.Revert())
+	assert.FileExists(t, runtimeFilePath)
+}
+
+// TestRemoveRuntimeFile_RemoveError covers the removal error path: os.Remove
+// fails when the generated file was replaced by a non-empty directory, and
+// removeRuntimeFile must surface that error instead of dropping it silently.
+func TestRemoveRuntimeFile_RemoveError(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp := newTestSetupPhase()
+
+	runtimeFileAsDir := filepath.Join(tmpDir, otelcRuntimeFile)
+	require.NoError(t, os.Mkdir(runtimeFileAsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(runtimeFileAsDir, "child"), []byte("x"), 0o600))
+
+	err := sp.removeRuntimeFile(t.Context(), tmpDir)
+	assert.Error(t, err)
 }
