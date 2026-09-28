@@ -31,7 +31,7 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 	}
 
 	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports, aliasOverrides), rule.Name); err != nil {
 		return err
 	}
 

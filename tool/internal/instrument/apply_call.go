@@ -35,7 +35,7 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		return false, nil
 	}
 
-	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
 		return false, err
 	}
 	ip.Info("Apply call rule", "rule", r)

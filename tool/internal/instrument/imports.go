@@ -245,17 +245,30 @@ func signatureNames(funcDecl *dst.FuncDecl) map[string]bool {
 // referenced somewhere in root. It must be called after the rule's generated
 // code has already been spliced into root.
 //
-// Blank ("_") and dot (".") aliases are always kept.
-func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]string {
+// Blank ("_") and dot (".") aliases are always kept. An alias present in
+// aliasOverrides is dropped instead, never reaching addRuleImports:
+// resolveAliasOverrides only produces an override when the file already
+// imports that path under a different alias (see resolveAliasOverrides).
+func usedRuleImports(root *dst.File, ruleImports, aliasOverrides map[string]string) map[string]string {
 	if len(ruleImports) == 0 {
 		return nil
 	}
 
 	used := make(map[string]string, len(ruleImports))
+	unresolved := make(map[string]string, len(ruleImports))
 	for alias, path := range ruleImports {
+		if _, overridden := aliasOverrides[alias]; overridden {
+			continue
+		}
 		if alias == "_" || alias == "." {
 			used[alias] = path
+			continue
 		}
+		unresolved[alias] = path
+	}
+
+	if len(unresolved) == 0 {
+		return used
 	}
 
 	dst.Inspect(root, func(node dst.Node) bool {
@@ -267,7 +280,7 @@ func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]s
 		if !identOk {
 			return true
 		}
-		if path, importOk := ruleImports[ident.Name]; importOk {
+		if path, importOk := unresolved[ident.Name]; importOk {
 			used[ident.Name] = path
 		}
 		return true

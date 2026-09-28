@@ -72,7 +72,7 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 		}
 	}
 
-	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
 		return err
 	}
 
