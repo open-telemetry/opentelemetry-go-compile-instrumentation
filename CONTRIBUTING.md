@@ -8,7 +8,7 @@ repo for information on this and other SIGs.
 See the [public meeting
 notes](https://docs.google.com/document/d/1XkVahJfhf482d3WVHsvUUDaGzHc8TO3sqQlSS80mpGY/edit)
 for a summary description of past meetings. You can also get in touch on slack channel
-[#otel-go-compt-instr-sig](https://cloud-native.slack.com/archives/C088D8GSSSF)
+[#otel-go-compile-instrumentation](https://cloud-native.slack.com/archives/C088D8GSSSF)
 
 ## Development
 
