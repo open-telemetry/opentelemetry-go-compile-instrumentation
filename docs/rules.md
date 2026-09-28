@@ -81,7 +81,7 @@ treated as requiring `v1.0.0` and produce a warning.
 
 Field notes:
 
-- `target` (string, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package. May also be a glob to match a package family — see [Glob targets](#glob-targets). It can also be a list of patterns, including entries that exclude packages. See [Target lists](#target-lists).
+- `target` (pattern or list, required): The import path of the Go package to be instrumented. For example, `golang.org/x/time/rate` or `main` for the main package. May also be a glob to match a package family — see [Glob targets](#glob-targets). It can also be a list of patterns, including entries that exclude packages. See [Target lists](#target-lists).
 - `version` (string, optional): Specifies a version range for the target package using the format `start_inclusive,end_exclusive`. For example, `v0.11.0,v0.12.0` matches versions ≥ `v0.11.0` and < `v0.12.0`. Omit to match all versions.
 - `where` (map, optional): Non-package selectors. Flat selector keys inside `where` are an implicit `all-of`. File-level predicates live under `where.file`. See [ADR-0003](adr/0003-structured-rule-schema.md#where-semantics) for the full list of selector keys and the qualifier composition (`all-of`, `one-of`, `not`).
 - `do` (sequence, required): Ordered list of modifier entries. Each entry is a single-key map whose key names the modifier (`inject_hooks`, `inject_code`, `add_struct_fields`, `add_file`, `wrap_call`, `expand_directive`, `assign_value`). A single-modifier rule may also use map form (`do: <modifier>: …`), but the canonical form is the sequence form.

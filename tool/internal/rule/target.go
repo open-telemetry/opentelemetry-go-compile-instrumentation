@@ -16,6 +16,9 @@ import (
 // targetKeyNot is the key of a target list entry that excludes packages.
 const targetKeyNot = "not"
 
+// yamlNullTag is the YAML tag for a null scalar (`null`, `~`, or blank).
+const yamlNullTag = "!!null"
+
 // Target selects the packages a rule applies to. It is written as a single
 // pattern, or as a list of patterns where an entry of the form {not: pattern}
 // excludes the packages that pattern matches. Each pattern is an import path,
@@ -151,37 +154,50 @@ func (t *Target) first() string {
 	return t.Include[0]
 }
 
+// resolveAlias follows a YAML alias to the node it points to, so target
+// entries written with anchors match the same shapes as inline ones.
+func resolveAlias(node *yaml.Node) *yaml.Node {
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return node.Alias
+	}
+	return node
+}
+
 // UnmarshalYAML accepts a single pattern or a list of patterns and
 // {not: pattern} entries.
 func (t *Target) UnmarshalYAML(node *yaml.Node) error {
 	*t = Target{}
+	node = resolveAlias(node)
 	switch node.Kind {
 	case yaml.ScalarNode:
 		// A blank value leaves the target unset, which rule loading reports as
 		// a missing target.
-		if node.Tag != "!!null" && strings.TrimSpace(node.Value) != "" {
+		if node.Tag != yamlNullTag && strings.TrimSpace(node.Value) != "" {
 			t.Include = []string{node.Value}
 		}
 		return nil
 	case yaml.SequenceNode:
-		for _, item := range node.Content {
+		for _, raw := range node.Content {
+			item := resolveAlias(raw)
 			switch {
-			case item.Kind == yaml.ScalarNode:
+			case item.Kind == yaml.ScalarNode && item.Tag != yamlNullTag:
 				t.Include = append(t.Include, item.Value)
 			case item.Kind == yaml.MappingNode && len(item.Content) == 2 &&
-				item.Content[0].Value == targetKeyNot && item.Content[1].Kind == yaml.ScalarNode:
-				t.Exclude = append(t.Exclude, item.Content[1].Value)
+				item.Content[0].Value == targetKeyNot:
+				value := resolveAlias(item.Content[1])
+				if value.Kind != yaml.ScalarNode || value.Tag == yamlNullTag {
+					return ex.Newf("a target list entry must be a pattern or {%s: pattern}", targetKeyNot)
+				}
+				t.Exclude = append(t.Exclude, value.Value)
 			default:
-				return ex.Newf("line %d: a target list entry must be a pattern or {%s: pattern}",
-					item.Line, targetKeyNot)
+				return ex.Newf("a target list entry must be a pattern or {%s: pattern}", targetKeyNot)
 			}
 		}
 		return nil
 	case yaml.DocumentNode, yaml.MappingNode, yaml.AliasNode:
-		return ex.Newf("line %d: target must be a pattern or a list of patterns", node.Line)
-	default:
-		return ex.Newf("line %d: target must be a pattern or a list of patterns", node.Line)
+		return ex.New("target must be a pattern or a list of patterns")
 	}
+	return ex.New("target must be a pattern or a list of patterns")
 }
 
 // MarshalYAML writes t back in the shape UnmarshalYAML reads.

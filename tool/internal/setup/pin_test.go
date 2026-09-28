@@ -849,6 +849,23 @@ func TestLoadMinimalRules_InvalidRuleYAML(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestLoadMinimalRules_InvalidTarget(t *testing.T) {
+	dir := t.TempDir()
+
+	sub1 := filepath.Join(dir, "sub1")
+	require.NoError(t, os.Mkdir(sub1, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte(`
+version: "v1.0.0"
+rule1:
+  target:
+    - not: example.com/target
+`), 0o644))
+
+	_, err := loadMinimalRules(t.Context(), dir, util.Version)
+	require.ErrorContains(t, err, "selects no package")
+}
+
 func TestValidateRuleFiles(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "otelc.yaml")

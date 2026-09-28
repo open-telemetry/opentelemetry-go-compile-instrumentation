@@ -211,9 +211,13 @@ func loadModuleRules(
 			if decodeErr := entry.Node.Decode(&r); decodeErr != nil {
 				return ex.Wrapf(decodeErr, "parsing rule %q in %s", entry.Name, path)
 			}
-			if !r.Target.IsZero() {
-				loaded[module] = append(loaded[module], r)
+			if r.Target.IsZero() {
+				continue
 			}
+			if validateErr := r.Target.Validate(); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating target for rule %q in %s", entry.Name, path)
+			}
+			loaded[module] = append(loaded[module], r)
 		}
 
 		return nil

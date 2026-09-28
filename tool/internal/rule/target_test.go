@@ -34,6 +34,21 @@ func TestTargetUnmarshalYAML(t *testing.T) {
 		{name: "unknown key", content: "- skip: example.com/pkg", wantErr: "must be a pattern or {not: pattern}"},
 		{name: "nested list", content: "- [example.com/pkg]", wantErr: "must be a pattern or {not: pattern}"},
 		{name: "not with a list", content: "- not: [a, b]", wantErr: "must be a pattern or {not: pattern}"},
+		{name: "list entry null", content: "[null]", wantErr: "must be a pattern or {not: pattern}"},
+		{name: "not null", content: "- example.com/pkg\n- not: null\n", wantErr: "must be a pattern or {not: pattern}"},
+		{
+			name:    "aliased entry",
+			content: "[&pkg example.com/app, *pkg]",
+			want:    rule.NewTarget("example.com/app", "example.com/app"),
+		},
+		{
+			name:    "aliased not entry",
+			content: "- example.com/**\n- not: &excl example.com/mock\n- not: *excl\n",
+			want: rule.Target{
+				Include: []string{"example.com/**"},
+				Exclude: []string{"example.com/mock", "example.com/mock"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
