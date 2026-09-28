@@ -514,7 +514,7 @@ func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*type
 	}
 	defer f.Close()
 
-	r, err := gcexportdata.NewReader(f)
+	r, err := gcexportdata.NewReader(f) //nolint:staticcheck // no replacement exists yet ahead of Go 1.29
 	if err != nil {
 		return nil, ex.Wrapf(err, "reading export data section for %q from %s", path, archive)
 	}
