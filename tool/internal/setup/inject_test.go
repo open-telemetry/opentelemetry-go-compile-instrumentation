@@ -19,7 +19,7 @@ import (
 
 func funcRuleWithPath(name, path string) *rule.InstFuncRule {
 	return &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: name, Target: "example.com/svc"},
+		InstBaseRule: rule.InstBaseRule{Name: name, Target: rule.NewTarget("example.com/svc")},
 		Func:         "Handler",
 		Before:       "BeforeHandler",
 		Path:         path,
@@ -28,7 +28,7 @@ func funcRuleWithPath(name, path string) *rule.InstFuncRule {
 
 func fileRuleWithPath(name, path string) *rule.InstFileRule {
 	return &rule.InstFileRule{
-		InstBaseRule: rule.InstBaseRule{Name: name, Target: "example.com/svc"},
+		InstBaseRule: rule.InstBaseRule{Name: name, Target: rule.NewTarget("example.com/svc")},
 		Path:         path,
 	}
 }
