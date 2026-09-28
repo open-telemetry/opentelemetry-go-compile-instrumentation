@@ -243,6 +243,39 @@ func Run() {
 	assert.Equal(t, "Call", sel.Sel.Name)
 }
 
+func TestApplyCallRule_UnrelatedSelectorSharingRuleAliasDoesNotBlockOverride(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Other() {
+	traced.Value()
+}
+
+func Run() {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+}
+
 func TestApplyCallRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
 	root := parseFile(t, `package main
 

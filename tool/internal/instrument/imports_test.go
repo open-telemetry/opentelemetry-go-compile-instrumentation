@@ -422,7 +422,7 @@ func f() {}
 		".": "example.com/dotimport",
 	}
 
-	used := usedRuleImports(root, ruleImports)
+	used := usedRuleImports(root, ruleImports, nil)
 
 	assert.Equal(t, ruleImports, used)
 }
@@ -439,7 +439,7 @@ func f() {
 		"unrelated": "example.com/unrelated",
 	}
 
-	used := usedRuleImports(root, ruleImports)
+	used := usedRuleImports(root, ruleImports, nil)
 
 	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
 }
@@ -450,7 +450,7 @@ func TestUsedRuleImports_EmptyRuleImports(t *testing.T) {
 func f() {}
 `)
 
-	used := usedRuleImports(root, nil)
+	used := usedRuleImports(root, nil, nil)
 
 	assert.Nil(t, used)
 }
@@ -464,7 +464,7 @@ func f() {
 `)
 	ruleImports := map[string]string{"traced": "fmt"}
 
-	used := usedRuleImports(root, ruleImports)
+	used := usedRuleImports(root, ruleImports, nil)
 
 	assert.Empty(t, used)
 }
@@ -478,7 +478,7 @@ func f() {
 `)
 	ruleImports := map[string]string{"traced": "fmt"}
 
-	used := usedRuleImports(root, ruleImports)
+	used := usedRuleImports(root, ruleImports, nil)
 
 	assert.Empty(t, used)
 }
@@ -493,7 +493,7 @@ func f() {
 `)
 	ruleImports := map[string]string{"traced": "fmt"}
 
-	used := usedRuleImports(root, ruleImports)
+	used := usedRuleImports(root, ruleImports, nil)
 
 	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
 }
@@ -512,11 +512,26 @@ func f() {
 		".":      "example.com/dotimport",
 	}
 
-	used := usedRuleImports(root, ruleImports)
+	used := usedRuleImports(root, ruleImports, nil)
 
 	assert.Equal(t, map[string]string{
 		"traced": "fmt",
 		"_":      "example.com/sideeffect",
 		".":      "example.com/dotimport",
 	}, used)
+}
+
+func TestUsedRuleImports_OverriddenAliasExcludedEvenWhenReferencedElsewhere(t *testing.T) {
+	root := parseFile(t, `package main
+
+func f() {
+	traced.Value()
+}
+`)
+	ruleImports := map[string]string{"traced": "fmt"}
+	aliasOverrides := map[string]string{"traced": "f"}
+
+	used := usedRuleImports(root, ruleImports, aliasOverrides)
+
+	assert.Empty(t, used, "an overridden alias must never reach addRuleImports")
 }

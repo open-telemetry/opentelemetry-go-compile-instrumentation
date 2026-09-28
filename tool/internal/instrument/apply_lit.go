@@ -59,7 +59,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 		return nil
 	}
 
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
 		return err
 	}
 	ip.Info("Apply literal rule", "rule", r)
