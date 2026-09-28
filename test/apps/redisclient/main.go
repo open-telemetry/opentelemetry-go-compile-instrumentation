@@ -40,6 +40,14 @@ func main() {
 	}
 	slog.Info("GET", "key", "testkey", "value", val)
 
+	conn := rdb.Conn()
+	defer func() { _ = conn.Close() }()
+	connVal, err := conn.Get(ctx, "testkey").Result()
+	if err != nil {
+		log.Fatalf("failed to get key via Conn: %v", err)
+	}
+	slog.Info("CONN GET", "key", "testkey", "value", connVal)
+
 	// DEL command
 	err = rdb.Del(ctx, "testkey").Err()
 	if err != nil {
