@@ -145,6 +145,8 @@ func AfterServeHTTP(ictx hook.HookContext) {
 		logger.Debug("AfterServeHTTP: no span from before hook")
 		return
 	}
+	initInstrumentation()
+
 	ctx := data.ctx
 	if ctx == nil {
 		ctx = context.Background()
