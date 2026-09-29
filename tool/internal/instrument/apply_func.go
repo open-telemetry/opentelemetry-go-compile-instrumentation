@@ -394,14 +394,13 @@ func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 // trampoline was actually inserted (true) or the rule was skipped (false). The
 // bool lets the caller avoid writing an otelc.globals.go file for a package
 // whose only func rules were skipped via //otelc:ignore.
-func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) (bool, error) {
-	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
-	if err != nil {
-		return false, err
-	}
-	if !ok {
+func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File,
+	funcDecl *dst.FuncDecl, found bool,
+) (bool, error) {
+	if !found {
 		return false, ex.Newf("can not find function %s", rule.Func)
 	}
+	var err error
 	// A function-level //otelc:ignore opts this function out even when a rule
 	// matches it. The func rule then contributes no instrumented function, so it
 	// must not force a globals file to be written for the package.
