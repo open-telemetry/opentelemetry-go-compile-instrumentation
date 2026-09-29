@@ -296,7 +296,7 @@ func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Packa
 // every file in pkgDir, and relative -modfile or -overlay values resolve against
 // the -C directory of the build, so pkgDir cannot replace that directory.
 func resolveImportPath(ctx context.Context, buildFlags []string, pkgDir string) (string, error) {
-	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, buildFlags, pkgDir)
+	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, buildFlags, false, pkgDir)
 	if err != nil {
 		return "", err
 	}
