@@ -17,3 +17,5 @@ mongodb_hook_newclient:
     - inject_hooks:
         before: BeforeNewClient
         path: "go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/mongo"
+        exclude_callers:
+          - Connect

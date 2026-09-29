@@ -71,6 +71,7 @@ func (c *HookContextImpl) GetPackageName() string { return c.packageName }
 var (
 	OtelGetStackImpl   func() []byte = nil
 	OtelPrintStackImpl func([]byte)  = nil
+	OtelSuppressedImpl func() bool   = nil
 )
 
 // Trampoline Template

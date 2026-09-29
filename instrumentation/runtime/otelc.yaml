@@ -11,6 +11,8 @@ add_gls_field:
             type: "interface{}"
           - name: "otel_baggage_container"
             type: "interface{}"
+          - name: "otel_suppress_count"
+            type: "int"
 
 gls_linker:
   target: "runtime"

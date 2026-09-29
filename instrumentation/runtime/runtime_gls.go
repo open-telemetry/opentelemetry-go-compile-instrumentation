@@ -21,6 +21,24 @@ func SetBaggageContainerToGLS(baggageContainer interface{}) {
 	getg().m.curg.otel_baggage_container = baggageContainer
 }
 
+func IncrementSuppressCount() {
+	getg().m.curg.otel_suppress_count++
+}
+
+func DecrementSuppressCount() {
+	getg().m.curg.otel_suppress_count--
+}
+
+// IsSuppressed reports whether the current goroutine is inside an excluded
+// call.
+//
+// The count does not survive a new goroutine. A goroutine started while the
+// count is greater than zero starts at zero, so a hook running on that
+// goroutine is not suppressed.
+func IsSuppressed() bool {
+	return getg().m.curg.otel_suppress_count > 0
+}
+
 type OtelContextCloner interface {
 	Clone() interface{}
 }

@@ -66,6 +66,9 @@ type instrumentPhase struct {
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
+	// needsSuppressionVar is true once any func rule applied during this
+	// package's instrumentation carries ExcludeCallers.
+	needsSuppressionVar bool
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }

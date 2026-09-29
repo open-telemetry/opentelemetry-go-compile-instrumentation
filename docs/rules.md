@@ -488,6 +488,29 @@ This is the most common rule type. It injects function calls at the beginning (`
   module is added to the build graph automatically. When supplying rules via `--rules` or the
   `OTELC_RULES` environment variable, the package must already be listed in the user's `go.mod`.
 
+- `exclude_callers` (`[]string`, optional): Names of other functions whose calls to the target function must not run `before`/`after`. 
+
+  Each name must resolve to a function declaration in that file, and each excluded caller must
+  reach the target function through a plain statement The exclusion only takes effect on the excluded 
+  caller's own goroutine for the duration of that one call.
+
+  **Example:**
+
+  ```yaml
+  hook_new_async_producer:
+    target: github.com/IBM/sarama
+    where:
+      func: NewAsyncProducer
+    do:
+      - inject_hooks:
+          before: BeforeNewAsyncProducer
+          path: example.com/instrumentation/sarama
+          exclude_callers:
+            - NewSyncProducer
+  ```
+
+  `sarama.NewSyncProducer` calls `sarama.NewAsyncProducer` directly, in the same file. Without `exclude_callers`, a single call to `NewSyncProducer` would also run `BeforeNewAsyncProducer` for the `NewAsyncProducer` call it makes internally.
+
 **Example:**
 
 ```yaml

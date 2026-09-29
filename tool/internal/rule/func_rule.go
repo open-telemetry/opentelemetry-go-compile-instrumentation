@@ -60,6 +60,10 @@ type InstFuncRule struct {
 	Result            string         `json:"result,omitempty"             yaml:"result"`
 	LastResult        string         `json:"last_result,omitempty"        yaml:"last_result"`
 	Param             string         `json:"param,omitempty"              yaml:"param"`
+
+	// ExcludeCallers names declarations, in the same source file as Func, whose
+	// own calls to Func must not run Before/After.
+	ExcludeCallers []string `json:"exclude_callers,omitempty" yaml:"exclude_callers"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.

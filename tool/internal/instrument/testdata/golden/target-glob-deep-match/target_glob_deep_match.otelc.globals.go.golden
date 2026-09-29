@@ -4,6 +4,7 @@ package users
 var (
 	OtelGetStackImpl   func() []byte = nil
 	OtelPrintStackImpl func([]byte)  = nil
+	OtelSuppressedImpl func() bool   = nil
 )
 
 // !!! pkg/hook/context.go will auto-sync to tool/internal/instrument/api.tmpl

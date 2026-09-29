@@ -174,7 +174,7 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 	// Write globals file if any function is instrumented because injected code
 	// always requires some global variables and auxiliary declarations
 	if hasFuncRule {
-		return ip.writeGlobals(rset.PackageName)
+		return ip.writeGlobals(ctx, rset.PackageName)
 	}
 	return nil
 }

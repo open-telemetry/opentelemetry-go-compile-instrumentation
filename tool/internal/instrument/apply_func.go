@@ -15,6 +15,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -22,6 +23,11 @@ import (
 const (
 	tJumpLabel       = "/* __TRAMPOLINE_JUMP_IF__ */"
 	otelcGlobalsFile = "otelc.globals.go"
+
+	suppressCountPackage       = "runtime"
+	incrementSuppressCountName = "IncrementSuppressCount"
+	decrementSuppressCountName = "DecrementSuppressCount"
+	isSuppressedFuncName       = "IsSuppressed"
 )
 
 func makeName(r *rule.InstFuncRule, funcDecl *dst.FuncDecl, isBefore bool) string {
@@ -309,7 +315,7 @@ func (ip *instrumentPhase) addCompileArg(newArg string) {
 //go:embed api.tmpl
 var templateAPI string
 
-func (ip *instrumentPhase) writeGlobals(pkgName string) error {
+func (ip *instrumentPhase) writeGlobals(ctx context.Context, pkgName string) error {
 	// Prepare trampoline code header
 	p := ast.NewAstParser()
 	trampoline, err := p.ParseSource("package " + pkgName)
@@ -326,6 +332,12 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	}
 	trampoline.Decls = append(trampoline.Decls, api.Decls...)
 
+	if ip.needsSuppressionVar {
+		if err = ip.addSuppressionInit(ctx, trampoline, pkgName); err != nil {
+			return err
+		}
+	}
+
 	// Write trampoline code to file
 	path := filepath.Join(ip.workDir, otelcGlobalsFile)
 	err = ast.WriteFile(path, trampoline)
@@ -334,6 +346,29 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	}
 	ip.addCompileArg(path)
 	ip.keepForDebug(path)
+	return nil
+}
+
+// addSuppressionInit adds an import of the runtime package and an init
+// function that assigns OtelSuppressedImpl to runtime.IsSuppressed into
+// trampoline.
+func (ip *instrumentPhase) addSuppressionInit(ctx context.Context, trampoline *dst.File, pkgName string) error {
+	if pkgName == suppressCountPackage {
+		return ex.Newf("exclude_callers targeting the %s package itself is not supported", suppressCountPackage)
+	}
+	if err := imports.AddToFile(ctx, trampoline, map[string]string{suppressCountPackage: suppressCountPackage}); err != nil {
+		return ex.Wrapf(err, "adding %s import for exclude_callers", suppressCountPackage)
+	}
+	assign := ast.AssignStmt(
+		ast.Ident(suppressImplName),
+		ast.SelectorExpr(ast.Ident(suppressCountPackage), isSuppressedFuncName),
+	)
+	initFunc := &dst.FuncDecl{
+		Name: ast.Ident("init"),
+		Type: &dst.FuncType{Params: &dst.FieldList{}},
+		Body: ast.BlockStmts(assign),
+	}
+	trampoline.Decls = append(trampoline.Decls, initFunc)
 	return nil
 }
 
@@ -432,10 +467,138 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	if err = ip.insertTJump(rule, funcDecl); err != nil {
 		return false, err
 	}
+	if err = ip.applyExcludeCallers(ctx, rule, root); err != nil {
+		return false, err
+	}
 	if ip.appliedFuncIdentities == nil {
 		ip.appliedFuncIdentities = make(map[string]struct{})
 	}
 	ip.appliedFuncIdentities[id] = struct{}{}
 	ip.Info("Apply func rule", "rule", rule)
 	return true, nil
+}
+
+// applyExcludeCallers surrounds every excluded call to rule.Func with
+// goroutine-local suppression counters
+//
+// Each caller must be a function declaration in root, the same file as
+// rule.Func.
+func (ip *instrumentPhase) applyExcludeCallers(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
+	if len(rule.ExcludeCallers) == 0 {
+		return nil
+	}
+	if err := ip.addRuleImports(ctx, root, map[string]string{"runtime": "runtime"}, rule.Name); err != nil {
+		return err
+	}
+	for _, caller := range rule.ExcludeCallers {
+		callerDecl := ast.FindFuncDeclWithoutRecv(root, caller)
+		if callerDecl == nil {
+			return ex.Newf(
+				"rule %q: exclude_callers names %q, but no function declaration with that name "+
+					"exists in the same file as %s; cross-file caller exclusion is not supported",
+				rule.Name, caller, rule.Func)
+		}
+		bracketed, bracketErr := bracketExcludedCalls(callerDecl.Body, rule.Func)
+		if bracketErr != nil {
+			return ex.Wrapf(bracketErr, "rule %q: exclude_callers %q", rule.Name, caller)
+		}
+		if bracketed == 0 {
+			return ex.Newf(
+				"rule %q: exclude_callers names %q, but it has no direct call to %s; "+
+					"a call reached only through a switch or select case is not supported",
+				rule.Name, caller, rule.Func)
+		}
+	}
+	ip.needsSuppressionVar = true
+	return nil
+}
+
+// bracketExcludedCalls wraps every statement that directly calls
+// funcName with an increment/decrement pair around the goroutine-local
+// suppression counter. Does not include return statements that call funcName.
+// Returns how many statements it wrapped.
+func bracketExcludedCalls(body *dst.BlockStmt, funcName string) (int, error) {
+	bracketed := 0
+	for i := 0; i < len(body.List); i++ {
+		stmt := body.List[i]
+		if nested := nestedBlocksOf(stmt); len(nested) > 0 {
+			for _, block := range nested {
+				n, err := bracketExcludedCalls(block, funcName)
+				if err != nil {
+					return 0, err
+				}
+				bracketed += n
+			}
+			continue
+		}
+		if !stmtCallsFunc(stmt, funcName) {
+			continue
+		}
+		if _, isReturn := stmt.(*dst.ReturnStmt); isReturn {
+			return 0, ex.Newf(
+				"calls %s directly in a return statement; bracketing that call would place "+
+					"the decrement after a statement that never returns. Assign the call's "+
+					"result to a variable and return the variable instead",
+				funcName)
+		}
+		inc := ast.ExprStmt(suppressCountCall(incrementSuppressCountName))
+		dec := ast.ExprStmt(suppressCountCall(decrementSuppressCountName))
+		body.List = append(body.List[:i], append([]dst.Stmt{inc}, body.List[i:]...)...)
+		i++
+		body.List = append(body.List[:i+1], append([]dst.Stmt{dec}, body.List[i+1:]...)...)
+		i++
+		bracketed++
+	}
+	return bracketed, nil
+}
+
+// nestedBlocksOf returns the block bodies that stmt runs unconditionally or
+// conditionally, for the statement kinds bracketExcludedCalls recurses into.
+// Returns nil for any other statement kind.
+func nestedBlocksOf(stmt dst.Stmt) []*dst.BlockStmt {
+	switch s := stmt.(type) {
+	case *dst.BlockStmt:
+		return []*dst.BlockStmt{s}
+	case *dst.IfStmt:
+		blocks := []*dst.BlockStmt{s.Body}
+		switch e := s.Else.(type) {
+		case *dst.BlockStmt:
+			blocks = append(blocks, e)
+		case *dst.IfStmt:
+			blocks = append(blocks, nestedBlocksOf(e)...)
+		}
+		return blocks
+	case *dst.ForStmt:
+		return []*dst.BlockStmt{s.Body}
+	case *dst.RangeStmt:
+		return []*dst.BlockStmt{s.Body}
+	default:
+		return nil
+	}
+}
+
+// stmtCallsFunc reports whether stmt directly calls a function named
+// funcName, unqualified, as sarama.NewSyncProducer calls the sibling
+// sarama.NewAsyncProducer within the same package.
+func stmtCallsFunc(stmt dst.Stmt, funcName string) bool {
+	found := false
+	dst.Inspect(stmt, func(n dst.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := n.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		if ident, ok := call.Fun.(*dst.Ident); ok && ident.Name == funcName {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func suppressCountCall(funcName string) *dst.CallExpr {
+	return &dst.CallExpr{Fun: ast.SelectorExpr(ast.Ident(suppressCountPackage), funcName)}
 }

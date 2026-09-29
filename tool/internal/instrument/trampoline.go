@@ -57,6 +57,7 @@ const (
 	trampolineBefore                = true
 	trampolineAfter                 = false
 	unsafePackageName               = "unsafe"
+	suppressImplName                = "OtelSuppressedImpl"
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -488,6 +489,28 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	return nil
 }
 
+// hookCallGuard builds the condition that gates a call to the real hook
+// function named fnName or when t excludes one or more callers.
+func hookCallGuard(fnName string, t *rule.InstFuncRule) dst.Expr {
+	notNil := &dst.BinaryExpr{X: ast.Ident(fnName), Op: token.NEQ, Y: ast.Nil()}
+	if len(t.ExcludeCallers) == 0 {
+		return notNil
+	}
+	notSuppressed := &dst.BinaryExpr{
+		X: &dst.BinaryExpr{
+			X:  ast.Ident(suppressImplName),
+			Op: token.EQL,
+			Y:  ast.Nil(),
+		},
+		Op: token.LOR,
+		Y: &dst.UnaryExpr{
+			Op: token.NOT,
+			X:  ast.CallTo(suppressImplName, nil, nil),
+		},
+	}
+	return &dst.BinaryExpr{X: notNil, Op: token.LAND, Y: notSuppressed}
+}
+
 func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	// Query whether the parameter is a variadic parameter in the target function
 	targetParams := findTargetParamType(ip.targetFunc)
@@ -511,11 +534,7 @@ func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	}
 	fnName := getHookFuncName(t, trampolineBefore)
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
-	iff := ast.IfNotNilStmt(
-		ast.Ident(fnName),
-		ast.Block(call),
-		nil,
-	)
+	iff := &dst.IfStmt{Cond: hookCallGuard(fnName, t), Body: ast.Block(call)}
 	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
 }
 
@@ -536,11 +555,7 @@ func (ip *instrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 	}
 	fnName := getHookFuncName(t, trampolineAfter)
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
-	iff := ast.IfNotNilStmt(
-		ast.Ident(fnName),
-		ast.Block(call),
-		nil,
-	)
+	iff := &dst.IfStmt{Cond: hookCallGuard(fnName, t), Body: ast.Block(call)}
 	insertAtEnd(ip.afterTrampFunc, iff)
 }
 

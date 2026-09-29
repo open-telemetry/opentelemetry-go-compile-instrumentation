@@ -9,6 +9,8 @@ client_hook_newclient:
         before: BeforeNewClient
         after: AfterNewClient
         path: "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/client"
+        exclude_callers:
+          - DialContext
 
 client_hook_dialcontext:
   target: google.golang.org/grpc
