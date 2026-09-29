@@ -1226,6 +1226,42 @@ func TestCheckRuleFileVersion(t *testing.T) {
 	})
 }
 
+func TestPublishedRuleFilesCompatibleWithReleasedOtelc(t *testing.T) {
+	// Released otelc versions (v1.0.1, v1.1.0) parse rule files by
+	// unmarshalling the whole document into map[string]map[string]any, so a
+	// scalar top-level key such as the file-level "version" metadata breaks
+	// them. Published instrumentation rule files must therefore stay on the
+	// legacy format until a released otelc understands that metadata.
+	instRoot := filepath.Join("..", "..", "..", "instrumentation")
+
+	var ruleFiles []string
+	err := filepath.WalkDir(instRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && util.IsRuleFile(d.Name()) {
+			ruleFiles = append(ruleFiles, path)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, ruleFiles, "no published rule files found under %s", instRoot)
+
+	for _, path := range ruleFiles {
+		data, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+
+		var legacyRules map[string]map[string]any
+		require.NoError(t, yaml.Unmarshal(data, &legacyRules),
+			"published rule file %s must be readable by released otelc parsers", path)
+
+		doc, parseErr := rule.ParseFile(data)
+		require.NoError(t, parseErr, path)
+		assert.True(t, doc.Legacy,
+			"published rule file %s must not declare a minimum otelc version", path)
+	}
+}
+
 func TestLoadCustomRulesDeterministicOrder(t *testing.T) {
 	content := `zebra:
   target: main
