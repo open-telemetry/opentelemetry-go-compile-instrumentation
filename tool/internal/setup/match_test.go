@@ -443,7 +443,7 @@ func validateCreatedRule(t *testing.T, createdRule rule.InstRule, ruleName strin
 	}
 
 	if target, ok := fields["target"].(string); ok {
-		if createdRule.GetTarget() != target {
+		if createdRule.GetTarget().String() != target {
 			t.Errorf("rule target = %v, want %v", createdRule.GetTarget(), target)
 		}
 	}
@@ -742,7 +742,7 @@ func TestPreciseMatching_WhereFileFilter(t *testing.T) {
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "test-where-file",
-			Target: "example.com/svc",
+			Target: rule.NewTarget("example.com/svc"),
 			Where: &rule.WhereDef{
 				File: &rule.FilterDef{HasStruct: "Server"},
 			},
@@ -775,7 +775,7 @@ func TestPreciseMatching_WhereFileAllOf(t *testing.T) {
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "test-where-file-all-of",
-			Target: "example.com/svc",
+			Target: rule.NewTarget("example.com/svc"),
 			Where: &rule.WhereDef{
 				File: &rule.FilterDef{
 					AllOf: []rule.FilterDef{
@@ -816,7 +816,7 @@ func TestPreciseMatching_CallRuleAddedToAllFiles(t *testing.T) {
 	callRule := &rule.InstCallRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "wrap-sizeof",
-			Target: "example.com/app",
+			Target: rule.NewTarget("example.com/app"),
 		},
 		FunctionCall: "unsafe.Sizeof",
 		ImportPath:   "unsafe",
@@ -849,7 +849,7 @@ func TestPreciseMatching_WhereFileOneOf(t *testing.T) {
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "test-where-file-one-of",
-			Target: "example.com/svc",
+			Target: rule.NewTarget("example.com/svc"),
 			Where: &rule.WhereDef{
 				File: &rule.FilterDef{
 					OneOf: []rule.FilterDef{
@@ -890,7 +890,7 @@ func TestPreciseMatching_WhereFileNot(t *testing.T) {
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "test-where-file-not",
-			Target: "example.com/svc",
+			Target: rule.NewTarget("example.com/svc"),
 			Where: &rule.WhereDef{
 				File: &rule.FilterDef{
 					Not: &rule.FilterDef{HasStruct: "MockConn"},
@@ -961,7 +961,7 @@ func TestPreciseMatching_IsTestFilter(t *testing.T) {
 			funcRule := &rule.InstFuncRule{
 				InstBaseRule: rule.InstBaseRule{
 					Name:   "test-is-test-filter",
-					Target: "example.com/svc",
+					Target: rule.NewTarget("example.com/svc"),
 					Where: &rule.WhereDef{
 						File: &rule.FilterDef{IsTest: &shouldMatch},
 					},
@@ -1004,7 +1004,7 @@ func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 	badRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "bad-where-file",
-			Target: "example.com/svc",
+			Target: rule.NewTarget("example.com/svc"),
 			Where: &rule.WhereDef{
 				File: &rule.FilterDef{HasFunc: "Foo", HasStruct: "Bar"},
 			},
@@ -1031,7 +1031,7 @@ func newTestSetupPhase() *setupPhase {
 func newTestFuncRule(path, target string) *rule.InstFuncRule {
 	return &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
-			Target: target,
+			Target: rule.NewTarget(target),
 		},
 		Path: path,
 	}
@@ -1040,7 +1040,7 @@ func newTestFuncRule(path, target string) *rule.InstFuncRule {
 func newTestFileRule(path, target string) *rule.InstFileRule {
 	return &rule.InstFileRule{
 		InstBaseRule: rule.InstBaseRule{
-			Target: target,
+			Target: rule.NewTarget(target),
 		},
 		Path: path,
 	}
@@ -1117,13 +1117,13 @@ func Target(value string) error { return nil }
 	matchingSig := rule.FuncSignature{Args: []string{"string"}, Returns: []string{"error"}}
 	nonMatchingSig := rule.FuncSignature{Args: []string{"int"}, Returns: []string{"error"}}
 	matchingRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "matching", Target: importPath},
+		InstBaseRule: rule.InstBaseRule{Name: "matching", Target: rule.NewTarget(importPath)},
 		Func:         "Target",
 		Before:       "BeforeTarget",
 		Signature:    &matchingSig,
 	}
 	nonMatchingRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "non-matching", Target: importPath},
+		InstBaseRule: rule.InstBaseRule{Name: "non-matching", Target: rule.NewTarget(importPath)},
 		Func:         "Target",
 		Before:       "BeforeTarget",
 		Signature:    &nonMatchingSig,
@@ -1334,7 +1334,7 @@ func globFuncRule(name, target string) *rule.InstFuncRule {
 	return &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   name,
-			Target: target,
+			Target: rule.NewTarget(target),
 		},
 		Func:   "Handler",
 		Before: "BeforeHandler",
@@ -1358,7 +1358,7 @@ func TestRunMatch_GlobTargetMatches(t *testing.T) {
 		context.Background(),
 		dep,
 		map[string][]rule.InstRule{},
-		[]targetRule{{target: globRule.Target, rule: globRule}},
+		[]targetRule{{target: &globRule.Target, rule: globRule}},
 	)
 	require.NoError(t, err)
 	require.Len(t, set.FuncRules, 1, "glob target should match the descendant package")
@@ -1381,7 +1381,7 @@ func TestRunMatch_GlobTargetNoMatch(t *testing.T) {
 		context.Background(),
 		dep,
 		map[string][]rule.InstRule{},
-		[]targetRule{{target: globRule.Target, rule: globRule}},
+		[]targetRule{{target: &globRule.Target, rule: globRule}},
 	)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty(), "glob target must not match an unrelated package")
@@ -1403,7 +1403,7 @@ func TestRunMatch_SingleSegmentGlobDoesNotCrossBoundary(t *testing.T) {
 		context.Background(),
 		dep,
 		map[string][]rule.InstRule{},
-		[]targetRule{{target: globRule.Target, rule: globRule}},
+		[]targetRule{{target: &globRule.Target, rule: globRule}},
 	)
 	require.NoError(t, err)
 	require.True(t, set.IsEmpty(), "single-segment glob must not cross a path boundary")
@@ -1430,7 +1430,7 @@ func TestRunMatch_ExactAndGlobCoexist(t *testing.T) {
 		context.Background(),
 		dep,
 		exactRules,
-		[]targetRule{{target: globRule.Target, rule: globRule}},
+		[]targetRule{{target: &globRule.Target, rule: globRule}},
 	)
 	require.NoError(t, err)
 	require.Len(t, set.FuncRules[srcFile], 2, "both exact and glob rules should match")
@@ -1524,6 +1524,51 @@ func TestMatchDeps_RootTargetExpandsToRootModuleGlob(t *testing.T) {
 			require.Len(t, m.FuncRules[pluginSrc], 1, "overlapping roots must not apply the same rule twice")
 		}
 	}
+}
+
+func TestMatchDeps_TargetList(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "list.yaml")
+	err := os.WriteFile(ruleFile, []byte(`list_hook:
+  target:
+    - $root
+    - main
+    - not: example.com/app/internal/**
+  where:
+    func: Handler
+  do:
+    - inject_hooks:
+        before: BeforeHandler
+        path: "example.com/hooks"
+`), 0o644)
+	require.NoError(t, err)
+
+	mainSrc := writeGoSource(t, "main.go", "package main\n\nfunc Handler() {}\n\nfunc main() {}\n")
+	libSrc := writeGoSource(t, "lib.go", "package lib\n\nfunc Handler() {}\n")
+	internalSrc := writeGoSource(t, "internal.go", "package gen\n\nfunc Handler() {}\n")
+	externalSrc := writeGoSource(t, "external.go", "package other\n\nfunc Handler() {}\n")
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+	sp.buildPackages = []*packages.Package{{Module: &packages.Module{Path: "example.com/app"}}}
+
+	deps := []*Dependency{
+		{ImportPath: "main", Sources: []string{mainSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/app/lib", Sources: []string{libSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/app/internal/gen", Sources: []string{internalSrc}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/other", Sources: []string{externalSrc}, CgoFiles: map[string]string{}},
+	}
+
+	matched, err := sp.matchDeps(context.Background(), deps, nil)
+	require.NoError(t, err)
+
+	rulesByPath := make(map[string]int)
+	for _, m := range matched {
+		for _, rules := range m.FuncRules {
+			rulesByPath[m.ModulePath] += len(rules)
+		}
+	}
+	assert.Equal(t, map[string]int{"main": 1, "example.com/app/lib": 1}, rulesByPath)
 }
 
 func TestMatchDeps_RootTargetRequiresRootModule(t *testing.T) {
@@ -1647,7 +1692,7 @@ func TestRunMatch_WarnsOnUnresolvedVersion(t *testing.T) {
 			&rule.InstFuncRule{
 				InstBaseRule: rule.InstBaseRule{
 					Name:    "versioned_hook",
-					Target:  importPath,
+					Target:  rule.NewTarget(importPath),
 					Version: "v1.0.0",
 				},
 				Func:   "Target",
@@ -1656,7 +1701,7 @@ func TestRunMatch_WarnsOnUnresolvedVersion(t *testing.T) {
 			&rule.InstFuncRule{
 				InstBaseRule: rule.InstBaseRule{
 					Name:    "another_versioned_hook",
-					Target:  importPath,
+					Target:  rule.NewTarget(importPath),
 					Version: "v2.0.0",
 				},
 				Func:   "Other",
@@ -1708,7 +1753,7 @@ func TestMatchOneRule(t *testing.T) {
 		{
 			name: "func rule matches declared function",
 			rule: &rule.InstFuncRule{
-				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 				Func:         "Plain",
 				Before:       "H",
 				Path:         "example.com/hooks",
@@ -1720,7 +1765,7 @@ func TestMatchOneRule(t *testing.T) {
 		{
 			name: "func rule does not match missing function",
 			rule: &rule.InstFuncRule{
-				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 				Func:         "DoesNotExist",
 				Before:       "H",
 				Path:         "example.com/hooks",
@@ -1732,7 +1777,7 @@ func TestMatchOneRule(t *testing.T) {
 		{
 			name: "struct rule matches declared struct",
 			rule: &rule.InstStructRule{
-				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 				Struct:       "Widget",
 			},
 			verify: func(t *testing.T, set *rule.InstRuleSet) {
@@ -1742,7 +1787,7 @@ func TestMatchOneRule(t *testing.T) {
 		{
 			name: "raw rule matches declared function",
 			rule: &rule.InstRawRule{
-				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 				Func:         "Plain",
 				Raw:          "println()",
 			},
@@ -1753,7 +1798,7 @@ func TestMatchOneRule(t *testing.T) {
 		{
 			name: "call rule is added unconditionally",
 			rule: &rule.InstCallRule{
-				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 				FunctionCall: "net/http.Get",
 			},
 			verify: func(t *testing.T, set *rule.InstRuleSet) {
@@ -1763,7 +1808,7 @@ func TestMatchOneRule(t *testing.T) {
 		{
 			name: "directive rule matches annotated function",
 			rule: &rule.InstDirectiveRule{
-				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 				Directive:    "sample:trace",
 			},
 			verify: func(t *testing.T, set *rule.InstRuleSet) {
@@ -1773,7 +1818,7 @@ func TestMatchOneRule(t *testing.T) {
 		{
 			name: "decl rule matches named const",
 			rule: &rule.InstDeclRule{
-				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 				Identifier:   "MaxRetries",
 				Kind:         "const",
 			},
@@ -1784,7 +1829,7 @@ func TestMatchOneRule(t *testing.T) {
 		{
 			name: "file rule is skipped",
 			rule: &rule.InstFileRule{
-				InstBaseRule: rule.InstBaseRule{Target: "example.com/sample"},
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 			},
 			verify: func(t *testing.T, set *rule.InstRuleSet) {
 				assert.Empty(t, set.FileRules)
@@ -1863,7 +1908,7 @@ func TestRunMatch_VersionFilteredOut(t *testing.T) {
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:    "vrule",
-			Target:  "example.com/v",
+			Target:  rule.NewTarget("example.com/v"),
 			Version: "v2.0.0",
 		},
 		Func:   "Handler",
@@ -1880,7 +1925,7 @@ func TestRunMatch_VersionFilteredOut(t *testing.T) {
 func TestPreciseMatching_NoSources(t *testing.T) {
 	dep := &Dependency{ImportPath: "example.com/empty"}
 	funcRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "r", Target: "example.com/empty"},
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: rule.NewTarget("example.com/empty")},
 		Func:         "Foo",
 	}
 
@@ -1898,7 +1943,7 @@ func TestPreciseMatching_CtxCancelled(t *testing.T) {
 		Sources:    []string{srcFile},
 	}
 	funcRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "r", Target: "example.com/c"},
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: rule.NewTarget("example.com/c")},
 		Func:         "Foo",
 		Before:       "BeforeFoo",
 		Path:         "example.com/hooks",
@@ -1920,7 +1965,7 @@ func TestPreciseMatching_MatchOneRuleError(t *testing.T) {
 		Sources:    []string{srcFile},
 	}
 	badRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "bad", Target: "example.com/s"},
+		InstBaseRule: rule.InstBaseRule{Name: "bad", Target: rule.NewTarget("example.com/s")},
 		Func:         "Foo",
 		Signature:    &rule.FuncSignature{Args: []string{"[]invalid"}},
 	}

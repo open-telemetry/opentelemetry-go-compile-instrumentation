@@ -448,6 +448,19 @@ echo ignored
 			},
 		},
 		{
+			name: "keeps change directory first",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"-C", "app", "."},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{
+				"build", "-C", "app", "-a", "-x", "-n", ".",
+			},
+		},
+		{
 			name: "returns build failure",
 			buildPlan: `
 go: module example.com missing
