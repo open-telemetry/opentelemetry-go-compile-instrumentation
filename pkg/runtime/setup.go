@@ -24,12 +24,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-const (
-	// Default export intervals and batch sizes
-	defaultTraceBatchTimeout = time.Second
-	defaultTraceBatchSize    = 512
-)
-
 var (
 	logger                *slog.Logger
 	meterProvider         *sdkmetric.MeterProvider
@@ -190,10 +184,14 @@ func newSpanProcessor(traceExporter sdktrace.SpanExporter) sdktrace.SpanProcesso
 		return sdktrace.NewSimpleSpanProcessor(traceExporter)
 	}
 
-	return sdktrace.NewBatchSpanProcessor(traceExporter,
-		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
-		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
-	)
+	// No WithBatchTimeout/WithMaxExportBatchSize here: NewBatchSpanProcessor
+	// already derives MaxQueueSize, MaxExportBatchSize, BatchTimeout and
+	// ExportTimeout from the standard OTEL_BSP_* env vars when no option
+	// overrides them. Passing explicit options for two of the four silently
+	// defeats OTEL_BSP_MAX_EXPORT_BATCH_SIZE and OTEL_BSP_SCHEDULE_DELAY for
+	// every otelc-instrumented service, with no way to raise the export
+	// throughput ceiling short of patching this function.
+	return sdktrace.NewBatchSpanProcessor(traceExporter)
 }
 
 func useSimpleSpanProcessor() bool {
