@@ -4,6 +4,7 @@
 package testutil
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strings"
@@ -120,15 +121,31 @@ func (f *TestFixture) CollectorURL() string {
 type Server struct {
 	t       *testing.T
 	appPath string
+	output  *AppOutput
 
 	*exec.Cmd
+}
+
+// WaitForLog blocks until the application has logged substr, failing the test
+// if it never does. The wait is event driven rather than polled, so it returns
+// as soon as the line is written.
+func (s *Server) WaitForLog(substr string) {
+	s.t.Helper()
+
+	ctx, cancel := context.WithTimeout(s.t.Context(), defaultAppLogTimeout)
+	defer cancel()
+
+	if err := s.output.WaitFor(ctx, substr); err != nil {
+		s.t.Fatalf("app %s never logged %q: %v\napp output:\n%s",
+			s.appPath, substr, err, s.output)
+	}
 }
 
 // Start starts a test application from test/apps/. The binary is
 // expected to be built using Build.
 func (f *TestFixture) Start(appName string, args ...string) *Server {
-	cmd := Start(f.t, f.appsDir, appName, f.Env(), args...)
-	return &Server{t: f.t, appPath: appName, Cmd: cmd}
+	cmd, out := Start(f.t, f.appsDir, appName, f.Env(), args...)
+	return &Server{t: f.t, appPath: appName, output: out, Cmd: cmd}
 }
 
 // Run runs a application and returns its output. The binary is
