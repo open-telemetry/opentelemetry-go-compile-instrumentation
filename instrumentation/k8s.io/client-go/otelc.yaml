@@ -1,8 +1,8 @@
 version: "v1.0.0"
 
-k8s_hook_processdeltas:
+k8s_hook_processdeltas_legacy:
   target: k8s.io/client-go/tools/cache
-  version: "v0.34.0,v0.36.0"
+  version: "v0.34.0,v0.35.0"
   where:
     func: processDeltas
   do:
@@ -10,6 +10,24 @@ k8s_hook_processdeltas:
         before: beforeProcessDeltas
         after: afterProcessDeltas
         path: "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go"
+
+# processDeltasInBatch (added in v0.35.0) calls processDeltas
+# once per delta when the store does not support transactions. 
+# Without exclude_callers, that internal call would also run 
+# beforeProcessDeltas/afterProcessDeltas, adding one extra
+# span per delta.
+k8s_hook_processdeltas:
+  target: k8s.io/client-go/tools/cache
+  version: "v0.35.0,v0.36.0"
+  where:
+    func: processDeltas
+  do:
+    - inject_hooks:
+        before: beforeProcessDeltas
+        after: afterProcessDeltas
+        path: "go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go"
+        exclude_callers:
+          - processDeltasInBatch
 
 k8s_hook_processdeltasinbatch:
   target: k8s.io/client-go/tools/cache
