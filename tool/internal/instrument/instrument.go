@@ -93,20 +93,16 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 // passes this override check, but applyFuncRule then re-checks //otelc:ignore
 // and skips it, so the closest-to-declaration //otelc:ignore wins.
 func (ip *instrumentPhase) skipRuleForFileIgnore(r rule.InstRule, funcDecl *dst.FuncDecl, found bool) bool {
-	if !isFuncRule(r) {
+	fr, isFuncRule := r.(*rule.InstFuncRule)
+	if !isFuncRule {
 		ip.Debug("Skip non-func rule due to file-level //otelc:ignore (not overridable)", "rule", r.GetName())
 		return true
 	}
 	if !found || !ast.FuncLeadHasDirective(funcDecl, util.DirectiveInstrument) {
-		ip.Debug("Skip func rule due to file-level //otelc:ignore", "rule", r.GetName())
+		ip.Debug("Skip func rule due to file-level //otelc:ignore", "func", fr.Func, "rule", r.GetName())
 		return true
 	}
 	return false
-}
-
-func isFuncRule(r rule.InstRule) bool {
-	_, ok := r.(*rule.InstFuncRule)
-	return ok
 }
 
 // instrumentFile applies rules to a single file and reports whether any of
