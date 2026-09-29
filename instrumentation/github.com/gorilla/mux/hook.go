@@ -18,12 +18,16 @@ import (
 // return. Params are fixed: 0 is the *Router, 1 is *http.Request, 2 is
 // *mux.RouteMatch.
 //
+// The bool is the match result. Return when it is false even if Route is
+// set and MatchErr is nil. A leftover or custom Route on a failed Match
+// must not receive http.route.
+//
 // Match returns true for a custom NotFoundHandler or MethodNotAllowedHandler
 // as well as for a real route. Those cases set MatchErr (ErrNotFound /
 // ErrMethodMismatch) and must not receive http.route — same as a 404/405
 // that used mux's default handlers.
-func AfterMatch(ictx hook.HookContext, _ bool) {
-	if !enabler.Enable() || ictx == nil {
+func AfterMatch(ictx hook.HookContext, ok bool) {
+	if !enabler.Enable() || ictx == nil || !ok {
 		return
 	}
 

@@ -103,6 +103,30 @@ func TestAfterMatch_SubrouterUsesFullPathTemplate(t *testing.T) {
 	assert.Contains(t, tpl, "{appId}")
 }
 
+func TestAfterMatch_FalseMatchWithStaleRouteDoesNotSetRoute(t *testing.T) {
+	// Match can return false with Route still set (stale or caller-filled)
+	// and MatchErr nil. The bool is the match result; do not enrich.
+	sr, tr := setupContextTracer(t)
+	_, span := tr.Start(context.Background(), "GET")
+
+	r := mux.NewRouter()
+	r.HandleFunc("/users/{id}", func(http.ResponseWriter, *http.Request) {}).Methods(http.MethodGet)
+	_, okMatch, ok := matchRequest(t, r, http.MethodGet, "/users/42", nil)
+	require.True(t, ok)
+	require.NotNil(t, okMatch.Route)
+	require.NoError(t, okMatch.MatchErr)
+
+	req := httptest.NewRequest(http.MethodGet, "/stale", nil).
+		WithContext(trace.ContextWithSpan(context.Background(), span))
+	stale := mux.RouteMatch{Route: okMatch.Route}
+	afterMatch(req, &stale, false)
+	span.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, "GET", sr.Ended()[0].Name())
+	assert.NotContains(t, routeAttrs(sr.Ended()[0]), "http.route")
+}
+
 func TestAfterMatch_UnmatchedRouteIsNoop(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 	_, span := tr.Start(context.Background(), "GET")
