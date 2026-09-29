@@ -78,6 +78,46 @@ func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]s
 	return used
 }
 
+// callEnclosingStmts maps every *dst.CallExpr in root to the nearest dst.Stmt
+// that contains it.
+func callEnclosingStmts(root *dst.File) map[*dst.CallExpr]dst.Stmt {
+	v := &enclosingStmtVisitor{stmts: make(map[*dst.CallExpr]dst.Stmt)}
+	dst.Walk(v, root)
+	return v.stmts
+}
+
+// enclosingStmtVisitor implements dst.Visitor and tracks the current stack of
+// enclosing statements while dst.Walk descends through the tree.
+//
+// dst.Walk calls Visit(node) on the way down through a node's children, and
+// once those children are done, calls Visit(nil) exactly once.
+type enclosingStmtVisitor struct {
+	stmts  map[*dst.CallExpr]dst.Stmt
+	stack  []dst.Stmt
+	pushed []bool
+}
+
+func (v *enclosingStmtVisitor) Visit(node dst.Node) dst.Visitor {
+	if node == nil {
+		last := v.pushed[len(v.pushed)-1]
+		v.pushed = v.pushed[:len(v.pushed)-1]
+		if last {
+			v.stack = v.stack[:len(v.stack)-1]
+		}
+		return nil
+	}
+	didPush := false
+	if stmt, ok := node.(dst.Stmt); ok {
+		v.stack = append(v.stack, stmt)
+		didPush = true
+	}
+	v.pushed = append(v.pushed, didPush)
+	if call, ok := node.(*dst.CallExpr); ok && len(v.stack) > 0 {
+		v.stmts[call] = v.stack[len(v.stack)-1]
+	}
+	return v
+}
+
 // walkCallsWithEnclosingFunc visits every *dst.CallExpr in root and invokes fn
 // with the call and the top-level *dst.FuncDecl that contains it. Returns nil for
 // calls outside any function body, e.g. a package-level variable
@@ -106,7 +146,10 @@ func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, encl
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
-func (*instrumentPhase) applyCallReplace(
+//
+// A //otelc:ignore comment above a matching call's enclosing statement opts
+// that one call site out and leaves every other matching call site wrapped.
+func (ip *instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -116,12 +159,18 @@ func (*instrumentPhase) applyCallReplace(
 		return false, err
 	}
 
+	stmts := callEnclosingStmts(root)
+
 	// Pass 1: collect matching calls and pre-compute replacements to avoid
 	// re-matching the original call pointer inside its own wrapper.
 	replacements := make(map[*dst.CallExpr]dst.Expr)
 	var wrapError error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
 		if !matchesCallRule(call, r, importAliases) {
+			return true
+		}
+		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
 		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases)
@@ -158,6 +207,10 @@ func (*instrumentPhase) applyCallReplace(
 	return true, nil
 }
 
+// applyCallAppendArgs appends r's extra arguments to every call site that
+// matches r. A //otelc:ignore comment above a matching call's enclosing
+// statement opts that one call site out and leaves every other matching call
+// site appended.
 func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
@@ -167,15 +220,21 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		return false
 	}
 
+	stmts := callEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
 	dst.Inspect(root, func(node dst.Node) bool {
 		call, ok := node.(*dst.CallExpr)
 		if !ok {
 			return true
 		}
-		if matchesCallRule(call, r, importAliases) {
-			matchingCalls = append(matchingCalls, call)
+		if !matchesCallRule(call, r, importAliases) {
+			return true
 		}
+		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
+			return true
+		}
+		matchingCalls = append(matchingCalls, call)
 		return true
 	})
 	for _, call := range matchingCalls {
