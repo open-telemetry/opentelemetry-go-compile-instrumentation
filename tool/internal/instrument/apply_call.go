@@ -498,10 +498,12 @@ func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*type
 		return pkg, nil
 	}
 
+	resolvedPath := path
 	archive, ok := imp.archives[path]
 	if !ok {
 		if mapped, mappedOk := imp.importMap[path]; mappedOk {
 			archive, ok = imp.archives[mapped]
+			resolvedPath = mapped
 		}
 	}
 	if !ok {
@@ -519,10 +521,11 @@ func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*type
 		return nil, ex.Wrapf(err, "reading export data section for %q from %s", path, archive)
 	}
 
-	pkg, err := gcexportdata.Read(r, imp.fset, imp.packages, path)
+	pkg, err := gcexportdata.Read(r, imp.fset, imp.packages, resolvedPath)
 	if err != nil {
 		return nil, ex.Wrapf(err, "decoding export data for %q from %s", path, archive)
 	}
+	imp.packages[path] = pkg
 	return pkg, nil
 }
 
