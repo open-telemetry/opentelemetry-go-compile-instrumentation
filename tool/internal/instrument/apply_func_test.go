@@ -42,7 +42,11 @@ func Target(value string) error { return nil }
 		Signature:    &sig,
 	}
 
-	_, err = newTestPhase().applyFuncRule(context.Background(), funcRule, root)
+	funcDecl, found, err := ast.FindFuncDecl(root, funcRule)
+	require.NoError(t, err)
+	require.False(t, found)
+
+	_, err = newTestPhase().applyFuncRule(context.Background(), funcRule, root, funcDecl, found)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can not find function Target")
 }

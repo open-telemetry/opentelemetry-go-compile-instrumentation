@@ -54,13 +54,15 @@ func addRulesToMap[T rule.InstRule](
 // applyOneRule applies a single rule to the target file and reports whether the
 // rule injected code that depends on the globals file (i.e. whether a globals
 // file is needed).
-func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (bool, error) {
+func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File,
+	funcDecl *dst.FuncDecl, found bool,
+) (bool, error) {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		// applyFuncRule reports whether it actually instrumented a function; a
 		// func rule skipped via //otelc:ignore returns false so no globals file
 		// is written for a package whose only func rules were ignored.
-		return ip.applyFuncRule(ctx, rt, root)
+		return ip.applyFuncRule(ctx, rt, root, funcDecl, found)
 	case *rule.InstStructRule:
 		return false, ip.applyStructRule(ctx, rt, root)
 	case *rule.InstDeclRule:
@@ -90,21 +92,21 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 // Precedence: a function carrying both //otelc:instrument and //otelc:ignore
 // passes this override check, but applyFuncRule then re-checks //otelc:ignore
 // and skips it, so the closest-to-declaration //otelc:ignore wins.
-func (ip *instrumentPhase) skipRuleForFileIgnore(root *dst.File, r rule.InstRule) (bool, error) {
-	fr, isFuncRule := r.(*rule.InstFuncRule)
-	if !isFuncRule {
+func (ip *instrumentPhase) skipRuleForFileIgnore(r rule.InstRule, funcDecl *dst.FuncDecl, found bool) bool {
+	if !isFuncRule(r) {
 		ip.Debug("Skip non-func rule due to file-level //otelc:ignore (not overridable)", "rule", r.GetName())
-		return true, nil
+		return true
 	}
-	funcDecl, ok, err := ast.FindFuncDecl(root, fr)
-	if err != nil {
-		return false, ex.Wrapf(err, "finding function %s", fr.Func)
+	if !found || !ast.FuncLeadHasDirective(funcDecl, util.DirectiveInstrument) {
+		ip.Debug("Skip func rule due to file-level //otelc:ignore", "rule", r.GetName())
+		return true
 	}
-	if !ok || !ast.FuncLeadHasDirective(funcDecl, util.DirectiveInstrument) {
-		ip.Debug("Skip func rule due to file-level //otelc:ignore", "func", fr.Func, "rule", r.GetName())
-		return true, nil
-	}
-	return false, nil
+	return false
+}
+
+func isFuncRule(r rule.InstRule) bool {
+	_, ok := r.(*rule.InstFuncRule)
+	return ok
 }
 
 // instrumentFile applies rules to a single file and reports whether any of
@@ -124,16 +126,18 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 
 	hasFuncRule := false
 	for _, r := range rules {
-		if fileIgnored {
-			skip, skipErr := ip.skipRuleForFileIgnore(root, r)
-			if skipErr != nil {
-				return false, skipErr
-			}
-			if skip {
-				continue
+		var funcDecl *dst.FuncDecl
+		var found bool
+		if fr, ok := r.(*rule.InstFuncRule); ok {
+			funcDecl, found, err = ast.FindFuncDecl(root, fr)
+			if err != nil {
+				return false, ex.Wrapf(err, "finding function %s", fr.Func)
 			}
 		}
-		funcRule, err1 := ip.applyOneRule(ctx, r, root)
+		if fileIgnored && ip.skipRuleForFileIgnore(r, funcDecl, found) {
+			continue
+		}
+		funcRule, err1 := ip.applyOneRule(ctx, r, root, funcDecl, found)
 		if err1 != nil {
 			return false, ex.Wrapf(err1, "applying rule %s", r.GetName())
 		}
