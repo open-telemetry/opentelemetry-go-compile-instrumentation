@@ -29,12 +29,19 @@ type writerWrapper struct {
 	wroteHeader bool
 }
 
-// WriteHeader captures the status code and forwards to the underlying ResponseWriter
+// WriteHeader captures the final status code and forwards to the underlying ResponseWriter.
 func (w *writerWrapper) WriteHeader(statusCode int) {
-	// Prevent duplicate header writes
 	if w.wroteHeader {
 		return
 	}
+
+	// Informational responses do not commit the final response. Switching
+	// protocols is the exception: net/http treats 101 as final.
+	if statusCode >= 100 && statusCode <= 199 && statusCode != http.StatusSwitchingProtocols {
+		w.ResponseWriter.WriteHeader(statusCode)
+		return
+	}
+
 	w.statusCode = statusCode
 	w.wroteHeader = true
 	w.ResponseWriter.WriteHeader(statusCode)
