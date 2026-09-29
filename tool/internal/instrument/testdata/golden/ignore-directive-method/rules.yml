@@ -1,0 +1,15 @@
+hook_ignored:
+  target: main
+  func: IgnoredMethod
+  recv: "*T"
+  before: HBefore
+  after: HAfter
+  path: testdata/golden/ignore-directive-method
+
+hook_instrumented:
+  target: main
+  func: InstrumentedMethod
+  recv: "*T"
+  before: HBefore
+  after: HAfter
+  path: testdata/golden/ignore-directive-method
