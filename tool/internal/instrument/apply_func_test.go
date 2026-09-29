@@ -535,3 +535,138 @@ func (g *GenStruct[K, V]) Clear() error { return nil }
 	assert.Equal(t, "K", afterIndexList.Indices[0].(*dst.Ident).Name)
 	assert.Equal(t, "V", afterIndexList.Indices[1].(*dst.Ident).Name)
 }
+
+func TestBracketExcludedCalls_HeadOfIfStatement(t *testing.T) {
+	root, caller := parseFileFunc(t, `package cache
+
+func processDeltasInBatch() error {
+	if !supported {
+		var errs []error
+		for _, delta := range deltas {
+			if err := processDeltas(delta); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return nil
+	}
+	return nil
+}
+`)
+
+	bracketed, err := bracketExcludedCalls(caller.Body, "processDeltas")
+	require.NoError(t, err)
+	assert.Equal(t, 1, bracketed)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.IncrementSuppressCount()\n\t\t\tif err := processDeltas(delta); err != nil {")
+	assert.Contains(t, src, "}\n\t\t\truntime.DecrementSuppressCount()")
+}
+
+func TestBracketExcludedCalls_RejectsIfWhereEveryBranchReturns(t *testing.T) {
+	_, caller := parseFileFunc(t, `package p
+
+func caller() error {
+	if err := target(); err != nil {
+		return err
+	} else {
+		return nil
+	}
+}
+`)
+
+	_, err := bracketExcludedCalls(caller.Body, "target")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "every branch returns")
+}
+
+func TestBracketExcludedCalls_AllowsIfWithNoElseEvenIfBodyReturns(t *testing.T) {
+	_, caller := parseFileFunc(t, `package p
+
+func caller() error {
+	if err := target(); err != nil {
+		return err
+	}
+	return nil
+}
+`)
+
+	bracketed, err := bracketExcludedCalls(caller.Body, "target")
+	require.NoError(t, err)
+	assert.Equal(t, 1, bracketed)
+}
+
+func TestBracketExcludedCalls_RejectsTailReturn(t *testing.T) {
+	_, caller := parseFileFunc(t, `package p
+
+func caller() (string, error) {
+	return target()
+}
+`)
+
+	_, err := bracketExcludedCalls(caller.Body, "target")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "return statement")
+}
+
+func TestFindExcludedCallerDecl(t *testing.T) {
+	root := parseFile(t, `package reader
+
+type Reader struct{}
+
+func (r *Reader) ReadMessage() (Message, error) {
+	return r.FetchMessage()
+}
+
+func (r *Reader) FetchMessage() (Message, error) { return Message{}, nil }
+
+func (r Reader) ValueReceiver() {}
+
+type Message struct{}
+`)
+
+	t.Run("bare function with no dot", func(t *testing.T) {
+		root := parseFile(t, "package p\nfunc plain() {}\n")
+		decl := findExcludedCallerDecl(root, "plain")
+		require.NotNil(t, decl)
+		assert.Equal(t, "plain", decl.Name.Name)
+	})
+
+	t.Run("pointer receiver method", func(t *testing.T) {
+		decl := findExcludedCallerDecl(root, "*Reader.ReadMessage")
+		require.NotNil(t, decl)
+		assert.Equal(t, "ReadMessage", decl.Name.Name)
+	})
+
+	t.Run("value receiver method", func(t *testing.T) {
+		decl := findExcludedCallerDecl(root, "Reader.ValueReceiver")
+		require.NotNil(t, decl)
+		assert.Equal(t, "ValueReceiver", decl.Name.Name)
+	})
+
+	t.Run("wrong receiver does not match", func(t *testing.T) {
+		decl := findExcludedCallerDecl(root, "Reader.ReadMessage")
+		assert.Nil(t, decl, "ReadMessage has a pointer receiver, not a value receiver")
+	})
+
+	t.Run("unknown name does not match", func(t *testing.T) {
+		decl := findExcludedCallerDecl(root, "*Reader.Missing")
+		assert.Nil(t, decl)
+	})
+}
+
+func TestBracketExcludedCalls_MethodCallerOnSelector(t *testing.T) {
+	_, caller := parseFileFunc(t, `package reader
+
+func (r *Reader) ReadMessage() (Message, error) {
+	m, err := r.FetchMessage()
+	if err != nil {
+		return Message{}, err
+	}
+	return m, nil
+}
+`)
+
+	bracketed, err := bracketExcludedCalls(caller.Body, "FetchMessage")
+	require.NoError(t, err)
+	assert.Equal(t, 1, bracketed)
+}

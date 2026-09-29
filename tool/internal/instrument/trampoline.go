@@ -248,7 +248,46 @@ func (ip *instrumentPhase) getHookFunc(t *rule.InstFuncRule, before bool) (*dst.
 		return nil, ex.Newf("hook %s or %s not found from %s",
 			t.Before, t.After, file)
 	}
+	if callsRuntimeCallers(target, ast.ImportAliasMap(root)) {
+		return nil, ex.Newf(
+			"hook %s in %s calls runtime.Callers: scanning the call stack to identify a caller "+
+				"is not supported. Name the caller in exclude_callers on the target function's "+
+				"rule instead",
+			target.Name.Name, file)
+	}
 	return target, nil
+}
+
+// callsRuntimeCallers reports whether fn's body calls runtime.Callers.
+func callsRuntimeCallers(fn *dst.FuncDecl, importAliases map[string]string) bool {
+	found := false
+	dst.Inspect(fn, func(n dst.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := n.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*dst.SelectorExpr)
+		if !ok || sel.Sel.Name != "Callers" {
+			return true
+		}
+		ident, ok := sel.X.(*dst.Ident)
+		if !ok {
+			return true
+		}
+		path := ident.Path
+		if path == "" {
+			path = importAliases[ident.Name]
+		}
+		if path == "runtime" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func arrayTypeName(t *dst.ArrayType) string {

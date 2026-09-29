@@ -44,6 +44,38 @@ func TestGetHookFuncCachesParsedFile(t *testing.T) {
 	assert.Equal(t, "beforeB", second.Name.Name)
 }
 
+func TestGetHookFuncRejectsRuntimeCallers(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "hook.go"),
+		[]byte("package hook\n\nimport \"runtime\"\n\n"+
+			"func beforeA() {\n\tvar pc [1]uintptr\n\truntime.Callers(0, pc[:])\n}\n"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	_, err := ip.getHookFunc(r, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "runtime.Callers")
+	assert.Contains(t, err.Error(), "exclude_callers")
+}
+
+func TestGetHookFuncAllowsUnrelatedCallersMethod(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "hook.go"),
+		[]byte("package hook\n\ntype stack struct{}\n\nfunc (s stack) Callers() {}\n\n"+
+			"func beforeA() {\n\ts := stack{}\n\ts.Callers()\n}\n"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	_, err := ip.getHookFunc(r, true)
+	require.NoError(t, err)
+}
+
 func TestGetHookFuncPropagatesParseError(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(

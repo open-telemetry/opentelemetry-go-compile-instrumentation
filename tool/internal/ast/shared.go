@@ -43,6 +43,12 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 	return decls[0]
 }
 
+// FindMethodDecl finds the method funcName declared on receiver type recv
+// in root.
+func FindMethodDecl(root *dst.File, recv, funcName string) *dst.FuncDecl {
+	return findFuncDecl(root, funcName, recv)
+}
+
 // stripGenericTypes extracts the base type name from a receiver expression,
 // handling both generic and non-generic types.
 // For example:

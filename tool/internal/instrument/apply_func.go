@@ -481,8 +481,8 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 // applyExcludeCallers surrounds every excluded call to rule.Func with
 // goroutine-local suppression counters
 //
-// Each caller must be a function declaration in root, the same file as
-// rule.Func.
+// Each caller must be a function or method declaration in root, the same
+// file as rule.Func.
 func (ip *instrumentPhase) applyExcludeCallers(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
 	if len(rule.ExcludeCallers) == 0 {
 		return nil
@@ -491,11 +491,11 @@ func (ip *instrumentPhase) applyExcludeCallers(ctx context.Context, rule *rule.I
 		return err
 	}
 	for _, caller := range rule.ExcludeCallers {
-		callerDecl := ast.FindFuncDeclWithoutRecv(root, caller)
+		callerDecl := findExcludedCallerDecl(root, caller)
 		if callerDecl == nil {
 			return ex.Newf(
-				"rule %q: exclude_callers names %q, but no function declaration with that name "+
-					"exists in the same file as %s; cross-file caller exclusion is not supported",
+				"rule %q: exclude_callers names %q, but no matching declaration exists in the "+
+					"same file as %s; cross-file caller exclusion is not supported",
 				rule.Name, caller, rule.Func)
 		}
 		bracketed, bracketErr := bracketExcludedCalls(callerDecl.Body, rule.Func)
@@ -513,23 +513,41 @@ func (ip *instrumentPhase) applyExcludeCallers(ctx context.Context, rule *rule.I
 	return nil
 }
 
-// bracketExcludedCalls wraps every statement that directly calls
+// findExcludedCallerDecl resolves one exclude_callers entry against root. An
+// entry with no "." is a plain function with no receiver.
+func findExcludedCallerDecl(root *dst.File, caller string) *dst.FuncDecl {
+	idx := strings.LastIndex(caller, ".")
+	if idx < 0 {
+		return ast.FindFuncDeclWithoutRecv(root, caller)
+	}
+	recv, funcName := caller[:idx], caller[idx+1:]
+	return ast.FindMethodDecl(root, recv, funcName)
+}
+
+// bracketExcludedCalls wraps every statement in body that directly calls
 // funcName with an increment/decrement pair around the goroutine-local
-// suppression counter. Does not include return statements that call funcName.
-// Returns how many statements it wrapped.
+// suppression counter and returns how many statements it wrapped.
+//
+// A statement that runs a nested block (if/for/range) recurses into that
+// block first. If the call does not turn up in any nested block,
+// it sits in the statement's own head instead.
 func bracketExcludedCalls(body *dst.BlockStmt, funcName string) (int, error) {
 	bracketed := 0
 	for i := 0; i < len(body.List); i++ {
 		stmt := body.List[i]
 		if nested := nestedBlocksOf(stmt); len(nested) > 0 {
+			foundInNested := 0
 			for _, block := range nested {
 				n, err := bracketExcludedCalls(block, funcName)
 				if err != nil {
 					return 0, err
 				}
-				bracketed += n
+				foundInNested += n
 			}
-			continue
+			if foundInNested > 0 {
+				bracketed += foundInNested
+				continue
+			}
 		}
 		if !stmtCallsFunc(stmt, funcName) {
 			continue
@@ -539,6 +557,13 @@ func bracketExcludedCalls(body *dst.BlockStmt, funcName string) (int, error) {
 				"calls %s directly in a return statement; bracketing that call would place "+
 					"the decrement after a statement that never returns. Assign the call's "+
 					"result to a variable and return the variable instead",
+				funcName)
+		}
+		if ifStmt, ok := stmt.(*dst.IfStmt); ok && ifAlwaysReturns(ifStmt) {
+			return 0, ex.Newf(
+				"calls %s only in the head of an if statement whose every branch returns; "+
+					"bracketing that statement would place the decrement after code that never "+
+					"runs. Assign the call's result to a variable in its own statement instead",
 				funcName)
 		}
 		inc := ast.ExprStmt(suppressCountCall(incrementSuppressCountName))
@@ -577,6 +602,34 @@ func nestedBlocksOf(stmt dst.Stmt) []*dst.BlockStmt {
 	}
 }
 
+// ifAlwaysReturns reports whether every branch of ifStmt ends in a return
+// statement.
+//
+// An if-statement with no else branch always reports false: when its
+// condition is false, execution falls through normally regardless of what
+// the true branch does.
+func ifAlwaysReturns(ifStmt *dst.IfStmt) bool {
+	if !blockEndsInReturn(ifStmt.Body) {
+		return false
+	}
+	switch e := ifStmt.Else.(type) {
+	case *dst.BlockStmt:
+		return blockEndsInReturn(e)
+	case *dst.IfStmt:
+		return ifAlwaysReturns(e)
+	default:
+		return false
+	}
+}
+
+func blockEndsInReturn(b *dst.BlockStmt) bool {
+	if len(b.List) == 0 {
+		return false
+	}
+	_, ok := b.List[len(b.List)-1].(*dst.ReturnStmt)
+	return ok
+}
+
 // stmtCallsFunc reports whether stmt directly calls a function named
 // funcName, unqualified, as sarama.NewSyncProducer calls the sibling
 // sarama.NewAsyncProducer within the same package.
@@ -590,11 +643,13 @@ func stmtCallsFunc(stmt dst.Stmt, funcName string) bool {
 		if !ok {
 			return true
 		}
-		if ident, ok := call.Fun.(*dst.Ident); ok && ident.Name == funcName {
-			found = true
-			return false
+		switch fn := call.Fun.(type) {
+		case *dst.Ident:
+			found = fn.Name == funcName
+		case *dst.SelectorExpr:
+			found = fn.Sel.Name == funcName
 		}
-		return true
+		return !found
 	})
 	return found
 }

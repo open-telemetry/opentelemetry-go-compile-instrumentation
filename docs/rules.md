@@ -494,6 +494,10 @@ This is the most common rule type. It injects function calls at the beginning (`
   reach the target function through a plain statement The exclusion only takes effect on the excluded 
   caller's own goroutine for the duration of that one call.
 
+  The exclusion only takes effect on the excluded caller's own goroutine, for the duration of
+  that one call: if the caller starts a new goroutine before calling the target function, code
+  running on that new goroutine is not excluded.
+
   **Example:**
 
   ```yaml
