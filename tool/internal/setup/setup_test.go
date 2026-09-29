@@ -983,7 +983,7 @@ func TestRuntimeImportPathUsesBuildFlags(t *testing.T) {
 			mustWriteFile(t, filepath.Join(moduleDir, "hooks", "hooks.go"), tt.hooksSrc)
 
 			args := tt.args(moduleDir)
-			pkgs, err := getBuildPackages(t.Context(), args)
+			pkgs, err := getBuildPackages(t.Context(), subcmdBuild, args)
 			require.NoError(t, err)
 			require.Len(t, pkgs, 1)
 
