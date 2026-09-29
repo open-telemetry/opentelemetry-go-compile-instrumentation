@@ -30,8 +30,8 @@ type Entry struct {
 type Manifest []Entry
 
 type yamlRule struct {
-	Target       string `yaml:"target"`
-	VersionRange string `yaml:"version"`
+	Target       rule.Target `yaml:"target"`
+	VersionRange string      `yaml:"version"`
 }
 
 func Generate(instrumentationRoot string) (Manifest, error) {
@@ -154,17 +154,21 @@ func parseRuleEntriesForVersion(content []byte, path, modulePath, currentVersion
 		if validateErr := util.ValidateVersionRange(ruleConfig.VersionRange); validateErr != nil {
 			return nil, ex.Wrapf(validateErr, "validating version for rule %q in file %s", entry.Name, path)
 		}
-		if ruleConfig.Target == "" {
+		if ruleConfig.Target.IsZero() {
 			continue
 		}
-		if validateErr := rule.ValidateTarget(ruleConfig.Target); validateErr != nil {
+		if validateErr := ruleConfig.Target.Validate(); validateErr != nil {
 			return nil, ex.Wrapf(validateErr, "validating target for rule %q in file %s", entry.Name, path)
 		}
-		entries = append(entries, Entry{
-			ModulePath:   modulePath,
-			Target:       ruleConfig.Target,
-			VersionRange: ruleConfig.VersionRange,
-		})
+		// One entry per included pattern. Excluded patterns only narrow what a
+		// rule applies to, so the manifest may list a package a rule skips.
+		for _, target := range ruleConfig.Target.Include {
+			entries = append(entries, Entry{
+				ModulePath:   modulePath,
+				Target:       target,
+				VersionRange: ruleConfig.VersionRange,
+			})
+		}
 	}
 	return entries, nil
 }
