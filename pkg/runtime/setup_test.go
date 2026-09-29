@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -142,6 +143,23 @@ func TestShutdownProviders(t *testing.T) {
 func restoreProviders(t *testing.T) {
 	origTracer, origMeter, origLogger := tracerProvider, meterProvider, loggerProvider
 	t.Cleanup(func() { tracerProvider, meterProvider, loggerProvider = origTracer, origMeter, origLogger })
+}
+
+func TestNewResourceIncludesTelemetrySDK(t *testing.T) {
+	res := newResource(context.Background())
+	set := res.Set()
+
+	name, ok := set.Value(attribute.Key("telemetry.sdk.name"))
+	require.True(t, ok, "auto-configured resource must set telemetry.sdk.name")
+	assert.Equal(t, "opentelemetry", name.AsString())
+
+	lang, ok := set.Value(attribute.Key("telemetry.sdk.language"))
+	require.True(t, ok, "auto-configured resource must set telemetry.sdk.language")
+	assert.Equal(t, "go", lang.AsString())
+
+	ver, ok := set.Value(attribute.Key("telemetry.sdk.version"))
+	require.True(t, ok, "auto-configured resource must set telemetry.sdk.version")
+	assert.NotEmpty(t, ver.AsString())
 }
 
 func TestSetupOpenTelemetry(t *testing.T) {
