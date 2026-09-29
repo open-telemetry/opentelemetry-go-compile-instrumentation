@@ -210,6 +210,61 @@ func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
 	assert.False(t, fileImportsPath(file, "example.com/traced"))
 }
 
+func TestApplyCallRule_ReplaceHonorsIgnoreDirective(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Run() {
+	//otelc:ignore
+	http.Get("ignored")
+	http.Get("kept")
+}
+`)
+	r := httpGetRule("traced({{ . }})")
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	ignoredStmt := fn.Body.List[0].(*dst.ExprStmt)
+	_, ignoredStillBare := ignoredStmt.X.(*dst.CallExpr)
+	assert.True(t, ignoredStillBare, "annotated call site must keep its original form")
+
+	keptStmt := fn.Body.List[1].(*dst.ExprStmt)
+	keptCall, ok := keptStmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", keptStmt.X)
+	fnIdent, ok := keptCall.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "traced", fnIdent.Name, "the other call site to the same function must stay instrumented")
+}
+
+func TestApplyCallRule_AppendArgsHonorsIgnoreDirective(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Run() {
+	//otelc:ignore
+	http.Get("ignored")
+	http.Get("kept")
+}
+`)
+	r := httpGetRule("")
+	r.AppendArgs = []string{"traced.Context()"}
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	ignoredCall := fn.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
+	assert.Len(t, ignoredCall.Args, 1, "annotated call site must not gain the appended argument")
+
+	keptCall := fn.Body.List[1].(*dst.ExprStmt).X.(*dst.CallExpr)
+	assert.Len(t, keptCall.Args, 2, "the other call site to the same function must gain the appended argument")
+}
+
 func TestApplyCallRule_ImportAliasMismatch(t *testing.T) {
 	root := parseFile(t, `package main
 

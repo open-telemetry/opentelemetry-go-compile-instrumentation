@@ -203,6 +203,25 @@ func FuncLeadHasDirective(funcDecl *dst.FuncDecl, directive string) bool {
 	return false
 }
 
+// HasLeadingDirective reports whether the statement's leading decorations
+// contain the given directive. A nil stmt has no leading decorations,
+// so the function returns false.
+func HasLeadingDirective(stmt dst.Stmt, directive string) bool {
+	if stmt == nil {
+		return false
+	}
+	decs := stmt.Decorations()
+	if decs == nil {
+		return false
+	}
+	for _, dec := range decs.Start {
+		if _, matched := matchDirective(dec, directive); matched {
+			return true
+		}
+	}
+	return false
+}
+
 // FuncDirectiveMatch pairs a function declaration matched by
 // FindFuncsByDirective with the key:value arguments parsed from its matching
 // directive comment

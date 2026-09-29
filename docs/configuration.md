@@ -151,6 +151,18 @@ code it applies to — annotate the source directly. These directives are line c
   func stillInstrumented() { /* ... */ }
   ```
 
+- **Ignore a single call site.** Put `//otelc:ignore` in the comment directly above the
+  statement that holds the call. A `wrap_call` rule skips that one call and leaves every other
+  call to the same function instrumented:
+
+  ```go
+  //otelc:ignore
+  db, err := sql.Open("postgres", dsn)
+  ```
+
+  This form covers a call to a function you do not own — for example a library's `sql.Open` —
+  as it annotates your own call site, not the library's declaration.
+
 Keep in mind:
 
 - Only **function rules** are overridable. A file-level `//otelc:ignore` unconditionally skips
@@ -158,10 +170,10 @@ Keep in mind:
   `//otelc:instrument` equivalent to force them through.
 - If a function carries both `//otelc:instrument` and `//otelc:ignore`, **`//otelc:ignore`
   wins** — the directive closest to the declaration takes precedence.
-- Both forms only cover the *declaration* they annotate. They cannot opt out one call site to a
-  function you do not own — for example a single `sql.Open(...)` call — while leaving other
-  calls to that same function instrumented. **Planned:** a call-site form of `//otelc:ignore`
-  that covers that case is planned.
+- The call-site form works only on a `wrap_call` rule. An `inject_hooks` rule hooks the
+  function declaration and never reads the caller's source, so it ignores a `//otelc:ignore`
+  comment above a call site. Every call to a function under an `inject_hooks` rule stays
+  instrumented regardless of that comment.
 
 ## Runtime Tuning
 

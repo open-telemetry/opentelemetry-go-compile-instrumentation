@@ -606,6 +606,79 @@ func Foo() {}
 	}
 }
 
+func lastStmt(t *testing.T, file *dst.File) dst.Stmt {
+	t.Helper()
+	fn := lastFuncDecl(t, file)
+	require.NotEmpty(t, fn.Body.List, "test source must contain a statement")
+	return fn.Body.List[len(fn.Body.List)-1]
+}
+
+func TestStmtHasLeadingDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		directive string
+		expected  bool
+	}{
+		{
+			name: "directive on statement",
+			src: `package p
+func Foo() {
+	//otelc:ignore
+	Bar()
+}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+		{
+			name: "no directive",
+			src: `package p
+func Foo() {
+	Bar()
+}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			name: "different directive",
+			src: `package p
+func Foo() {
+	//otelc:instrument
+	Bar()
+}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			name: "directive on assignment statement",
+			src: `package p
+func Foo() {
+	//otelc:ignore
+	v := Bar()
+}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, HasLeadingDirective(lastStmt(t, tree), tt.directive))
+		})
+	}
+}
+
+func TestStmtHasLeadingDirective_NilStmt(t *testing.T) {
+	assert.False(t, HasLeadingDirective(nil, "otelc:ignore"))
+}
+
 func TestUnknownDirectiveNames(t *testing.T) {
 	knownIgnore := map[string]bool{"otelc:ignore": true}
 
