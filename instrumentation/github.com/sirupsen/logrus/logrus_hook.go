@@ -94,13 +94,30 @@ func ensureTraceHook(logger *logrus.Logger) {
 		return
 	}
 
-	if logger.Hooks == nil {
-		logger.Hooks = make(logrus.LevelHooks)
-	}
-	logger.AddHook(&traceHook{})
+	addTraceHook(logger)
 	initialized[wp] = struct{}{}
 
 	goruntime.AddCleanup(logger, forgetLogger, wp)
+}
+
+// addTraceHook adds traceHook to logger, going only through logrus's own
+// locked accessors (AddHook, ReplaceHooks) rather than logger.Hooks
+// directly. A *logrus.Logger built via a struct literal instead of
+// logrus.New() starts with a nil Hooks map, and AddHook panics writing into
+// a nil map, so that case needs to be handled somehow. Checking
+// logger.Hooks == nil and assigning to it here would read and write that
+// field without the logger's own (unexported) mutex, racing any concurrent
+// caller that goes through it, such as ReplaceHooks. Recovering from the
+// one panic AddHook can throw and retrying through ReplaceHooks keeps every
+// touch of logger.Hooks behind that mutex instead.
+func addTraceHook(logger *logrus.Logger) {
+	defer func() {
+		if recover() != nil {
+			logger.ReplaceHooks(make(logrus.LevelHooks))
+			logger.AddHook(&traceHook{})
+		}
+	}()
+	logger.AddHook(&traceHook{})
 }
 
 func forgetLogger(wp weak.Pointer[logrus.Logger]) {

@@ -183,6 +183,27 @@ func TestAfterLogrusWithField_NilMapAtCallTime(t *testing.T) {
 	assert.True(t, hasTraceHook(logger))
 }
 
+// TestEnsureTraceHook_NilLoggerHooks covers a *logrus.Logger built via a
+// struct literal (&logrus.Logger{}) rather than logrus.New(), which leaves
+// Hooks nil. logrus.Logger.AddHook panics writing into a nil map, so
+// ensureTraceHook must handle that case without panicking and without
+// reading or writing logger.Hooks directly, since that field is normally
+// only touched under logger's own (unexported) mutex.
+func TestEnsureTraceHook_NilLoggerHooks(t *testing.T) {
+	resetHookState()
+
+	ictx := hooktest.NewMockHookContext()
+	logger := &logrus.Logger{}
+	require.Nil(t, logger.Hooks)
+	entry := &logrus.Entry{Logger: logger, Data: logrus.Fields{}}
+
+	assert.NotPanics(t, func() {
+		AfterLogrusWithField(ictx, entry)
+	})
+
+	assert.True(t, hasTraceHook(logger))
+}
+
 // TestEnsureTraceHook_SharedAcrossPaths covers #1002: hookInitMap and
 // fieldInitMap used to be tracked separately, so a logger that went
 // through AfterLogrusNew and then AfterLogrusWithField (an ordinary
