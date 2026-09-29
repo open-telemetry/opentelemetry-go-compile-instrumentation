@@ -86,6 +86,69 @@ func TestResolveRulePaths(t *testing.T) {
 	require.Equal(t, hooksDir, rs.FileRules[0].ResolvedPath)
 }
 
+func TestResolveRulePaths_MultipleDistinctPaths(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte("module example.com/test\n\ngo 1.25\n"),
+		0o644,
+	))
+
+	for _, name := range []string{"hooksa", "hooksb"} {
+		pkgDir := filepath.Join(dir, name)
+		require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(pkgDir, "hook.go"),
+			[]byte("package "+name+"\n"),
+			0o644,
+		))
+	}
+
+	rs := &rule.InstRuleSet{
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"foo": {{Path: "example.com/test/hooksa"}},
+			"bar": {{Path: "example.com/test/hooksb"}},
+		},
+	}
+
+	err := resolveRulePaths(
+		t.Context(),
+		[]*rule.InstRuleSet{rs},
+		map[string]bool{dir: true},
+	)
+	require.NoError(t, err)
+
+	rules := rs.AllFuncRules()
+	byPath := map[string]string{}
+	for _, r := range rules {
+		byPath[r.Path] = r.ResolvedPath
+	}
+	assert.Equal(t, filepath.Join(dir, "hooksa"), byPath["example.com/test/hooksa"])
+	assert.Equal(t, filepath.Join(dir, "hooksb"), byPath["example.com/test/hooksb"])
+}
+
+func TestResolveRulePaths_LoadError(t *testing.T) {
+	// A module dir that doesn't exist on disk makes packages.Load itself
+	// fail (not just fail to find the package), exercising the loadErr
+	// branch in resolveRulePaths rather than the per-package one.
+	missingDir := filepath.Join(t.TempDir(), "does-not-exist")
+
+	rs := &rule.InstRuleSet{
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"foo": {{Path: "example.com/test/hooks"}},
+		},
+	}
+
+	err := resolveRulePaths(
+		t.Context(),
+		[]*rule.InstRuleSet{rs},
+		map[string]bool{missingDir: true},
+	)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to resolve import path")
+}
+
 func TestResolveRulePaths_NotFound(t *testing.T) {
 	dir := t.TempDir()
 

@@ -77,7 +77,7 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 	return nil
 }
 
-func extractGZip(bundleReader io.Reader, targetDir string) error {
+func extractGZip(bundleReader io.Reader, targetDir string) (retErr error) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return ex.Wrap(err)
 	}
@@ -87,7 +87,9 @@ func extractGZip(bundleReader io.Reader, targetDir string) error {
 		return ex.Wrap(gzErr)
 	}
 	defer func() {
-		_ = gzReader.Close()
+		if closeErr := gzReader.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, ex.Wrap(closeErr))
+		}
 	}()
 
 	tarReader := tar.NewReader(gzReader)

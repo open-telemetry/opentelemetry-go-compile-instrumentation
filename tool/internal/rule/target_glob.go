@@ -16,8 +16,9 @@ import (
 // import path that keeps the fast map-lookup matching path.
 const globMeta = "*?[{"
 
-// TargetRoot selects the root module of the build. The setup phase expands it
-// to a concrete module glob before matching rules.
+// TargetRoot selects the root module of the build. Target.Matches resolves
+// it against the root module paths passed to it, rather than expanding it
+// into a glob ahead of time.
 const TargetRoot = "$root"
 
 // IsRootTarget reports whether target is the root-module selector.

@@ -1,0 +1,18 @@
+# Every stripe-go API call — across all 200+ resource clients, both v1 and v2
+# API modes, the deprecated client.API aggregate and the current stripe.Client —
+# funnels through requestWithRetriesAndTelemetry on the backend. Hooking that one
+# function covers the whole SDK and does not need updating when Stripe adds a
+# resource.
+#
+# version is a minimum bound (see tool/util.VersionInRange).
+stripe_backend_request:
+  target: github.com/stripe/stripe-go/v82
+  version: v82.0.0
+  where:
+    func: requestWithRetriesAndTelemetry
+    recv: "*BackendImplementation"
+  do:
+    - inject_hooks:
+        before: BeforeRequest
+        after: AfterRequest
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v82"

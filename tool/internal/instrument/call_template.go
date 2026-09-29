@@ -134,6 +134,16 @@ func (d *callTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
 	return d.enclosing.FuncArgumentOfType(typeStr)
 }
 
+// FuncReturnOfType returns the identifier of the first return value of the
+// enclosing function whose type matches typeStr, or "" if none match.
+// Template usage: {{.FuncReturnOfType "error"}}
+func (d *callTemplateData) FuncReturnOfType(typeStr string) (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.FuncReturnOfType(typeStr)
+}
+
 func notACallErr() error {
 	return ex.Newf("requires the wrapped expression to be a function call")
 }
@@ -168,16 +178,22 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 // initializer); when non-nil, it makes the shared function template
 // variables (FuncName, FuncArgument N, FuncReturn N, ...) available in the
 // template alongside {{ . }}.
+// imports is the target file's import alias map (see ast.ImportAliasMap);
+// FuncArgumentOfType / FuncReturnOfType need it to resolve aliased imports
+// and packages that share a default name. Pass nil when no import context
+// is available.
 //
 // The process:
 // 1. Execute the template with a fixed placeholder string (_.PLACEHOLDER_0)
 // 2. Parse the result as a Go statement snippet
 // 3. Extract the expression from the parsed statement
 // 4. Replace the placeholder with the actual AST node
-func (t *callTemplate) compileExpression(node dst.Expr, enclosing *dst.FuncDecl) (dst.Expr, error) {
+func (t *callTemplate) compileExpression(
+	node dst.Expr, enclosing *dst.FuncDecl, imports map[string]string,
+) (dst.Expr, error) {
 	data := &callTemplateData{}
 	if enclosing != nil {
-		data.enclosing = newFuncTemplateData(enclosing, nil, nil, "")
+		data.enclosing = newFuncTemplateData(enclosing, nil, imports, "")
 	}
 	if call, ok := unwrap(node).(*dst.CallExpr); ok {
 		data.isCall = true

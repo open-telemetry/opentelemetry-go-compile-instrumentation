@@ -4,13 +4,14 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/token"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ import (
 
 // discardLogger returns a logger that drops all output, keeping test logs quiet.
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestRemoveImports(t *testing.T) {
@@ -462,7 +463,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.2.3",
 				}},
 			},
@@ -480,7 +481,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/bar": {{
-					Target:       "example.com/bar",
+					Target:       rule.NewTarget("example.com/bar"),
 					VersionRange: "v1.2.3",
 				}},
 			},
@@ -496,7 +497,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.2.4",
 				}},
 			},
@@ -512,7 +513,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.0.0",
 				}},
 			},
@@ -528,7 +529,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "",
 				}},
 			},
@@ -546,7 +547,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/*",
+					Target:       rule.NewTarget("example.com/*"),
 					VersionRange: "v1.2.3",
 				}},
 			},
@@ -564,7 +565,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/*",
+					Target:       rule.NewTarget("example.com/*"),
 					VersionRange: "v1.2.3",
 				}},
 			},
@@ -579,12 +580,42 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target: rule.TargetRoot,
+					Target: rule.NewTarget(rule.TargetRoot),
 				}},
 			},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
+		},
+		{
+			name: "target list including root",
+			deps: []*Dependency{{ImportPath: "example.com/foo"}},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target: rule.NewTarget(rule.TargetRoot, "main"),
+				}},
+			},
+			want: map[string]bool{"example.com/instrumentation/foo": true},
+		},
+		{
+			name: "target list",
+			deps: []*Dependency{{ImportPath: "example.com/bar"}},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target: rule.NewTarget("example.com/foo", "example.com/bar"),
+				}},
+			},
+			want: map[string]bool{"example.com/instrumentation/foo": true},
+		},
+		{
+			name: "target list excluding the dependency",
+			deps: []*Dependency{{ImportPath: "example.com/foo/mock"}},
+			rules: map[string][]yamlRule{
+				"example.com/instrumentation/foo": {{
+					Target: rule.Target{Include: []string{"example.com/foo/**"}, Exclude: []string{"example.com/foo/mock"}},
+				}},
+			},
+			want: map[string]bool{},
 		},
 		{
 			name: "multiple matches",
@@ -600,11 +631,11 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: map[string][]yamlRule{
 				"example.com/instrumentation/foo": {{
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.0.0",
 				}},
 				"example.com/instrumentation/bar": {{
-					Target:       "example.com/bar",
+					Target:       rule.NewTarget("example.com/bar"),
 					VersionRange: "v2.0.0",
 				}},
 			},
@@ -629,7 +660,7 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 		}}
 		rules := map[string][]yamlRule{
 			"example.com/instrumentation/foo": {{
-				Target:       "example.com/foo",
+				Target:       rule.NewTarget("example.com/foo"),
 				VersionRange: "v1.0.0",
 			}},
 		}
@@ -657,8 +688,8 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 		}
 		rules := map[string][]yamlRule{
 			"example.com/instrumentation/foo": {
-				{Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
-				{Target: "example.com/foo/v1/sub", VersionRange: ""},
+				{Target: rule.NewTarget("example.com/foo/v1"), VersionRange: "v1.0.0"},
+				{Target: rule.NewTarget("example.com/foo/v1/sub"), VersionRange: ""},
 			},
 		}
 
@@ -680,8 +711,8 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 		}}
 		rules := map[string][]yamlRule{
 			"example.com/instrumentation/foo": {
-				{Target: "example.com/foo", VersionRange: "v1.0.0"},
-				{Target: "example.com/foo", VersionRange: "v2.0.0"},
+				{Target: rule.NewTarget("example.com/foo"), VersionRange: "v1.0.0"},
+				{Target: rule.NewTarget("example.com/foo"), VersionRange: "v2.0.0"},
 			},
 		}
 
@@ -734,11 +765,11 @@ ruleNested:
 	require.Contains(t, rules, "example.com/sub1/nested")
 
 	require.Len(t, rules["example.com/sub1"], 1)
-	require.Equal(t, "example.com/target", rules["example.com/sub1"][0].Target)
+	require.Equal(t, "example.com/target", rules["example.com/sub1"][0].Target.String())
 	require.Equal(t, "v1.0.0", rules["example.com/sub1"][0].VersionRange)
 
 	require.Len(t, rules["example.com/sub1/nested"], 1)
-	require.Equal(t, "example.com/nested-target", rules["example.com/sub1/nested"][0].Target)
+	require.Equal(t, "example.com/nested-target", rules["example.com/sub1/nested"][0].Target.String())
 }
 
 func TestLoadMinimalRulesMinimumVersionMetadata(t *testing.T) {
@@ -757,7 +788,7 @@ rule:
 	rules, err := loadMinimalRules(t.Context(), dir, util.Version)
 	require.NoError(t, err)
 	require.Len(t, rules["example.com/module"], 1)
-	assert.Equal(t, "example.com/target", rules["example.com/module"][0].Target)
+	assert.Equal(t, "example.com/target", rules["example.com/module"][0].Target.String())
 	assert.Equal(t, "v2.0.0,v3.0.0", rules["example.com/module"][0].VersionRange)
 }
 
@@ -818,6 +849,23 @@ func TestLoadMinimalRules_InvalidRuleYAML(t *testing.T) {
 
 	_, err := loadMinimalRules(t.Context(), dir, util.Version)
 	require.Error(t, err)
+}
+
+func TestLoadMinimalRules_InvalidTarget(t *testing.T) {
+	dir := t.TempDir()
+
+	sub1 := filepath.Join(dir, "sub1")
+	require.NoError(t, os.Mkdir(sub1, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub1, "go.mod"), []byte("module example.com/sub1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(sub1, "otelc.yaml"), []byte(`
+version: "v1.0.0"
+rule1:
+  target:
+    - not: example.com/target
+`), 0o644))
+
+	_, err := loadMinimalRules(t.Context(), dir, util.Version)
+	require.ErrorContains(t, err, "selects no package")
 }
 
 func TestValidateRuleFiles(t *testing.T) {
@@ -911,14 +959,245 @@ go 1.25
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/tool/cmd/otelc")
 }
 
-func TestUpdateToolFile_ParseError(t *testing.T) {
+func TestUpdateToolFile_SteadyStateSkipsModTidy(t *testing.T) {
+	trueValue := true
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte(`module example.com/test
+
+go 1.25
+`),
+		0o644,
+	))
+
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	// First run canonicalizes the tool file and adds the otelc require.
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+
+	toolFileAfterFirst, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	goModAfterFirst, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	require.NoError(t, err)
+
+	// Second run changes nothing, so go mod tidy must be skipped.
+	var logs bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), debugLogger)
+
+	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
+	require.Contains(t, logs.String(), skipTidyMessage)
+
+	toolFileAfterSecond, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Equal(t, string(toolFileAfterFirst), string(toolFileAfterSecond))
+
+	goModAfterSecond, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	require.NoError(t, err)
+	require.Equal(t, string(goModAfterFirst), string(goModAfterSecond))
+}
+
+func TestUpdateToolFile_MissingGoSumRunsTidy(t *testing.T) {
+	trueValue := true
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte(`module example.com/test
+
+go 1.25
+`),
+		0o644,
+	))
+
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+
+	// A hand-deleted go.sum must force a tidy even when nothing else changed.
+	goSumPath := filepath.Join(dir, "go.sum")
+	require.NoError(t, os.Remove(goSumPath))
+
+	var logs bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), debugLogger)
+
+	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
+	require.NotContains(t, logs.String(), skipTidyMessage)
+	require.FileExists(t, goSumPath, "go mod tidy should have restored go.sum")
+}
+
+func TestUpdateToolFile_SkippedTidyKeepsManualRequire(t *testing.T) {
+	trueValue := true
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte(`module example.com/test
+
+go 1.25
+`),
+		0o644,
+	))
+
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	// First run reaches the steady state.
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+
+	goModPath := filepath.Join(dir, "go.mod")
+	goModAfterFirst, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+
+	// The user adds a manual require. otelc owns only the lines it
+	// writes, so the manual require must survive the skipped tidy.
+	goModManual := string(goModAfterFirst) + "\nrequire example.com/manual v1.2.3\n"
+	require.NoError(t, os.WriteFile(goModPath, []byte(goModManual), 0o644))
+
+	var logs bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), debugLogger)
+
+	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
+	require.Contains(t, logs.String(), skipTidyMessage)
+
+	goModAfterSecond, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+	require.Equal(t, goModManual, string(goModAfterSecond))
+}
+
+func TestUpdateToolFile_PruneAfterSteadyStateRunsTidy(t *testing.T) {
+	trueValue := true
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"),
+		[]byte(`module example.com/test
+
+go 1.25
+`),
+		0o644,
+	))
+
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	opts := PinOptions{
+		Prune:    true,
+		Generate: &trueValue,
+	}
+
+	// First run reaches the steady state.
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+
+	var logs bytes.Buffer
+	debugLogger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), debugLogger)
+
+	// A prune must flip toolFileChanged and force the tidy.
+	require.NoError(t, updateToolFile(ctx, toolFile, map[string]bool{"fmt": true}, opts))
+	require.NotContains(t, logs.String(), skipTidyMessage)
+
+	toolFileAfter, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.NotContains(t, string(toolFileAfter), `"fmt"`)
+}
+
+func TestEnsureOtelcRequire_DevVersionReportsMissingRequire(t *testing.T) {
+	dir := t.TempDir()
+
+	// Tool directive present, require line absent: the state a dev build
+	// leaves behind, since ensureOtelcRequireVersion will not pin v0.0.0 or a
+	// pseudo-version and so cannot add the require itself.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, goModFileName),
+		[]byte(`module example.com/test
+
+go 1.25
+
+tool go.opentelemetry.io/otelc/tool/cmd/otelc
+`),
+		0o644,
+	))
+
+	for _, version := range []string{"v0.0.0", "v0.0.0-20260101000000-000000000000", "(devel)"} {
+		t.Run(version, func(t *testing.T) {
+			modified, err := ensureOtelcRequire(dir, version)
+			require.NoError(t, err)
+			require.True(t, modified, "a missing require must be reported so the caller still tidies")
+		})
+	}
+}
+
+func TestUpdateToolFile_ReadError(t *testing.T) {
 	err := updateToolFile(t.Context(),
 		filepath.Join(t.TempDir(), "does-not-exist.go"),
 		nil,
 		PinOptions{},
 	)
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestUpdateToolFile_ParseError(t *testing.T) {
+	toolFile := filepath.Join(t.TempDir(), toolFileCanonical)
+	require.NoError(t, os.WriteFile(toolFile, []byte("this is not go"), 0o644))
+
+	err := updateToolFile(t.Context(), toolFile, nil, PinOptions{})
+
+	require.ErrorContains(t, err, "failed to parse file")
+}
+
+func TestUpdateToolFile_WriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod permissions are not enforced consistently on Windows")
+	}
+
+	dir := t.TempDir()
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+
+	original, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+
+	// A read-only directory still lets updateToolFile read the tool file, but
+	// not replace it, since the atomic write needs a temp file next to it.
+	require.NoError(t, os.Chmod(dir, 0o555))
+	t.Cleanup(func() {
+		_ = os.Chmod(dir, 0o755)
+	})
+
+	// Pruning "fmt" changes the tool file, so updateToolFile has to write it.
+	err = updateToolFile(t.Context(), toolFile, map[string]bool{"fmt": true}, PinOptions{Prune: true})
+	require.ErrorContains(t, err, "failed to create temporary file")
+
+	after, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Equal(t, string(original), string(after))
 }
 
 func TestUpdateToolFile_EnsureRequireError(t *testing.T) {

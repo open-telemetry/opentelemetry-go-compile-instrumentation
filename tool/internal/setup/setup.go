@@ -28,6 +28,7 @@ type setupPhase struct {
 	logger          *slog.Logger
 	ruleConfig      string
 	buildPackages   []*packages.Package
+	buildFlags      []string
 	rootModulePaths []string
 }
 
@@ -132,6 +133,19 @@ const (
 	subcmdBuild   = "build"
 	subcmdInstall = "install"
 	subcmdTest    = "test"
+
+	goModFileName = "go.mod"
+	vendorDirName = "vendor"
+	flagMod       = "-mod"
+)
+
+// Go command flags that the argument scanners treat specially.
+const (
+	// flagArgs separates the go command's own arguments from the ones it
+	// passes through to the test binary.
+	flagArgs = "-args"
+	// flagJSON makes the go command report its output as JSON events.
+	flagJSON = "-json"
 )
 
 // GetBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
@@ -213,7 +227,7 @@ func splitBuildTargets(args []string) ([]string, []string, error) {
 
 		// Everything after `-args` is passed to the test binary, not the go
 		// command, so it can contain neither packages nor go flags.
-		if arg == "-args" {
+		if arg == flagArgs {
 			break
 		}
 
@@ -298,12 +312,55 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, pkgDir, pkg.Name); err != nil {
+		if err := sp.addDeps(ctx, matched, runtimePackage{
+			dir:        pkgDir,
+			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
+			name:       pkg.Name,
+		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
 
 	return nil
+}
+
+// runtimeImportPath returns the import path of the package that receives a
+// generated runtime file. A file target loads one synthetic
+// "command-line-arguments" package, so the real path comes from the module that
+// owns the directory. If the lookup fails, runtimeImportPath returns the
+// synthetic path, and a build outside a module continues to work.
+func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Package, pkgDir string) string {
+	if pkg.PkgPath != pkgload.CommandLineArgumentsPackage {
+		return pkg.PkgPath
+	}
+
+	importPath, err := resolveImportPath(ctx, sp.buildFlags, pkgDir)
+	if err != nil {
+		// Expected outside a module, so this is not a warning on its own.
+		sp.Debug("cannot derive the import path of a file target", "dir", pkgDir, "error", err)
+		return pkg.PkgPath
+	}
+
+	return importPath
+}
+
+// resolveImportPath returns the canonical import path of the package in pkgDir.
+// resolveImportPath loads pkgDir as a package pattern, so the result is the real
+// import path and not the synthetic path that a file target carries.
+//
+// The build flags are the ones of the build, unchanged. Build tags can exclude
+// every file in pkgDir, and relative -modfile or -overlay values resolve against
+// the -C directory of the build, so pkgDir cannot replace that directory.
+func resolveImportPath(ctx context.Context, buildFlags []string, pkgDir string) (string, error) {
+	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, buildFlags, pkgDir)
+	if err != nil {
+		return "", err
+	}
+	if len(pkgs) == 0 || len(pkgs[0].Errors) > 0 || pkgs[0].PkgPath == "" {
+		return "", ex.Newf("cannot resolve the import path of the package in %s", pkgDir)
+	}
+
+	return pkgs[0].PkgPath, nil
 }
 
 // Setup prepares the environment for further instrumentation. It runs
@@ -361,6 +418,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	sp := &setupPhase{
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
+		buildFlags: extractBuildFlags(args),
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
@@ -406,6 +464,25 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
 	if err != nil {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
+	}
+
+	// The hook packages the pass above selected get blank-imported into the
+	// application below, which compiles their dependencies too. The build plan
+	// never saw those, so match them now.
+	injected, err := sp.matchInjectedDeps(
+		ctx, matched, deps, moduleDirs, extractBuildFlags(args),
+	)
+	if err != nil {
+		return err
+	}
+	matched = append(matched, injected...)
+
+	// Reported here rather than per matching pass: an individual pass matching
+	// nothing is normal, it is the combined result that tells the user whether
+	// anything will be instrumented.
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
 	}
 
 	// Generate otelc.runtime.go for all packages
@@ -533,29 +610,55 @@ func extractBuildFlags(args []string) []string {
 	return append(valueFlags, enabledBoolFlags...)
 }
 
-// buildWithToolexec builds the project with the toolexec mode. vendored is
-// passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
-// -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
-// args and forwarded flags below.
-func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
-	args := cmd.Args().Slice()
-	logger := util.LoggerFromContext(ctx)
-
-	// Add -toolexec=otelc to the original build command and run it
-	execPath, err := os.Executable()
+// toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
+// from buildWithToolexec so the error path (reachable only when execPath
+// contains both quote characters) is testable without depending on
+// os.Executable.
+func toolexecInsertArg(execPath string) (string, error) {
+	insert, err := util.BuildToolexecFlag(execPath)
 	if err != nil {
-		return ex.Wrapf(err, "failed to get executable path")
+		// BuildToolexecFlag's own error already names execPath, so there
+		// is nothing to add here, matching nestedToolexecGoflagsToken
+		// and the #1231 convention.
+		return "", err
 	}
-	insert := "-toolexec=" + execPath + " toolexec"
-	const additionalCount = 2
+	return insert, nil
+}
+
+// addBuildFlags inserts flags after a leading -C, which the go command requires
+// to be the first flag on its command line.
+func addBuildFlags(args []string, flags ...string) []string {
+	insertAt := 0
+	if len(args) > 0 {
+		switch {
+		case args[0] == "-C" && len(args) > 1:
+			insertAt = 2
+		case strings.HasPrefix(args[0], "-C="):
+			insertAt = 1
+		}
+	}
+
+	result := make([]string, 0, len(args)+len(flags))
+	result = append(result, args[:insertAt]...)
+	result = append(result, flags...)
+	return append(result, args[insertAt:]...)
+}
+
+// toolexecBuildArgs assembles the argv for the instrumented build: the
+// original go subcommand, -work, the -toolexec flag pointing at execPath, and
+// the caller's remaining arguments. Kept free of side effects so it can be
+// tested directly; buildWithToolexec cannot be, since it would spawn a go
+// build whose -toolexec target is the test binary itself.
+func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string, error) {
+	insert, err := toolexecInsertArg(execPath)
+	if err != nil {
+		return nil, err
+	}
+	const additionalCount = 3
 	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
 	// Add "go build"
 	newArgs = append(newArgs, "go")
 	newArgs = append(newArgs, args[:1]...)
-	// Add "-work" to give us a chance to debug instrumented code if needed
-	newArgs = append(newArgs, "-work")
-	// Add "-toolexec=..."
-	newArgs = append(newArgs, insert)
 	// Add the rest
 	restArgs := args[1:]
 	if vendored {
@@ -569,7 +672,43 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 			restArgs = append(restArgs, otelcRuntimePath)
 		}
 	}
-	newArgs = append(newArgs, restArgs...)
+	// Add -work and -toolexec after a leading -C. The go command rejects -C
+	// when any other flag comes before it.
+	restArgs = addBuildFlags(restArgs, "-work", insert)
+	return append(newArgs, restArgs...), nil
+}
+
+// runBuildCmd runs the assembled go build. It is a variable so tests can
+// replace it: the -toolexec target is os.Executable(), which under `go test`
+// is the test binary, so really running the command would make the test
+// binary its own toolexec target and re-invoke itself without bound.
+//
+//nolint:gochecknoglobals // test seam
+var runBuildCmd = util.RunCmdWithEnv
+
+// executablePath resolves the path to the current executable. It is a variable
+// so tests can simulate paths that trigger quoting errors.
+//
+//nolint:gochecknoglobals // test seam
+var executablePath = os.Executable
+
+// buildWithToolexec builds the project with the toolexec mode. vendored is
+// passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
+// -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
+// args and forwarded flags below.
+func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
+	args := cmd.Args().Slice()
+	logger := util.LoggerFromContext(ctx)
+
+	// Add -toolexec=otelc to the original build command and run it
+	execPath, err := executablePath()
+	if err != nil {
+		return ex.Wrapf(err, "failed to get executable path")
+	}
+	newArgs, err := toolexecBuildArgs(args, execPath, vendored)
+	if err != nil {
+		return err
+	}
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
@@ -596,7 +735,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		return ex.Wrapf(err, "configuring go cache")
 	}
 
-	return util.RunCmdWithEnv(ctx, env, newArgs...)
+	return runBuildCmd(ctx, env, newArgs...)
 }
 
 func GoBuild(ctx context.Context, cmd *cli.Command) error {
