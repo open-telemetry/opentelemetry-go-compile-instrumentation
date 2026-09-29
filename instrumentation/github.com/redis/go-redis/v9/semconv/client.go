@@ -17,6 +17,10 @@ type RedisRequest struct {
 	Statement string
 }
 
+// redisClientRequestAttrCap is the most attributes RedisClientRequestTraceAttrs
+// can return: five required fields plus server.port.
+const redisClientRequestAttrCap = 6
+
 // RedisClientRequestTraceAttrs returns trace attributes for a Redis client request.
 func RedisClientRequestTraceAttrs(req RedisRequest) []attribute.KeyValue {
 	host, portStr, err := net.SplitHostPort(req.Endpoint)
@@ -24,13 +28,14 @@ func RedisClientRequestTraceAttrs(req RedisRequest) []attribute.KeyValue {
 		host = req.Endpoint
 	}
 
-	attrs := []attribute.KeyValue{
+	attrs := make([]attribute.KeyValue, 0, redisClientRequestAttrCap)
+	attrs = append(attrs,
 		semconv.DBSystemNameRedis,
 		semconv.DBOperationName(req.FullName),
 		semconv.ServerAddress(host),
 		semconv.NetworkTransportTCP,
 		semconv.DBQueryText(req.Statement),
-	}
+	)
 
 	if err == nil {
 		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
