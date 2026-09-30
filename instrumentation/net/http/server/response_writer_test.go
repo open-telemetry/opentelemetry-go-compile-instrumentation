@@ -59,6 +59,53 @@ func TestWriterWrapper_WriteHeader_PreventDuplicate(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, wrapper.statusCode)
 }
 
+type recordingResponseWriter struct {
+	header      http.Header
+	statusCodes []int
+	body        strings.Builder
+}
+
+func (w *recordingResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *recordingResponseWriter) Write(b []byte) (int, error) {
+	return w.body.Write(b)
+}
+
+func (w *recordingResponseWriter) WriteHeader(statusCode int) {
+	w.statusCodes = append(w.statusCodes, statusCode)
+}
+
+func TestWriterWrapper_WriteHeader_InformationalResponses(t *testing.T) {
+	recorder := &recordingResponseWriter{}
+	wrapper := &writerWrapper{ResponseWriter: recorder, statusCode: http.StatusOK}
+
+	wrapper.WriteHeader(http.StatusEarlyHints)
+	wrapper.WriteHeader(http.StatusProcessing)
+	wrapper.WriteHeader(http.StatusCreated)
+	wrapper.WriteHeader(http.StatusBadRequest)
+
+	assert.Equal(t, []int{http.StatusEarlyHints, http.StatusProcessing, http.StatusCreated}, recorder.statusCodes)
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusCreated, wrapper.statusCode)
+}
+
+func TestWriterWrapper_WriteHeader_SwitchingProtocolsIsFinal(t *testing.T) {
+	recorder := &recordingResponseWriter{}
+	wrapper := &writerWrapper{ResponseWriter: recorder, statusCode: http.StatusOK}
+
+	wrapper.WriteHeader(http.StatusSwitchingProtocols)
+	wrapper.WriteHeader(http.StatusCreated)
+
+	assert.Equal(t, []int{http.StatusSwitchingProtocols}, recorder.statusCodes)
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusSwitchingProtocols, wrapper.statusCode)
+}
+
 func TestWriterWrapper_Write(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	wrapper := &writerWrapper{
@@ -72,6 +119,20 @@ func TestWriterWrapper_Write(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, len(data), n)
 	assert.Equal(t, "test data", recorder.Body.String())
+}
+
+func TestWriterWrapper_WriteAfterInformationalResponse(t *testing.T) {
+	recorder := &recordingResponseWriter{}
+	wrapper := &writerWrapper{ResponseWriter: recorder, statusCode: http.StatusOK}
+
+	wrapper.WriteHeader(http.StatusEarlyHints)
+	n, err := wrapper.Write([]byte("payload"))
+
+	require.NoError(t, err)
+	assert.Equal(t, len("payload"), n)
+	assert.Equal(t, []int{http.StatusEarlyHints, http.StatusOK}, recorder.statusCodes)
+	assert.Equal(t, "payload", recorder.body.String())
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
 }
 
 func TestWriterWrapper_Header(t *testing.T) {
@@ -271,6 +332,20 @@ func TestWriterWrapper_ReadFrom_KeepsExplicitStatus(t *testing.T) {
 	assert.Equal(t, http.StatusPartialContent, recorder.Code)
 }
 
+func TestWriterWrapper_ReadFromAfterInformationalResponse(t *testing.T) {
+	recorder := &recordingResponseWriter{}
+	wrapper := &writerWrapper{ResponseWriter: recorder, statusCode: http.StatusOK}
+
+	wrapper.WriteHeader(http.StatusEarlyHints)
+	n, err := wrapper.ReadFrom(bodyReader("payload"))
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(len("payload")), n)
+	assert.Equal(t, []int{http.StatusEarlyHints, http.StatusOK}, recorder.statusCodes)
+	assert.Equal(t, "payload", recorder.body.String())
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+}
+
 // mockStringWriter is a mock ResponseWriter that implements io.StringWriter,
 // the interface net/http's own *response uses to write a string without an
 // extra []byte conversion.
@@ -369,6 +444,43 @@ func TestWriterWrapper_WriteString_KeepsExplicitStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusPartialContent, wrapper.statusCode)
 	assert.Equal(t, http.StatusPartialContent, recorder.Code)
+}
+
+func TestWriterWrapper_WriteStringAfterInformationalResponse(t *testing.T) {
+	recorder := &recordingResponseWriter{}
+	wrapper := &writerWrapper{ResponseWriter: recorder, statusCode: http.StatusOK}
+
+	wrapper.WriteHeader(http.StatusEarlyHints)
+	n, err := wrapper.WriteString("payload")
+
+	require.NoError(t, err)
+	assert.Equal(t, len("payload"), n)
+	assert.Equal(t, []int{http.StatusEarlyHints, http.StatusOK}, recorder.statusCodes)
+	assert.Equal(t, "payload", recorder.body.String())
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+}
+
+func TestWriterWrapper_InformationalResponseOverRealServer(t *testing.T) {
+	statusCode := make(chan int, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		wrapper := &writerWrapper{ResponseWriter: w, statusCode: http.StatusOK}
+		wrapper.WriteHeader(http.StatusEarlyHints)
+		wrapper.WriteHeader(http.StatusCreated)
+		_, err := wrapper.Write([]byte("payload"))
+		require.NoError(t, err)
+		statusCode <- wrapper.statusCode
+	}))
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	assert.Equal(t, "payload", string(body))
+	assert.Equal(t, http.StatusCreated, <-statusCode)
 }
 
 func TestWriterWrapper_ServeFileOverRealServer(t *testing.T) {

@@ -132,12 +132,12 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	if subcommand == subcmdTest {
 		planVerb = subcmdTest
 	}
-	// The full command is: "go build/test -a -x -n {...}"
+	// The full command is: "go build/test [-C dir] -a -x -n {...}"
 	planArgs := dropPlanIrrelevantFlags(subcommand, cmdArgs)
-	prefix := []string{planVerb, "-a", "-x", "-n"}
-	args := make([]string, 0, len(prefix)+len(planArgs))
-	args = append(args, prefix...)
-	args = append(args, planArgs...) // args from original build/install or setup command
+	planFlags := []string{"-a", "-x", "-n"}
+	args := make([]string, 0, len(planArgs)+len(planFlags)+1)
+	args = append(args, planVerb)
+	args = append(args, addBuildFlags(planArgs, planFlags...)...)
 	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
