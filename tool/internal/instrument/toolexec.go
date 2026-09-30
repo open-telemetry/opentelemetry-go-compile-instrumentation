@@ -498,9 +498,20 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 		return interceptToolVersion(ctx, args)
 	}
 
-	// The tool version rewrite above already keeps a nested build's cache keys
-	// aligned with the outer one; instrumenting here too would recurse.
-	if !nested {
+	// A nested build shares the outer build's cache keys (see the tool version
+	// rewrite above), so it must compile the same instrumented output: a plain
+	// compile there would be stored under the key of the instrumented one, and
+	// a package compiled against it would not match the archive the outer
+	// build links. Nesting only goes deeper along the import graph, so it ends.
+	if nested {
+		if util.IsCompileCommandWithArgs(args) {
+			var err error
+			args, err = interceptCompile(ctx, args)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
 		var err error
 		args, err = interceptToolCommand(ctx, args)
 		if err != nil {
