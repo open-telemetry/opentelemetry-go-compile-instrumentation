@@ -796,25 +796,25 @@ func Foo() {}
 		},
 		{
 			name: "file-level directive is reported",
-			src: `//otelc:ignore
+			src: `//otelc:custom
 
 package p
 func Foo() {}
 `,
 			known:    knownIgnore,
-			expected: []string{"otelc:ignore"},
+			expected: []string{"otelc:custom"},
 		},
 		{
 			name: "duplicate unknown directives collapse to one entry",
 			src: `package p
-//otelc:ignore
+//otelc:custom
 func Foo() {}
 
-//otelc:ignore
+//otelc:custom
 func Bar() {}
 `,
 			known:    knownIgnore,
-			expected: []string{"otelc:ignore"},
+			expected: []string{"otelc:custom"},
 		},
 		{
 			name: "distinct unknown directives are sorted",

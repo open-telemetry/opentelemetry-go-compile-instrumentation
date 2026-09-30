@@ -570,7 +570,12 @@ func HookedFunc(p1 string) {}
 		require.NoError(t, err)
 
 		src := renderFile(t, root)
-		assert.NotContains(t, src, `"runtime"`, "no otelc:ignore anywhere in the build means no reason to import runtime")
+		assert.NotContains(
+			t,
+			src,
+			`"runtime"`,
+			"no otelc:ignore anywhere in the build means no reason to import runtime",
+		)
 		assert.NotContains(t, src, "HooksSuppressed")
 	})
 

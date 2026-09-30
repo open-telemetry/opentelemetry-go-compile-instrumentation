@@ -85,7 +85,7 @@ func (sp *setupPhase) matchGlobRules(
 
 // markIgnoredCallFiles records source files in dep that hold a
 // //otelc:ignore comment directly above a call.
-func (sp *setupPhase) markIgnoredCallFiles(dep *Dependency, set *rule.InstRuleSet) error {
+func markIgnoredCallFiles(dep *Dependency, set *rule.InstRuleSet) error {
 	for _, source := range dep.Sources {
 		maybe, err := ast.FileContainsDirectiveText(source, util.DirectiveIgnore)
 		if err != nil {
@@ -127,7 +127,7 @@ func (sp *setupPhase) runMatch(
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
 	}
 
-	if err := sp.markIgnoredCallFiles(dep, set); err != nil {
+	if err := markIgnoredCallFiles(dep, set); err != nil {
 		return nil, err
 	}
 

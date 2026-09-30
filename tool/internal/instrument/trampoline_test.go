@@ -1055,7 +1055,12 @@ func TestHookGuardCond_WithoutBuildWideIgnoreUsage(t *testing.T) {
 
 	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
 	require.True(t, ok)
-	assert.Equal(t, token.NEQ, cond.Op, "with no //otelc:ignore usage in this build, the guard checks only the hook var")
+	assert.Equal(
+		t,
+		token.NEQ,
+		cond.Op,
+		"with no //otelc:ignore usage in this build, the guard checks only the hook var",
+	)
 }
 
 func TestHookGuardCond_WithBuildWideIgnoreUsage(t *testing.T) {

@@ -1097,7 +1097,11 @@ func Run() {
 	require.NoError(t, err)
 
 	src := renderFile(t, root)
-	assert.Contains(t, src, "runtime.SuppressHooks()\n\t//otelc:ignore\n\thttp.Get(\"ignored\")\n\truntime.UnsuppressHooks()")
+	assert.Contains(
+		t,
+		src,
+		"runtime.SuppressHooks()\n\t//otelc:ignore\n\thttp.Get(\"ignored\")\n\truntime.UnsuppressHooks()",
+	)
 	assert.NotContains(t, src, "runtime.SuppressHooks()\n\thttp.Get(\"kept\")")
 }
 
