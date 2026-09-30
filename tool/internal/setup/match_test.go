@@ -2070,6 +2070,28 @@ func TestMarkIgnoredCallFiles_NoDirective(t *testing.T) {
 	assert.Empty(t, set.IgnoredCallFiles)
 }
 
+func TestMarkIgnoredCallFiles_MissingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.go")
+	dep := &Dependency{Sources: []string{missing}}
+
+	set := rule.NewInstRuleSet("example.com/missing")
+	err := markIgnoredCallFiles(dep, set)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scanning")
+}
+
+func TestMarkIgnoredCallFiles_InvalidSyntax(t *testing.T) {
+	srcFile := writeGoSource(t, "broken.go", "package broken\n\n//otelc:ignore\nfunc Foo(garbage syntax here\n")
+	dep := &Dependency{Sources: []string{srcFile}}
+
+	set := rule.NewInstRuleSet("example.com/broken")
+	err := markIgnoredCallFiles(dep, set)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing")
+}
+
 func TestRunMatch_IgnoredCallFileWithNoMatchingRule(t *testing.T) {
 	srcFile := writeGoSource(
 		t,
@@ -2087,6 +2109,20 @@ func TestRunMatch_IgnoredCallFileWithNoMatchingRule(t *testing.T) {
 	require.NotNil(t, set)
 	assert.False(t, set.IsEmpty())
 	assert.Equal(t, []string{srcFile}, set.IgnoredCallFiles)
+}
+
+func TestRunMatch_PropagatesMarkIgnoredCallFilesError(t *testing.T) {
+	srcFile := writeGoSource(t, "broken.go", "package broken\n\n//otelc:ignore\nfunc Foo(garbage syntax here\n")
+	dep := &Dependency{
+		ImportPath: "example.com/broken",
+		Sources:    []string{srcFile},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, set)
 }
 
 func TestRulesFromDirWalkError(t *testing.T) {

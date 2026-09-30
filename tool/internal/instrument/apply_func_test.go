@@ -594,3 +594,32 @@ func HookedFunc(p1 string) {}
 		assert.Contains(t, src, "runtime.HooksSuppressed()")
 	})
 }
+
+func TestInstrumentFile_FindFuncDeclErrorIsWrapped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n\nfunc Target(x int) {}\n"), 0o600))
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad-filter"},
+		Func:         "Target",
+		Param:        "[]invalid",
+	}
+
+	ip := newTestPhase()
+	_, err := ip.instrumentFile(context.Background(), path, []rule.InstRule{funcRule})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "finding function Target")
+}
+
+func TestInstrumentFile_ApplyIgnoredCallSitesErrorIsWrapped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.go")
+	src := "package main\n\nfunc Run() error {\n\t//otelc:ignore\n\treturn hooked()\n}\n\nfunc hooked() error { return nil }\n"
+	require.NoError(t, os.WriteFile(path, []byte(src), 0o600))
+
+	ip := newTestPhase()
+	_, err := ip.instrumentFile(context.Background(), path, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "applying //otelc:ignore call sites")
+}

@@ -5,6 +5,7 @@ package ast
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dave/dst"
@@ -828,6 +829,15 @@ func Bar() {}
 			known:    knownIgnore,
 			expected: []string{"otelc:aaa", "otelc:zzz"},
 		},
+		{
+			name: "unknown directive name stops at trailing whitespace",
+			src: `package p
+//otelc:custom key:val
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:custom"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -838,4 +848,25 @@ func Bar() {}
 			assert.Equal(t, tt.expected, UnknownDirectiveNames(tree, tt.known))
 		})
 	}
+}
+
+func TestFileContainsDirectiveText(t *testing.T) {
+	t.Run("directive text present", func(t *testing.T) {
+		path := writeGoTempFile(t, "package p\n//otelc:ignore\nfunc Foo() {}\n")
+		found, err := FileContainsDirectiveText(path, "otelc:ignore")
+		require.NoError(t, err)
+		assert.True(t, found)
+	})
+
+	t.Run("directive text absent", func(t *testing.T) {
+		path := writeGoTempFile(t, "package p\nfunc Foo() {}\n")
+		found, err := FileContainsDirectiveText(path, "otelc:ignore")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+
+	t.Run("read error on a missing file", func(t *testing.T) {
+		_, err := FileContainsDirectiveText(filepath.Join(t.TempDir(), "missing.go"), "otelc:ignore")
+		require.Error(t, err)
+	})
 }

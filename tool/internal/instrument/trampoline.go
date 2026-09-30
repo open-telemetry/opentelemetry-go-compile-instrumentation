@@ -547,7 +547,10 @@ func (ip *instrumentPhase) hookGuardCond(fnName string) dst.Expr {
 	if !ip.buildUsesIgnoreDirective {
 		return notNil
 	}
-	notSuppressed := &dst.UnaryExpr{Op: token.NOT, X: suppressHooksCall(hooksSuppressedFuncName, ip.isSuppressHooksPackage())}
+	notSuppressed := &dst.UnaryExpr{
+		Op: token.NOT,
+		X:  suppressHooksCall(hooksSuppressedFuncName, ip.isSuppressHooksPackage()),
+	}
 	return &dst.BinaryExpr{X: notNil, Op: token.LAND, Y: notSuppressed}
 }
 
