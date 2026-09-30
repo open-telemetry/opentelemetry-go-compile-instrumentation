@@ -32,6 +32,10 @@
     "versionRange": "v2.4.1"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/client",
+    "target": "github.com/modelcontextprotocol/go-sdk/mcp"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/olivere/elastic/v7",
     "target": "github.com/olivere/elastic/v7",
     "versionRange": "v7.0.0"
