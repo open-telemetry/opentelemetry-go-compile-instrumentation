@@ -152,8 +152,8 @@ code it applies to — annotate the source directly. These directives are line c
   ```
 
 - **Ignore a single call site.** Put `//otelc:ignore` in the comment directly above the
-  statement that holds the call. A `wrap_call` rule skips that one call and leaves every other
-  call to the same function instrumented:
+  statement that holds the call. That one call is skipped and every other call to the same
+  function stays instrumented:
 
   ```go
   //otelc:ignore
@@ -161,7 +161,8 @@ code it applies to — annotate the source directly. These directives are line c
   ```
 
   This form covers a call to a function you do not own — for example a library's `sql.Open` —
-  as it annotates your own call site, not the library's declaration.
+  as it annotates your own call site, not the library's declaration. It works for both a
+  `wrap_call` rule and an `inject_hooks` rule.
 
 Keep in mind:
 
@@ -170,10 +171,9 @@ Keep in mind:
   `//otelc:instrument` equivalent to force them through.
 - If a function carries both `//otelc:instrument` and `//otelc:ignore`, **`//otelc:ignore`
   wins** — the directive closest to the declaration takes precedence.
-- The call-site form works only on a `wrap_call` rule. An `inject_hooks` rule hooks the
-  function declaration and never reads the caller's source, so it ignores a `//otelc:ignore`
-  comment above a call site. Every call to a function under an `inject_hooks` rule stays
-  instrumented regardless of that comment.
+- The annotated statement must not return, break, continue, or jump out of its enclosing
+  block. Assign the call's result to a variable in its own statement, then use the variable in
+  the control-flow statement on its own, unannotated line.
 
 ## Runtime Tuning
 
