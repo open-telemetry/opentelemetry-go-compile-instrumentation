@@ -1991,7 +1991,7 @@ func TestKnownDirectiveNames(t *testing.T) {
 }
 
 func TestPreciseMatching_WarnsOnUnknownDirective(t *testing.T) {
-	srcFile := writeGoSource(t, "typo.go", "package typo\n\n//otelc:ignroe\nfunc Foo() {}\n")
+	srcFile := writeGoSource(t, "typo.go", "package typo\n\n//otelc:ignoer\nfunc Foo() {}\n")
 	dep := &Dependency{
 		ImportPath: "example.com/typo",
 		Sources:    []string{srcFile},
@@ -2010,7 +2010,7 @@ func TestPreciseMatching_WarnsOnUnknownDirective(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "otelc:ignroe")
+	assert.Contains(t, out, "otelc:ignoer")
 	assert.Contains(t, out, srcFile)
 }
 
