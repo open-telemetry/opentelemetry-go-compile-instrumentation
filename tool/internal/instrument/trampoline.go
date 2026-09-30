@@ -547,14 +547,20 @@ func (ip *instrumentPhase) hookGuardCond(fnName string) dst.Expr {
 	if !ip.buildUsesIgnoreDirective {
 		return notNil
 	}
-	notSuppressed := &dst.UnaryExpr{Op: token.NOT, X: suppressHooksCall(hooksSuppressedFuncName, ip.target.Name.Name)}
+	notSuppressed := &dst.UnaryExpr{Op: token.NOT, X: suppressHooksCall(hooksSuppressedFuncName, ip.isSuppressHooksPackage())}
 	return &dst.BinaryExpr{X: notNil, Op: token.LAND, Y: notSuppressed}
 }
 
+// isSuppressHooksPackage reports whether the package currently being
+// compiled is the runtime package itself
+func (ip *instrumentPhase) isSuppressHooksPackage() bool {
+	return util.FindFlagValue(ip.compileArgs, "-p") == suppressHooksPackage
+}
+
 // suppressHooksCall builds a call to funcName in the runtime package,
-// unqualified when pkgName is itself "runtime".
-func suppressHooksCall(funcName, pkgName string) *dst.CallExpr {
-	if pkgName == suppressHooksPackage {
+// unqualified when selfPackage is true.
+func suppressHooksCall(funcName string, selfPackage bool) *dst.CallExpr {
+	if selfPackage {
 		return ast.CallTo(funcName, nil, nil)
 	}
 	return &dst.CallExpr{Fun: ast.SelectorExpr(ast.Ident(suppressHooksPackage), funcName)}

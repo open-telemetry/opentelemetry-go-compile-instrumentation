@@ -1083,7 +1083,11 @@ func TestHookGuardCond_WithBuildWideIgnoreUsage(t *testing.T) {
 }
 
 func TestHookGuardCond_InsideRuntimePackageItselfIsUnqualified(t *testing.T) {
-	ip := &instrumentPhase{target: parseFile(t, "package runtime\n"), buildUsesIgnoreDirective: true}
+	ip := &instrumentPhase{
+		target:                   parseFile(t, "package runtime\n"),
+		buildUsesIgnoreDirective: true,
+		compileArgs:              []string{"-p", "runtime"},
+	}
 
 	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
 	require.True(t, ok)

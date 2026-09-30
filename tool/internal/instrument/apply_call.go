@@ -353,9 +353,11 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 		return true
 	})
 
+	selfPackage := ip.isSuppressHooksPackage()
+
 	bracketed := 0
 	for _, block := range blocks {
-		n, err := bracketMarkedStmts(block, marked, root.Name.Name)
+		n, err := bracketMarkedStmts(block, marked, selfPackage)
 		if err != nil {
 			return err
 		}
@@ -365,7 +367,7 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 		return nil
 	}
 
-	if root.Name.Name == suppressHooksPackage {
+	if selfPackage {
 		return nil
 	}
 	suppressImport := map[string]string{suppressHooksPackage: suppressHooksPackage}
@@ -400,9 +402,9 @@ func (ip *instrumentPhase) markIgnoreConsumed(stmt dst.Stmt) {
 }
 
 // bracketMarkedStmts brackets every statement in block.List that appears in
-// marked and reports how many it bracketed. pkgName decides whether the
+// marked and reports how many it bracketed. selfPackage decides whether the
 // inserted calls need a "runtime" qualifier.
-func bracketMarkedStmts(block *dst.BlockStmt, marked map[dst.Stmt]bool, pkgName string) (int, error) {
+func bracketMarkedStmts(block *dst.BlockStmt, marked map[dst.Stmt]bool, selfPackage bool) (int, error) {
 	bracketed := 0
 	for i := 0; i < len(block.List); i++ {
 		stmt := block.List[i]
@@ -416,8 +418,8 @@ func bracketMarkedStmts(block *dst.BlockStmt, marked map[dst.Stmt]bool, pkgName 
 					"Assign the call's result to a variable in its own statement, then use the " +
 					"variable in the control-flow statement on its own, unannotated line")
 		}
-		inc := ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, pkgName))
-		dec := ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, pkgName))
+		inc := ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, selfPackage))
+		dec := ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage))
 		block.List = append(block.List[:i], append([]dst.Stmt{inc}, block.List[i:]...)...)
 		i++
 		block.List = append(block.List[:i+1], append([]dst.Stmt{dec}, block.List[i+1:]...)...)

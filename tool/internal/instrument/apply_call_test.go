@@ -1235,12 +1235,35 @@ func Run() {
 func hooked() {}
 `)
 
-	err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	ip := newTestPhase()
+	ip.compileArgs = []string{"-p", "runtime"}
+	err := ip.applyIgnoredCallSites(context.Background(), root)
 	require.NoError(t, err)
 
 	src := renderFile(t, root)
 	assert.Contains(t, src, "SuppressHooks()\n\t//otelc:ignore\n\thooked()\n\tUnsuppressHooks()")
 	assert.NotContains(t, src, `"runtime"`)
+}
+
+func TestApplyIgnoredCallSites_PackageClauseNamedRuntimeAtOtherImportPathIsQualified(t *testing.T) {
+	root := parseFile(t, `package runtime
+
+func Run() {
+	//otelc:ignore
+	hooked()
+}
+
+func hooked() {}
+`)
+
+	ip := newTestPhase()
+	ip.compileArgs = []string{"-p", "example.com/vendored/runtime"}
+	err := ip.applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()\n\t//otelc:ignore\n\thooked()\n\truntime.UnsuppressHooks()")
+	assert.Contains(t, src, `"runtime"`)
 }
 
 func TestHasEscapingControlFlow(t *testing.T) {
