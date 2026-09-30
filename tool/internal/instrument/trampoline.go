@@ -281,7 +281,7 @@ func callsRuntimeCallers(fn *dst.FuncDecl, importAliases map[string]string) bool
 		if path == "" {
 			path = importAliases[ident.Name]
 		}
-		if path == "runtime" {
+		if path == suppressCountPackage {
 			found = true
 			return false
 		}

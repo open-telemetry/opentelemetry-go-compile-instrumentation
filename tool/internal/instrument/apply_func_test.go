@@ -625,8 +625,8 @@ type Message struct{}
 `)
 
 	t.Run("bare function with no dot", func(t *testing.T) {
-		root := parseFile(t, "package p\nfunc plain() {}\n")
-		decl := findExcludedCallerDecl(root, "plain")
+		plainRoot := parseFile(t, "package p\nfunc plain() {}\n")
+		decl := findExcludedCallerDecl(plainRoot, "plain")
 		require.NotNil(t, decl)
 		assert.Equal(t, "plain", decl.Name.Name)
 	})

@@ -333,7 +333,7 @@ func (ip *instrumentPhase) writeGlobals(ctx context.Context, pkgName string) err
 	trampoline.Decls = append(trampoline.Decls, api.Decls...)
 
 	if ip.needsSuppressionVar {
-		if err = ip.addSuppressionInit(ctx, trampoline, pkgName); err != nil {
+		if err = addSuppressionInit(ctx, trampoline, pkgName); err != nil {
 			return err
 		}
 	}
@@ -352,11 +352,12 @@ func (ip *instrumentPhase) writeGlobals(ctx context.Context, pkgName string) err
 // addSuppressionInit adds an import of the runtime package and an init
 // function that assigns OtelSuppressedImpl to runtime.IsSuppressed into
 // trampoline.
-func (ip *instrumentPhase) addSuppressionInit(ctx context.Context, trampoline *dst.File, pkgName string) error {
+func addSuppressionInit(ctx context.Context, trampoline *dst.File, pkgName string) error {
 	if pkgName == suppressCountPackage {
 		return ex.Newf("exclude_callers targeting the %s package itself is not supported", suppressCountPackage)
 	}
-	if err := imports.AddToFile(ctx, trampoline, map[string]string{suppressCountPackage: suppressCountPackage}); err != nil {
+	suppressImport := map[string]string{suppressCountPackage: suppressCountPackage}
+	if err := imports.AddToFile(ctx, trampoline, suppressImport); err != nil {
 		return ex.Wrapf(err, "adding %s import for exclude_callers", suppressCountPackage)
 	}
 	assign := ast.AssignStmt(
@@ -487,7 +488,8 @@ func (ip *instrumentPhase) applyExcludeCallers(ctx context.Context, rule *rule.I
 	if len(rule.ExcludeCallers) == 0 {
 		return nil
 	}
-	if err := ip.addRuleImports(ctx, root, map[string]string{"runtime": "runtime"}, rule.Name); err != nil {
+	suppressImport := map[string]string{suppressCountPackage: suppressCountPackage}
+	if err := ip.addRuleImports(ctx, root, suppressImport, rule.Name); err != nil {
 		return err
 	}
 	for _, caller := range rule.ExcludeCallers {
