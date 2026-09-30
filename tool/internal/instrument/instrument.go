@@ -31,7 +31,26 @@ func groupRules(workDir string, rset *rule.InstRuleSet) (map[string][]rule.InstR
 	addRulesToMap(rset.LitRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DirectiveRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DeclRules, file2rules, rset.CgoFileMap, workDir)
+	addIgnoredCallFilesToMap(rset.IgnoredCallFiles, file2rules, rset.CgoFileMap, workDir)
 	return file2rules, slices.Sorted(maps.Keys(file2rules))
+}
+
+// addIgnoredCallFilesToMap gives every file in files an entry in file2rules,
+// even one with no rule of its own.
+func addIgnoredCallFilesToMap(
+	files []string,
+	file2rules map[string][]rule.InstRule,
+	cgoMap map[string]string,
+	workDir string,
+) {
+	for _, file := range files {
+		if cgoBase, ok := cgoMap[file]; ok {
+			file = filepath.Join(workDir, cgoBase)
+		}
+		if _, exists := file2rules[file]; !exists {
+			file2rules[file] = nil
+		}
+	}
 }
 
 func addRulesToMap[T rule.InstRule](
@@ -113,6 +132,7 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 	if err != nil {
 		return false, ex.Wrapf(err, "parsing file %s", file)
 	}
+	ip.consumedIgnoreStmts = nil
 
 	fileIgnored := ast.FileHasLeadingDirective(root, util.DirectiveIgnore)
 	if fileIgnored {
@@ -139,6 +159,11 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 		}
 		hasFuncRule = hasFuncRule || funcRule
 	}
+
+	if err = ip.applyIgnoredCallSites(ctx, root); err != nil {
+		return false, ex.Wrapf(err, "applying //otelc:ignore call sites in %s", file)
+	}
+
 	// Since trampoline-jump-if is performance-critical, perform AST level
 	// optimization for them before writing to file
 	if err = ip.optimizeTJumps(); err != nil {

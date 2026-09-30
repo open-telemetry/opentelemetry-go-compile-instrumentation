@@ -679,6 +679,76 @@ func TestStmtHasLeadingDirective_NilStmt(t *testing.T) {
 	assert.False(t, HasLeadingDirective(nil, "otelc:ignore"))
 }
 
+func TestFileHasIgnoredCall(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		expected bool
+	}{
+		{
+			name: "directive above a call",
+			src: `package p
+func Foo() {
+	//otelc:ignore
+	Bar()
+}
+`,
+			expected: true,
+		},
+		{
+			name: "no directive",
+			src: `package p
+func Foo() {
+	Bar()
+}
+`,
+			expected: false,
+		},
+		{
+			name: "directive above a function, not a call",
+			src: `package p
+//otelc:ignore
+func Foo() {
+	Bar()
+}
+`,
+			expected: false,
+		},
+		{
+			name: "directive above the package clause, not a call",
+			src: `//otelc:ignore
+
+package p
+func Foo() {
+	Bar()
+}
+`,
+			expected: false,
+		},
+		{
+			name: "directive above a call nested inside an if",
+			src: `package p
+func Foo() {
+	if true {
+		//otelc:ignore
+		Bar()
+	}
+}
+`,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, FileHasIgnoredCall(tree, "otelc:ignore"))
+		})
+	}
+}
+
 func TestUnknownDirectiveNames(t *testing.T) {
 	knownIgnore := map[string]bool{"otelc:ignore": true}
 

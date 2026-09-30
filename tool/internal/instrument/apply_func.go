@@ -416,6 +416,14 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 		return false, err
 	}
 
+	// Skip package runtime itself to avoid a self-import.
+	if ip.buildUsesIgnoreDirective && root.Name.Name != suppressHooksPackage {
+		suppressImport := map[string]string{suppressHooksPackage: suppressHooksPackage}
+		if err = ip.addRuleImports(ctx, root, suppressImport, rule.Name); err != nil {
+			return false, err
+		}
+	}
+
 	// De-duplicate trampoline/HookContext emission for rules that resolve to the
 	// same content identity: emitting again would redeclare byte-identical
 	// declarations. Distinct do-sequence modifiers differ by content or by

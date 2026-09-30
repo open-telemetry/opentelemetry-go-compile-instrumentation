@@ -556,3 +556,54 @@ func RenderNode(restorer *decorator.Restorer, node dst.Node) (string, error) {
 	}
 	return buf.String(), nil
 }
+
+// CallEnclosingStmts maps every *dst.CallExpr in root to the nearest dst.Stmt
+// that contains it.
+func CallEnclosingStmts(root *dst.File) map[*dst.CallExpr]dst.Stmt {
+	v := &enclosingStmtVisitor{stmts: make(map[*dst.CallExpr]dst.Stmt)}
+	dst.Walk(v, root)
+	return v.stmts
+}
+
+// enclosingStmtVisitor implements dst.Visitor and tracks the current stack of
+// enclosing statements while dst.Walk descends through the tree.
+//
+// dst.Walk calls Visit(node) on the way down through a node's children, and
+// once those children are done, calls Visit(nil) exactly once.
+type enclosingStmtVisitor struct {
+	stmts  map[*dst.CallExpr]dst.Stmt
+	stack  []dst.Stmt
+	pushed []bool
+}
+
+func (v *enclosingStmtVisitor) Visit(node dst.Node) dst.Visitor {
+	if node == nil {
+		last := v.pushed[len(v.pushed)-1]
+		v.pushed = v.pushed[:len(v.pushed)-1]
+		if last {
+			v.stack = v.stack[:len(v.stack)-1]
+		}
+		return nil
+	}
+	didPush := false
+	if stmt, ok := node.(dst.Stmt); ok {
+		v.stack = append(v.stack, stmt)
+		didPush = true
+	}
+	v.pushed = append(v.pushed, didPush)
+	if call, ok := node.(*dst.CallExpr); ok && len(v.stack) > 0 {
+		v.stmts[call] = v.stack[len(v.stack)-1]
+	}
+	return v
+}
+
+// FileHasIgnoredCall reports whether root holds a call whose enclosing
+// statement carries the given directive directly above it.
+func FileHasIgnoredCall(root *dst.File, directive string) bool {
+	for _, stmt := range CallEnclosingStmts(root) {
+		if stmt != nil && HasLeadingDirective(stmt, directive) {
+			return true
+		}
+	}
+	return false
+}

@@ -1080,3 +1080,204 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse generated code")
 }
+
+func TestApplyIgnoredCallSites_BracketsAnnotatedStatement(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Run() {
+	//otelc:ignore
+	http.Get("ignored")
+	http.Get("kept")
+}
+`)
+
+	err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()\n\t//otelc:ignore\n\thttp.Get(\"ignored\")\n\truntime.UnsuppressHooks()")
+	assert.NotContains(t, src, "runtime.SuppressHooks()\n\thttp.Get(\"kept\")")
+}
+
+func TestApplyIgnoredCallSites_NoDirectiveNoChange(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Run() {
+	http.Get("kept")
+}
+`)
+
+	err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.NotContains(t, src, "SuppressHooks")
+	assert.NotContains(t, src, `"runtime"`)
+}
+
+func TestApplyIgnoredCallSites_BracketsInsideNestedBlock(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	if true {
+		//otelc:ignore
+		hooked()
+	}
+}
+
+func hooked() {}
+`)
+
+	err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()\n\t\t//otelc:ignore\n\t\thooked()\n\t\truntime.UnsuppressHooks()")
+}
+
+func TestApplyIgnoredCallSites_RejectsBareReturn(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() error {
+	//otelc:ignore
+	return hooked()
+}
+
+func hooked() error { return nil }
+`)
+
+	err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returns, breaks, continues, or jumps out of")
+}
+
+func TestApplyIgnoredCallSites_RejectsBreakInside(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	for {
+		//otelc:ignore
+		if hooked() {
+			break
+		}
+	}
+}
+
+func hooked() bool { return false }
+`)
+
+	err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returns, breaks, continues, or jumps out of")
+}
+
+func TestApplyIgnoredCallSites_AllowsReturnInsideNestedClosure(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	//otelc:ignore
+	wrap(func() bool {
+		return hooked()
+	})
+}
+
+func wrap(f func() bool) {}
+func hooked() bool       { return false }
+`)
+
+	err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+}
+
+func TestApplyIgnoredCallSites_SkipsStatementAlreadyConsumedByWrapCall(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "unsafe"
+
+func Run() {
+	x := 42
+	//otelc:ignore
+	_ = unsafe.Sizeof(x)
+}
+`)
+
+	ip := newTestPhase()
+	fn := findFuncDeclInFile(t, root, "Run")
+	stmt := fn.Body.List[len(fn.Body.List)-1]
+	ip.markIgnoreConsumed(stmt)
+
+	err := ip.applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.NotContains(t, src, "SuppressHooks")
+}
+
+func TestApplyIgnoredCallSites_SelfImportUsesUnqualifiedCalls(t *testing.T) {
+	root := parseFile(t, `package runtime
+
+func Run() {
+	//otelc:ignore
+	hooked()
+}
+
+func hooked() {}
+`)
+
+	err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "SuppressHooks()\n\t//otelc:ignore\n\thooked()\n\tUnsuppressHooks()")
+	assert.NotContains(t, src, `"runtime"`)
+}
+
+func TestHasEscapingControlFlow(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		expected bool
+	}{
+		{
+			name:     "plain call",
+			src:      `hooked()`,
+			expected: false,
+		},
+		{
+			name:     "bare return",
+			src:      `return hooked()`,
+			expected: true,
+		},
+		{
+			name:     "break",
+			src:      `break`,
+			expected: true,
+		},
+		{
+			name:     "continue",
+			src:      `continue`,
+			expected: true,
+		},
+		{
+			name:     "return inside func literal is scoped to it",
+			src:      `wrap(func() bool { return hooked() })`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := parseFile(t, "package main\nfunc Run() {\n"+tt.src+"\n}\n")
+			fn := findFuncDeclInFile(t, root, "Run")
+			stmt := fn.Body.List[0]
+			assert.Equal(t, tt.expected, hasEscapingControlFlow(stmt))
+		})
+	}
+}

@@ -57,6 +57,10 @@ const (
 	trampolineBefore                = true
 	trampolineAfter                 = false
 	unsafePackageName               = "unsafe"
+	suppressHooksPackage            = "runtime"
+	suppressHooksFuncName           = "SuppressHooks"
+	unsuppressHooksFuncName         = "UnsuppressHooks"
+	hooksSuppressedFuncName         = "HooksSuppressed"
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -511,11 +515,7 @@ func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	}
 	fnName := getHookFuncName(t, trampolineBefore)
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
-	iff := ast.IfNotNilStmt(
-		ast.Ident(fnName),
-		ast.Block(call),
-		nil,
-	)
+	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
 	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
 }
 
@@ -536,12 +536,28 @@ func (ip *instrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 	}
 	fnName := getHookFuncName(t, trampolineAfter)
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
-	iff := ast.IfNotNilStmt(
-		ast.Ident(fnName),
-		ast.Block(call),
-		nil,
-	)
+	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
 	insertAtEnd(ip.afterTrampFunc, iff)
+}
+
+// hookGuardCond builds the condition that gates a trampoline's call to its
+// real hook function
+func (ip *instrumentPhase) hookGuardCond(fnName string) dst.Expr {
+	notNil := &dst.BinaryExpr{X: ast.Ident(fnName), Op: token.NEQ, Y: ast.Nil()}
+	if !ip.buildUsesIgnoreDirective {
+		return notNil
+	}
+	notSuppressed := &dst.UnaryExpr{Op: token.NOT, X: suppressHooksCall(hooksSuppressedFuncName, ip.target.Name.Name)}
+	return &dst.BinaryExpr{X: notNil, Op: token.LAND, Y: notSuppressed}
+}
+
+// suppressHooksCall builds a call to funcName in the runtime package,
+// unqualified when pkgName is itself "runtime".
+func suppressHooksCall(funcName, pkgName string) *dst.CallExpr {
+	if pkgName == suppressHooksPackage {
+		return ast.CallTo(funcName, nil, nil)
+	}
+	return &dst.CallExpr{Fun: ast.SelectorExpr(ast.Ident(suppressHooksPackage), funcName)}
 }
 
 func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {

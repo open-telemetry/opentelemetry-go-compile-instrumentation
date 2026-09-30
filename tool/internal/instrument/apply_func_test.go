@@ -535,3 +535,57 @@ func (g *GenStruct[K, V]) Clear() error { return nil }
 	assert.Equal(t, "K", afterIndexList.Indices[0].(*dst.Ident).Name)
 	assert.Equal(t, "V", afterIndexList.Indices[1].(*dst.Ident).Name)
 }
+
+func TestApplyFuncRule_RuntimeImportFollowsBuildWideIgnoreUsage(t *testing.T) {
+	hookDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(hookDir, "hook.go"),
+		[]byte("package hook\n\nfunc HBefore(ctx HookContext, p1 string) {}\n"),
+		0o600,
+	))
+
+	newTargetRoot := func(t *testing.T) (*dst.File, *dst.FuncDecl) {
+		t.Helper()
+		root := parseFile(t, `package main
+
+func HookedFunc(p1 string) {}
+`)
+		return root, findFuncDeclInFile(t, root, "HookedFunc")
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook-rule"},
+		Func:         "HookedFunc",
+		Before:       "HBefore",
+		ResolvedPath: hookDir,
+	}
+
+	t.Run("build never uses //otelc:ignore", func(t *testing.T) {
+		root, funcDecl := newTargetRoot(t)
+		ip := newTestPhase()
+		ip.target = root
+		ip.parser = ast.NewAstParser()
+
+		_, err := ip.applyFuncRule(context.Background(), funcRule, root, funcDecl, true)
+		require.NoError(t, err)
+
+		src := renderFile(t, root)
+		assert.NotContains(t, src, `"runtime"`, "no otelc:ignore anywhere in the build means no reason to import runtime")
+		assert.NotContains(t, src, "HooksSuppressed")
+	})
+
+	t.Run("build uses //otelc:ignore somewhere", func(t *testing.T) {
+		root, funcDecl := newTargetRoot(t)
+		ip := newTestPhase()
+		ip.target = root
+		ip.parser = ast.NewAstParser()
+		ip.buildUsesIgnoreDirective = true
+
+		_, err := ip.applyFuncRule(context.Background(), funcRule, root, funcDecl, true)
+		require.NoError(t, err)
+
+		src := renderFile(t, root)
+		assert.Contains(t, src, `"runtime"`)
+		assert.Contains(t, src, "runtime.HooksSuppressed()")
+	})
+}

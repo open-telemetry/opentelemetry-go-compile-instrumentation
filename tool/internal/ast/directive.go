@@ -4,6 +4,8 @@
 package ast
 
 import (
+	"bytes"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -158,6 +160,16 @@ func scanArgs(input string) ([]DirectiveArg, error) {
 		args = append(args, DirectiveArg{Key: key, Value: value})
 	}
 	return args, nil
+}
+
+// FileContainsDirectiveText reports whether the raw bytes of the file at path
+// hold the literal text "//" + directive anywhere in the file.
+func FileContainsDirectiveText(path, directive string) (bool, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Contains(content, []byte("//"+directive)), nil
 }
 
 // FileHasDirective reports whether any node decoration in the file matches the

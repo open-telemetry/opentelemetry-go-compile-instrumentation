@@ -83,6 +83,28 @@ func (sp *setupPhase) matchGlobRules(
 	return matched
 }
 
+// markIgnoredCallFiles records source files in dep that hold a
+// //otelc:ignore comment directly above a call.
+func (sp *setupPhase) markIgnoredCallFiles(dep *Dependency, set *rule.InstRuleSet) error {
+	for _, source := range dep.Sources {
+		maybe, err := ast.FileContainsDirectiveText(source, util.DirectiveIgnore)
+		if err != nil {
+			return ex.Wrapf(err, "scanning %s for %s", source, util.DirectiveIgnore)
+		}
+		if !maybe {
+			continue
+		}
+		tree, err := ast.ParseFileFast(source)
+		if err != nil {
+			return ex.Wrapf(err, "parsing %s for %s", source, util.DirectiveIgnore)
+		}
+		if ast.FileHasIgnoredCall(tree, util.DirectiveIgnore) {
+			set.AddIgnoredCallFile(source)
+		}
+	}
+	return nil
+}
+
 // runMatch performs precise matching of rules against the dependency's source code.
 // It parses source files and matches rules by examining AST nodes.
 //
@@ -103,6 +125,10 @@ func (sp *setupPhase) runMatch(
 	if len(dep.CgoFiles) > 0 {
 		set.SetCgoFileMap(dep.CgoFiles)
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
+	}
+
+	if err := sp.markIgnoredCallFiles(dep, set); err != nil {
+		return nil, err
 	}
 
 	// Fast path: exact-target rules via a single map lookup.

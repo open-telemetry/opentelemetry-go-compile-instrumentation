@@ -71,6 +71,11 @@ func TestInstRuleSetIsEmpty(t *testing.T) {
 		irs.AddStructRule(file, &InstStructRule{})
 		assert.False(t, irs.IsEmpty())
 	})
+	t.Run("ignored call file makes it non-empty", func(t *testing.T) {
+		irs := NewInstRuleSet("m")
+		irs.AddIgnoredCallFile(file)
+		assert.False(t, irs.IsEmpty())
+	})
 }
 
 func TestInstRuleSetAdders(t *testing.T) {

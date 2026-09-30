@@ -2036,6 +2036,54 @@ func TestPreciseMatching_NoWarnForKnownDirective(t *testing.T) {
 	assert.Empty(t, buf.String())
 }
 
+func TestMarkIgnoredCallFiles_DirectiveAboveCall(t *testing.T) {
+	srcFile := writeGoSource(t, "caller.go", "package caller\n\nfunc Foo() {\n\t//otelc:ignore\n\tBar()\n}\n\nfunc Bar() {}\n")
+	dep := &Dependency{Sources: []string{srcFile}}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet("example.com/caller")
+	require.NoError(t, sp.markIgnoredCallFiles(dep, set))
+
+	assert.Equal(t, []string{srcFile}, set.IgnoredCallFiles)
+}
+
+func TestMarkIgnoredCallFiles_DirectiveAboveFunctionDoesNotCount(t *testing.T) {
+	srcFile := writeGoSource(t, "owner.go", "package owner\n\n//otelc:ignore\nfunc Foo() {}\n")
+	dep := &Dependency{Sources: []string{srcFile}}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet("example.com/owner")
+	require.NoError(t, sp.markIgnoredCallFiles(dep, set))
+
+	assert.Empty(t, set.IgnoredCallFiles)
+}
+
+func TestMarkIgnoredCallFiles_NoDirective(t *testing.T) {
+	srcFile := writeGoSource(t, "plain.go", "package plain\n\nfunc Foo() {}\n")
+	dep := &Dependency{Sources: []string{srcFile}}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet("example.com/plain")
+	require.NoError(t, sp.markIgnoredCallFiles(dep, set))
+
+	assert.Empty(t, set.IgnoredCallFiles)
+}
+
+func TestRunMatch_IgnoredCallFileWithNoMatchingRule(t *testing.T) {
+	srcFile := writeGoSource(t, "caller.go", "package caller\n\nfunc Foo() {\n\t//otelc:ignore\n\tBar()\n}\n\nfunc Bar() {}\n")
+	dep := &Dependency{
+		ImportPath: "example.com/caller",
+		Sources:    []string{srcFile},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+	assert.False(t, set.IsEmpty())
+	assert.Equal(t, []string{srcFile}, set.IgnoredCallFiles)
+}
+
 func TestRulesFromDirWalkError(t *testing.T) {
 	_, err := rulesFromDir(filepath.Join(t.TempDir(), "missing"), false)
 	require.Error(t, err)
