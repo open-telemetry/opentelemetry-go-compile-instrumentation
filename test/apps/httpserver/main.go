@@ -22,11 +22,18 @@ func greetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func informationalHandler(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusEarlyHints)
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte("created"))
+}
+
 func main() {
 	flag.Parse()
 
 	addr := fmt.Sprintf(":%s", *port)
 	http.HandleFunc("/hello", greetHandler)
+	http.HandleFunc("/informational", informationalHandler)
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 
@@ -16,11 +17,21 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
 	otelcRuntimeFile = "otelc.runtime.go"
 )
+
+// runtimePackage describes the package that receives a generated
+// otelc.runtime.go: where it sits on disk, how it is imported, and the package
+// name the generated file must declare.
+type runtimePackage struct {
+	dir        string
+	importPath string
+	name       string
+}
 
 //nolint:gochecknoglobals // This is a constant
 var requiredImports = map[string]string{
@@ -167,17 +178,52 @@ func (sp *setupPhase) writeRuntimeDiffForDebug(srcPath, pkgPath string, contribu
 	instrument.WriteAddedSourceDiff(dest, srcPath, header, sp.logger)
 }
 
+// removeRuntimeFile deletes the runtime file in pkgDir that an earlier setup
+// generated from rules that no longer apply. A stale runtime file keeps its old
+// imports and linkname declarations active in the build.
+func (sp *setupPhase) removeRuntimeFile(ctx context.Context, pkgDir string) error {
+	otelcRuntimeFilePath := filepath.Join(pkgDir, otelcRuntimeFile)
+	if !util.PathExists(otelcRuntimeFilePath) {
+		return nil
+	}
+
+	// Track the file first so that a later revert can restore it.
+	if stateManager, found := stateManagerFromContext(ctx); found {
+		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(otelcRuntimeFilePath); err != nil {
+		return ex.Wrapf(err, "removing stale otelc runtime file %s", otelcRuntimeFilePath)
+	}
+	sp.Info("Removed stale otelc.runtime.go", "path", otelcRuntimeFilePath)
+
+	return nil
+}
+
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
-func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkgDir, pkgName, pkgPath string) error {
+//
+// Rules that keep their hook code in pkg itself are dropped, since a generated
+// file cannot import the package it belongs to. `otelc go test ./...` selects
+// such a package when the hooks live in the application module.
+func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkg runtimePackage) error {
 	funcRules := []*rule.InstFuncRule{}
 	fileRules := []*rule.InstFileRule{}
 	for _, m := range matched {
-		funcRules = append(funcRules, m.AllFuncRules()...)
-		fileRules = append(fileRules, m.FileRules...)
+		for _, funcRule := range m.AllFuncRules() {
+			if funcRule.Path != pkg.importPath {
+				funcRules = append(funcRules, funcRule)
+			}
+		}
+		for _, fileRule := range m.FileRules {
+			if fileRule.Path != pkg.importPath {
+				fileRules = append(fileRules, fileRule)
+			}
+		}
 	}
 	if len(funcRules) == 0 && len(fileRules) == 0 {
-		return nil
+		return sp.removeRuntimeFile(ctx, pkg.dir)
 	}
 
 	// Add required imports
@@ -185,8 +231,8 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	// Generate the variable declarations that used by otel runtime
 	varDecls := genVarDecl(funcRules)
 	// build the ast
-	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), pkgName)
-	otelcRuntimeFilePath := filepath.Join(pkgDir, otelcRuntimeFile)
+	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), pkg.name)
+	otelcRuntimeFilePath := filepath.Join(pkg.dir, otelcRuntimeFile)
 	// Track file in state manager
 	if stateManager, found := stateManagerFromContext(ctx); found {
 		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
@@ -197,8 +243,8 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
-	keepForDebug(ctx, otelcRuntimeFilePath, pkgPath)
-	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, pkgPath, runtimeContributors(funcRules, fileRules))
+	keepForDebug(ctx, otelcRuntimeFilePath, pkg.importPath)
+	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, pkg.importPath, runtimeContributors(funcRules, fileRules))
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
 }

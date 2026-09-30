@@ -11,6 +11,7 @@
 package setup
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,10 +26,11 @@ import (
 
 func TestAddDeps(t *testing.T) {
 	tests := []struct {
-		name        string
-		matched     []*rule.InstRuleSet
-		packageName string
-		goldenFile  string // Empty means no file should be generated
+		name              string
+		matched           []*rule.InstRuleSet
+		packageImportPath string
+		packageName       string
+		goldenFile        string // Empty means no file should be generated
 	}{
 		{
 			name:        "empty_matched_rules",
@@ -97,6 +99,41 @@ func TestAddDeps(t *testing.T) {
 			packageName: "mypkg",
 			goldenFile:  "non_main_package_name.otelc.runtime.go.golden",
 		},
+		{
+			name: "self_only_rules",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/local-hooks",
+					[]*rule.InstFuncRule{newTestFuncRule("example.com/local-hooks", "example.com/app")},
+					[]*rule.InstFileRule{newTestFileRule("example.com/local-hooks", "example.com/app")},
+				),
+			},
+			packageImportPath: "example.com/local-hooks",
+			packageName:       "hooks",
+			goldenFile:        "",
+		},
+		{
+			// The generated file is correct. The link still fails, because this package and
+			// the instrumented package both define the same hook linkname. See
+			// https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1361
+			name: "self_and_external_rules",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app",
+					[]*rule.InstFuncRule{
+						newTestFuncRule("example.com/local-hooks", "example.com/app"),
+						newTestFuncRule("example.com/external-hooks", "example.com/app"),
+					},
+					[]*rule.InstFileRule{
+						newTestFileRule("example.com/local-hooks", "example.com/app"),
+						newTestFileRule("example.com/external-file-hooks", "example.com/app"),
+					},
+				),
+			},
+			packageImportPath: "example.com/local-hooks",
+			packageName:       "hooks",
+			goldenFile:        "mixed_self_and_external.otelc.runtime.go.golden",
+		},
 	}
 
 	for _, tt := range tests {
@@ -107,13 +144,18 @@ func TestAddDeps(t *testing.T) {
 			stateManager := newStateManager()
 			ctx := contextWithStateManager(t.Context(), stateManager)
 
-			err := sp.addDeps(ctx, tt.matched, tmpDir, tt.packageName, tt.packageName)
+			err := sp.addDeps(ctx, tt.matched, runtimePackage{
+				dir:        tmpDir,
+				importPath: tt.packageImportPath,
+				name:       tt.packageName,
+			})
 			require.NoError(t, err)
 
 			runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
 
 			if tt.goldenFile == "" {
 				assert.NoFileExists(t, runtimeFilePath)
+				assert.NotContains(t, stateManager.files, runtimeFilePath)
 				return
 			}
 
@@ -124,6 +166,12 @@ func TestAddDeps(t *testing.T) {
 			require.Contains(t, stateManager.files, runtimeFilePath)
 
 			actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+			if tt.packageImportPath != "" {
+				// Match the quoted import path, not a bare substring: a remaining
+				// import for a path that merely shares tt.packageImportPath as a
+				// prefix (e.g. ".../v2") must not fail this assertion.
+				assert.NotContains(t, actualNorm, fmt.Sprintf("%q", tt.packageImportPath))
+			}
 			golden.Assert(t, actualNorm, tt.goldenFile)
 		})
 	}
@@ -142,7 +190,62 @@ func TestAddDeps_FileWriteError(t *testing.T) {
 	invalidPath := filepath.Join(t.TempDir(), "nonexistent", "subdir")
 	sp := newTestSetupPhase()
 
-	err := sp.addDeps(t.Context(), matched, invalidPath, "main", "main")
+	err := sp.addDeps(t.Context(), matched, runtimePackage{dir: invalidPath, name: "main"})
+	assert.Error(t, err)
+}
+
+// TestAddDepsRemovesStaleRuntimeFile covers two successive setups of one package.
+// The first setup generates a runtime file from an external rule. The second setup
+// matches only a self-referencing rule, so addDeps must delete the runtime file.
+// A stale runtime file keeps the old imports and linkname declarations active.
+func TestAddDepsRemovesStaleRuntimeFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp := newTestSetupPhase()
+
+	pkg := runtimePackage{dir: tmpDir, importPath: "example.com/local-hooks", name: "hooks"}
+	runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
+
+	external := []*rule.InstRuleSet{
+		newTestRuleSet(
+			"example.com/app",
+			[]*rule.InstFuncRule{newTestFuncRule("example.com/external-hooks", "example.com/app")},
+			nil,
+		),
+	}
+	firstRunState := newStateManager()
+	require.NoError(t, sp.addDeps(contextWithStateManager(t.Context(), firstRunState), external, pkg))
+	require.FileExists(t, runtimeFilePath)
+
+	selfOnly := []*rule.InstRuleSet{
+		newTestRuleSet(
+			"example.com/app",
+			[]*rule.InstFuncRule{newTestFuncRule("example.com/local-hooks", "example.com/app")},
+			nil,
+		),
+	}
+	// A fresh state manager, as a second `otelc` run gets. Reusing firstRunState
+	// would already record the path as missing, so the Track below would do
+	// nothing and this test would not cover the restore path.
+	secondRunState := newStateManager()
+	require.NoError(t, sp.addDeps(contextWithStateManager(t.Context(), secondRunState), selfOnly, pkg))
+	assert.NoFileExists(t, runtimeFilePath)
+
+	require.NoError(t, secondRunState.Revert())
+	assert.FileExists(t, runtimeFilePath)
+}
+
+// TestRemoveRuntimeFile_RemoveError covers the removal error path: os.Remove
+// fails when the generated file was replaced by a non-empty directory, and
+// removeRuntimeFile must surface that error instead of dropping it silently.
+func TestRemoveRuntimeFile_RemoveError(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp := newTestSetupPhase()
+
+	runtimeFileAsDir := filepath.Join(tmpDir, otelcRuntimeFile)
+	require.NoError(t, os.Mkdir(runtimeFileAsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(runtimeFileAsDir, "child"), []byte("x"), 0o600))
+
+	err := sp.removeRuntimeFile(t.Context(), tmpDir)
 	assert.Error(t, err)
 }
 
@@ -157,17 +260,17 @@ func TestAddDeps_RuntimeDiffUnderDebug(t *testing.T) {
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "rule_func_http",
-			Target: "example.com/target",
+			Target: rule.NewTarget("example.com/target"),
 		},
-		Path: "example.com/target",
+		Path: "example.com/external-hooks",
 		Func: "Handle",
 	}
 	fileRule := &rule.InstFileRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "rule_file_helper",
-			Target: "example.com/target",
+			Target: rule.NewTarget("example.com/target"),
 		},
-		Path: "example.com/target",
+		Path: "example.com/external-hooks",
 		File: "helper.go",
 	}
 
@@ -177,7 +280,11 @@ func TestAddDeps_RuntimeDiffUnderDebug(t *testing.T) {
 	rs.AddFileRule(fileRule)
 
 	sp := newTestSetupPhase()
-	err := sp.addDeps(t.Context(), []*rule.InstRuleSet{rs}, packageDir, "main", "example.com/target")
+	err := sp.addDeps(t.Context(), []*rule.InstRuleSet{rs}, runtimePackage{
+		dir:        packageDir,
+		importPath: "example.com/target",
+		name:       "main",
+	})
 	require.NoError(t, err)
 
 	runtimeFilePath := filepath.Join(packageDir, otelcRuntimeFile)
@@ -212,7 +319,7 @@ func TestAddDeps_RuntimeContributorsAttribution(t *testing.T) {
 	funcRuleA := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "rule_a",
-			Target: "example.com/a",
+			Target: rule.NewTarget("example.com/a"),
 		},
 		Path: "example.com/a",
 		Func: "FuncA",
@@ -220,7 +327,7 @@ func TestAddDeps_RuntimeContributorsAttribution(t *testing.T) {
 	funcRuleB := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "rule_b",
-			Target: "example.com/b",
+			Target: rule.NewTarget("example.com/b"),
 		},
 		Path: "example.com/b",
 		Func: "FuncB",
@@ -228,7 +335,7 @@ func TestAddDeps_RuntimeContributorsAttribution(t *testing.T) {
 	funcRuleADistinct := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "rule_a",
-			Target: "example.com/a_distinct",
+			Target: rule.NewTarget("example.com/a_distinct"),
 		},
 		Path: "example.com/a_distinct",
 		Func: "FuncDistinct",
@@ -236,7 +343,7 @@ func TestAddDeps_RuntimeContributorsAttribution(t *testing.T) {
 	fileRuleC := &rule.InstFileRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "rule_c",
-			Target: "example.com/c",
+			Target: rule.NewTarget("example.com/c"),
 		},
 		Path: "example.com/c",
 		File: "file_c.go",
@@ -244,7 +351,7 @@ func TestAddDeps_RuntimeContributorsAttribution(t *testing.T) {
 	fileRuleCDup := &rule.InstFileRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "rule_c",
-			Target: "example.com/c",
+			Target: rule.NewTarget("example.com/c"),
 		},
 		Path: "example.com/c",
 		File: "file_c.go",
@@ -271,16 +378,20 @@ func TestAddDeps_RuntimeDiffDebugOff(t *testing.T) {
 			funcRule := &rule.InstFuncRule{
 				InstBaseRule: rule.InstBaseRule{
 					Name:   "my_rule",
-					Target: "example.com/target",
+					Target: rule.NewTarget("example.com/target"),
 				},
-				Path: "example.com/target",
+				Path: "example.com/external-hooks",
 				Func: "Do",
 			}
 			rs := rule.NewInstRuleSet("example.com/target")
 			rs.AddFuncRule(filepath.Join(t.TempDir(), "f.go"), funcRule)
 
 			sp := newTestSetupPhase()
-			err := sp.addDeps(t.Context(), []*rule.InstRuleSet{rs}, packageDir, "main", "example.com/target")
+			err := sp.addDeps(t.Context(), []*rule.InstRuleSet{rs}, runtimePackage{
+				dir:        packageDir,
+				importPath: "example.com/target",
+				name:       "main",
+			})
 			require.NoError(t, err)
 
 			// Runtime file is generated
@@ -313,7 +424,7 @@ func TestAddDeps_RuntimeDiffCollision(t *testing.T) {
 	internalPkgPath := "example.com/app/internal/client"
 
 	ruleCmd := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "rule_cmd", Target: "example.com/target_cmd"},
+		InstBaseRule: rule.InstBaseRule{Name: "rule_cmd", Target: rule.NewTarget("example.com/target_cmd")},
 		Path:         "example.com/target_cmd",
 		Func:         "DoCmd",
 	}
@@ -321,7 +432,7 @@ func TestAddDeps_RuntimeDiffCollision(t *testing.T) {
 	rsCmd.AddFuncRule(filepath.Join(cmdClientDir, "client.go"), ruleCmd)
 
 	ruleInternal := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "rule_internal", Target: "example.com/target_internal"},
+		InstBaseRule: rule.InstBaseRule{Name: "rule_internal", Target: rule.NewTarget("example.com/target_internal")},
 		Path:         "example.com/target_internal",
 		Func:         "DoInternal",
 	}
@@ -330,9 +441,11 @@ func TestAddDeps_RuntimeDiffCollision(t *testing.T) {
 
 	sp := newTestSetupPhase()
 	require.NoError(t, sp.addDeps(
-		t.Context(), []*rule.InstRuleSet{rsCmd}, cmdClientDir, "client", cmdPkgPath))
+		t.Context(), []*rule.InstRuleSet{rsCmd},
+		runtimePackage{dir: cmdClientDir, importPath: cmdPkgPath, name: "client"}))
 	require.NoError(t, sp.addDeps(
-		t.Context(), []*rule.InstRuleSet{rsInternal}, internalClientDir, "client", internalPkgPath))
+		t.Context(), []*rule.InstRuleSet{rsInternal},
+		runtimePackage{dir: internalClientDir, importPath: internalPkgPath, name: "client"}))
 
 	cmdDiffPath := filepath.Join(setupDebugDir(cmdPkgPath), otelcRuntimeFile+".diff")
 	internalDiffPath := filepath.Join(setupDebugDir(internalPkgPath), otelcRuntimeFile+".diff")

@@ -7,6 +7,8 @@ import (
 	_ "unsafe"
 
 	"go.opentelemetry.io/otel/trace"
+
+	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
 //go:linkname traceContextAddSpan go.opentelemetry.io/otel/sdk/trace.traceContextAddSpan
@@ -14,6 +16,22 @@ func traceContextAddSpan(span trace.Span)
 
 //go:linkname traceContextDelSpan go.opentelemetry.io/otel/sdk/trace.traceContextDelSpan
 func traceContextDelSpan(span trace.Span)
+
+func afterNewRecordingSpan(_ hook.HookContext, span any) {
+	addSpanToGLS(span)
+}
+
+func afterNewNonRecordingSpan(_ hook.HookContext, span any) {
+	addSpanToGLS(span)
+}
+
+func beforeRecordingSpanEnd(_ hook.HookContext, span any, _ ...any) {
+	deleteSpanFromGLS(span)
+}
+
+func beforeNonRecordingSpanEnd(_ hook.HookContext, span any, _ ...any) {
+	deleteSpanFromGLS(span)
+}
 
 func addSpanToGLS(span any) {
 	if span != nil {

@@ -136,9 +136,16 @@ func RenderFile(root *dst.File) ([]byte, error) {
 	var buf bytes.Buffer
 	r := decorator.NewRestorer()
 	if err := r.Fprint(&buf, root); err != nil {
-		return nil, ex.Wrap(err)
+		return nil, ex.Wrapf(err, "failed to restore AST")
 	}
 	return buf.Bytes(), nil
+}
+
+// PrintFile renders the AST to source bytes without writing it anywhere.
+// It is the same rendering as RenderFile, kept under its existing name so
+// callers of either function behave identically.
+func PrintFile(root *dst.File) ([]byte, error) {
+	return RenderFile(root)
 }
 
 // ParsePackageName parses only the package name from a file, skipping
