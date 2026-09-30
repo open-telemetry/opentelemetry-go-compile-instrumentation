@@ -1997,7 +1997,7 @@ func TestPreciseMatching_WarnsOnUnknownDirective(t *testing.T) {
 		Sources:    []string{srcFile},
 	}
 	funcRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "r", Target: "example.com/typo"},
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: rule.NewTarget("example.com/typo")},
 		Func:         "Foo",
 		Before:       "BeforeFoo",
 		Path:         "example.com/hooks",
@@ -2021,7 +2021,7 @@ func TestPreciseMatching_NoWarnForKnownDirective(t *testing.T) {
 		Sources:    []string{srcFile},
 	}
 	funcRule := &rule.InstFuncRule{
-		InstBaseRule: rule.InstBaseRule{Name: "r", Target: "example.com/known"},
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: rule.NewTarget("example.com/known")},
 		Func:         "Foo",
 		Before:       "BeforeFoo",
 		Path:         "example.com/hooks",
