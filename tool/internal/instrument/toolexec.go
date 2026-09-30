@@ -503,20 +503,15 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	// compile there would be stored under the key of the instrumented one, and
 	// a package compiled against it would not match the archive the outer
 	// build links. Nesting only goes deeper along the import graph, so it ends.
-	if nested {
-		if util.IsCompileCommandWithArgs(args) {
-			var err error
-			args, err = interceptCompile(ctx, args)
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		var err error
+	var err error
+	switch {
+	case !nested:
 		args, err = interceptToolCommand(ctx, args)
-		if err != nil {
-			return err
-		}
+	case util.IsCompileCommandWithArgs(args):
+		args, err = interceptCompile(ctx, args)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Run the command
@@ -526,7 +521,7 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	tool := filepath.Base(args[0])
 	pkg := util.FindFlagValue(args, "-p")
 	start := time.Now()
-	err := util.RunCmd(ctx, args...)
+	err = util.RunCmd(ctx, args...)
 	elapsed := time.Since(start)
 	util.LoggerFromContext(ctx).InfoContext(ctx, "toolexec stats",
 		"tool", tool,
