@@ -27,6 +27,7 @@ type writerWrapper struct {
 	http.ResponseWriter
 	statusCode  int
 	wroteHeader bool
+	written     int64
 }
 
 // WriteHeader captures the final status code and forwards to the underlying ResponseWriter.
@@ -53,7 +54,9 @@ func (w *writerWrapper) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
-	return w.ResponseWriter.Write(b)
+	n, err := w.ResponseWriter.Write(b)
+	w.written += int64(n)
+	return n, err
 }
 
 // writeOnly hides every method of the wrapped value except Write, so that
