@@ -770,11 +770,11 @@ func Foo() {}
 		{
 			name: "typo of a known directive is reported",
 			src: `package p
-//otelc:ignore
+//otelc:ignroe
 func Foo() {}
 `,
 			known:    knownIgnore,
-			expected: []string{"otelc:ignore"},
+			expected: []string{"otelc:ignroe"},
 		},
 		{
 			name: "non-otelc comment is not reported",
