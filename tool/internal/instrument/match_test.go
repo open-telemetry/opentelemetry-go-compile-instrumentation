@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"log/slog"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,7 +39,7 @@ func TestAnyRuleSetHasIgnoredCallFiles(t *testing.T) {
 	})
 	t.Run("one rule set has one, not necessarily the caller's own", func(t *testing.T) {
 		other := rule.NewInstRuleSet("example.com/other")
-		other.AddIgnoredCallFile("/abs/other.go")
+		other.AddIgnoredCallFile(filepath.Join(t.TempDir(), "other.go"))
 		allSet := []*rule.InstRuleSet{
 			rule.NewInstRuleSet("example.com/mine"),
 			other,
