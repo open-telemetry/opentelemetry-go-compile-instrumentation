@@ -54,6 +54,16 @@ func TestHTTPServerEndpoint(t *testing.T) {
 			name:   "relative URL",
 			rawURL: "/v1/messages",
 		},
+		{
+			name:        "explicit zero port",
+			rawURL:      "https://api.openai.com:0/v1/chat/completions",
+			wantAddress: "api.openai.com",
+		},
+		{
+			name:        "port out of range",
+			rawURL:      "https://api.openai.com:99999/v1/chat/completions",
+			wantAddress: "api.openai.com",
+		},
 	}
 
 	for _, tt := range tests {

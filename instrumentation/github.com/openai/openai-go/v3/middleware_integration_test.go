@@ -462,10 +462,10 @@ func TestOtelMiddleware_ProviderDetection(t *testing.T) {
 		expectedAddress string
 		expectedPort    int64
 	}{
-		{"deepseek", "api.deepseek.com", "deepseek", "api.deepseek.com", 80},
-		{"azure", "myendpoint.azure.com", "azure", "myendpoint.azure.com", 80},
+		{"deepseek", "api.deepseek.com", "deepseek", "api.deepseek.com", 443},
+		{"azure", "myendpoint.azure.com", "azure", "myendpoint.azure.com", 443},
 		{"local", "localhost:11434", "local", "localhost", 11434},
-		{"groq", "api.groq.com", "groq", "api.groq.com", 80},
+		{"groq", "api.groq.com", "groq", "api.groq.com", 443},
 	}
 
 	for _, tt := range tests {
@@ -476,7 +476,7 @@ func TestOtelMiddleware_ProviderDetection(t *testing.T) {
 			reqBody := `{"model":"test-model"}`
 			req, _ := http.NewRequest(
 				"POST",
-				"http://"+tt.host+"/v1/chat/completions",
+				"https://"+tt.host+"/v1/chat/completions",
 				io.NopCloser(bytes.NewReader([]byte(reqBody))),
 			)
 
