@@ -300,7 +300,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, runtimePackage{
+		if err = sp.addDeps(ctx, matched, runtimePackage{
 			dir:             pkgDir,
 			importPath:      importPath,
 			name:            pkg.Name,
@@ -781,7 +781,7 @@ func hookImports(
 ) (map[string]map[string]bool, error) {
 	hookPaths := hookPackagePaths(matched)
 	if len(hookPaths) == 0 {
-		return nil, nil
+		return map[string]map[string]bool{}, nil
 	}
 
 	pkgs, err := pkgload.LoadPackages(
