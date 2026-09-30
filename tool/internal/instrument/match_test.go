@@ -67,11 +67,12 @@ func TestAddIgnoredCallFilesToMap(t *testing.T) {
 	})
 
 	t.Run("remaps a cgo file through workDir", func(t *testing.T) {
+		workDir := t.TempDir()
 		file2rules := make(map[string][]rule.InstRule)
 		cgoMap := map[string]string{"pkg.cgo1.go": "cgo1.go"}
-		addIgnoredCallFilesToMap([]string{"pkg.cgo1.go"}, file2rules, cgoMap, "/build/work")
+		addIgnoredCallFilesToMap([]string{"pkg.cgo1.go"}, file2rules, cgoMap, workDir)
 
-		_, exists := file2rules["/build/work/cgo1.go"]
+		_, exists := file2rules[filepath.Join(workDir, "cgo1.go")]
 		assert.True(t, exists, "cgo-mapped file must be keyed by its remapped path")
 		_, unmapped := file2rules["pkg.cgo1.go"]
 		assert.False(t, unmapped)
