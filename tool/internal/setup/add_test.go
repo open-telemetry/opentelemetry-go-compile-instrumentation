@@ -257,6 +257,7 @@ func TestAddDeps_RuntimeDiffUnderDebug(t *testing.T) {
 	packageDir := filepath.Join(workDir, "my_package")
 	require.NoError(t, os.MkdirAll(packageDir, 0o755))
 
+	// Keep hook path separate from target path: addDeps drops self-import rules.
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "rule_func_http",
@@ -280,21 +281,21 @@ func TestAddDeps_RuntimeDiffUnderDebug(t *testing.T) {
 	rs.AddFileRule(fileRule)
 
 	sp := newTestSetupPhase()
-	err := sp.addDeps(t.Context(), []*rule.InstRuleSet{rs}, runtimePackage{
+	require.NoError(t, sp.addDeps(t.Context(), []*rule.InstRuleSet{rs}, runtimePackage{
 		dir:        packageDir,
 		importPath: "example.com/target",
+		debugPath:  "command-line-arguments",
 		name:       "main",
-	})
-	require.NoError(t, err)
+	}))
 
 	runtimeFilePath := filepath.Join(packageDir, otelcRuntimeFile)
 
 	// Verify retained runtime source exists
-	retainedPath := filepath.Join(setupDebugDir("example.com/target"), otelcRuntimeFile)
+	retainedPath := filepath.Join(setupDebugDir("command-line-arguments"), otelcRuntimeFile)
 	assert.FileExists(t, retainedPath)
 
 	// Verify otelc.runtime.go.diff exists next to the retained runtime source
-	diffPath := filepath.Join(setupDebugDir("example.com/target"), otelcRuntimeFile+".diff")
+	diffPath := filepath.Join(setupDebugDir("command-line-arguments"), otelcRuntimeFile+".diff")
 	require.FileExists(t, diffPath)
 
 	content, err := os.ReadFile(diffPath)
@@ -375,6 +376,7 @@ func TestAddDeps_RuntimeDiffDebugOff(t *testing.T) {
 			packageDir := filepath.Join(workDir, "pkg")
 			require.NoError(t, os.MkdirAll(packageDir, 0o755))
 
+			// Hook lives in another package so addDeps retains this rule.
 			funcRule := &rule.InstFuncRule{
 				InstBaseRule: rule.InstBaseRule{
 					Name:   "my_rule",

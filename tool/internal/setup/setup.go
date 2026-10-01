@@ -44,14 +44,21 @@ func setupDebugDir(pkgPath string) string {
 	return filepath.Join(util.GetBuildTemp("debug"), util.EscapePackagePath(pkgPath))
 }
 
+func cleanupDebugArtifacts() error {
+	if !instrument.DiffDebugEnabled() {
+		return nil
+	}
+	return instrument.CleanupDebugArtifacts()
+}
+
 // keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
-func keepForDebug(ctx context.Context, srcPath string, pkgPath ...string) {
+func keepForDebug(ctx context.Context, srcPath, pkgPath string) {
 	logger := util.LoggerFromContext(ctx)
 	var targetDir string
 	switch {
-	case len(pkgPath) > 0 && pkgPath[0] != "":
-		targetDir = setupDebugDir(pkgPath[0])
+	case pkgPath != "":
+		targetDir = setupDebugDir(pkgPath)
 	case filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()):
 		targetDir = setupDebugDir("main")
 	default:
@@ -317,6 +324,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		if err := sp.addDeps(ctx, matched, runtimePackage{
 			dir:        pkgDir,
 			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
+			debugPath:  pkg.PkgPath,
 			name:       pkg.Name,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
@@ -382,12 +390,12 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
-	} else if instrument.DiffDebugEnabled() {
+	} else {
 		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
 		// as it prepares the environment for a subsequent toolexec build.
 		// For `otelc go ...`, runGoBuild already performed this cleanup at its
 		// lifecycle boundary before invoking Setup.
-		if err := instrument.CleanupDebugArtifacts(); err != nil {
+		if err := cleanupDebugArtifacts(); err != nil {
 			return ex.Wrapf(err, "cleaning debug artifacts")
 		}
 	}
@@ -777,10 +785,8 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
-	if instrument.DiffDebugEnabled() {
-		if err := instrument.CleanupDebugArtifacts(); err != nil {
-			return ex.Wrapf(err, "cleaning debug artifacts")
-		}
+	if err := cleanupDebugArtifacts(); err != nil {
+		return ex.Wrapf(err, "cleaning debug artifacts")
 	}
 
 	defer func() {

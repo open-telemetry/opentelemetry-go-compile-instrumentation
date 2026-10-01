@@ -30,6 +30,7 @@ const (
 type runtimePackage struct {
 	dir        string
 	importPath string
+	debugPath  string
 	name       string
 }
 
@@ -123,58 +124,59 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 	}
 }
 
-// runtimeContributors returns a deterministic, deduplicated list of rule names
-// that contributed to the generation of otelc.runtime.go. Deduplication is based
-// on stable rule identity rather than display name alone so distinct rules with
-// identical display names are not merged.
+type runtimeContributorID struct {
+	kind, name, path, file, identity string
+}
+
+// runtimeContributors returns a sorted, deduplicated list of contributing rule names.
 func runtimeContributors(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []string {
 	var contributors []string
-	seen := make(map[string]struct{})
+	seen := make(map[runtimeContributorID]bool)
 
 	for _, r := range funcRules {
-		name := r.GetName()
-		if name == "" {
-			name = r.Func
-		}
-		if name == "" {
-			name = r.Path
-		}
 		// Distinct func rules are identified by their name and content identity.
-		id := fmt.Sprintf("func:%s:%s", r.GetName(), r.Identity())
-		if _, ok := seen[id]; ok {
+		id := runtimeContributorID{kind: "func", name: r.GetName(), identity: r.Identity()}
+		if seen[id] {
 			continue
 		}
-		seen[id] = struct{}{}
-		contributors = append(contributors, name)
+		seen[id] = true
+		contributors = append(contributors, firstNonEmpty(r.GetName(), r.Func, r.Path))
 	}
 
 	for _, r := range fileRules {
-		name := r.GetName()
-		if name == "" {
-			name = r.File
-		}
-		if name == "" {
-			name = r.Path
-		}
 		// Distinct file rules are identified by their name, path, and file.
-		id := fmt.Sprintf("file:%s:%s:%s", r.GetName(), r.Path, r.File)
-		if _, ok := seen[id]; ok {
+		id := runtimeContributorID{kind: "file", name: r.GetName(), path: r.Path, file: r.File}
+		if seen[id] {
 			continue
 		}
-		seen[id] = struct{}{}
-		contributors = append(contributors, name)
+		seen[id] = true
+		contributors = append(contributors, firstNonEmpty(r.GetName(), r.File, r.Path))
 	}
 
 	slices.Sort(contributors)
 	return contributors
 }
 
-func (sp *setupPhase) writeRuntimeDiffForDebug(srcPath, pkgPath string, contributors []string) {
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// writeRuntimeDiffForDebug writes the generated runtime file diff when debug output is enabled.
+func (sp *setupPhase) writeRuntimeDiffForDebug(
+	srcPath, pkgPath string,
+	funcRules []*rule.InstFuncRule,
+	fileRules []*rule.InstFileRule,
+) {
 	if !instrument.DiffDebugEnabled() {
 		return
 	}
 	dest := filepath.Join(setupDebugDir(pkgPath), filepath.Base(srcPath)+".diff")
-	header := instrument.FormatGeneratedFileHeader(otelcRuntimeFile, contributors)
+	header := instrument.FormatGeneratedFileHeader(otelcRuntimeFile, runtimeContributors(funcRules, fileRules))
 	instrument.WriteAddedSourceDiff(dest, srcPath, header, sp.logger)
 }
 
@@ -208,8 +210,8 @@ func (sp *setupPhase) removeRuntimeFile(ctx context.Context, pkgDir string) erro
 // file cannot import the package it belongs to. `otelc go test ./...` selects
 // such a package when the hooks live in the application module.
 func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkg runtimePackage) error {
-	funcRules := []*rule.InstFuncRule{}
-	fileRules := []*rule.InstFileRule{}
+	var funcRules []*rule.InstFuncRule
+	var fileRules []*rule.InstFileRule
 	for _, m := range matched {
 		for _, funcRule := range m.AllFuncRules() {
 			if funcRule.Path != pkg.importPath {
@@ -243,8 +245,12 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
-	keepForDebug(ctx, otelcRuntimeFilePath, pkg.importPath)
-	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, pkg.importPath, runtimeContributors(funcRules, fileRules))
+	debugPath := pkg.debugPath
+	if debugPath == "" {
+		debugPath = pkg.importPath
+	}
+	keepForDebug(ctx, otelcRuntimeFilePath, debugPath)
+	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, debugPath, funcRules, fileRules)
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
 }
