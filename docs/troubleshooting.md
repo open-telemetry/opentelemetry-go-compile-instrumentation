@@ -101,9 +101,10 @@ showing all source modifications and source additions introduced into the Go com
   where `<escaped-package>` is derived from the package/import path (the `-p` flag passed
   to the compiler, or `pkg.PkgPath` during setup) with slashes and dots replaced by underscores
   (e.g. `github_com_redis_go-redis_v9` or `example_com_app_cmd_client`). Both runtime helper
-  artifacts and compiler phase instrumentation reports use this package-scoped path, ensuring
-  packages with identical directory basenames (such as `cmd/client` and `internal/client`) never
-  collide.
+  artifacts and compiler phase instrumentation reports use this package-scoped path, so packages
+  with identical directory basenames (such as `cmd/client` and `internal/client`) stay separate.
+  Slashes and dots are both replaced with underscores, so unusual import paths that collapse to the
+  same escaped name can still share a directory.
 - **Modified source files**: Reports contain labeled sections for each applied rule in
   application order (`=== rule X/N: <name> ===`), followed by an authoritative full diff
   (`=== full diff: <original> -> <compiled> ===`) that includes any post-processing

@@ -72,6 +72,10 @@ func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 	// Add the new file as part of the source files to be compiled
 	ip.addCompileArg(newFile)
 	ip.keepForDebug(newFile)
-	ip.writeFileRuleDiffForDebug(newFile, rule.Name)
+	ruleName := rule.Name
+	if ruleName == "" {
+		ruleName = rule.File
+	}
+	ip.writeFileRuleDiffForDebug(newFile, ruleName)
 	return nil
 }
