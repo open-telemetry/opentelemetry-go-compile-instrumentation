@@ -60,12 +60,14 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 	render func(*dst.File) ([]byte, error),
 ) (bool, []ruleChange, error) {
 	debug := DiffDebugEnabled()
+	capturing := debug
 	var prev []byte
-	if debug {
+	if capturing {
 		var err error
 		prev, err = render(root)
 		if err != nil {
-			return false, nil, ex.Wrapf(err, "rendering AST before applying rules")
+			ip.Warn("failed to snapshot AST for instrumentation diff", "phase", "before rules", "error", err)
+			capturing = false
 		}
 	}
 
@@ -84,13 +86,15 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 				ip.globalsContributors = append(ip.globalsContributors, r.GetName())
 			}
 		}
-		if !debug {
+		if !capturing {
 			continue
 		}
 
 		after, err := render(root)
 		if err != nil {
-			return needsGlobals, changes, ex.Wrapf(err, "rendering AST after applying rule %s", r.GetName())
+			ip.Warn("failed to snapshot AST for instrumentation diff", "rule", r.GetName(), "error", err)
+			capturing = false
+			continue
 		}
 		if !bytes.Equal(prev, after) {
 			changes = append(changes, ruleChange{name: r.GetName(), before: prev, after: after})
@@ -100,25 +104,19 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 	return needsGlobals, changes, nil
 }
 
-// writeDiffForDebug writes a report of what otelc wove into oldFile next to
-// the copies keepForDebug already saves: a unified diff per rule, in
-// application order, so an injected change can be traced back to the rule
-// that caused it, followed by the full old-to-new diff. That full diff is
-// the authoritative one for what the compiler actually sees, because
-// post-processing (optimizeTJumps) can still alter the file after the last
-// rule has run, so the per-rule sections need not sum to it.
-// RemoveStaleDiff removes a stale diff file at dest if it exists.
+// removeStaleDiff removes a stale diff file at dest if it exists.
 // If removal fails with an error other than os.ErrNotExist, a warning is logged.
-func RemoveStaleDiff(dest string, logger *slog.Logger) {
+func removeStaleDiff(dest string, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
-		if logger != nil {
-			logger.Warn("failed to remove stale instrumentation diff", "dest", dest, "error", err)
-		}
+		logger.Warn("failed to remove stale instrumentation diff", "dest", dest, "error", err)
 	}
 }
 
 func (ip *instrumentPhase) removeStaleDiff(dest string) {
-	RemoveStaleDiff(dest, ip.logger)
+	removeStaleDiff(dest, ip.logger)
 }
 
 // writeDiffForDebug writes a report of what otelc wove into oldFile next to
@@ -158,18 +156,30 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 		// sequence. The suffix keeps the two header lines distinguishable
 		// while leaving the path itself the first whitespace-delimited
 		// token, which is what patch(1) reads as the filename.
-		text := unifiedDiff(c.before, c.after,
+		text, diffErr := unifiedDiff(c.before, c.after,
 			fmt.Sprintf("%s (before %s)", oldFile, c.name),
 			fmt.Sprintf("%s (after %s)", oldFile, c.name))
+		if diffErr != nil {
+			ip.Warn("failed to generate per-rule instrumentation diff", "rule", c.name, "error", diffErr)
+			continue
+		}
 		if text == "" {
 			continue
 		}
 		_, _ = fmt.Fprintf(&report, "=== rule %d/%d: %s ===\n%s\n", i+1, len(changes), c.name, text)
 	}
 
-	fullText := unifiedDiff(oldContent, newContent, oldFile, newFile)
+	fullText, err := unifiedDiff(oldContent, newContent, oldFile, newFile)
+	if err != nil {
+		ip.Warn("failed to generate full instrumentation diff", "path", oldFile, "error", err)
+		return
+	}
 	if report.Len() > 0 {
-		_, _ = fmt.Fprintf(&report, "=== full diff: %s -> %s ===\n%s", oldFile, newFile, fullText)
+		if fullText == "" {
+			_, _ = fmt.Fprintf(&report, "=== full diff: %s -> %s (no net changes) ===\n", oldFile, newFile)
+		} else {
+			_, _ = fmt.Fprintf(&report, "=== full diff: %s -> %s ===\n%s", oldFile, newFile, fullText)
+		}
 	} else {
 		_, _ = report.WriteString(fullText)
 	}
@@ -191,17 +201,22 @@ func WriteAddedSourceDiff(dest, newFile, header string, logger *slog.Logger) {
 	if !DiffDebugEnabled() {
 		return
 	}
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 
 	newContent, err := os.ReadFile(newFile)
 	if err != nil {
-		RemoveStaleDiff(dest, logger)
-		if logger != nil {
-			logger.Warn("failed to read added file for diff", "path", newFile, "error", err)
-		}
+		removeStaleDiff(dest, logger)
+		logger.Warn("failed to read added file for diff", "path", newFile, "error", err)
 		return
 	}
 
-	diffText := unifiedDiff(nil, newContent, "/dev/null", newFile)
+	diffText, err := unifiedDiff(nil, newContent, "/dev/null", newFile)
+	if err != nil {
+		logger.Warn("failed to generate added source instrumentation diff", "path", newFile, "error", err)
+		return
+	}
 
 	var report strings.Builder
 	if header != "" {
@@ -213,20 +228,14 @@ func WriteAddedSourceDiff(dest, newFile, header string, logger *slog.Logger) {
 	_, _ = report.WriteString(diffText)
 
 	if err = os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		if logger != nil {
-			logger.Warn("failed to create directory for instrumentation diff", "dest", dest, "error", err)
-		}
+		logger.Warn("failed to create directory for instrumentation diff", "dest", dest, "error", err)
 		return
 	}
 	if err = os.WriteFile(dest, []byte(report.String()), 0o600); err != nil {
-		if logger != nil {
-			logger.Warn("failed to write instrumentation diff", "dest", dest, "error", err)
-		}
+		logger.Warn("failed to write instrumentation diff", "dest", dest, "error", err)
 		return
 	}
-	if logger != nil {
-		logger.Info("Wrote added source instrumentation diff", "path", dest)
-	}
+	logger.Info("Wrote added source instrumentation diff", "path", dest)
 }
 
 // writeAddedSourceDiffForDebug writes a unified diff representing a new file
@@ -247,7 +256,7 @@ func (ip *instrumentPhase) writeFileRuleDiffForDebug(newFile, ruleName string) {
 // listing the contributing rules in order.
 func FormatGeneratedFileHeader(filename string, contributors []string) string {
 	var header strings.Builder
-	_, _ = header.WriteString("=== generated instrumentation file: " + filename + " ===")
+	_, _ = fmt.Fprintf(&header, "=== generated instrumentation file: %s ===", filename)
 	if len(contributors) > 0 {
 		_, _ = header.WriteString("\nrules:")
 		for _, c := range contributors {
@@ -264,13 +273,12 @@ func (ip *instrumentPhase) writeGlobalsDiffForDebug(path string, contributors []
 	ip.writeAddedSourceDiffForDebug(path, header)
 }
 
-func unifiedDiff(a, b []byte, fromFile, toFile string) string {
-	diff, _ := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+func unifiedDiff(a, b []byte, fromFile, toFile string) (string, error) {
+	return difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
 		A:        difflib.SplitLines(string(a)),
 		B:        difflib.SplitLines(string(b)),
 		FromFile: fromFile,
 		ToFile:   toFile,
 		Context:  diffContextLines,
 	})
-	return diff
 }

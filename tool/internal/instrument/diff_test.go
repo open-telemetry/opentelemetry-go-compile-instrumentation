@@ -289,12 +289,21 @@ func TestApplyRulesCapturingDiffsInitialRenderError(t *testing.T) {
 		return nil, errors.New("simulated initial render failure")
 	}
 
-	hasFuncRule, changes, err := newTestPhase().applyRulesCapturingDiffsWithRenderer(
-		context.Background(), nil, wrapVarDeclFile(), render)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rendering AST before applying rules")
-	assert.False(t, hasFuncRule)
+	ruleX := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_x"},
+		Kind:         "var",
+		Identifier:   "X",
+		Wrap:         "double({{ . }})",
+	}
+	root := wrapVarDeclFile()
+	needsGlobals, changes, err := newTestPhase().applyRulesCapturingDiffsWithRenderer(
+		context.Background(), []rule.InstRule{ruleX}, root, render)
+	require.NoError(t, err)
+	assert.False(t, needsGlobals)
 	assert.Nil(t, changes)
+	final, err := ast.RenderFile(root)
+	require.NoError(t, err)
+	assert.Contains(t, string(final), "double")
 }
 
 func TestApplyRulesCapturingDiffsPostRuleRenderError(t *testing.T) {
@@ -322,13 +331,17 @@ func TestApplyRulesCapturingDiffsPostRuleRenderError(t *testing.T) {
 		return nil, errors.New("simulated post-rule render failure")
 	}
 
-	hasFuncRule, changes, err := newTestPhase().applyRulesCapturingDiffsWithRenderer(
-		context.Background(), []rule.InstRule{ruleX, ruleY}, wrapVarDeclFile(), render)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rendering AST after applying rule wrap_y")
-	assert.False(t, hasFuncRule)
+	root := wrapVarDeclFile()
+	needsGlobals, changes, err := newTestPhase().applyRulesCapturingDiffsWithRenderer(
+		context.Background(), []rule.InstRule{ruleX, ruleY}, root, render)
+	require.NoError(t, err)
+	assert.False(t, needsGlobals)
 	require.Len(t, changes, 1)
 	assert.Equal(t, "wrap_x", changes[0].name)
+	final, err := ast.RenderFile(root)
+	require.NoError(t, err)
+	assert.Contains(t, string(final), "double")
+	assert.Contains(t, string(final), "triple")
 }
 
 func TestApplyRulesCapturingDiffsRenderErrorSkippedWhenDebugOff(t *testing.T) {
@@ -586,7 +599,7 @@ func TestRemoveStaleDiff(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
 		dest := filepath.Join(t.TempDir(), "nonexistent.diff")
 
-		RemoveStaleDiff(dest, logger)
+		removeStaleDiff(dest, logger)
 		assert.Empty(t, logs.String())
 	})
 
@@ -596,7 +609,7 @@ func TestRemoveStaleDiff(t *testing.T) {
 		dest := filepath.Join(t.TempDir(), "stale.diff")
 		require.NoError(t, os.WriteFile(dest, []byte("old diff"), 0o600))
 
-		RemoveStaleDiff(dest, logger)
+		removeStaleDiff(dest, logger)
 		assert.NoFileExists(t, dest)
 		assert.Empty(t, logs.String())
 	})
@@ -608,7 +621,7 @@ func TestRemoveStaleDiff(t *testing.T) {
 		// Create non-empty directory at dest so os.Remove fails portably.
 		require.NoError(t, os.MkdirAll(filepath.Join(dest, "child"), 0o755))
 
-		RemoveStaleDiff(dest, logger)
+		removeStaleDiff(dest, logger)
 		assert.DirExists(t, dest)
 		assert.Contains(t, logs.String(), "failed to remove stale instrumentation diff")
 		assert.Contains(t, logs.String(), dest)
