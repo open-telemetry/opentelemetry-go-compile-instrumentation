@@ -484,7 +484,9 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 // to find out the compile command we are interested in and run it with the
 // instrumented code, and ensure the link command has all necessary dependencies.
 // nested (see EnvOtelcNestedToolexec) means this runs inside a go command
-// another otelc spawned; such invocations only rewrite tool version probes.
+// another otelc spawned, such as the `go list -export` that resolves an import
+// a rule added. Those invocations instrument compiles and run every other
+// command unchanged.
 func Toolexec(ctx context.Context, args []string, nested bool) error {
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
@@ -498,11 +500,12 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 		return interceptToolVersion(ctx, args)
 	}
 
-	// A nested build shares the outer build's cache keys (see the tool version
-	// rewrite above), so it must compile the same instrumented output: a plain
-	// compile there would be stored under the key of the instrumented one, and
-	// a package compiled against it would not match the archive the outer
-	// build links. Nesting only goes deeper along the import graph, so it ends.
+	// A nested build answers `-V=full` the same way as the outer one, so both
+	// share cache keys, and it must compile the same instrumented output: a
+	// plain compile there would be stored under the key of the instrumented
+	// one, and a package compiled against it would not match the archive the
+	// outer build links. Nesting only goes deeper along the import graph, so
+	// it ends.
 	var err error
 	switch {
 	case !nested:
@@ -584,10 +587,10 @@ func nestedToolexecGoflagsToken(execPath string) (string, error) {
 var executablePath = os.Executable
 
 // EnableNestedToolexec points GOFLAGS at this executable in nested mode, so go
-// commands this process spawns (e.g. `go list -export`) run through a
-// version-only otelc toolexec and share this build's cache keys. Any existing
-// -toolexec was stripped at startup. Must only be called from the real otelc
-// binary, since os.Executable is what nested go commands will run.
+// commands this process spawns (e.g. `go list -export`) run through otelc,
+// instrument compiles the same way and share this build's cache keys. Any
+// existing -toolexec was stripped at startup. Must only be called from the
+// real otelc binary, since os.Executable is what nested go commands will run.
 func EnableNestedToolexec() error {
 	execPath, err := executablePath()
 	if err != nil {
