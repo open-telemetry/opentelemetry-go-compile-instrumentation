@@ -135,9 +135,10 @@ func TestApplyCallRule_Success(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("traced({{ . }})")
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
 	outerCall, ok := stmt.X.(*dst.CallExpr)
 	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
@@ -154,9 +155,10 @@ func TestApplyCallRule_NonCallExprResult(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("{{ . }}.Response")
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
 	_, ok := stmt.X.(*dst.SelectorExpr)
 	require.True(t, ok, "expected *dst.SelectorExpr after wrap, got %T", stmt.X)
@@ -167,9 +169,10 @@ func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("wrapper({{")
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "failed to parse template")
 }
 
@@ -179,9 +182,10 @@ func TestApplyCallRule_AppendArgs(t *testing.T) {
 	r.AppendArgs = []string{"traced.Context()"}
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 	fn := findFuncDeclInFile(t, file, "f")
 	stmt := fn.Body.List[0].(*dst.ExprStmt)
 	call, ok := stmt.X.(*dst.CallExpr)
@@ -204,9 +208,10 @@ func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
 	r.AppendArgs = []string{"traced.Context()"}
 	r.Imports = map[string]string{"traced": "example.com/traced"}
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.False(t, fileImportsPath(file, "example.com/traced"))
 }
 
@@ -225,9 +230,10 @@ func Run() {
 	r := httpGetRule("traced.Call({{ . }})")
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "import alias mismatch")
 }
 
@@ -242,9 +248,10 @@ func Handler(name string) {
 `)
 	r := httpGetRule("traced({{ .FuncArgument 0 }}, {{ . }})")
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 	handler := findFuncDeclInFile(t, root, "Handler")
 	stmt := handler.Body.List[0].(*dst.ExprStmt)
 	outerCall, ok := stmt.X.(*dst.CallExpr)
@@ -273,9 +280,10 @@ func Handler(r *althttp.Request) (resp *althttp.Request, err error) {
 				"{{ . }})",
 		)
 
-		_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		handler := findFuncDeclInFile(t, root, "Handler")
 		outerCall, ok := handler.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
 		require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", handler.Body.List[0].(*dst.ExprStmt).X)
@@ -312,9 +320,10 @@ func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
 			Replace:      replace,
 		}
 
-		_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		handler := findFuncDeclInFile(t, root, "Handler")
 		outerCall, ok := handler.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
 		require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", handler.Body.List[0].(*dst.ExprStmt).X)
@@ -353,8 +362,9 @@ func Run(ctx context.Context) {
 `)
 		r := httpGetRule(replace)
 
-		_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 
 		fn := findFuncDeclInFile(t, root, "Run")
 		stmt := fn.Body.List[0].(*dst.ExprStmt)
@@ -383,8 +393,9 @@ func Run(name string) {
 `)
 		r := httpGetRule(replace)
 
-		_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 
 		fn := findFuncDeclInFile(t, root, "Run")
 		stmt := fn.Body.List[0].(*dst.ExprStmt)
@@ -407,9 +418,10 @@ func Run(ctx context.Context) {
 	http.Get("url")
 }
 `)
-		_, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		assert.True(t, fileImportsPath(root, "fmt"), "import must be added when the taken branch references it")
 	})
 
@@ -422,9 +434,10 @@ func Run(name string) {
 	http.Get("url")
 }
 `)
-		_, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		assert.False(
 			t,
 			fileImportsPath(root, "fmt"),
@@ -445,9 +458,10 @@ func WithoutContext(name string) {
 	http.Get("url")
 }
 `)
-		_, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		assert.True(
 			t,
 			fileImportsPath(root, "fmt"),
@@ -592,9 +606,10 @@ var resp, _ = http.Get("url")
 `)
 	r := httpGetRule("traced({{ .FuncName }}, {{ . }})")
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "no enclosing function is available")
 }
 
@@ -879,8 +894,9 @@ func TestAppendCallArgs_WithReplace(t *testing.T) {
 		Replace:      "wrapper({{ . }})",
 	}
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
 	outerCall, ok := stmt.X.(*dst.CallExpr)
@@ -984,9 +1000,10 @@ func TestApplyCallRule_NoMatchIsNoOp(t *testing.T) {
 		Replace:      "Wrapper({{ . }})",
 	}
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err, "applyCallRule must no-op when no calls match")
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 }
 
 func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
@@ -1020,8 +1037,9 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("not a valid expression {{ . }}")
 
-	_, err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "failed to parse generated code")
 }

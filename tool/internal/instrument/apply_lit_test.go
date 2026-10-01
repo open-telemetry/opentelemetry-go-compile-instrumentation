@@ -392,8 +392,9 @@ func TestApplyLitRule_InvalidWrapTemplate(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }}"})
 
 	ip := newTestPhase()
-	_, err := ip.applyLitRule(context.Background(), r, file)
+	modified, err := ip.applyLitRule(context.Background(), r, file)
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 }
 
 func TestApplyLitRule_InvalidValueExpression(t *testing.T) {
@@ -401,8 +402,9 @@ func TestApplyLitRule_InvalidValueExpression(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "func("})
 
 	ip := newTestPhase()
-	_, err := ip.applyLitRule(context.Background(), r, file)
+	modified, err := ip.applyLitRule(context.Background(), r, file)
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "failed to parse value")
 }
 

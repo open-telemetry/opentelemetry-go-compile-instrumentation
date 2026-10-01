@@ -68,23 +68,23 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 	case *rule.InstFuncRule:
 		return ruleResult{needsGlobals: true, modified: true}, ip.applyFuncRule(ctx, rt, root)
 	case *rule.InstStructRule:
-		return ruleResult{modified: true}, ip.applyStructRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: true}, ip.applyStructRule(ctx, rt, root)
 	case *rule.InstDeclRule:
-		return ruleResult{modified: true}, ip.applyDeclRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: true}, ip.applyDeclRule(ctx, rt, root)
 	case *rule.InstRawRule:
 		return ruleResult{needsGlobals: true, modified: true}, ip.applyRawRule(ctx, rt, root)
 	case *rule.InstCallRule:
 		modified, err := ip.applyCallRule(ctx, rt, root)
-		return ruleResult{modified: modified}, err
+		return ruleResult{needsGlobals: false, modified: modified}, err
 	case *rule.InstLitRule:
 		modified, err := ip.applyLitRule(ctx, rt, root)
-		return ruleResult{modified: modified}, err
+		return ruleResult{needsGlobals: false, modified: modified}, err
 	case *rule.InstDirectiveRule:
 		needsGlobals, err := ip.applyDirectiveRule(ctx, rt, root)
 		return ruleResult{needsGlobals: needsGlobals, modified: true}, err
 	default:
 		util.ShouldNotReachHere()
-		return ruleResult{}, nil
+		return ruleResult{needsGlobals: false, modified: false}, nil
 	}
 }
 
