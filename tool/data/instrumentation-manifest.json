@@ -22,6 +22,11 @@
     "target": "github.com/gin-gonic/gin"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/gorilla/mux",
+    "target": "github.com/gorilla/mux",
+    "versionRange": "v1.8.1"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2",
     "target": "github.com/linode/linodego/v2",
     "versionRange": "v2.0.0"
