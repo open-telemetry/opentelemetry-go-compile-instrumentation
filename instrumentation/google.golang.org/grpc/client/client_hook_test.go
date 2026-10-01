@@ -227,6 +227,26 @@ func TestBeforeDialContext(t *testing.T) {
 	}
 }
 
+func TestDialContextDelegatingToNewClientInjectsOnce(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	target := "localhost:50051"
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	dialCtx := hooktest.NewMockHookContext(t.Context(), target, opts)
+	BeforeDialContext(dialCtx, t.Context(), target, opts...)
+
+	dialOpts, ok := dialCtx.GetParam(dialOptionsParamIndex).([]grpc.DialOption)
+	require.True(t, ok)
+	require.Len(t, dialOpts, len(opts)+2, "first hook should add one marker and one stats handler")
+
+	newClientCtx := hooktest.NewMockHookContext(target, dialOpts)
+	BeforeNewClient(newClientCtx, target, dialOpts...)
+
+	newClientOpts, ok := newClientCtx.GetParam(newClientOptionsParamIndex).([]grpc.DialOption)
+	require.True(t, ok)
+	assert.Equal(t, dialOpts, newClientOpts, "delegated NewClient call must not add another stats handler")
+}
+
 // TestAfterDialContext verifies the AfterDialContext hook handles various connection outcomes
 // without panicking. This hook is primarily for debug logging and doesn't modify state,
 // so we verify it gracefully handles both success and error cases.
