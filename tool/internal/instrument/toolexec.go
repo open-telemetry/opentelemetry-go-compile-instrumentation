@@ -171,9 +171,14 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			continue
 		}
 
+		restore, err := ip.enterNestedResolution(importPath)
+		if err != nil {
+			return err
+		}
 		// Resolve package archive location, passing build flags to match the current build context
 		buildFlags := util.GetBuildFlags()
 		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
+		restore()
 		if err != nil {
 			return ex.Wrapf(err, "resolving %q", importPath)
 		}
@@ -204,6 +209,70 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	}
 
 	return nil
+}
+
+// resolution is a compile waiting on a nested build to resolve an import a rule
+// added to it.
+type resolution struct {
+	pkg   string
+	added string
+}
+
+// enterNestedResolution records, for the nested build about to resolve added,
+// that the package being compiled waits on it. It fails when added is a
+// package already waiting further up the chain: the nested build would compile
+// it again, add the same import, and never end. Go cannot catch this itself,
+// because a nested build only sees each package's original imports. The
+// returned function restores the previous chain.
+func (ip *instrumentPhase) enterNestedResolution(added string) (func(), error) {
+	prev, hadPrev := os.LookupEnv(util.EnvOtelcNestedResolving)
+	chain := parseResolutionChain(prev)
+	chain = append(chain, resolution{pkg: util.FindFlagValue(ip.compileArgs, "-p"), added: added})
+	for _, r := range chain {
+		if r.pkg == added {
+			return nil, ex.Newf("rules add an import cycle: %s", describeResolutionChain(chain))
+		}
+	}
+
+	if err := os.Setenv(util.EnvOtelcNestedResolving, encodeResolutionChain(chain)); err != nil {
+		return nil, ex.Wrapf(err, "setting %s", util.EnvOtelcNestedResolving)
+	}
+	return func() {
+		if hadPrev {
+			_ = os.Setenv(util.EnvOtelcNestedResolving, prev)
+		} else {
+			_ = os.Unsetenv(util.EnvOtelcNestedResolving)
+		}
+	}, nil
+}
+
+func parseResolutionChain(s string) []resolution {
+	if s == "" {
+		return nil
+	}
+	entries := strings.Split(s, ",")
+	chain := make([]resolution, 0, len(entries))
+	for _, entry := range entries {
+		pkg, added, _ := strings.Cut(entry, ">")
+		chain = append(chain, resolution{pkg: pkg, added: added})
+	}
+	return chain
+}
+
+func encodeResolutionChain(chain []resolution) string {
+	entries := make([]string, len(chain))
+	for i, r := range chain {
+		entries[i] = r.pkg + ">" + r.added
+	}
+	return strings.Join(entries, ",")
+}
+
+func describeResolutionChain(chain []resolution) string {
+	steps := make([]string, len(chain))
+	for i, r := range chain {
+		steps[i] = r.pkg + " adds " + r.added
+	}
+	return strings.Join(steps, "; ")
 }
 
 // trackAddedImports saves the resolved package files to a per-process tracking file.
@@ -504,8 +573,8 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	// share cache keys, and it must compile the same instrumented output: a
 	// plain compile there would be stored under the key of the instrumented
 	// one, and a package compiled against it would not match the archive the
-	// outer build links. Nesting only goes deeper along the import graph, so
-	// it ends.
+	// outer build links. A cycle of added imports would nest forever, and
+	// enterNestedResolution stops it.
 	var err error
 	switch {
 	case !nested:
