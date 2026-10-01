@@ -146,6 +146,10 @@ func restoreProviders(t *testing.T) {
 }
 
 func TestNewResourceIncludesTelemetrySDK(t *testing.T) {
+	// WithFromEnv runs last in newResource, so OTEL_RESOURCE_ATTRIBUTES can
+	// override these values. Pin it to keep the test hermetic.
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+
 	res := newResource(context.Background())
 	set := res.Set()
 
@@ -160,6 +164,30 @@ func TestNewResourceIncludesTelemetrySDK(t *testing.T) {
 	ver, ok := set.Value(attribute.Key("telemetry.sdk.version"))
 	require.True(t, ok, "auto-configured resource must set telemetry.sdk.version")
 	assert.NotEmpty(t, ver.AsString())
+
+	// resource.Default() (the fallback in newResource) also stamps the
+	// telemetry.sdk.* attributes, so the assertions above cannot tell the
+	// happy path from the fallback. process.pid is only set on the happy
+	// path and the environment cannot remove it.
+	pid, ok := set.Value(attribute.Key("process.pid"))
+	require.True(t, ok, "resource must include detector attributes; this fails if newResource fell back to resource.Default()")
+	assert.NotZero(t, pid.AsInt64())
+}
+
+func TestNewResourceFallsBackToDefaultOnError(t *testing.T) {
+	// A pair missing "=" makes resource.New fail with ErrPartialResource,
+	// so newResource must warn and return resource.Default().
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "key")
+
+	var buf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	res := newResource(context.Background())
+	_, ok := res.Set().Value(attribute.Key("service.name"))
+	require.True(t, ok, "fallback resource should be resource.Default(), which sets service.name")
+	assert.Contains(t, buf.String(), "failed to create resource")
 }
 
 func TestSetupOpenTelemetry(t *testing.T) {
