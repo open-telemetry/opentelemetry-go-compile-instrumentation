@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -172,6 +173,33 @@ func TestNewResourceIncludesTelemetrySDK(t *testing.T) {
 	pid, ok := set.Value(attribute.Key("process.pid"))
 	require.True(t, ok, "resource must include detector attributes; this fails if newResource fell back to resource.Default()")
 	assert.NotZero(t, pid.AsInt64())
+}
+
+func TestNewResourceIncludesService(t *testing.T) {
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+	t.Setenv("OTEL_SERVICE_NAME", "")
+
+	res := newResource(context.Background())
+	set := res.Set()
+
+	name, ok := set.Value(attribute.Key("service.name"))
+	require.True(t, ok, "auto-configured resource must set service.name")
+	assert.True(t, strings.HasPrefix(name.AsString(), "unknown_service:"),
+		"default service.name = %q, want unknown_service:<executable>", name.AsString())
+
+	id, ok := set.Value(attribute.Key("service.instance.id"))
+	require.True(t, ok, "auto-configured resource must set service.instance.id")
+	assert.NotEmpty(t, id.AsString())
+}
+
+func TestNewResourceServiceNameFromEnv(t *testing.T) {
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+	t.Setenv("OTEL_SERVICE_NAME", "checkout")
+
+	res := newResource(context.Background())
+	name, ok := res.Set().Value(attribute.Key("service.name"))
+	require.True(t, ok)
+	assert.Equal(t, "checkout", name.AsString())
 }
 
 func TestNewResourceFallsBackToDefaultOnError(t *testing.T) {

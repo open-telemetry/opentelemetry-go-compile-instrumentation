@@ -97,9 +97,13 @@ func logLevel() slog.Level {
 // newResource builds the process resource for auto-configured providers.
 // WithTelemetrySDK stamps telemetry.sdk.name/language/version, which
 // resource.Default() includes but resource.New() does not unless asked.
+// WithService stamps service.name (unknown_service:<executable>) and
+// service.instance.id. WithFromEnv stays last so OTEL_SERVICE_NAME and
+// OTEL_RESOURCE_ATTRIBUTES still win.
 func newResource(ctx context.Context) *resource.Resource {
 	res, err := resource.New(ctx,
 		resource.WithTelemetrySDK(),
+		resource.WithService(),
 		resource.WithProcess(),
 		resource.WithOS(),
 		resource.WithContainer(),
