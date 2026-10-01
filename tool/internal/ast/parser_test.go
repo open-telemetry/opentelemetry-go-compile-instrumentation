@@ -99,7 +99,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	assert.Contains(t, string(data), "func Bar()")
 }
 
-func TestWriteFileAtomic_Error(t *testing.T) {
+func TestWriteFileAtomic_WriteError(t *testing.T) {
 	p := NewAstParser()
 	file, err := p.ParseSource("package main\n\nfunc Bar() {}\n")
 	require.NoError(t, err)
@@ -122,8 +122,8 @@ func unprintableFile(t *testing.T) *dst.File {
 	return file
 }
 
-func TestPrintFile_RestoreError(t *testing.T) {
-	data, err := PrintFile(unprintableFile(t))
+func TestRenderFile_RestoreError(t *testing.T) {
+	data, err := RenderFile(unprintableFile(t))
 	require.ErrorContains(t, err, "failed to restore AST")
 	assert.Nil(t, data)
 }

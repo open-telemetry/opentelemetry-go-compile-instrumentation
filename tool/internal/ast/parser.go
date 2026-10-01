@@ -123,7 +123,7 @@ func writeFile(w io.WriteCloser, filePath string, root *dst.File) (retErr error)
 func WriteFileAtomic(filePath string, root *dst.File) error {
 	buf, err := RenderFile(root)
 	if err != nil {
-		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
+		return ex.Wrapf(err, "writing file %s", filePath)
 	}
 
 	return util.WriteFileAtomic(filePath, buf)
@@ -139,13 +139,6 @@ func RenderFile(root *dst.File) ([]byte, error) {
 		return nil, ex.Wrapf(err, "failed to restore AST")
 	}
 	return buf.Bytes(), nil
-}
-
-// PrintFile renders the AST to source bytes without writing it anywhere.
-// It is the same rendering as RenderFile, kept under its existing name so
-// callers of either function behave identically.
-func PrintFile(root *dst.File) ([]byte, error) {
-	return RenderFile(root)
 }
 
 // ParsePackageName parses only the package name from a file, skipping
