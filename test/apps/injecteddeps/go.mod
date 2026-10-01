@@ -24,6 +24,7 @@ require (
 )
 
 require (
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	go.opentelemetry.io/otelc v1.1.0 // indirect
 	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
