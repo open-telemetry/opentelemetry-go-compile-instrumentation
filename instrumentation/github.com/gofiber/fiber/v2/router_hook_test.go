@@ -286,3 +286,41 @@ func TestHeaderCarrierReadsRequestHeaders(t *testing.T) {
 	assert.Equal(t, "value", got)
 	assert.Contains(t, keys, "X-Probe")
 }
+
+func TestCustomErrorHandlerLeavesStatusUnrecorded(t *testing.T) {
+	recorder := newRecordingTracer(t)
+	handlerErr := errors.New("boom")
+
+	// This app maps every error to 400, not the 500 fiber.DefaultErrorHandler
+	// would write. The handler runs after (*App).next returns, so the hook
+	// cannot see the result and must not guess.
+	app := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, _ error) error {
+			return c.SendStatus(fiber.StatusBadRequest)
+		},
+	})
+	app.Get("/fail", func(c *fiber.Ctx) error {
+		ictx := newMockHookContext(app, c)
+		BeforeNext(ictx, app, c)
+		AfterNext(ictx, true, handlerErr)
+		return handlerErr
+	})
+
+	req := httptest.NewRequest(fiber.MethodGet, "/fail", nil)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
+
+	spans := recorder.Ended()
+	require.Len(t, spans, 1)
+	span := spans[0]
+
+	_, recorded := attrsOf(t, span)["http.response.status_code"]
+	assert.False(t, recorded,
+		"a guessed status is worse than none when Config.ErrorHandler can remap it")
+
+	// The handler still failed, so the span says so without claiming a code.
+	assert.Equal(t, codes.Error, span.Status().Code)
+	require.Len(t, span.Events(), 1, "the error must still be recorded")
+}

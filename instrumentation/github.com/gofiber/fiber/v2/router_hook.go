@@ -5,6 +5,7 @@ package server
 
 import (
 	"errors"
+	"reflect"
 
 	"github.com/gofiber/fiber/v2"
 	"go.opentelemetry.io/otel/attribute"
@@ -130,37 +131,67 @@ func AfterNext(ictx hook.HookContext, _ bool, nextErr error) {
 		span.SetAttributes(semconv.HTTPRouteKey.String(route.Path))
 	}
 
-	status := responseStatus(c, nextErr)
-	span.SetAttributes(semconv.HTTPResponseStatusCodeKey.Int(status))
+	app, _ := ictx.GetParam(0).(*fiber.App)
+
+	status, known := responseStatus(c, app, nextErr)
+	if known {
+		span.SetAttributes(semconv.HTTPResponseStatusCodeKey.Int(status))
+	}
 
 	if nextErr != nil {
 		span.RecordError(nextErr)
 	}
 
 	// Only 5xx marks a server span as failed. A 4xx is the client's problem and
-	// the HTTP conventions leave such spans Unset.
-	if status >= fiber.StatusInternalServerError {
+	// the HTTP conventions leave such spans Unset. When the status is unknown we
+	// still know the handler failed, so the span is marked Error without a code.
+	if nextErr != nil && !known {
+		span.SetStatus(codes.Error, statusMessage(nextErr))
+	} else if known && status >= fiber.StatusInternalServerError {
 		span.SetStatus(codes.Error, statusMessage(nextErr))
 	}
 }
 
-// responseStatus reports the status the client will actually receive.
+// responseStatus reports the status the client will actually receive, and
+// whether that status is knowable from inside this hook at all.
 //
 // (*App).next returns its error to (*App).handler, which only then runs the
 // application's error handler and writes a status. This hook is inside that
 // window, so the recorded response still holds whatever was set before the
 // error, usually 200. Deriving the status from the error instead keeps 404,
 // 405 and handler failures from being reported as successes.
-func responseStatus(c *fiber.Ctx, nextErr error) int {
+func responseStatus(c *fiber.Ctx, app *fiber.App, nextErr error) (int, bool) {
 	if nextErr == nil {
-		return c.Response().StatusCode()
+		return c.Response().StatusCode(), true
+	}
+	// Every error-derived status below describes what fiber.DefaultErrorHandler
+	// would write. A configured Config.ErrorHandler may map any error, including
+	// a *fiber.Error, to any status, and it runs after (*App).next returns, so
+	// there is nothing this hook can observe. Report no code rather than a wrong
+	// one.
+	if !usesDefaultErrorHandler(app) {
+		return 0, false
 	}
 	var fiberErr *fiber.Error
 	if errors.As(nextErr, &fiberErr) {
-		return fiberErr.Code
+		return fiberErr.Code, true
 	}
-	// Fiber's default error handler turns anything else into a 500.
-	return fiber.StatusInternalServerError
+	return fiber.StatusInternalServerError, true
+}
+
+// usesDefaultErrorHandler reports whether app still maps errors to statuses the
+// way responseStatus assumes. Function values are not comparable, so the check
+// is on the code pointer.
+func usesDefaultErrorHandler(app *fiber.App) bool {
+	if app == nil {
+		return false
+	}
+	handler := app.Config().ErrorHandler
+	if handler == nil {
+		// fiber.New installs DefaultErrorHandler when the field is left unset.
+		return true
+	}
+	return reflect.ValueOf(handler).Pointer() == reflect.ValueOf(fiber.DefaultErrorHandler).Pointer()
 }
 
 func statusMessage(nextErr error) string {
