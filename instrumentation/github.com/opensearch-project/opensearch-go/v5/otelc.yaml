@@ -1,0 +1,16 @@
+version: "v1.0.0"
+
+# (*Client).Request is the shared HTTP path for Search, Index, Bulk, Delete,
+# and the rest of the public opensearch-go v5 API. Node discovery and health
+# checks live on the transport and never reach Request, so they do not create
+# OpenSearch spans.
+opensearch_client_request:
+  target: github.com/opensearch-project/opensearch-go/v5
+  where:
+    func: Request
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeRequest
+        after: AfterRequest
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/opensearch-project/opensearch-go/v5"
