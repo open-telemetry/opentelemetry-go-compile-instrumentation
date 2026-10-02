@@ -536,6 +536,96 @@ func f2() *http.Transport {
 	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
+func TestApplyLitRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+	// The rule writes its injected code against alias "traced" for "fmt",
+	// which the rewrite moves to the file's alias "f". The enclosing
+	// function's parameter is also named "f", so the rewritten code would
+	// resolve to the parameter while still compiling.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func run(f sink) *http.Transport {
+	return &http.Transport{Proxy: myProxy}
+}
+`)
+	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "traced.Sprint({{ . }})"})
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	err := newTestPhase().applyLitRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "run", "the error names the offending function")
+}
+
+func TestApplyLitRule_OverrideNonShadowingSignatureAppliesRule(t *testing.T) {
+	// Same rule and file aliases as the shadowing test above, but the
+	// enclosing function's signature does not name "f", so the rule applies
+	// and the wrapped value uses the file's alias.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func run(s sink) *http.Transport {
+	return &http.Transport{Proxy: myProxy}
+}
+`)
+	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "traced.Sprint({{ . }})"})
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	err := newTestPhase().applyLitRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	lit := litFromReturn(t, root, "run")
+	kv, ok := lit.Elts[0].(*dst.KeyValueExpr)
+	require.True(t, ok)
+	call, ok := kv.Value.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", kv.Value)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "wrapped value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "Sprint", sel.Sel.Name)
+	require.Len(t, call.Args, 1)
+	assert.Equal(t, "myProxy", call.Args[0].(*dst.Ident).Name)
+}
+
+func TestApplyLitRule_WrapResolvesEnclosingFunctionVariables(t *testing.T) {
+	// A literal inside a function body has an enclosing function, so the
+	// wrap template can use the shared function variables alongside {{ . }}.
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func run(name string) *http.Transport {
+	return &http.Transport{Proxy: myProxy}
+}
+`)
+	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ .FuncArgument 0 }}, {{ . }})"})
+
+	err := newTestPhase().applyLitRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	lit := litFromReturn(t, root, "run")
+	kv, ok := lit.Elts[0].(*dst.KeyValueExpr)
+	require.True(t, ok)
+	call, ok := kv.Value.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", kv.Value)
+	assert.Equal(t, "wrapProxy", call.Fun.(*dst.Ident).Name)
+	require.Len(t, call.Args, 2)
+	assert.Equal(t, "name", call.Args[0].(*dst.Ident).Name,
+		"{{ .FuncArgument 0 }} must resolve to the enclosing function's parameter")
+	assert.Equal(t, "myProxy", call.Args[1].(*dst.Ident).Name)
+}
+
 // litFromReturn returns the composite literal returned by the named
 // function's first (and only) return statement, unwrapping the leading "&".
 func litFromReturn(t *testing.T, root *dst.File, funcName string) *dst.CompositeLit {
