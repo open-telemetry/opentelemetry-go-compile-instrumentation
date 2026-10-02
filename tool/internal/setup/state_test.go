@@ -85,6 +85,24 @@ func TestLoadStateManager(t *testing.T) {
 	}
 }
 
+func TestInterruptedBuildCannotOverwriteSnapshots(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	file := filepath.Join(util.GetOtelcWorkDir(), "go.mod")
+	original := []byte("module example.com/original\n")
+	require.NoError(t, os.WriteFile(file, original, 0o644))
+	require.NoError(t, checkInterruptedBuild())
+	previous := newStateManager()
+	require.NoError(t, previous.Track(file))
+	require.NoError(t, os.WriteFile(file, []byte("module example.com/modified\n"), 0o644))
+	require.ErrorContains(t, checkInterruptedBuild(), "otelc cleanup")
+	require.ErrorContains(t, processYAMLConfigs(t.Context(), nil, PinOptions{}), "otelc cleanup")
+	require.NoError(t, Cleanup(t.Context(), false))
+	restored, err := os.ReadFile(file)
+	require.NoError(t, err)
+	require.Equal(t, original, restored)
+	require.NoError(t, checkInterruptedBuild())
+}
+
 func TestStateManagerFromContext(t *testing.T) {
 	t.Run("manager exists in context", func(t *testing.T) {
 		expected := newStateManager()
@@ -130,6 +148,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileCanonical),
+					filepath.Join(moduleDir, toolFileAlias),
 					filepath.Join(tmp, "go.work.sum"),
 				}
 			},
@@ -149,6 +168,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileCanonical),
+					filepath.Join(moduleDir, toolFileAlias),
 					filepath.Join(tmp, "go.work.sum"),
 				}
 			},
@@ -165,6 +185,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileCanonical),
+					filepath.Join(moduleDir, toolFileAlias),
 				}
 			},
 		},
@@ -190,6 +211,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileAlias),
+					filepath.Join(moduleDir, toolFileCanonical),
 				}
 			},
 		},
@@ -206,6 +228,7 @@ func TestGetBackupFiles(t *testing.T) {
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
 					filepath.Join(moduleDir, toolFileCanonical),
+					filepath.Join(moduleDir, toolFileAlias),
 				}
 			},
 		},

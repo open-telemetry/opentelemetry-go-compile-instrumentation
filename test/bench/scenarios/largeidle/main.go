@@ -68,12 +68,12 @@ import (
 	"github.com/tidwall/gjson"
 	"go.uber.org/atomic"
 	"go.uber.org/multierr"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/maps"
 	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
-	"go.yaml.in/yaml/v3"
 )
 
 func main() {

@@ -55,12 +55,12 @@ go list -m <module-path>
 ```
 
 **A `--rules` or `OTELC_RULES` override replaced the matching rules.** When either flag is
-set, `otelc` uses only those rules. The embedded bundle and any `otel.instrumentation.go`
+set, `otelc` uses only those rules. Embedded defaults and any `otel.instrumentation.go`
 declarations are ignored. Remove the override or add your custom rules to the specified file.
 
 **The `otel.instrumentation.go` file declares packages with no matching rules.** When a tool
 file is present, `otelc` loads only the rules from the declared instrumentation packages and
-ignores the embedded bundle. If those packages contain no `*.otelc.yml` files, the matched
+ignores embedded defaults. If those packages contain no `*.otelc.yml` files, the matched
 set is empty. See [External Configuration Sources](external-configuration.md).
 
 ### Instrumented but no spans appear
@@ -130,6 +130,15 @@ after the build. The path is printed at the start of the build output as `WORK=.
 the sources there to see the exact code that entered the compiler for each package.
 
 ## Common Errors
+
+### Source checkout not found
+
+Until #983, pinning built-in instrumentations needs a full source checkout. Set
+`OTELC_SOURCE_ROOT` to its root (containing `go.mod`, `pkg/go.mod`, and
+`instrumentation/go.mod`). If multiple checkouts are available, set it explicitly to the one
+matching the `otelc` binary version; the automatic directory walk can otherwise find a stale
+checkout. An interrupted `otelc pin` or build can leave `.otelc-build/state.json`; run
+`otelc cleanup` before retrying so the original files are restored rather than overwritten.
 
 ### `no command provided. Only 'go build', 'go install' and 'go test' are supported`
 

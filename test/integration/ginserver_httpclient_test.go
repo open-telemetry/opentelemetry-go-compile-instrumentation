@@ -48,7 +48,12 @@ func TestGinServerHTTPClient(t *testing.T) {
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(3)
 
-	ginServerSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, func(s ptrace.Span) bool { return s.Name() == "GET /hello" })
+	ginServerSpan := testutil.RequireSpan(
+		t,
+		f.Traces(),
+		testutil.IsServer,
+		func(s ptrace.Span) bool { return s.Name() == "GET /hello" },
+	)
 	httpClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
 	backendServerSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, func(s ptrace.Span) bool {
 		return s.Name() == "GET /api/backend"
@@ -59,6 +64,11 @@ func TestGinServerHTTPClient(t *testing.T) {
 	require.Equal(t, ginServerSpan.TraceID(), backendServerSpan.TraceID(), "trace ID mismatch")
 
 	require.Equal(t, ginServerSpan.SpanID(), httpClientSpan.ParentSpanID(), "HTTP client parent must be Gin server")
-	require.Equal(t, httpClientSpan.SpanID(), backendServerSpan.ParentSpanID(), "Backend server parent must be HTTP client")
+	require.Equal(
+		t,
+		httpClientSpan.SpanID(),
+		backendServerSpan.ParentSpanID(),
+		"Backend server parent must be HTTP client",
+	)
 	require.True(t, ginServerSpan.ParentSpanID().IsEmpty(), "Gin server span must be the trace root")
 }

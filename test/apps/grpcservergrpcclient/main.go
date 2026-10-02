@@ -63,7 +63,10 @@ func main() {
 	}()
 
 	// Connect to backend
-	conn, err := grpc.NewClient(fmt.Sprintf("127.0.0.1:%d", *backPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		fmt.Sprintf("127.0.0.1:%d", *backPort),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
 		log.Fatalf("failed to connect to backend: %v", err)
 	}

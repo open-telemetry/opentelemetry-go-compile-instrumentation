@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestRun(t *testing.T) {
@@ -36,7 +38,7 @@ http:
 	require.NoError(t, json.Unmarshal(content, &got))
 	require.Equal(t, Manifest{{
 		ModulePath:   "example.com/instrumentation/example",
-		Target:       "net/http",
+		Target:       rule.NewTarget("net/http"),
 		VersionRange: "v1.0.0",
 	}}, got)
 }

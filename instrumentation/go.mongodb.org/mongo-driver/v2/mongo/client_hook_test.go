@@ -213,21 +213,24 @@ func TestBeforeConnect(t *testing.T) {
 		},
 	)
 
-	t.Run("carries a caller's custom HTTPClient through injection instead of losing it to options.Client()'s default", func(t *testing.T) {
-		t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB_V2")
+	t.Run(
+		"carries a caller's custom HTTPClient through injection instead of losing it to options.Client()'s default",
+		func(t *testing.T) {
+			t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "MONGODB_V2")
 
-		customClient := &http.Client{}
-		base := options.Client().SetHTTPClient(customClient)
-		mockCtx := hooktest.NewMockHookContext()
+			customClient := &http.Client{}
+			base := options.Client().SetHTTPClient(customClient)
+			mockCtx := hooktest.NewMockHookContext()
 
-		BeforeConnect(mockCtx, base)
+			BeforeConnect(mockCtx, base)
 
-		newOpts, ok := mockCtx.GetParam(0).([]*options.ClientOptions)
-		require.True(t, ok)
-		merged := options.MergeClientOptions(newOpts...)
-		assert.Same(t, customClient, merged.HTTPClient,
-			"caller's HTTPClient must survive injection, not be replaced by the appended element's default")
-	})
+			newOpts, ok := mockCtx.GetParam(0).([]*options.ClientOptions)
+			require.True(t, ok)
+			merged := options.MergeClientOptions(newOpts...)
+			assert.Same(t, customClient, merged.HTTPClient,
+				"caller's HTTPClient must survive injection, not be replaced by the appended element's default")
+		},
+	)
 
 	t.Run("does nothing when instrumentation is disabled", func(t *testing.T) {
 		t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "MONGODB_V2")

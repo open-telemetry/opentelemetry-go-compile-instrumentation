@@ -24,6 +24,10 @@ RUN apk add --no-cache git
 
 # Copy the otelc tool from previous stage
 COPY --from=otelc-builder /otelc /usr/local/bin/otelc
+COPY --from=otelc-builder /build/go.mod /build/go.mod
+COPY --from=otelc-builder /build/pkg /build/pkg
+COPY --from=otelc-builder /build/instrumentation /build/instrumentation
+ENV OTELC_SOURCE_ROOT=/build
 
 # Copy both client and server to maintain the go.mod replace directive structure
 COPY demo/app/grpc/server /server

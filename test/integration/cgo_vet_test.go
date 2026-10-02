@@ -108,5 +108,7 @@ func Before(ctx hook.HookContext) {
 
 	env := os.Environ()
 	runOtelcCommand(t, moduleDir, env, otelcPath, "setup", ".")
+	// Standalone setup persists snapshots. Consume them before starting a new build.
+	runOtelcCommand(t, moduleDir, env, otelcPath, "cleanup")
 	runOtelcCommand(t, moduleDir, env, otelcPath, "go", "test", "-count=1", "./...")
 }

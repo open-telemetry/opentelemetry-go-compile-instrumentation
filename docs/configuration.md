@@ -6,8 +6,8 @@ rule schema reference, see [Instrumentation Rules](rules.md).
 
 ## Selecting Instrumentations
 
-By default, `otelc` applies all instrumentation rules from its embedded bundle to every
-dependency it finds in your module graph. This zero-configuration mode works well for
+By default, `otelc` selects instrumentation modules using its embedded manifest and loads
+their rules from a full source checkout. This zero-configuration mode works well for
 getting started: run `otelc go build` and all [supported libraries](getting-started.md#supported-libraries)
 are instrumented automatically.
 
@@ -54,13 +54,15 @@ OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
    paths. When set, all other sources are ignored.
 2. **`--rules` flag** — same format as `OTELC_RULES`. Takes effect when `OTELC_RULES` is not
    set.
-3. **Tool files** (`otel.instrumentation.go` / `otelc.tool.go`) — when the project declares
-   instrumentations explicitly. See [External Configuration Sources](external-configuration.md).
-4. **Embedded defaults** — the instrumentation bundle built into `otelc`, applied when none of
-   the above are present.
+3. **Module-local instrumentation selection** — an `otel.instrumentation.go` / `otelc.tool.go`
+   tool file, or `otel.instrumentation.yml` / `otel.instrumentation.yaml` when no tool file exists
+   in that module. See [External Configuration Sources](external-configuration.md).
+4. **Embedded defaults** — the instrumentation manifest built into `otelc`, applied to modules
+   without explicit selection. Rule files and code come from a full source checkout until #983.
 
-Each source entirely replaces those below it. There is no merging: when `--rules` is provided,
-tool files and the embedded bundle are not consulted.
+`OTELC_RULES` and `--rules` replace import-driven sources. A tool file takes precedence over YAML
+in the same module. Selections from participating modules are combined; modules without either
+source still use inferred defaults.
 
 ### Using `--rules` for development and debugging
 

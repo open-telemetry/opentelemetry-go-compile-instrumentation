@@ -64,6 +64,10 @@ func runPin(t *testing.T, workDir string, args ...string) (string, error) {
 
 	cmd := exec.CommandContext(t.Context(), otelc, append([]string{"pin"}, args...)...)
 	cmd.Dir = workDir
+	cmd.Env = os.Environ()
+	if os.Getenv("OTELC_SOURCE_ROOT") == "" {
+		cmd.Env = append(cmd.Env, "OTELC_SOURCE_ROOT="+filepath.Dir(otelc))
+	}
 
 	out, outErr := cmd.CombinedOutput()
 	if outErr != nil {
@@ -165,6 +169,64 @@ func TestPin_GeneratesNewToolFile(t *testing.T) {
 
 	// Ensure the http integration is within the go.mod file, which ensures it is pinned as a dependency.
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/instrumentation/net/http/client")
+}
+
+func TestYAMLSelectionBuildRestoresModule(t *testing.T) {
+	for _, invalid := range []bool{false, true} {
+		name := "valid"
+		if invalid {
+			name = "invalid_import"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := writePinApp(t)
+			yaml := "# explicitly selected\ninstrumentations:\n  - go.opentelemetry.io/otelc/instrumentation/net/http/client\n"
+			if invalid {
+				stale := filepath.Join(dir, "stale")
+				writeTestFile(t, stale, "go.mod", "module example.com/stale\n\ngo 1.25\n")
+				writeTestFile(t, stale, "stale.go", "package stale\n")
+				yaml += "  - example.com/stale\n"
+				modPath := filepath.Join(dir, "go.mod")
+				mod, err := os.ReadFile(modPath)
+				require.NoError(t, err)
+				require.NoError(
+					t,
+					os.WriteFile(
+						modPath,
+						append(
+							mod,
+							[]byte("\nrequire example.com/stale v0.0.0\nreplace example.com/stale => ./stale\n")...),
+						0o644,
+					),
+				)
+			}
+			yamlPath := filepath.Join(dir, "otel.instrumentation.yml")
+			require.NoError(t, os.WriteFile(yamlPath, []byte(yaml), 0o644))
+			beforeMod, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+			require.NoError(t, err)
+			beforeSum, sumErr := os.ReadFile(filepath.Join(dir, "go.sum"))
+			require.True(t, sumErr == nil || os.IsNotExist(sumErr))
+
+			otelc, err := testutil.OtelcPath()
+			require.NoError(t, err)
+			output := runOtelcCommand(t, dir, append(os.Environ(), "OTELC_SOURCE_ROOT="+filepath.Dir(otelc)),
+				otelc, "go", "build", "-o", filepath.Join(dir, "app"), ".")
+			require.NotContains(t, output, "no instrumentation will be applied")
+			require.FileExists(t, filepath.Join(dir, "app"))
+			matched, err := os.ReadFile(filepath.Join(dir, ".otelc-build", "matched.json"))
+			require.NoError(t, err)
+			require.Contains(t, string(matched), "net/http")
+			gotYAML, err := os.ReadFile(yamlPath)
+			require.NoError(t, err)
+			require.Equal(t, yaml, string(gotYAML))
+			gotMod, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+			require.NoError(t, err)
+			require.Equal(t, beforeMod, gotMod)
+			gotSum, afterSumErr := os.ReadFile(filepath.Join(dir, "go.sum"))
+			require.Equal(t, sumErr == nil, afterSumErr == nil)
+			require.Equal(t, beforeSum, gotSum)
+			require.NoFileExists(t, filepath.Join(dir, toolFileCanonical))
+		})
+	}
 }
 
 func TestPin_PrunesInvalidImports(t *testing.T) {
