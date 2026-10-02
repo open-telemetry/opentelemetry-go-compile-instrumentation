@@ -217,6 +217,7 @@ func classifyValueFlag(
 }
 
 type testArgState struct {
+	packageListStarted bool
 	pkgDiscoveryClosed bool
 	testArgsFinalized  bool
 }
@@ -327,6 +328,7 @@ func classifyPositionalTestArg(
 	}
 
 	// Establishing or adding to the package list.
+	state.packageListStarted = true
 	return ClassifiedArg{
 		Index: i,
 		Raw:   arg,
@@ -414,6 +416,11 @@ func classifyTestArgs(args []string) []ClassifiedArg {
 		}
 
 		if strings.HasPrefix(arg, "-") {
+			// cmd/go ends an established package list at any flag. A later
+			// positional starts the test binary's argument tail.
+			if testState.packageListStarted {
+				testState.pkgDiscoveryClosed = true
+			}
 			consumed, items, unjoinedUnknown, name := classifyTestFlagToken(
 				args, i, &testState,
 			)

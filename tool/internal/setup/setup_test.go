@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -211,10 +212,10 @@ func TestToolexecBuildArgs(t *testing.T) {
 			runIdx = slices.Index(gotWithDelim, "-test.run")
 			require.Positive(t, runIdx)
 			require.Equal(t, val, gotWithDelim[runIdx+1], "flag value must immediately follow flag")
-			realDelimIdx := slices.Index(gotWithDelim[runIdx+2:], "--") + runIdx + 2
+
 			runtimeIdx := slices.Index(gotWithDelim, otelcRuntimeFile)
 			require.Positive(t, runtimeIdx)
-			assert.Equal(t, realDelimIdx-1, runtimeIdx, "runtime file must appear before the real delimiter")
+			assert.Equal(t, slices.Index(gotWithDelim, "main_test.go")+1, runtimeIdx)
 		}
 	})
 
@@ -224,20 +225,15 @@ func TestToolexecBuildArgs(t *testing.T) {
 	})
 }
 
-func TestFindTestDelimiter(t *testing.T) {
-	assert.Equal(t, -1, findTestDelimiter(subcmdBuild, []string{"--", "main.go"}))
-	assert.Equal(t, 1, findTestDelimiter(subcmdTest, []string{"./pkg", "--", "custom"}))
-	assert.Equal(t, 1, findTestDelimiter(subcmdTest, []string{"./pkg", "-args", "custom"}))
-	assert.Equal(t, 1, findTestDelimiter(subcmdTest, []string{"./pkg", "--args", "custom"}))
-
-	for _, delim := range []string{"--", "-args", "--args"} {
-		assert.Equal(t, -1, findTestDelimiter(subcmdTest, []string{"-test.run", delim, "./pkg"}))
-		assert.Equal(t, -1, findTestDelimiter(subcmdTest, []string{"--test.run", delim, "./pkg"}))
-		assert.Equal(t, -1, findTestDelimiter(subcmdTest, []string{"-run", delim, "./pkg"}))
-		assert.Equal(t, 2, findTestDelimiter(subcmdTest, []string{"-test.run", delim, "--", "./pkg"}))
-		assert.Equal(t, 2, findTestDelimiter(subcmdTest, []string{"-test.run", delim, "-args", "./pkg"}))
-		assert.Equal(t, 2, findTestDelimiter(subcmdTest, []string{"-test.run", delim, "--args", "./pkg"}))
-	}
+func TestLastFileTargetIndex(t *testing.T) {
+	assert.Equal(t, 1, lastFileTargetIndex(subcmdBuild, []string{"--", "main.go"}))
+	assert.Equal(
+		t,
+		1,
+		lastFileTargetIndex(subcmdTest, []string{"main.go", "main_test.go", "-run", "TestX", "other.go"}),
+	)
+	assert.Equal(t, -1, lastFileTargetIndex(subcmdTest, []string{"./pkg", "--", "custom.go"}))
+	assert.Equal(t, -1, lastFileTargetIndex(subcmdTest, []string{"-run", "pattern.go", "./pkg"}))
 }
 
 // runBuildWithToolexec drives buildWithToolexec with the command runner
@@ -759,23 +755,23 @@ func TestSplitBuildTargets(t *testing.T) {
 	})
 
 	t.Run(
-		"known flag preserves package discovery for trailing positional",
+		"known flag ends the package list",
 		func(t *testing.T) {
 			pkgs, files, err := splitBuildTargets(subcmdTest, []string{"./pkg", "-run", "TestX", "./other"})
 			require.NoError(t, err)
-			assert.Equal(t, []string{"./pkg", "./other"}, pkgs)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
 			assert.Empty(t, files)
 
 			pkgs, files, err = splitBuildTargets(subcmdTest, []string{"fmt", "-run", "TestX", "math"})
 			require.NoError(t, err)
-			assert.Equal(t, []string{"fmt", "math"}, pkgs)
+			assert.Equal(t, []string{"fmt"}, pkgs)
 			assert.Empty(t, files)
 
 			pkgs, files, err = splitBuildTargets(subcmdTest, []string{
 				"./pkg", "-run", "TestX", "math", "-race", "-mod=vendor", "-tags=x", "./other",
 			})
 			require.NoError(t, err)
-			assert.Equal(t, []string{"./pkg", "math", "./other"}, pkgs)
+			assert.Equal(t, []string{"./pkg"}, pkgs)
 			assert.Empty(t, files)
 		},
 	)
@@ -1158,10 +1154,10 @@ func TestExtractBuildFlags(t *testing.T) {
 			expected:   nil,
 		},
 		{
-			name:       "packages on both sides of -run extracts build flags",
+			name:       "build-like flags after a positional tail are preserved",
 			subcommand: subcmdTest,
 			args:       []string{"./pkg", "-run", "TestX", "math", "-tags=integration"},
-			expected:   []string{"-tags=integration"},
+			expected:   nil,
 		},
 	}
 
@@ -1510,4 +1506,54 @@ func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	}
 	err := cmd.Run(t.Context(), []string{"setup", mainFile})
 	require.Error(t, err)
+}
+
+func TestGetBuildPackages_TestWithoutTargets(t *testing.T) {
+	setupTestModule(t, nil)
+	for _, args := range [][]string{{"-test.run", "TestName"}, {"-run", "TestName"}, {"--", "custom"}, {"-args", "custom"}, {"--args", "custom"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			pkgs, err := getBuildPackages(t.Context(), subcmdTest, args)
+			require.NoError(t, err)
+			require.Len(t, pkgs, 1)
+			assert.Equal(t, "testmodule", pkgs[0].PkgPath)
+		})
+	}
+}
+
+func TestExtractBuildFlags_DashPrefixedValue(t *testing.T) {
+	assert.Equal(t, []string{"-tags", "-race"}, extractBuildFlags(subcmdTest, []string{"-tags", "-race", "./pkg"}))
+}
+
+func TestToolexecBuildArgs_RuntimeFileCompiled(t *testing.T) {
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile(otelcRuntimeFile, []byte("package main\nconst runtimeMarker = 42\n"), 0o644))
+	require.NoError(t, os.WriteFile("main_test.go", []byte(`package main
+import "testing"
+func TestRuntime(t *testing.T) {
+ if runtimeMarker != 42 { t.Fatal(runtimeMarker) }
+}
+`), 0o644))
+	for _, flags := range [][]string{{"-race", "--", "custom"}, {"-race", "-args", "custom"}, {"-race", "--args", "custom"}} {
+		args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc", false)
+		require.NoError(t, err)
+		assert.Equal(t, slices.Index(args, "main_test.go")+1, slices.Index(args, otelcRuntimeFile))
+		assert.Less(t, slices.Index(args, otelcRuntimeFile), slices.Index(args, "-race"))
+	}
+	for _, flags := range [][]string{{"-run", "TestRuntime"}, {"-v", "--", "custom"}, {"-run", "TestRuntime", "-args", "custom"}} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc", false)
+			require.NoError(t, err)
+			assert.Equal(t, slices.Index(args, "main_test.go")+1, slices.Index(args, otelcRuntimeFile))
+			// Execute the generated file list without invoking the instrumentation wrapper.
+			args = slices.DeleteFunc(
+				args,
+				func(arg string) bool { return arg == "-work" || strings.HasPrefix(arg, "-toolexec=") },
+			)
+			cmd := exec.CommandContext(t.Context(), args[0], args[1:]...)
+			cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			assert.Contains(t, string(output), "ok")
+		})
+	}
 }

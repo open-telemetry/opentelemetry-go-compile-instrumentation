@@ -89,17 +89,14 @@ const (
 	flagJSON = "-json"
 )
 
-func findTestDelimiter(subcommand string, args []string) int {
-	if subcommand != subcmdTest {
-		return -1
-	}
-	classified := classifyArgs(subcommand, args)
-	for _, a := range classified {
-		if a.Kind == ArgTestDelimiter {
-			return a.Index
+func lastFileTargetIndex(subcommand string, args []string) int {
+	last := -1
+	for _, arg := range classifyArgs(subcommand, args) {
+		if arg.Kind == ArgTarget && filepath.Ext(arg.Raw) == ".go" {
+			last = arg.Index
 		}
 	}
-	return -1
+	return last
 }
 
 // getBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
@@ -570,11 +567,10 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string,
 		dir := filepath.Dir(fileTargets[0])
 		otelcRuntimePath := filepath.Join(dir, otelcRuntimeFile)
 		if util.PathExists(otelcRuntimePath) {
-			if delimIdx := findTestDelimiter(subcommand, restArgs); delimIdx >= 0 {
-				restArgs = slices.Insert(restArgs, delimIdx, otelcRuntimePath)
-			} else {
-				restArgs = append(restArgs, otelcRuntimePath)
-			}
+			// Keep the runtime file next to the file targets. In go test,
+			// a file path after a flag is passed to the test binary instead.
+			insertAt := lastFileTargetIndex(subcommand, restArgs) + 1
+			restArgs = slices.Insert(restArgs, insertAt, otelcRuntimePath)
 		}
 	}
 	// Add -work and -toolexec after a leading -C. The go command rejects -C

@@ -257,16 +257,16 @@ func TestRewriteModVendor(t *testing.T) {
 			want:       []string{"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
 		},
 		{
-			name:       "genuine build flag with package targets on both sides of -run is rewritten",
+			name:       "joined vendor flag in the positional tail is preserved",
 			subcommand: subcmdTest,
 			args:       []string{"./pkg", "-run", "TestX", "math", "-mod=vendor"},
-			want:       []string{"./pkg", "-run", "TestX", "math", "-mod=mod"},
+			want:       []string{"./pkg", "-run", "TestX", "math", "-mod=vendor"},
 		},
 		{
-			name:       "genuine two-token build flag with package targets on both sides of -run is rewritten",
+			name:       "separated vendor flag in the positional tail is preserved",
 			subcommand: subcmdTest,
 			args:       []string{"./pkg", "-run", "TestX", "math", "-mod", "vendor"},
-			want:       []string{"./pkg", "-run", "TestX", "math", "-mod", "mod"},
+			want:       []string{"./pkg", "-run", "TestX", "math", "-mod", "vendor"},
 		},
 	}
 	for _, tt := range tests {

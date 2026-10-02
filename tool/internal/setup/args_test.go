@@ -4,9 +4,15 @@
 package setup
 
 import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClassifyArgs_Build(t *testing.T) {
@@ -264,7 +270,7 @@ func TestClassifyArgs_Test_Aliases(t *testing.T) {
 
 func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 	t.Run(
-		"known flag preserves package discovery for trailing positional",
+		"known flag ends the package list",
 		func(t *testing.T) {
 			args := []string{"./pkg", "-run", "TestX", "./other"}
 			got := classifyArgs(subcmdTest, args)
@@ -273,14 +279,14 @@ func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 				{Index: 0, Raw: "./pkg", Kind: ArgTarget},
 				{Index: 1, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
 				{Index: 2, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
-				{Index: 3, Raw: "./other", Kind: ArgTarget},
+				{Index: 3, Raw: "./other", Kind: ArgTestBinary},
 			}
 			assert.Equal(t, expected, got)
 		},
 	)
 
 	t.Run(
-		"package targets on both sides of -run",
+		"positional after -run belongs to the test binary",
 		func(t *testing.T) {
 			args := []string{"fmt", "-run", "TestX", "math"}
 			got := classifyArgs(subcmdTest, args)
@@ -289,14 +295,14 @@ func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 				{Index: 0, Raw: "fmt", Kind: ArgTarget},
 				{Index: 1, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
 				{Index: 2, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
-				{Index: 3, Raw: "math", Kind: ArgTarget},
+				{Index: 3, Raw: "math", Kind: ArgTestBinary},
 			}
 			assert.Equal(t, expected, got)
 		},
 	)
 
 	t.Run(
-		"package targets interspersed with recognized test and build flags",
+		"flags before packages and a trailing test binary argument",
 		func(t *testing.T) {
 			args := []string{"-v", "fmt", "-run", "TestX", "math", "-tags=integration", "./other"}
 			got := classifyArgs(subcmdTest, args)
@@ -306,22 +312,15 @@ func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 				{Index: 1, Raw: "fmt", Kind: ArgTarget},
 				{Index: 2, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
 				{Index: 3, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
-				{Index: 4, Raw: "math", Kind: ArgTarget},
-				{
-					Index:    5,
-					Raw:      "-tags=integration",
-					Kind:     ArgBuildFlag,
-					FlagName: "-tags",
-					HasValue: true,
-					Value:    "integration",
-				},
-				{Index: 6, Raw: "./other", Kind: ArgTarget},
+				{Index: 4, Raw: "math", Kind: ArgTestBinary},
+				{Index: 5, Raw: "-tags=integration", Kind: ArgTestBinary},
+				{Index: 6, Raw: "./other", Kind: ArgTestBinary},
 			}
 			assert.Equal(t, expected, got)
 		},
 	)
 
-	t.Run("known flag followed by target package then build flag", func(t *testing.T) {
+	t.Run("positional tail preserves a build-like flag", func(t *testing.T) {
 		args := []string{"./pkg", "-run", "TestX", "positional", "-tags=integration"}
 		got := classifyArgs(subcmdTest, args)
 
@@ -329,15 +328,8 @@ func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 			{Index: 0, Raw: "./pkg", Kind: ArgTarget},
 			{Index: 1, Raw: "-run", Kind: ArgTestFlag, FlagName: "-run", HasValue: false},
 			{Index: 2, Raw: "TestX", Kind: ArgTestFlagValue, FlagName: "-run", Value: "TestX"},
-			{Index: 3, Raw: "positional", Kind: ArgTarget},
-			{
-				Index:    4,
-				Raw:      "-tags=integration",
-				Kind:     ArgBuildFlag,
-				FlagName: "-tags",
-				HasValue: true,
-				Value:    "integration",
-			},
+			{Index: 3, Raw: "positional", Kind: ArgTestBinary},
+			{Index: 4, Raw: "-tags=integration", Kind: ArgTestBinary},
 		}
 		assert.Equal(t, expected, got)
 	})
@@ -411,4 +403,79 @@ func TestClassifyArgs_Test_PackageListAndTestArgvTransitions(t *testing.T) {
 		}
 		assert.Equal(t, expected, got)
 	})
+}
+
+func TestClassifyArgs_GoTestParity(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module probe\ngo 1.26\n"), 0o644))
+	for _, pkg := range []string{".", "a", "b"} {
+		pkgDir := filepath.Join(dir, pkg)
+		require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "probe_test.go"), []byte(`package probe
+import (
+ "encoding/json"
+ "flag"
+ "testing"
+)
+func TestProbe(t *testing.T) {
+ args, err := json.Marshal(flag.Args())
+ if err != nil { t.Fatal(err) }
+ t.Logf("PROBE_ARGS=%s", args)
+}
+`), 0o644))
+	}
+	for _, args := range [][]string{
+		{"./a", "./b", "-run", "TestProbe"},
+		{"-run", "TestProbe", "./a", "./b"},
+		{"./a", "-run", "TestProbe", "./b", "-tags=unused"},
+		{"./a", "-v", "./b"},
+		{"./a", "-args", "./b", "-tags=unused"},
+		{"-run", "TestProbe"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), "go", append([]string{"test", "-json"}, args...)...)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			var tested []string
+			tail := []string{}
+			for _, arg := range classifyArgs(subcmdTest, args) {
+				if arg.Kind == ArgTestBinary {
+					tail = append(tail, arg.Raw)
+				}
+			}
+			tailJSON, err := json.Marshal(tail)
+			require.NoError(t, err)
+			loggedArgs := false
+			for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
+				var event struct {
+					Action  string `json:"Action"`
+					Package string `json:"Package"`
+					Test    string `json:"Test"`
+					Output  string `json:"Output"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(line), &event))
+				if event.Action == "run" && event.Test == "TestProbe" {
+					pkg := "."
+					if event.Package != "probe" {
+						pkg = "./" + strings.TrimPrefix(event.Package, "probe/")
+					}
+					tested = append(tested, pkg)
+				}
+				if strings.Contains(event.Output, "PROBE_ARGS=") {
+					loggedArgs = true
+					assert.Contains(t, event.Output, "PROBE_ARGS="+string(tailJSON))
+				}
+			}
+			assert.True(t, loggedArgs, "the probe must report its test binary arguments")
+			pkgs, files, err := splitBuildTargets(subcmdTest, args)
+			require.NoError(t, err)
+			assert.Empty(t, files)
+			if len(pkgs) == 0 {
+				pkgs = []string{"."}
+			}
+			assert.ElementsMatch(t, pkgs, tested)
+		})
+	}
 }

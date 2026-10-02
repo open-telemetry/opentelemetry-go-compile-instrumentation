@@ -758,10 +758,10 @@ func TestDropPlanIrrelevantFlags(t *testing.T) {
 			expected: []string{"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
 		},
 		{
-			name:       "go test drops -json even with package targets on both sides of -run",
+			name:       "go test preserves -json in the positional tail",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./pkg", "-run", "TestX", "math", "-json"},
-			expected:   []string{"./pkg", "-run", "TestX", "math"},
+			expected:   []string{"./pkg", "-run", "TestX", "math", "-json"},
 		},
 	}
 
