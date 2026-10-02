@@ -301,10 +301,9 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 // span before returning the *sql.Tx, so this is shared by their after-hooks:
 // afterTxInstrumentation and afterConnTxInstrumentation.
 //
-// The context matters beyond this call: it is read back by txContext as the
-// parent for the Commit/Rollback spans created long after this hook returns,
-// so they land in the same trace as the transaction instead of falling back
-// to context.Background().
+// The context stored is the caller's, from before the begin span started. It is
+// read back by txContext as the parent for Commit/Rollback, so those spans are
+// siblings of the begin span in the same trace, not its children.
 func populateTxFromBeginHook(ictx hook.HookContext, tx *sql.Tx) {
 	if ictx.GetData() == nil {
 		return
@@ -319,7 +318,7 @@ func populateTxFromBeginHook(ictx hook.HookContext, tx *sql.Tx) {
 		tx.DSN = dbRequest.Dsn
 		tx.DbName = dbRequest.DbName
 	}
-	if ctx, ok := callData["ctx"].(context.Context); ok {
+	if ctx, ok := callData["parentCtx"].(context.Context); ok {
 		tx.OtelCtx = ctx
 	}
 }
@@ -737,7 +736,7 @@ func instrumentStart(
 	attrs := semconv.DbClientRequestTraceAttrs(req)
 
 	// Start span
-	ctx, span := tracer.Start(ctx,
+	spanCtx, span := tracer.Start(ctx,
 		req.OpType,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
@@ -745,10 +744,13 @@ func instrumentStart(
 
 	// Store data for after hook
 	ictx.SetData(map[string]interface{}{
-		"ctx":   ctx,
-		"span":  span,
-		"req":   req,
-		"start": time.Now(),
+		"ctx": spanCtx,
+		// parentCtx is the caller's context from before the span started. BeginTx
+		// keeps it on the Tx so commit and rollback spans are siblings of begin.
+		"parentCtx": ctx,
+		"span":      span,
+		"req":       req,
+		"start":     time.Now(),
 	})
 }
 
