@@ -91,6 +91,8 @@ This instrumentation emits spans following the
 | `gen_ai.usage.total_tokens` | Total token count | `192` |
 | `gen_ai.usage.cache_read.input_tokens` | Cache read tokens (Anthropic-specific) | `50` |
 | `gen_ai.usage.cache_creation.input_tokens` | Cache creation tokens (Anthropic-specific) | `30` |
+| `server.address` | GenAI server hostname or IP address | `"api.anthropic.com"` |
+| `server.port` | GenAI server port, including default ports | `443` |
 
 ## Configuration
 
