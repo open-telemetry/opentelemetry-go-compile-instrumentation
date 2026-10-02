@@ -102,7 +102,8 @@ func DiscoverWorkDir(dir string) string {
 	}
 }
 
-// GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
+// GetBuildTempDir returns the path to the build temp directory,
+// $OTELC_WORK_DIR/.otelc-build.
 func GetBuildTempDir() string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir)
 }
