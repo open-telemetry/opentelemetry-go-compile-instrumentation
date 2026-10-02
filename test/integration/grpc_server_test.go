@@ -89,6 +89,15 @@ func TestGRPCServer(t *testing.T) {
 			client := NewGRPCClient(t, addr)
 			client.SayHello(t, "ShutdownTest")
 
+			// The client holding its response does not mean the server span is
+			// buffered yet: gRPC fires stats.End, where the instrumentation ends the
+			// span, only after the response has been written. Signalling straight
+			// away therefore races span.End(), and a flush that wins finds an empty
+			// batch and drops the span for good. Wait instead for the server to
+			// report the RPC finished, which its stats handler does after the
+			// instrumentation's has ended the span.
+			srv.WaitForLog("rpc completed")
+
 			// Instrumentation flushes buffered telemetry on the signal but must not
 			// terminate the process — the app owns its exit. Wait for the flushed
 			// span, then confirm the process is still alive (fixture kills it later).
