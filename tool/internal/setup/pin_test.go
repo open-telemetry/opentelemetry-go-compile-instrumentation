@@ -1423,7 +1423,7 @@ func TestPrepareVendoredBuild_NotVendored(t *testing.T) {
 	t.Setenv("GOFLAGS", "")
 
 	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), args)
+	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
 	require.NoError(t, err)
 
 	// Unchanged: not a vendored project, so no rewriting happens.
@@ -1454,7 +1454,7 @@ func TestPrepareVendoredBuild_Vendored(t *testing.T) {
 	t.Setenv("GOWORK", "off")
 
 	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), args)
+	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"build", "-mod=mod", "./..."}, got)
@@ -1611,7 +1611,12 @@ func TestPrepareVendoredBuild(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 
 	args := []string{"build", "./..."}
-	got, err := prepareVendoredBuild(context.Background(), util.LoggerFromContext(context.Background()), args)
+	got, err := prepareVendoredBuild(
+		context.Background(),
+		util.LoggerFromContext(context.Background()),
+		subcmdBuild,
+		args,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, args, got)
 }
