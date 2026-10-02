@@ -75,40 +75,18 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 	return commands, nil
 }
 
-// planIrrelevantFlags names flags that change how the go command formats its
-// own output without changing the build plan. listBuildPlan reads the plan from
-// the go command's stderr, and -json moves it to stdout as a stream of JSON
-// build-output events instead, so the plan parses empty and no dependency is
-// found. The real build keeps the flag; only the dry run drops it.
-// dropPlanIrrelevantFlags returns cmdArgs without the flags listed in
-// planIrrelevantFlags. Arguments after test delimiters go to the test binary rather than
-// the go command, so they pass through untouched, and a value that follows a
-// flag in separated form travels with its flag so it is never read as one.
-func dropPlanIrrelevantFlags(subcommand string, cmdArgs []string) []string {
-	if subcommand == "" {
-		subcommand = subcmdBuild
-	}
-	classified := classifyArgs(subcommand, cmdArgs)
-	dropIndices := make(map[int]bool)
-
-	for i, a := range classified {
-		if (a.Kind == ArgBuildFlag || a.Kind == ArgTestFlag) && isPlanIrrelevantFlag(a.FlagName) {
-			dropIndices[a.Index] = true
-			if !a.HasValue && i+1 < len(classified) &&
-				(classified[i+1].Kind == ArgBuildFlagValue ||
-					classified[i+1].Kind == ArgTestFlagValue) {
-				dropIndices[classified[i+1].Index] = true
-			}
+// disableJSONOutput keeps the build plan on stderr as shell commands.
+// Retain the flag position: removing a flag after go test's package list
+// could turn a test-binary argument into another package target.
+func disableJSONOutput(subcommand string, args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for _, arg := range classifyArgs(subcommand, args) {
+		if arg.Kind == ArgBuildFlag && arg.FlagName == flagJSON {
+			out[arg.Index] = "-json=false"
 		}
 	}
-
-	kept := make([]string, 0, len(cmdArgs))
-	for i, arg := range cmdArgs {
-		if !dropIndices[i] {
-			kept = append(kept, arg)
-		}
-	}
-	return kept
+	return out
 }
 
 // listBuildPlan lists the build plan by running `go build -a -x -n`
@@ -133,7 +111,7 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 		planVerb = subcmdTest
 	}
 	// The full command is: "go build/test [-C dir] -a -x -n {...}"
-	planArgs := dropPlanIrrelevantFlags(subcommand, cmdArgs)
+	planArgs := disableJSONOutput(subcommand, cmdArgs)
 	planFlags := []string{"-a", "-x", "-n"}
 	args := make([]string, 0, len(planArgs)+len(planFlags)+1)
 	args = append(args, planVerb)

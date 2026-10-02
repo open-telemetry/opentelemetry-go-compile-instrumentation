@@ -495,8 +495,8 @@ echo nothing useful
 		{
 			// -json makes `go test` write the plan to stdout as JSON events
 			// instead of to stderr as shell commands, which leaves the plan
-			// empty. The dry run must drop it.
-			name:       "drops -json from a go test plan",
+			// empty. The dry run must disable it.
+			name:       "disables JSON output in a go test plan",
 			subcommand: "test",
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
@@ -505,11 +505,11 @@ echo nothing useful
 			expected: []string{
 				".../compile -o /tmp/out.a -buildid abc -p main main.go",
 			},
-			expectedGoCmd: []string{"test", "-a", "-x", "-n", "-count=1", "./..."},
+			expectedGoCmd: []string{"test", "-a", "-x", "-n", "-json=false", "-count=1", "./..."},
 		},
 		{
 			// `go build -json` reports build output as JSON events too.
-			name: "drops -json from a go build plan",
+			name: "disables JSON output in a go build plan",
 			buildPlan: `
 .../compile -o /tmp/out.a -buildid abc -p main main.go
 `,
@@ -517,7 +517,7 @@ echo nothing useful
 			expected: []string{
 				".../compile -o /tmp/out.a -buildid abc -p main main.go",
 			},
-			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./cmd"},
+			expectedGoCmd: []string{"build", "-a", "-x", "-n", "-json=false", "./cmd"},
 		},
 		{
 			// The test subcommand must list a `go test` plan, which surfaces the
@@ -584,7 +584,7 @@ echo nothing useful
 	}
 }
 
-func TestDropPlanIrrelevantFlags(t *testing.T) {
+func TestDisableJSONOutput(t *testing.T) {
 	tests := []struct {
 		name       string
 		subcommand string
@@ -604,60 +604,59 @@ func TestDropPlanIrrelevantFlags(t *testing.T) {
 			expected:   []string{},
 		},
 		{
-			name:       "drops -json",
+			name:       "disables -json",
 			subcommand: subcmdBuild,
 			args:       []string{"-json", "./..."},
-			expected:   []string{"./..."},
+			expected:   []string{"-json=false", "./..."},
 		},
 		{
-			name:       "drops --json",
+			name:       "disables --json",
 			subcommand: subcmdBuild,
 			args:       []string{"--json", "./..."},
-			expected:   []string{"./..."},
+			expected:   []string{"-json=false", "./..."},
 		},
 		{
-			name:       "drops -json=true",
+			name:       "disables -json=true",
 			subcommand: subcmdBuild,
 			args:       []string{"-json=true", "./..."},
-			expected:   []string{"./..."},
+			expected:   []string{"-json=false", "./..."},
 		},
 		{
-			// -json=false already leaves the plan on stderr, but the dry run
-			// has no use for either form.
-			name:       "drops -json=false",
+			// An explicitly disabled flag keeps its position too.
+			name:       "keeps -json=false",
 			subcommand: subcmdBuild,
 			args:       []string{"-json=false", "./..."},
-			expected:   []string{"./..."},
+			expected:   []string{"-json=false", "./..."},
 		},
 		{
 			name:       "keeps other flags",
 			subcommand: subcmdBuild,
 			args:       []string{"-tags=integration", "-json", "-race", "./cmd"},
-			expected:   []string{"-tags=integration", "-race", "./cmd"},
+			expected:   []string{"-tags=integration", "-json=false", "-race", "./cmd"},
 		},
 		{
 			name:       "keeps a separated flag value that follows -json",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "-run", "TestX", "./..."},
-			expected:   []string{"-run", "TestX", "./..."},
+			expected:   []string{"-json=false", "-run", "TestX", "./..."},
 		},
 		{
 			name:       "keeps a separated -test.run flag value that follows -json",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "-test.run", "TestX", "./..."},
-			expected:   []string{"-test.run", "TestX", "./..."},
+			expected:   []string{"-json=false", "-test.run", "TestX", "./..."},
 		},
 		{
 			name:       "keeps joined -test.run flag value",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "-test.run=TestX", "./..."},
-			expected:   []string{"-test.run=TestX", "./..."},
+			expected:   []string{"-json=false", "-test.run=TestX", "./..."},
 		},
 		{
 			name:       "keeps separated --test.run flag value",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "--test.run", "TestX", "./..."},
-			expected:   []string{"--test.run", "TestX", "./..."},
+			expected:   []string{"-json=false", "--test.run", "TestX", "./..."},
 		},
 		{
 			name:       "keeps -json when it is the value of -test.run",
@@ -681,22 +680,22 @@ func TestDropPlanIrrelevantFlags(t *testing.T) {
 			expected:   []string{"./...", "-args", "-json", "-v"},
 		},
 		{
-			name:       "drops -json before -args and keeps it after",
+			name:       "disables -json before -args and keeps it after",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./...", "-args", "-json"},
-			expected:   []string{"./...", "-args", "-json"},
+			expected:   []string{"-json=false", "./...", "-args", "-json"},
 		},
 		{
 			name:       "tolerates a trailing value flag with no value",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./...", "-run"},
-			expected:   []string{"./...", "-run"},
+			expected:   []string{"-json=false", "./...", "-run"},
 		},
 		{
 			name:       "tolerates a trailing -test.run flag with no value",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./...", "-test.run"},
-			expected:   []string{"./...", "-test.run"},
+			expected:   []string{"-json=false", "./...", "-test.run"},
 		},
 		{
 			// go test ./pkg -- -test.run TestName input.go
@@ -707,40 +706,40 @@ func TestDropPlanIrrelevantFlags(t *testing.T) {
 			expected:   []string{"./pkg", "--", "-test.run", "TestName", "input.go"},
 		},
 		{
-			name:       "go test drops -json before -- and preserves after --",
+			name:       "go test disables -json before -- and preserves after --",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./pkg", "--", "-json", "input.go"},
-			expected:   []string{"./pkg", "--", "-json", "input.go"},
+			expected:   []string{"-json=false", "./pkg", "--", "-json", "input.go"},
 		},
 		{
-			name:       "go test drops -json before --args and preserves after --args",
+			name:       "go test disables -json before --args and preserves after --args",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./pkg", "--args", "-json", "input.go"},
-			expected:   []string{"./pkg", "--args", "-json", "input.go"},
+			expected:   []string{"-json=false", "./pkg", "--args", "-json", "input.go"},
 		},
 		{
 			name:       "go test preserves empty delimiter --",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./pkg", "--"},
-			expected:   []string{"./pkg", "--"},
+			expected:   []string{"-json=false", "./pkg", "--"},
 		},
 		{
 			name:       "go test preserves repeated delimiter -- --",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./pkg", "--", "--", "-json"},
-			expected:   []string{"./pkg", "--", "--", "-json"},
+			expected:   []string{"-json=false", "./pkg", "--", "--", "-json"},
 		},
 		{
 			name:       "go build -- closes flag parsing and preserves positional -json",
 			subcommand: subcmdBuild,
 			args:       []string{"-json", "./pkg", "--", "-json", "main.go"},
-			expected:   []string{"./pkg", "--", "-json", "main.go"},
+			expected:   []string{"-json=false", "./pkg", "--", "-json", "main.go"},
 		},
 		{
 			name:       "go test preserves -json after positional test-argv boundary",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./pkg", "-custom=x", "positional", "-json"},
-			expected:   []string{"./pkg", "-custom=x", "positional", "-json"},
+			expected:   []string{"-json=false", "./pkg", "-custom=x", "positional", "-json"},
 		},
 		{
 			name:       "go test preserves full tail untouched after positional test-argv boundary",
@@ -755,19 +754,46 @@ func TestDropPlanIrrelevantFlags(t *testing.T) {
 				"-tags=x",
 				"./other",
 			},
-			expected: []string{"./pkg", "-custom=x", "positional", "-race", "-mod=vendor", "-tags=x", "./other"},
+			expected: []string{
+				"-json=false",
+				"./pkg",
+				"-custom=x",
+				"positional",
+				"-race",
+				"-mod=vendor",
+				"-tags=x",
+				"./other",
+			},
 		},
 		{
 			name:       "go test preserves -json in the positional tail",
 			subcommand: subcmdTest,
 			args:       []string{"-json", "./pkg", "-run", "TestX", "math", "-json"},
-			expected:   []string{"./pkg", "-run", "TestX", "math", "-json"},
+			expected:   []string{"-json=false", "./pkg", "-run", "TestX", "math", "-json"},
+		},
+		{
+			name:       "JSON flag ends the package list",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-json", "./missing", "-json"},
+			expected:   []string{"./pkg", "-json=false", "./missing", "-json"},
+		},
+		{
+			name:       "JSON flag separates an unknown flag from its positional tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-custom", "-json", "positional", "-race"},
+			expected:   []string{"./pkg", "-custom", "-json=false", "positional", "-race"},
+		},
+		{
+			name:       "disables every JSON flag",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--json=true", "./missing"},
+			expected:   []string{"-json=false", "./pkg", "-json=false", "./missing"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, dropPlanIrrelevantFlags(tt.subcommand, tt.args))
+			assert.Equal(t, tt.expected, disableJSONOutput(tt.subcommand, tt.args))
 		})
 	}
 }
@@ -867,5 +893,24 @@ func TestFindGoSources(t *testing.T) {
 	require.Len(t, dep.Sources, 2)
 	for _, s := range dep.Sources {
 		assert.True(t, filepath.IsAbs(s), "source path must be absolute: %s", s)
+	}
+}
+
+func TestListBuildPlan_JSONPreservesPackageBoundary(t *testing.T) {
+	setupTestModule(t, []string{"a"})
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join("a", "main.go"), []byte("package a\n"), 0o644))
+	for _, flag := range []string{"-json", "--json", "-json=true", "-json=false"} {
+		t.Run(flag, func(t *testing.T) {
+			// ./missing is a test-binary argument. Loading it as a package would fail.
+			plan, planErr := listBuildPlan(t.Context(), subcmdTest, []string{"./a", flag, "./missing"})
+			require.NoError(t, planErr)
+			assert.Contains(t, strings.Join(plan, "\n"), "-p testmodule/a ")
+		})
 	}
 }

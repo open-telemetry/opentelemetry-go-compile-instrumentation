@@ -145,11 +145,6 @@ func isBuildContextBoolFlag(name string) bool {
 	}
 }
 
-// isPlanIrrelevantFlag reports whether name is stripped from the build plan dry-run command.
-func isPlanIrrelevantFlag(name string) bool {
-	return name == flagJSON
-}
-
 // flagName returns the flag name of arg in single-dash form, without a joined value.
 func flagName(arg string) string {
 	name, _, _ := strings.Cut(arg, "=")
