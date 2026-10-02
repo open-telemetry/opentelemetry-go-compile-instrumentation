@@ -238,6 +238,9 @@ func (ip *instrumentPhase) enterNestedResolution(added string) (func(), error) {
 		return nil, ex.Wrapf(err, "setting %s", util.EnvOtelcNestedResolving)
 	}
 	return func() {
+		// The variable name is fixed and valid, so this cannot meaningfully
+		// fail; if it did, a leaked chain can only cause a spurious cycle error
+		// later in this same process, never unbounded nesting.
 		if hadPrev {
 			_ = os.Setenv(util.EnvOtelcNestedResolving, prev)
 		} else {
@@ -259,6 +262,11 @@ func parseResolutionChain(s string) []resolution {
 	return chain
 }
 
+// encodeResolutionChain encodes chain as comma-separated "pkg>added" entries.
+// No escaping is needed: cmd/go rejects ",", ">", and spaces in import paths
+// ("malformed import path ... invalid char"), so the separators cannot occur
+// inside either field. Keep it that way rather than switching to an escaped
+// format such as JSON.
 func encodeResolutionChain(chain []resolution) string {
 	entries := make([]string, len(chain))
 	for i, r := range chain {
@@ -660,6 +668,12 @@ var executablePath = os.Executable
 // instrument compiles the same way and share this build's cache keys. Any
 // existing -toolexec was stripped at startup. Must only be called from the
 // real otelc binary, since os.Executable is what nested go commands will run.
+//
+// Nested mode assumes its go commands are `go list -export` spawned from
+// updateImportConfig: those run compile (instrumented), asm, cgo, and pack,
+// and answer -V=full probes, but never link or vet. A new go command spawned
+// during the instrumentation phase must be audited for the tools it runs
+// before it can rely on nested mode.
 func EnableNestedToolexec() error {
 	execPath, err := executablePath()
 	if err != nil {
