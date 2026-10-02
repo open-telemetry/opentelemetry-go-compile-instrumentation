@@ -423,7 +423,7 @@ func TestGetPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgs, err := getBuildPackages(t.Context(), subcmdBuild, tt.args)
+			pkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, tt.args)
 			if tt.expectError {
 				require.Error(t, err)
 			} else {
@@ -455,7 +455,7 @@ func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
 	))
 	t.Chdir(tmpDir)
 
-	pkgs, err := getBuildPackages(t.Context(), subcmdBuild, []string{"-C", "app", "."})
+	pkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, []string{"-C", "app", "."})
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	require.NotNil(t, pkgs[0].Module)
@@ -482,15 +482,66 @@ func TestGetBuildPackages_TestSubcommandIncludesTestOnlyImports(t *testing.T) {
 	))
 	t.Chdir(tmpDir)
 
-	buildPkgs, err := getBuildPackages(t.Context(), subcmdBuild, nil)
+	buildPkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, nil)
 	require.NoError(t, err)
 	assert.NotContains(t, pkgload.CollectPackageNames(buildPkgs), "unicode",
 		"a build must not resolve names for imports that only appear in _test.go files")
 
-	testPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
+	testBuildPkgs, testAllPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
 	require.NoError(t, err)
-	assert.Contains(t, pkgload.CollectPackageNames(testPkgs), "unicode",
+	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "unicode",
 		"otelc go test must resolve real names for imports that only appear in _test.go files")
+	for _, pkg := range testBuildPkgs {
+		assert.Empty(t, pkg.ForTest,
+			"the build packages of a test run must not contain test packages: %s", pkg.ID)
+	}
+}
+
+// TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage guards the
+// split of a test load. The external test package ("p_test [p.test]") must
+// only feed the name table: otelc.runtime.go for it would declare
+// "package p_test" next to "p.go" and fail the build with conflicting
+// package names.
+func TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "p.go"),
+		[]byte("package p\n\nfunc F() {}\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "p_ext_test.go"),
+		[]byte("package p_test\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {}\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	buildPkgs, allPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
+	require.NoError(t, err)
+
+	// Only the real package builds.
+	require.Len(t, buildPkgs, 1)
+	assert.Equal(t, "testmodule", buildPkgs[0].PkgPath)
+	assert.Equal(t, "p", buildPkgs[0].Name)
+	assert.Empty(t, buildPkgs[0].ForTest)
+
+	// The all-packages list still carries the test packages for the name table.
+	var externalTestPkg *packages.Package
+	for _, pkg := range allPkgs {
+		if pkg.Name == "p_test" {
+			externalTestPkg = pkg
+		}
+	}
+	require.NotNil(t, externalTestPkg,
+		"the all-packages list must keep the external test package: %v", extractPackageIDs(allPkgs))
+	assert.NotEmpty(t, externalTestPkg.ForTest)
+	assert.Len(t, allPkgs, len(buildPkgs)+2, // the variant and the synthesized test binary
+		"unexpected all-packages list: %v", extractPackageIDs(allPkgs))
 }
 
 func TestSplitBuildTargets(t *testing.T) {
@@ -1402,7 +1453,7 @@ func TestRuntimeImportPathUsesBuildFlags(t *testing.T) {
 			mustWriteFile(t, filepath.Join(moduleDir, "hooks", "hooks.go"), tt.hooksSrc)
 
 			args := tt.args(t, moduleDir)
-			pkgs, err := getBuildPackages(t.Context(), subcmdBuild, args)
+			pkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, args)
 			require.NoError(t, err)
 			require.Len(t, pkgs, 1)
 
@@ -1437,15 +1488,15 @@ func TestGetBuildPackages_LoadErrors(t *testing.T) {
 	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
 
 	// File targets with non-existent -C flag
-	_, err := getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "main.go"})
+	_, _, err := getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "main.go"})
 	require.Error(t, err)
 
 	// Package targets with non-existent -C flag
-	_, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "./pkg"})
+	_, _, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "./pkg"})
 	require.Error(t, err)
 
 	// Default targets with non-existent -C flag
-	_, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir})
+	_, _, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir})
 	require.Error(t, err)
 }
 

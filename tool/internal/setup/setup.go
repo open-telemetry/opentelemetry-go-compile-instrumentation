@@ -102,27 +102,36 @@ func lastFileTargetIndex(subcommand string, args []string) int {
 	return last
 }
 
-// getBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
 // getBuildPackages loads all packages from the otelc go build/install/test or otelc setup command arguments.
-// Returns a list of loaded packages. If no package patterns are found in args,
-// defaults to loading the current directory package.
+// If no package patterns are found in args, defaults to loading the current directory package.
 // subcommand is the go subcommand args from "build", "install", or "test".
 // The args parameter should be the go build/install/test command arguments (e.g., ["-a", "./cmd"]).
+// It returns two lists:
+//   - the build packages: the real packages the go command builds. A test load
+//     also returns test packages ("p [p.test]" variants, external "p_test"
+//     packages, and the synthesized "p.test" binaries). They are excluded,
+//     because otelc.runtime.go for one of them would declare "package p_test"
+//     next to "p.go" and fail the build.
+//   - all packages: the build packages plus those test packages. Only this list
+//     sees them, because they carry imports that only _test.go files use.
+//
 // Returns an error if package loading fails or if invalid patterns are provided.
 // For example:
 //   - args ["-a", "./cmd"] returns packages for "./cmd"
 //   - args ["-a", "cmd"] returns packages for the "cmd" package in the module
 //   - args ["-a", ".", "./cmd"] returns packages for both "." and "./cmd"
 //   - args [] returns packages for "."
-func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]*packages.Package, error) {
+func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]*packages.Package, []*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
+	// NeedForTest marks the test packages, so the loop below can split them
+	// from the real build packages.
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule |
-		packages.NeedImports | packages.NeedDeps
+		packages.NeedImports | packages.NeedDeps | packages.NeedForTest
 	tests := subcommand == subcmdTest
 
 	pkgTargets, fileTargets, err := splitBuildTargets(subcommand, args)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	buildFlags := extractBuildFlags(subcommand, args)
 
@@ -134,25 +143,36 @@ func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]
 	case len(fileTargets) > 0:
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
 		if loadErr != nil {
-			return nil, loadErr
+			return nil, nil, loadErr
 		}
 
 		if len(pkgs) > 1 {
-			return nil, ex.New("multiple packages found for file targets")
+			return nil, nil, ex.New("multiple packages found for file targets")
 		}
 	case len(pkgTargets) > 0:
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
 		if loadErr != nil {
-			return nil, loadErr
+			return nil, nil, loadErr
 		}
 	default:
 		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
 		if loadErr != nil {
-			return nil, loadErr
+			return nil, nil, loadErr
+		}
+	}
+
+	// A test load sets ForTest on every test package it adds. The synthesized
+	// test binaries ("p.test") have no marker of their own, but each one is the
+	// ForTest value of a test package plus a ".test" suffix.
+	testBinaries := make(map[string]bool, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg.ForTest != "" {
+			testBinaries[pkg.ForTest+".test"] = true
 		}
 	}
 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
+	allPkgs := make([]*packages.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		// file-based builds use synthetic "command-line-arguments" packages
 		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != pkgload.CommandLineArgumentsPackage) {
@@ -160,14 +180,17 @@ func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]
 			continue
 		}
 
-		buildPkgs = append(buildPkgs, pkg)
+		allPkgs = append(allPkgs, pkg)
+		if pkg.ForTest == "" && !testBinaries[pkg.ID] {
+			buildPkgs = append(buildPkgs, pkg)
+		}
 	}
 
 	if len(buildPkgs) == 0 {
-		return nil, ex.New("no valid packages found in build targets")
+		return nil, nil, ex.New("no valid packages found in build targets")
 	}
 
-	return buildPkgs, nil
+	return buildPkgs, allPkgs, nil
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
@@ -367,15 +390,17 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
-	pkgs, err := getBuildPackages(ctx, subcommand, args)
+	buildPkgs, allPkgs, err := getBuildPackages(ctx, subcommand, args)
 	if err != nil {
 		return err
 	}
-	sp.buildPackages = pkgs
-	sp.resolvedNames = pkgload.CollectPackageNames(pkgs)
+	// Only the real packages are built. The test packages still feed the name
+	// table, because they carry imports that only _test.go files use.
+	sp.buildPackages = buildPkgs
+	sp.resolvedNames = pkgload.CollectPackageNames(allPkgs)
 
 	// Find the module directories for the build packages
-	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, pkgs)
+	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, buildPkgs)
 	if findModErr != nil {
 		return findModErr
 	}
@@ -431,7 +456,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Generate otelc.runtime.go for all packages
-	if err = sp.generateRuntimePerPackage(ctx, pkgs, matched); err != nil {
+	if err = sp.generateRuntimePerPackage(ctx, buildPkgs, matched); err != nil {
 		return err
 	}
 
