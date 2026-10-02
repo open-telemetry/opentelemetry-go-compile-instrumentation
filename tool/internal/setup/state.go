@@ -77,6 +77,19 @@ func loadStateManager() (*stateManager, error) {
 	return s, nil
 }
 
+// checkInterruptedBuild prevents a new snapshot from replacing state left by
+// an interrupted build or standalone pin invocation.
+func checkInterruptedBuild() error {
+	previous, err := loadStateManager()
+	if err != nil {
+		return err
+	}
+	if previous != nil {
+		return ex.New("previous otelc invocation did not complete; run `otelc cleanup` before retrying")
+	}
+	return nil
+}
+
 type stateManagerKey struct{}
 
 // contextWithStateManager returns a copy of ctx containing s.

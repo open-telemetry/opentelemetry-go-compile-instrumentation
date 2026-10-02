@@ -6,8 +6,8 @@ rule schema reference, see [Instrumentation Rules](rules.md).
 
 ## Selecting Instrumentations
 
-By default, `otelc` applies all instrumentation rules from its embedded bundle to every
-dependency it finds in your module graph. This zero-configuration mode works well for
+By default, `otelc` selects instrumentation modules using its embedded manifest and loads
+their rules from a full source checkout. This zero-configuration mode works well for
 getting started: run `otelc go build` and all [supported libraries](getting-started.md#supported-libraries)
 are instrumented automatically.
 
@@ -57,8 +57,8 @@ OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
 3. **Module-local instrumentation selection** — an `otel.instrumentation.go` / `otelc.tool.go`
    tool file, or `otel.instrumentation.yml` / `otel.instrumentation.yaml` when no tool file exists
    in that module. See [External Configuration Sources](external-configuration.md).
-4. **Embedded defaults** — the instrumentation bundle built into `otelc`, applied when none of
-   the above are present.
+4. **Embedded defaults** — the instrumentation manifest built into `otelc`, applied to modules
+   without explicit selection. Rule files and code come from a full source checkout until #983.
 
 `OTELC_RULES` and `--rules` replace import-driven sources. A tool file takes precedence over YAML
 in the same module. Selections from participating modules are combined; modules without either

@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestLoad(t *testing.T) {
@@ -20,7 +22,7 @@ func TestLoad(t *testing.T) {
 		require.NotEmpty(t, entry.Target)
 	}
 	require.True(t, slices.IsSortedFunc(got, compareEntries))
-	require.Len(t, slices.Compact(slices.Clone(got)), len(got))
+	require.Len(t, slices.CompactFunc(slices.Clone(got), entriesEqual), len(got))
 }
 
 func TestLoadInvalidJSON(t *testing.T) {
@@ -32,8 +34,26 @@ func compareEntries(a, b Entry) int {
 	if cmp := strings.Compare(a.ModulePath, b.ModulePath); cmp != 0 {
 		return cmp
 	}
-	if cmp := strings.Compare(a.Target, b.Target); cmp != 0 {
+	if cmp := strings.Compare(a.Target.String(), b.Target.String()); cmp != 0 {
 		return cmp
 	}
 	return strings.Compare(a.VersionRange, b.VersionRange)
+}
+
+func entriesEqual(a, b Entry) bool {
+	return a.ModulePath == b.ModulePath &&
+		slices.Equal(a.Target.Include, b.Target.Include) &&
+		slices.Equal(a.Target.Exclude, b.Target.Exclude) &&
+		a.VersionRange == b.VersionRange
+}
+
+func TestLoadTargetList(t *testing.T) {
+	got, err := load([]byte(`[
+		{"modulePath":"example.com/instrumentation","target":["example.com/**",{"not":"example.com/mock"}]}
+	]`))
+	require.NoError(t, err)
+	require.Equal(t, rule.Target{
+		Include: []string{"example.com/**"},
+		Exclude: []string{"example.com/mock"},
+	}, got[0].Target)
 }

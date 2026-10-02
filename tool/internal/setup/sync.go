@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
@@ -25,6 +26,23 @@ const (
 	envOtelcSourceRoot = "OTELC_SOURCE_ROOT"
 	goSumFileName      = "go.sum"
 )
+
+type pinSourceRootKey struct{}
+
+type pinSourceRootCache struct {
+	once sync.Once
+	root string
+	err  error
+}
+
+func pinSourceRoot(ctx context.Context) (string, error) {
+	cache, ok := ctx.Value(pinSourceRootKey{}).(*pinSourceRootCache)
+	if !ok {
+		return repositorySourceRoot()
+	}
+	cache.once.Do(func() { cache.root, cache.err = repositorySourceRoot() })
+	return cache.root, cache.err
+}
 
 func repositorySourceRoot() (string, error) {
 	root := os.Getenv(envOtelcSourceRoot)
@@ -233,7 +251,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	if len(modPaths) == 0 {
 		return nil
 	}
-	sourceRoot, err := repositorySourceRoot()
+	sourceRoot, err := pinSourceRoot(ctx)
 	if err != nil {
 		return err
 	}

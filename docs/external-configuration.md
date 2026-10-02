@@ -24,7 +24,8 @@ reference. This document is the authoritative protocol specification.
 
 ## Overview
 
-By default, `otelc` instruments every dependency it finds using its embedded rule bundle.
+By default, `otelc` selects instrumentation using its embedded manifest and resolves the
+corresponding rules from a full source checkout (temporary until #983).
 This all-or-nothing model works for getting started, but it does not give you reproducible
 builds: adding a new version of `otelc` may silently change which libraries get instrumented.
 
@@ -46,6 +47,15 @@ dependencies after the build. Standalone `otelc pin --prune` removes invalid imp
 does not leave a generated tool file or track its instrumentation dependencies in `go.mod`. A tool
 file takes precedence when both formats exist in the same module. Selections from different modules
 are combined.
+
+An explicitly empty `instrumentations: []` selects no instrumentations for that module; it does
+not fall back to the embedded defaults. YAML files currently accept only the `instrumentations`
+key. Unknown fields are rejected, so future schema extensions require an explicitly versioned
+format rather than silently changing how older binaries interpret these files.
+
+`otelc pin --prune` leaves YAML byte-identical when there is nothing to prune. When removing
+invalid entries it retains other entries and YAML comments through a syntax-tree edit; formatting
+of the rewritten file may change. If a pin is interrupted, run `otelc cleanup` before retrying.
 
 This approach mirrors how [DataDog Orchestrion](https://github.com/DataDog/orchestrion)
 manages its instrumentation configuration with `orchestrion.tool.go`, and it realizes the
@@ -192,6 +202,19 @@ Within a module, a tool file takes precedence over instrumentation YAML. Import-
 from participating modules are combined.
 
 ## Errors and Diagnostics
+
+**Both YAML filename variants present.** Keep only one of `otel.instrumentation.yml` and
+`otel.instrumentation.yaml` in each module.
+
+**YAML and a tool file in the same module.** The tool file wins; YAML edits have no effect until
+the tool file is removed. An empty YAML list intentionally disables inferred defaults.
+
+**Invalid YAML selection.** Use one mapping with an `instrumentations` list of non-empty import
+paths. Unknown keys, multiple non-empty documents, and non-mapping content are rejected; a final
+empty `---` separator is allowed.
+
+**Source checkout not found.** Set `OTELC_SOURCE_ROOT` to a full checkout matching the running
+`otelc` version; see [Troubleshooting](troubleshooting.md#source-checkout-not-found).
 
 **Both config file names present in the same module.** Only one is allowed. Remove
 `otelc.tool.go` and keep `otel.instrumentation.go`.

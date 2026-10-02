@@ -40,16 +40,16 @@ var commandGo = cli.Command{
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandPin = cli.Command{
 	Name:        "pin",
-	Description: "Generate or update otel.instrumentation.go to pin instrumentation packages for the current module.",
+	Description: "Pin instrumentation packages using otel.instrumentation.go or otel.instrumentation.yml.",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
 			Name:  "prune",
-			Usage: "Prune invalid imports within otel.instrumentation.go",
+			Usage: "Prune invalid imports from the tool file or instrumentation YAML",
 			Value: true,
 		},
 		&cli.BoolFlag{
 			Name:  "validate",
-			Usage: "Validate that all imports in otel.instrumentation.go contain valid rules",
+			Usage: "Validate that selected instrumentation packages contain valid rules",
 			Value: false,
 		},
 		&cli.BoolFlag{

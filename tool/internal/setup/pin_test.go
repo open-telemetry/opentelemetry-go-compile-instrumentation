@@ -329,6 +329,12 @@ func TestLoadOtelYAMLImports(t *testing.T) {
 	imports, err := loadOtelYAMLImports(path)
 	require.NoError(t, err)
 	require.Equal(t, map[string]bool{"example.com/foo": true, "example.com/bar": true}, imports)
+	for _, suffix := range []string{"---\n", "---\n# trailing comment\n"} {
+		require.NoError(t, os.WriteFile(path, []byte("instrumentations: [example.com/foo]\n"+suffix), 0o644))
+		imports, err = loadOtelYAMLImports(path)
+		require.NoError(t, err)
+		require.Equal(t, map[string]bool{"example.com/foo": true}, imports)
+	}
 
 	require.NoError(t, os.WriteFile(path, []byte("unknown: true\n"), 0o644))
 	_, err = loadOtelYAMLImports(path)
@@ -348,6 +354,8 @@ func TestLoadOtelYAMLImports(t *testing.T) {
 	}{
 		{name: "malformed", contents: "instrumentations: [", want: "parsing"},
 		{name: "multiple documents", contents: "instrumentations: []\n---\ninstrumentations: []\n", want: "multiple YAML documents"},
+		{name: "empty mapping document", contents: "instrumentations: []\n---\n{}\n", want: "multiple YAML documents"},
+		{name: "nonempty third document", contents: "instrumentations: []\n---\n---\nfoo\n", want: "multiple YAML documents"},
 		{name: "malformed second document", contents: "instrumentations: []\n---\n[", want: "parsing"},
 		{name: "empty import", contents: "instrumentations:\n  - '  '\n", want: "must not contain empty import paths"},
 	} {
@@ -364,15 +372,14 @@ func TestLoadOtelYAMLImports(t *testing.T) {
 
 func TestWriteOtelYAMLImports(t *testing.T) {
 	path := filepath.Join(t.TempDir(), instrumentationYAMLCanonical)
-	require.NoError(t, os.WriteFile(path, nil, 0o640))
+	require.NoError(t, os.WriteFile(path, []byte("instrumentations:\n  - example.com/z\n  - example.com/a\n"), 0o640))
 	require.NoError(t, writeOtelYAMLImports(path, map[string]bool{
-		"example.com/z": true,
 		"example.com/a": true,
 	}))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Equal(t, "instrumentations:\n    - example.com/a\n    - example.com/z\n", string(data))
+	require.Equal(t, "instrumentations:\n    - example.com/a\n", string(data))
 	if runtime.GOOS != "windows" {
 		info, statErr := os.Stat(path)
 		require.NoError(t, statErr)
@@ -380,7 +387,31 @@ func TestWriteOtelYAMLImports(t *testing.T) {
 	}
 
 	err = writeOtelYAMLImports(filepath.Join(t.TempDir(), "missing", "config.yml"), nil)
-	require.ErrorContains(t, err, "stating")
+	require.ErrorContains(t, err, "reading")
+}
+
+func TestPruneYAMLPreservesCommentsAndNoopBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), instrumentationYAMLCanonical)
+	original := []byte(
+		"# selection notes\ninstrumentations:\n  - 'example.com/keep' # keep this\n  - example.com/remove\n",
+	)
+	require.NoError(t, os.WriteFile(path, original, 0o644))
+	state := yamlPinState{config: modulePinConfig{yamlFile: path}, imports: map[string]bool{
+		"example.com/keep": true, "example.com/remove": true,
+	}}
+	require.NoError(t, finalizeStandaloneYAML([]yamlPinState{state}, PinOptions{Prune: true}, newStateManager()))
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, original, got)
+
+	state.pruned = true
+	delete(state.imports, "example.com/remove")
+	require.NoError(t, finalizeStandaloneYAML([]yamlPinState{state}, PinOptions{Prune: true}, newStateManager()))
+	got, err = os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(got), "# selection notes")
+	require.Contains(t, string(got), "'example.com/keep' # keep this")
+	require.NotContains(t, string(got), "example.com/remove")
 }
 
 func TestYAMLStateManager(t *testing.T) {
@@ -440,6 +471,7 @@ func TestProcessYAMLConfigsRequiresStateManagerForAutoPin(t *testing.T) {
 }
 
 func TestProcessYAMLConfigsLoadError(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	err := processYAMLConfigs(t.Context(), []modulePinConfig{{
 		yamlFile: filepath.Join(t.TempDir(), "missing.yml"),
 	}}, PinOptions{})
@@ -461,6 +493,7 @@ func TestFinalizeAutoPinYAMLTidyErrorRevertsToolFile(t *testing.T) {
 		config:   modulePinConfig{moduleDir: moduleDir},
 		imports:  map[string]bool{"example.com/instrumentation": true},
 		toolFile: toolFile,
+		pruned:   true,
 	}}, PinOptions{}, manager)
 	require.ErrorContains(t, err, "running go mod tidy")
 	require.NoFileExists(t, toolFile)
@@ -479,6 +512,7 @@ func TestFinalizeAutoPinYAMLWritesPrunedToolFile(t *testing.T) {
 		config:   modulePinConfig{moduleDir: moduleDir},
 		imports:  map[string]bool{},
 		toolFile: toolFile,
+		pruned:   true,
 	}}, PinOptions{}, newStateManager())
 	require.NoError(t, err)
 
@@ -500,8 +534,9 @@ func TestFinalizeStandaloneYAMLWriteError(t *testing.T) {
 
 	err := finalizeStandaloneYAML([]yamlPinState{{
 		config: modulePinConfig{yamlFile: filepath.Join(tmp, "missing.yml")},
+		pruned: true,
 	}}, PinOptions{Prune: true}, manager)
-	require.ErrorContains(t, err, "stating")
+	require.ErrorContains(t, err, "reading")
 	require.NoFileExists(t, generated)
 }
 
@@ -886,6 +921,33 @@ replace example.com/invalid => %s
 	require.NotContains(t, string(toolData), "example.com/invalid")
 }
 
+func TestAutoPinEmptyYAMLSuppressesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/app\n\ngo 1.25\n"), 0o644))
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(dir, "main.go"),
+			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
+			0o644,
+		),
+	)
+	yamlFile := filepath.Join(dir, instrumentationYAMLCanonical)
+	original := []byte("# deliberately disabled\ninstrumentations: []\n")
+	require.NoError(t, os.WriteFile(yamlFile, original, 0o644))
+	ctx := contextWithStateManager(t.Context(), newStateManager())
+	_, err := autoPin(ctx, map[string]bool{dir: true}, subcmdBuild, []string{"."})
+	require.NoError(t, err)
+	toolFile, err := os.ReadFile(filepath.Join(dir, toolFileCanonical))
+	require.NoError(t, err)
+	require.NotContains(t, string(toolFile), "go.opentelemetry.io/otelc/instrumentation/net/http")
+	require.NotContains(t, string(toolFile), "import (")
+	got, err := os.ReadFile(yamlFile)
+	require.NoError(t, err)
+	require.Equal(t, original, got)
+}
+
 func TestEnsureOtelcRequire(t *testing.T) {
 	const testVersion = "v1.2.3"
 
@@ -1030,7 +1092,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: manifest.Manifest{{
 				ModulePath:   "example.com/instrumentation/foo",
-				Target:       "example.com/foo",
+				Target:       rule.NewTarget("example.com/foo"),
 				VersionRange: "v1.2.3",
 			}},
 			want: map[string]bool{
@@ -1047,7 +1109,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: manifest.Manifest{{
 				ModulePath:   "example.com/instrumentation/bar",
-				Target:       "example.com/bar",
+				Target:       rule.NewTarget("example.com/bar"),
 				VersionRange: "v1.2.3",
 			}},
 			want: map[string]bool{},
@@ -1062,7 +1124,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: manifest.Manifest{{
 				ModulePath:   "example.com/instrumentation/foo",
-				Target:       "example.com/foo",
+				Target:       rule.NewTarget("example.com/foo"),
 				VersionRange: "v1.2.4",
 			}},
 			want: map[string]bool{},
@@ -1077,7 +1139,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: manifest.Manifest{{
 				ModulePath:   "example.com/instrumentation/foo",
-				Target:       "example.com/foo",
+				Target:       rule.NewTarget("example.com/foo"),
 				VersionRange: "v1.0.0",
 			}},
 			want: map[string]bool{},
@@ -1092,7 +1154,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: manifest.Manifest{{
 				ModulePath:   "example.com/instrumentation/foo",
-				Target:       "example.com/foo",
+				Target:       rule.NewTarget("example.com/foo"),
 				VersionRange: "",
 			}},
 			want: map[string]bool{
@@ -1109,7 +1171,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: manifest.Manifest{{
 				ModulePath:   "example.com/instrumentation/foo",
-				Target:       "example.com/*",
+				Target:       rule.NewTarget("example.com/*"),
 				VersionRange: "v1.2.3",
 			}},
 			want: map[string]bool{
@@ -1126,7 +1188,7 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: manifest.Manifest{{
 				ModulePath:   "example.com/instrumentation/foo",
-				Target:       "example.com/*",
+				Target:       rule.NewTarget("example.com/*"),
 				VersionRange: "v1.2.3",
 			}},
 			want: map[string]bool{},
@@ -1140,11 +1202,41 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 			rules: manifest.Manifest{{
 				ModulePath: "example.com/instrumentation/foo",
-				Target:     rule.TargetRoot,
+				Target:     rule.NewTarget(rule.TargetRoot),
 			}},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
 			},
+		},
+		{
+			name: "target list including root",
+			deps: []*Dependency{{ImportPath: "example.com/foo"}},
+			rules: manifest.Manifest{{
+				ModulePath: "example.com/instrumentation/foo",
+				Target:     rule.NewTarget(rule.TargetRoot, "main"),
+			}},
+			want: map[string]bool{"example.com/instrumentation/foo": true},
+		},
+		{
+			name: "target list",
+			deps: []*Dependency{{ImportPath: "example.com/bar"}},
+			rules: manifest.Manifest{{
+				ModulePath: "example.com/instrumentation/foo",
+				Target:     rule.NewTarget("example.com/foo", "example.com/bar"),
+			}},
+			want: map[string]bool{"example.com/instrumentation/foo": true},
+		},
+		{
+			name: "target list excluding the dependency",
+			deps: []*Dependency{{ImportPath: "example.com/foo/mock"}},
+			rules: manifest.Manifest{{
+				ModulePath: "example.com/instrumentation/foo",
+				Target: rule.Target{
+					Include: []string{"example.com/foo/**"},
+					Exclude: []string{"example.com/foo/mock"},
+				},
+			}},
+			want: map[string]bool{},
 		},
 		{
 			name: "multiple matches",
@@ -1161,12 +1253,12 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			rules: manifest.Manifest{
 				{
 					ModulePath:   "example.com/instrumentation/foo",
-					Target:       "example.com/foo",
+					Target:       rule.NewTarget("example.com/foo"),
 					VersionRange: "v1.0.0",
 				},
 				{
 					ModulePath:   "example.com/instrumentation/bar",
-					Target:       "example.com/bar",
+					Target:       rule.NewTarget("example.com/bar"),
 					VersionRange: "v2.0.0",
 				},
 			},
@@ -1182,8 +1274,8 @@ func TestMatchInstrumentationImports(t *testing.T) {
 				Version:    "v1.0.0",
 			}},
 			rules: manifest.Manifest{
-				{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo"},
-				{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo"},
+				{ModulePath: "example.com/instrumentation/foo", Target: rule.NewTarget("example.com/foo")},
+				{ModulePath: "example.com/instrumentation/foo", Target: rule.NewTarget("example.com/foo")},
 			},
 			want: map[string]bool{
 				"example.com/instrumentation/foo": true,
@@ -1205,7 +1297,7 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 		}}
 		rules := manifest.Manifest{{
 			ModulePath:   "example.com/instrumentation/foo",
-			Target:       "example.com/foo",
+			Target:       rule.NewTarget("example.com/foo"),
 			VersionRange: "v1.0.0",
 		}}
 
@@ -1231,8 +1323,12 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 			{ImportPath: "example.com/foo/v1/sub", Version: "v1.0.0"},
 		}
 		rules := manifest.Manifest{
-			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo/v1", VersionRange: "v1.0.0"},
-			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo/v1/sub"},
+			{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       rule.NewTarget("example.com/foo/v1"),
+				VersionRange: "v1.0.0",
+			},
+			{ModulePath: "example.com/instrumentation/foo", Target: rule.NewTarget("example.com/foo/v1/sub")},
 		}
 
 		var warned bool
@@ -1252,8 +1348,16 @@ func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 			Version:    "",
 		}}
 		rules := manifest.Manifest{
-			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo", VersionRange: "v1.0.0"},
-			{ModulePath: "example.com/instrumentation/foo", Target: "example.com/foo", VersionRange: "v2.0.0"},
+			{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       rule.NewTarget("example.com/foo"),
+				VersionRange: "v1.0.0",
+			},
+			{
+				ModulePath:   "example.com/instrumentation/foo",
+				Target:       rule.NewTarget("example.com/foo"),
+				VersionRange: "v2.0.0",
+			},
 		}
 
 		warnCount := 0
@@ -1328,6 +1432,72 @@ func TestUpdateToolFile_ParseError(t *testing.T) {
 	)
 
 	require.Error(t, err)
+}
+
+func TestUpdateToolFileSteadyStateSkipsTidy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.25\n"), 0o644),
+	)
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+	enabled := true
+	opts := PinOptions{Prune: true, Generate: &enabled}
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), logger)
+	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
+	require.Contains(t, logs.String(), skipTidyMessage)
+	logs.Reset()
+	require.NoError(t, updateToolFile(ctx, toolFile, map[string]bool{"fmt": true}, opts))
+	require.NotContains(t, logs.String(), skipTidyMessage)
+}
+
+func TestUpdateToolFileMissingGoSumRunsTidy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.25\n"), 0o644),
+	)
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, "fmt")
+	enabled := true
+	opts := PinOptions{Prune: true, Generate: &enabled}
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, opts))
+	sum := filepath.Join(dir, "go.sum")
+	require.NoError(t, os.Remove(sum))
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := util.ContextWithLogger(t.Context(), logger)
+	require.NoError(t, updateToolFile(ctx, toolFile, nil, opts))
+	require.NotContains(t, logs.String(), skipTidyMessage)
+	require.FileExists(t, sum)
+}
+
+func TestEnsureOtelcRequireDevVersionReportsMissingRequire(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, goModFileName), []byte(
+		"module example.com/test\n\ngo 1.25\n\ntool go.opentelemetry.io/otelc/tool/cmd/otelc\n",
+	), 0o644))
+	for _, version := range []string{"v0.0.0", "v0.0.0-20260101000000-000000000000", "(devel)"} {
+		t.Run(version, func(t *testing.T) {
+			modified, err := ensureOtelcRequire(dir, version)
+			require.NoError(t, err)
+			require.True(t, modified, "a missing require must still trigger go mod tidy")
+		})
+	}
+}
+
+func TestUpdateToolFileReadAndParseErrors(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, toolFileCanonical)
+	require.ErrorIs(t, updateToolFile(t.Context(), missing, nil, PinOptions{}), os.ErrNotExist)
+	require.NoError(t, os.WriteFile(missing, []byte("not go"), 0o644))
+	require.ErrorContains(t, updateToolFile(t.Context(), missing, nil, PinOptions{}), "failed to parse file")
 }
 
 func TestUpdateToolFile_EnsureRequireError(t *testing.T) {
@@ -1504,6 +1674,27 @@ import "fmt"
 func main() {
 	fmt.Println("Hello, World")
 }
+
+func TestGeneratePinnedProjectsSecondModuleFailure(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	repositoryDir, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+	t.Chdir(root)
+	first := filepath.Join(root, "a")
+	second := filepath.Join(root, "z")
+	require.NoError(t, os.MkdirAll(first, 0o755))
+	require.NoError(t, os.MkdirAll(second, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/test\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(first, "go.mod"), []byte("module example.com/first\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(second, "go.mod"), []byte("invalid go.mod"), 0o644))
+	_, err = generatePinnedProjects(t.Context(), map[string]bool{first: true, second: true}, PinOptions{Args: []string{"."}})
+	require.Error(t, err)
+	require.FileExists(t, filepath.Join(first, toolFileCanonical), "the first module was already materialized")
+	require.FileExists(t, filepath.Join(second, toolFileCanonical), "the second write precedes go.mod validation")
+}
 `),
 		0o644,
 	))
@@ -1596,6 +1787,7 @@ func TestPinLocked_UpdatesExistingToolFile(t *testing.T) {
 	// straight to updating the existing tool file. A dependency that turns out
 	// not to be an instrumentation package must be pruned from it.
 	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
 
 	toolFile := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
 		"example.com/notinstrumentation": filepath.Join(tmp, "notinstrumentation"),
