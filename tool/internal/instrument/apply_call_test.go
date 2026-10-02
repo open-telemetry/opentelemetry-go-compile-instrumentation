@@ -345,7 +345,10 @@ traced.Call({{ $ctx }}, {{ .CallArgument 0 }})
 	t.Run("context.Context argument present builds a new call", func(t *testing.T) {
 		root := parseFile(t, `package main
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 func Run(ctx context.Context) {
 	http.Get("url")
@@ -401,7 +404,10 @@ func Run(name string) {
 	t.Run("correctly add the import", func(t *testing.T) {
 		root := parseFile(t, `package main
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 func Run(ctx context.Context) {
 	http.Get("url")
@@ -435,7 +441,10 @@ func Run(name string) {
 	t.Run("multiple call sites", func(t *testing.T) {
 		root := parseFile(t, `package main
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 func WithContext(ctx context.Context) {
 	http.Get("url")
