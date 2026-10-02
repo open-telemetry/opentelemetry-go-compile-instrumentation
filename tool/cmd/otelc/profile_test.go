@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package profile
+package main
 
 import (
 	"context"
@@ -22,38 +22,38 @@ func TestParseTypes(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   string
-		want    []Type
+		want    []profileType
 		wantErr string
 	}{
 		{
 			name:  "single cpu",
 			input: "cpu",
-			want:  []Type{typeCPU},
+			want:  []profileType{profileTypeCPU},
 		},
 		{
 			name:  "single heap",
 			input: "heap",
-			want:  []Type{typeHeap},
+			want:  []profileType{profileTypeHeap},
 		},
 		{
 			name:  "single trace",
 			input: "trace",
-			want:  []Type{typeTrace},
+			want:  []profileType{profileTypeTrace},
 		},
 		{
 			name:  "all three",
 			input: "cpu,heap,trace",
-			want:  []Type{typeCPU, typeHeap, typeTrace},
+			want:  []profileType{profileTypeCPU, profileTypeHeap, profileTypeTrace},
 		},
 		{
 			name:  "spaces around entries trimmed",
 			input: "cpu, heap",
-			want:  []Type{typeCPU, typeHeap},
+			want:  []profileType{profileTypeCPU, profileTypeHeap},
 		},
 		{
 			name:  "leading and trailing whitespace",
 			input: "  cpu,heap  ",
-			want:  []Type{typeCPU, typeHeap},
+			want:  []profileType{profileTypeCPU, profileTypeHeap},
 		},
 		{
 			name:  "empty string",
@@ -84,23 +84,28 @@ func TestParseTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseTypes(tt.input)
+			got, err := parseProfileTypes(tt.input)
 
 			if tt.wantErr != "" {
 				if err == nil {
-					t.Fatalf("ParseTypes(%q) = nil error, want error containing %q", tt.input, tt.wantErr)
+					t.Fatalf("parseProfileTypes(%q) = nil error, want error containing %q", tt.input, tt.wantErr)
 				}
 				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("ParseTypes(%q) error = %q, want it to contain %q", tt.input, err.Error(), tt.wantErr)
+					t.Fatalf(
+						"parseProfileTypes(%q) error = %q, want it to contain %q",
+						tt.input,
+						err.Error(),
+						tt.wantErr,
+					)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("ParseTypes(%q) unexpected error: %v", tt.input, err)
+				t.Fatalf("parseProfileTypes(%q) unexpected error: %v", tt.input, err)
 			}
 			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("ParseTypes(%q) mismatch (-want +got):\n%s", tt.input, diff)
+				t.Errorf("parseProfileTypes(%q) mismatch (-want +got):\n%s", tt.input, diff)
 			}
 		})
 	}
@@ -109,13 +114,13 @@ func TestParseTypes(t *testing.T) {
 func TestStartStopCPU(t *testing.T) {
 	dir := t.TempDir()
 
-	s, err := Start(dir, []Type{typeCPU})
+	s, err := startProfileSession(dir, []profileType{profileTypeCPU})
 	if err != nil {
-		t.Fatalf("Start() error: %v", err)
+		t.Fatalf("startProfileSession() error: %v", err)
 	}
 
-	if stopErr := s.Stop(); stopErr != nil {
-		t.Fatalf("Stop() error: %v", stopErr)
+	if stopErr := s.stop(); stopErr != nil {
+		t.Fatalf("stop() error: %v", stopErr)
 	}
 
 	path := filepath.Join(dir, fmt.Sprintf("otelc-cpu-%d.pprof", os.Getpid()))
@@ -125,13 +130,13 @@ func TestStartStopCPU(t *testing.T) {
 func TestStartStopHeap(t *testing.T) {
 	dir := t.TempDir()
 
-	s, err := Start(dir, []Type{typeHeap})
+	s, err := startProfileSession(dir, []profileType{profileTypeHeap})
 	if err != nil {
-		t.Fatalf("Start() error: %v", err)
+		t.Fatalf("startProfileSession() error: %v", err)
 	}
 
-	if stopErr := s.Stop(); stopErr != nil {
-		t.Fatalf("Stop() error: %v", stopErr)
+	if stopErr := s.stop(); stopErr != nil {
+		t.Fatalf("stop() error: %v", stopErr)
 	}
 
 	path := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
@@ -141,13 +146,13 @@ func TestStartStopHeap(t *testing.T) {
 func TestStartStopTrace(t *testing.T) {
 	dir := t.TempDir()
 
-	s, err := Start(dir, []Type{typeTrace})
+	s, err := startProfileSession(dir, []profileType{profileTypeTrace})
 	if err != nil {
-		t.Fatalf("Start() error: %v", err)
+		t.Fatalf("startProfileSession() error: %v", err)
 	}
 
-	if stopErr := s.Stop(); stopErr != nil {
-		t.Fatalf("Stop() error: %v", stopErr)
+	if stopErr := s.stop(); stopErr != nil {
+		t.Fatalf("stop() error: %v", stopErr)
 	}
 
 	path := filepath.Join(dir, fmt.Sprintf("otelc-%d.trace", os.Getpid()))
@@ -158,13 +163,13 @@ func TestStartStopAll(t *testing.T) {
 	dir := t.TempDir()
 	pid := os.Getpid()
 
-	s, err := Start(dir, []Type{typeCPU, typeHeap, typeTrace})
+	s, err := startProfileSession(dir, []profileType{profileTypeCPU, profileTypeHeap, profileTypeTrace})
 	if err != nil {
-		t.Fatalf("Start() error: %v", err)
+		t.Fatalf("startProfileSession() error: %v", err)
 	}
 
-	if stopErr := s.Stop(); stopErr != nil {
-		t.Fatalf("Stop() error: %v", stopErr)
+	if stopErr := s.stop(); stopErr != nil {
+		t.Fatalf("stop() error: %v", stopErr)
 	}
 
 	assertFileExists(t, filepath.Join(dir, fmt.Sprintf("otelc-cpu-%d.pprof", pid)))
@@ -173,9 +178,9 @@ func TestStartStopAll(t *testing.T) {
 }
 
 func TestStopNilSession(t *testing.T) {
-	var s *Session
-	if err := s.Stop(); err != nil {
-		t.Errorf("Stop() on nil session returned error: %v", err)
+	var s *profileSession
+	if err := s.stop(); err != nil {
+		t.Errorf("stop() on nil session returned error: %v", err)
 	}
 }
 
@@ -183,18 +188,18 @@ func TestStartCreatesDirectory(t *testing.T) {
 	base := t.TempDir()
 	dir := filepath.Join(base, "nested", "profile", "dir")
 
-	s, err := Start(dir, []Type{typeHeap})
+	s, err := startProfileSession(dir, []profileType{profileTypeHeap})
 	if err != nil {
-		t.Fatalf("Start() error: %v", err)
+		t.Fatalf("startProfileSession() error: %v", err)
 	}
 	t.Cleanup(func() {
-		if stopErr := s.Stop(); stopErr != nil {
-			t.Errorf("Stop() cleanup error: %v", stopErr)
+		if stopErr := s.stop(); stopErr != nil {
+			t.Errorf("stop() cleanup error: %v", stopErr)
 		}
 	})
 
 	if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
-		t.Errorf("Start() did not create directory %q", dir)
+		t.Errorf("startProfileSession() did not create directory %q", dir)
 	}
 }
 
@@ -206,9 +211,9 @@ func TestStartInvalidDir(t *testing.T) {
 	}
 	_ = f.Close()
 
-	_, err := Start(filepath.Join(f.Name(), "subdir"), []Type{typeHeap})
+	_, err := startProfileSession(filepath.Join(f.Name(), "subdir"), []profileType{profileTypeHeap})
 	if err == nil {
-		t.Fatal("Start() with invalid dir returned nil error, want error")
+		t.Fatal("startProfileSession() with invalid dir returned nil error, want error")
 	}
 }
 
@@ -216,18 +221,18 @@ func TestMerge(t *testing.T) {
 	dir := t.TempDir()
 
 	// Produce a real PID-stamped heap profile to merge.
-	s, err := Start(dir, []Type{typeHeap})
+	s, err := startProfileSession(dir, []profileType{profileTypeHeap})
 	if err != nil {
-		t.Fatalf("Start() error: %v", err)
+		t.Fatalf("startProfileSession() error: %v", err)
 	}
-	if stopErr := s.Stop(); stopErr != nil {
-		t.Fatalf("Stop() error: %v", stopErr)
+	if stopErr := s.stop(); stopErr != nil {
+		t.Fatalf("stop() error: %v", stopErr)
 	}
 	pidFile := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
 	assertFileExists(t, pidFile)
 
-	if mergeErr := Merge(context.Background(), dir, []Type{typeHeap}); mergeErr != nil {
-		t.Fatalf("Merge() error: %v", mergeErr)
+	if mergeErr := mergeProfiles(context.Background(), dir, []profileType{profileTypeHeap}); mergeErr != nil {
+		t.Fatalf("mergeProfiles() error: %v", mergeErr)
 	}
 
 	// The merged file is written and the PID-stamped input is removed.
@@ -240,20 +245,24 @@ func TestMerge(t *testing.T) {
 func TestMergeTraceSkipped(t *testing.T) {
 	dir := t.TempDir()
 
-	// typeTrace profiles cannot be merged, so Merge is a no-op for them and must not
+	// profileTypeTrace profiles cannot be merged, so mergeProfiles is a no-op for them and must not
 	// create a merged trace file.
-	if err := Merge(context.Background(), dir, []Type{typeTrace}); err != nil {
-		t.Fatalf("Merge() error: %v", err)
+	if err := mergeProfiles(context.Background(), dir, []profileType{profileTypeTrace}); err != nil {
+		t.Fatalf("mergeProfiles() error: %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "otelc-trace.pprof")); !os.IsNotExist(statErr) {
-		t.Error("Merge() must not create a merged trace file")
+		t.Error("mergeProfiles() must not create a merged trace file")
 	}
 }
 
 func TestMergeNoFiles(t *testing.T) {
-	// With no matching profile files present, Merge succeeds without writing anything.
-	if err := Merge(context.Background(), t.TempDir(), []Type{typeHeap, typeCPU}); err != nil {
-		t.Fatalf("Merge() error: %v", err)
+	// With no matching profile files present, mergeProfiles succeeds without writing anything.
+	if err := mergeProfiles(
+		context.Background(),
+		t.TempDir(),
+		[]profileType{profileTypeHeap, profileTypeCPU},
+	); err != nil {
+		t.Fatalf("mergeProfiles() error: %v", err)
 	}
 }
 
@@ -280,7 +289,7 @@ func TestStartCPUCreateFileError(t *testing.T) {
 	path := filepath.Join(dir, fmt.Sprintf("otelc-cpu-%d.pprof", os.Getpid()))
 	require.NoError(t, os.Mkdir(path, 0o755))
 
-	_, err := Start(dir, []Type{typeCPU})
+	_, err := startProfileSession(dir, []profileType{profileTypeCPU})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create CPU profile")
 }
@@ -293,7 +302,7 @@ func TestStartCPUProfileAlreadyRunning(t *testing.T) {
 	require.NoError(t, pprof.StartCPUProfile(f))
 	defer pprof.StopCPUProfile()
 
-	_, err = Start(dir, []Type{typeCPU})
+	_, err = startProfileSession(dir, []profileType{profileTypeCPU})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "start CPU profile")
 }
@@ -303,7 +312,7 @@ func TestStartTraceCreateFileError(t *testing.T) {
 	path := filepath.Join(dir, fmt.Sprintf("otelc-%d.trace", os.Getpid()))
 	require.NoError(t, os.Mkdir(path, 0o755))
 
-	_, err := Start(dir, []Type{typeTrace})
+	_, err := startProfileSession(dir, []profileType{profileTypeTrace})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create trace file")
 }
@@ -316,37 +325,37 @@ func TestStartTraceAlreadyRunning(t *testing.T) {
 	require.NoError(t, trace.Start(f))
 	defer trace.Stop()
 
-	_, err = Start(dir, []Type{typeTrace})
+	_, err = startProfileSession(dir, []profileType{profileTypeTrace})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "start execution trace")
 }
 
 func TestStopCPUCloseError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{typeCPU})
+	s, err := startProfileSession(dir, []profileType{profileTypeCPU})
 	require.NoError(t, err)
 	require.NotNil(t, s.cpuFile)
 	require.NoError(t, s.cpuFile.Close())
 
-	stopErr := s.Stop()
+	stopErr := s.stop()
 	require.Error(t, stopErr)
 	require.ErrorContains(t, stopErr, "close CPU profile")
 }
 
 func TestStopTraceCloseError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{typeTrace})
+	s, err := startProfileSession(dir, []profileType{profileTypeTrace})
 	require.NoError(t, err)
 	require.NotNil(t, s.traceFile)
 	require.NoError(t, s.traceFile.Close())
 
-	stopErr := s.Stop()
+	stopErr := s.stop()
 	require.Error(t, stopErr)
 	require.ErrorContains(t, stopErr, "close trace file")
 }
 
 func TestWriteHeapProfileCreateError(t *testing.T) {
-	s := &Session{dir: t.TempDir()}
+	s := &profileSession{dir: t.TempDir()}
 	path := filepath.Join(s.dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
 	require.NoError(t, os.Mkdir(path, 0o755))
 
@@ -358,13 +367,13 @@ func TestWriteHeapProfileCreateError(t *testing.T) {
 func TestMergeTypeGlobError(t *testing.T) {
 	// An unclosed bracket in the directory name makes filepath.Glob fail.
 	dir := filepath.Join(t.TempDir(), "a[")
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeProfileType(context.Background(), dir, profileTypeCPU)
 	require.Error(t, err)
 }
 
 func TestMergeReturnsMergeError(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "a[")
-	err := Merge(context.Background(), dir, []Type{typeCPU})
+	err := mergeProfiles(context.Background(), dir, []profileType{profileTypeCPU})
 	require.Error(t, err)
 }
 
@@ -374,7 +383,7 @@ func TestMergeTypeCreateOutputError(t *testing.T) {
 	// The merged output path is blocked by a directory.
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "otelc-cpu.pprof"), 0o755))
 
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeProfileType(context.Background(), dir, profileTypeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "create merged")
 }
@@ -393,7 +402,7 @@ func TestMergeTypeGoToolFailsWithStderr(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeProfileType(context.Background(), dir, profileTypeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge failed")
 }
@@ -412,20 +421,20 @@ func TestMergeTypeGoToolFailsWithoutStderr(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeProfileType(context.Background(), dir, profileTypeCPU)
 	require.Error(t, err)
 }
 
 func TestStopHeapWriteError(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Start(dir, []Type{typeHeap})
+	s, err := startProfileSession(dir, []profileType{profileTypeHeap})
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
 	path := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
 	require.NoError(t, os.Mkdir(path, 0o755))
 
-	stopErr := s.Stop()
+	stopErr := s.stop()
 	require.Error(t, stopErr)
 	require.ErrorContains(t, stopErr, "write heap profile")
 }
@@ -435,7 +444,7 @@ func TestMergeTypeGoToolNotFound(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "otelc-cpu-1.pprof"), []byte("data"), 0o644))
 	t.Setenv("PATH", "")
 
-	err := mergeType(context.Background(), dir, typeCPU)
+	err := mergeProfileType(context.Background(), dir, profileTypeCPU)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "merge cpu profiles")
 }

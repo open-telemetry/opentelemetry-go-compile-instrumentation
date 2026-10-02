@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"maps"
 	"os"
@@ -172,9 +171,14 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			continue
 		}
 
+		restore, err := ip.enterNestedResolution(importPath)
+		if err != nil {
+			return err
+		}
 		// Resolve package archive location, passing build flags to match the current build context
 		buildFlags := util.GetBuildFlags()
 		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
+		restore()
 		if err != nil {
 			return ex.Wrapf(err, "resolving %q", importPath)
 		}
@@ -205,6 +209,70 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	}
 
 	return nil
+}
+
+// resolution is a compile waiting on a nested build to resolve an import a rule
+// added to it.
+type resolution struct {
+	pkg   string
+	added string
+}
+
+// enterNestedResolution records, for the nested build about to resolve added,
+// that the package being compiled waits on it. It fails when added is a
+// package already waiting further up the chain: the nested build would compile
+// it again, add the same import, and never end. Go cannot catch this itself,
+// because a nested build only sees each package's original imports. The
+// returned function restores the previous chain.
+func (ip *instrumentPhase) enterNestedResolution(added string) (func(), error) {
+	prev, hadPrev := os.LookupEnv(util.EnvOtelcNestedResolving)
+	chain := parseResolutionChain(prev)
+	chain = append(chain, resolution{pkg: util.FindFlagValue(ip.compileArgs, "-p"), added: added})
+	for _, r := range chain {
+		if r.pkg == added {
+			return nil, ex.Newf("rules add an import cycle: %s", describeResolutionChain(chain))
+		}
+	}
+
+	if err := os.Setenv(util.EnvOtelcNestedResolving, encodeResolutionChain(chain)); err != nil {
+		return nil, ex.Wrapf(err, "setting %s", util.EnvOtelcNestedResolving)
+	}
+	return func() {
+		if hadPrev {
+			_ = os.Setenv(util.EnvOtelcNestedResolving, prev)
+		} else {
+			_ = os.Unsetenv(util.EnvOtelcNestedResolving)
+		}
+	}, nil
+}
+
+func parseResolutionChain(s string) []resolution {
+	if s == "" {
+		return nil
+	}
+	entries := strings.Split(s, ",")
+	chain := make([]resolution, 0, len(entries))
+	for _, entry := range entries {
+		pkg, added, _ := strings.Cut(entry, ">")
+		chain = append(chain, resolution{pkg: pkg, added: added})
+	}
+	return chain
+}
+
+func encodeResolutionChain(chain []resolution) string {
+	entries := make([]string, len(chain))
+	for i, r := range chain {
+		entries[i] = r.pkg + ">" + r.added
+	}
+	return strings.Join(entries, ",")
+}
+
+func describeResolutionChain(chain []resolution) string {
+	steps := make([]string, len(chain))
+	for i, r := range chain {
+		steps[i] = r.pkg + " adds " + r.added
+	}
+	return strings.Join(steps, "; ")
 }
 
 // trackAddedImports saves the resolved package files to a per-process tracking file.
@@ -485,7 +553,9 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 // to find out the compile command we are interested in and run it with the
 // instrumented code, and ensure the link command has all necessary dependencies.
 // nested (see EnvOtelcNestedToolexec) means this runs inside a go command
-// another otelc spawned; such invocations only rewrite tool version probes.
+// another otelc spawned, such as the `go list -export` that resolves an import
+// a rule added. Those invocations instrument compiles and run every other
+// command unchanged.
 func Toolexec(ctx context.Context, args []string, nested bool) error {
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
@@ -499,14 +569,21 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 		return interceptToolVersion(ctx, args)
 	}
 
-	// The tool version rewrite above already keeps a nested build's cache keys
-	// aligned with the outer one; instrumenting here too would recurse.
-	if !nested {
-		var err error
+	// A nested build answers `-V=full` the same way as the outer one, so both
+	// share cache keys, and it must compile the same instrumented output: a
+	// plain compile there would be stored under the key of the instrumented
+	// one, and a package compiled against it would not match the archive the
+	// outer build links. A cycle of added imports would nest forever, and
+	// enterNestedResolution stops it.
+	var err error
+	switch {
+	case !nested:
 		args, err = interceptToolCommand(ctx, args)
-		if err != nil {
-			return err
-		}
+	case util.IsCompileCommandWithArgs(args):
+		args, err = interceptCompile(ctx, args)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Run the command
@@ -516,7 +593,7 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	tool := filepath.Base(args[0])
 	pkg := util.FindFlagValue(args, "-p")
 	start := time.Now()
-	err := util.RunCmd(ctx, args...)
+	err = util.RunCmd(ctx, args...)
 	elapsed := time.Since(start)
 	util.LoggerFromContext(ctx).InfoContext(ctx, "toolexec stats",
 		"tool", tool,
@@ -543,19 +620,54 @@ func interceptToolCommand(ctx context.Context, args []string) ([]string, error) 
 	return args, nil
 }
 
+// nestedToolexecGoflagsToken builds the GOFLAGS-safe -toolexec token for
+// execPath. Split out from EnableNestedToolexec so the error paths (only
+// reachable when execPath itself contains quote characters) are testable
+// without depending on os.Executable.
+func nestedToolexecGoflagsToken(execPath string) (string, error) {
+	// Quoted twice on purpose: the inner quote keeps a spaced path intact when
+	// cmd/go splits the -toolexec value, the outer one keeps the whole flag a
+	// single token when cmd/go splits GOFLAGS.
+	innerFlag, err := util.BuildToolexecFlag(execPath)
+	if err != nil {
+		// BuildToolexecFlag's own error is already stackful and already names
+		// execPath, so there is nothing to add here; see #1231.
+		return "", err
+	}
+	toolexecFlag, err := util.QuoteGoflagsToken(innerFlag)
+	if err != nil {
+		// Reachable whenever the finished flag holds both quote characters:
+		// the inner quoting supplies one kind to keep a spaced path together,
+		// and a quote already in execPath supplies the other. GOFLAGS is split
+		// by cmd/internal/quoted.Split, which has no escape syntax, so such a
+		// token simply cannot be represented there.
+		return "", ex.Wrapf(err, "otelc's own path %q cannot be passed to nested "+
+			"go commands through GOFLAGS, because quoting it there would need "+
+			"both quote characters and GOFLAGS has no way to escape either; "+
+			"reinstall otelc under a path without quote characters", execPath)
+	}
+	return toolexecFlag, nil
+}
+
+// executablePath resolves the path to the current executable. It is a variable
+// so tests can simulate paths that trigger quoting errors.
+//
+//nolint:gochecknoglobals // test seam
+var executablePath = os.Executable
+
 // EnableNestedToolexec points GOFLAGS at this executable in nested mode, so go
-// commands this process spawns (e.g. `go list -export`) run through a
-// version-only otelc toolexec and share this build's cache keys. Any existing
-// -toolexec was stripped at startup. Must only be called from the real otelc
-// binary, since os.Executable is what nested go commands will run.
+// commands this process spawns (e.g. `go list -export`) run through otelc,
+// instrument compiles the same way and share this build's cache keys. Any
+// existing -toolexec was stripped at startup. Must only be called from the
+// real otelc binary, since os.Executable is what nested go commands will run.
 func EnableNestedToolexec() error {
-	execPath, err := os.Executable()
+	execPath, err := executablePath()
 	if err != nil {
 		return ex.Wrapf(err, "resolving otelc executable path")
 	}
-	toolexecFlag, err := util.QuoteGoflagsToken(fmt.Sprintf("-toolexec=%s toolexec", execPath))
+	toolexecFlag, err := nestedToolexecGoflagsToken(execPath)
 	if err != nil {
-		return ex.Wrapf(err, "quoting nested toolexec GOFLAGS entry")
+		return err
 	}
 	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + " " + toolexecFlag)
 	if err = os.Setenv("GOFLAGS", goflags); err != nil {
