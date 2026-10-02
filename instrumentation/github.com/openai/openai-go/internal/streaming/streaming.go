@@ -16,7 +16,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -112,23 +111,21 @@ const (
 
 type StreamingReader struct {
 	reader         io.ReadCloser
-	teeReader      io.Reader
-	logBuffer      *bytes.Buffer
 	span           trace.Span
 	op             OperationType
 	captureContent bool
 	contentLimit   int
-	done           atomic.Bool
 	onDone         func()
 
 	// mu guards every field below. A caller may Close from a goroutine other
 	// than the one blocked in Read, e.g. to abort a stuck stream on a
-	// timeout, the same way closing an *http.Response.Body unblocks a Read on
-	// it. Read and Close both parse and update this state, so without a lock
-	// that is a data race, and for capturedStreams a possible concurrent map
-	// read/write crash, not just a rare edge case.
+	// timeout. Read and Close both parse and update this state, so it needs
+	// a lock. The blocking read on the body itself is done without it.
 	mu              sync.Mutex
+	teeReader       io.Reader
+	logBuffer       *bytes.Buffer
 	lineBuffer      *bytes.Buffer
+	done            bool
 	start           time.Time
 	first           time.Time
 	inputTokens     int64
@@ -175,53 +172,49 @@ func NewStreamingReader(
 }
 
 func (r *StreamingReader) Read(p []byte) (n int, err error) {
+	r.mu.Lock()
 	if r.teeReader == nil {
-		// lineBuffer is also touched by Close (see the lock below), so its
-		// creation has to be under the lock too, not just the later parsing.
-		r.mu.Lock()
 		r.logBuffer = &bytes.Buffer{}
 		r.lineBuffer = &bytes.Buffer{}
 		r.teeReader = io.TeeReader(r.reader, r.logBuffer)
-		r.mu.Unlock()
 	}
-
-	n, err = r.teeReader.Read(p)
-
-	// Lock only around the parsing state, not the blocking read above: Close
-	// may run on another goroutine while this call is still waiting on the
-	// network, and it must be able to finalize and unblock us without
-	// waiting on a Read that has not returned yet.
-	r.mu.Lock()
-	if n > 0 {
-		r.processSSELines()
-	}
-
-	if err != nil && r.done.CompareAndSwap(false, true) {
-		// Only a clean EOF means lineBuffer holds a complete, unterminated
-		// final line. On any other read error the buffered bytes may be a
-		// truncated mid-chunk fragment, so leave them unparsed rather than
-		r.finalize(err == io.EOF, err)
-	}
+	tee := r.teeReader
 	r.mu.Unlock()
 
+	// The lock is not held here. Close may run on another goroutine while
+	// this call waits on the network, and it has to be able to finish first.
+	n, err = tee.Read(p)
+
+	if onDone := r.afterRead(n, err); onDone != nil {
+		onDone()
+	}
 	return n, err
 }
 
-func (r *StreamingReader) Close() error {
+// afterRead parses what was just read and finalizes the stream on error. It
+// returns the onDone callback when this call finalized, so the caller runs it
+// after the lock is released.
+func (r *StreamingReader) afterRead(n int, err error) func() {
 	r.mu.Lock()
-	if r.done.CompareAndSwap(false, true) {
-		// Flush the line buffer first: a caller that stops reading before
-		// EOF must still get the final chunk's attributes, and the flush may
-		// itself recover the finish reason or [DONE] marker. Then decide
-		// whether the stream completed or was torn down prematurely.
-		r.flushRemaining()
-		if r.completed || len(r.reasons) > 0 {
-			r.finalize(false, nil)
-		} else {
-			r.finalize(false, errStreamAborted)
-		}
+	defer r.mu.Unlock()
+
+	if n > 0 {
+		r.processSSELines()
 	}
-	r.mu.Unlock()
+	if err == nil || r.done {
+		return nil
+	}
+	r.done = true
+	// Only a clean EOF means lineBuffer holds a complete, unterminated final
+	// line. On any other read error the buffered bytes may be a truncated
+	// mid-chunk fragment, so leave them unparsed.
+	return r.finalize(err == io.EOF, err)
+}
+
+func (r *StreamingReader) Close() error {
+	if onDone := r.finishOnClose(); onDone != nil {
+		onDone()
+	}
 
 	if r.reader != nil {
 		return r.reader.Close()
@@ -229,7 +222,31 @@ func (r *StreamingReader) Close() error {
 	return nil
 }
 
-func (r *StreamingReader) finalize(flush bool, err error) {
+// finishOnClose finalizes the stream if nothing else has yet. It returns the
+// onDone callback so the caller runs it after the lock is released.
+func (r *StreamingReader) finishOnClose() func() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.done {
+		return nil
+	}
+	r.done = true
+	// Flush the line buffer first: a caller that stops reading before EOF
+	// must still get the final chunk's attributes, and the flush may itself
+	// recover the finish reason or [DONE] marker. Then decide whether the
+	// stream completed or was torn down prematurely.
+	r.flushRemaining()
+	if r.completed || len(r.reasons) > 0 {
+		return r.finalize(false, nil)
+	}
+	return r.finalize(false, errStreamAborted)
+}
+
+// finalize ends the span and returns onDone. Call it with mu held and run the
+// returned callback after unlocking, so a callback that calls Read or Close
+// cannot deadlock.
+func (r *StreamingReader) finalize(flush bool, err error) func() {
 	if flush {
 		r.flushRemaining()
 	}
@@ -272,9 +289,7 @@ func (r *StreamingReader) finalize(flush bool, err error) {
 	r.recordCapturedContent()
 
 	r.span.End()
-	if r.onDone != nil {
-		r.onDone()
-	}
+	return r.onDone
 }
 
 func streamError(err error) error {

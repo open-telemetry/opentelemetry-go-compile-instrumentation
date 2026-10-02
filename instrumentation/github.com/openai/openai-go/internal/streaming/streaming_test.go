@@ -5,11 +5,13 @@ package streaming
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -758,17 +760,21 @@ func (r *indexedChunkReader) Close() error { return nil }
 // loops for a time budget rather than a fixed count because the offending
 // window is narrow and needs many attempts to reliably land.
 func TestStreamingReader_ConcurrentReadCloseIsRaceFree(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
 	deadline := time.Now().Add(2 * time.Second)
 	attempts := 0
 	for time.Now().Before(deadline) {
 		attempts++
 
-		sr := tracetest.NewSpanRecorder()
-		tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 		_, span := tp.Tracer("test").Start(t.Context(), "concurrent-read-close")
 
+		var doneCalls atomic.Int32
 		body := newIndexedChunkReader(32)
-		reader := NewStreamingReader(body, span, time.Now(), OpChat, true, ContentCaptureLimit)
+		reader := NewStreamingReader(body, span, time.Now(), OpChat, true, ContentCaptureLimit,
+			func() { doneCalls.Add(1) })
 
 		start := make(chan struct{})
 		var wg sync.WaitGroup
@@ -791,8 +797,8 @@ func TestStreamingReader_ConcurrentReadCloseIsRaceFree(t *testing.T) {
 		close(start)
 		wg.Wait()
 
-		spans := sr.Ended()
-		require.Len(t, spans, 1, "span must end exactly once even when Close races a concurrent Read")
+		require.Len(t, sr.Ended(), attempts, "span must end exactly once even when Close races a concurrent Read")
+		require.EqualValues(t, 1, doneCalls.Load(), "onDone must run exactly once")
 	}
 	t.Logf("ran %d concurrent Read/Close iterations", attempts)
 }
