@@ -1,5 +1,6 @@
 ---
 applyTo: "**"
+excludeAgent: "cloud-agent"
 ---
 
 # Code review
@@ -32,8 +33,9 @@ otelc can rewrite the AST of matched packages and inject hook code. `AGENTS.md` 
 
 CI already checks these:
 
-- Anything `golangci-lint` reports. `.tools/golangci.yml` enables 77 linters, including `govet`,
-  `errcheck`, `bodyclose`, `spancheck`, `copyloopvar` and `gosec`.
+- Diagnostics the `golangci-lint` CI run already reports for this PR (`.tools/golangci.yml`
+  enables 77 linters, including `govet`, `errcheck`, `bodyclose`, `spancheck`, `copyloopvar` and
+  `gosec`). A real problem is still worth raising if the linter doesn't report it.
 - Formatting, typos, markdown lint, license headers, conventional-commit PR titles, an outdated
   `tool/data/otelc-bundle.tgz` or outdated golden files, test file names and the coverage floor.
 

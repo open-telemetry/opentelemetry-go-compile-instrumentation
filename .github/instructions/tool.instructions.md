@@ -1,5 +1,6 @@
 ---
 applyTo: "tool/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Reviewing `tool/`
@@ -9,9 +10,11 @@ here are places where the two disagree.
 
 ## Fidelity with the go command
 
-- New `packages.Load` calls should get the user's build flags through `extractBuildFlags` in
-  `tool/internal/setup`, which keeps `-C`, `-overlay`, `-tags`, `-mod`, `-modfile` and boolean
-  flags such as `-race`. Loading without them gives wrong results for tag-gated or vendored code.
+- `packages.Load` calls that need to see packages the way the user's build does (the build
+  targets, or local packages that build tags can affect) should get the user's build flags through
+  `extractBuildFlags` in `tool/internal/setup`. It keeps `-C`, `-overlay`, `-tags`, `-mod`,
+  `-modfile` and boolean flags such as `-race`. Loads that only resolve instrumentation packages
+  (`config.go`, `store.go`) don't need them.
 - `classifyArgs` in `tool/internal/setup/args.go` classifies command-line arguments. New code
   should use it instead of splitting arguments again.
 - `-C` becomes `packages.Config.Dir` in `loadDirFromBuildFlags` (`tool/internal/pkgload`).
@@ -20,15 +23,15 @@ here are places where the two disagree.
 - In `GOFLAGS`, value flags are only valid as `-flag=value`. Entries are split like
   `cmd/internal/quoted.Split` (see `tool/util/go.go`): any whitespace, including `\n` and `\r`,
   separates entries, and quotes have no escapes.
-- `go test` has its own flags (`go help testflags`), and arguments after `-args` or `--` go to
-  the test binary. Changes to argument handling have to cover both.
+- `go test` has its own flags (`go help testflags`). Arguments after `-args` go to the test
+  binary; with `--`, the `--` itself is passed along too. Argument handling has to cover both.
 - A nil error from `packages.Load` doesn't mean every package loaded. Check `len(pkg.Errors) > 0`
   for each package that is used.
 - The compiler can remap imports through `importmap` lines in the importcfg, for example vendored
   `vendor/golang.org/x/net/...` packages in the standard library. Lookups by import path have to
   apply that map.
-- Each `packages.Load` or `go list` call starts a subprocess. Flag new calls inside loops that
-  could be batched, and repeated loads of the same directory.
+- Each `packages.Load` or `go list` call starts a subprocess. Flag new calls in loops that could
+  be batched, and repeated loads of the same directory.
 
 ## Rules (`tool/internal/rule`, `tool/internal/setup`)
 
