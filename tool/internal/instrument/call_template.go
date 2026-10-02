@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -18,6 +19,19 @@ import (
 // then replaced with the actual AST node once the rendered text has been
 // parsed. It must be a syntactically valid Go expression on its own.
 const placeholderIdent = "_.PLACEHOLDER_0"
+
+// callArgPlaceholderSel is the selector part of the placeholder substituted
+// for "{{ .CallArgument N }}" during template execution (full form:
+// _.CALLARG_<idx>). Like placeholderIdent, it is replaced with the actual
+// AST node once the rendered text has been parsed and the rule's qualifiers
+// rewritten, so the argument's own code is never rewritten.
+const callArgPlaceholderSel = "CALLARG_"
+
+// callArgPlaceholderIdent returns the placeholder for the idx-th wrapped
+// call argument. It must be a syntactically valid Go expression on its own.
+func callArgPlaceholderIdent(idx int) string {
+	return toolast.IdentIgnore + "." + callArgPlaceholderSel + strconv.Itoa(idx)
+}
 
 // callTemplate represents a code template that can be used to wrap or transform
 // Go expressions. It uses text/template for template execution and supports
@@ -149,6 +163,11 @@ func (d *callTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 // instead of the marked one, such as in tests.
 type renderingCallTemplateData struct {
 	*callTemplateData
+
+	// renderedCallArgs records each index rendered by {{ .CallArgument N }}
+	// so compileExpression can verify every placeholder was swapped for
+	// the argument's real AST.
+	renderedCallArgs map[int]bool
 }
 
 func (d renderingCallTemplateData) FuncName() (string, error) {
@@ -181,6 +200,20 @@ func (d renderingCallTemplateData) FuncReturnOfType(typeStr string) (string, err
 	return markDynamicIdent(name), err
 }
 
+// CallArgument renders the idx-th (0-indexed) argument of the wrapped call
+// expression as a fixed placeholder (see callArgPlaceholderIdent) instead of
+// the argument's source text, so replaceQualifierAliases cannot rewrite the
+// argument's own code. compileExpression swaps the placeholder for a copy of
+// the argument AST after the rewrite. Validation and error messages match
+// callTemplateData.CallArgument. Template usage: {{.CallArgument N}}
+func (d renderingCallTemplateData) CallArgument(idx int) (string, error) {
+	if _, err := d.callTemplateData.CallArgument(idx); err != nil {
+		return "", err
+	}
+	d.renderedCallArgs[idx] = true
+	return callArgPlaceholderIdent(idx), nil
+}
+
 func notACallErr() error {
 	return ex.Newf("requires the wrapped expression to be a function call")
 }
@@ -198,6 +231,9 @@ func (d *callTemplateData) CallArgumentCount() (int, error) {
 // CallArgument returns the source text of the idx-th (0-indexed) argument of
 // the wrapped call expression. Only available when the wrapped expression is
 // itself a function call. Template usage: {{.CallArgument N}}
+//
+// Template rendering goes through renderingCallTemplateData.CallArgument,
+// which returns a placeholder instead; see that method for why.
 func (d *callTemplateData) CallArgument(idx int) (string, error) {
 	if !d.isCall {
 		return "", notACallErr()
@@ -222,10 +258,12 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 // aliasOverrides maps each rule alias to the file's alias.
 //
 // The process:
-// 1. Execute the template with a fixed placeholder string (_.PLACEHOLDER_0)
-// 2. Parse the result as a Go statement snippet
-// 3. Rewrite the rule's own qualifiers in that parsed result
-// 4. Replace the placeholder with the actual AST node
+//  1. Execute the template with fixed placeholder strings (_.PLACEHOLDER_0 for
+//     "{{ . }}", _.CALLARG_<N> for "{{ .CallArgument N }}")
+//  2. Parse the result as a Go statement snippet
+//  3. Rewrite the rule's own qualifiers in that parsed result
+//  4. Replace the placeholders with the actual AST nodes, which keeps the
+//     target's own code untouched by the rewrite in step 3
 func (t *callTemplate) compileExpression(
 	node dst.Expr, enclosing *dst.FuncDecl, imports, aliasOverrides map[string]string,
 ) (dst.Expr, error) {
@@ -238,8 +276,12 @@ func (t *callTemplate) compileExpression(
 		data.callArgs = call.Args
 	}
 
+	renderData := renderingCallTemplateData{
+		callTemplateData: data,
+		renderedCallArgs: make(map[int]bool),
+	}
 	var sb strings.Builder
-	if err := t.template.Execute(&sb, renderingCallTemplateData{data}); err != nil {
+	if err := t.template.Execute(&sb, renderData); err != nil {
 		return nil, ex.Wrapf(err, "failed to execute template")
 	}
 	userResult := sb.String()
@@ -261,6 +303,20 @@ func (t *callTemplate) compileExpression(
 
 	replaceQualifierAliases(exprStmt.X, aliasOverrides)
 	stripDynamicIdents(exprStmt.X)
+
+	// Swap the call-argument placeholders before the {{ . }} placeholder so
+	// both run after the qualifier rewrite; the swapped-in argument ASTs then
+	// keep the target's original argument code untouched.
+	swappedArgs, swappedIdxs := replaceCallArgPlaceholders(exprStmt.X, data.callArgs)
+	for idx := range renderData.renderedCallArgs {
+		if !swappedIdxs[idx] {
+			return nil, ex.Newf(
+				"template output did not contain expected placeholder expression for {{ .CallArgument %d }}",
+				idx,
+			)
+		}
+	}
+	exprStmt.X = swappedArgs
 
 	result, replaced := replacePlaceholder(exprStmt.X, node)
 	if placeholderRendered && !replaced {
@@ -330,6 +386,42 @@ func parseGoTypeExpression(typeStr string) (dst.Expr, error) {
 		return nil, ex.Newf("unexpected spec shape for type %q", typeStr)
 	}
 	return valueSpec.Type, nil
+}
+
+// replaceCallArgPlaceholders replaces every _.CALLARG_<idx> occurrence in
+// node with its own dst.Clone copy of callArgs[idx], and returns the
+// resulting expression plus the indices it swapped. This is used to inject
+// the wrapped call's arguments into the template-generated code after the
+// alias rewrite, so the arguments' original code is never rewritten.
+func replaceCallArgPlaceholders(node dst.Expr, callArgs []dst.Expr) (dst.Expr, map[int]bool) {
+	swappedIdxs := make(map[int]bool)
+	result := dstutil.Apply(
+		node,
+		func(cursor *dstutil.Cursor) bool {
+			selectorExpr, ok := cursor.Node().(*dst.SelectorExpr)
+			if !ok {
+				return true
+			}
+
+			// Check if this is _.CALLARG_<idx>
+			ident, ok := selectorExpr.X.(*dst.Ident)
+			if !ok || ident.Name != toolast.IdentIgnore {
+				return true
+			}
+
+			idx, err := strconv.Atoi(strings.TrimPrefix(selectorExpr.Sel.Name, callArgPlaceholderSel))
+			if err != nil || idx < 0 || idx >= len(callArgs) {
+				return true
+			}
+
+			cursor.Replace(dst.Clone(callArgs[idx]))
+			swappedIdxs[idx] = true
+			return false
+		},
+		nil,
+	)
+	expr, _ := result.(dst.Expr)
+	return expr, swappedIdxs
 }
 
 // replacePlaceholder replaces all occurrences of _.PLACEHOLDER_0 in the AST

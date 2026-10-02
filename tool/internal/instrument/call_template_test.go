@@ -564,6 +564,103 @@ func TestCompileExpression_CallArgumentComplexExpression(t *testing.T) {
 	assert.Equal(t, "a", xIdent.Name)
 }
 
+func TestCompileExpression_CallArgumentNotRewrittenByAliasOverride(t *testing.T) {
+	// Regression test: the wrapped call's argument must be spliced in as its
+	// original AST after the alias rewrite, so a qualifier in the argument
+	// that merely shares the rule alias's name stays untouched.
+	tmpl, err := newCallTemplate("traced.Sprint({{ .CallArgument 0 }})")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Get"}},
+		Args: []dst.Expr{
+			&dst.CallExpr{
+				Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "URL"}},
+			},
+		},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil, nil, map[string]string{"traced": "f"})
+
+	require.NoError(t, err)
+	outer, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	outerSel, ok := outer.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", outer.Fun)
+	assert.Equal(t, "f", outerSel.X.(*dst.Ident).Name,
+		"the rule's own qualifier must move to the file's alias")
+	require.Len(t, outer.Args, 1)
+	argCall, ok := outer.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected the argument to stay a *dst.CallExpr, got %T", outer.Args[0])
+	argSel, ok := argCall.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", argCall.Fun)
+	assert.Equal(t, "traced", argSel.X.(*dst.Ident).Name,
+		"the wrapped call's argument code must not be rewritten just because it shares the rule's alias name")
+}
+
+func TestCompileExpression_CallArgumentSameIndexTwice(t *testing.T) {
+	tmpl, err := newCallTemplate("combine({{ .CallArgument 0 }}, {{ .CallArgument 0 }})")
+	require.NoError(t, err)
+
+	originalArg := &dst.CallExpr{Fun: &dst.Ident{Name: "innerArg"}}
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{originalArg},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+
+	for i, arg := range resultCall.Args {
+		call, ok := arg.(*dst.CallExpr)
+		require.True(t, ok, "expected *dst.CallExpr for arg %d, got %T", i, arg)
+		fun, ok := call.Fun.(*dst.Ident)
+		require.True(t, ok, "expected *dst.Ident, got %T", call.Fun)
+		assert.Equal(t, "innerArg", fun.Name)
+		assert.NotSame(t, originalArg, call,
+			"each occurrence must receive its own AST copy")
+	}
+	assert.NotSame(t, resultCall.Args[0], resultCall.Args[1],
+		"repeated occurrences of the same index must not share one AST")
+}
+
+func TestCompileExpression_CallArgumentOutOfRangeMessageUnchanged(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .CallArgument 1 }})")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	_, err = tmpl.compileExpression(originalCall, nil, nil, nil)
+
+	require.Error(t, err)
+	// The delegate validation keeps the original error text verbatim inside
+	// text/template's own error wrapping.
+	assert.Contains(t, err.Error(), "error calling CallArgument: CallArgument index 1 out of range [0, 1)")
+}
+
+func TestCompileExpression_CallArgumentPlaceholderNotReplaced(t *testing.T) {
+	tmpl, err := newCallTemplate(`wrapper("{{ .CallArgument 0 }}")`)
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "did not contain expected placeholder expression for {{ .CallArgument 0 }}")
+}
+
 func TestCompileExpression_SimpleWrapping(t *testing.T) {
 	tmpl, err := newCallTemplate("wrapper({{ . }})")
 	require.NoError(t, err)
