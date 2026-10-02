@@ -30,6 +30,10 @@ type runtimePackage struct {
 	dir        string
 	importPath string
 	name       string
+	// importedByHooks holds the hook packages that import this package,
+	// directly or through a chain. A generated file here cannot import them
+	// back without creating an import cycle.
+	importedByHooks map[string]bool
 }
 
 //nolint:gochecknoglobals // This is a constant
@@ -156,12 +160,12 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	fileRules := []*rule.InstFileRule{}
 	for _, m := range matched {
 		for _, funcRule := range m.AllFuncRules() {
-			if funcRule.Path != pkg.importPath {
+			if funcRule.Path != pkg.importPath && !pkg.importedByHooks[funcRule.Path] {
 				funcRules = append(funcRules, funcRule)
 			}
 		}
 		for _, fileRule := range m.FileRules {
-			if fileRule.Path != pkg.importPath {
+			if fileRule.Path != pkg.importPath && !pkg.importedByHooks[fileRule.Path] {
 				fileRules = append(fileRules, fileRule)
 			}
 		}

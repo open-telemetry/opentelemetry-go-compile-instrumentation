@@ -304,6 +304,13 @@ func (sp *setupPhase) generateRuntimePerPackage(
 	pkgs []*packages.Package,
 	matched []*rule.InstRuleSet,
 ) error {
+	// What each hook package imports. A package a hook imports must not
+	// import that hook back, or the build has an import cycle.
+	imports, err := hookImports(ctx, sp.buildFlags, matched)
+	if err != nil {
+		return err
+	}
+
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
@@ -311,11 +318,20 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			continue
 		}
 
+		importPath := sp.runtimeImportPath(ctx, pkg, pkgDir)
+		importedByHooks := make(map[string]bool)
+		for hookPath, deps := range imports {
+			if deps[importPath] {
+				importedByHooks[hookPath] = true
+			}
+		}
+
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, runtimePackage{
-			dir:        pkgDir,
-			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
-			name:       pkg.Name,
+		if err = sp.addDeps(ctx, matched, runtimePackage{
+			dir:             pkgDir,
+			importPath:      importPath,
+			name:            pkg.Name,
+			importedByHooks: importedByHooks,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
@@ -806,4 +822,37 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	}
 	logger.InfoContext(ctx, "Instrumentation completed successfully")
 	return nil
+}
+
+// hookImports maps each hook package to every package it imports, directly or
+// through a chain. A package on a hook's list cannot import that hook back.
+func hookImports(
+	ctx context.Context,
+	buildFlags []string,
+	matched []*rule.InstRuleSet,
+) (map[string]map[string]bool, error) {
+	hookPaths := hookPackagePaths(matched)
+	if len(hookPaths) == 0 {
+		return map[string]map[string]bool{}, nil
+	}
+
+	pkgs, err := pkgload.LoadPackages(
+		ctx,
+		packages.NeedName|packages.NeedImports|packages.NeedDeps,
+		buildFlags,
+		hookPaths...,
+	)
+	if err != nil {
+		return nil, ex.Wrapf(err, "loading hook packages to find their imports")
+	}
+
+	result := make(map[string]map[string]bool, len(pkgs))
+	for _, hook := range pkgs {
+		deps := make(map[string]bool)
+		packages.Visit([]*packages.Package{hook}, nil, func(p *packages.Package) {
+			deps[p.PkgPath] = true
+		})
+		result[hook.PkgPath] = deps
+	}
+	return result, nil
 }
