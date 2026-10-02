@@ -144,6 +144,43 @@ func (d *callTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	return d.enclosing.FuncReturnOfType(typeStr)
 }
 
+// renderingCallTemplateData wraps callTemplateData for use as text/template
+// render data. Use callTemplateData directly when the real name is needed
+// instead of the marked one, such as in tests.
+type renderingCallTemplateData struct {
+	*callTemplateData
+}
+
+func (d renderingCallTemplateData) FuncName() (string, error) {
+	name, err := d.callTemplateData.FuncName()
+	return markDynamicIdent(name), err
+}
+
+func (d renderingCallTemplateData) FuncArgument(idx int) (string, error) {
+	name, err := d.callTemplateData.FuncArgument(idx)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingCallTemplateData) FuncReturn(idx int) (string, error) {
+	name, err := d.callTemplateData.FuncReturn(idx)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingCallTemplateData) Receiver() (string, error) {
+	name, err := d.callTemplateData.Receiver()
+	return markDynamicIdent(name), err
+}
+
+func (d renderingCallTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
+	name, err := d.callTemplateData.FuncArgumentOfType(typeStr)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingCallTemplateData) FuncReturnOfType(typeStr string) (string, error) {
+	name, err := d.callTemplateData.FuncReturnOfType(typeStr)
+	return markDynamicIdent(name), err
+}
+
 func notACallErr() error {
 	return ex.Newf("requires the wrapped expression to be a function call")
 }
@@ -182,14 +219,15 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 // FuncArgumentOfType / FuncReturnOfType need it to resolve aliased imports
 // and packages that share a default name. Pass nil when no import context
 // is available.
+// aliasOverrides maps each rule alias to the file's alias.
 //
 // The process:
 // 1. Execute the template with a fixed placeholder string (_.PLACEHOLDER_0)
 // 2. Parse the result as a Go statement snippet
-// 3. Extract the expression from the parsed statement
+// 3. Rewrite the rule's own qualifiers in that parsed result
 // 4. Replace the placeholder with the actual AST node
 func (t *callTemplate) compileExpression(
-	node dst.Expr, enclosing *dst.FuncDecl, imports map[string]string,
+	node dst.Expr, enclosing *dst.FuncDecl, imports, aliasOverrides map[string]string,
 ) (dst.Expr, error) {
 	data := &callTemplateData{}
 	if enclosing != nil {
@@ -201,7 +239,7 @@ func (t *callTemplate) compileExpression(
 	}
 
 	var sb strings.Builder
-	if err := t.template.Execute(&sb, data); err != nil {
+	if err := t.template.Execute(&sb, renderingCallTemplateData{data}); err != nil {
 		return nil, ex.Wrapf(err, "failed to execute template")
 	}
 	userResult := sb.String()
@@ -220,6 +258,9 @@ func (t *callTemplate) compileExpression(
 	if !ok {
 		return nil, ex.Newf("expected expression statement, got %T", stmts[0])
 	}
+
+	replaceQualifierAliases(exprStmt.X, aliasOverrides)
+	stripDynamicIdents(exprStmt.X)
 
 	result, replaced := replacePlaceholder(exprStmt.X, node)
 	if placeholderRendered && !replaced {

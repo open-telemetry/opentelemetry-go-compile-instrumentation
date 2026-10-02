@@ -182,3 +182,51 @@ func (d *funcTemplateData) DirectiveArg(key string) string {
 	}
 	return ""
 }
+
+// dynamicIdentMarker prefixes an identifier name that comes from the target
+// function when the name is rendered by renderingFuncTemplateData.
+const dynamicIdentMarker = "_OTELCDYN_"
+
+// markDynamicIdent adds dynamicIdentMarker to name, or returns name
+// unchanged if name is empty.
+func markDynamicIdent(name string) string {
+	if name == "" {
+		return name
+	}
+	return dynamicIdentMarker + name
+}
+
+// renderingFuncTemplateData wraps funcTemplateData for use as text/template
+// render data.
+type renderingFuncTemplateData struct {
+	*funcTemplateData
+}
+
+func (d renderingFuncTemplateData) FuncName() string {
+	return markDynamicIdent(d.funcTemplateData.FuncName())
+}
+
+func (d renderingFuncTemplateData) FuncArgument(idx int) (string, error) {
+	name, err := d.funcTemplateData.FuncArgument(idx)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) FuncReturn(idx int) (string, error) {
+	name, err := d.funcTemplateData.FuncReturn(idx)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) Receiver() (string, error) {
+	name, err := d.funcTemplateData.Receiver()
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
+	name, err := d.funcTemplateData.FuncArgumentOfType(typeStr)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) FuncReturnOfType(typeStr string) (string, error) {
+	name, err := d.funcTemplateData.FuncReturnOfType(typeStr)
+	return markDynamicIdent(name), err
+}

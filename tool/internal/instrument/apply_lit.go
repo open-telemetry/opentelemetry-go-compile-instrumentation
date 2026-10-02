@@ -10,7 +10,6 @@ import (
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -18,9 +17,9 @@ import (
 // applyLitRule sets fields on every composite literal of the rule's type found
 // in the target file.
 func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) error {
-	importAliases := ast.ImportAliasMap(root)
+	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
-	setters, err := newLitFieldSetters(r)
+	setters, err := newLitFieldSetters(r, aliasOverrides)
 	if err != nil {
 		return err
 	}
@@ -49,7 +48,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 				"rule", r.Name, "type", r.StructLiteral)
 			continue
 		}
-		litModified, setErr := ip.setLitFields(lit, setters, r)
+		litModified, setErr := ip.setLitFields(lit, setters, r, aliasOverrides)
 		if setErr != nil {
 			return setErr
 		}
@@ -60,7 +59,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 		return nil
 	}
 
-	if err = ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
 		return err
 	}
 	ip.Info("Apply literal rule", "rule", r)
@@ -81,7 +80,7 @@ type litFieldSetter struct {
 	wrap *callTemplate
 }
 
-func newLitFieldSetters(r *rule.InstLitRule) ([]*litFieldSetter, error) {
+func newLitFieldSetters(r *rule.InstLitRule, aliasOverrides map[string]string) ([]*litFieldSetter, error) {
 	setters := make([]*litFieldSetter, 0, len(r.Field))
 	for _, f := range r.Field {
 		setter := &litFieldSetter{name: f.Name}
@@ -90,6 +89,7 @@ func newLitFieldSetters(r *rule.InstLitRule) ([]*litFieldSetter, error) {
 			if err != nil {
 				return nil, ex.Wrapf(err, "failed to parse value %q for field %q", f.Value, f.Name)
 			}
+			replaceQualifierAliases(value, aliasOverrides)
 			setter.value = value
 		}
 		if f.Wrap != "" {
@@ -152,6 +152,7 @@ func (ip *instrumentPhase) setLitFields(
 	lit *dst.CompositeLit,
 	setters []*litFieldSetter,
 	r *rule.InstLitRule,
+	aliasOverrides map[string]string,
 ) (bool, error) {
 	changed := false
 	var prepend []dst.Expr
@@ -165,7 +166,7 @@ func (ip *instrumentPhase) setLitFields(
 				continue
 			}
 			// Composite literal fields have no enclosing function context.
-			wrapped, err := setter.wrap.compileExpression(existing.Value, nil, nil)
+			wrapped, err := setter.wrap.compileExpression(existing.Value, nil, nil, aliasOverrides)
 			if err != nil {
 				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}

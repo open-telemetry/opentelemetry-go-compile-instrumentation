@@ -49,6 +49,12 @@ func GetMatchedRuleFile() string {
 	return GetBuildTemp(matchedRuleFile)
 }
 
+// GetImportNamesFile returns the path to the import name table file.
+func GetImportNamesFile() string {
+	const importNamesFile = "import_names.json"
+	return GetBuildTemp(importNamesFile)
+}
+
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
 // Each compile process writes to its own file to avoid inter-process race conditions.
 func GetAddedImportsFileForProcess() string {
