@@ -12,7 +12,6 @@ import (
 	"go/token"
 	"io/fs"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -574,7 +573,7 @@ func updatePinnedProjects(
 	return &PinResult{}, nil
 }
 
-func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opts PinOptions) (*PinResult, error) {
+func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOptions) (*PinResult, error) {
 	logger := util.LoggerFromContext(ctx)
 	subcommand := opts.Subcommand
 	if subcommand == "" {
@@ -622,8 +621,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
 	f := generateOtelInstrumentationGo(imports, opts)
-	dirs := slices.Sorted(maps.Keys(moduleDirs))
-	for _, moduleDir := range dirs {
+	for _, moduleDir := range moduleDirs {
 		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
@@ -665,6 +663,17 @@ func prepareVendoredBuild(
 	return rewriteModVendor(subcommand, args), nil
 }
 
+// normalizeModuleDirs returns a cloned, sorted, and deduplicated copy of dirs.
+// If dirs is empty, it returns an empty non-nil slice. The caller's slice is never mutated.
+func normalizeModuleDirs(dirs []string) []string {
+	if len(dirs) == 0 {
+		return []string{}
+	}
+	res := slices.Clone(dirs)
+	slices.Sort(res)
+	return slices.Compact(res)
+}
+
 type PinOptions struct {
 	// Whether to prune invalid imports within otel.instrumentation.go
 	Prune bool
@@ -678,7 +687,7 @@ type PinOptions struct {
 	Subcommand string
 	// ModuleDirs is the set of module directories to search for tool files
 	// If empty, module directories will be found using opts.Args
-	ModuleDirs map[string]bool
+	ModuleDirs []string
 }
 
 type PinResult struct {
@@ -703,7 +712,7 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 }
 
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
-	moduleDirs := opts.ModuleDirs
+	moduleDirs := normalizeModuleDirs(opts.ModuleDirs)
 	// moduleDirs being empty means Pin was invoked as a standalone command
 	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
@@ -749,7 +758,7 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 
 // autoPin is a convenience function that automatically tracks generated/modified files before calling Pin
 // in order to restore them after the build completes.
-func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
+func autoPin(ctx context.Context, moduleDirs []string, subcommand string, args []string) (*PinResult, error) {
 	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		return nil, ex.New("state manager not found in context")

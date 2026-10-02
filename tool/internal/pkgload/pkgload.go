@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -216,10 +217,11 @@ func resolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
 	return mod.Dir, nil
 }
 
-func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) (map[string]bool, error) {
+func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) ([]string, error) {
 	logger := util.LoggerFromContext(ctx)
 
-	moduleDirs := make(map[string]bool)
+	seen := make(map[string]struct{})
+	moduleDirs := make([]string, 0)
 	for _, pkg := range pkgs {
 		// file-based builds use synthetic "command-line-arguments" packages
 		if pkg.Module == nil && pkg.PkgPath != CommandLineArgumentsPackage {
@@ -245,8 +247,12 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) (map[string]b
 			moduleDir = modDir
 		}
 
-		moduleDirs[moduleDir] = true
+		if _, ok := seen[moduleDir]; !ok {
+			seen[moduleDir] = struct{}{}
+			moduleDirs = append(moduleDirs, moduleDir)
+		}
 	}
 
+	slices.Sort(moduleDirs)
 	return moduleDirs, nil
 }

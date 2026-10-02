@@ -474,7 +474,7 @@ func loadRulesFromToolFiles(
 	return ruleSet, nil
 }
 
-func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool) ([]rule.InstRule, error) {
+func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rule.InstRule, error) {
 	// Load rules from environment variable OTELC_RULES if specified. It has the
 	// highest priority.
 	rulePath := os.Getenv(util.EnvOtelcRules)
@@ -507,7 +507,7 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool)
 func (sp *setupPhase) matchDeps(
 	ctx context.Context,
 	deps []*Dependency,
-	moduleDirs map[string]bool,
+	moduleDirs []string,
 ) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
 	allRules, err := sp.loadRules(ctx, moduleDirs)
