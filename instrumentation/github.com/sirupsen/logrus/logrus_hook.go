@@ -27,31 +27,11 @@ func (l logEnabler) Enable() bool {
 
 var enabler = logEnabler{}
 
-// initialized starts nil rather than being made here. AfterLogrusNew and
-// AfterLogrusWithField are wired via //go:linkname, which doesn't create a
-// normal Go import edge, so this package's own var initializers are not
-// guaranteed to have run by the time a hook fires (for example when
-// logrus's own "var std = New()" triggers AfterLogrusNew during logrus's
-// package init). Assigning through make() here would race that init and
-// could leave a hook writing into a nil map. ensureTraceHook lazily
-// initializes the map under initMu instead, which is safe regardless of
-// init order.
-//
-// One map now backs all three hooks below (AfterLogrusNew,
-// AfterLogrusWithField, AfterLogrusSetFormatter) instead of a separate map
-// per hook. A logger commonly goes through more than one of these paths,
-// for example logrus.New() followed by a WithField() call on the result;
-// with a map per path neither guard could see what the other had already
-// done, so the same logger got a second traceHook attached. Sharing one
-// map closes that gap.
-//
-// The map is keyed by a weak pointer rather than the *logrus.Logger itself.
-// A strong-pointer key would keep every logger instrumentation has ever
-// seen reachable for the life of the process, which is an unbounded leak
-// for any program that creates short-lived loggers (per-request loggers,
-// tests, etc.). The weak key lets a logger be collected normally, and the
-// runtime.AddCleanup call in ensureTraceHook drops the now-dead entry when
-// that happens.
+// initialized is created lazily in ensureTraceHook, not here, because the hooks
+// run via go:linkname and can fire before this package's var initializers.
+// One map is shared by all three hooks so a logger that goes through more than
+// one of them only gets a single traceHook. It is keyed by weak pointer so
+// loggers can still be garbage collected.
 var (
 	initMu      sync.Mutex
 	initialized map[weak.Pointer[logrus.Logger]]struct{}

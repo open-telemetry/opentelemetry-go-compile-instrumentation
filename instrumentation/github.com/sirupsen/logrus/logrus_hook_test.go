@@ -150,10 +150,7 @@ func TestTraceHook_Fire_NoTraceContext(t *testing.T) {
 // initialized can still be nil the moment the hook is invoked. It must
 // lazily initialize the map rather than panic on a nil-map write.
 func TestAfterLogrusNew_NilMapAtCallTime(t *testing.T) {
-	initMu.Lock()
-	initialized = nil
-	initMu.Unlock()
-	t.Cleanup(resetHookState)
+	resetHookState()
 
 	ictx := hooktest.NewMockHookContext()
 	logger := logrus.New()
@@ -168,10 +165,7 @@ func TestAfterLogrusNew_NilMapAtCallTime(t *testing.T) {
 // counterpart of TestAfterLogrusNew_NilMapAtCallTime: initialized can also
 // still be nil when the hook fires.
 func TestAfterLogrusWithField_NilMapAtCallTime(t *testing.T) {
-	initMu.Lock()
-	initialized = nil
-	initMu.Unlock()
-	t.Cleanup(resetHookState)
+	resetHookState()
 
 	ictx := hooktest.NewMockHookContext()
 	logger := logrus.New()
