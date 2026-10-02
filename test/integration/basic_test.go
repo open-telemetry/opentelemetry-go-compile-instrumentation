@@ -36,6 +36,9 @@ func TestBasic(t *testing.T) {
 		"Hello, Generic Recv World!",
 		"GenericRecvExample after hook",
 		"traceID: 123, spanID: 456",
+		"Query before hook",
+		"Query: SELECT 1",
+		"Query after hook",
 		"[MyHook]",
 		"RawCode",
 		"funcName:Example",
@@ -54,6 +57,7 @@ func TestBasic(t *testing.T) {
 	}
 
 	verifyGenericHookContextLogs(t, output)
+	verifyQueryHookContextLogs(t, output)
 	verifyExportedHelloWorldSpan(t, output)
 	verifyTracePropagationBetweenFunctionAAndB(t, output)
 }
@@ -90,11 +94,25 @@ func verifyGenericHookContextLogs(t *testing.T, output string) {
 		"[Generic] Skip call: false",
 		"[Generic] Data from Before: test-data",
 		"[Generic] Return value count: 1",
-		"[Generic] SetParam panic (expected): SetParam is unsupported for generic functions",
-		"[Generic] SetReturnVal panic (expected): SetReturnVal is unsupported for generic functions",
+		"[Generic] SetParam panic (expected): SetParam is unsupported for generic parameter at index 0",
+		"[Generic] SetReturnVal panic (expected): SetReturnVal is unsupported for generic return value at index 0",
 	}
 	for _, log := range expectedGenericLogs {
 		require.Contains(t, output, log, "Expected generic HookContext log: %s", log)
+	}
+}
+
+// verifyQueryHookContextLogs asserts that GetParam/GetReturnVal succeed for
+// ordinary (non-type-parameter) slots on a generic function, and still panic
+// for the slot whose type is the type parameter itself.
+func verifyQueryHookContextLogs(t *testing.T, output string) {
+	expectedQueryLogs := []string{
+		"[Query] GetParam(1): SELECT 1",
+		"[Query] GetReturnVal(1): <nil>",
+		"[Query] GetReturnVal(0) panic (expected): GetReturnVal is unsupported for generic return value at index 0",
+	}
+	for _, log := range expectedQueryLogs {
+		require.Contains(t, output, log, "Expected Query HookContext log: %s", log)
 	}
 }
 
