@@ -1192,6 +1192,16 @@ func TestAddBuildFlags(t *testing.T) {
 			args: []string{"-C=app", "."},
 			want: []string{"-C=app", "-work", "-toolexec=x", "."},
 		},
+		{
+			name: "separate double-dash change directory",
+			args: []string{"--C", "app", "."},
+			want: []string{"--C", "app", "-work", "-toolexec=x", "."},
+		},
+		{
+			name: "joined double-dash change directory",
+			args: []string{"--C=app", "."},
+			want: []string{"--C=app", "-work", "-toolexec=x", "."},
+		},
 	}
 
 	for _, tt := range tests {

@@ -528,9 +528,9 @@ func addBuildFlags(args []string, flags ...string) []string {
 	insertAt := 0
 	if len(args) > 0 {
 		switch {
-		case args[0] == "-C" && len(args) > 1:
+		case (args[0] == "-C" || args[0] == "--C") && len(args) > 1:
 			insertAt = 2
-		case strings.HasPrefix(args[0], "-C="):
+		case strings.HasPrefix(args[0], "-C=") || strings.HasPrefix(args[0], "--C="):
 			insertAt = 1
 		}
 	}
@@ -573,7 +573,7 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string,
 			restArgs = slices.Insert(restArgs, insertAt, otelcRuntimePath)
 		}
 	}
-	// Add -work and -toolexec after a leading -C. The go command rejects -C
+	// Add -work and -toolexec after a leading -C/--C. The go command rejects -C
 	// when any other flag comes before it.
 	restArgs = addBuildFlags(restArgs, "-work", insert)
 	return append(newArgs, restArgs...), nil
