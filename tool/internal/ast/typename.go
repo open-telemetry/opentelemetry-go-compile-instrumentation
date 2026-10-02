@@ -122,12 +122,15 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 	return tn.matches(node, imports), nil
 }
 
-// importAliasMap builds a map from the local identifier used to reference an
+// ImportAliasMap builds a map from the local identifier used to reference an
 // imported package within file (its explicit alias, or its default package
-// name when unaliased) to that package's real import path. It correctly disambiguates:
-//   - aliased imports (e.g. `import althttp "net/http"`)
-//   - distinct import paths that happen to share a last path segment (e.g.
-//     "text/template" vs "html/template", both conventionally "template")
+// name when unaliased) to that package's real import path.
+//
+// An aliased import always resolves to its own path, because the alias is
+// the local identifier. But two unaliased imports that share a package name
+// (e.g. "text/template" and "html/template", both "template") collide: only
+// one of them survives in the map, and a type match through that identifier
+// may then resolve to the wrong path.
 //
 // resolvedNames maps an import path to a package name. Pass nil, or
 // leave a path out, to use a guess instead. A live package lookup here
