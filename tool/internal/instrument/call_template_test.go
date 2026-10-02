@@ -267,6 +267,38 @@ func TestCompileExpression_FuncArgumentWithEnclosingFunc(t *testing.T) {
 	assert.Equal(t, "name", nameArg.Name)
 }
 
+func TestCompileExpression_FuncReturnWithEnclosingFunc(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .FuncReturn 0 }}, {{ . }})")
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\nfunc Handler() (result string) { return result }")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+	retArg, ok := resultCall.Args[0].(*dst.Ident)
+	require.True(t, ok, "expected *dst.Ident, got %T", resultCall.Args[0])
+	assert.Equal(t, "result", retArg.Name,
+		"the marker added at render time must be stripped, leaving the result's real name")
+}
+
+func TestCompileExpression_FuncReturnOutOfRange(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .FuncReturn 5 }})")
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\nfunc Handler() (result string) { return result }")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	_, err = tmpl.compileExpression(originalCall, enclosing, nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FuncReturn index 5 out of range [0, 1)")
+}
+
 func TestCompileExpression_FuncTagWithoutEnclosingFuncErrors(t *testing.T) {
 	tmpl, err := newCallTemplate("traced({{ .FuncName }})")
 	require.NoError(t, err)
