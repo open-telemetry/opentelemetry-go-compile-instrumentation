@@ -458,7 +458,7 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	updateGenerateDirective(f, opts)
 
-	updated, printErr := ast.PrintFile(f)
+	updated, printErr := ast.RenderFile(f)
 	if printErr != nil {
 		return printErr
 	}
@@ -637,7 +637,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 			return nil, syncErr
 		}
 
-		keepForDebug(ctx, path)
+		keepForDebug(ctx, path, "")
 	}
 
 	// Intentionally return an empty PinResult

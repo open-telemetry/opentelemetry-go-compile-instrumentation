@@ -20,6 +20,8 @@ require (
 	gotest.tools/v3 v3.5.2
 )
 
+require github.com/pmezard/go-difflib v1.0.0
+
 require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5

@@ -99,6 +99,15 @@ func TestWriteFileAtomic(t *testing.T) {
 	assert.Contains(t, string(data), "func Bar()")
 }
 
+func TestWriteFileAtomic_WriteError(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Bar() {}\n")
+	require.NoError(t, err)
+
+	badPath := filepath.Join(t.TempDir(), "missing-dir", "atomic.go")
+	require.Error(t, WriteFileAtomic(badPath, file))
+}
+
 // unprintableFile returns an AST that the restorer cannot turn back into
 // source: go/format re-parses files with grouped imports, and a function
 // named "1bad" does not parse.
@@ -113,8 +122,8 @@ func unprintableFile(t *testing.T) *dst.File {
 	return file
 }
 
-func TestPrintFile_RestoreError(t *testing.T) {
-	data, err := PrintFile(unprintableFile(t))
+func TestRenderFile_RestoreError(t *testing.T) {
+	data, err := RenderFile(unprintableFile(t))
 	require.ErrorContains(t, err, "failed to restore AST")
 	assert.Nil(t, data)
 }
@@ -247,4 +256,14 @@ func TestWriteFile_PanicSafety(t *testing.T) {
 	mock := &mockWriteCloser{panicOnWrite: true}
 	require.Panics(t, func() { _ = writeFile(mock, "out.go", f) })
 	assert.True(t, mock.closed, "the file must be closed even when writing panics")
+}
+
+func TestRenderFile(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Bar() {}\n")
+	require.NoError(t, err)
+
+	buf, err := RenderFile(file)
+	require.NoError(t, err)
+	assert.Contains(t, string(buf), "func Bar()")
 }
