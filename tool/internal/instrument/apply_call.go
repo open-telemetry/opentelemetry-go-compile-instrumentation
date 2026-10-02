@@ -106,7 +106,10 @@ func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, encl
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
-func (*instrumentPhase) applyCallReplace(
+//
+// A //otelc:ignore comment above a matching call's enclosing statement opts
+// that one call site out and leaves every other matching call site wrapped.
+func (ip *instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -116,12 +119,19 @@ func (*instrumentPhase) applyCallReplace(
 		return false, err
 	}
 
+	stmts := ast.CallEnclosingStmts(root)
+
 	// Pass 1: collect matching calls and pre-compute replacements to avoid
 	// re-matching the original call pointer inside its own wrapper.
 	replacements := make(map[*dst.CallExpr]dst.Expr)
 	var wrapError error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
 		if !matchesCallRule(call, r, importAliases) {
+			return true
+		}
+		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
+			ip.markIgnoreConsumed(stmts[call])
 			return true
 		}
 		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases)
@@ -158,6 +168,10 @@ func (*instrumentPhase) applyCallReplace(
 	return true, nil
 }
 
+// applyCallAppendArgs appends r's extra arguments to every call site that
+// matches r. A //otelc:ignore comment above a matching call's enclosing
+// statement opts that one call site out and leaves every other matching call
+// site appended.
 func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
@@ -167,15 +181,22 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		return false
 	}
 
+	stmts := ast.CallEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
 	dst.Inspect(root, func(node dst.Node) bool {
 		call, ok := node.(*dst.CallExpr)
 		if !ok {
 			return true
 		}
-		if matchesCallRule(call, r, importAliases) {
-			matchingCalls = append(matchingCalls, call)
+		if !matchesCallRule(call, r, importAliases) {
+			return true
 		}
+		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
+			ip.markIgnoreConsumed(stmts[call])
+			return true
+		}
+		matchingCalls = append(matchingCalls, call)
 		return true
 	})
 	for _, call := range matchingCalls {
@@ -313,4 +334,117 @@ func buildEllipsisIIFE(spreadArg, varType dst.Expr, newArgs []dst.Expr) *dst.Cal
 		Args:     []dst.Expr{spreadArg},
 		Ellipsis: true,
 	}
+}
+
+// applyIgnoredCallSites brackets every call whose enclosing statement
+// carries //otelc:ignore, skipping a statement a wrap_call rule already
+// consumed in this file.
+func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.File) error {
+	marked := ip.markedIgnoredStmts(root)
+	if len(marked) == 0 {
+		return nil
+	}
+
+	var blocks []*dst.BlockStmt
+	dst.Inspect(root, func(n dst.Node) bool {
+		if block, ok := n.(*dst.BlockStmt); ok {
+			blocks = append(blocks, block)
+		}
+		return true
+	})
+
+	selfPackage := ip.isSuppressHooksPackage()
+
+	bracketed := 0
+	for _, block := range blocks {
+		n, err := bracketMarkedStmts(block, marked, selfPackage)
+		if err != nil {
+			return err
+		}
+		bracketed += n
+	}
+	if bracketed == 0 {
+		return nil
+	}
+
+	if selfPackage {
+		return nil
+	}
+	suppressImport := map[string]string{suppressHooksPackage: suppressHooksPackage}
+	return ip.addRuleImports(ctx, root, suppressImport, "otelc:ignore")
+}
+
+// markedIgnoredStmts returns statements in root carrying //otelc:ignore
+// above a call, excluding ones already consumed by a wrap_call rule.
+func (ip *instrumentPhase) markedIgnoredStmts(root *dst.File) map[dst.Stmt]bool {
+	marked := make(map[dst.Stmt]bool)
+	for _, stmt := range ast.CallEnclosingStmts(root) {
+		if stmt == nil || ip.consumedIgnoreStmts[stmt] {
+			continue
+		}
+		if ast.HasLeadingDirective(stmt, util.DirectiveIgnore) {
+			marked[stmt] = true
+		}
+	}
+	return marked
+}
+
+// markIgnoreConsumed marks stmt's //otelc:ignore comment as already handled
+// by a wrap_call rule.
+func (ip *instrumentPhase) markIgnoreConsumed(stmt dst.Stmt) {
+	if stmt == nil {
+		return
+	}
+	if ip.consumedIgnoreStmts == nil {
+		ip.consumedIgnoreStmts = make(map[dst.Stmt]bool)
+	}
+	ip.consumedIgnoreStmts[stmt] = true
+}
+
+// bracketMarkedStmts brackets every statement in block.List that appears in
+// marked and reports how many it bracketed. selfPackage decides whether the
+// inserted calls need a "runtime" qualifier.
+func bracketMarkedStmts(block *dst.BlockStmt, marked map[dst.Stmt]bool, selfPackage bool) (int, error) {
+	bracketed := 0
+	for i := 0; i < len(block.List); i++ {
+		stmt := block.List[i]
+		if !marked[stmt] {
+			continue
+		}
+		if hasEscapingControlFlow(stmt) {
+			return 0, ex.Newf(
+				"the statement above //otelc:ignore returns, breaks, continues, or jumps out of " +
+					"its enclosing block; the suppression placed after it would not always run. " +
+					"Assign the call's result to a variable in its own statement, then use the " +
+					"variable in the control-flow statement on its own, unannotated line")
+		}
+		inc := ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, selfPackage))
+		dec := ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage))
+		block.List = append(block.List[:i], append([]dst.Stmt{inc}, block.List[i:]...)...)
+		i++
+		block.List = append(block.List[:i+1], append([]dst.Stmt{dec}, block.List[i+1:]...)...)
+		i++
+		bracketed++
+	}
+	return bracketed, nil
+}
+
+// hasEscapingControlFlow reports whether stmt's subtree holds a return,
+// break, continue, or goto outside a nested function literal.
+func hasEscapingControlFlow(stmt dst.Stmt) bool {
+	found := false
+	dst.Inspect(stmt, func(n dst.Node) bool {
+		if found {
+			return false
+		}
+		switch n.(type) {
+		case *dst.FuncLit:
+			return false
+		case *dst.ReturnStmt, *dst.BranchStmt:
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }

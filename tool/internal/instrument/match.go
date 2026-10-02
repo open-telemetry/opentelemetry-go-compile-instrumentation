@@ -35,6 +35,17 @@ func (ip *instrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	return rset, nil
 }
 
+// anyRuleSetHasIgnoredCallFiles reports whether any package in this build has
+// a //otelc:ignore comment above a call, found during setup.
+func anyRuleSetHasIgnoredCallFiles(allSet []*rule.InstRuleSet) bool {
+	for _, rset := range allSet {
+		if len(rset.IgnoredCallFiles) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // match matches the rules with the compile command.
 func (ip *instrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rule.InstRuleSet {
 	// One package can only be matched with one rule set, so it's safe to return

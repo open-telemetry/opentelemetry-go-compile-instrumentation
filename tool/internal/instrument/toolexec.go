@@ -66,6 +66,12 @@ type instrumentPhase struct {
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
+	// consumedIgnoreStmts holds statements whose //otelc:ignore comment a
+	// wrap_call rule already acted on. Reset at the start of each file.
+	consumedIgnoreStmts map[dst.Stmt]bool
+	// buildUsesIgnoreDirective is true when some package in this build has a
+	// //otelc:ignore comment above a call, found during setup.
+	buildUsesIgnoreDirective bool
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
@@ -127,6 +133,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	ip.buildUsesIgnoreDirective = anyRuleSetHasIgnoredCallFiles(allSet)
 
 	// Check if the current compile command matches the rules.
 	matched := ip.match(allSet, args)

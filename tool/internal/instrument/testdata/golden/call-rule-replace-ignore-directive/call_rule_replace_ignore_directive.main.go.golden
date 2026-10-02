@@ -1,0 +1,22 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "unsafe"
+
+func Wrapper(size uintptr) uintptr {
+	println("Wrapped!")
+	return size
+}
+
+func main() {
+	x := 42
+	//otelc:ignore
+	ignored := unsafe.Sizeof(x)
+	_ = ignored
+
+	y := "hello"
+	kept := Wrapper(unsafe.Sizeof(y))
+	_ = kept
+}
