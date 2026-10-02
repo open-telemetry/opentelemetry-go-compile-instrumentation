@@ -89,6 +89,64 @@ func exprString(t *testing.T, expr dst.Expr) string {
 	}
 }
 
+// --- walkLitsWithEnclosingFunc tests ---
+
+func TestWalkLitsWithEnclosingFunc_TracksEnclosingFunc(t *testing.T) {
+	root := parseFile(t, `package main
+
+type T struct{}
+
+var v1 = T{}
+
+func A() {
+	_ = T{}
+	_ = T{}
+}
+
+func B() {
+	_ = T{}
+}
+`)
+
+	var enclosingNames []string
+	walkLitsWithEnclosingFunc(root, func(_ *dst.CompositeLit, enclosing *dst.FuncDecl) bool {
+		name := "<none>"
+		if enclosing != nil {
+			name = enclosing.Name.Name
+		}
+		enclosingNames = append(enclosingNames, name)
+		return true
+	})
+
+	assert.Equal(t, []string{"<none>", "A", "A", "B"}, enclosingNames)
+}
+
+func TestWalkLitsWithEnclosingFunc_StopsOnFirstDecline(t *testing.T) {
+	root := parseFile(t, `package main
+
+type T struct{}
+
+var v1 = T{}
+
+func A() {
+	_ = T{}
+	_ = T{}
+}
+
+func B() {
+	_ = T{}
+}
+`)
+
+	visited := 0
+	walkLitsWithEnclosingFunc(root, func(_ *dst.CompositeLit, _ *dst.FuncDecl) bool {
+		visited++
+		return false
+	})
+
+	assert.Equal(t, 1, visited, "must stop visiting literals in the same and later decls once fn returns false")
+}
+
 // --- matchesLitRule tests ---
 
 func TestMatchesLitRule(t *testing.T) {
