@@ -75,6 +75,27 @@ func TestNormalize(t *testing.T) {
 			},
 		},
 		{
+			name: "where hoisting method_call",
+			fields: map[string]any{
+				"target": "$root",
+				"where": map[string]any{
+					"method_call": "go.uber.org/zap.Logger.Info",
+				},
+				"do": map[string]any{
+					"wrap_call": map[string]any{
+						"replace": "tracedInfo({{ . }})",
+					},
+				},
+			},
+			want: []map[string]any{
+				{
+					"target":      "$root",
+					"method_call": "go.uber.org/zap.Logger.Info",
+					"replace":     "tracedInfo({{ . }})",
+				},
+			},
+		},
+		{
 			name: "where hoists func signature selectors",
 			fields: map[string]any{
 				"target": "database/sql",

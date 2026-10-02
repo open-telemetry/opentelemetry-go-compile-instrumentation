@@ -5,12 +5,21 @@ package instrument
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/dstutil"
+	"golang.org/x/tools/go/gcexportdata"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/ast"
+	toolast "go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -18,7 +27,7 @@ import (
 // applyCallRule transforms function calls at call sites by wrapping them with
 // instrumentation code according to the provided replacement template.
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
-	importAliases := ast.ImportAliasMap(root)
+	importAliases := toolast.ImportAliasMap(root)
 
 	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
 
@@ -106,7 +115,7 @@ func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, encl
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
-func (*instrumentPhase) applyCallReplace(
+func (ip *instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -121,7 +130,7 @@ func (*instrumentPhase) applyCallReplace(
 	replacements := make(map[*dst.CallExpr]dst.Expr)
 	var wrapError error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
-		if !matchesCallRule(call, r, importAliases) {
+		if !ip.matchesRule(call, r, importAliases) {
 			return true
 		}
 		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases)
@@ -129,7 +138,13 @@ func (*instrumentPhase) applyCallReplace(
 			wrapError = wrapErr
 			return false
 		}
-		replacements[call] = util.AssertType[dst.Expr](dst.Clone(wrapped))
+		cloned := util.AssertType[dst.Expr](dst.Clone(wrapped))
+		// dst.Clone gives the wrapped call's nodes fresh pointers absent from the
+		// parser's position map
+		if ip.parser != nil {
+			ip.parser.PropagatePositions(wrapped, cloned)
+		}
+		replacements[call] = cloned
 		return true
 	})
 
@@ -173,7 +188,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		if !ok {
 			return true
 		}
-		if matchesCallRule(call, r, importAliases) {
+		if ip.matchesRule(call, r, importAliases) {
 			matchingCalls = append(matchingCalls, call)
 		}
 		return true
@@ -276,6 +291,242 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 
 	resolvedPath, ok := importAliases[ident.Name]
 	return ok && resolvedPath == importPath
+}
+
+// matchesRule dispatches by selector: function_call or method_call.
+func (ip *instrumentPhase) matchesRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map[string]string) bool {
+	if r.MethodCall != "" {
+		return ip.matchesMethodCallRule(call, r)
+	}
+	return matchesCallRule(call, r, importAliases)
+}
+
+// matchesMethodCallRule ensures that files that never mention the method
+// name skip type-checking entirely.
+func (ip *instrumentPhase) matchesMethodCallRule(call *dst.CallExpr, r *rule.InstCallRule) bool {
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	if !ok || sel.Sel.Name != r.FuncName {
+		return false
+	}
+
+	info := ip.ensureMethodCallInfo()
+	if info == nil {
+		return false
+	}
+
+	pos := ip.parser.FindPosition(sel.Sel)
+	if pos.Filename == "" {
+		return false
+	}
+
+	importPath, recvType, ok := info.methodReceiver(pos.Filename, pos.Line, pos.Column)
+	return ok && importPath == r.ImportPath && recvType == r.RecvType
+}
+
+// ensureMethodCallInfo type-checks the package at most once.
+func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
+	if ip.methodCallInfoLoaded {
+		return ip.methodCallInfo
+	}
+	ip.methodCallInfoLoaded = true
+
+	pkgPath := util.FindFlagValue(ip.compileArgs, "-p")
+	files := packageSourceFiles(ip.compileArgs)
+	info, err := checkPackageForMethodCalls(pkgPath, files, ip.importConfig)
+	if err != nil {
+		ip.Warn("method_call type-checking failed; method_call rules will not match in this package",
+			"package", pkgPath, "error", err)
+		return nil
+	}
+
+	ip.methodCallInfo = info
+	return ip.methodCallInfo
+}
+
+// packageSourceFiles returns the compile command's source files
+func packageSourceFiles(compileArgs []string) []string {
+	var files []string
+	for _, arg := range compileArgs {
+		if strings.HasPrefix(arg, "-") || !util.IsGoFile(arg) {
+			continue
+		}
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			continue
+		}
+		files = append(files, abs)
+	}
+	return files
+}
+
+// methodCallPosition keys the dst/ast bridge by file base name, line, and
+// column, since both parses read the same source bytes.
+type methodCallPosition struct {
+	file string
+	line int
+	col  int
+}
+
+// methodCallPackageInfo is the result of type-checking one package for
+// method_call matching.
+type methodCallPackageInfo struct {
+	selByPos map[methodCallPosition]*types.Selection
+}
+
+// checkPackageForMethodCalls type-checks files in pkgPath.
+func checkPackageForMethodCalls(
+	pkgPath string,
+	files []string,
+	cfg imports.ImportConfig,
+) (*methodCallPackageInfo, error) {
+	fset := token.NewFileSet()
+	astFiles := make([]*ast.File, 0, len(files))
+	for _, path := range files {
+		astFile, err := parseForTypeCheck(fset, path)
+		if err != nil {
+			return nil, err
+		}
+		astFiles = append(astFiles, astFile)
+	}
+
+	info := &types.Info{
+		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+	tcfg := &types.Config{
+		Importer: newExportImporter(fset, cfg.PackageFile, cfg.ImportMap),
+		Error:    func(error) {}, // Type errors are expected and ignored here.
+	}
+	_, _ = tcfg.Check(pkgPath, fset, astFiles, info)
+
+	pi := &methodCallPackageInfo{selByPos: make(map[methodCallPosition]*types.Selection, len(info.Selections))}
+	for sel, selection := range info.Selections {
+		pos := fset.Position(sel.Sel.Pos())
+		pi.selByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = selection
+	}
+	return pi, nil
+}
+
+// parseForTypeCheck records position filenames as filepath.Base(path)
+func parseForTypeCheck(fset *token.FileSet, path string) (*ast.File, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, ex.Wrapf(err, "opening %s for type-checking", path)
+	}
+	defer f.Close()
+
+	astFile, err := parser.ParseFile(fset, filepath.Base(path), f, parser.SkipObjectResolution)
+	if err != nil {
+		return nil, ex.Wrapf(err, "parsing %s for type-checking", path)
+	}
+	return astFile, nil
+}
+
+// methodReceiver resolves the method at the selector position, the file,
+// line, and column of its method-name identifier. It returns the receiver's
+// import path, its type name, and whether a method was resolved. A leading
+// "*" on the type name marks a pointer receiver.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns
+func (pi *methodCallPackageInfo) methodReceiver(file string, line, col int) (string, string, bool) {
+	selection, found := pi.selByPos[methodCallPosition{file: file, line: line, col: col}]
+	if !found {
+		return "", "", false
+	}
+
+	// Only bound method calls (recv.Method(...)) should match
+	// Exclude method expressions (Type.Method(recv, ...))
+	if selection.Kind() != types.MethodVal {
+		return "", "", false
+	}
+
+	fn, isFunc := selection.Obj().(*types.Func)
+	if !isFunc {
+		return "", "", false
+	}
+	sig, isSig := fn.Type().(*types.Signature)
+	if !isSig || sig.Recv() == nil {
+		return "", "", false
+	}
+
+	recvT := sig.Recv().Type()
+	pointer := false
+	if ptr, isPtr := recvT.(*types.Pointer); isPtr {
+		pointer = true
+		recvT = ptr.Elem()
+	}
+
+	named, isNamed := recvT.(*types.Named)
+	if !isNamed || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return "", "", false
+	}
+
+	recvType := named.Obj().Name()
+	if pointer {
+		recvType = "*" + recvType
+	}
+	return named.Obj().Pkg().Path(), recvType, true
+}
+
+// exportImporter reads a dependency's own compiled .a file.
+type exportImporter struct {
+	fset      *token.FileSet
+	archives  map[string]string // import path -> .a file, from -importcfg
+	importMap map[string]string // source import path -> its resolved/vendored path, from -importcfg
+	packages  map[string]*types.Package
+}
+
+func newExportImporter(fset *token.FileSet, archives, importMap map[string]string) *exportImporter {
+	return &exportImporter{
+		fset:      fset,
+		archives:  archives,
+		importMap: importMap,
+		packages:  make(map[string]*types.Package),
+	}
+}
+
+// Import implements types.Importer.
+func (imp *exportImporter) Import(path string) (*types.Package, error) {
+	return imp.ImportFrom(path, "", 0)
+}
+
+// ImportFrom implements types.ImporterFrom.
+func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*types.Package, error) {
+	if path == "unsafe" {
+		return types.Unsafe, nil
+	}
+	if pkg, ok := imp.packages[path]; ok && pkg.Complete() {
+		return pkg, nil
+	}
+
+	resolvedPath := path
+	archive, ok := imp.archives[path]
+	if !ok {
+		if mapped, mappedOk := imp.importMap[path]; mappedOk {
+			archive, ok = imp.archives[mapped]
+			resolvedPath = mapped
+		}
+	}
+	if !ok {
+		return nil, ex.Newf("no archive for import path %q in -importcfg", path)
+	}
+
+	f, err := os.Open(archive)
+	if err != nil {
+		return nil, ex.Wrapf(err, "opening archive for %q", path)
+	}
+	defer f.Close()
+
+	r, err := gcexportdata.NewReader(f) //nolint:staticcheck // no replacement exists yet ahead of Go 1.29
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading export data section for %q from %s", path, archive)
+	}
+
+	pkg, err := gcexportdata.Read(r, imp.fset, imp.packages, resolvedPath)
+	if err != nil {
+		return nil, ex.Wrapf(err, "decoding export data for %q from %s", path, archive)
+	}
+	imp.packages[path] = pkg
+	return pkg, nil
 }
 
 // buildEllipsisIIFE constructs the IIFE that appends new args to a spread argument:

@@ -21,6 +21,7 @@ const (
 	selectorStruct            selector = "struct"
 	selectorStructLiteral     selector = "struct_literal"
 	selectorFunctionCall      selector = "function_call"
+	selectorMethodCall        selector = "method_call"
 	selectorDirective         selector = "directive"
 	selectorKind              selector = "kind"
 	selectorIdentifier        selector = "identifier"
@@ -60,6 +61,7 @@ const (
 	selStruct            = string(selectorStruct)
 	selStructLiteral     = string(selectorStructLiteral)
 	selFunctionCall      = string(selectorFunctionCall)
+	selMethodCall        = string(selectorMethodCall)
 	selDirective         = string(selectorDirective)
 	selKind              = string(selectorKind)
 	selIdentifier        = string(selectorIdentifier)
@@ -132,6 +134,7 @@ func allSelectors() []selector {
 		selectorStruct,
 		selectorStructLiteral,
 		selectorFunctionCall,
+		selectorMethodCall,
 		selectorDirective,
 		selectorKind,
 		selectorIdentifier,
