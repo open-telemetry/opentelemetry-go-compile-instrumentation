@@ -58,6 +58,11 @@
     "target": "github.com/redis/go-redis/v9"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9",
+    "target": "github.com/redis/go-redis/v9",
+    "versionRange": "v9.0.0,v9.9.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/consumer",
     "target": "github.com/segmentio/kafka-go"
   },
@@ -69,6 +74,16 @@
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/sirupsen/logrus",
     "target": "github.com/sirupsen/logrus",
     "versionRange": "v1.4.2"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v81",
+    "target": "github.com/stripe/stripe-go/v81",
+    "versionRange": "v81.0.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v82",
+    "target": "github.com/stripe/stripe-go/v82",
+    "versionRange": "v82.0.0"
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.mongodb.org/mongo-driver/mongo",
