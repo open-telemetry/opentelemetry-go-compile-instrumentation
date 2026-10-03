@@ -535,3 +535,103 @@ func f() {
 
 	assert.Empty(t, used, "an overridden alias must never reach addRuleImports")
 }
+
+func TestCheckAliasOverrideShadowing_BodyLevelDeclReportsConflict(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "short var decl",
+			body: "f := sink{}\n\t_ = f",
+		},
+		{
+			name: "var decl",
+			body: "var f sink\n\t_ = f",
+		},
+		{
+			name: "const decl",
+			body: "const f = 1\n\t_ = f",
+		},
+		{
+			name: "type decl",
+			body: "type f struct{}\n\tvar _ f",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := parseFile(t, "package main\n\nfunc Run() {\n\t"+tt.body+"\n}\n")
+			fn := findFuncDeclInFile(t, root, "Run")
+
+			err := checkAliasOverrideShadowing(map[string]string{"traced": "f"}, fn)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "alias override conflict")
+			assert.Contains(t, err.Error(), "body-level variable")
+		})
+	}
+}
+
+func TestCheckAliasOverrideShadowing_NestedLocalDoesNotReportConflict(t *testing.T) {
+	// Locals bound inside nested statements and closures are scoped there;
+	// they do not shadow code injected at the function's top level.
+	root := parseFile(t, `package main
+
+func Run() {
+	if true {
+		f := sink{}
+		_ = f
+	}
+	for i := 0; i < 1; i++ {
+		var f sink
+		_ = f
+	}
+	func() {
+		const f = 1
+		_ = f
+	}()
+}
+`)
+	fn := findFuncDeclInFile(t, root, "Run")
+
+	err := checkAliasOverrideShadowing(map[string]string{"traced": "f"}, fn)
+
+	assert.NoError(t, err)
+}
+
+func TestCheckAliasOverrideShadowing_NonDefineAssignDoesNotReportConflict(t *testing.T) {
+	// A plain assignment to a selector must not be collected as a binding.
+	root := parseFile(t, `package main
+
+func Run() {
+	f.field = 1
+	f[0] = 1
+}
+`)
+	fn := findFuncDeclInFile(t, root, "Run")
+
+	err := checkAliasOverrideShadowing(map[string]string{"traced": "f"}, fn)
+
+	assert.NoError(t, err)
+}
+
+func TestCheckAliasOverrideShadowing_NilBodySignatureNameReportsConflict(t *testing.T) {
+	// External (e.g. assembly) functions have no body; signature names must
+	// still be checked.
+	root := parseFile(t, "package main\n\nfunc Run(f sink)\n")
+	fn := findFuncDeclInFile(t, root, "Run")
+	require.Nil(t, fn.Body)
+
+	err := checkAliasOverrideShadowing(map[string]string{"traced": "f"}, fn)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+}
+
+func TestCheckAliasOverrideShadowing_NoOverridesOrNilEnclosingReportsNoError(t *testing.T) {
+	root := parseFile(t, "package main\n\nfunc Run(f sink) {\n\tg := 1\n\t_ = g\n}\n")
+	fn := findFuncDeclInFile(t, root, "Run")
+
+	assert.NoError(t, checkAliasOverrideShadowing(nil, fn))
+	assert.NoError(t, checkAliasOverrideShadowing(map[string]string{"traced": "f"}, nil))
+}

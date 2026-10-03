@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"go/token"
 	"strings"
 
 	"github.com/dave/dst"
@@ -198,7 +199,11 @@ func stripDynamicIdents(node dst.Node) {
 }
 
 // checkAliasOverrideShadowing reports an error when an override's file
-// alias names a parameter, receiver, or named return value of `enclosing`.
+// alias names a receiver, parameter, named return value, or body-level
+// variable of `enclosing`.
+//
+// Identifiers bound in nested statements and closures are not checked,
+// because they do not shadow code injected at the function's top level.
 //
 // checkAliasOverrideShadowing reports no error when enclosing is nil.
 func checkAliasOverrideShadowing(overrides map[string]string, enclosing *dst.FuncDecl) error {
@@ -206,13 +211,16 @@ func checkAliasOverrideShadowing(overrides map[string]string, enclosing *dst.Fun
 		return nil
 	}
 	localNames := signatureNames(enclosing)
+	for name := range topLevelBodyNames(enclosing) {
+		localNames[name] = true
+	}
 	for ruleAlias, fileAlias := range overrides {
 		if localNames[fileAlias] {
 			return ex.Newf(
 				"alias override conflict in %s: substituting the file's alias %q for "+
-					"rule alias %q would resolve to a parameter, receiver, or named "+
-					"return value instead of the import; rename the local identifier "+
-					"or the file's import alias",
+					"rule alias %q would resolve to a parameter, receiver, named "+
+					"return, or body-level variable instead of the import; rename the "+
+					"local identifier or the file's import alias",
 				enclosing.Name.Name, fileAlias, ruleAlias)
 		}
 	}
@@ -239,6 +247,54 @@ func signatureNames(funcDecl *dst.FuncDecl) map[string]bool {
 	addFieldNames(funcDecl.Type.Params)
 	addFieldNames(funcDecl.Type.Results)
 	return names
+}
+
+// topLevelBodyNames returns the names bound directly by funcDecl's body
+// statements: var, const, and type declarations, plus short variable
+// declarations. Identifiers bound in nested statements and closures are not
+// returned, because they do not shadow code injected at the function's top
+// level.
+func topLevelBodyNames(funcDecl *dst.FuncDecl) map[string]bool {
+	names := make(map[string]bool)
+	if funcDecl.Body == nil {
+		return names
+	}
+	for _, stmt := range funcDecl.Body.List {
+		switch s := stmt.(type) {
+		case *dst.DeclStmt:
+			decl, ok := s.Decl.(*dst.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, spec := range decl.Specs {
+				switch spec := spec.(type) {
+				case *dst.ValueSpec:
+					for _, name := range spec.Names {
+						addLocalName(names, name)
+					}
+				case *dst.TypeSpec:
+					addLocalName(names, spec.Name)
+				}
+			}
+		case *dst.AssignStmt:
+			if s.Tok != token.DEFINE {
+				continue
+			}
+			for _, lhs := range s.Lhs {
+				if ident, ok := lhs.(*dst.Ident); ok {
+					addLocalName(names, ident)
+				}
+			}
+		}
+	}
+	return names
+}
+
+// addLocalName records name in names, skipping blank identifiers.
+func addLocalName(names map[string]bool, name *dst.Ident) {
+	if name != nil && name.Name != "" && name.Name != "_" {
+		names[name.Name] = true
+	}
 }
 
 // usedRuleImports returns the subset of ruleImports whose alias is actually
