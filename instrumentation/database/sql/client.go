@@ -301,9 +301,9 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 // span before returning the *sql.Tx, so this is shared by their after-hooks:
 // afterTxInstrumentation and afterConnTxInstrumentation.
 //
-// The context stored is the caller's, from before the begin span started. It is
-// read back by txContext as the parent for Commit/Rollback, so those spans are
-// siblings of the begin span in the same trace, not its children.
+// When the caller's context already has a span, that context is stored, so
+// Commit/Rollback are siblings of the begin span. Otherwise the begin span's own
+// context is stored so they stay in the same trace. txContext reads it back.
 func populateTxFromBeginHook(ictx hook.HookContext, tx *sql.Tx) {
 	if ictx.GetData() == nil {
 		return
@@ -318,7 +318,12 @@ func populateTxFromBeginHook(ictx hook.HookContext, tx *sql.Tx) {
 		tx.DSN = dbRequest.Dsn
 		tx.DbName = dbRequest.DbName
 	}
-	if ctx, ok := callData["parentCtx"].(context.Context); ok {
+	parent, _ := callData["parentCtx"].(context.Context)
+	if parent != nil && trace.SpanContextFromContext(parent).IsValid() {
+		tx.OtelCtx = parent
+	} else if ctx, ok := callData["ctx"].(context.Context); ok {
+		// The caller had no span, so there is no parent to be a sibling of. Use
+		// the begin span's context to keep commit and rollback in the same trace.
 		tx.OtelCtx = ctx
 	}
 }
