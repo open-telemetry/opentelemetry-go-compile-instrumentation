@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -971,5 +972,22 @@ func TestEnterNestedResolution(t *testing.T) {
 		_, err := ip.enterNestedResolution("example.com/p")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "rules add an import cycle: example.com/p adds example.com/p")
+	})
+
+	t.Run("a chain past the depth bound fails", func(t *testing.T) {
+		// Each entry waits on a package no other entry compiles, so no cycle
+		// closes, yet the chain grows without end.
+		entries := make([]string, maxResolutionChain)
+		for i := range entries {
+			entries[i] = "example.com/p" + strconv.Itoa(i) + ">example.com/q" + strconv.Itoa(i)
+		}
+		t.Setenv(util.EnvOtelcNestedResolving, strings.Join(entries, ","))
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/deep"}}
+
+		_, err := ip.enterNestedResolution("example.com/added")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(),
+			"rules add imports nested deeper than "+strconv.Itoa(maxResolutionChain))
+		assert.Contains(t, err.Error(), "example.com/deep adds example.com/added")
 	})
 }
