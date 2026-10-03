@@ -289,21 +289,38 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 		return
 	}
 	defer instrumentEnd(ictx, err)
-	if tx == nil || ictx.GetData() == nil {
+	if tx == nil {
+		return
+	}
+	populateTxFromBeginHook(ictx, tx)
+}
+
+// populateTxFromBeginHook copies the endpoint/driver info and the context
+// instrumentStart stashed in ictx onto tx. Both BeginTx entry points
+// (DB.BeginTx and Conn.BeginTx) call instrumentStart with the same "start"
+// span before returning the *sql.Tx, so this is shared by their after-hooks:
+// afterTxInstrumentation and afterConnTxInstrumentation.
+//
+// The context stored is the caller's, from before the begin span started. It is
+// read back by txContext as the parent for Commit/Rollback, so those spans are
+// siblings of the begin span in the same trace, not its children.
+func populateTxFromBeginHook(ictx hook.HookContext, tx *sql.Tx) {
+	if ictx.GetData() == nil {
 		return
 	}
 	callData, ok := ictx.GetData().(map[string]interface{})
 	if !ok {
 		return
 	}
-	dbRequest, ok := callData["req"].(semconv.DatabaseSqlRequest)
-	if !ok {
-		return
+	if dbRequest, ok := callData["req"].(semconv.DatabaseSqlRequest); ok {
+		tx.Endpoint = dbRequest.Endpoint
+		tx.DriverName = dbRequest.DriverName
+		tx.DSN = dbRequest.Dsn
+		tx.DbName = dbRequest.DbName
 	}
-	tx.Endpoint = dbRequest.Endpoint
-	tx.DriverName = dbRequest.DriverName
-	tx.DSN = dbRequest.Dsn
-	tx.DbName = dbRequest.DbName
+	if ctx, ok := callData["parentCtx"].(context.Context); ok {
+		tx.OtelCtx = ctx
+	}
 }
 
 func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Context) {
@@ -463,7 +480,11 @@ func afterConnTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 	if !clientEnabler.Enable() {
 		return
 	}
-	instrumentEnd(ictx, err)
+	defer instrumentEnd(ictx, err)
+	if tx == nil {
+		return
+	}
+	populateTxFromBeginHook(ictx, tx)
 }
 
 func beforeTxPrepareContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ctx context.Context, query string) {
@@ -601,7 +622,7 @@ func beforeTxCommitInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	instrumentStart(ictx, txContext(tx), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 func afterTxCommitInstrumentation(ictx hook.HookContext, err error) {
@@ -618,7 +639,18 @@ func beforeTxRollbackInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	instrumentStart(ictx, txContext(tx), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+}
+
+// txContext returns the context BeginTx was originally called with, so that
+// commit and rollback spans land in the same trace as the transaction they
+// belong to. It falls back to context.Background() for a Tx that predates
+// this field, e.g. one built directly by a driver in a test.
+func txContext(tx *sql.Tx) context.Context {
+	if tx.OtelCtx != nil {
+		return tx.OtelCtx
+	}
+	return context.Background()
 }
 
 func afterTxRollbackInstrumentation(ictx hook.HookContext, err error) {
@@ -704,7 +736,7 @@ func instrumentStart(
 	attrs := semconv.DbClientRequestTraceAttrs(req)
 
 	// Start span
-	ctx, span := tracer.Start(ctx,
+	spanCtx, span := tracer.Start(ctx,
 		req.OpType,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
@@ -712,10 +744,13 @@ func instrumentStart(
 
 	// Store data for after hook
 	ictx.SetData(map[string]interface{}{
-		"ctx":   ctx,
-		"span":  span,
-		"req":   req,
-		"start": time.Now(),
+		"ctx": spanCtx,
+		// parentCtx is the caller's context from before the span started. BeginTx
+		// keeps it on the Tx so commit and rollback spans are siblings of begin.
+		"parentCtx": ctx,
+		"span":      span,
+		"req":       req,
+		"start":     time.Now(),
 	})
 }
 
