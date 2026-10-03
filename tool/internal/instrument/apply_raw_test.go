@@ -749,6 +749,36 @@ func Run(f sink) {}
 	assert.Empty(t, fn.Body.List, "must not inject code that would resolve to the wrong identifier")
 }
 
+func TestApplyRawRule_OverrideShadowedByBodyLocalReportsConflict(t *testing.T) {
+	// The file imports fmt as f and the target function declares f as a
+	// body-level local, so the rule's rewritten qualifier would resolve to
+	// the local instead of the import.
+	root := parseFile(t, `package main
+
+import f "fmt"
+
+func Run() {
+	f := sink{}
+	_ = f
+}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func: "Run",
+		Raw:  `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	fn := findFuncDeclInFile(t, root, "Run")
+	assert.Len(t, fn.Body.List, 2, "must not inject code that would resolve to the wrong identifier")
+}
+
 func TestInsertRaw_DoesNotRewriteArgumentNamedSameAsRuleAlias(t *testing.T) {
 	root := parseFile(t, `package main
 
