@@ -106,6 +106,23 @@ func (g grpcClientEnabler) Enable() bool {
 
 var clientEnabler = grpcClientEnabler{}
 
+type clientStatsHandlerInjected struct {
+	grpc.EmptyDialOption
+}
+
+func withClientStatsHandler(opts []grpc.DialOption) []grpc.DialOption {
+	for _, opt := range opts {
+		if _, ok := opt.(clientStatsHandlerInjected); ok {
+			return opts
+		}
+	}
+
+	return append([]grpc.DialOption{
+		clientStatsHandlerInjected{},
+		grpc.WithStatsHandler(newClientStatsHandler()),
+	}, opts...)
+}
+
 // BeforeNewClient hooks before grpc.NewClient (v1.63+)
 func BeforeNewClient(ictx hook.HookContext, target string, opts ...grpc.DialOption) {
 	if !clientEnabler.Enable() {
@@ -117,10 +134,7 @@ func BeforeNewClient(ictx hook.HookContext, target string, opts ...grpc.DialOpti
 
 	logger.Debug("BeforeNewClient called", "target", target)
 
-	// Create and inject stats handler
-	handler := newClientStatsHandler()
-	newOpts := append([]grpc.DialOption{grpc.WithStatsHandler(handler)}, opts...)
-	ictx.SetParam(newClientOptionsParamIndex, newOpts)
+	ictx.SetParam(newClientOptionsParamIndex, withClientStatsHandler(opts))
 }
 
 // AfterNewClient hooks after grpc.NewClient
@@ -146,10 +160,7 @@ func BeforeDialContext(ictx hook.HookContext, ctx context.Context, target string
 
 	logger.Debug("BeforeDialContext called", "target", target)
 
-	// Create and inject stats handler
-	handler := newClientStatsHandler()
-	newOpts := append([]grpc.DialOption{grpc.WithStatsHandler(handler)}, opts...)
-	ictx.SetParam(dialOptionsParamIndex, newOpts)
+	ictx.SetParam(dialOptionsParamIndex, withClientStatsHandler(opts))
 }
 
 // AfterDialContext hooks after grpc.DialContext
