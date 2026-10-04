@@ -704,3 +704,63 @@ func TestContentCaptureFromEnv(t *testing.T) {
 	assert.False(t, contentCaptureFromEnv("1"))
 	assert.False(t, contentCaptureFromEnv("TRUE"))
 }
+
+// TestOtelMiddleware_SystemMatchesDetectedProvider asserts gen_ai.system agrees
+// with gen_ai.provider.name. The openai-go client is routinely pointed at other
+// providers through a custom base URL, which is what providerMapping exists for;
+// a span claiming both groq and openai cannot be acted on.
+func TestOtelMiddleware_SystemMatchesDetectedProvider(t *testing.T) {
+	tests := []struct {
+		host     string
+		provider string
+	}{
+		{"api.openai.com", "openai"},
+		{"api.anthropic.com", "anthropic"},
+		{"api.groq.com", "groq"},
+		{"api.deepseek.com", "deepseek"},
+		{"localhost:11434", "local"},
+		{"example.invalid", "openai"}, // unknown hosts keep the documented default
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			sr := setupTestTracer(t)
+			middleware := OtelMiddleware()
+
+			req, err := http.NewRequest(http.MethodPost,
+				"http://"+tt.host+"/v1/chat/completions",
+				io.NopCloser(bytes.NewReader([]byte(
+					`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))))
+			require.NoError(t, err)
+
+			next := func(*http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body: io.NopCloser(strings.NewReader(
+						`{"id":"1","model":"m","choices":[{"finish_reason":"stop"}]}`)),
+				}, nil
+			}
+
+			_, err = middleware(req, next)
+			require.NoError(t, err)
+
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+			attrs := spans[0].Attributes()
+			assertAttribute(t, attrs, "gen_ai.provider.name", tt.provider)
+			assertAttribute(t, attrs, "gen_ai.system", tt.provider)
+
+			var system, provider string
+			for _, a := range attrs {
+				switch string(a.Key) {
+				case "gen_ai.system":
+					system = a.Value.AsString()
+				case "gen_ai.provider.name":
+					provider = a.Value.AsString()
+				}
+			}
+			assert.Equal(t, provider, system,
+				"gen_ai.system and gen_ai.provider.name must not disagree")
+		})
+	}
+}

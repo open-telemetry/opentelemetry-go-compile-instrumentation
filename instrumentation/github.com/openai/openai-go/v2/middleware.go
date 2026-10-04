@@ -179,7 +179,7 @@ func otelMiddleware(
 
 		spanName := opName + " " + model
 		baseAttrs := []attribute.KeyValue{
-			semconv.GenAISystem("openai"),
+			semconv.GenAISystem(provider),
 			semconv.GenAIOperationName(opName),
 			semconv.GenAIRequestModel(model),
 			semconv.GenAIProviderName(provider),
