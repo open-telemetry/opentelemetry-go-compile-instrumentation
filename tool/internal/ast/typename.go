@@ -205,6 +205,10 @@ func ImportAliasMap(file *dst.File) map[string]string {
 			// ambiguous.
 			if isExplicit {
 				explicit[alias] = true
+				// Clear any collision an earlier default alias recorded, the same
+				// way the explicit-override branch below does. Without this the
+				// result depends on which import came first.
+				delete(collided, alias)
 			}
 			continue
 		}

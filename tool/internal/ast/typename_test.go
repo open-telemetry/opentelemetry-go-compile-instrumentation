@@ -288,6 +288,41 @@ func f(r *http.Request, r2 *althttp.Request) {}
 		assert.NotContains(t, imports, ".")
 	})
 
+	t.Run("an explicit respelling of an already-imported path is order independent", func(t *testing.T) {
+		// A default alias that collided earlier must not survive as a collision
+		// once the same path is respelled explicitly, otherwise the result
+		// depends on which import the file happens to list first.
+		const wantPath = "net/http"
+
+		collisionFirst := `package main
+
+import (
+	"net/http"
+	"example.com/http"
+	http "net/http"
+)
+`
+		collisionLast := `package main
+
+import (
+	"net/http"
+	http "net/http"
+	"example.com/http"
+)
+`
+		for name, src := range map[string]string{
+			"collision before the respelling": collisionFirst,
+			"collision after the respelling":  collisionLast,
+		} {
+			t.Run(name, func(t *testing.T) {
+				p := NewAstParser()
+				file, err := p.ParseSource(src)
+				require.NoError(t, err)
+				assert.Equal(t, wantPath, ImportAliasMap(file)["http"])
+			})
+		}
+	})
+
 	t.Run("module version suffix is not the package name", func(t *testing.T) {
 		p := NewAstParser()
 		file, err := p.ParseSource(`package main
