@@ -59,6 +59,10 @@ type matchContext struct {
 	// AST is the parsed dst tree of the source file. Filters must treat it
 	// as read-only; node updates would corrupt downstream rule matching.
 	AST *dst.File
+
+	// ResolvedNames maps an import path to a package name, for
+	// signature matching against real names instead of a guess.
+	ResolvedNames map[string]string
 }
 
 // --- Leaf filters ---
@@ -84,7 +88,7 @@ func (f *funcFilter) Match(ctx *matchContext) bool {
 		Func: f.Func,
 		Recv: f.Recv,
 	}
-	_, ok, _ := ast.FindFuncDecl(ctx.AST, fr)
+	_, ok, _ := ast.FindFuncDecl(ctx.AST, fr, ctx.ResolvedNames)
 	return ok
 }
 
