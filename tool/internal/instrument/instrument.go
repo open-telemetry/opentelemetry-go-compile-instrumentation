@@ -70,33 +70,47 @@ func addRulesToMap[T rule.InstRule](
 	}
 }
 
-// applyOneRule applies a single rule to the target file and reports whether the
-// rule injected code that depends on the globals file (i.e. whether a globals
-// file is needed).
+// ruleResult is what applying one rule to a file did.
+type ruleResult struct {
+	// needsGlobals reports whether the rule injected code that depends on the
+	// globals file.
+	needsGlobals bool
+	// modified reports whether the rule changed the file. Call and literal
+	// rules are attached to every file of a target package and change only the
+	// files that contain a match; the other rule kinds only reach files setup
+	// already matched.
+	modified bool
+}
+
+// applyOneRule applies a single rule to the target file.
 func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File,
 	funcDecl *dst.FuncDecl, found bool,
-) (bool, error) {
+) (ruleResult, error) {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		// applyFuncRule reports whether it actually instrumented a function; a
 		// func rule skipped via //otelc:ignore returns false so no globals file
 		// is written for a package whose only func rules were ignored.
-		return ip.applyFuncRule(ctx, rt, root, funcDecl, found)
+		modified, err := ip.applyFuncRule(ctx, rt, root, funcDecl, found)
+		return ruleResult{needsGlobals: modified, modified: modified}, err
 	case *rule.InstStructRule:
-		return false, ip.applyStructRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: true}, ip.applyStructRule(ctx, rt, root)
 	case *rule.InstDeclRule:
-		return false, ip.applyDeclRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: true}, ip.applyDeclRule(ctx, rt, root)
 	case *rule.InstRawRule:
-		return true, ip.applyRawRule(ctx, rt, root)
+		return ruleResult{needsGlobals: true, modified: true}, ip.applyRawRule(ctx, rt, root)
 	case *rule.InstCallRule:
-		return false, ip.applyCallRule(ctx, rt, root)
+		modified, err := ip.applyCallRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: modified}, err
 	case *rule.InstLitRule:
-		return false, ip.applyLitRule(ctx, rt, root)
+		modified, err := ip.applyLitRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: modified}, err
 	case *rule.InstDirectiveRule:
-		return ip.applyDirectiveRule(ctx, rt, root)
+		needsGlobals, err := ip.applyDirectiveRule(ctx, rt, root)
+		return ruleResult{needsGlobals: needsGlobals, modified: true}, err
 	default:
 		util.ShouldNotReachHere()
-		return false, nil
+		return ruleResult{needsGlobals: false, modified: false}, nil
 	}
 }
 
@@ -141,11 +155,12 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 	}
 
 	hasFuncRule := false
+	modified := false
 	for _, r := range rules {
 		var funcDecl *dst.FuncDecl
 		var found bool
 		if fr, ok := r.(*rule.InstFuncRule); ok {
-			funcDecl, found, err = ast.FindFuncDecl(root, fr)
+			funcDecl, found, err = ast.FindFuncDecl(root, fr, ip.importNames)
 			if err != nil {
 				return false, ex.Wrapf(err, "finding function %s", fr.Func)
 			}
@@ -153,15 +168,26 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 		if fileIgnored && ip.skipRuleForFileIgnore(r, funcDecl, found) {
 			continue
 		}
-		funcRule, err1 := ip.applyOneRule(ctx, r, root, funcDecl, found)
+		res, err1 := ip.applyOneRule(ctx, r, root, funcDecl, found)
 		if err1 != nil {
 			return false, ex.Wrapf(err1, "applying rule %s", r.GetName())
 		}
-		hasFuncRule = hasFuncRule || funcRule
+		hasFuncRule = hasFuncRule || res.needsGlobals
+		modified = modified || res.modified
 	}
 
-	if err = ip.applyIgnoredCallSites(ctx, root); err != nil {
+	ignoredSitesModified, err := ip.applyIgnoredCallSites(ctx, root)
+	if err != nil {
 		return false, ex.Wrapf(err, "applying //otelc:ignore call sites in %s", file)
+	}
+	modified = modified || ignoredSitesModified
+
+	// Leave a file no rule changed out of the compile command. A glob
+	// target attaches call and literal rules to every file of every
+	// package it matches, and rewriting those would needlessly reprint
+	// them, including cgo and standard library files.
+	if !modified {
+		return hasFuncRule, nil
 	}
 
 	// Since trampoline-jump-if is performance-critical, perform AST level

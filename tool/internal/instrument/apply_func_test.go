@@ -42,13 +42,100 @@ func Target(value string) error { return nil }
 		Signature:    &sig,
 	}
 
-	funcDecl, found, err := ast.FindFuncDecl(root, funcRule)
+	funcDecl, found, err := ast.FindFuncDecl(root, funcRule, map[string]string{})
 	require.NoError(t, err)
 	require.False(t, found)
 
 	_, err = newTestPhase().applyFuncRule(context.Background(), funcRule, root, funcDecl, found)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can not find function Target")
+}
+
+func TestApplyFuncRule_ImportAliasMismatchDoesNotError(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+)
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "mismatch",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countImportSpecs(root),
+		"must not add a redundant import for an alias never referenced by generated code")
+}
+
+func TestApplyFuncRule_BlankImportKept(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "side-effect-driver",
+			Imports: map[string]string{"_": "net/http/pprof"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.NoError(t, err)
+	assert.True(t, fileImportsPath(root, "net/http/pprof"),
+		"blank import must still be added for a de-duplicated rule")
+}
+
+func TestApplyFuncRule_DotImportConflictStillErrors(t *testing.T) {
+	root := parseFile(t, `package main
+
+import rt "runtime"
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "dot-conflict",
+			Imports: map[string]string{".": "runtime"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
 // testHash stands in for InstFuncRule.Identity() in these unit tests, since
