@@ -1251,13 +1251,6 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 // parameter *name* that happens to collide with the type parameter (e.g. cb
 // func(T int), where the inner T merely names an int parameter) and wrongly
 // treat it as a reference.
-//
-// One case intentionally diverges: replaceTypeParamsWithAny treats
-// *dst.InterfaceType as an opaque base case (an inline interface literal is
-// returned as-is, unrewritten), but here an interface literal such as
-// interface{ Get() T } does reference the type parameter through its method
-// signature, so this recurses into its methods where the other function does
-// not.
 func referencesTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	return containsTypeParameter(t, typeParams)
 }
