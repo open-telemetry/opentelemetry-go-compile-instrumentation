@@ -298,7 +298,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 	}
 	switch {
 	case def.HasFunc != "":
-		_, ok, _ := ast.FindFuncDecl(tree, def)
+		_, ok, _ := ast.FindFuncDecl(tree, def, nil)
 		return ok
 	case def.HasStruct != "":
 		return ast.FindStructType(tree, def.HasStruct) != nil
@@ -702,4 +702,47 @@ func TestGroupRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInstrumentSkipsFilesNoRuleChanged checks that a file a call rule is
+// attached to, but that has no matching call, stays in the compile command as
+// it is. Setup attaches call rules to every file of a target package, so with
+// a glob target that is most files of the build.
+func TestInstrumentSkipsFilesNoRuleChanged(t *testing.T) {
+	src := t.TempDir()
+	matched := filepath.Join(src, "matched.go")
+	unmatched := filepath.Join(src, "unmatched.go")
+	require.NoError(t, os.WriteFile(matched, []byte(`package p
+
+import "net/http"
+
+func F() { _, _ = http.Get("http://example.com") }
+`), 0o600))
+	require.NoError(t, os.WriteFile(unmatched, []byte(`package p
+
+func G() int { return 1 }
+`), 0o600))
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      "({{ . }})",
+	}
+	rset := rule.NewInstRuleSet("example.com/p")
+	rset.PackageName = "p"
+	rset.AddCallRule(matched, r)
+	rset.AddCallRule(unmatched, r)
+
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"compile", "-p", "example.com/p", matched, unmatched}
+	require.NoError(t, ip.instrument(context.Background(), rset))
+
+	assert.Equal(t, filepath.Join(ip.workDir, "matched.go"), ip.compileArgs[3],
+		"the file with a matching call must be replaced by its instrumented copy")
+	assert.Equal(t, unmatched, ip.compileArgs[4],
+		"a file no rule changed must stay in the compile command as it is")
+	assert.NoFileExists(t, filepath.Join(ip.workDir, "unmatched.go"))
 }
